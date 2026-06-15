@@ -1,0 +1,9 @@
+go 1.26
+
+// Go workspace spanning every in-repo Go module. A change in a shared Go
+// package is picked up on the next build with no `replace` directives.
+//
+// Modules are added here as they are created/ported (plan.md §10). The root
+// Makefile discovers workspace modules dynamically, so adding a `use` line is
+// the only edit needed to adopt a new Go module.
+use ./packages/contracts/example-server

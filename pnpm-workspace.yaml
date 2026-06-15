@@ -1,0 +1,8 @@
+# pnpm workspace — every TypeScript package in the monorepo.
+# Go modules (no package.json) are skipped by pnpm and live in go.work instead.
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "packages/ui/*"
+  - "services/*"
+  - "runners/*"

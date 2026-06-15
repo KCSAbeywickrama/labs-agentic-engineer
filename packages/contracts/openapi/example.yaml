@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: AEP Contracts — Example
+  version: 0.0.1
+  description: >-
+    Minimal example contract that proves the codegen rails end to end. It is NOT
+    a real service API — it exists only to exercise every compile-time guard:
+    a Go producer (oapi-codegen StrictServerInterface) and a TS consumer
+    (openapi-typescript) generated from this single source of truth.
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      summary: Fetch a widget by id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string

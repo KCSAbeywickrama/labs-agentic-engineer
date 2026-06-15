@@ -1,0 +1,11 @@
+# oapi-codegen config for the example contract's Go producer.
+# Generates models + a net/http server + the strict server interface from the
+# single source of truth (../openapi/example.yaml).
+package: examplesrv
+output: api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  skip-prune: true

@@ -1,0 +1,39 @@
+# golangci-lint v2 config (root). Applies to every Go module in go.work.
+# Run per-module (`cd <mod> && golangci-lint run ./...`); config is discovered
+# by walking up to the repo root. The license header is inlined (not a path) so
+# it resolves regardless of how deep a module sits in the tree.
+#
+# Generated files (*.gen.go) carry the standard "Code generated ... DO NOT EDIT"
+# header and are auto-excluded by `exclusions.generated: lax`.
+version: "2"
+run:
+  concurrency: 4
+linters:
+  default: standard
+  enable:
+    - goheader
+  settings:
+    goheader:
+      values:
+        regexp:
+          YEAR: "\\d{4}"
+      template: |-
+        Copyright (c) {{ YEAR }}, WSO2 LLC. (https://www.wso2.com).
+
+        WSO2 LLC. licenses this file to you under the Apache License,
+        Version 2.0 (the "License"); you may not use this file except
+        in compliance with the License.
+        You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+        Unless required by applicable law or agreed to in writing,
+        software distributed under the License is distributed on an
+        "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+        KIND, either express or implied.  See the License for the
+        specific language governing permissions and limitations
+        under the License.
+  exclusions:
+    generated: lax
+    paths:
+      - ".*\\.gen\\.go$"
