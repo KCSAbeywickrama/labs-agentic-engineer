@@ -18,17 +18,36 @@
 // Temporal worker and executes the development-flow and task-lifecycle
 // workflows + their activities.
 //
-// O0 skeleton: this only proves the module builds and the shared
-// orchestration boundary contract is importable. The Temporal client, worker,
-// and workflow registrations land in O1+.
+// O1: connects to Temporal, registers the PingWorkflow + Ping activity, and
+// runs the worker. The real workflows land in O3+.
 package main
 
 import (
-	"fmt"
+	"log"
 
-	"github.com/wso2/labs-agentic-engineer/packages/contracts/orchestration"
+	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/activities"
+	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/config"
+	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/temporal"
+	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/worker"
+	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/workflows"
 )
 
 func main() {
-	fmt.Println("aep orchestrator (skeleton) — task queue", orchestration.TaskQueue)
+	cfg := config.Load()
+
+	c, err := temporal.NewClient(cfg.TemporalHostPort, cfg.TemporalNamespace)
+	if err != nil {
+		log.Fatalf("orchestrator: %v", err)
+	}
+	defer c.Close()
+
+	w := worker.New(c, cfg.TaskQueue)
+	w.RegisterWorkflow(workflows.PingWorkflow)
+	w.RegisterActivity(&activities.Activities{})
+
+	log.Printf("orchestrator worker starting — temporal=%s ns=%s queue=%s",
+		cfg.TemporalHostPort, cfg.TemporalNamespace, cfg.TaskQueue)
+	if err := worker.Run(w); err != nil {
+		log.Fatalf("orchestrator: worker stopped: %v", err)
+	}
 }
