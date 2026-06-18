@@ -13,7 +13,7 @@
 | JS task graph | pnpm workspaces + **Turborepo** 2.x (caching, `--filter`, task deps) |
 | Go graph | a single **`go.work`** spanning in-repo Go modules (no `replace`) |
 | Single entry point | a root **`Makefile`** fanning out to `turbo` (TS) and a `go` loop |
-| Go version | `go 1.26` (workspace + all modules) |
+| Go version | `go 1.26` (workspace + all modules; `toolchain go1.26.4` pinned in `go.work`) |
 | Node | 22 LTS (`engines.node >=22`) |
 | pnpm | 10 (`packageManager: pnpm@10`) |
 | npm scope | `@aep/*` (e.g. `@aep/contracts`, `@aep/ui-explorer`) |

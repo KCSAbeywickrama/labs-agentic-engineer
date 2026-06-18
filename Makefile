@@ -32,7 +32,7 @@ GOLANGCI := $(GOBIN)/golangci-lint
 # (it refuses to analyze a newer-targeted module). `make tools` forces the
 # project toolchain so the installed binary matches.
 GOLANGCI_VERSION := v2.12.2
-GO_TOOLCHAIN := go1.26.0
+GO_TOOLCHAIN := go1.26.4
 
 # addlicense applies the WSO2 Apache-2.0 header, picking the comment style per
 # file type. Idempotent. Generated Go and vendored/build output are excluded.
