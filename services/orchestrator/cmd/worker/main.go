@@ -43,6 +43,8 @@ func main() {
 
 	w := worker.New(c, cfg.TaskQueue)
 	w.RegisterWorkflow(workflows.PingWorkflow)
+	w.RegisterWorkflow(workflows.DevelopmentFlowWorkflow)
+	w.RegisterWorkflow(workflows.TaskLifecycleWorkflow)
 	w.RegisterActivity(&activities.Activities{})
 
 	log.Printf("orchestrator worker starting — temporal=%s ns=%s queue=%s",
