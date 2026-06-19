@@ -17,6 +17,7 @@
  */
 
 import type { components } from "./generated/example";
+import type { components as aepApi } from "./generated/aep-api";
 
 /**
  * Widget is sourced from the generated OpenAPI types — never hand-defined.
@@ -31,4 +32,21 @@ export type Widget = components["schemas"]["Widget"];
  */
 export function widgetLabel(w: Widget): string {
   return w.name;
+}
+
+/* aep-api orchestration boundary — types sourced from openapi/aep-api.yaml. */
+
+export type CycleState = aepApi["schemas"]["CycleState"];
+export type GatePolicy = aepApi["schemas"]["GatePolicy"];
+export type Phase = aepApi["schemas"]["Phase"];
+export type TaskState = aepApi["schemas"]["TaskState"];
+export type CreateCycleRequest = aepApi["schemas"]["CreateCycleRequest"];
+
+/**
+ * Consumer of the generated CycleState — proves the aep-api contract rail.
+ * Renaming `phase`/`gatesPassed` in openapi/aep-api.yaml breaks this at
+ * typecheck time (drift guard #2).
+ */
+export function isCycleComplete(s: CycleState): boolean {
+  return s.phase === "complete" && s.gatesPassed.tasks;
 }

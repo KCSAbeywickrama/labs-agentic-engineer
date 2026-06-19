@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aep.wso2.com/contracts/events/build-status.schema.json",
+  "title": "BuildStatusEvent",
+  "description": "Build progress for a task's k8s Job / Argo run. aep-api maps status to the BuildStarted/BuildSucceeded/BuildFailed signal on task:<org>:<project>:<taskId>.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["org", "project", "taskId", "status", "occurredAt"],
+  "properties": {
+    "org": { "type": "string" },
+    "project": { "type": "string" },
+    "taskId": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["started", "succeeded", "failed"]
+    },
+    "buildRef": {
+      "type": "string",
+      "description": "Build/Job/WorkflowRun identifier for correlation."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

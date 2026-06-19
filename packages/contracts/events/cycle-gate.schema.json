@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aep.wso2.com/contracts/events/cycle-gate.schema.json",
+  "title": "CycleGateEvent",
+  "description": "A development-flow stage gate transition aep-api routes to the cycle workflow (devflow:<org>:<project>:<cycle>) as an Approve/Revise/Back/MarkComplete signal. Carries who/what for audit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["org", "project", "cycleId", "action", "occurredAt"],
+  "properties": {
+    "org": { "type": "string" },
+    "project": { "type": "string" },
+    "cycleId": { "type": "string" },
+    "action": {
+      "type": "string",
+      "enum": [
+        "ApproveRequirements",
+        "ReviseRequirements",
+        "ApproveDesign",
+        "ReviseDesign",
+        "BackToRequirements",
+        "BackToDesign",
+        "MarkComplete"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["human", "auto"],
+      "description": "Whether a person or an automated gate produced this transition."
+    },
+    "actor": {
+      "type": "string",
+      "description": "User id (human mode) or the automated gate name (auto mode)."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

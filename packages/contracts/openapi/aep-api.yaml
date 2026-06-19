@@ -1,0 +1,233 @@
+openapi: 3.0.3
+info:
+  title: AEP API — orchestration boundary (BFF → console)
+  version: 0.0.1
+  description: >-
+    The REST surface aep-api exposes to the console for driving development-flow
+    cycles. These endpoints are thin: each translates into a Temporal
+    start/signal/query against the orchestrator (see
+    docs/design/orchestration/). Handlers are authored when aep-api is ported
+    (plan phase O4); this file is the contract only.
+
+paths:
+  /cycles:
+    post:
+      operationId: createCycle
+      summary: Start a development-flow cycle (StartWorkflow).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCycleRequest"
+      responses:
+        "202":
+          description: Cycle accepted; workflow started (or already running — idempotent).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CycleRef"
+
+  /cycles/{cycleId}/approve:
+    post:
+      operationId: approveStage
+      summary: Approve the current stage gate (Approve<Stage> signal).
+      parameters:
+        - $ref: "#/components/parameters/CycleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StageRef"
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /cycles/{cycleId}/revise:
+    post:
+      operationId: reviseStage
+      summary: Stay in the current stage for another iteration (Revise<Stage> signal).
+      parameters:
+        - $ref: "#/components/parameters/CycleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StageRef"
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /cycles/{cycleId}/back:
+    post:
+      operationId: goBack
+      summary: Loop back to an earlier stage (BackToRequirements/BackToDesign signal).
+      parameters:
+        - $ref: "#/components/parameters/CycleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackTarget"
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /cycles/{cycleId}/complete:
+    post:
+      operationId: completeCycle
+      summary: Mark the cycle complete (MarkComplete signal).
+      parameters:
+        - $ref: "#/components/parameters/CycleId"
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /cycles/{cycleId}/state:
+    get:
+      operationId: getCycleState
+      summary: Read the cycle's durable position (GetCycleState query).
+      parameters:
+        - $ref: "#/components/parameters/CycleId"
+      responses:
+        "200":
+          description: The cycle's current phase + gates + task states.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CycleState"
+
+  /tasks/{taskId}/state:
+    get:
+      operationId: getTaskState
+      summary: Read a task's durable position (GetTaskState query).
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The task's current status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskState"
+
+  /webhooks/github:
+    post:
+      operationId: receiveGitHubWebhook
+      summary: >-
+        GitHub webhook receiver. Verifies HMAC, maps the event to a Temporal
+        signal, and routes it to the task/cycle workflow. Body is GitHub's
+        payload (opaque here).
+      responses:
+        "202":
+          description: Webhook accepted and routed (or ignored if irrelevant).
+
+components:
+  parameters:
+    CycleId:
+      name: cycleId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Accepted:
+      description: Signal accepted; the workflow will react.
+
+  schemas:
+    Phase:
+      type: string
+      enum: [requirements, design, implement, merge, complete]
+    Stage:
+      type: string
+      enum: [requirements, design]
+    TaskStatus:
+      type: string
+      enum:
+        - in_progress
+        - ready_for_review
+        - merged
+        - building
+        - deployed
+        - rejected
+        - failed
+        - abandoned
+        - verification_failed
+    GateMode:
+      type: string
+      enum: [human, auto]
+    CycleSource:
+      type: string
+      enum: [requirement, issue]
+
+    GatePolicy:
+      type: object
+      description: Per-stage gate mode. 'auto' runs checks then advances; never a blind skip.
+      properties:
+        requirements: { $ref: "#/components/schemas/GateMode" }
+        design: { $ref: "#/components/schemas/GateMode" }
+        codeReview: { $ref: "#/components/schemas/GateMode" }
+
+    CreateCycleRequest:
+      type: object
+      required: [org, project, source]
+      properties:
+        org: { type: string }
+        project: { type: string }
+        source: { $ref: "#/components/schemas/CycleSource" }
+        startPhase:
+          $ref: "#/components/schemas/Phase"
+          description: Entry phase; issues fast-path to 'implement'.
+        issueId:
+          type: string
+          description: Set when source = issue.
+        gatePolicy: { $ref: "#/components/schemas/GatePolicy" }
+
+    CycleRef:
+      type: object
+      required: [cycleId, workflowId]
+      properties:
+        cycleId: { type: string }
+        workflowId:
+          type: string
+          description: Temporal workflow ID (devflow:<org>:<project>:<cycle>).
+
+    StageRef:
+      type: object
+      required: [stage]
+      properties:
+        stage: { $ref: "#/components/schemas/Stage" }
+
+    BackTarget:
+      type: object
+      required: [target]
+      properties:
+        target: { $ref: "#/components/schemas/Stage" }
+
+    TaskState:
+      type: object
+      required: [taskId, status]
+      properties:
+        taskId: { type: string }
+        status: { $ref: "#/components/schemas/TaskStatus" }
+
+    GateStatus:
+      type: object
+      required: [requirements, design, tasks]
+      properties:
+        requirements: { type: boolean }
+        design: { type: boolean }
+        tasks: { type: boolean }
+
+    CycleState:
+      type: object
+      required: [cycleId, phase, gatesPassed, tasks]
+      properties:
+        cycleId: { type: string }
+        phase: { $ref: "#/components/schemas/Phase" }
+        gatesPassed: { $ref: "#/components/schemas/GateStatus" }
+        tasks:
+          type: array
+          items: { $ref: "#/components/schemas/TaskState" }

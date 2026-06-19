@@ -15,7 +15,7 @@
     "dist"
   ],
   "scripts": {
-    "gen": "openapi-typescript openapi/example.yaml -o src/generated/example.ts",
+    "gen": "openapi-typescript openapi/example.yaml -o src/generated/example.ts && openapi-typescript openapi/aep-api.yaml -o src/generated/aep-api.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",

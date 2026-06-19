@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aep.wso2.com/contracts/events/webhook-signal-envelope.schema.json",
+  "title": "WebhookSignalEnvelope",
+  "description": "Internal event aep-api builds from a verified GitHub webhook before routing it as a Temporal signal to the addressed task workflow (task:<org>:<project>:<taskId>).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deliveryId", "source", "org", "project", "taskId", "signal", "occurredAt"],
+  "properties": {
+    "deliveryId": {
+      "type": "string",
+      "description": "Source delivery id (e.g. GitHub X-GitHub-Delivery) — the idempotency/dedupe key."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["github"]
+    },
+    "org": { "type": "string" },
+    "project": { "type": "string" },
+    "taskId": { "type": "string" },
+    "signal": {
+      "type": "string",
+      "description": "Target Temporal signal name (from packages/contracts/orchestration).",
+      "enum": [
+        "PRReady",
+        "PRMerged",
+        "PRRejected",
+        "CodingAgentFailed",
+        "BuildStarted",
+        "BuildSucceeded",
+        "BuildFailed",
+        "VerificationFailed",
+        "OrgDisconnected"
+      ]
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "raw": {
+      "type": "object",
+      "description": "Optional passthrough of source-relevant fields (PR number, branch, sha).",
+      "additionalProperties": true
+    }
+  }
+}
