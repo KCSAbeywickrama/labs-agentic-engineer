@@ -25,8 +25,8 @@ package main
 import (
 	"log"
 
-	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/activities"
 	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/config"
+	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/deps"
 	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/temporal"
 	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/worker"
 	"github.com/wso2/labs-agentic-engineer/services/orchestrator/internal/workflows"
@@ -45,7 +45,7 @@ func main() {
 	w.RegisterWorkflow(workflows.PingWorkflow)
 	w.RegisterWorkflow(workflows.DevelopmentFlowWorkflow)
 	w.RegisterWorkflow(workflows.TaskLifecycleWorkflow)
-	w.RegisterActivity(&activities.Activities{})
+	w.RegisterActivity(deps.NewActivities())
 
 	log.Printf("orchestrator worker starting — temporal=%s ns=%s queue=%s",
 		cfg.TemporalHostPort, cfg.TemporalNamespace, cfg.TaskQueue)

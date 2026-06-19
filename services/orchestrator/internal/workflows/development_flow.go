@@ -81,7 +81,7 @@ func DevelopmentFlowWorkflow(ctx workflow.Context, in types.DevelopmentFlowInput
 	for {
 		switch state.Phase {
 		case orchestration.PhaseRequirements:
-			if policy.Requirements == orchestration.GateAuto && runGateChecks(ctx, "requirements") {
+			if policy.Requirements == orchestration.GateAuto && runGateChecks(ctx, in, "requirements") {
 				state.GatesPassed.Requirements = true
 				state.Phase = orchestration.PhaseDesign
 				continue
@@ -97,7 +97,7 @@ func DevelopmentFlowWorkflow(ctx workflow.Context, in types.DevelopmentFlowInput
 			sel.Select(ctx)
 
 		case orchestration.PhaseDesign:
-			if policy.Design == orchestration.GateAuto && runGateChecks(ctx, "design") {
+			if policy.Design == orchestration.GateAuto && runGateChecks(ctx, in, "design") {
 				state.GatesPassed.Design = true
 				state.Phase = orchestration.PhaseImplement
 				continue
@@ -157,13 +157,14 @@ func DevelopmentFlowWorkflow(ctx workflow.Context, in types.DevelopmentFlowInput
 
 // runGateChecks runs the auto-mode gate activity for a stage; returns whether it
 // passed (a failure falls back to the human wait — stop-and-surface).
-func runGateChecks(ctx workflow.Context, stage string) bool {
+func runGateChecks(ctx workflow.Context, in types.DevelopmentFlowInput, stage string) bool {
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	}
+	checks := types.GateChecksInput{Org: in.Org, Project: in.Project, Stage: stage}
 	var res types.GateChecksResult
-	if err := workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, ao), activityRunGateChecks, stage).Get(ctx, &res); err != nil {
+	if err := workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, ao), activityRunGateChecks, checks).Get(ctx, &res); err != nil {
 		return false
 	}
 	return res.Passed

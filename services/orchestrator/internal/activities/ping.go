@@ -14,9 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package activities holds the orchestrator's Temporal activities — all side
-// effects live here, never in the workflow packages (determinism boundary,
-// ADR-0004). Real activities (dispatch, build, read-models, git) land in O4.
 package activities
 
 import "context"
@@ -25,11 +22,7 @@ import "context"
 // name as a constant keeps the workflow package from importing this one.
 const PingActivityName = "Ping"
 
-// Activities is the receiver for all orchestrator activity methods. A
-// zero-value Activities is valid for the O1 smoke test.
-type Activities struct{}
-
 // Ping is the O1 smoke-test activity: proves the worker executes activities.
-func (Activities) Ping(_ context.Context, msg string) (string, error) {
+func (*Activities) Ping(_ context.Context, msg string) (string, error) {
 	return "pong:" + msg, nil
 }

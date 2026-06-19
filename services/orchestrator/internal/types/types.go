@@ -57,6 +57,13 @@ type TaskLifecycleInput struct {
 	CodeReview    orchestration.GateMode
 }
 
+// GateChecksInput is the input to the RunGateChecks activity (auto gate).
+type GateChecksInput struct {
+	Org     string
+	Project string
+	Stage   string
+}
+
 // GateChecksResult is returned by the RunGateChecks activity (auto gate).
 type GateChecksResult struct {
 	Passed bool
