@@ -29,8 +29,9 @@ import (
 // Activity names (duplicated as local consts so this deterministic package does
 // not import the activities package; values must match activities.Activity*).
 const (
-	activityDispatchTask = "DispatchTask"
-	activityAutoMerge    = "AutoMerge"
+	activityDispatchTask   = "DispatchTask"
+	activityDispatchDeploy = "DispatchDeploy"
+	activityAutoMerge      = "AutoMerge"
 )
 
 // TaskLifecycleWorkflow is the durable state machine for one task. GitHub
@@ -69,6 +70,9 @@ func TaskLifecycleWorkflow(ctx workflow.Context, in types.TaskLifecycleInput) (t
 	buildStarted := workflow.GetSignalChannel(ctx, orchestration.SignalBuildStarted)
 	buildSucceeded := workflow.GetSignalChannel(ctx, orchestration.SignalBuildSucceeded)
 	buildFailed := workflow.GetSignalChannel(ctx, orchestration.SignalBuildFailed)
+	deployStarted := workflow.GetSignalChannel(ctx, orchestration.SignalDeployStarted)
+	deploySucceeded := workflow.GetSignalChannel(ctx, orchestration.SignalDeploySucceeded)
+	deployFailed := workflow.GetSignalChannel(ctx, orchestration.SignalDeployFailed)
 	verificationFailed := workflow.GetSignalChannel(ctx, orchestration.SignalVerificationFailed)
 	retry := workflow.GetSignalChannel(ctx, orchestration.SignalRetry)
 	orgDisconnected := workflow.GetSignalChannel(ctx, orchestration.SignalOrgDisconnected)
@@ -113,8 +117,26 @@ func TaskLifecycleWorkflow(ctx workflow.Context, in types.TaskLifecycleInput) (t
 
 		case orchestration.TaskBuilding:
 			sel := workflow.NewSelector(ctx)
-			sel.AddReceive(buildSucceeded, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskDeployed) })
+			sel.AddReceive(buildSucceeded, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskBuilt) })
 			sel.AddReceive(buildFailed, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskFailed) })
+			sel.Select(ctx)
+
+		case orchestration.TaskBuilt:
+			// Build succeeded — issue the deploy command, then await deploy start.
+			ao := workflow.ActivityOptions{
+				StartToCloseTimeout: 10 * time.Minute,
+				RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+			}
+			_ = workflow.ExecuteActivity(workflow.WithActivityOptions(ctx, ao), activityDispatchDeploy, in).Get(ctx, nil)
+			sel := workflow.NewSelector(ctx)
+			sel.AddReceive(deployStarted, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskDeploying) })
+			sel.AddReceive(deployFailed, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskFailed) })
+			sel.Select(ctx)
+
+		case orchestration.TaskDeploying:
+			sel := workflow.NewSelector(ctx)
+			sel.AddReceive(deploySucceeded, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskDeployed) })
+			sel.AddReceive(deployFailed, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil); set(orchestration.TaskFailed) })
 			sel.Select(ctx)
 
 		case orchestration.TaskDeployed:

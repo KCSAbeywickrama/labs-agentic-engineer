@@ -150,6 +150,8 @@ components:
         - ready_for_review
         - merged
         - building
+        - built
+        - deploying
         - deployed
         - rejected
         - failed

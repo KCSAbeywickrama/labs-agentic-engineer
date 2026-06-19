@@ -53,6 +53,9 @@ const (
 	SignalBuildStarted       = "BuildStarted"
 	SignalBuildSucceeded     = "BuildSucceeded"
 	SignalBuildFailed        = "BuildFailed"
+	SignalDeployStarted      = "DeployStarted"
+	SignalDeploySucceeded    = "DeploySucceeded"
+	SignalDeployFailed       = "DeployFailed"
 	SignalVerificationFailed = "VerificationFailed"
 	SignalRetry              = "Retry"
 	SignalOrgDisconnected    = "OrgDisconnected"
@@ -83,6 +86,8 @@ const (
 	TaskReadyForReview     TaskStatus = "ready_for_review"
 	TaskMerged             TaskStatus = "merged"
 	TaskBuilding           TaskStatus = "building"
+	TaskBuilt              TaskStatus = "built"     // build done; deploy command issued, awaiting deploy start
+	TaskDeploying          TaskStatus = "deploying" // deploy started, in progress
 	TaskDeployed           TaskStatus = "deployed"
 	TaskRejected           TaskStatus = "rejected"
 	TaskFailed             TaskStatus = "failed"

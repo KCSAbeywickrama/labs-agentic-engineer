@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aep.wso2.com/contracts/events/deploy-status.schema.json",
+  "title": "DeployStatusEvent",
+  "description": "Deploy progress for a task whose build succeeded. aep-api maps status to the DeployStarted/DeploySucceeded/DeployFailed signal on task:<org>:<project>:<taskId>. The deploy command itself is issued by the orchestrator's DispatchDeploy activity when the task reaches `built`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["org", "project", "taskId", "status", "occurredAt"],
+  "properties": {
+    "org": { "type": "string" },
+    "project": { "type": "string" },
+    "taskId": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["started", "succeeded", "failed"]
+    },
+    "deployRef": {
+      "type": "string",
+      "description": "Deploy run / release identifier for correlation."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

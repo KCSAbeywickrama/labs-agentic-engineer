@@ -52,10 +52,18 @@ type Dispatcher struct {
 	mu         sync.Mutex
 	Workspaces map[string]int // org -> EnsureOrgWorkspace call count
 	Dispatched map[string]int // taskID -> DispatchTask call count
+	Deployed   map[string]int // taskID -> DeployTask call count
 }
 
 func NewDispatcher() *Dispatcher {
-	return &Dispatcher{Workspaces: map[string]int{}, Dispatched: map[string]int{}}
+	return &Dispatcher{Workspaces: map[string]int{}, Dispatched: map[string]int{}, Deployed: map[string]int{}}
+}
+
+func (d *Dispatcher) DeployTask(_ context.Context, in types.TaskLifecycleInput) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.Deployed[in.TaskID]++
+	return nil
 }
 
 func (d *Dispatcher) EnsureOrgWorkspace(_ context.Context, org string) error {

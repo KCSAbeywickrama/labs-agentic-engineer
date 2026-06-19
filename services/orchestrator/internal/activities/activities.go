@@ -31,10 +31,11 @@ import (
 // Activity names, referenced by the workflows via string so the (deterministic)
 // workflows package never imports this one.
 const (
-	ActivityPlanTasks     = "PlanTasks"
-	ActivityRunGateChecks = "RunGateChecks"
-	ActivityDispatchTask  = "DispatchTask"
-	ActivityAutoMerge     = "AutoMerge"
+	ActivityPlanTasks      = "PlanTasks"
+	ActivityRunGateChecks  = "RunGateChecks"
+	ActivityDispatchTask   = "DispatchTask"
+	ActivityDispatchDeploy = "DispatchDeploy"
+	ActivityAutoMerge      = "AutoMerge"
 )
 
 // Activities is the receiver for all orchestrator activity methods. Its fields
@@ -84,6 +85,14 @@ func (a *Activities) DispatchTask(ctx context.Context, in types.TaskLifecycleInp
 		return err
 	}
 	return a.Dispatch.DispatchTask(ctx, in)
+}
+
+// DispatchDeploy issues the deploy command for a task whose build succeeded.
+func (a *Activities) DispatchDeploy(ctx context.Context, in types.TaskLifecycleInput) error {
+	if a == nil || a.Dispatch == nil {
+		return nil
+	}
+	return a.Dispatch.DeployTask(ctx, in)
 }
 
 // AutoMerge merges the task's PR in auto code-review mode.

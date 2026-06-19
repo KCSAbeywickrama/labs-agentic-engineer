@@ -60,8 +60,22 @@ func TestTask_HappyPath(t *testing.T) {
 		signalAt(env, 2, orchestration.SignalPRMerged)
 		signalAt(env, 3, orchestration.SignalBuildStarted)
 		signalAt(env, 4, orchestration.SignalBuildSucceeded)
+		signalAt(env, 5, orchestration.SignalDeployStarted)
+		signalAt(env, 6, orchestration.SignalDeploySucceeded)
 	})
 	require.Equal(t, orchestration.TaskDeployed, out.Status)
+}
+
+func TestTask_DeployFailed(t *testing.T) {
+	out := runTask(t, taskInput(orchestration.GateHuman), func(env *testsuite.TestWorkflowEnvironment) {
+		signalAt(env, 1, orchestration.SignalPRReady)
+		signalAt(env, 2, orchestration.SignalPRMerged)
+		signalAt(env, 3, orchestration.SignalBuildStarted)
+		signalAt(env, 4, orchestration.SignalBuildSucceeded)
+		signalAt(env, 5, orchestration.SignalDeployStarted)
+		signalAt(env, 6, orchestration.SignalDeployFailed)
+	})
+	require.Equal(t, orchestration.TaskFailed, out.Status)
 }
 
 func TestTask_RejectedInProgress(t *testing.T) {
@@ -89,6 +103,8 @@ func TestTask_VerificationFailedThenRetry(t *testing.T) {
 		signalAt(env, 4, orchestration.SignalPRMerged)
 		signalAt(env, 5, orchestration.SignalBuildStarted)
 		signalAt(env, 6, orchestration.SignalBuildSucceeded)
+		signalAt(env, 7, orchestration.SignalDeployStarted)
+		signalAt(env, 8, orchestration.SignalDeploySucceeded)
 	})
 	require.Equal(t, orchestration.TaskDeployed, out.Status)
 }
@@ -100,6 +116,8 @@ func TestTask_AutoMerge(t *testing.T) {
 		signalAt(env, 2, orchestration.SignalPRMerged)
 		signalAt(env, 3, orchestration.SignalBuildStarted)
 		signalAt(env, 4, orchestration.SignalBuildSucceeded)
+		signalAt(env, 5, orchestration.SignalDeployStarted)
+		signalAt(env, 6, orchestration.SignalDeploySucceeded)
 	})
 	require.Equal(t, orchestration.TaskDeployed, out.Status)
 }

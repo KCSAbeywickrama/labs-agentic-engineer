@@ -29,6 +29,9 @@
         "BuildStarted",
         "BuildSucceeded",
         "BuildFailed",
+        "DeployStarted",
+        "DeploySucceeded",
+        "DeployFailed",
         "VerificationFailed",
         "OrgDisconnected"
       ]

@@ -57,13 +57,15 @@ func childSignalAt(env *testsuite.TestWorkflowEnvironment, order int, wfID, name
 	}, time.Duration(order)*time.Millisecond)
 }
 
-// driveTaskToDeployed schedules the four signals that take a child task from
-// in_progress to deployed, starting at the given ordinal.
+// driveTaskToDeployed schedules the signals that take a child task from
+// in_progress to deployed (PR → build → deploy), starting at the given ordinal.
 func driveTaskToDeployed(env *testsuite.TestWorkflowEnvironment, startOrder int, childID string) {
 	childSignalAt(env, startOrder+0, childID, orchestration.SignalPRReady)
 	childSignalAt(env, startOrder+1, childID, orchestration.SignalPRMerged)
 	childSignalAt(env, startOrder+2, childID, orchestration.SignalBuildStarted)
 	childSignalAt(env, startOrder+3, childID, orchestration.SignalBuildSucceeded)
+	childSignalAt(env, startOrder+4, childID, orchestration.SignalDeployStarted)
+	childSignalAt(env, startOrder+5, childID, orchestration.SignalDeploySucceeded)
 }
 
 func newCycleEnv() (*testsuite.TestWorkflowEnvironment, *testsuite.WorkflowTestSuite) {
@@ -154,8 +156,8 @@ func TestDevFlow_OneTaskDeploys(t *testing.T) {
 	childID := orchestration.TaskWorkflowID(tOrg, tProject, "T1")
 	signalAt(env, 1, orchestration.SignalApproveRequirements)
 	signalAt(env, 2, orchestration.SignalApproveDesign) // implement starts child T1
-	driveTaskToDeployed(env, 3, childID)                // 3..6 -> T1 deployed
-	signalAt(env, 7, orchestration.SignalMarkComplete)
+	driveTaskToDeployed(env, 3, childID)                // 3..8 -> T1 deployed
+	signalAt(env, 10, orchestration.SignalMarkComplete)
 
 	env.ExecuteWorkflow(workflows.DevelopmentFlowWorkflow, cycleInput(orchestration.PhaseRequirements, allHuman()))
 
@@ -181,9 +183,9 @@ func TestDevFlow_DependencyOrderDAG(t *testing.T) {
 	t2 := orchestration.TaskWorkflowID(tOrg, tProject, "T2")
 	signalAt(env, 1, orchestration.SignalApproveRequirements)
 	signalAt(env, 2, orchestration.SignalApproveDesign)
-	driveTaskToDeployed(env, 3, t1) // 3..6 -> T1 deployed, which unblocks T2
-	driveTaskToDeployed(env, 7, t2) // 7..10 -> T2 deployed
-	signalAt(env, 11, orchestration.SignalMarkComplete)
+	driveTaskToDeployed(env, 3, t1)  // 3..8 -> T1 deployed, which unblocks T2
+	driveTaskToDeployed(env, 10, t2) // 10..15 -> T2 deployed
+	signalAt(env, 17, orchestration.SignalMarkComplete)
 
 	env.ExecuteWorkflow(workflows.DevelopmentFlowWorkflow, cycleInput(orchestration.PhaseRequirements, allHuman()))
 

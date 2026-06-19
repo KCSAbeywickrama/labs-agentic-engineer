@@ -54,6 +54,9 @@ type TaskDispatcher interface {
 	// DispatchTask creates the coding-agent Job for the task. Idempotent: a Job
 	// for the same task+commit must not be created twice.
 	DispatchTask(ctx context.Context, in types.TaskLifecycleInput) error
+	// DeployTask issues the deploy command for the task's built artifact (e.g.
+	// an Argo deploy WorkflowRun / OpenChoreo release). Idempotent.
+	DeployTask(ctx context.Context, in types.TaskLifecycleInput) error
 }
 
 // PRMerger merges a task's PR in `auto` code-review mode (GitHub-backed).
