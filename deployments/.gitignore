@@ -1,0 +1,6 @@
+# deployments/ holds local secrets + keys that must never be committed.
+# Track ONLY the docker-compose (needed for the demo); ignore everything else,
+# including any *.pem, .env, and the keys/ dir.
+*
+!.gitignore
+!docker-compose.yml

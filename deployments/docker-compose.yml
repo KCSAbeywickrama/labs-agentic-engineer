@@ -1,0 +1,33 @@
+# AEP local dev — Temporal dev server (single container, bundled Web UI).
+#
+# deployments/ is local-only (untracked). Bring up:
+#   cd deployments && docker compose up -d temporal
+#   Web UI: http://localhost:8233   ·   gRPC: localhost:7233
+#
+# Run the orchestrator worker against it:
+#   cd services/orchestrator && TEMPORAL_HOSTPORT=localhost:7233 go run ./cmd/worker
+#
+# See docs/design/orchestration/05-configuration.md for the dev↔prod config model.
+services:
+  temporal:
+    image: temporalio/temporal:1.7.2
+    # entrypoint is `temporal`; start-dev bundles server + Web UI (in-memory).
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --ui-port
+      - "8233"
+      - --namespace
+      - default
+      # Persist workflow history across restarts (optional — uncomment + volume):
+      # - --db-filename
+      # - /data/temporal.db
+    ports:
+      - "7233:7233"   # gRPC frontend (orchestrator + aep-api dial this)
+      - "8233:8233"   # Web UI
+    # volumes:
+    #   - temporal-data:/data
+# volumes:
+#   temporal-data:
