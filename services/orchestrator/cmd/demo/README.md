@@ -30,6 +30,25 @@ The program prints a narrated trace and exits when both cycles complete. Open th
 workflows: the two `devflow:…` parents and their `task:…` children. Click a parent
 → its history/graph shows the phase loop, signals, activities, and child spawns.
 
+## Manual mode — approve the gates yourself
+```bash
+cd services/orchestrator && go run ./cmd/demo -manual
+```
+Runs a single human-gated cycle (`devflow:acme:web:manual-1`) and **pauses at each
+human gate** until *you* approve it. The program never sends the approvals itself —
+it polls the cycle's phase, so it advances no matter how you approve:
+
+- **Terminal:** press **[Enter]** at the `⏸ phase=…` prompt → it sends the signal.
+- **Temporal Web UI:** open the workflow at http://localhost:8233 → **"Send a
+  Signal"** → enter the signal name (no payload):
+  - `requirements` → `ApproveRequirements`
+  - `design` → `ApproveDesign`
+  - `merge` → `MarkComplete`
+
+You can mix the two (e.g. approve requirements from the UI, design from the
+terminal). The build/deploy task events are **not** human gates, so they are still
+driven automatically once the design gate is approved.
+
 ## Stop
 ```bash
 cd deployments && docker compose down
