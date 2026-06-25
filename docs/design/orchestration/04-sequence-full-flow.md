@@ -24,7 +24,7 @@ sequenceDiagram
     Note over DF,TK: DevelopmentFlow & Task workflows execute in the orchestrator worker
 
     %% ---------- START ----------
-    U->>CON: submit requirement
+    U->>CON: approve requirement
     CON->>API: POST /cycles
     API->>TMP: StartWorkflow(devflow:org:proj:cycle)
     TMP->>DF: start (phase = REQUIREMENTS)
