@@ -18,8 +18,12 @@ requirements-chat, tech-lead) land as the service is fully ported.
   - `prompt.ts` — system instructions + the seed corpus the demo mutates.
   - `run.ts` — CLI entry + `renderRun()` (consumes `fullStream`, renders the live
     diff, streams mutations to disk).
-  - `design.md` — the design doc (rationale, tool semantics, §10 disk mode).
 - `src/shared/` — the model seam (`createModel`) + config.
+
+Tool-edit rationale (anchored search/replace; alternatives rejected) is
+`docs/decisions/ADR-0003-anchored-file-edits.md`; the loop/SSE/persistence/eval
+refactor is `docs/design/agent-loop-and-eval-framework.md`. Tool *semantics* live
+in `bundle.ts` / `tool.ts`, not a separate design doc.
 
 ## Run
 

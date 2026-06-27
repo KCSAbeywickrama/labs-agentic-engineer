@@ -21,3 +21,7 @@ generated/
 # Editor / OS
 .DS_Store
 *.log
+.playwright-cli
+.agents
+.claude
+docs/

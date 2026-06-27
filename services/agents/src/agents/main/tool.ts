@@ -24,7 +24,7 @@
  * instant it resolves; the large string (`content` / `newString`) is last so it
  * streams delta-by-delta. The execute() return value IS what the model reads to
  * decide its next step — all console rendering happens in run.ts off
- * `fullStream`, never here, so nothing prints twice.
+ * `stream`, never here, so nothing prints twice.
  */
 
 import { tool } from "ai";

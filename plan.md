@@ -128,8 +128,8 @@ for the implementation plan — this plan does not perform any of those moves.
 
 ```
 repo/
-├── AGENTS.md                     # root context file (canonical); CLAUDE.md is a symlink to it
-├── CLAUDE.md  -> AGENTS.md
+├── AGENTS.md                     # root context file (canonical); CLAUDE.md imports it
+├── CLAUDE.md                     # one line: @AGENTS.md
 ├── README.md
 ├── turbo.json                    # JS task graph (pipeline, caching, --filter)
 ├── pnpm-workspace.yaml           # globs: apps/*, services/*, packages/*, runners/*
@@ -253,8 +253,8 @@ One public entry point per package: `src/index.ts` (TS), `cmd/<bin>` (Go).
 
 ## 4. Context files
 
-- One canonical file per level: **`AGENTS.md`**, with `CLAUDE.md` a symlink to it,
-  at every package and the root.
+- One canonical file per level: **`AGENTS.md`**, with `CLAUDE.md` importing it via
+  `@AGENTS.md`, at every package and the root.
 - **Root `AGENTS.md`:** short — system overview + uniform commands + links into
   `docs/`. Well under 40 lines; detail lives in `docs/`.
 - **Nested `AGENTS.md`:** ≤40 lines, package-local (what it is, its commands, its
@@ -412,7 +412,7 @@ Existing code stays on `main`/`rewrite`, untouched.
 - [x] `.gitignore` — generated dirs (`*.gen.go`, `generated/`, `dist/`,
       `node_modules/`).
 - [x] `.env.example` — placeholder; grows as services move.
-- [x] root `AGENTS.md` + `CLAUDE.md -> AGENTS.md` symlink (system overview +
+- [x] root `AGENTS.md` + `CLAUDE.md` (one line: `@AGENTS.md`) (system overview +
       uniform commands + links into `docs/`).
 
 **Directory skeleton** (empty buckets, each seeded with its own `AGENTS.md`):
@@ -453,8 +453,8 @@ flows stay verified by their existing suites, unchanged.
 - [x] `make build`, `make test`, `make lint`, `make typecheck`, `make gen` each
       exit 0 as green no-ops; `make dev` starts without error.
 - [x] `make license-check` passes.
-- [x] Root + every bucket has an `AGENTS.md` with a resolving
-      `CLAUDE.md -> AGENTS.md` symlink.
+- [x] Root + every bucket has an `AGENTS.md` with a `CLAUDE.md` that imports it
+      via `@AGENTS.md`.
 
 **Build-graph behavior**
 

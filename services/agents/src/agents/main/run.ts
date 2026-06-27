@@ -36,7 +36,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ToolLoopAgent, parsePartialJson, stepCountIs } from "ai";
+import { ToolLoopAgent, parsePartialJson, isStepCount } from "ai";
 import { createModel } from "../../shared/model.js";
 import { config } from "../../shared/config.js";
 import { FileBundle, lf } from "./bundle.js";
@@ -96,7 +96,7 @@ const OP_GLYPH: Record<string, string> = {
   [SET_FRONTMATTER_FIELD]: "✑",
 };
 
-/** Minimal shape of the fullStream parts we consume (real + synthetic in tests). */
+/** Minimal shape of the stream parts we consume (real + synthetic in tests). */
 export interface StreamPart {
   type: string;
   id?: string;
@@ -132,7 +132,7 @@ export interface RenderDeps {
 }
 
 /**
- * Consume a fullStream-like sequence: render the live diff to the console and,
+ * Consume a stream-like sequence: render the live diff to the console and,
  * in disk mode, stream each mutation into the real files. Factored out of
  * main() so tests can drive it with synthetic parts and assert on-disk states.
  */
@@ -345,7 +345,7 @@ async function main(): Promise<void> {
     model: createModel({ apiKey }),
     instructions,
     tools: buildTools(bundle),
-    stopWhen: stepCountIs(config.maxSteps),
+    stopWhen: isStepCount(config.maxSteps),
   });
 
   process.stdout.write(`${DIM}Instruction:${RESET} ${instruction}\n`);
@@ -354,9 +354,10 @@ async function main(): Promise<void> {
     disk && process.env.MAIN_DISK_DEBUG ? new DebugSink(disk) : disk;
 
   const result = await agent.stream({ prompt: buildPrompt(bundle.snapshot(), instruction) });
-  await renderRun(result.fullStream as AsyncIterable<StreamPart>, { bundle, disk: sink });
+  await renderRun(result.stream as AsyncIterable<StreamPart>, { bundle, disk: sink });
 
-  const usage = await result.totalUsage;
+  // v7: result.usage is the all-steps total (the former result.totalUsage).
+  const usage = await result.usage;
   const touched = bundle.touched();
   process.stdout.write(`\n${RULE}\n`);
   process.stdout.write(
