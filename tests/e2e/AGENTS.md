@@ -3,7 +3,7 @@
 End-to-end browser tests (Playwright) against the real local stack. Every test
 maps to a user scenario in `requirements/`.
 
-**Status:** empty bucket. Ported from `tests/` (`plan.md` §10).
+**Status:** nothing here yet.
 
 ## Conventions
 

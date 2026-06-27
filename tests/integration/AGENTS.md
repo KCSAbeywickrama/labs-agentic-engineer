@@ -3,7 +3,7 @@
 API integration tests (vitest) against the real cluster. Exercise service
 boundaries without a browser.
 
-**Status:** empty bucket. Ported from `tests/` (`plan.md` §10).
+**Status:** nothing here yet.
 
 ## Conventions
 

@@ -1,8 +1,5 @@
 # Glossary — domain terms
 
-> Ported from the previous `CONTEXT.md`. Refine into a focused glossary
-> as the rewrite progresses (`plan.md` §10).
-
 # Lab App Factory — Domain Glossary
 
 > Living glossary for the lab-app-factory codebase. Captures shared language

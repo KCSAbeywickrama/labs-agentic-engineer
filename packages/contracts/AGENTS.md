@@ -26,5 +26,5 @@ never redefine request/response types.
 3. Build-graph freshness — `gen` is a prereq of `build`/`typecheck`.
 4. CI staleness — `make gen` then `git diff --exit-code`.
 
-**Status:** machinery + one minimal example only. Real per-service contracts are
-authored when each service is ported (`plan.md` §10).
+**Status:** machinery + one minimal example. Per-service contracts are authored
+as each service lands.

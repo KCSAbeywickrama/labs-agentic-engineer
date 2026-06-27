@@ -16,6 +16,8 @@
  * under the License.
  */
 
+export * from "./agents/sse-events";
+
 import type { components } from "./generated/example";
 
 /**

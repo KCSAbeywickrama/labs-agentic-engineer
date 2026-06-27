@@ -3,8 +3,7 @@
 React webapps (Vite + Oxygen UI). One package per app; `apps/<name>` →
 `@aep/<name>`.
 
-**Status:** empty bucket. The console is ported here last (`apps/aep-console/`,
-`plan.md` §10) — together with the type-folder → feature-folder refactor.
+**Status:** nothing here yet. The console lands here as `apps/aep-console/`.
 
 ## Conventions
 

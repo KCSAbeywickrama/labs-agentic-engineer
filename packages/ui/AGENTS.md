@@ -3,9 +3,9 @@
 Shared React components — **one package per component**, never a single bundle.
 `packages/ui/<component>` → `@aep/ui-<component>`.
 
-**Status:** empty bucket. Ported from `ui-components/*` (`@asdlc/*` → `@aep/ui-*`,
-`plan.md` §10): explorer, md-editor, excalidraw-editor, cell-diagram-view,
-openapi-view, project-status, excalidraw-dsl.
+**Status:** nothing here yet. Components land here as `@aep/ui-*` packages:
+explorer, md-editor, excalidraw-editor, cell-diagram-view, openapi-view,
+project-status, excalidraw-dsl.
 
 ## Conventions
 

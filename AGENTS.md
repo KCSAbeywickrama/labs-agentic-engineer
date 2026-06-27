@@ -15,7 +15,12 @@ SDLC platform built on OpenChoreo.
 | typecheck | `make typecheck` | `tsc` + `go vet` |
 | license-check | `make license-check` | fail if any source lacks the Apache header |
 
+## Design docs
+
+Each package keeps a `design/` folder: concise notes + ADRs written **after** a
+feature ships (final state, not plans). Repo-wide ADRs/overview live in `docs/`.
+
 ## More
 
 `docs/architecture.md` (overview), `docs/decisions/` (ADRs), `docs/glossary.md`
-(domain terms), `docs/developer-guide/` (setup/dev flow), `plan.md` (rewrite plan).
+(domain terms), `docs/developer-guide/` (setup/dev flow).

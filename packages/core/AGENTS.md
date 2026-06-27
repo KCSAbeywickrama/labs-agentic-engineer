@@ -5,7 +5,7 @@ framework coupling — keep it pure and well-typed.
 
 **Status:** seeded with one cross-package example (`describeWidget`) that consumes
 `@aep/contracts` to prove the build-graph contract edge fires across packages.
-Real shared logic lands as services are ported (`plan.md` §10).
+Real shared logic lands as services are built.
 
 ## Conventions
 

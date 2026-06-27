@@ -1,7 +1,7 @@
 # AEP — Architecture
 
-> **Scaffold note:** this describes the *target* architecture the rewrite is built
-> toward. Components land as they are ported from `main` (`plan.md` §10).
+> **Note:** this describes the *target* architecture. Components land as they are
+> built.
 
 ## Overview
 

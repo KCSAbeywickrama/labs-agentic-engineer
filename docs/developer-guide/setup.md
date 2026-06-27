@@ -39,6 +39,4 @@ All driven from the root `Makefile` (the single entry point):
 
 ## Local stack
 
-The canonical local setup (k3d + docker-compose) lives in `deployments/` and is
-ported during migration (`plan.md` §10). Until then the scaffold has no runnable
-stack.
+The canonical local setup (k3d + docker-compose) lands in `deployments/`.
