@@ -52,18 +52,18 @@ requirements:
     criteria:
       - id: AC-001-a
         must: "A registered email receives a reset link"
-        verify: e2e            # e2e | scenario | manual
+        method: e2e            # e2e | scenario | manual
         covered: false         # set true after a passing e2e run; skips regeneration
       - id: AC-001-b
         must: "Reset link expires after 1 hour"
-        verify: e2e
+        method: e2e
         covered: false
       - id: AC-001-c
         must: "The reset confirmation message is clear and actionable"
-        verify: scenario
+        method: scenario
 ```
 
-- **`verify`** routes a criterion into a lane: `e2e` (a generated, committed test), `scenario` (an agent
+- **`method`** routes a criterion into a lane: `e2e` (a generated, committed test), `scenario` (an agent
   drives the app and judges), `manual` (a human must check it).
 - **`covered`** is a **validation-owned** field: set `true` after a criterion's e2e test passes, so
   future cycles re-run the committed test instead of regenerating it.
