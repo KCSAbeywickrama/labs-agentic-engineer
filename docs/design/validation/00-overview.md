@@ -97,7 +97,9 @@ stateDiagram-v2
   DESIGN --> IMPLEMENT: Approve
   IMPLEMENT --> MERGE: all tasks deployed
   MERGE --> VALIDATION: integrate done
-  VALIDATION --> DESIGN: autonomous validation failed (report-driven reentry)
+  VALIDATION --> DESIGN: fail · reentry=design (v1 default)
+  VALIDATION --> IMPLEMENT: fail · reentry=implement (future)
+  VALIDATION --> REQUIREMENTS: fail · reentry=criteria (future)
   VALIDATION --> COMPLETE: report signed off (always human)
   COMPLETE --> [*]
 ```
@@ -219,8 +221,15 @@ sequenceDiagram
     VW->>DB: upsert read-model (report)
     alt verdict = fail
         VW->>REPO: (no covered write-back)
-        VW-->>DF: fail + reentry
-        DF->>DF: phase = DESIGN (bounded by max-attempt guard)
+        VW-->>DF: fail + reentry {design | implement | criteria}
+        Note over DF: max-attempt guard — after N attempts, escalate to human instead of looping
+        alt reentry = design (v1 default)
+            DF->>DF: phase = DESIGN
+        else reentry = implement (future: needs IMPLEMENT-phase conformance)
+            DF->>DF: phase = IMPLEMENT
+        else reentry = criteria (criterion itself wrong)
+            DF->>DF: phase = REQUIREMENTS
+        end
     else verdict = pass
         VW->>REPO: activity MarkCovered (covered:true for passing e2e criteria)
         VW-->>DF: pass + report
