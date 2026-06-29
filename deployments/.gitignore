@@ -1,0 +1,8 @@
+# Generated at setup/run time — secrets and local runtime state. Never commit.
+.env
+keys/
+github-app-private-key.pem
+.kube/
+data/
+.webhook-relay.pid
+.webhook-relay.log

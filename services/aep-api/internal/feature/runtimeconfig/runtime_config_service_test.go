@@ -1,0 +1,85 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package runtimeconfig
+
+import (
+	"strings"
+	"testing"
+)
+
+// Test_renderEnvConfigJS — the file content must be deterministic + valid
+// JS. Keys are sorted so identical inputs produce byte-identical files.
+func Test_renderEnvConfigJS(t *testing.T) {
+	values := map[string]interface{}{
+		"API_BASE_URL":          "http://development-default.openchoreoapis.localhost:19080/todo-api-http",
+		"TODO_API_URL":          "http://development-default.openchoreoapis.localhost:19080/todo-api-http",
+		"SUPPORT_EMAIL":         "support@example.com",
+		"FEATURE_NEW_DASHBOARD": false,
+	}
+	got := renderEnvConfigJS(values)
+
+	for _, want := range []string{
+		"window._env_ = {",
+		`API_BASE_URL: "http://development-default.openchoreoapis.localhost:19080/todo-api-http"`,
+		`FEATURE_NEW_DASHBOARD: false`,
+		`SUPPORT_EMAIL: "support@example.com"`,
+		`TODO_API_URL: "http://development-default.openchoreoapis.localhost:19080/todo-api-http"`,
+		"};",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("renderEnvConfigJS output missing %q\ngot:\n%s", want, got)
+		}
+	}
+
+	// Verify keys are emitted in sorted order so the rendered JS is
+	// byte-stable (so equality checks against the on-cluster file
+	// don't flap).
+	wantOrder := []string{"API_BASE_URL", "FEATURE_NEW_DASHBOARD", "SUPPORT_EMAIL", "TODO_API_URL"}
+	prev := 0
+	for _, k := range wantOrder {
+		i := strings.Index(got, k+":")
+		if i < 0 {
+			t.Fatalf("key %s not present in output", k)
+		}
+		if i < prev {
+			t.Errorf("key %s appears before prior key (got pos %d, want > %d)\noutput:\n%s", k, i, prev, got)
+		}
+		prev = i
+	}
+}
+
+// Test_upperSnakeKey — kebab-case + dash + camelCase normalise to safe
+// JS identifier prefixes.
+func Test_upperSnakeKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"todo-api", "TODO_API"},
+		{"todo_api", "TODO_API"},
+		{"TodoApi", "TODOAPI"},
+		{"todo--api", "TODO_API"},
+		{"--todo-api--", "TODO_API"},
+		{"", ""},
+		{"a", "A"},
+		{"a-b-c", "A_B_C"},
+		{"todo-api-v2", "TODO_API_V2"},
+	}
+	for _, c := range cases {
+		got := upperSnakeKey(c.in)
+		if got != c.want {
+			t.Errorf("upperSnakeKey(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+}

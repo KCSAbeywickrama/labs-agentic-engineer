@@ -23,7 +23,9 @@
  *   pnpm --filter @aep/agents eval                 # run all main fixtures, K samples
  *   pnpm --filter @aep/agents eval -- <fixture>    # run one fixture
  *   EVAL_RECORD=1 pnpm ... eval -- <fixture>       # record turns, print messages
- *   EVAL_WRITE_PREVIEW=1 pnpm ... eval             # dump reconstructed snapshots
+ *
+ * Each run dumps every turn's reconstructed snapshot under evals/.eval-preview/
+ * (gitignored) for human inspection.
  */
 
 import { dirname, join } from "node:path";
@@ -80,7 +82,7 @@ async function main(): Promise<void> {
     samples,
     ...(skills.length > 0 ? { skills } : {}),
     onLog: (m) => process.stdout.write(`${m}\n`),
-    ...(process.env.EVAL_WRITE_PREVIEW === "1" ? { writePreviewDir: join(here, ".eval-preview") } : {}),
+    writePreviewDir: join(here, ".eval-preview"),
   };
 
   const result = await runSuite(mainSuite, fixtures, opts);

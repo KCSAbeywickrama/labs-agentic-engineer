@@ -1,0 +1,156 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import type express from "express";
+import { streamText, stepCountIs, type LanguageModel } from "ai";
+import {
+  RequirementsChatInput,
+  RequirementsDoc,
+  systemPrompt,
+  buildUserPrompt,
+  buildTools,
+  type SseSink,
+  type FinalizeResolver,
+} from "../../agents/requirements-chat/index.js";
+import { createModel } from "../../shared/model.js";
+import { AGENTS_BASE } from "../../shared/config.js";
+import { getOrgId, getAnthropicKey } from "../../middleware/org-id.js";
+
+function writeFrame(res: express.Response, frame: unknown): void {
+  res.write(`data: ${JSON.stringify(frame)}\n\n`);
+}
+
+export function registerRequirementsChat(app: express.Express) {
+  app.post(`${AGENTS_BASE}/requirements-chat`, async (req, res) => {
+    const parsed = RequirementsChatInput.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.format() });
+      return;
+    }
+
+    const orgId = getOrgId(res);
+    const model: LanguageModel = createModel({ apiKey: getAnthropicKey(res) });
+
+    const fileCount = Object.keys(parsed.data.files).length;
+    console.log(
+      `[requirements-chat] streaming orgId=${orgId} mode=${parsed.data.mode} message=${parsed.data.message.length}c files=${fileCount}`,
+    );
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "x-vercel-ai-ui-message-stream": "v1",
+    });
+    res.flushHeaders?.();
+
+    const abortController = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
+    const keepAlive = setInterval(() => {
+      if (!res.writableEnded) res.write(": keep-alive\n\n");
+    }, 15_000);
+
+    const sse: SseSink = {
+      send(event, data) {
+        if (res.writableEnded) return;
+        writeFrame(res, { type: `data-${event}`, data });
+      },
+      isClosed() {
+        return res.writableEnded;
+      },
+    };
+
+    const finalizer: FinalizeResolver = {
+      finalized: false,
+      resolve: () => {
+        abortController.abort();
+      },
+    };
+
+    const doc = new RequirementsDoc(parsed.data.files);
+    const tools = buildTools(doc, sse, finalizer, parsed.data.mode);
+
+    try {
+      const result = streamText({
+        model,
+        system: systemPrompt,
+        prompt: buildUserPrompt(
+          parsed.data.message,
+          parsed.data.history,
+          parsed.data.files,
+          parsed.data.mode,
+        ),
+        tools,
+        // Per the design: stepCountIs(64) runaway guard; finish() is the
+        // intended terminator.
+        stopWhen: stepCountIs(64),
+        abortSignal: abortController.signal,
+        onError: ({ error }) => {
+          console.error("[requirements-chat] streamText error:", error);
+        },
+        onFinish: (ev) => {
+          console.log(
+            `[requirements-chat] finish=${ev.finishReason} steps=${ev.steps?.length ?? 0} in=${ev.usage?.inputTokens ?? 0} out=${ev.usage?.outputTokens ?? 0}`,
+          );
+        },
+      });
+
+      // Forward free-form model text to the client as text-delta frames so
+      // the chat can render the assistant's thinking-out-loud commentary.
+      for await (const chunk of result.textStream) {
+        if (res.writableEnded) break;
+        if (chunk.length > 0) {
+          writeFrame(res, { type: "text-delta", delta: chunk });
+        }
+      }
+
+      if (!finalizer.finalized && !res.writableEnded) {
+        writeFrame(res, {
+          type: "error",
+          errorText:
+            "requirements-chat agent ended without calling finish",
+        });
+      }
+
+      if (!res.writableEnded) res.write("data: [DONE]\n\n");
+    } catch (err) {
+      const aborted =
+        abortController.signal.aborted &&
+        (err instanceof Error
+          ? err.name === "AbortError" || /aborted/i.test(err.message)
+          : false);
+      if (aborted && finalizer.finalized) {
+        if (!res.writableEnded) res.write("data: [DONE]\n\n");
+      } else {
+        console.error("[requirements-chat] pipe error:", err);
+        if (!res.writableEnded) {
+          writeFrame(res, {
+            type: "error",
+            errorText: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    } finally {
+      clearInterval(keepAlive);
+      if (!res.writableEnded) res.end();
+    }
+  });
+}

@@ -2,9 +2,11 @@
 
 One-shot / job images (not long-lived services). Run to completion in a pod.
 
-**Status:** nothing here yet. The coding-agent runner lands here
-(`runners/coding-agent/`) — a TS Claude Agent SDK one-shot pod that provisions a
-workspace, loads the `asdlc` skill, and runs the Agent SDK.
+**Status:** `remote-worker/` holds the `asdlc` skill plugin loaded by the
+coding-agent runner — a TS Claude Agent SDK one-shot pod that provisions a
+workspace, loads the `asdlc` skill, and runs the Agent SDK. The dev flow
+bind-mounts `runners/remote-worker/plugin` into the runner pod for live skill
+edits (see `deployments/scripts/setup-k3d.sh`).
 
 ## Conventions
 

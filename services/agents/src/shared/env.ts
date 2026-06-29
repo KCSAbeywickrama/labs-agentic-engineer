@@ -19,8 +19,8 @@
 /**
  * The single .env loader. `config.ts` composes this BEFORE reading any
  * `process.env`, so a value set only in `.env` (not the ambient env) is honored
- * — not silently dropped. The walk is path-independent (it finds the nearest
- * `.env` going up to the monorepo root), so it survives moving the package.
+ * — not silently dropped. The walk is path-independent (it finds the env file
+ * going up to the monorepo root), so it survives moving the package.
  */
 
 import { existsSync } from "node:fs";
@@ -30,19 +30,23 @@ import { fileURLToPath } from "node:url";
 let loaded = false;
 
 /**
- * Load the nearest `.env` (walking up from this file to the filesystem root)
- * into `process.env`, once. No-op if already loaded or no `.env` is found —
- * ambient env then wins, which is what we want.
+ * Load the nearest env file (walking up from this file to the filesystem root)
+ * into `process.env`, once. At each ancestor we prefer `deployments/.env` (the
+ * file everyone running the local stack is expected to have — setup-asdlc.sh
+ * generates it) and fall back to a plain `.env`. No-op if already loaded or
+ * none is found — ambient env then wins, which is what we want.
  */
 export function loadDotenv(): void {
   if (loaded) return;
   loaded = true;
   let dir = fileURLToPath(new URL(".", import.meta.url));
   for (let i = 0; i < 12; i++) {
-    const candidate = join(dir, ".env");
-    if (existsSync(candidate)) {
-      process.loadEnvFile(candidate);
-      break;
+    for (const rel of ["deployments/.env", ".env"]) {
+      const candidate = join(dir, rel);
+      if (existsSync(candidate)) {
+        process.loadEnvFile(candidate);
+        return;
+      }
     }
     const parent = dirname(dir);
     if (parent === dir) break; // reached filesystem root
@@ -70,7 +74,7 @@ export function loadAnthropicKey(): string {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) {
     throw new Error(
-      "ANTHROPIC_API_KEY is not set. Export it, or add it to a .env at the monorepo root (see .env.example).",
+      "ANTHROPIC_API_KEY is not set. Export it, or add it to deployments/.env (run deployments/scripts/setup-asdlc.sh, or see .env.example).",
     );
   }
   return key;

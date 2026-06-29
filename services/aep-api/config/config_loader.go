@@ -1,0 +1,273 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package config
+
+import (
+	"bufio"
+	"fmt"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Coding-agent runner image. The version tag is pinned (never :latest) so a
+// BFF release and the runner image that serves its /internal/v1 callbacks
+// deploy as a matched pair: bump runnerImageVersion and push the image with the
+// same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
+const (
+	runnerImageRepo    = "docker.io/xlight05/app-factory-coding-agent-runner"
+	runnerImageVersion = "v3"
+	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
+)
+
+type configReader struct {
+	errors []error
+}
+
+// Load reads configuration from environment variables.
+// If ENV_FILE_PATH is set, variables are loaded from that file first.
+func Load() (Config, error) {
+	if envFile := os.Getenv("ENV_FILE_PATH"); envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to load env file %s: %v\n", envFile, err)
+		}
+	}
+
+	r := &configReader{}
+	cfg := Config{
+		ServerHost: r.readOptionalString("SERVER_HOST", "0.0.0.0"),
+		ServerPort: r.readOptionalInt("SERVER_PORT", 8080),
+		LogLevel:   r.readOptionalString("LOG_LEVEL", "info"),
+		PlatformAPI: PlatformAPIConfig{
+			BaseURL:    r.readRequiredString("PLATFORM_API_SERVICE_BASE_URL"),
+			HostHeader: r.readOptionalString("PLATFORM_API_SERVICE_HOST", ""),
+		},
+		DatabaseURL:               r.databaseURL(),
+		TestMode:                  r.readOptionalBool("TEST_MODE", false),
+		LocalOpenBaoRepairEnabled: r.readOptionalBool("LOCAL_OPENBAO_REPAIR", false),
+		DeploymentTier:            r.readOptionalString("DEPLOYMENT_TIER", "dev"),
+		TenantGateMode:            r.readOptionalString("TENANT_GATE_MODE", "enforce"),
+		GitHubWebhookSecret:    r.readOptionalString("GITHUB_WEBHOOK_SECRET", ""),
+		OAuthStateSigningKey:   r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
+		GithubAppSlug:          r.readOptionalString("GITHUB_APP_SLUG", "asdlc-platform"),
+		GithubAppClientID:      r.readOptionalString("GITHUB_CLIENT_ID", ""),
+		BFFPublicURL:           r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
+		BuildAuthRetryBudget:   r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
+		ThunderAdmin: ThunderAdminConfig{
+			BaseURL:      r.readOptionalString("THUNDER_ADMIN_URL", ""),
+			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "asdlc-system-client"),
+			ClientSecret: r.readOptionalString("THUNDER_SYSTEM_CLIENT_SECRET", "asdlc-system-client-secret"),
+		},
+		PlatformIDP: PlatformIDPDefaults{
+			Issuer:  r.readOptionalString("PLATFORM_IDP_ISSUER", "http://thunder.openchoreo.localhost:8080"),
+			JWKSURL: r.readOptionalString("PLATFORM_IDP_JWKS_URL", "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"),
+		},
+		TaskTokenSigningKey:    r.taskSigningKey(),
+		TaskTokenIssuer:        r.readOptionalString("BFF_TASK_TOKEN_ISSUER", "asdlc-bff"),
+		TaskTokenAudience:      r.readOptionalString("BFF_TASK_TOKEN_AUDIENCE", "git-service"),
+		JWKSURL:                r.readOptionalString("JWKS_URL", ""),
+		JWTAllowedIssuer:       r.readOptionalString("JWT_ISSUER", ""),
+		JWTAllowedAudience:     r.readOptionalString("JWT_AUDIENCE", "asdlc-bff"),
+		JWTResourceMetadataURL: r.readOptionalString("JWT_RESOURCE_METADATA_URL", ""),
+		Observability: ObservabilityConfig{
+			BaseURL:      r.readOptionalString("OBSERVER_URL", r.readOptionalString("OBSERVABILITY_SERVICE_BASE_URL", "")),
+			TokenURL:     r.readOptionalString("OBSERVER_OAUTH_TOKEN_URL", ""),
+			ClientID:     r.readOptionalString("OBSERVER_OAUTH_CLIENT_ID", ""),
+			ClientSecret: r.readOptionalString("OBSERVER_OAUTH_CLIENT_SECRET", ""),
+			HostHeader:   r.readOptionalString("OBSERVER_OAUTH_HOST_HEADER", ""),
+		},
+		AgentsService: AgentsServiceConfig{
+			BaseURL: r.readOptionalString("AGENTS_SERVICE_BASE_URL", ""),
+		},
+		AgentPlatformURL: r.readOptionalString("AGENT_PLATFORM_URL", ""),
+		ServiceAuth: ServiceAuthConfig{
+			TokenURL:     r.readOptionalString("SERVICE_AUTH_TOKEN_URL", ""),
+			ClientID:     r.readOptionalString("SERVICE_AUTH_CLIENT_ID", ""),
+			ClientSecret: r.readOptionalString("SERVICE_AUTH_CLIENT_SECRET", ""),
+			HostHeader:   r.readOptionalString("SERVICE_AUTH_HOST_HEADER", ""),
+		},
+
+		// Git-service config. Uses the same env-var names git-service used so
+		// existing local .env files / release-bindings keep working.
+		RepoBasePath:                r.readOptionalString("REPO_BASE_PATH", "/tmp/asdlc-repos"),
+		GitHubRepoVisibility:        r.readOptionalString("GITHUB_REPO_VISIBILITY", "public"),
+		GitHubCommitterName:         r.readOptionalString("GIT_COMMITTER_NAME", "ASDLC Bot"),
+		GitHubCommitterEmail:        r.readOptionalString("GIT_COMMITTER_EMAIL", "bot@asdlc.dev"),
+		WebhookDeliveryURL:          r.readOptionalString("GITHUB_WEBHOOK_DELIVERY_URL", ""),
+		WebhookHMACSecret:           r.readOptionalString("GITHUB_WEBHOOK_SECRET", ""),
+		CredentialEncryptionKey:     r.readOptionalString("CREDENTIAL_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+		OpenBaoAddr:                 r.readOptionalString("OPENBAO_ADDR", ""),
+		OpenBaoToken:                r.readOptionalString("OPENBAO_TOKEN", ""),
+		GitHubAppID:                 r.readOptionalString("GITHUB_APP_ID", ""),
+		GitHubAppClientID:           r.readOptionalString("GITHUB_CLIENT_ID", ""),
+		GitHubAppClientSecret:       r.readOptionalString("GITHUB_CLIENT_SECRET", ""),
+		GitHubAppSlug:               r.readOptionalString("GITHUB_APP_SLUG", "asdlc-platform"),
+		GitHubAppPrivateKeyPath:     r.readOptionalString("GITHUB_APP_PRIVATE_KEY_PATH", ""),
+		CredentialValidatorInterval: r.readOptionalDuration("CREDENTIAL_VALIDATOR_INTERVAL", 24*time.Hour),
+		BFFJWKSURL:                  r.readOptionalString("BFF_JWKS_URL", ""),
+		TaskJWTAllowedIssuer:        r.readOptionalString("TASK_JWT_ISSUER", "asdlc-bff"),
+		TaskJWTAllowedAudience:      r.readOptionalString("TASK_JWT_AUDIENCE", "git-service"),
+		AnthropicPlatformKey:        r.readOptionalString("ANTHROPIC_PLATFORM_KEY", ""),
+		AgentsServiceURL:            r.readOptionalString("AGENTS_SERVICE_URL", ""),
+
+		// SM-API + cluster-gateway-proxy.
+		SecretManagerAPIURL:     r.readOptionalString("SECRET_MANAGER_API_URL", ""),
+		SecretManagerAPITimeout: r.readOptionalDuration("SECRET_MANAGER_API_TIMEOUT", 30*time.Second),
+		ClusterGatewayProxyURL:  r.readOptionalString("CLUSTER_GATEWAY_PROXY_URL", ""),
+
+		// Agent runner image + ESO CSS for per-run ExternalSecrets.
+		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
+		AgentClusterSecretStore: r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),
+	}
+
+	if len(r.errors) > 0 {
+		msgs := make([]string, len(r.errors))
+		for i, e := range r.errors {
+			msgs[i] = e.Error()
+		}
+		return Config{}, fmt.Errorf("configuration errors:\n%s", strings.Join(msgs, "\n"))
+	}
+
+	return cfg, nil
+}
+
+// databaseURL builds the Postgres DSN. When DATABASE_URL is set it is used
+// verbatim — convenient for local dev with a hand-written URL. Otherwise the
+// URL is assembled from DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME,
+// which is the shape the platform release-binding provides. Mirrors the
+// approach used by agent-manager-service.
+func (r *configReader) databaseURL() string {
+	if v := os.Getenv("DATABASE_URL"); v != "" {
+		return v
+	}
+	host := r.readRequiredString("DB_HOST")
+	port := r.readOptionalInt("DB_PORT", 5432)
+	user := r.readRequiredString("DB_USER")
+	password := r.readRequiredString("DB_PASSWORD")
+	name := r.readRequiredString("DB_NAME")
+	params := url.Values{}
+	if mode := os.Getenv("DB_SSLMODE"); mode != "" {
+		params.Set("sslmode", mode)
+	}
+	u := &url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(user, password),
+		Host:     fmt.Sprintf("%s:%d", host, port),
+		Path:     "/" + name,
+		RawQuery: params.Encode(),
+	}
+	return u.String()
+}
+
+// taskSigningKey reads the BFF Task JWT signing PEM. BFF_TASK_SIGNING_KEY
+// takes precedence; BFF_TASK_SIGNING_KEY_PATH is the file-mount fallback
+// docker-compose deployments use (multi-line PEM survives a bind mount
+// cleanly; env-var passing across compose `${VAR}` substitution does not).
+func (r *configReader) taskSigningKey() string {
+	if v := os.Getenv("BFF_TASK_SIGNING_KEY"); v != "" {
+		return v
+	}
+	path := os.Getenv("BFF_TASK_SIGNING_KEY_PATH")
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		r.errors = append(r.errors, fmt.Errorf("read BFF_TASK_SIGNING_KEY_PATH %s: %w", path, err))
+		return ""
+	}
+	return string(b)
+}
+
+func (r *configReader) readRequiredString(key string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		r.errors = append(r.errors, fmt.Errorf("%s is required", key))
+	}
+	return val
+}
+
+func (r *configReader) readOptionalString(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+func (r *configReader) readOptionalInt(key string, defaultVal int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		r.errors = append(r.errors, fmt.Errorf("%s must be an integer: %w", key, err))
+		return defaultVal
+	}
+	return n
+}
+
+// readOptionalDuration parses time.ParseDuration values; falls back to
+// defaultVal on empty input, records an error on unparseable input.
+func (r *configReader) readOptionalDuration(key string, defaultVal time.Duration) time.Duration {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		r.errors = append(r.errors, fmt.Errorf("%s: %w", key, err))
+		return defaultVal
+	}
+	return d
+}
+
+func (r *configReader) readOptionalBool(key string, defaultVal bool) bool {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	return strings.EqualFold(val, "true") || val == "1"
+}
+
+func loadEnvFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value) //nolint:errcheck
+		}
+	}
+	return scanner.Err()
+}

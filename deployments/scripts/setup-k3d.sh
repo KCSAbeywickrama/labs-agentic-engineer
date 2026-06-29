@@ -1,0 +1,113 @@
+#!/bin/bash
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/env.sh"
+source "$SCRIPT_DIR/utils.sh"
+
+echo "=== Setting up k3d Cluster for OpenChoreo ==="
+
+# Detect Colima runtime — k3d's DNS fix replaces Docker's embedded DNS (127.0.0.11)
+# with the gateway IP, which causes DNS timeouts in Colima due to firewall/network
+# isolation. Setting K3D_FIX_DNS=0 preserves Docker's built-in DNS.
+# See https://github.com/k3d-io/k3d/issues/1449
+is_colima=false
+if docker info --format '{{.Name}}' 2>/dev/null | grep -qi "colima"; then
+    is_colima=true
+fi
+
+if k3d cluster list 2>/dev/null | grep -q "${CLUSTER_NAME}"; then
+    echo "✅ k3d cluster '${CLUSTER_NAME}' already exists"
+    ensure_cluster_accessible
+    kubectl cluster-info --context ${CLUSTER_CONTEXT}
+else
+    check_required_ports || exit 1
+    mkdir -p /tmp/k3d-shared
+
+    K3D_CONFIG="${SCRIPT_DIR}/../k3d-local-config.yaml"
+    if [ ! -f "$K3D_CONFIG" ]; then
+        echo "❌ k3d config not found at $K3D_CONFIG"
+        echo "   Restore it with: git checkout HEAD -- deployments/k3d-local-config.yaml"
+        exit 1
+    fi
+
+    # Dev plugin overlay (default ON) — bind-mount runners/remote-worker/plugin into
+    # the k3d server node so the dev variant of app-factory-coding-agent can
+    # hostPath-mount it into the runner pod (live skill edits, no image
+    # rebuild). The mount must be baked into the cluster at create-time;
+    # k3d has no in-place equivalent. Opt out with ASDLC_PROD_RUNNER=1 to
+    # mirror the published-image flow (no host overlay).
+    if [ "${ASDLC_PROD_RUNNER:-0}" = "1" ]; then
+        echo "🏷  ASDLC_PROD_RUNNER=1 — skipping host plugin bind-mount (using baked-in image plugin)"
+    else
+        # Check existence BEFORE cd — under `set -e` a failed cd inside the
+        # command substitution would abort the script with a cryptic error
+        # before the friendly check below could run.
+        if [ ! -d "${SCRIPT_DIR}/../../runners/remote-worker/plugin" ]; then
+            echo "❌ Dev plugin overlay enabled but plugin dir not found at ${SCRIPT_DIR}/../../runners/remote-worker/plugin"
+            echo "   Set ASDLC_PROD_RUNNER=1 to skip the overlay, or restore the plugin dir."
+            exit 1
+        fi
+        PLUGIN_HOST_PATH="$(cd "${SCRIPT_DIR}/../../runners/remote-worker/plugin" && pwd)"
+        K3D_CONFIG_DEV="/tmp/k3d-local-config.dev.yaml"
+        cp "$K3D_CONFIG" "$K3D_CONFIG_DEV"
+        cat >> "$K3D_CONFIG_DEV" <<EOF
+volumes:
+  - volume: ${PLUGIN_HOST_PATH}:/asdlc-dev/plugin
+    nodeFilters:
+      - server:*
+EOF
+        K3D_CONFIG="$K3D_CONFIG_DEV"
+        echo "🧪 dev plugin overlay — k3d node will bind-mount ${PLUGIN_HOST_PATH} → /asdlc-dev/plugin"
+    fi
+
+    if [ "$is_colima" = true ]; then
+        echo "🚀 Creating k3d cluster (Colima detected — K3D_FIX_DNS=0)..."
+        K3D_FIX_DNS=0 k3d cluster create --config "$K3D_CONFIG"
+    else
+        echo "🚀 Creating k3d cluster..."
+        k3d cluster create --config "$K3D_CONFIG"
+    fi
+
+    echo "✅ k3d cluster created!"
+    refresh_kubeconfig
+    wait_for_cluster || { echo "❌ Cluster failed to start"; exit 1; }
+fi
+
+echo "🔧 Applying CoreDNS custom configuration..."
+kubectl apply --context "${CLUSTER_CONTEXT}" \
+    -f "https://raw.githubusercontent.com/openchoreo/openchoreo/v${OPENCHOREO_VERSION}/install/k3d/common/coredns-custom.yaml"
+echo "✅ CoreDNS configured"
+
+# Fix node-level DNS (8.8.8.8 fallback for external image pulls).
+fix_node_dns
+
+# Ensure pods can resolve host.k3d.internal (k3d only sets it as a TLS SAN;
+# the CoreDNS NodeHosts entry is on us). Paired with OC's coredns-custom.yaml
+# rewrite for *.openchoreo.localhost above.
+ensure_host_k3d_internal_in_coredns
+
+# Repair OC's `openchoreo.override` so pods can also reach `*.openchoreo.localhost`
+# and `*.openchoreoapis.localhost` — the chart-shipped rewrite only handles
+# the first and targets a name the `.:53` plugin chain can't resolve.
+ensure_openchoreo_localhost_in_coredns
+
+generate_machine_ids "$CLUSTER_NAME"
+echo ""
+echo "✅ k3d cluster ready!"

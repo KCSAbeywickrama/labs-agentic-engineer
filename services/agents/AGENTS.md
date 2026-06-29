@@ -23,7 +23,7 @@ ADR-0002.
 
 - `pnpm --filter @aep/agents dev` — SSE server, watch/reload. `start` — run once.
 - Endpoints: `POST /conversations/:id/turns` (SSE) · `GET /conversations/:id`.
-- Needs `ANTHROPIC_API_KEY` (export, or `.env` at monorepo root — see `.env.example`).
+- Needs `ANTHROPIC_API_KEY` (export, or `deployments/.env` — see `.env.example`).
 
 ## Test
 

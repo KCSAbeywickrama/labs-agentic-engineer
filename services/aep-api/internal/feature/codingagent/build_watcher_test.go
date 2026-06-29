@@ -1,0 +1,169 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package codingagent
+
+import (
+	"testing"
+
+	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
+	"github.com/wso2/asdlc/asdlc-service/models"
+)
+
+// classifyRun unit tests — pure function, no DB. The retry-budget +
+// projector dispatch are exercised in integration tests against the
+// docker-compose stack.
+//
+// These fixtures use the OC-canonical Tasks[] shape ({Phase, Message});
+// see docs/design/auth-failure-classification.md.
+
+func TestClassifyRun_Nil(t *testing.T) {
+	event, msg, auth := classifyRun(nil)
+	if event != "" || msg != "" || auth {
+		t.Fatalf("nil run should yield no event")
+	}
+}
+
+func TestClassifyRun_NotCompleted(t *testing.T) {
+	// Pending or Running: Completed=false ⇒ no event regardless of Status string.
+	for _, status := range []string{"Pending", "Running"} {
+		run := &models.WorkflowRun{Status: status, Completed: false}
+		event, _, auth := classifyRun(run)
+		if event != "" || auth {
+			t.Fatalf("%s should yield no event, got %q auth=%v", status, event, auth)
+		}
+	}
+}
+
+func TestClassifyRun_Succeeded(t *testing.T) {
+	run := &models.WorkflowRun{Status: "WorkflowSucceeded", Completed: true}
+	event, _, auth := classifyRun(run)
+	if event != contracts.TaskEventBuildSucceeded || auth {
+		t.Fatalf("expected BuildSucceeded, got %q auth=%v", event, auth)
+	}
+}
+
+func TestClassifyRun_Failed_NoTaskMessage(t *testing.T) {
+	run := &models.WorkflowRun{Status: "WorkflowFailed", Completed: true}
+	event, msg, auth := classifyRun(run)
+	if event != contracts.TaskEventBuildFailed || auth {
+		t.Fatalf("plain failure should be terminal failed, got %q auth=%v", event, auth)
+	}
+	if msg == "" {
+		t.Fatalf("expected non-empty error message on terminal failure")
+	}
+}
+
+func TestClassifyRun_Failed_AuthMarkerInMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		run  *models.WorkflowRun
+	}{
+		{
+			name: "fatal authentication failed",
+			run: &models.WorkflowRun{
+				Status:    "WorkflowFailed",
+				Completed: true,
+				Tasks: []models.WorkflowRunTask{
+					{Name: "checkout-source", Phase: "Failed", Message: "fatal: Authentication failed for 'https://github.com/foo/bar.git/'"},
+				},
+			},
+		},
+		{
+			name: "401 status surface",
+			run: &models.WorkflowRun{
+				Status:    "WorkflowFailed",
+				Completed: true,
+				Tasks: []models.WorkflowRunTask{
+					{Name: "checkout-source", Phase: "Failed", Message: "the requested URL returned error: 401"},
+				},
+			},
+		},
+		{
+			name: "could not read username",
+			run: &models.WorkflowRun{
+				Status:    "WorkflowFailed",
+				Completed: true,
+				Tasks: []models.WorkflowRunTask{
+					{Name: "checkout-source", Phase: "Error", Message: "fatal: could not read Username for 'https://github.com'"},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event, _, auth := classifyRun(tc.run)
+			if event != "" {
+				t.Fatalf("auth-failure run should NOT yield a terminal event, got %q", event)
+			}
+			if !auth {
+				t.Fatalf("auth-failure run should set authFailure=true")
+			}
+		})
+	}
+}
+
+func TestClassifyRun_Failed_AuthMarkerOnNonCheckoutStep_NotRetried(t *testing.T) {
+	// An auth-shaped marker on a different step is NOT a git-clone auth failure.
+	run := &models.WorkflowRun{
+		Status:    "WorkflowFailed",
+		Completed: true,
+		Tasks: []models.WorkflowRunTask{
+			{Name: "publish-image", Phase: "Failed", Message: "fatal: Authentication failed (registry)"},
+		},
+	}
+	event, _, auth := classifyRun(run)
+	if event != contracts.TaskEventBuildFailed {
+		t.Fatalf("non-checkout auth failure should still be terminal failed, got %q", event)
+	}
+	if auth {
+		t.Fatalf("non-checkout auth failure must not set authFailure")
+	}
+}
+
+func TestClassifyRun_Failed_NonAuthMarker_NotRetried(t *testing.T) {
+	// A failure that doesn't match any auth marker stays terminal.
+	run := &models.WorkflowRun{
+		Status:    "WorkflowFailed",
+		Completed: true,
+		Tasks: []models.WorkflowRunTask{
+			{Name: "build-image", Phase: "Failed", Message: "ENOSPC: no space left on device"},
+		},
+	}
+	event, _, auth := classifyRun(run)
+	if event != contracts.TaskEventBuildFailed {
+		t.Fatalf("non-auth failure should still be terminal failed, got %q", event)
+	}
+	if auth {
+		t.Fatalf("non-auth failure must not set authFailure")
+	}
+}
+
+func TestClassifyRun_Failed_EmptyMessage_NotRetried(t *testing.T) {
+	// Conservative: empty Message on a failed checkout-source ⇒ NOT auth.
+	// The /logs?task= fallback (§3.1 of the doc) is deferred.
+	run := &models.WorkflowRun{
+		Status:    "WorkflowFailed",
+		Completed: true,
+		Tasks: []models.WorkflowRunTask{
+			{Name: "checkout-source", Phase: "Failed", Message: ""},
+		},
+	}
+	event, _, auth := classifyRun(run)
+	if event != contracts.TaskEventBuildFailed || auth {
+		t.Fatalf("empty-message checkout-source failure should be terminal failed, got %q auth=%v", event, auth)
+	}
+}

@@ -1,0 +1,7 @@
+/asdlc-api
+/default
+
+# Generated OpenAPI specs — regenerate with `make openapi`. The drift guard
+# (TestOpenAPISpecFresh) + `make openapi-check` keep them current in CI.
+/api/openapi.yaml
+/api/internal-openapi.yaml
