@@ -23,7 +23,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/auth/scope"
+	"github.com/wso2/aep/aep-api/internal/auth/scope"
 )
 
 // runnerSkillsOutput is the runner skills response. The Body field serializes

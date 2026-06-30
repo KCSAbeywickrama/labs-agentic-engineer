@@ -24,8 +24,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/utils"
-	"github.com/wso2/asdlc/asdlc-service/utils/validate"
+	"github.com/wso2/aep/aep-api/utils"
+	"github.com/wso2/aep/aep-api/utils/validate"
 )
 
 // Write400 writes a 400 Bad Request with the given client-facing message.

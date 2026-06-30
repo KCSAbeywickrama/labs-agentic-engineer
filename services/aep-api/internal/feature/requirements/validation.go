@@ -19,7 +19,7 @@ package requirements
 import (
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/httpkit"
+	"github.com/wso2/aep/aep-api/internal/platform/httpkit"
 )
 
 // requireOrgHandle validates the {orgHandle} path param. Returns true if

@@ -23,7 +23,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
 )
 
 // projectSPARuntimeConfigEmitter re-emits env-config.js across a project's

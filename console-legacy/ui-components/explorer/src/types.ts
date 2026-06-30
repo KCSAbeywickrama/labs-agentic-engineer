@@ -17,7 +17,7 @@
  */
 
 import type React from 'react';
-import type { MdEditorProps } from '@asdlc/md-editor';
+import type { MdEditorProps } from '@aep/md-editor';
 
 /** Flat map: file id -> markdown content. The key is the display name (no folder semantics). */
 export type FileMap = Record<string, string>;

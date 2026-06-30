@@ -22,14 +22,14 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/config"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/organization"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/webhook"
-	"github.com/wso2/asdlc/asdlc-service/middleware"
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
-	"github.com/wso2/asdlc/asdlc-service/middleware/logger"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/config"
+	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/webhook"
+	"github.com/wso2/aep/aep-api/middleware"
+	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/middleware/logger"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // internalV1 is the path root for the BFF's internal / server-to-server
@@ -91,7 +91,7 @@ type AppParams struct {
 }
 
 // NewHandler assembles the full HTTP handler with middleware and routes.
-// The console's nginx proxy strips the /asdlc-api-service prefix before
+// The console's nginx proxy strips the /aep-api-service prefix before
 // forwarding, so routes are registered at root level.
 func NewHandler(params AppParams) http.Handler {
 	// Every HTTP surface (public / internal S2S / external / dev + discovery) is
@@ -111,7 +111,7 @@ func NewHandler(params AppParams) http.Handler {
 
 // splitAndTrim splits a comma-separated env value into a list, dropping
 // empty entries. Lets JWT_ISSUER / JWT_AUDIENCE accept multiple values
-// (e.g. "APP_FACTORY_CONSOLE,local-dev-seeder") so a single BFF can
+// (e.g. "AEP_CONSOLE,local-dev-seeder") so a single BFF can
 // accept both end-user and S2S tokens that carry different `aud`
 // claims, without weakening the matcher to a wildcard.
 func splitAndTrim(s string) []string {

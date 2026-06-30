@@ -23,10 +23,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/k8sname"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // OrgPublisher is the narrow per-org Thunder publisher-provisioning surface
@@ -157,7 +157,7 @@ func (s *TraitSyncService) SyncComponentTraits(ctx context.Context, orgID, proje
 	desiredEnabled := models.ResolveAPISecurityEnabled(*match)
 
 	// Lazy provisioning of the org's Thunder publisher app: the first
-	// protected reconcile in an org creates `asdlc-publisher-<orgID>`
+	// protected reconcile in an org creates `aep-publisher-<orgID>`
 	// (idempotent on subsequent calls). Failures are non-fatal — the
 	// trait still emits, the API stays reachable; the publisher will
 	// be retried on the next reconcile or via the drift watcher.

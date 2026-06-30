@@ -47,9 +47,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // BuildGitSecretName is the OC GitSecret / SecretReference name carrying the
@@ -57,7 +57,7 @@ import (
 // scopes it by the org namespace, so the same name is safe across orgs, and
 // both the refresh (delete+create) and the disconnect cleanup target it by
 // name. Passed to the build WorkflowRun as `repository.secretRef`.
-const BuildGitSecretName = "app-factory-component-build-git-secret"
+const BuildGitSecretName = "aep-component-build-git-secret"
 
 // StageResult is returned to the BFF. The token never crosses the boundary;
 // only the SecretRef the build WorkflowRun should reference.
@@ -162,7 +162,7 @@ func (s *BuildCredentialsService) StageBuildSecret(
 		// route /api/v1alpha1/gitsecrets, so CreateGitSecret 404s (cross-plane
 		// private-repo secret delivery is tracked by wso2-enterprise/wso2cloud#319).
 		// Returning an empty SecretRef lets the build dispatch and clone
-		// unauthenticated, which is correct for the public repos app-factory
+		// unauthenticated, which is correct for the public repos aep
 		// creates by default; a private repo would fail later at checkout with a
 		// clear git error rather than a stuck task. Where provisioning DOES work
 		// (local k3d, single cluster), this branch is not taken and the real

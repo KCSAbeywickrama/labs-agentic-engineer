@@ -31,23 +31,23 @@ func TestBuildBearerChallenge(t *testing.T) {
 	}{
 		{
 			name: "realm only",
-			want: `Bearer realm="asdlc"`,
+			want: `Bearer realm="aep"`,
 		},
 		{
 			name:      "with error code",
 			errorCode: "invalid_token",
-			want:      `Bearer realm="asdlc", error="invalid_token"`,
+			want:      `Bearer realm="aep", error="invalid_token"`,
 		},
 		{
 			name:                "with resource metadata URL",
-			resourceMetadataURL: "https://asdlc.example.com/.well-known/oauth-protected-resource",
-			want:                `Bearer realm="asdlc", resource_metadata="https://asdlc.example.com/.well-known/oauth-protected-resource"`,
+			resourceMetadataURL: "https://aep.example.com/.well-known/oauth-protected-resource",
+			want:                `Bearer realm="aep", resource_metadata="https://aep.example.com/.well-known/oauth-protected-resource"`,
 		},
 		{
 			name:                "with error and resource metadata URL",
-			resourceMetadataURL: "https://asdlc.example.com/.well-known/oauth-protected-resource",
+			resourceMetadataURL: "https://aep.example.com/.well-known/oauth-protected-resource",
 			errorCode:           "invalid_token",
-			want:                `Bearer realm="asdlc", error="invalid_token", resource_metadata="https://asdlc.example.com/.well-known/oauth-protected-resource"`,
+			want:                `Bearer realm="aep", error="invalid_token", resource_metadata="https://aep.example.com/.well-known/oauth-protected-resource"`,
 		},
 	}
 	for _, tt := range tests {
@@ -61,10 +61,10 @@ func TestBuildBearerChallenge(t *testing.T) {
 }
 
 func TestAuthenticator_MissingHeader(t *testing.T) {
-	metadataURL := "https://asdlc.example.com/.well-known/oauth-protected-resource"
+	metadataURL := "https://aep.example.com/.well-known/oauth-protected-resource"
 	mw := Authenticator(Config{
 		AllowedIssuers:      []string{"thunder"},
-		AllowedAudiences:    []string{"asdlc-bff"},
+		AllowedAudiences:    []string{"aep-bff"},
 		ResourceMetadataURL: metadataURL,
 	})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,17 +78,17 @@ func TestAuthenticator_MissingHeader(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
-	want := `Bearer realm="asdlc", resource_metadata="https://asdlc.example.com/.well-known/oauth-protected-resource"`
+	want := `Bearer realm="aep", resource_metadata="https://aep.example.com/.well-known/oauth-protected-resource"`
 	if got := rec.Header().Get("WWW-Authenticate"); got != want {
 		t.Errorf("WWW-Authenticate = %q, want %q", got, want)
 	}
 }
 
 func TestAuthenticator_InvalidJWT(t *testing.T) {
-	metadataURL := "https://asdlc.example.com/.well-known/oauth-protected-resource"
+	metadataURL := "https://aep.example.com/.well-known/oauth-protected-resource"
 	mw := Authenticator(Config{
 		AllowedIssuers:      []string{"thunder"},
-		AllowedAudiences:    []string{"asdlc-bff"},
+		AllowedAudiences:    []string{"aep-bff"},
 		ResourceMetadataURL: metadataURL,
 	})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +103,7 @@ func TestAuthenticator_InvalidJWT(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
-	want := `Bearer realm="asdlc", error="invalid_token", resource_metadata="https://asdlc.example.com/.well-known/oauth-protected-resource"`
+	want := `Bearer realm="aep", error="invalid_token", resource_metadata="https://aep.example.com/.well-known/oauth-protected-resource"`
 	if got := rec.Header().Get("WWW-Authenticate"); got != want {
 		t.Errorf("WWW-Authenticate = %q, want %q", got, want)
 	}
@@ -118,26 +118,26 @@ func TestValidateAudience(t *testing.T) {
 	}{
 		{
 			name:         "exact match",
-			audiences:    []string{"asdlc-bff"},
-			allowed:      []string{"asdlc-bff"},
+			audiences:    []string{"aep-bff"},
+			allowed:      []string{"aep-bff"},
 			shouldAccept: true,
 		},
 		{
 			name:         "no match",
 			audiences:    []string{"someone-else"},
-			allowed:      []string{"asdlc-bff"},
+			allowed:      []string{"aep-bff"},
 			shouldAccept: false,
 		},
 		{
 			name:         "prefix match",
-			audiences:    []string{"asdlc-bff-v2"},
-			allowed:      []string{"asdlc-bff*"},
+			audiences:    []string{"aep-bff-v2"},
+			allowed:      []string{"aep-bff*"},
 			shouldAccept: true,
 		},
 		{
 			name:         "multiple audiences first matches",
-			audiences:    []string{"asdlc-bff", "other"},
-			allowed:      []string{"asdlc-bff"},
+			audiences:    []string{"aep-bff", "other"},
+			allowed:      []string{"aep-bff"},
 			shouldAccept: true,
 		},
 		{

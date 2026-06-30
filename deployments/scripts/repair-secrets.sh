@@ -25,7 +25,7 @@
 # starts.
 #
 # Flow:
-#   1. POST asdlc-api /_dev/v1/sm-api-resync — the BFF returns the
+#   1. POST aep-api /_dev/v1/sm-api-resync — the BFF returns the
 #      cred-store plaintext + the OpenBao path the dispatcher will read.
 #   2. For each write, `vault kv put -mount=secret <kvPath> <property>=<value>`
 #      via `kubectl exec openbao-0`.
@@ -61,25 +61,25 @@ fi
 
 # Wait briefly for the BFF to come up after `docker compose up -d`. 30s
 # total — enough for migrations + service init on a warm rebuild.
-echo "🔍 Waiting for asdlc-api at $BFF_URL/healthz (up to 30s)..."
+echo "🔍 Waiting for aep-api at $BFF_URL/healthz (up to 30s)..."
 for i in $(seq 1 30); do
     if curl -sS --max-time 1 -o /dev/null -w '%{http_code}' "$BFF_URL/healthz" 2>/dev/null | grep -q '^200$'; then
         break
     fi
     if [ "$i" -eq 30 ]; then
-        echo "❌ asdlc-api never reached /healthz — skipping secret resync."
+        echo "❌ aep-api never reached /healthz — skipping secret resync."
         exit 0
     fi
     sleep 1
 done
 
-echo "🔐 Fetching reseed bundles from asdlc-api..."
+echo "🔐 Fetching reseed bundles from aep-api..."
 RESP="$(curl -sS -X POST -w '\n%{http_code}' "$BFF_URL/_dev/v1/sm-api-resync" 2>&1 || true)"
 HTTP_CODE="$(echo "$RESP" | tail -n1)"
 BODY="$(echo "$RESP" | sed '$d')"
 
 if [ "$HTTP_CODE" = "404" ]; then
-    echo "ℹ️  /_dev/v1/sm-api-resync not mounted — needs TEST_MODE=true AND LOCAL_OPENBAO_REPAIR=true on asdlc-api. Skipping."
+    echo "ℹ️  /_dev/v1/sm-api-resync not mounted — needs TEST_MODE=true AND LOCAL_OPENBAO_REPAIR=true on aep-api. Skipping."
     exit 0
 fi
 if [ "$HTTP_CODE" != "200" ]; then

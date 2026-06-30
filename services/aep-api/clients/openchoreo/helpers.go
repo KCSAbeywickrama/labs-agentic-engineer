@@ -19,7 +19,7 @@ package openchoreo
 import (
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
 )
 
 // derefStr returns *s or "" if s is nil. The generated OC types

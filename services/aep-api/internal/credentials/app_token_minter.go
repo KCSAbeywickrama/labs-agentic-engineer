@@ -267,7 +267,7 @@ func truncateBody(body []byte) string {
 }
 
 // LoadAppWebhookSecrets reads the App-wide webhook secret list from
-// secret/asdlc/_platform/github/app/webhook_secret. Stored as a JSON list
+// secret/aep/_platform/github/app/webhook_secret. Stored as a JSON list
 // of {secret, added_at} entries (phase2.md §7.6 rotation shape).
 //
 // Returned as raw byte secrets, current-first, suitable for HMAC compare.
@@ -306,7 +306,7 @@ func (m *AppTokenMinter) LoadAppWebhookSecrets(ctx context.Context) ([][]byte, e
 }
 
 // LoadAppClientSecret reads the App's OAuth client_secret from
-// secret/asdlc/_platform/github/app/client_secret (§6.4). Consumed by
+// secret/aep/_platform/github/app/client_secret (§6.4). Consumed by
 // CredentialService.BindAppInstallation to exchange OAuth codes for user
 // tokens during the bind path.
 //

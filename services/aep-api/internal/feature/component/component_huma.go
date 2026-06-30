@@ -23,9 +23,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/humakit"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/ids"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/ids"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------

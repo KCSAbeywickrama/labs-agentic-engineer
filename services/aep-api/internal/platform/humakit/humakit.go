@@ -31,8 +31,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwt"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/middleware/jwt"
 )
 
 // gateMode is the process-wide tenant gate mode (ENFORCE by default — mirrors

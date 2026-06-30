@@ -21,7 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/utils"
+	"github.com/wso2/aep/aep-api/utils"
 )
 
 // OrganizationController serves the unscoped /api/v1/organizations endpoints.

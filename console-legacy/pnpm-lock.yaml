@@ -8,22 +8,22 @@ importers:
 
   console:
     dependencies:
-      '@asdlc/cell-diagram-view':
+      '@aep/cell-diagram-view':
         specifier: workspace:*
         version: link:../ui-components/cell-diagram-view
-      '@asdlc/excalidraw-dsl':
+      '@aep/excalidraw-dsl':
         specifier: workspace:*
         version: link:../ui-components/excalidraw-dsl
-      '@asdlc/explorer':
+      '@aep/explorer':
         specifier: workspace:*
         version: link:../ui-components/explorer
-      '@asdlc/md-editor':
+      '@aep/md-editor':
         specifier: workspace:*
         version: link:../ui-components/md-editor
-      '@asdlc/openapi-view':
+      '@aep/openapi-view':
         specifier: workspace:*
         version: link:../ui-components/openapi-view
-      '@asdlc/project-status':
+      '@aep/project-status':
         specifier: workspace:*
         version: link:../ui-components/project-status
       '@asgardeo/react':
@@ -129,7 +129,7 @@ importers:
 
   ui-components/cell-diagram-view:
     dependencies:
-      '@asdlc/explorer':
+      '@aep/explorer':
         specifier: workspace:*
         version: link:../explorer
       '@wso2/cell-diagram':
@@ -202,10 +202,10 @@ importers:
 
   ui-components/explorer:
     dependencies:
-      '@asdlc/excalidraw-editor':
+      '@aep/excalidraw-editor':
         specifier: workspace:*
         version: link:../excalidraw-editor
-      '@asdlc/md-editor':
+      '@aep/md-editor':
         specifier: workspace:*
         version: link:../md-editor
       react:

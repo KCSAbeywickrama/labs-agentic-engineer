@@ -20,7 +20,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o bin/asdlc-api ./cmd/asdlc-api
+RUN CGO_ENABLED=0 GOOS=linux go build -o bin/aep-api ./cmd/aep-api
 
 FROM alpine:3.21
 
@@ -38,7 +38,7 @@ RUN mkdir -p /home/appuser && \
     chown -R appuser:appgroup /home/appuser
 
 WORKDIR /app
-COPY --from=builder /app/bin/asdlc-api .
+COPY --from=builder /app/bin/aep-api .
 
 USER appuser
 
@@ -46,4 +46,4 @@ RUN git config --global --add safe.directory '*'
 
 EXPOSE 8080
 
-ENTRYPOINT ["./asdlc-api"]
+ENTRYPOINT ["./aep-api"]

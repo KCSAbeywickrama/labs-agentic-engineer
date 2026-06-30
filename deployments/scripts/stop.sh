@@ -15,14 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# Stop all ASDLC services.
+# Stop all AEP services.
 # Usage: cd deployments && bash scripts/stop.sh
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$SCRIPT_DIR/.."
 
-echo "=== Stopping ASDLC Platform ==="
+echo "=== Stopping AEP Platform ==="
 
 echo "🛑 Stopping OpenBao port-forward..."
 pkill -f "port-forward.*openbao.*8200" 2>/dev/null && echo "   Stopped" || echo "   Not running"

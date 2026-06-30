@@ -1,11 +1,11 @@
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterWorkflow
 metadata:
-  name: app-factory-coding-agent
+  name: aep-coding-agent
   labels:
     openchoreo.dev/workflow-type: "component"
   annotations:
-    openchoreo.dev/description: "Runs a Claude Agent SDK session in an ephemeral pod for one App Factory ComponentTask"
+    openchoreo.dev/description: "Runs a Claude Agent SDK session in an ephemeral pod for one AEP ComponentTask"
 spec:
   workflowPlaneRef:
     kind: ClusterWorkflowPlane
@@ -120,7 +120,7 @@ spec:
               # (visibility: internal) to admit this pod from a different
               # namespace. OC checks for `openchoreo.dev/system-component`
               # Exists on the source pod (internal/networkpolicy/networkpolicy.go).
-              openchoreo.dev/system-component: app-factory-coding-agent
+              openchoreo.dev/system-component: aep-coding-agent
           # No retryStrategy: the agent has side effects (commits, gh pr ready),
           # auto-retry would push duplicate work or open duplicate PRs. Retries
           # are managed at the dispatch-service layer, where idempotency holds.
@@ -132,7 +132,7 @@ spec:
             # counts against the registry's pull rate limits). When stabilising
             # for a long-lived dev/stage, pin to an immutable SHA tag and switch
             # to `imagePullPolicy: IfNotPresent`.
-            image: docker.io/xlight05/app-factory-coding-agent-runner:v3
+            image: docker.io/xlight05/aep-coding-agent-runner:v3
             imagePullPolicy: Always
             # Explicit command/args is the OC convention — every ClusterWorkflow
             # in this directory and Agent-Manager's amp-monitor-evaluation set
@@ -143,34 +143,34 @@ spec:
             args: ["tsx", "src/oneshot.ts"]
             workingDir: /app
             env:
-              - name: ASDLC_TASK_ID
+              - name: AEP_TASK_ID
                 value: '{{workflow.parameters.task-id}}'
-              - name: ASDLC_ORG_ID
+              - name: AEP_ORG_ID
                 value: '{{workflow.parameters.org-id}}'
-              - name: ASDLC_PROJECT_ID
+              - name: AEP_PROJECT_ID
                 value: '{{workflow.parameters.project-id}}'
-              - name: ASDLC_COMPONENT_NAME
+              - name: AEP_COMPONENT_NAME
                 value: '{{workflow.parameters.component-name}}'
-              - name: ASDLC_REPO_URL
+              - name: AEP_REPO_URL
                 value: '{{workflow.parameters.repo-url}}'
-              - name: ASDLC_IDENTITY_NAME
+              - name: AEP_IDENTITY_NAME
                 value: '{{workflow.parameters.identity-name}}'
-              - name: ASDLC_IDENTITY_EMAIL
+              - name: AEP_IDENTITY_EMAIL
                 value: '{{workflow.parameters.identity-email}}'
-              - name: ASDLC_IDENTITY_LOGIN
+              - name: AEP_IDENTITY_LOGIN
                 value: '{{workflow.parameters.identity-login}}'
-              - name: ASDLC_GIT_SERVICE_URL
+              - name: AEP_GIT_SERVICE_URL
                 value: '{{workflow.parameters.git-service-url}}'
-              - name: ASDLC_PROMPT
+              - name: AEP_PROMPT
                 value: '{{workflow.parameters.prompt}}'
-              - name: ASDLC_BEARER
+              - name: AEP_BEARER
                 value: '{{workflow.parameters.bearer}}'
-              - name: ASDLC_PLATFORM_URL
+              - name: AEP_PLATFORM_URL
                 value: '{{workflow.parameters.platform-url}}'
-              - name: ASDLC_CORRELATION_ID
+              - name: AEP_CORRELATION_ID
                 value: '{{workflow.parameters.correlation-id}}'
               - name: WORKSPACE_BASE_PATH
-                value: /home/asdlc/asdlc-workspace
+                value: /home/aep/aep-workspace
               - name: LOG_LEVEL
                 value: debug
               - name: ANTHROPIC_API_KEY
@@ -190,7 +190,7 @@ spec:
               runAsUser: 1000
             volumeMounts:
               - name: workspace
-                mountPath: /home/asdlc/asdlc-workspace
+                mountPath: /home/aep/aep-workspace
       volumes:
         - name: workspace
           emptyDir: {}

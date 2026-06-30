@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // fakeGitSecretClient records CreateGitSecret/DeleteGitSecret calls.
@@ -109,14 +109,14 @@ func TestStageBuildSecret_Happy(t *testing.T) {
 	repo := &models.GitRepository{
 		OrgID:     "default",
 		ProjectID: "p1",
-		RepoSlug:  "asdlc-repos-myrepo",
+		RepoSlug:  "aep-repos-myrepo",
 	}
-	repos := &fakeRepoRepo{rows: map[string]*models.GitRepository{"default/asdlc-repos-myrepo": repo}}
+	repos := &fakeRepoRepo{rows: map[string]*models.GitRepository{"default/aep-repos-myrepo": repo}}
 	res := &fakeResolver{cred: &fakeCred{token: "ghs_abc123", exp: time.Now().Add(time.Hour)}}
 	gs := &fakeGitSecretClient{}
 
 	svc := NewBuildCredentialsService(repos, res, gs)
-	got, err := svc.StageBuildSecret(context.Background(), "default", "asdlc-repos-myrepo", testRunName)
+	got, err := svc.StageBuildSecret(context.Background(), "default", "aep-repos-myrepo", testRunName)
 	if err != nil {
 		t.Fatalf("StageBuildSecret: %v", err)
 	}

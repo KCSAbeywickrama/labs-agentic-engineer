@@ -21,19 +21,19 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/design"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/idp"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/organization"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/project"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/requirements"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/skills"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/idp"
+	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/project"
+	"github.com/wso2/aep/aep-api/internal/feature/requirements"
+	"github.com/wso2/aep/aep-api/internal/feature/skills"
+	"github.com/wso2/aep/aep-api/internal/feature/task"
 )
 
 // HumaDeps carries every dependency the code-first feature registrations need.

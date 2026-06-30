@@ -1,35 +1,35 @@
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL — shared by asdlc-api (BFF) and git-service.
+  # PostgreSQL — shared by aep-api (BFF) and git-service.
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
-    container_name: asdlc-db
+    container_name: aep-db
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_DB: asdlc
-      POSTGRES_USER: asdlc
-      POSTGRES_PASSWORD: asdlc
+      POSTGRES_DB: aep
+      POSTGRES_USER: aep
+      POSTGRES_PASSWORD: aep
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U asdlc"]
+      test: ["CMD-SHELL", "pg_isready -U aep"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - asdlc
+      - aep
 
   # ---------------------------------------------------------------------------
-  # asdlc-api — Go BFF + GitHub webhook receiver. Reaches OC via the k3d
+  # aep-api — Go BFF + GitHub webhook receiver. Reaches OC via the k3d
   # docker network (k3d-openchoreo-serverlb) and Thunder via the same
   # loadbalancer routed by Host header.
   # ---------------------------------------------------------------------------
-  asdlc-api:
+  aep-api:
     build:
       context: ../services/aep-api
-    container_name: asdlc-api
+    container_name: aep-api
     ports:
       - "9090:9090"
     depends_on:
@@ -41,7 +41,7 @@ services:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9090"
       LOG_LEVEL: "debug"
-      DATABASE_URL: "postgres://asdlc:asdlc@postgres:5432/asdlc?sslmode=disable"
+      DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
       DEPLOYMENT_TIER: "${DEPLOYMENT_TIER:-dev}"
       # Central per-route tenant gate (§6.1b). ENFORCE by default (404s
       # cross-org); set TENANT_GATE_MODE=log for the observe-only canary
@@ -58,9 +58,9 @@ services:
       PLATFORM_API_SERVICE_BASE_URL: "${PLATFORM_API_SERVICE_BASE_URL}"
       PLATFORM_API_SERVICE_HOST: "${PLATFORM_API_SERVICE_HOST:-api.openchoreo.localhost}"
 
-      # ── Sister services on the asdlc compose network
+      # ── Sister services on the aep compose network
       AGENTS_SERVICE_BASE_URL: "http://agents-service:3400"
-      # After WS0.1, git-service is folded into the asdlc-api binary. The
+      # After WS0.1, git-service is folded into the aep-api binary. The
       # ── Coding-agent runner reach-back URL. The pod runs in
       # `workflows-<orgID>` inside the cluster, so it must reach the
       # compose services through k3d's host bridge. All former
@@ -71,36 +71,36 @@ services:
       GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"
       GITHUB_WEBHOOK_PROXY_URL: "${GITHUB_WEBHOOK_PROXY_URL}"
       OAUTH_STATE_SIGNING_KEY: "${OAUTH_STATE_SIGNING_KEY}"
-      GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:-ASDLC Bot}"
-      GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:-bot@asdlc.dev}"
+      GIT_COMMITTER_NAME: "${GIT_COMMITTER_NAME:-AEP Bot}"
+      GIT_COMMITTER_EMAIL: "${GIT_COMMITTER_EMAIL:-bot@aep.dev}"
 
       # ── App OAuth bind path: BFF builds /login/oauth/authorize with this client_id.
-      GITHUB_APP_SLUG: "${GITHUB_APP_SLUG:-asdlc-platform}"
+      GITHUB_APP_SLUG: "${GITHUB_APP_SLUG:-aep-platform}"
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       BFF_PUBLIC_URL: "${BFF_PUBLIC_URL:-http://localhost:8090}"
 
-      # ── Inbound JWT verification (Thunder JWKS, audience prefix asdlc-*).
+      # ── Inbound JWT verification (Thunder JWKS, audience prefix aep-*).
       JWKS_URL: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"
       JWT_ISSUER: "${JWT_ISSUER:-http://thunder.openchoreo.localhost:8080}"
-      JWT_AUDIENCE: "${BFF_AUDIENCE:-asdlc-*}"
+      JWT_AUDIENCE: "${BFF_AUDIENCE:-aep-*}"
 
       # ── Phase 3 of api-platform-integration — Thunder admin client
-      # for per-org publisher OAuth app lifecycle. The asdlc-system-client
+      # for per-org publisher OAuth app lifecycle. The aep-system-client
       # OAuth app + Administrator role binding are provisioned by
-      # values-thunder.yaml's 60-asdlc-system-role.sh bootstrap script.
+      # values-thunder.yaml's 60-aep-system-role.sh bootstrap script.
       THUNDER_ADMIN_URL: "http://thunder.openchoreo.localhost:8080"
-      THUNDER_SYSTEM_CLIENT_ID: "asdlc-system-client"
-      THUNDER_SYSTEM_CLIENT_SECRET: "asdlc-system-client-secret"
+      THUNDER_SYSTEM_CLIENT_ID: "aep-system-client"
+      THUNDER_SYSTEM_CLIENT_SECRET: "aep-system-client-secret"
       PLATFORM_IDP_ISSUER: "http://thunder.openchoreo.localhost:8080"
       PLATFORM_IDP_JWKS_URL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
 
       # ── OIDC config handed to user web-apps whose design has
-      # auth.kind=oidc-spa. v1 reuses the asdlc-console-client Thunder
+      # auth.kind=oidc-spa. v1 reuses the aep-console-client Thunder
       # OAuth client (already SPA-shaped with PKCE + public). Per-app
       # redirect URIs are appended at dispatch time. Per-project
       # clients are a v2 follow-up (see docs/design/oauth-protected-webapp.md).
       USER_APPS_OIDC_ISSUER: "http://thunder.openchoreo.localhost:8080"
-      USER_APPS_OIDC_CLIENT_ID: "asdlc-console-client"
+      USER_APPS_OIDC_CLIENT_ID: "aep-console-client"
       USER_APPS_OIDC_SCOPES: "openid profile"
 
       # ── Outbound Service JWTs — one client_credentials principal per
@@ -108,19 +108,19 @@ services:
       # audience is gone — coding-agent runs as a ClusterWorkflow pod
       # and authenticates back to git-service with a per-task Task JWT.
       SERVICE_AUTH_TOKEN_URL: "http://k3d-openchoreo-serverlb:8080/oauth2/token"
-      SERVICE_AUTH_CLIENT_ID: "asdlc-api-client"
-      SERVICE_AUTH_CLIENT_SECRET: "asdlc-api-client-secret"
+      SERVICE_AUTH_CLIENT_ID: "aep-api-client"
+      SERVICE_AUTH_CLIENT_SECRET: "aep-api-client-secret"
       SERVICE_AUTH_HOST_HEADER: "thunder.openchoreo.localhost"
       SERVICE_AUTH_GIT_TOKEN_URL: "http://k3d-openchoreo-serverlb:8080/oauth2/token"
-      SERVICE_AUTH_GIT_CLIENT_ID: "${SERVICE_AUTH_GIT_CLIENT_ID:-asdlc-bff-to-git-service}"
-      SERVICE_AUTH_GIT_CLIENT_SECRET: "${SERVICE_AUTH_GIT_CLIENT_SECRET:-asdlc-bff-to-git-service-secret}"
+      SERVICE_AUTH_GIT_CLIENT_ID: "${SERVICE_AUTH_GIT_CLIENT_ID:-aep-bff-to-git-service}"
+      SERVICE_AUTH_GIT_CLIENT_SECRET: "${SERVICE_AUTH_GIT_CLIENT_SECRET:-aep-bff-to-git-service-secret}"
       SERVICE_AUTH_GIT_HOST_HEADER: "thunder.openchoreo.localhost"
 
       # ── Task JWT signing — RS256, PEM read from a bind-mounted file.
       # Docker-compose's `${VAR}` substitution doesn't preserve newlines
       # cleanly, so we mount the file rather than env-pass the contents.
       BFF_TASK_SIGNING_KEY_PATH: "/app/keys/task-signing.pem"
-      BFF_TASK_TOKEN_ISSUER: "asdlc-bff"
+      BFF_TASK_TOKEN_ISSUER: "aep-bff"
       BFF_TASK_TOKEN_AUDIENCE: "git-service"
 
       # ── Folded-in git-service surface (after WS0.1) ─────────────────
@@ -140,7 +140,7 @@ services:
       # signs Task JWTs against its own /auth/external/jwks.json and
       # verifies them on the same endpoint. Self-loopback URL.
       BFF_JWKS_URL: "http://localhost:9090/auth/external/jwks.json"
-      TASK_JWT_ISSUER: "asdlc-bff"
+      TASK_JWT_ISSUER: "aep-bff"
       TASK_JWT_AUDIENCE: "git-service"
       ANTHROPIC_PLATFORM_KEY: "${ANTHROPIC_API_KEY}"
       AGENTS_SERVICE_URL: "http://agents-service:3400"
@@ -179,7 +179,7 @@ services:
       - ./github-app-private-key.pem:/etc/github-app/private-key.pem:ro
       - ./.kube/config:/app/.kube/config:ro
     networks:
-      - asdlc
+      - aep
       - k3d-openchoreo
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -196,7 +196,7 @@ services:
   agents-service:
     build:
       context: ../services/agents-legacy
-    container_name: asdlc-agents-service
+    container_name: aep-agents-service
     ports:
       - "3400:3400"
     environment:
@@ -206,22 +206,22 @@ services:
       # Inbound identity verification — BFF-signed JWT. agents verifies against
       # the BFF JWKS (not Thunder) and reads org from the verified ocOrgId
       # claim; the BFF is the single issuer for S2S identity tokens.
-      JWKS_URL: "http://asdlc-api:9090/auth/external/jwks.json"
-      JWT_ISSUER: "asdlc-bff"
+      JWKS_URL: "http://aep-api:9090/auth/external/jwks.json"
+      JWT_ISSUER: "aep-bff"
       JWT_AUDIENCE: "agents-service"
       # Resolve the per-org Anthropic key (or platform fallback) on each call.
-      # Points at the merged asdlc-api which serves the former
+      # Points at the merged aep-api which serves the former
       # /internal/credentials/orgs/{ocOrgId}/anthropic surface.
-      ASDLC_API_URL: "http://asdlc-api:9090"
+      AEP_API_URL: "http://aep-api:9090"
     networks:
-      - asdlc
+      - aep
     extra_hosts:
       - "thunder.openchoreo.localhost:host-gateway"
 
   # ---------------------------------------------------------------------------
   # secret-manager-api (Phase 1 — WS1.1) — in-repo local STUB of the cloud
   # sm-api, built from `./local-secret-manager-api` (no wso2cloud checkout
-  # needed). Reproduces the sm-api HTTP contract the asdlc-service client
+  # needed). Reproduces the sm-api HTTP contract the aep-service client
   # calls (POST /secrets, GET /secrets?labelSelector=, DELETE /secrets/{id}):
   # writes user secrets to OpenBao KV-v2 under `secret/data/user-app-secrets/
   # <ns>/<ref>` AND creates the OpenChoreo `SecretReference` CR — full parity
@@ -237,7 +237,7 @@ services:
   secret-manager-api:
     build:
       context: ./local-secret-manager-api
-    container_name: asdlc-secret-manager-api
+    container_name: aep-secret-manager-api
     ports:
       - "8082:8082"
     environment:
@@ -256,7 +256,7 @@ services:
     volumes:
       - ./.kube/config:/app/.kube/config:ro
     networks:
-      - asdlc
+      - aep
       - k3d-openchoreo
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -268,13 +268,13 @@ services:
   # /cloud-dp-cgw/<k8s path>` by forwarding to the local k3d k8s API
   # using the mounted kubeconfig. No mTLS to a remote cluster-gateway
   # (the cloud proxy bridges to a remote dataplane via the cluster-
-  # agent tunnel); this version exists only so asdlc-api's dispatch
+  # agent tunnel); this version exists only so aep-api's dispatch
   # path can speak the same HTTP shape in local + cloud.
   # ---------------------------------------------------------------------------
   local-cluster-gateway-proxy:
     build:
       context: ./local-cluster-gateway-proxy
-    container_name: asdlc-local-cluster-gateway-proxy
+    container_name: aep-local-cluster-gateway-proxy
     ports:
       - "8085:8085"
     environment:
@@ -284,60 +284,60 @@ services:
     volumes:
       - ./.kube/config:/app/.kube/config:ro
     networks:
-      - asdlc
+      - aep
       - k3d-openchoreo
 
   # ---------------------------------------------------------------------------
   # smee-client — forwards GitHub webhook events from the public smee.io
-  # channel to asdlc-api /api/v1/webhooks/github (same path cloud uses). In
+  # channel to aep-api /api/v1/webhooks/github (same path cloud uses). In
   # production this would be replaced by a real ingress to the BFF.
   # ---------------------------------------------------------------------------
   smee-client:
     image: deltaprojects/smee-client:latest
-    container_name: asdlc-smee-client
+    container_name: aep-smee-client
     depends_on:
-      - asdlc-api
+      - aep-api
     command:
       [
         "--url",
         "${GITHUB_WEBHOOK_PROXY_URL}",
         "--target",
-        "http://asdlc-api:9090/api/v1/webhooks/github",
+        "http://aep-api:9090/api/v1/webhooks/github",
       ]
     networks:
-      - asdlc
+      - aep
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # console — React SPA served by nginx. The browser hits Thunder directly
   # via thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1
   # → k3d loadbalancer). All API requests go through the same-origin
-  # /asdlc-api-service/ nginx proxy → asdlc-api:9090.
+  # /aep-api-service/ nginx proxy → aep-api:9090.
   # ---------------------------------------------------------------------------
   console:
     build:
       context: ../console-legacy
       dockerfile: console/Dockerfile
-    container_name: asdlc-console
+    container_name: aep-console
     ports:
       - "8090:3000"
     depends_on:
-      - asdlc-api
+      - aep-api
     environment:
-      ASDLC_API_PROXY_URL: "http://asdlc-api:9090"
+      AEP_API_PROXY_URL: "http://aep-api:9090"
       VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
-      VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-asdlc-console-client}"
+      VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
       VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
       VITE_SIGN_IN_REDIRECT_URL: "${PUBLIC_CONSOLE_URL}"
       VITE_SIGN_OUT_REDIRECT_URL: "${PUBLIC_CONSOLE_URL}/login"
     networks:
-      - asdlc
+      - aep
 
 volumes:
   pgdata:
 
 networks:
-  asdlc:
+  aep:
     driver: bridge
   k3d-openchoreo:
     external: true

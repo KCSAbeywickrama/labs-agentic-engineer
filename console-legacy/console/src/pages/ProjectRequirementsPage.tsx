@@ -29,8 +29,8 @@ import {
   Typography,
 } from '@wso2/oxygen-ui';
 import { GitCompare, GitHub, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
-import { MdDiffViewer, countLineChanges, type CollabConfig } from '@asdlc/md-editor';
-import { Explorer, type ExplorerRef, type AddFileMenuItem } from '@asdlc/explorer';
+import { MdDiffViewer, countLineChanges, type CollabConfig } from '@aep/md-editor';
+import { Explorer, type ExplorerRef, type AddFileMenuItem } from '@aep/explorer';
 import { api, ApiError } from '../services/api';
 import type { ArtifactVersion } from '../services/api';
 import { projectArchitecturePath } from '../lib/paths';
@@ -61,7 +61,7 @@ import {
   toTitleCase,
   type DocumentType,
 } from '../lib/documentTypes';
-import { tryDslToExcalidraw, type DslKind } from '@asdlc/excalidraw-dsl';
+import { tryDslToExcalidraw, type DslKind } from '@aep/excalidraw-dsl';
 
 type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error';
 

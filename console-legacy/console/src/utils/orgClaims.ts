@@ -25,7 +25,7 @@ import type { UserClaims } from '../auth/useUserClaims';
  * fail-loud error rather than silently substitute an org.
  *
  * The BFF mirrors this precedence verbatim
- * (asdlc-service/middleware/jwt.ResolveOuHandle). Any change here MUST
+ * (aep-service/middleware/jwt.ResolveOuHandle). Any change here MUST
  * land on both sides simultaneously.
  */
 export function resolveOuHandle(claims: UserClaims | null | undefined): string | undefined {

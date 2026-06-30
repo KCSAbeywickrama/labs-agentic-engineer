@@ -25,13 +25,13 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/clients/oauth"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 type TaskService interface {
@@ -279,7 +279,7 @@ func (s *taskService) ensureIssueForTask(
 	issue, err := s.issueSvc.CreateIssue(ctx, task.OrgID, task.ProjectID, gitrepo.CreateIssueRequest{
 		Title:  gitrepo.IssueTitle(task),
 		Body:   gitrepo.BuildIssueBody(task, comp, repoURL, repoSlug),
-		Labels: []string{"asdlc", "implementation"},
+		Labels: []string{"aep", "implementation"},
 	})
 	if err != nil {
 		return err

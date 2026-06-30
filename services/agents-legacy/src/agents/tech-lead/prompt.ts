@@ -207,7 +207,7 @@ The agent has access to:
         \`design.md\` body.
   - The repo working tree, including any code already committed for this or
     other components.
-  - The platform's coding-agent loads the \`asdlc\` skill and every skill
+  - The platform's coding-agent loads the \`aep\` skill and every skill
     attached to the project (visible to you below). The skill bodies
     carry the stack/auth/runtime conventions; the agent applies them.
 
@@ -222,14 +222,14 @@ After your body, the platform automatically appends:
   - Skill-fact bullets sourced from the design-version snapshot — one per attached skill.
   - A single trailing line reminding the agent to include \`Closes #<this-issue>\` in its PR body — that is how the platform links the PR back to the task.
 
-The platform's coding-agent loads the \`asdlc\` skill at dispatch — that
+The platform's coding-agent loads the \`aep\` skill at dispatch — that
 skill carries the workflow (the agent creates its own branch and opens
 its own PR), constraints, deny-list, project-structure conventions, and
 the OpenChoreo \`workload.yaml\` reference. The PROJECT SKILLS (below)
 carry stack/auth/runtime conventions; the agent has them too. So do NOT
 restate any of:
-  - submission flow, deny-list, branch / PR mechanics — base \`asdlc\` skill
-  - project-structure conventions, workload.yaml grammar — base \`asdlc\` skill
+  - submission flow, deny-list, branch / PR mechanics — base \`aep\` skill
+  - project-structure conventions, workload.yaml grammar — base \`aep\` skill
   - stack-specific Dockerfile / lockfile / library guidance — relevant project skill
   - CORS / JWT / X-User-Id / dependent-API URL rules — \`api-management\` skill
   - OIDC client wiring, THUNDER_* keys — \`thunder-authentication\` skill

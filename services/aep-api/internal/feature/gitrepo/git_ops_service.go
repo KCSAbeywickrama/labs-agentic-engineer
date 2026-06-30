@@ -31,9 +31,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // cryptoRandRead is exposed as a func var so tests can substitute a
@@ -382,15 +382,15 @@ func (s *gitOpsService) PrepareAuthedEnv(ctx context.Context, repoRecord *models
 }
 
 // ResolveSaveIdentities returns (author, committer) identities for the save.
-// Both are set to the credential identity (falling back to a default ASDLC
+// Both are set to the credential identity (falling back to a default AEP
 // name/email when the credential carries none).
 func (s *gitOpsService) ResolveSaveIdentities(cred credentials.Credential) (*GitIdentity, *GitIdentity) {
 	id := cred.Identity()
 	if id.Name == "" {
-		id.Name = "ASDLC"
+		id.Name = "AEP"
 	}
 	if id.Email == "" {
-		id.Email = "noreply@asdlc.dev"
+		id.Email = "noreply@aep.dev"
 	}
 	gi := &GitIdentity{Name: id.Name, Email: id.Email}
 	return gi, gi

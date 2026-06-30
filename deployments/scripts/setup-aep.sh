@@ -21,16 +21,16 @@ cd "$SCRIPT_DIR"
 source "$SCRIPT_DIR/env.sh"
 source "$SCRIPT_DIR/utils.sh"
 
-echo "=== Setting up ASDLC Platform ==="
+echo "=== Setting up AEP Platform ==="
 
-# Verify Thunder is running and ASDLC client exists
+# Verify Thunder is running and AEP client exists
 kubectl get deployment thunder-deployment -n thunder &>/dev/null || {
     echo "❌ Thunder not found. Run setup-openchoreo.sh first."
     exit 1
 }
 echo "✅ Thunder is running"
-echo "   ASDLC OAuth2 clients are bootstrapped via Thunder helm values"
-echo "   (59-asdlc-oauth-apps.sh — registers console / api / workload-publisher / 3x bff→service clients)"
+echo "   AEP OAuth2 clients are bootstrapped via Thunder helm values"
+echo "   (59-aep-oauth-apps.sh — registers console / api / workload-publisher / 3x bff→service clients)"
 
 # ============================================================================
 # Registry mirror for Docker builds
@@ -44,7 +44,7 @@ echo "🐳 Configuring container registry for Docker builds..."
 configure_registry_mirror
 
 # ============================================================================
-# OpenChoreo workflows (dockerfile-builder + app-factory-coding-agent)
+# OpenChoreo workflows (dockerfile-builder + aep-coding-agent)
 # ============================================================================
 echo ""
 echo "🔨 Installing OpenChoreo workflows..."
@@ -78,20 +78,20 @@ echo "✅ ClusterWorkflow 'dockerfile-builder' installed"
 # rebuild). The prod manifest stays the single source of truth; yq layers
 # the dev-patch fragment over it at apply time so other fields can't drift.
 # Requires setup-k3d.sh to have baked the bind-mount onto the node.
-# Opt out with ASDLC_PROD_RUNNER=1 to mirror the published-image flow.
-CODING_AGENT_MANIFEST="${SCRIPT_DIR}/../manifests/app-factory-coding-agent.yaml"
-CODING_AGENT_PATCH="${SCRIPT_DIR}/../manifests/app-factory-coding-agent.dev-patch.yaml"
+# Opt out with AEP_PROD_RUNNER=1 to mirror the published-image flow.
+CODING_AGENT_MANIFEST="${SCRIPT_DIR}/../manifests/aep-coding-agent.yaml"
+CODING_AGENT_PATCH="${SCRIPT_DIR}/../manifests/aep-coding-agent.dev-patch.yaml"
 
-if [ "${ASDLC_PROD_RUNNER:-0}" = "1" ]; then
-    apply_with_retry "$CODING_AGENT_MANIFEST" "app-factory-coding-agent"
-    echo "✅ ClusterWorkflow 'app-factory-coding-agent' installed (PROD — baked-in image plugin)"
+if [ "${AEP_PROD_RUNNER:-0}" = "1" ]; then
+    apply_with_retry "$CODING_AGENT_MANIFEST" "aep-coding-agent"
+    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (PROD — baked-in image plugin)"
 else
     if ! command -v yq &>/dev/null; then
         echo "❌ Dev plugin overlay needs yq for the patch merge — 'brew install yq'"
-        echo "   Or set ASDLC_PROD_RUNNER=1 to skip the overlay."
+        echo "   Or set AEP_PROD_RUNNER=1 to skip the overlay."
         exit 1
     fi
-    DEV_MANIFEST="$(mktemp -t app-factory-coding-agent.dev.XXXXXX.yaml)"
+    DEV_MANIFEST="$(mktemp -t aep-coding-agent.dev.XXXXXX.yaml)"
     trap 'rm -f "$DEV_MANIFEST"' EXIT
     yq eval "
         .spec.runTemplate.spec.templates[0].container.volumeMounts +=
@@ -99,8 +99,8 @@ else
         .spec.runTemplate.spec.volumes +=
           load(\"${CODING_AGENT_PATCH}\").volumes
     " "$CODING_AGENT_MANIFEST" > "$DEV_MANIFEST"
-    apply_with_retry "$DEV_MANIFEST" "app-factory-coding-agent (dev — hostPath overlay)"
-    echo "✅ ClusterWorkflow 'app-factory-coding-agent' installed (DEV — /app/plugin overlay live from host)"
+    apply_with_retry "$DEV_MANIFEST" "aep-coding-agent (dev — hostPath overlay)"
+    echo "✅ ClusterWorkflow 'aep-coding-agent' installed (DEV — /app/plugin overlay live from host)"
 fi
 
 # ============================================================================
@@ -547,7 +547,7 @@ echo "✅ ClusterComponentType 'deployment/web-application' created"
 #    platform-api ProvisionOrgUnit) ────────────────────────────────────────
 # The BFF references the per-org namespaced ComponentType (kind=ComponentType),
 # not the cluster-scoped ClusterComponentType — see
-# asdlc-service/clients/openchoreo/component_client.go. In dev cloud,
+# aep-service/clients/openchoreo/component_client.go. In dev cloud,
 # platform-api's ProvisionOrgUnit creates `service`/`web-application`
 # ComponentTypes inside each org's namespace; locally nothing did, so a
 # kind=ComponentType reference resolved to `ComponentTypeNotFound` and user
@@ -608,12 +608,12 @@ kubectl apply -f - <<'OCEOF'
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterAuthzRoleBinding
 metadata:
-  name: asdlc-api-client-binding
+  name: aep-api-client-binding
 spec:
   effect: allow
   entitlement:
     claim: sub
-    value: asdlc-api-client
+    value: aep-api-client
   roleMappings:
   - roleRef:
       kind: ClusterAuthzRole
@@ -633,7 +633,7 @@ spec:
       kind: ClusterAuthzRole
       name: admin
 OCEOF
-echo "✅ ASDLC API service account + Administrators group authorized"
+echo "✅ AEP API service account + Administrators group authorized"
 
 # ============================================================================
 # Generate .env file
@@ -702,22 +702,22 @@ GITHUB_APP_ID_VAL="$(existing_val GITHUB_APP_ID)"
 GITHUB_CLIENT_ID_VAL="$(existing_val GITHUB_CLIENT_ID)"
 GITHUB_CLIENT_SECRET_VAL="$(existing_val GITHUB_CLIENT_SECRET)"
 GITHUB_APP_SLUG_VAL="$(existing_val GITHUB_APP_SLUG)"
-[ -z "$GITHUB_APP_SLUG_VAL" ] && GITHUB_APP_SLUG_VAL="asdlc-platform"
+[ -z "$GITHUB_APP_SLUG_VAL" ] && GITHUB_APP_SLUG_VAL="aep-platform"
 
 # Local-dev seed convenience — consumed exclusively by scripts/seed-dev.sh.
 # Preserved across re-runs so the operator doesn't have to re-append them
-# every time setup-asdlc.sh regenerates the .env from scratch.
+# every time setup-aep.sh regenerates the .env from scratch.
 LOCAL_DEV_ADMIN_GITHUB_PAT_VAL="$(existing_val LOCAL_DEV_ADMIN_GITHUB_PAT)"
 LOCAL_DEV_ADMIN_GITHUB_OWNER_VAL="$(existing_val LOCAL_DEV_ADMIN_GITHUB_OWNER)"
 
 cat > "$ENV_FILE" <<EOF
-# Auto-generated by setup-asdlc.sh — $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Auto-generated by setup-aep.sh — $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 #
-# Re-running setup-asdlc.sh preserves secrets, the smee.io channel, and any
+# Re-running setup-aep.sh preserves secrets, the smee.io channel, and any
 # values you've hand-edited (ANTHROPIC_API_KEY, GitHub App credentials).
 
 # ── OpenChoreo Platform API ────────────────────────────────────────────────
-# asdlc-api (in compose) reaches OC via the k3d Docker network. The Host
+# aep-api (in compose) reaches OC via the k3d Docker network. The Host
 # header is what kgateway routes on.
 PLATFORM_API_SERVICE_BASE_URL=http://k3d-${CLUSTER_NAME}-serverlb:8080
 PLATFORM_API_SERVICE_HOST=api.openchoreo.localhost
@@ -729,7 +729,7 @@ PUBLIC_THUNDER_URL=http://thunder.openchoreo.localhost:8080
 PUBLIC_CONSOLE_URL=http://localhost:8090
 
 # ── Thunder OAuth client (consumed by the console at runtime) ──────────────
-VITE_THUNDER_CLIENT_ID=asdlc-console-client
+VITE_THUNDER_CLIENT_ID=aep-console-client
 VITE_THUNDER_SCOPES=openid profile email
 
 # ── Agents service ─────────────────────────────────────────────────────────
@@ -754,7 +754,7 @@ GITHUB_REPO_VISIBILITY=private
 # WEBHOOK_SECRET is the HMAC key the receiver validates events with;
 # OAUTH_STATE_SIGNING_KEY signs the GitHub App connect-state JWT
 # (CSRF protection on the connect callback). Generated once at setup;
-# rotate by clearing the values here and re-running setup-asdlc.sh.
+# rotate by clearing the values here and re-running setup-aep.sh.
 GITHUB_WEBHOOK_SECRET=${WEBHOOK_SECRET}
 OAUTH_STATE_SIGNING_KEY=${OAUTH_STATE_KEY}
 
@@ -763,8 +763,8 @@ OAUTH_STATE_SIGNING_KEY=${OAUTH_STATE_KEY}
 GITHUB_WEBHOOK_PROXY_URL=${SMEE_URL}
 
 # ── Committer identity (for platform-driven commits + tags) ────────────────
-GIT_COMMITTER_NAME=ASDLC Bot
-GIT_COMMITTER_EMAIL=bot@asdlc.dev
+GIT_COMMITTER_NAME=AEP Bot
+GIT_COMMITTER_EMAIL=bot@aep.dev
 
 # Dev gate — the BFF refuses some destructive seed paths unless tier=dev.
 DEPLOYMENT_TIER=dev
@@ -795,8 +795,8 @@ echo "✅ .env file generated at $(realpath "$ENV_FILE")"
 echo ""
 echo "🪪 Pre-creating default org base namespace (local-only, ou-service equivalent)..."
 THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
-SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-asdlc-local-dev-seeder}"
-SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-asdlc-local-dev-seeder-secret}"
+SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-aep-local-dev-seeder}"
+SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-aep-local-dev-seeder-secret}"
 # Thunder may have come up moments ago and not yet be ready to serve
 # /oauth2/token (especially on the first setup after a fresh k3d
 # cluster). Retry up to ~30s with backoff before giving up — the
@@ -840,11 +840,11 @@ print(json.loads(base64.b64decode(s)).get("ouId", ""))' 2>/dev/null)
 fi
 
 echo ""
-echo "✅ ASDLC setup complete!"
+echo "✅ AEP setup complete!"
 echo ""
 echo "   Default login credentials:"
 echo "     Username: admin"
 echo "     Password: admin"
 echo ""
-echo "   To start ASDLC:"
+echo "   To start AEP:"
 echo "     cd deployments && bash scripts/start.sh"

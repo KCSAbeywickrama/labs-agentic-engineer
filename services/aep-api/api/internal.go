@@ -22,8 +22,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/task"
 )
 
 // newInternalAPI creates the Huma API for the internal service-to-service
@@ -35,7 +35,7 @@ import (
 // generated to a checked-in file and is never advertised on the gateway. See
 // docs/design/internal-s2s-api.md §3.
 func newInternalAPI(internalMux *http.ServeMux) huma.API {
-	cfg := huma.DefaultConfig("ASDLC Internal S2S API", apiVersion)
+	cfg := huma.DefaultConfig("AEP Internal S2S API", apiVersion)
 	// Same rationale as newHumaAPI: clear the built-in spec/docs/schema routes
 	// (they would land on internalMux, which only receives /internal/* anyway)
 	// and suppress the $schema response-body link so runner callbacks stay

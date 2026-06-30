@@ -15,11 +15,11 @@
 // under the License.
 
 // Package secretmanagersvc is the secret-management client for the
-// asdlc-service workflows plane. Two shape choices drive the rest of the
+// aep-service workflows plane. Two shape choices drive the rest of the
 // package:
 //
 //  1. SecretLocation is keyed by `{org, project, task, entity, secretKey}`.
-//     A coding-agent task is the smallest ownership unit; app-factory has
+//     A coding-agent task is the smallest ownership unit; aep has
 //     no agent or env-set concept at the secret layer, and per-env scoping
 //     happens at the OC SecretReference level, not in the KV path.
 //
@@ -44,7 +44,7 @@ const (
 	// DefaultManagedBy is the default ownership tag stamped onto every
 	// secret written through this client. Cloud SM-API uses it to refuse
 	// cross-tenant deletes; OpenBao providers use it for the same reason.
-	DefaultManagedBy = "asdlc-app-factory"
+	DefaultManagedBy = "aep-aep"
 
 	// SecretKeyAPIKey is the conventional key name for single-value
 	// secrets stored as `{api-key: "..."}`. Anthropic key + GitHub PAT

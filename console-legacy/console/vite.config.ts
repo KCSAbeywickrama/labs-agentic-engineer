@@ -36,10 +36,10 @@ export default defineConfig({
   server: {
     port: 8090,
     proxy: {
-      '/asdlc-api-service': {
+      '/aep-api-service': {
         target: apiTarget,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/asdlc-api-service/, ''),
+        rewrite: (path) => path.replace(/^\/aep-api-service/, ''),
       },
     },
   },

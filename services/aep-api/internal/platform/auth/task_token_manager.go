@@ -54,7 +54,7 @@ type TaskTokenConfig struct {
 	// PrivateKey is the PEM-encoded RSA private key (PKCS#1 or PKCS#8).
 	// Passed as the BFF_TASK_SIGNING_KEY env var. Required.
 	PrivateKey string
-	// Issuer is the iss claim value (e.g., "asdlc-bff").
+	// Issuer is the iss claim value (e.g., "aep-bff").
 	Issuer string
 	// Audience is the aud claim value (always "git-service" today).
 	Audience string

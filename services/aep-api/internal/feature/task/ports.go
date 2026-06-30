@@ -19,7 +19,7 @@ package task
 import (
 	"context"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/contracts"
 )
 
 // Consumer ports for task's HTTP edge (task_controller). §4 rule 1: the

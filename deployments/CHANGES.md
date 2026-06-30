@@ -4,7 +4,7 @@
 
 The v1 `deployments/` setup (pure OpenChoreo + Docker Compose) was outdated against the current source — references to long-removed services (`collab-server`), the now-replaced long-lived `remote-worker`, and missing env vars (`AGENT_GIT_SERVICE_URL`, `AGENT_PLATFORM_URL`, `OBSERVER_URL`, `ANTHROPIC_PLATFORM_KEY`, …) made `docker compose up` produce a stack that couldn't serve the UI flow end-to-end.
 
-I rewrote the v1 setup to mirror agent-manager's docker-compose pattern (`/Users/wso2/repos/agent-manager/deployments/`) as closely as possible while honouring App Factory's heavier needs (git-service writes K8s Secrets into `workflows-*` namespaces, coding-agent is dispatched as a one-shot ClusterWorkflow pod), then ran the full flow from "Create Project → Generate Requirements → Architecture → Tasks → Code → Build → Deploy" in a browser to confirm.
+I rewrote the v1 setup to mirror agent-manager's docker-compose pattern (`/Users/wso2/repos/agent-manager/deployments/`) as closely as possible while honouring AEP's heavier needs (git-service writes K8s Secrets into `workflows-*` namespaces, coding-agent is dispatched as a one-shot ClusterWorkflow pod), then ran the full flow from "Create Project → Generate Requirements → Architecture → Tasks → Code → Build → Deploy" in a browser to confirm.
 
 ## E2E result
 
@@ -32,15 +32,15 @@ I rewrote the v1 setup to mirror agent-manager's docker-compose pattern (`/Users
 
 | File | Change |
 |---|---|
-| `deployments/docker-compose.yml` | Rewritten: removed `collab-server`, long-lived `remote-worker`. Updated env vars to match current code. Mounts the host kubeconfig + Task signing PEM into git-service / asdlc-api. |
-| `deployments/scripts/setup-asdlc.sh` | Installs `dockerfile-builder` + **new** `app-factory-coding-agent` ClusterWorkflow. Creates `workflows-default` namespace. Binds Thunder's `Administrators` group → OC `admin` role. Generates a leaner `.env`. |
+| `deployments/docker-compose.yml` | Rewritten: removed `collab-server`, long-lived `remote-worker`. Updated env vars to match current code. Mounts the host kubeconfig + Task signing PEM into git-service / aep-api. |
+| `deployments/scripts/setup-aep.sh` | Installs `dockerfile-builder` + **new** `aep-coding-agent` ClusterWorkflow. Creates `workflows-default` namespace. Binds Thunder's `Administrators` group → OC `admin` role. Generates a leaner `.env`. |
 | `deployments/scripts/start.sh` | Removed REMOTE_WORKER_MODE branching. Seeds `deployments/.kube/config` from `k3d kubeconfig get … --internal`. |
-| `deployments/scripts/utils.sh` | `patch_coredns_host_k3d_internal` now uses the docker bridge gateway IP — fixes pod → host port reachability for git-service / asdlc-api. |
+| `deployments/scripts/utils.sh` | `patch_coredns_host_k3d_internal` now uses the docker bridge gateway IP — fixes pod → host port reachability for git-service / aep-api. |
 | `deployments/scripts/stop.sh` | Removed remote-worker host-mode kill. |
 | `deployments/single-cluster/values-thunder.yaml` | Added Thunder bootstrap scripts: `50-platform-users.sh`, **`58-openchoreo-workload-publisher.sh`**. Added `ou*` claims to console app's userAttributes. |
-| `deployments/manifests/app-factory-coding-agent.yaml` | **New** — copied verbatim from `deployments-v2/wso2cloud-deployment/.../cluster-workflows/app-factory-coding-agent.yaml`. |
+| `deployments/manifests/aep-coding-agent.yaml` | **New** — copied verbatim from `deployments-v2/wso2cloud-deployment/.../cluster-workflows/aep-coding-agent.yaml`. |
 | `deployments/README.md` | **New** — quick-start + architecture diagram + file inventory. |
-| `asdlc-service/config/config_loader.go` | Added `BFF_TASK_SIGNING_KEY_PATH` fallback for the Task JWT signing key (compose env-var substitution doesn't preserve newlines cleanly; mount the PEM instead). |
+| `aep-service/config/config_loader.go` | Added `BFF_TASK_SIGNING_KEY_PATH` fallback for the Task JWT signing key (compose env-var substitution doesn't preserve newlines cleanly; mount the PEM instead). |
 | `AGENTS.md` / `CLAUDE.md` | Updated the deployments/ line: from "DEPRECATED" to "ALTERNATIVE local setup". |
 
 ## Departures from the original v1

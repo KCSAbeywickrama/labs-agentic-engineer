@@ -19,7 +19,7 @@ package codingagent
 import (
 	"context"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // BuildOps is the auth-retry surface webhook triggers: the build watcher

@@ -1,41 +1,41 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: asdlc-api
+  name: aep-api
   namespace: {{ .Release.Namespace }}
   labels:
-    app: asdlc-api
+    app: aep-api
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
 spec:
-  replicas: {{ .Values.asdlcApi.replicas | default 1 }}
+  replicas: {{ .Values.aepApi.replicas | default 1 }}
   selector:
     matchLabels:
-      app: asdlc-api
+      app: aep-api
   template:
     metadata:
       labels:
-        app: asdlc-api
+        app: aep-api
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
-      serviceAccountName: asdlc-api
+      serviceAccountName: aep-api
       containers:
-        - name: asdlc-api
-          image: "{{ .Values.asdlcApi.image.repository }}:{{ .Values.asdlcApi.image.tag }}"
-          imagePullPolicy: {{ .Values.asdlcApi.image.pullPolicy }}
+        - name: aep-api
+          image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
+          imagePullPolicy: {{ .Values.aepApi.image.pullPolicy }}
           ports:
-            - containerPort: {{ .Values.asdlcApi.port }}
+            - containerPort: {{ .Values.aepApi.port }}
               name: http
-          resources: {{ toYaml .Values.asdlcApi.resources | nindent 12 }}
+          resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
           env:
             - name: SERVER_HOST
               value: "0.0.0.0"
             - name: SERVER_PORT
-              value: {{ .Values.asdlcApi.port | quote }}
+              value: {{ .Values.aepApi.port | quote }}
             - name: LOG_LEVEL
-              value: {{ .Values.asdlcApi.logLevel | quote }}
+              value: {{ .Values.aepApi.logLevel | quote }}
             - name: DEPLOYMENT_TIER
-              value: {{ .Values.asdlcApi.deploymentTier | quote }}
+              value: {{ .Values.aepApi.deploymentTier | quote }}
             - name: TEST_MODE
               value: "false"
             - name: LOCAL_OPENBAO_REPAIR
@@ -47,7 +47,7 @@ spec:
               value: {{ .Values.postgres.url | quote }}
             {{- else }}
             - name: DATABASE_URL
-              value: "postgres://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@asdlc-db:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
+              value: "postgres://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@aep-db:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
             {{- end }}
 
             # ── OpenChoreo ────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ spec:
               value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
             # The runner's /internal callback base. Points at the dedicated
             # internal host when bff.internalURL is set (pairs with the
-            # asdlcApi.internalHostname HTTPRoute split); otherwise the public URL.
+            # aepApi.internalHostname HTTPRoute split); otherwise the public URL.
             - name: AGENT_PLATFORM_URL
               value: {{ .Values.bff.internalURL | default .Values.bff.publicURL | quote }}
 
@@ -73,7 +73,7 @@ spec:
             - name: JWT_ISSUER
               value: {{ .Values.idp.issuer | quote }}
             - name: JWT_AUDIENCE
-              value: "asdlc-*"
+              value: "aep-*"
             - name: THUNDER_ADMIN_URL
               value: {{ .Values.idp.adminURL | quote }}
             - name: THUNDER_SYSTEM_CLIENT_ID
@@ -93,27 +93,27 @@ spec:
 
             # ── Service auth (BFF service identity for OC API calls) ──────────
             - name: SERVICE_AUTH_TOKEN_URL
-              value: {{ .Values.asdlcApi.serviceAuth.tokenURL | quote }}
+              value: {{ .Values.aepApi.serviceAuth.tokenURL | quote }}
             - name: SERVICE_AUTH_CLIENT_ID
-              value: {{ .Values.asdlcApi.serviceAuth.clientId | quote }}
+              value: {{ .Values.aepApi.serviceAuth.clientId | quote }}
             - name: SERVICE_AUTH_CLIENT_SECRET
-              value: {{ .Values.asdlcApi.serviceAuth.clientSecret | quote }}
+              value: {{ .Values.aepApi.serviceAuth.clientSecret | quote }}
             - name: SERVICE_AUTH_HOST_HEADER
               value: ""
             - name: SERVICE_AUTH_GIT_TOKEN_URL
               value: {{ .Values.idp.tokenURL | quote }}
             - name: SERVICE_AUTH_GIT_CLIENT_ID
-              value: "asdlc-bff-to-git-service"
+              value: "aep-bff-to-git-service"
             - name: SERVICE_AUTH_GIT_CLIENT_SECRET
-              value: "asdlc-bff-to-git-service-secret"
+              value: "aep-bff-to-git-service-secret"
             - name: SERVICE_AUTH_GIT_HOST_HEADER
               value: ""
             - name: SERVICE_AUTH_AGENTS_TOKEN_URL
               value: {{ .Values.idp.tokenURL | quote }}
             - name: SERVICE_AUTH_AGENTS_CLIENT_ID
-              value: {{ .Values.asdlcApi.agentsJwt.clientId | quote }}
+              value: {{ .Values.aepApi.agentsJwt.clientId | quote }}
             - name: SERVICE_AUTH_AGENTS_CLIENT_SECRET
-              value: {{ .Values.asdlcApi.agentsJwt.clientSecret | quote }}
+              value: {{ .Values.aepApi.agentsJwt.clientSecret | quote }}
             - name: SERVICE_AUTH_AGENTS_HOST_HEADER
               value: ""
 
@@ -125,7 +125,7 @@ spec:
             - name: BFF_TASK_TOKEN_AUDIENCE
               value: {{ .Values.taskSigning.audience | quote }}
             - name: BFF_JWKS_URL
-              value: "http://localhost:{{ .Values.asdlcApi.port }}/auth/external/jwks.json"
+              value: "http://localhost:{{ .Values.aepApi.port }}/auth/external/jwks.json"
             - name: TASK_JWT_ISSUER
               value: {{ .Values.taskSigning.issuer | quote }}
             - name: TASK_JWT_AUDIENCE
@@ -169,9 +169,9 @@ spec:
 
             # ── Cloud service stubs ───────────────────────────────────────────
             - name: SECRET_MANAGER_API_URL
-              value: {{ .Values.asdlcApi.smApiURL | default "" | quote }}
+              value: {{ .Values.aepApi.smApiURL | default "" | quote }}
             - name: CLUSTER_GATEWAY_PROXY_URL
-              value: {{ .Values.asdlcApi.clusterGatewayProxyURL | default "" | quote }}
+              value: {{ .Values.aepApi.clusterGatewayProxyURL | default "" | quote }}
 
             # ── Observer ──────────────────────────────────────────────────────
             - name: OBSERVER_URL
@@ -203,11 +203,11 @@ spec:
       volumes:
         - name: task-signing-key
           configMap:
-            name: asdlc-api-task-signing-key
+            name: aep-api-task-signing-key
         {{- if .Values.github.appPrivateKeyPem }}
         - name: github-app-key
           configMap:
-            name: asdlc-api-github-app-key
+            name: aep-api-github-app-key
         {{- end }}
         - name: repos
           emptyDir: {}
@@ -218,7 +218,7 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: asdlc-api-task-signing-key
+  name: aep-api-task-signing-key
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -232,7 +232,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: asdlc-api-github-app-key
+  name: aep-api-github-app-key
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}

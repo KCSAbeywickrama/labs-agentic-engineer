@@ -1,17 +1,17 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: asdlc-api
+  name: aep-api
   namespace: {{ .Release.Namespace }}
   labels:
-    app: asdlc-api
+    app: aep-api
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
 spec:
   selector:
-    app: asdlc-api
+    app: aep-api
   ports:
-    - port: {{ .Values.asdlcApi.port }}
+    - port: {{ .Values.aepApi.port }}
       targetPort: http
       protocol: TCP
       name: http

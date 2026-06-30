@@ -31,16 +31,16 @@
 //     ExternalSecrets just before the Job is applied.
 //     Mounted as envFrom so a leaked process listing
 //     won't disclose secret values.
-//   - runnerImage — the asdlc remote-worker image; pinned by the BFF
+//   - runnerImage — the aep remote-worker image; pinned by the BFF
 //     from cfg.AgentRunnerImage.
 //   - prompt / repo URL / identity / callback URL — pre-rendered
 //     dispatch payload the runner reads from
-//     ASDLC_* env vars.
+//     AEP_* env vars.
 //
 // Mounts:
 //
 //   - the runner's workspace lives on an `emptyDir` at
-//     /home/asdlc/asdlc-workspace (matches remote-worker's config.ts
+//     /home/aep/aep-workspace (matches remote-worker's config.ts
 //     default).
 //
 // Restart policy:
@@ -84,24 +84,24 @@ type JobInputs struct {
 	// PublisherSecretName is the K8s Secret holding the per-org publisher
 	// cc creds (client_id + client_secret) materialised by a per-run ES
 	// from SM-API. Empty disables the runner-auth path; the runner then
-	// falls back to ASDLC_BEARER for /credentials/refresh calls.
+	// falls back to AEP_BEARER for /credentials/refresh calls.
 	PublisherSecretName string
 	// PublisherTokenURL is the Thunder /oauth2/token endpoint used by the
 	// runner's cc helper. Non-secret; rides as a plain env. Set in lockstep
 	// with PublisherSecretName.
 	PublisherTokenURL string
 
-	// Dispatch payload — passed verbatim into the runner via ASDLC_* env vars.
+	// Dispatch payload — passed verbatim into the runner via AEP_* env vars.
 	RepoURL       string
 	Prompt        string
 	IdentityName  string
 	IdentityEmail string
 	IdentityLogin string // optional
-	GitServiceURL string // ASDLC_GIT_SERVICE_URL (BFF URL reachable from the pod)
-	CallbackURL   string // ASDLC_PLATFORM_URL (BFF callback URL)
+	GitServiceURL string // AEP_GIT_SERVICE_URL (BFF URL reachable from the pod)
+	CallbackURL   string // AEP_PLATFORM_URL (BFF callback URL)
 	CorrelationID string // optional; runner synthesizes one if absent
 
-	// Bearer is the bespoke ASDLC_BEARER param. When PublisherSecretName
+	// Bearer is the bespoke AEP_BEARER param. When PublisherSecretName
 	// is also set the runner prefers the Thunder client_credentials flow
 	// and uses Bearer only as a fallback.
 	Bearer string
@@ -124,23 +124,23 @@ func Build(in JobInputs) (map[string]any, error) {
 	}
 
 	envVars := []map[string]any{
-		{"name": "ASDLC_TASK_ID", "value": in.TaskID},
-		{"name": "ASDLC_ORG_ID", "value": in.OrgID},
-		{"name": "ASDLC_PROJECT_ID", "value": in.ProjectID},
-		{"name": "ASDLC_COMPONENT_NAME", "value": in.ComponentName},
-		{"name": "ASDLC_REPO_URL", "value": in.RepoURL},
-		{"name": "ASDLC_PROMPT", "value": in.Prompt},
-		{"name": "ASDLC_GIT_SERVICE_URL", "value": in.GitServiceURL},
-		{"name": "ASDLC_PLATFORM_URL", "value": in.CallbackURL},
-		{"name": "ASDLC_IDENTITY_NAME", "value": in.IdentityName},
-		{"name": "ASDLC_IDENTITY_EMAIL", "value": in.IdentityEmail},
-		{"name": "ASDLC_IDENTITY_LOGIN", "value": in.IdentityLogin},
-		{"name": "ASDLC_CORRELATION_ID", "value": in.CorrelationID},
-		{"name": "WORKSPACE_BASE_PATH", "value": "/home/asdlc/asdlc-workspace"},
+		{"name": "AEP_TASK_ID", "value": in.TaskID},
+		{"name": "AEP_ORG_ID", "value": in.OrgID},
+		{"name": "AEP_PROJECT_ID", "value": in.ProjectID},
+		{"name": "AEP_COMPONENT_NAME", "value": in.ComponentName},
+		{"name": "AEP_REPO_URL", "value": in.RepoURL},
+		{"name": "AEP_PROMPT", "value": in.Prompt},
+		{"name": "AEP_GIT_SERVICE_URL", "value": in.GitServiceURL},
+		{"name": "AEP_PLATFORM_URL", "value": in.CallbackURL},
+		{"name": "AEP_IDENTITY_NAME", "value": in.IdentityName},
+		{"name": "AEP_IDENTITY_EMAIL", "value": in.IdentityEmail},
+		{"name": "AEP_IDENTITY_LOGIN", "value": in.IdentityLogin},
+		{"name": "AEP_CORRELATION_ID", "value": in.CorrelationID},
+		{"name": "WORKSPACE_BASE_PATH", "value": "/home/aep/aep-workspace"},
 	}
 	if in.Bearer != "" {
 		envVars = append(envVars, map[string]any{
-			"name": "ASDLC_BEARER", "value": in.Bearer,
+			"name": "AEP_BEARER", "value": in.Bearer,
 		})
 	}
 
@@ -161,11 +161,11 @@ func Build(in JobInputs) (map[string]any, error) {
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":    "remote-worker",
-		"app.kubernetes.io/part-of": "asdlc",
-		"asdlc.io/task":             in.TaskID,
-		"asdlc.io/org":              in.OrgID,
-		"asdlc.io/project":          in.ProjectID,
-		"asdlc.io/component":        in.ComponentName,
+		"app.kubernetes.io/part-of": "aep",
+		"aep.io/task":             in.TaskID,
+		"aep.io/org":              in.OrgID,
+		"aep.io/project":          in.ProjectID,
+		"aep.io/component":        in.ComponentName,
 	}
 
 	return map[string]any{
@@ -194,7 +194,7 @@ func Build(in JobInputs) (map[string]any, error) {
 							"env":     envVars,
 							"envFrom": envFrom,
 							"volumeMounts": []map[string]any{
-								{"name": "workspace", "mountPath": "/home/asdlc/asdlc-workspace"},
+								{"name": "workspace", "mountPath": "/home/aep/aep-workspace"},
 								{"name": "tmp", "mountPath": "/tmp"},
 							},
 						},

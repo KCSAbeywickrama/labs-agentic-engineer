@@ -44,7 +44,7 @@ function getEnv(key: keyof RuntimeEnv): string | undefined {
 }
 
 export const env = {
-  VITE_CORE_API_BASE_URL: getEnv('VITE_CORE_API_BASE_URL') || '/asdlc-api-service',
+  VITE_CORE_API_BASE_URL: getEnv('VITE_CORE_API_BASE_URL') || '/aep-api-service',
   VITE_THUNDER_URL: getEnv('VITE_THUNDER_URL') || '',
   VITE_THUNDER_CLIENT_ID: getEnv('VITE_THUNDER_CLIENT_ID') || '',
   VITE_THUNDER_SCOPES: getEnv('VITE_THUNDER_SCOPES') || 'openid profile email',

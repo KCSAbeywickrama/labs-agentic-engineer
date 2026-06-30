@@ -19,8 +19,8 @@ package codingagent
 import (
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // classifyRun unit tests — pure function, no DB. The retry-budget +

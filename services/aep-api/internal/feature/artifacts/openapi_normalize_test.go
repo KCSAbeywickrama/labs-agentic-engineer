@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 func TestNormalizeOpenAPIYAML_KeyOrder(t *testing.T) {

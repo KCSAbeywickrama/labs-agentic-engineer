@@ -22,9 +22,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/dbtest"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // TestRepoRepository_OrgScopedIsolation exercises real Postgres (no mock) to

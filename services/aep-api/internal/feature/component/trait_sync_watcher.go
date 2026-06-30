@@ -24,7 +24,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 )
 
 // TraitSyncWatcher is the convergence safety net for api-configuration

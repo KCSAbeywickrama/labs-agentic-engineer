@@ -1,4 +1,4 @@
-module github.com/wso2/asdlc/asdlc-service
+module github.com/wso2/aep/aep-api
 
 go 1.26.0
 

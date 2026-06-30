@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // ---- in-memory fake git server --------------------------------------------
@@ -168,7 +168,7 @@ type fakeCred struct{}
 
 func (fakeCred) Token(context.Context) (string, time.Time, error) { return "tok", time.Time{}, nil }
 func (fakeCred) Identity() credentials.Identity {
-	return credentials.Identity{Name: "Bot", Email: "bot@asdlc.dev"}
+	return credentials.Identity{Name: "Bot", Email: "bot@aep.dev"}
 }
 func (fakeCred) RepoOwner() string                            { return "test-org" }
 func (fakeCred) WebhookStrategy() credentials.WebhookStrategy { return credentials.WebhookPlatform }
@@ -187,7 +187,7 @@ type fakeGitOps struct {
 func (f *fakeGitOps) GitHubClient() gitrepo.GitHubClient { return f.gh }
 func (f *fakeGitOps) Resolver() credentials.Resolver     { return fakeResolver{} }
 func (f *fakeGitOps) ResolveSaveIdentities(credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity) {
-	gi := &gitrepo.GitIdentity{Name: "Bot", Email: "bot@asdlc.dev"}
+	gi := &gitrepo.GitIdentity{Name: "Bot", Email: "bot@aep.dev"}
 	return gi, gi
 }
 
@@ -317,7 +317,7 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 		"name: payments-pci\n" +
 		"description: PCI handling rules for payment components.\n" +
 		"metadata:\n" +
-		"  asdlc.version: \"1\"\n" +
+		"  aep.version: \"1\"\n" +
 		"---\n\nAlways tokenize PANs before persistence.\n"
 
 	created, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{Name: "payments-pci", SkillMD: skillMD})

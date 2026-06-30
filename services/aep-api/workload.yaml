@@ -1,6 +1,6 @@
 apiVersion: openchoreo.dev/v1alpha1
 metadata:
-  name: app-factory-api
+  name: aep-api
 endpoints:
   - name: http
     type: HTTP
@@ -9,12 +9,12 @@ endpoints:
       - project
 dependencies:
   endpoints:
-    - component: app-factory-git-service
+    - component: aep-git-service
       name: http
       visibility: project
       envBindings:
         address: GIT_SERVICE_BASE_URL
-    - component: app-factory-agents-service
+    - component: aep-agents-service
       name: http
       visibility: project
       envBindings:

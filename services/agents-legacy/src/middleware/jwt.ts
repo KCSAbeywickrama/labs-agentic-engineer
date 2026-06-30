@@ -33,7 +33,7 @@ export interface JWTAuthOptions {
   resourceMetadataUrl?: string;
 }
 
-const REALM = "asdlc";
+const REALM = "aep";
 
 function buildBearerChallenge(resourceMetadataUrl: string | undefined, errorCode: string): string {
   const parts: string[] = [`realm="${REALM}"`];

@@ -30,8 +30,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/auth"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
 // SecurityRunner is the OpenAPI security requirement for runner-facing internal

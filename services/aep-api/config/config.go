@@ -71,7 +71,7 @@ type Config struct {
 	// TaskTokenSigningKey is the PEM-encoded RSA private key used to sign
 	// Task JWTs. The matching public key is published at /auth/external/jwks.json.
 	TaskTokenSigningKey string
-	// TaskTokenIssuer is the iss claim on issued Task JWTs (e.g. "asdlc-bff").
+	// TaskTokenIssuer is the iss claim on issued Task JWTs (e.g. "aep-bff").
 	TaskTokenIssuer string
 	// TaskTokenAudience is the aud claim — fixed to "git-service" today, the
 	// only verifier of Task JWTs.
@@ -102,7 +102,7 @@ type Config struct {
 
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
 	// back to the BFF (every former git-service endpoint is served by the
-	// merged asdlc-api now) for credentials refresh + skills pull. Reachable
+	// merged aep-api now) for credentials refresh + skills pull. Reachable
 	// from the WorkflowPlane namespace (`workflows-<ouHandle>`) via
 	// cross-namespace FQDN.
 	AgentPlatformURL string
@@ -116,7 +116,7 @@ type Config struct {
 	JWTResourceMetadataURL string
 
 	// Git-service config fields. Some overlap conceptually with the
-	// asdlc-side fields above (e.g. GitHubAppSlug vs GithubAppSlug); the
+	// aep-side fields above (e.g. GitHubAppSlug vs GithubAppSlug); the
 	// loader sets both from the same env vars.
 
 	RepoBasePath string
@@ -157,7 +157,7 @@ type Config struct {
 	// AnthropicPlatformKey — platform-wide fallback Anthropic API key.
 	AnthropicPlatformKey string
 
-	// AgentsServiceURL — in-cluster base URL of asdlc-agents-service.
+	// AgentsServiceURL — in-cluster base URL of aep-agents-service.
 	// (Duplicates AgentsService.BaseURL under a different field name.)
 	AgentsServiceURL string
 
@@ -192,7 +192,7 @@ type Config struct {
 	AgentClusterSecretStore string
 }
 
-// ThunderAdminConfig holds the asdlc-system-client OAuth2 credentials
+// ThunderAdminConfig holds the aep-system-client OAuth2 credentials
 // + base URL the BFF uses to manage Thunder applications (per-org
 // publisher lifecycle). The same Thunder instance that fronts user
 // PKCE login — see deployments/single-cluster/values-thunder.yaml's
@@ -220,7 +220,7 @@ type ServiceAuthConfig struct {
 	HostHeader   string // Thunder Host header for k3d routing
 }
 
-// AgentsServiceConfig holds connection settings for the asdlc-agents-service
+// AgentsServiceConfig holds connection settings for the aep-agents-service
 // (AI SDK v6-based; BA, architect, tech-lead).
 type AgentsServiceConfig struct {
 	BaseURL string

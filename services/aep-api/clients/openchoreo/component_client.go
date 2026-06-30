@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/component_client_mock.go . ComponentClient
@@ -50,7 +50,7 @@ type ComponentClient interface {
 	// `spec.workloadOverrides.container.env`. Per-env (one RB per
 	// environment) so OC's controller renders the values straight into the
 	// pod spec on the next reconcile — no rebuild required, matching how
-	// PE-managed components (app-factory-api, agent-manager-service, etc.)
+	// PE-managed components (aep-api, agent-manager-service, etc.)
 	// carry their env. ReleaseBindings are listed by component label and
 	// each is updated independently; if no RBs exist yet (pre-first-deploy)
 	// the call is a soft no-op and the caller is expected to retry once
@@ -115,9 +115,9 @@ type ComponentClient interface {
 	// See TriggerBuild for the `runName` + `secretRef` contracts.
 	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*models.WorkflowRun, error)
 	// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
-	// `app-factory-coding-agent` for the per-task ephemeral pod that runs the
+	// `aep-coding-agent` for the per-task ephemeral pod that runs the
 	// Claude Agent SDK against the task's feature branch. The label
-	// `app-factory.openchoreo.dev/coding-agent-task` carries the taskId so
+	// `aep.openchoreo.dev/coding-agent-task` carries the taskId so
 	// the BFF watcher can correlate runs back to the task.
 	TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*models.WorkflowRun, error)
 	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
@@ -125,7 +125,7 @@ type ComponentClient interface {
 }
 
 // CodingAgentParams is the input to TriggerCodingAgent. Mirrors the schema
-// of `app-factory-coding-agent` ClusterWorkflow. All fields are required.
+// of `aep-coding-agent` ClusterWorkflow. All fields are required.
 // The agent itself creates the feature branch and opens the PR (with
 // `Closes #<issueNumber>` so the BFF webhook can link it back to the
 // task), so no branch is plumbed through here.
@@ -143,7 +143,7 @@ type CodingAgentParams struct {
 	GitServiceURL string
 	// PlatformURL is the BFF base URL the runner pod uses for its callbacks
 	// (credentials refresh, skills pull). Passed through to the ClusterWorkflow
-	// parameter `bff.platformUrl` → env var ASDLC_PLATFORM_URL in the pod.
+	// parameter `bff.platformUrl` → env var AEP_PLATFORM_URL in the pod.
 	PlatformURL string
 	// AnthropicSecretRef is the name of the per-org K8s Secret in
 	// workflows-<OrgName> carrying ANTHROPIC_API_KEY. Materialised by
@@ -697,11 +697,11 @@ func buildCreateComponentBody(projectName string, req *models.CreateComponentReq
 	// platform-api ProvisionOrgUnit) that DOES carry the registry-pull-secret +
 	// imagePullSecrets AND still allows the dockerfile-builder ClusterWorkflow.
 	// Devant and agent-manager both reference the namespaced `ComponentType`
-	// (kind=ComponentType) for the same reason; app-factory was the outlier.
+	// (kind=ComponentType) for the same reason; aep was the outlier.
 	//
 	// Verified local + dev cloud: in cloud, platform-api's ProvisionOrgUnit
 	// creates the per-org namespaced `service`/`web-application` ComponentTypes;
-	// locally, deployments/scripts/setup-asdlc.sh provisions the same namespaced
+	// locally, deployments/scripts/setup-aep.sh provisions the same namespaced
 	// types in the org ns (derived from the cluster-scoped definitions). So the
 	// kind=ComponentType reference resolves in both environments — no env branch.
 	// The type NAME (`deployment/service` etc.) is identical for both kinds.
@@ -1029,7 +1029,7 @@ func cloneParameterMap(in map[string]interface{}) map[string]interface{} {
 }
 
 // TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
-// `app-factory-coding-agent`. Each call creates a fresh run; idempotency is
+// `aep-coding-agent`. Each call creates a fresh run; idempotency is
 // the caller's responsibility (see DispatchService.dispatchOne which gates
 // on task.LastCodingAgentRunName + DispatchedAt).
 //
@@ -1037,11 +1037,11 @@ func cloneParameterMap(in map[string]interface{}) map[string]interface{} {
 // `openchoreo.dev/project` labels. OC validates the
 // ClusterWorkflow ↔ ClusterComponentType allowed-workflow pair when a
 // WorkflowRun carries the `openchoreo.dev/component` label, which would
-// reject `app-factory-coding-agent` because the user's component is
+// reject `aep-coding-agent` because the user's component is
 // `deployment/service` (allowed only the builder ClusterWorkflows). The
 // agent pod has no need to be tied to the user's Component for OC's
 // purposes — the project + component identifiers flow in via the
-// `parameters.task.*` fields that the runner reads. The `app-factory.*`
+// `parameters.task.*` fields that the runner reads. The `aep.*`
 // label catalog carries them for the BFF watcher instead.
 func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingAgentParams) (*models.WorkflowRun, error) {
 	scopedComp := ScopedComponentName(params.ProjectName, params.ComponentName)
@@ -1056,9 +1056,9 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 	runName := fmt.Sprintf("coding-agent-%s-%d", shortTask, time.Now().UnixMilli())
 
 	labels := map[string]string{
-		string(LabelKeyAppFactoryCodingAgentTask): params.TaskID,
-		string(LabelKeyAppFactoryProject):         params.ProjectName,
-		string(LabelKeyAppFactoryComponent):       scopedComp,
+		string(LabelKeyAepCodingAgentTask): params.TaskID,
+		string(LabelKeyAepProject):         params.ProjectName,
+		string(LabelKeyAepComponent):       scopedComp,
 	}
 
 	wfKind := gen.WorkflowRunConfigKindClusterWorkflow
@@ -1071,7 +1071,7 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 		Spec: &gen.WorkflowRunSpec{
 			Workflow: gen.WorkflowRunConfig{
 				Kind:       &wfKind,
-				Name:       "app-factory-coding-agent",
+				Name:       "aep-coding-agent",
 				Parameters: &parameters,
 			},
 		},
@@ -1081,8 +1081,8 @@ func (c *componentClient) TriggerCodingAgent(ctx context.Context, params CodingA
 }
 
 // codingAgentParameters builds the `parameters.*` map that the
-// app-factory-coding-agent ClusterWorkflow's openAPIV3Schema expects. The
-// runner image reads ASDLC_* env vars substituted from these keys.
+// aep-coding-agent ClusterWorkflow's openAPIV3Schema expects. The
+// runner image reads AEP_* env vars substituted from these keys.
 func codingAgentParameters(p CodingAgentParams) map[string]interface{} {
 	return map[string]interface{}{
 		"task": map[string]interface{}{

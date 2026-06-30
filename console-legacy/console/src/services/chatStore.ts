@@ -19,7 +19,7 @@
 /**
  * Per-project chat store backing the requirements chat panel.
  *
- * - Messages persist to localStorage under `asdlc.chat.v1.<orgId>.<projectId>`.
+ * - Messages persist to localStorage under `aep.chat.v1.<orgId>.<projectId>`.
  * - Schema version is recorded on the blob; mismatched blobs are dropped
  *   silently on read (chat history is transient by design).
  * - Two event buses are exposed:
@@ -120,7 +120,7 @@ export interface ErrorMessage {
 // ---------------------------------------------------------------------------
 
 const SCHEMA_VERSION = 1;
-const STORE_KEY_PREFIX = 'asdlc.chat.v1.';
+const STORE_KEY_PREFIX = 'aep.chat.v1.';
 const MAX_MESSAGES_PER_PROJECT = 200;
 
 /**

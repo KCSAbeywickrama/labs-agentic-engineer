@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/wso2/asdlc/asdlc-service/api"
+	"github.com/wso2/aep/aep-api/api"
 )
 
 func main() {

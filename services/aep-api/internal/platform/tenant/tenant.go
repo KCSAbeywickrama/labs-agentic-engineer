@@ -18,7 +18,7 @@
 // tenant key (OrgHandle), the authorized Caller produced only by the auth
 // middleware, the Source provenance enum, and the central per-route gate
 // (gate.go). Keeping it gorm-free lets HTTP/middleware read a Caller without
-// dragging the database layer in. See docs/design/asdlc-service-modularization.md
+// dragging the database layer in. See docs/design/aep-service-modularization.md
 // §6.1.
 package tenant
 

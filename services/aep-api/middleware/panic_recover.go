@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"github.com/wso2/asdlc/asdlc-service/utils"
+	"github.com/wso2/aep/aep-api/utils"
 )
 
 // RecovererOnPanic returns a middleware that recovers from panics and returns a 500 response.

@@ -35,9 +35,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // CredentialService is the orchestration layer behind /internal/credentials/orgs/...
@@ -516,9 +516,9 @@ func (s *CredentialService) connectApp(ctx context.Context, tx *gorm.DB, ocOrgID
 			slog.WarnContext(ctx, "fetch bot identity failed", "error", err)
 			// Use a deterministic fallback so the row passes NOT NULL constraints.
 			botID = credentials.Identity{
-				Name:  "ASDLC Platform Bot",
-				Email: "bot@asdlc.dev",
-				Login: "asdlc-platform[bot]",
+				Name:  "AEP Platform Bot",
+				Email: "bot@aep.dev",
+				Login: "aep-platform[bot]",
 			}
 		}
 		s.minter.SetBotIdentity(botID)
@@ -601,7 +601,7 @@ func (s *CredentialService) Status(ctx context.Context, ocOrgID string) (*Projec
 
 // Disconnect runs Phase D of the disconnect cascade (phase2.md §6.7):
 // org-scoped advisory lock, status flip to 'disconnected', best-effort
-// OpenBao GC of secret/asdlc/{ocOrgId}/{github,git}/*. Phases A/B/C live
+// OpenBao GC of secret/aep/{ocOrgId}/{github,git}/*. Phases A/B/C live
 // in the BFF (they need to enumerate ComponentTask rows that this service
 // doesn't own).
 //
@@ -742,7 +742,7 @@ func (s *CredentialService) IdentityFor(ctx context.Context, ocOrgID string) (*I
 
 // GetWebhookSecrets returns the accepted HMAC keys for ocOrgID, current-first.
 // PAT mode reads from the row's webhook_secrets JSONB. App mode reads from
-// the platform-wide secret/asdlc/_platform/github/app/webhook_secret.
+// the platform-wide secret/aep/_platform/github/app/webhook_secret.
 func (s *CredentialService) GetWebhookSecrets(ctx context.Context, ocOrgID string) ([][]byte, error) {
 	row, err := s.fetchRow(ctx, ocOrgID)
 	if err != nil {
@@ -1059,7 +1059,7 @@ func (s *CredentialService) validatePATMembership(ctx context.Context, pat, gith
 	// `read:org` / `Members: read` permission. Fine-grained PATs scoped
 	// only to repo operations hit this. The downstream repo-read probe
 	// is the real signal — if the PAT can write to the org's repos
-	// (which is what ASDLC actually does), membership is implicit.
+	// (which is what AEP actually does), membership is implicit.
 	// Skip-with-log so a fine-grained-PAT user isn't blocked from
 	// connecting just because they didn't grant membership-read.
 	if resp.StatusCode == 403 {
@@ -1192,7 +1192,7 @@ var ErrAppBindNotConfigured = errors.New("app bind path not configured (missing 
 // fetches the installations the user has admin access to via
 // GET /user/installations, and intersects with our App's installations.
 // Only installations that are either unbound or bound to the requesting
-// org are returned — installs bound to *other* ASDLC orgs are silently
+// org are returned — installs bound to *other* AEP orgs are silently
 // filtered to avoid leaking cross-tenant install metadata to OC admins
 // who happen to share GitHub admin access.
 //
@@ -1238,7 +1238,7 @@ func (s *CredentialService) ResolveUserInstallations(ctx context.Context, ocOrgI
 	}
 
 	// Pull installations bound to OTHER orgs — we filter those out so we
-	// don't leak "install X is owned by some other ASDLC tenant" to this
+	// don't leak "install X is owned by some other AEP tenant" to this
 	// user. Installs bound to ocOrgID itself (re-connect / re-confirm)
 	// are kept.
 	type boundRow struct {

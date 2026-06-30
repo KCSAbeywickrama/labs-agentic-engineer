@@ -171,7 +171,7 @@ export function dslToExcalidraw(kind: DslKind, dsl: string): string {
   const scene: ExcalidrawScene = {
     type: 'excalidraw',
     version: 2,
-    source: 'asdlc-generator',
+    source: 'aep-generator',
     elements,
     appState: { viewBackgroundColor: '#ffffff' },
     files: {},

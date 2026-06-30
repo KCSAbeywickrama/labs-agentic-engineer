@@ -20,7 +20,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
 )
 
 // openchoreoErrorStatus maps an OC sentinel error to its HTTP status. ok is

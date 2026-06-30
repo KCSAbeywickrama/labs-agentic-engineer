@@ -25,7 +25,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/contracts"
 )
 
 // ProgressSchemaVersion is the only version this BFF supports today.

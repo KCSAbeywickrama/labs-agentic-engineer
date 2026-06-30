@@ -19,7 +19,7 @@ package models
 import (
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/contracts"
 )
 
 // StringSlice is a reusable slice type for JSONB storage in PostgreSQL.

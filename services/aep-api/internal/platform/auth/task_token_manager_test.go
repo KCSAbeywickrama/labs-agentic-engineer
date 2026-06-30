@@ -54,7 +54,7 @@ func TestTaskTokenManager_PKCS1(t *testing.T) {
 	pemKey, _ := writeTestKey(t, "pkcs1")
 	mgr, err := NewTaskTokenManager(TaskTokenConfig{
 		PrivateKey: pemKey,
-		Issuer:     "asdlc-bff",
+		Issuer:     "aep-bff",
 		Audience:   "git-service",
 		TTL:        1 * time.Hour,
 	})
@@ -83,7 +83,7 @@ func TestTaskTokenManager_PKCS1(t *testing.T) {
 	if claims.TaskID != "task-123" || claims.OcOrgID != "org-456" || claims.ProjectID != "proj-789" {
 		t.Errorf("claims wrong: %+v", claims)
 	}
-	if claims.Issuer != "asdlc-bff" {
+	if claims.Issuer != "aep-bff" {
 		t.Errorf("issuer wrong: %s", claims.Issuer)
 	}
 	if len(claims.Audience) != 1 || claims.Audience[0] != "git-service" {
@@ -98,7 +98,7 @@ func TestTaskTokenManager_PKCS8(t *testing.T) {
 	pemKey, _ := writeTestKey(t, "pkcs8")
 	mgr, err := NewTaskTokenManager(TaskTokenConfig{
 		PrivateKey: pemKey,
-		Issuer:     "asdlc-bff",
+		Issuer:     "aep-bff",
 		Audience:   "git-service",
 		TTL:        1 * time.Hour,
 	})
@@ -114,7 +114,7 @@ func TestTaskTokenManager_JWKS(t *testing.T) {
 	pemKey, _ := writeTestKey(t, "pkcs1")
 	mgr, err := NewTaskTokenManager(TaskTokenConfig{
 		PrivateKey: pemKey,
-		Issuer:     "asdlc-bff",
+		Issuer:     "aep-bff",
 		Audience:   "git-service",
 		TTL:        1 * time.Hour,
 	})
@@ -140,7 +140,7 @@ func TestTaskTokenManager_JWKS(t *testing.T) {
 func TestTaskTokenManager_RejectsBadKey(t *testing.T) {
 	_, err := NewTaskTokenManager(TaskTokenConfig{
 		PrivateKey: "not a pem",
-		Issuer:     "asdlc-bff",
+		Issuer:     "aep-bff",
 		Audience:   "git-service",
 		TTL:        1 * time.Hour,
 	})

@@ -26,15 +26,15 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/k8sname"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 	"gorm.io/gorm"
 )
 
@@ -49,10 +49,10 @@ type DispatchResult = contracts.DispatchResult
 //  1. Verifies a GitHub issue exists (created at task generation).
 //  2. Ensures the OC Component exists (with AutoBuild=false).
 //  3. Mints a fresh per-task RS256 JWT.
-//  4. Creates a WorkflowRun of ClusterWorkflow `app-factory-coding-agent`
+//  4. Creates a WorkflowRun of ClusterWorkflow `aep-coding-agent`
 //     via WorkflowRunService.TriggerCodingAgent. The Argo pod clones
 //     the project repo on its default branch and runs the Claude Agent
-//     SDK with the asdlc skill loaded; the agent itself creates the
+//     SDK with the aep skill loaded; the agent itself creates the
 //     feature branch and opens the PR with `Closes #<issue>` so the
 //     webhook handler can link the PR back to the task.
 //
@@ -657,7 +657,7 @@ func (s *dispatchService) tryDispatchViaProxy(
 		IdentityLogin: identity.Login,
 		GitServiceURL: s.gitServiceURL,
 		CallbackURL:   s.platformURL,
-		// `ASDLC_BEARER` carries the per-task RS256 JWT path on the new
+		// `AEP_BEARER` carries the per-task RS256 JWT path on the new
 		// dispatcher. The runner's `oneshot.ts` validates the env var at
 		// startup and uses it for /credentials/refresh callbacks.
 		// PublisherSR (below) populates a 3rd per-run ExternalSecret; the

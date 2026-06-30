@@ -43,8 +43,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/httpkit"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/httpkit"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------
@@ -103,7 +103,7 @@ type orgGitHubDisconnectOutput struct {
 //   - bearerSvc     *BearerService
 //   - appSlug, publicURL, appClientID string
 //
-// The same defaulting NewOrgGitHubController applied (appSlug → "asdlc-platform",
+// The same defaulting NewOrgGitHubController applied (appSlug → "aep-platform",
 // publicURL → "http://localhost:8090") is applied here so behaviour is identical.
 func RegisterOrgGitHub(
 	api huma.API,
@@ -113,7 +113,7 @@ func RegisterOrgGitHub(
 	appSlug, publicURL, appClientID string,
 ) {
 	if appSlug == "" {
-		appSlug = "asdlc-platform"
+		appSlug = "aep-platform"
 	}
 	if publicURL == "" {
 		publicURL = "http://localhost:8090"

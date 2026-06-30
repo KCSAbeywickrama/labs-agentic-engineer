@@ -75,7 +75,7 @@ interface Stage {
 ### Usage
 
 ```tsx
-import { ProjectStatusPolyline, type Stage } from '@asdlc/project-status';
+import { ProjectStatusPolyline, type Stage } from '@aep/project-status';
 
 const stages: Stage[] = [/* ... */];
 

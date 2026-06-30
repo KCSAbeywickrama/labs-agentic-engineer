@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package agents is the client for the asdlc-agents-service (AI SDK v6-based,
+// Package agents is the client for the aep-agents-service (AI SDK v6-based,
 // ANTHROPIC_API_KEY auth). Streams AI SDK UI Message Stream SSE responses for
 // the streaming agents (business-analyst, architect, tech-lead).
 package agents
@@ -29,8 +29,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/httpx"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/httpx"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // agentsAudience is the aud claim the BFF stamps on outbound agents tokens and
@@ -71,7 +71,7 @@ var ErrNoAnthropicKey = errors.New("no Anthropic API key configured for this org
 // agents-service, rather than agents-service calling back to fetch it.
 type KeyResolver func(ctx context.Context, orgID string) (string, error)
 
-// Client calls the asdlc-agents-service.
+// Client calls the aep-agents-service.
 //
 // Every streaming method carries an `orgID` parameter, bound into a per-call
 // BFF-signed identity JWT (the `ocOrgId` claim) so agents-service derives the

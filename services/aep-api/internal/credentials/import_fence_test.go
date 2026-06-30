@@ -30,7 +30,7 @@ import (
 // "no Go file outside `allowedPrefix` may import any package whose path
 // starts with one of `bannedImportPrefixes`".
 //
-// The fence runs once over the entire asdlc-service tree per row, so a
+// The fence runs once over the entire aep-service tree per row, so a
 // new rule adds one row, not a new walk.
 type fenceRule struct {
 	name                 string
@@ -54,7 +54,7 @@ var rules = []fenceRule{
 	{
 		name:                 "openchoreo-gen-direct",
 		allowedPrefix:        filepath.Join("clients", "openchoreo") + string(filepath.Separator),
-		bannedImportPrefixes: []string{`"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"`},
+		bannedImportPrefixes: []string{`"github.com/wso2/aep/aep-api/clients/openchoreo/gen"`},
 		reason: "The oapi-codegen layer (clients/openchoreo/gen) is an implementation detail. " +
 			"Services + controllers go through the typed wrappers in clients/openchoreo/ so a " +
 			"schema regen doesn't ripple across the BFF.",
@@ -120,7 +120,7 @@ func findModuleRoot(t *testing.T) string {
 	}
 	dir := wd
 	for {
-		// asdlc-service module root holds go.mod + internal/credentials.
+		// aep-service module root holds go.mod + internal/credentials.
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			if _, err := os.Stat(filepath.Join(dir, "internal", "credentials")); err == nil {
 				return dir
@@ -128,7 +128,7 @@ func findModuleRoot(t *testing.T) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("could not locate asdlc-service root from %s", wd)
+			t.Fatalf("could not locate aep-service root from %s", wd)
 		}
 		dir = parent
 	}

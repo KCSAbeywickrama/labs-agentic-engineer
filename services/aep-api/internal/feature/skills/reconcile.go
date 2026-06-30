@@ -32,9 +32,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	embedskills "github.com/wso2/asdlc/asdlc-service/skills"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
+	embedskills "github.com/wso2/aep/aep-api/skills"
 )
 
 // SkillUpdate is one row of the "updates available" badge: a built-in whose

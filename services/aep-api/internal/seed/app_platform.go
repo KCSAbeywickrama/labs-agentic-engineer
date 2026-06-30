@@ -25,12 +25,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/config"
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
+	"github.com/wso2/aep/aep-api/config"
+	"github.com/wso2/aep/aep-api/internal/credentials"
 )
 
 // AppPlatformFromEnv writes the GitHub App's appID, clientID, private key,
-// and webhook secret into OpenBao at secret/asdlc/_platform/github/app/*
+// and webhook secret into OpenBao at secret/aep/_platform/github/app/*
 // when DeploymentTier=dev and the env values are present.
 //
 // Idempotent: re-runs overwrite with the same values (KV v2 versions, but
@@ -64,7 +64,7 @@ func AppPlatformFromEnv(ctx context.Context, store credentials.OpenBaoStore, cfg
 		if os.IsNotExist(err) {
 			slog.Warn("app-platform seed: private key file not found; App-mode connect will be unavailable",
 				"path", cfg.GitHubAppPrivateKeyPath,
-				"hint", "download from github.com/settings/apps/asdlc-platform → 'Generate a private key' and drop at this path")
+				"hint", "download from github.com/settings/apps/aep-platform → 'Generate a private key' and drop at this path")
 			return nil
 		}
 		return fmt.Errorf("app-platform seed: read %s: %w", cfg.GitHubAppPrivateKeyPath, err)

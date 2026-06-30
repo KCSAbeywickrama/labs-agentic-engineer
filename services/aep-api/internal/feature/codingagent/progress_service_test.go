@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/observer"
+	"github.com/wso2/aep/aep-api/clients/observer"
 )
 
 func TestSortEvents_StableOnTsThenSeq(t *testing.T) {

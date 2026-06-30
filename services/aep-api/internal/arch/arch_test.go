@@ -15,7 +15,7 @@
 // under the License.
 
 // Package arch holds the architecture-boundary invariant test
-// (docs/design/asdlc-service-modularization.md §4/§6.3). It is the CI lock-in
+// (docs/design/aep-service-modularization.md §4/§6.3). It is the CI lock-in
 // that keeps the feature import boundaries from regressing: there are no flat
 // services/controllers packages, no feature imports another feature's concrete
 // except along the allowed (acyclic) edges, and the cross-feature cycles
@@ -31,7 +31,7 @@ import (
 	"testing"
 )
 
-const mod = "github.com/wso2/asdlc/asdlc-service"
+const mod = "github.com/wso2/aep/aep-api"
 
 // depCache memoizes each package's transitive import set so the boundary tests
 // shell out to `go list -deps` once per distinct package (not once per
@@ -100,7 +100,7 @@ func TestNoFlatServicesOrControllers(t *testing.T) {
 	}
 	// The wiring layer holds no flat edges: the composition root and api
 	// routes own no controllers/services import.
-	for _, p := range []string{"/cmd/asdlc-api", "/api"} {
+	for _, p := range []string{"/cmd/aep-api", "/api"} {
 		pkg := mod + p
 		if imports(t, pkg, mod+"/controllers") {
 			t.Errorf("%s imports the controllers package — it is deleted; wire features directly", p)

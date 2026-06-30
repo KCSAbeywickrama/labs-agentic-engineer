@@ -1,14 +1,14 @@
 {
-  "name": "asdlc",
+  "name": "aep",
   "owner": {
-    "name": "ASDLC"
+    "name": "AEP"
   },
   "plugins": [
     {
-      "name": "asdlc",
+      "name": "aep",
       "source": "./",
       "version": "0.4.0",
-      "description": "ASDLC task execution skill for agents working a platform-dispatched component task."
+      "description": "AEP task execution skill for agents working a platform-dispatched component task."
     }
   ]
 }

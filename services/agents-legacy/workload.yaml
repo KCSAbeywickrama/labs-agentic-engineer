@@ -1,6 +1,6 @@
 apiVersion: openchoreo.dev/v1alpha1
 metadata:
-  name: app-factory-agents-service
+  name: aep-agents-service
 endpoints:
   - name: http
     type: HTTP

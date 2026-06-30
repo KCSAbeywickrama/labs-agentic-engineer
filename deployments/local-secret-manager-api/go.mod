@@ -1,4 +1,4 @@
-module github.com/wso2/asdlc/deployments/local-secret-manager-api
+module github.com/wso2/aep/deployments/local-secret-manager-api
 
 go 1.26.0
 

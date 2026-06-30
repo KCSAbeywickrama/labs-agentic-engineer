@@ -28,45 +28,45 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/api"
-	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/clients/clustergatewayproxy"
-	k8sclient "github.com/wso2/asdlc/asdlc-service/clients/k8s"
-	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
-	"github.com/wso2/asdlc/asdlc-service/clients/observability"
-	"github.com/wso2/asdlc/asdlc-service/clients/observer"
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/clients/secretmanagersvc"
-	"github.com/wso2/asdlc/asdlc-service/clients/secretmanagersvc/providers/secretmanagerapi"
-	"github.com/wso2/asdlc/asdlc-service/clients/thundersvc"
-	"github.com/wso2/asdlc/asdlc-service/config"
-	"github.com/wso2/asdlc/asdlc-service/database"
-	"github.com/wso2/asdlc/asdlc-service/database/migrations"
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/codingagent"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/design"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/idp"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/organization"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/project"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/requirements"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/runtimeconfig"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/skills"
-	"github.com/wso2/asdlc/asdlc-service/internal/auth/scope"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/task"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/webhook"
-	authn "github.com/wso2/asdlc/asdlc-service/internal/platform/auth"
-	"github.com/wso2/asdlc/asdlc-service/internal/seed"
-	"github.com/wso2/asdlc/asdlc-service/middleware"
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwt"
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
-	"github.com/wso2/asdlc/asdlc-service/middleware/logger"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/api"
+	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
+	k8sclient "github.com/wso2/aep/aep-api/clients/k8s"
+	"github.com/wso2/aep/aep-api/clients/oauth"
+	"github.com/wso2/aep/aep-api/clients/observability"
+	"github.com/wso2/aep/aep-api/clients/observer"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/clients/secretmanagersvc/providers/secretmanagerapi"
+	"github.com/wso2/aep/aep-api/clients/thundersvc"
+	"github.com/wso2/aep/aep-api/config"
+	"github.com/wso2/aep/aep-api/database"
+	"github.com/wso2/aep/aep-api/database/migrations"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/idp"
+	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/project"
+	"github.com/wso2/aep/aep-api/internal/feature/requirements"
+	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
+	"github.com/wso2/aep/aep-api/internal/feature/skills"
+	"github.com/wso2/aep/aep-api/internal/auth/scope"
+	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/feature/webhook"
+	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/internal/seed"
+	"github.com/wso2/aep/aep-api/middleware"
+	"github.com/wso2/aep/aep-api/middleware/jwt"
+	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/middleware/logger"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 	"gorm.io/gorm"
 )
 
@@ -313,7 +313,7 @@ func main() {
 	repoRepo := repositories.NewRepoRepository(db)
 
 	// Token provider for service-to-service auth. OC authorizes requests by
-	// the service client subject (asdlc-api-client), so every OC API call
+	// the service client subject (aep-api-client), so every OC API call
 	// must carry this token rather than the end-user's token.
 	var tokenProvider *oauth.TokenProvider
 	if cfg.ServiceAuth.TokenURL != "" && cfg.ServiceAuth.ClientID != "" {
@@ -707,7 +707,7 @@ func main() {
 	}
 
 	// Thunder admin client + IDP service. Reads
-	// asdlc-system-client credentials from env (THUNDER_*) and exposes
+	// aep-system-client credentials from env (THUNDER_*) and exposes
 	// EnsureOrgPublisher / RevokeOrgPublisher / RegenerateClientSecret
 	// for per-org publisher OAuth app lifecycle. Optional — when the
 	// Thunder base URL is empty the IDP service still runs and serves
@@ -801,7 +801,7 @@ func main() {
 	wfRunService := codingagent.NewWorkflowRunService(db, taskRepo, componentClient, repoService, buildCredService, artifactStore, projector, asServiceIdentity)
 
 	// Dispatch service routes to WorkflowRunService.TriggerCodingAgent
-	// (ClusterWorkflow `app-factory-coding-agent`) for the per-task agent pod.
+	// (ClusterWorkflow `aep-coding-agent`) for the per-task agent pod.
 	// The runner pod reaches every BFF endpoint at AGENT_PLATFORM_URL, which
 	// must be reachable from the WorkflowPlane namespace (cross-namespace
 	// FQDN — see env-overlay).
@@ -922,7 +922,7 @@ func main() {
 	// for scope.RunnerScopedInput.Resolve. publisherVerifier is nil in local dev
 	// without the platform IDP (Task-JWT only); taskService.GetTask supplies the
 	// task→org lookup the publisher-cc branch needs.
-	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "asdlc-publisher-")
+	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
 	scope.SetRunnerAuthorizer(scope.NewRunnerAuthorizer(taskTokens, publisherVerifier,
 		func(ctx context.Context, taskID string) (string, error) {
 			t, err := taskService.GetTask(ctx, taskID)

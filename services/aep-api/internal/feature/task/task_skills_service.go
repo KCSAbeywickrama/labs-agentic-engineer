@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // TaskSkillEntry is one row in the runner's pull response. Mirrors

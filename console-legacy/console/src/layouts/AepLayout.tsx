@@ -71,7 +71,7 @@ import {
 import { resolveOuHandle } from '../utils/orgClaims';
 import wso2LogoUrl from '../assets/wso2-logo.svg';
 
-export default function AsdlcLayout() {
+export default function AepLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
@@ -80,7 +80,7 @@ export default function AsdlcLayout() {
   const user = { name: claims?.name || 'User', email: claims?.email || '' };
 
   // Org identity: use JWT claims (ouHandle) which matches the OC namespace.
-  // Same precedence as the BFF (asdlc-service/middleware/jwt.ResolveOuHandle).
+  // Same precedence as the BFF (aep-service/middleware/jwt.ResolveOuHandle).
   // No silent fallback — the route param (`:orgId` from useParams) is the
   // canonical org for the page; the JWT claim only seeds the org switcher.
   const claimsOrgId = resolveOuHandle(claims);
@@ -88,7 +88,7 @@ export default function AsdlcLayout() {
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
-      return localStorage.getItem('asdlc:sidebarCollapsed') === '1';
+      return localStorage.getItem('aep:sidebarCollapsed') === '1';
     } catch {
       return false;
     }
@@ -96,7 +96,7 @@ export default function AsdlcLayout() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('asdlc:sidebarCollapsed', collapsed ? '1' : '0');
+      localStorage.setItem('aep:sidebarCollapsed', collapsed ? '1' : '0');
     } catch {
       // ignore quota/access errors
     }

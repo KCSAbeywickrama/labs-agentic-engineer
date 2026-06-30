@@ -24,7 +24,7 @@ import {
   useState,
 } from 'react';
 import { Box, Stack } from '@wso2/oxygen-ui';
-import type { MdEditorRef } from '@asdlc/md-editor';
+import type { MdEditorRef } from '@aep/md-editor';
 import type { FileMap, ExplorerProps, ExplorerRef } from './types.js';
 import { useFileBuffers } from './hooks/useFileBuffers.js';
 import { Sidebar } from './sidebar/Sidebar.js';

@@ -23,7 +23,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 )
 
 // RegisterAllDev mounts the dev/test surface (/_dev/v1/*) — local-only tooling
@@ -56,7 +56,7 @@ func RegisterAllDev(mux *http.ServeMux, p AppParams) {
 // We don't call SM-API directly here because SM-API's auth requires a Thunder
 // JWT with an `ouId` claim — only mintable from a user session. For a no-user
 // repair flow the BFF would need a per-org impersonation token. The shell→vault
-// path bypasses that entirely and matches how setup-asdlc.sh seeds other local
+// path bypasses that entirely and matches how setup-aep.sh seeds other local
 // secrets. Plaintext is never logged.
 func devResyncHandler(params AppParams) http.HandlerFunc {
 	type orgResult struct {

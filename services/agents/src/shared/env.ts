@@ -32,7 +32,7 @@ let loaded = false;
 /**
  * Load the nearest env file (walking up from this file to the filesystem root)
  * into `process.env`, once. At each ancestor we prefer `deployments/.env` (the
- * file everyone running the local stack is expected to have — setup-asdlc.sh
+ * file everyone running the local stack is expected to have — setup-aep.sh
  * generates it) and fall back to a plain `.env`. No-op if already loaded or
  * none is found — ambient env then wins, which is what we want.
  */
@@ -74,7 +74,7 @@ export function loadAnthropicKey(): string {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) {
     throw new Error(
-      "ANTHROPIC_API_KEY is not set. Export it, or add it to deployments/.env (run deployments/scripts/setup-asdlc.sh, or see .env.example).",
+      "ANTHROPIC_API_KEY is not set. Export it, or add it to deployments/.env (run deployments/scripts/setup-aep.sh, or see .env.example).",
     );
   }
   return key;

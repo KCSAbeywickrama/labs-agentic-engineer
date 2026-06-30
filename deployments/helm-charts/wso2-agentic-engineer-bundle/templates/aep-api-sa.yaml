@@ -1,11 +1,11 @@
 ---
-# ServiceAccount for the asdlc-api Deployment.
-# The asdlc-api pod needs cluster-wide permissions to manage per-org workflow
+# ServiceAccount for the aep-api Deployment.
+# The aep-api pod needs cluster-wide permissions to manage per-org workflow
 # namespaces, Secrets (Anthropic keys, task JWTs) and ExternalSecretReferences.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: asdlc-api
+  name: aep-api
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -14,7 +14,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: asdlc-api
+  name: aep-api
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
@@ -32,15 +32,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: asdlc-api
+  name: aep-api
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: asdlc-api
+  name: aep-api
 subjects:
   - kind: ServiceAccount
-    name: asdlc-api
+    name: aep-api
     namespace: {{ .Release.Namespace }}

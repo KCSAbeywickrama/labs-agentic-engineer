@@ -20,9 +20,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware"
-	"github.com/wso2/asdlc/asdlc-service/utils"
-	"github.com/wso2/asdlc/asdlc-service/utils/validate"
+	"github.com/wso2/aep/aep-api/middleware"
+	"github.com/wso2/aep/aep-api/utils"
+	"github.com/wso2/aep/aep-api/utils/validate"
 )
 
 // CredentialsRefreshController issues fresh GitHub tokens to the agent's

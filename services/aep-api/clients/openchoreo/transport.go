@@ -25,10 +25,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/httpx"
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
-	"github.com/wso2/asdlc/asdlc-service/clients/requests"
-	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/aep/aep-api/clients/httpx"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/clients/requests"
+	"github.com/wso2/aep/aep-api/middleware"
 )
 
 // AuthProvider is the auth-token contract the OC client depends on. Lets us

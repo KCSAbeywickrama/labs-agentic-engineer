@@ -43,8 +43,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/secretmanagersvc"
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 )
 
 // ProviderName is the registry key under which Register registers this

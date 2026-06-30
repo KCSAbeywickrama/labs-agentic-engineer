@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { Stage } from '@asdlc/project-status';
+import type { Stage } from '@aep/project-status';
 import type { ComponentTask, ProjectStatus } from '../services/api';
 
 const ACTIVE_TASK_STATUSES = new Set([

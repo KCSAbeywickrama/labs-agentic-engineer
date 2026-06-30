@@ -1,5 +1,5 @@
 ---
-name: asdlc
+name: aep
 description: Load when working a component task dispatched by WSO2 Labs Agentic Engineer. The cwd is a clone of the project's repo on its default branch; the task is anchored by a GitHub issue passed in your prompt. You create your own working branch and open the PR. Defines the workflow, the mandatory `Closes #N` PR-body link, constraints, deny-list, project-structure conventions, the verify-before-PR step, and the OpenChoreo workload.yaml format. Stack-specific conventions (Go, React, Thunder OIDC, API Management) live in separate project skills the platform also preloads — apply them. Authentication is handled at the workspace level — run `git` and `gh` normally.
 ---
 
@@ -18,12 +18,12 @@ wrapper for `gh`). Don't try to `gh auth login`, set tokens, or change
 provisioning and refreshes them on every call.
 
 > **Local-flow developers**: install this plugin into your own Claude Code
-> (`claude plugin install <repo>/runners/remote-worker/plugin`), then use your own
+> (`claude plugin install <repo>/remote-worker/plugin`), then use your own
 > `gh auth login`. The workflow below is identical.
 
 ## Active project skills
 
-In addition to this `asdlc` skill, the platform preloads **project-attached
+In addition to this `aep` skill, the platform preloads **project-attached
 skills** at startup — they carry the stack/auth/runtime conventions for
 this project. They appear in your context alongside this body and you
 should consult them whenever their concern is relevant. Examples (the
@@ -58,11 +58,11 @@ card).
 both.**
 
 If you ever need to discover the issue from scratch (e.g. running
-locally without a prompt), the issue is labelled `asdlc` +
+locally without a prompt), the issue is labelled `aep` +
 `implementation`:
 
 ```bash
-gh issue list --label asdlc --label implementation --state open \
+gh issue list --label aep --label implementation --state open \
   --json number,title,url
 ```
 
@@ -82,7 +82,7 @@ gh issue list --label asdlc --label implementation --state open \
    ```
 4. **Apply the project's attached skills.** Patterns for `window._env_`,
    OIDC, protected handlers, etc. live in the per-skill bodies — see
-   "Active project skills" above. The base `asdlc` skill carries
+   "Active project skills" above. The base `aep` skill carries
    workflow + workload.yaml grammar + the deny-list; everything stack-
    specific is in another skill.
 5. **Edit, commit, push.** Standard `git add`, `git commit -m "..."`,
@@ -143,6 +143,10 @@ still fails:
    ```bash
    gh issue comment <issue-number> --body "Build verification failed after N attempts. PR opened as draft for operator review. See PR #<n> for log."
    ```
+3. Do NOT call the platform's `/verification-failed` endpoint — that
+   path is for the dependency-integration verifier, not the
+   self-build verifier. The draft PR + issue comment is the operator
+   signal here.
 
 ## Project structure
 
@@ -188,7 +192,8 @@ for you.
   HTTP endpoint with `visibility: external` in its `workload.yaml`** —
   this is what makes the deployed URL reachable for the dependent SPA's
   browser AND lets the BFF resolve the URL into `window._env_` for any
-  sibling web-app that `dependsOn` this service.
+  sibling web-app that depends on this service (a `dependencies` entry of
+  `kind: component`).
 
 ## Do not
 
@@ -199,9 +204,6 @@ for you.
 - Open more than one PR for this task.
 - Run `gh pr merge`, `gh pr close`, `gh repo create`, `gh repo delete`,
   `gh repo fork`, or `gh repo edit`.
-- Add a `dependencies.endpoints` block to `workload.yaml` (the
-  consumer-side OC runtime-injection wiring). Sibling URLs reach the
-  SPA at request time via `window._env_` (see the `react-webapp` skill).
 - Add CORS middleware in any service component (see the `api-management`
   skill).
 - Delete remote branches (`git push --delete`, `git push origin :branch`).
@@ -216,11 +218,14 @@ Every component must have a `workload.yaml` at its root. This file uses
 the **flat WorkloadDescriptor** format — **not** a Kubernetes CR. Do
 **not** use `kind: Workload`, `spec:`, `autoBuild`, or `autoDeploy`.
 
-For v1, **declare only `endpoints` (provider-side)**. Do **not** declare
-a `dependencies` block — consumer-side runtime URL injection is not used
-in v1. Sibling URLs reach SPAs at request time via `window._env_`; Go
-service consumers read sibling URLs from env vars set on the
-ReleaseBinding (see the `api-management` skill).
+Declare your component's **`endpoints`** (provider-side). When your issue
+has a **"Platform-resolved dependencies"** comment with a `dependencies:`
+block, you **MUST** also add that block to your `workload.yaml`
+(consumer-side) — the platform has already resolved the targets and the
+env-var bindings, so copy it **verbatim** (merging into any existing
+`dependencies:`). OpenChoreo injects the resolved addresses/outputs into
+your pod env at runtime. **This instruction overrides the legacy guidance
+in any other skill that says not to add a `dependencies` block.**
 
 ### Format
 
@@ -253,14 +258,40 @@ is mintable and reachable from the dependent's browser. The platform
 will fail loudly with a §1.3 invariant error at the dependent's dispatch
 time if a deployed dep has no external URL.
 
-### Service-to-service runtime injection (legacy / deferred)
+**Org-published services (P3).** If THIS component's design frontmatter has
+`exposesAPI.orgPublished: true`, the service is meant to be consumed by
+components in OTHER projects of the org. In that case ALSO add `namespace`
+to the endpoint's `visibility` list — e.g. `visibility: [external, namespace]`
+— so OpenChoreo exposes it cross-project. This is the ONLY way a service
+becomes an `org-service` target; the platform never edits your workload.yaml.
+Add `namespace` only when `orgPublished` is set in the design.
 
-The OpenChoreo `dependencies.endpoints` block with `envBindings:` is a
-real and supported primitive — it lets a Go/Node backend receive an
-upstream URL at pod startup via an env var. The v1 WSO2 Labs Agentic
-Engineer platform handles consumer-side env injection through a
-different path: the BFF emits `<NAME>_URL` env vars onto the consuming
-workload's ReleaseBinding directly (no `dependencies.endpoints` block
-required). When the platform later supports the native runtime
-injection grammar, this section will be updated. Do NOT add a
-`dependencies.endpoints` block preemptively.
+### Consumer-side dependencies (`dependencies:`)
+
+When this component consumes another service or an external connection,
+the platform resolves the wiring and posts it as a **"Platform-resolved
+dependencies"** comment on your issue (read it with
+`gh issue view <url> --comments`). Add that `dependencies:` block to your
+`workload.yaml` exactly as given — do not invent, rename, or omit fields:
+
+```yaml
+dependencies:
+  endpoints:                       # service-to-service / cross-project (org-service)
+    - project: <provider-project>  # present for cross-project; absent = same project
+      component: <provider-component>
+      name: <provider-endpoint>    # e.g. http
+      visibility: namespace        # or project (same-project)
+      envBindings:
+        address: <ENV_VAR>         # OpenChoreo injects the resolved URL here
+  resources:                       # external connection resources
+    - ref: <resource-name>
+      envBindings:
+        <output-name>: <ENV_VAR>   # OpenChoreo injects the connection output here
+```
+
+Read each injected value from its env var at startup (no hardcoded
+fallback). If your issue has **no** "Platform-resolved dependencies"
+comment, your component has no consumer-side dependencies — add no
+`dependencies:` block. The build's `generate-workload-cr` step propagates
+this block into the OpenChoreo `Workload` CR, and OpenChoreo resolves +
+injects the addresses; you never hardcode an upstream URL.

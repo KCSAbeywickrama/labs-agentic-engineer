@@ -34,8 +34,8 @@
 #   ORG_HANDLE                   defaults to "default"
 #   BFF_URL                      defaults to http://localhost:9090
 #   THUNDER_URL                  defaults to http://thunder.openchoreo.localhost:8080
-#   SEEDER_CLIENT_ID             defaults to asdlc-local-dev-seeder
-#   SEEDER_CLIENT_SECRET         defaults to asdlc-local-dev-seeder-secret
+#   SEEDER_CLIENT_ID             defaults to aep-local-dev-seeder
+#   SEEDER_CLIENT_SECRET         defaults to aep-local-dev-seeder-secret
 #
 # The seeder client is registered by the Thunder bootstrap (one row in
 # CONFIDENTIAL_APPS in single-cluster/values-thunder.yaml). If you ran
@@ -54,8 +54,8 @@ ENV_FILE="${ENV_FILE:-$DEPLOY_DIR/.env}"
 ORG_HANDLE="${ORG_HANDLE:-default}"
 BFF_URL="${BFF_URL:-http://localhost:9090}"
 THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
-SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-asdlc-local-dev-seeder}"
-SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-asdlc-local-dev-seeder-secret}"
+SEEDER_CLIENT_ID="${SEEDER_CLIENT_ID:-aep-local-dev-seeder}"
+SEEDER_CLIENT_SECRET="${SEEDER_CLIENT_SECRET:-aep-local-dev-seeder-secret}"
 
 # Whitelist-load a single env key from $ENV_FILE without sourcing the
 # whole file (some values legitimately contain spaces / equals signs).

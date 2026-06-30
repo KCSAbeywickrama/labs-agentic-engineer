@@ -23,8 +23,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/humakit"
-	jwtmw "github.com/wso2/asdlc/asdlc-service/middleware/jwt"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	jwtmw "github.com/wso2/aep/aep-api/middleware/jwt"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------

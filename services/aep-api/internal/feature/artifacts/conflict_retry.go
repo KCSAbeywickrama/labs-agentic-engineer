@@ -38,7 +38,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
 // casRetryAttempts is the per-call attempt schedule (50ms / 200ms / 800ms,

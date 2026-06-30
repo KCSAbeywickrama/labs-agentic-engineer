@@ -50,19 +50,19 @@ const (
 	LabelKeyComponentType LabelKeys = "openchoreo.dev/component-type"
 	LabelKeyProjectName   LabelKeys = "openchoreo.dev/project-name"
 
-	// app-factory-specific labels (NOT the openchoreo.dev/* prefix) carry
+	// aep-specific labels (NOT the openchoreo.dev/* prefix) carry
 	// task / project / component identifiers on coding-agent WorkflowRuns
 	// without triggering OC's ClusterWorkflow ↔ ClusterComponentType
 	// allow-list validation (which keys off `openchoreo.dev/component`).
-	LabelKeyAppFactoryCodingAgentTask LabelKeys = "app-factory.openchoreo.dev/coding-agent-task"
-	LabelKeyAppFactoryProject         LabelKeys = "app-factory.openchoreo.dev/project"
-	LabelKeyAppFactoryComponent       LabelKeys = "app-factory.openchoreo.dev/component"
+	LabelKeyAepCodingAgentTask LabelKeys = "aep.openchoreo.dev/coding-agent-task"
+	LabelKeyAepProject         LabelKeys = "aep.openchoreo.dev/project"
+	LabelKeyAepComponent       LabelKeys = "aep.openchoreo.dev/component"
 )
 
-// Stable label values we stamp on secret-references created by asdlc-service.
+// Stable label values we stamp on secret-references created by aep-service.
 // Live in the same place as their keys so wire-shape changes are atomic.
 const (
-	LabelValueManagedBy           = "asdlc"
+	LabelValueManagedBy           = "aep"
 	LabelValueSecretTypeBasicAuth = "basic-auth"
 	LabelValueSecretTypeGitCreds  = "git-credentials"
 	LabelValueClusterWorkflowKind = "ClusterWorkflowPlane"

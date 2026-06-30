@@ -17,7 +17,7 @@
  */
 
 // ---------------------------------------------------------------------------
-// Domain types for the ASDLC platform
+// Domain types for the AEP platform
 // ---------------------------------------------------------------------------
 
 export type ProjectPhase =
@@ -206,7 +206,7 @@ export interface BuildLogs {
 // -- Implementation Tasks (dispatched to agents) ------------------------------
 
 // Phase 0 single-status lifecycle. Webhooks (and the build watcher polling
-// OC) drive transitions; see asdlc-service/services/task_state.go for the
+// OC) drive transitions; see aep-service/services/task_state.go for the
 // transition table.
 export type TaskStatus =
   | "pending"
@@ -270,7 +270,7 @@ export interface ComponentTask {
 }
 
 // -- Task progress (live execution feed) -------------------------------------
-// Mirrors asdlc-service/clients/observer/schema.go and
+// Mirrors aep-service/clients/observer/schema.go and
 // remote-worker/src/lib/progress/schema.ts. Versioned NDJSON envelope —
 // see docs/design/task-execution-progress.md §5.1.
 

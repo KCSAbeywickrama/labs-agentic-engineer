@@ -21,11 +21,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/humakit"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
-	"github.com/wso2/asdlc/asdlc-service/middleware"
-	jwtmw "github.com/wso2/asdlc/asdlc-service/middleware/jwt"
-	"github.com/wso2/asdlc/asdlc-service/middleware/orgensure"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/middleware"
+	jwtmw "github.com/wso2/aep/aep-api/middleware/jwt"
+	"github.com/wso2/aep/aep-api/middleware/orgensure"
 )
 
 // mountSurfaces wires every HTTP surface onto one outer mux and returns it. This

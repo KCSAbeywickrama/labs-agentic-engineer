@@ -26,9 +26,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // BuildDispatcher is the build-dispatch port the merge handler triggers
@@ -260,7 +260,7 @@ func (h *Handler) PullRequestClosed(ctx context.Context, event, action string, b
 	}
 
 	// Dispatch the build immediately. The platform invariant is that `main`
-	// only moves via merged PRs (branch protection + the asdlc agent skill
+	// only moves via merged PRs (branch protection + the aep agent skill
 	// enforce this), so pr.closed is the single source of truth for "code
 	// just landed on main" — we do not need to wait for the push event or
 	// reconcile against it. DispatchTaskBuild stages the build secret,

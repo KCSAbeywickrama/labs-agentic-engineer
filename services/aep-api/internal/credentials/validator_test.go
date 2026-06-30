@@ -203,7 +203,7 @@ func TestProcessRow_App_Unauthorized_FiresCascade(t *testing.T) {
 func TestProcessRow_App_Rename_DriftsLogin(t *testing.T) {
 	probes := &fakeProbes{
 		appFn: func(ActiveRow) (string, error) {
-			return "asdlc-repos-renamed", nil
+			return "aep-repos-renamed", nil
 		},
 	}
 	v := &Validator{probes: probes}
@@ -211,7 +211,7 @@ func TestProcessRow_App_Rename_DriftsLogin(t *testing.T) {
 	row := ActiveRow{
 		OcOrgID:        "default",
 		Kind:           "app-installation",
-		GitHubLogin:    "asdlc-repos",
+		GitHubLogin:    "aep-repos",
 		InstallationID: &id,
 	}
 	summary := &RunSummary{}
@@ -236,7 +236,7 @@ func TestProcessRow_App_Stable_NoDrift(t *testing.T) {
 	row := ActiveRow{
 		OcOrgID:        "default",
 		Kind:           "app-installation",
-		GitHubLogin:    "asdlc-repos",
+		GitHubLogin:    "aep-repos",
 		InstallationID: &id,
 	}
 	summary := &RunSummary{}

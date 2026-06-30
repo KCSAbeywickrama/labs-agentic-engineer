@@ -27,7 +27,7 @@ import (
 // org_credentials with kind='user-pat' is materialised by orgResolver
 // into one of these.
 //
-// Token() reads from OpenBao at secret/asdlc/{ocOrgID}/github/pat with
+// Token() reads from OpenBao at secret/aep/{ocOrgID}/github/pat with
 // singleflight collapsing concurrent reads. There is NO plaintext cache:
 // the process-memory retention window is an undesirable security trade,
 // OpenBao reads are sub-10ms, and bursts are absorbed by singleflight

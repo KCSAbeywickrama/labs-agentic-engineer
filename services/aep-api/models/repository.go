@@ -48,7 +48,7 @@ type GitRepository struct {
 	// older rows.
 	OcSecretRefName *string `gorm:"column:oc_secret_ref_name" json:"ocSecretRefName,omitempty"`
 	// RepoSlug is the SecretReference slug — `lower(<owner>-<repo>)`. Used
-	// for OpenBao path keying (`secret/asdlc/{ocOrgId}/git/{repoSlug}`) and
+	// for OpenBao path keying (`secret/aep/{ocOrgId}/git/{repoSlug}`) and
 	// the OC SecretReference CR name (`git-{ocOrgId}-{repoSlug}`). Nullable;
 	// the dispatch path lazy-backfills from RepoURL.
 	RepoSlug        string    `gorm:"column:repo_slug;index" json:"repoSlug,omitempty"`

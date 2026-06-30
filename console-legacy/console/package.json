@@ -1,5 +1,5 @@
 {
-  "name": "asdlc-console",
+  "name": "aep-console",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -18,12 +18,12 @@
     "vite": "7.2.2"
   },
   "dependencies": {
-    "@asdlc/cell-diagram-view": "workspace:*",
-    "@asdlc/excalidraw-dsl": "workspace:*",
-    "@asdlc/explorer": "workspace:*",
-    "@asdlc/md-editor": "workspace:*",
-    "@asdlc/openapi-view": "workspace:*",
-    "@asdlc/project-status": "workspace:*",
+    "@aep/cell-diagram-view": "workspace:*",
+    "@aep/excalidraw-dsl": "workspace:*",
+    "@aep/explorer": "workspace:*",
+    "@aep/md-editor": "workspace:*",
+    "@aep/openapi-view": "workspace:*",
+    "@aep/project-status": "workspace:*",
     "@asgardeo/react": "^0.20.0",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",

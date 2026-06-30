@@ -19,9 +19,9 @@ package component
 import (
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/httpkit"
-	"github.com/wso2/asdlc/asdlc-service/utils"
-	"github.com/wso2/asdlc/asdlc-service/utils/validate"
+	"github.com/wso2/aep/aep-api/internal/platform/httpkit"
+	"github.com/wso2/aep/aep-api/utils"
+	"github.com/wso2/aep/aep-api/utils/validate"
 )
 
 // requireOrgHandle validates the {orgHandle} path param. Returns true if

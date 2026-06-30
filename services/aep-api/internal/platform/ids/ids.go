@@ -19,7 +19,7 @@
 // backs both call sites.
 package ids
 
-import "github.com/wso2/asdlc/asdlc-service/utils/validate"
+import "github.com/wso2/aep/aep-api/utils/validate"
 
 // Slug validates a path identifier such as an org handle or project id.
 func Slug(v string) error { return validate.Slug(v) }

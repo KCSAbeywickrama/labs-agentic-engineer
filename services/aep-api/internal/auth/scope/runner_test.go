@@ -28,8 +28,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/auth"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
 // newTaskManager builds a TaskTokenManager backed by a freshly generated RSA
@@ -43,7 +43,7 @@ func newTaskManager(t *testing.T) *auth.TaskTokenManager {
 	pemKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 	mgr, err := auth.NewTaskTokenManager(auth.TaskTokenConfig{
 		PrivateKey: string(pemKey),
-		Issuer:     "asdlc-bff",
+		Issuer:     "aep-bff",
 		Audience:   "git-service",
 		TTL:        time.Hour,
 	})

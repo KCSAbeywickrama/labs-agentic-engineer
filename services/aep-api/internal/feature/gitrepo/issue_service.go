@@ -22,9 +22,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // IssueService creates and lists GitHub issues on project repositories.
@@ -229,11 +229,11 @@ func ParseOwnerRepo(cloneURL string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// labelColor returns a hex color (without #) for well-known ASDLC labels,
+// labelColor returns a hex color (without #) for well-known AEP labels,
 // falling back to a neutral grey for anything else (e.g. phase-N labels).
 func labelColor(name string) string {
 	switch name {
-	case "asdlc":
+	case "aep":
 		return "0075ca" // blue
 	case "implementation":
 		return "7057ff" // purple

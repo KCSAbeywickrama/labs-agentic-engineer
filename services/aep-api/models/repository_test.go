@@ -24,12 +24,12 @@ func TestSlugForURL(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{"https://github.com/asdlc-repos/phase2-prc-app-test037.git", "asdlc-repos-phase2-prc-app-test037"},
-		{"https://github.com/asdlc-repos/phase2-prc-app-test037", "asdlc-repos-phase2-prc-app-test037"},
+		{"https://github.com/aep-repos/phase2-prc-app-test037.git", "aep-repos-phase2-prc-app-test037"},
+		{"https://github.com/aep-repos/phase2-prc-app-test037", "aep-repos-phase2-prc-app-test037"},
 		{"https://github.com/Owner/MixedCaseRepo", "owner-mixedcaserepo"},
-		{"https://github.com/asdlc-repos/repo.git/", "asdlc-repos-repo"},
+		{"https://github.com/aep-repos/repo.git/", "aep-repos-repo"},
 		// Non-GitHub URL — empty
-		{"https://gitlab.com/asdlc/repo.git", ""},
+		{"https://gitlab.com/aep/repo.git", ""},
 	}
 	for _, c := range cases {
 		got := SlugForURL(c.in)

@@ -23,7 +23,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 )
 
 // Claims is the BFF-internal projection of the verified JWT.

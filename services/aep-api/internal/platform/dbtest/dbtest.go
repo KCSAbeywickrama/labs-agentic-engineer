@@ -40,8 +40,8 @@ import (
 )
 
 // DefaultURL points at the deployments Postgres (docker-compose `postgres`
-// service, host-mapped to :5433 with the asdlc/asdlc dev credentials).
-const DefaultURL = "postgres://asdlc:asdlc@localhost:5433/asdlc?sslmode=disable"
+// service, host-mapped to :5433 with the aep/aep dev credentials).
+const DefaultURL = "postgres://aep:aep@localhost:5433/aep?sslmode=disable"
 
 // URL returns the test database DSN (TEST_DATABASE_URL or DefaultURL).
 func URL() string {

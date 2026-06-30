@@ -30,7 +30,7 @@ import (
 // Per-row write semantics (filled by the Connect flow):
 //
 //   - sm_api_secret_ref_name — name returned by SM-API on POST /secrets;
-//     the asdlc-side persists this so subsequent dispatch can mint an
+//     the aep-side persists this so subsequent dispatch can mint an
 //     ExternalSecret without re-resolving via label selector.
 //   - sm_api_kv_path — KV path the SecretReference points at (passed
 //     verbatim to ExternalSecret.spec.data[].remoteRef.key).

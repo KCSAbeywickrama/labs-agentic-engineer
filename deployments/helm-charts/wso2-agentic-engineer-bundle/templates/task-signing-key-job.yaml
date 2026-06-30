@@ -94,7 +94,7 @@ spec:
                 apk add --no-cache kubectl
               fi
 
-              CONFIGMAP_NAME="asdlc-api-task-signing-key"
+              CONFIGMAP_NAME="aep-api-task-signing-key"
               KEY_FILE="/tmp/task-signing.pem"
 
               echo "Checking if task signing key ConfigMap already exists..."

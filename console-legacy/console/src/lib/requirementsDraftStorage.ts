@@ -29,7 +29,7 @@ export interface StoredFileDraft {
 
 export type StoredDraftMap = Record<string, StoredFileDraft>;
 
-const PREFIX = 'asdlc:requirements-drafts';
+const PREFIX = 'aep:requirements-drafts';
 
 function key(orgId: string, projectId: string): string {
   return `${PREFIX}:${orgId}:${projectId}`;

@@ -26,9 +26,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/thundersvc"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/thundersvc"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // IDPService manages per-organisation IDP profiles + the matching
@@ -531,5 +531,5 @@ func profileSummary(p *models.OrganizationIDPProfile) profileSummaryFields {
 // on the profile so a later migration to OpenBao can rewrite the row
 // without schema changes.
 func secretRefPath(orgID string) string {
-	return "secret/asdlc/" + orgID + "/idp/publisher"
+	return "secret/aep/" + orgID + "/idp/publisher"
 }

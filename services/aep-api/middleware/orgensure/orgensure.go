@@ -37,7 +37,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwt"
+	"github.com/wso2/aep/aep-api/middleware/jwt"
 )
 
 // OrgEnsurer is the narrow JIT-ensure port this middleware needs. The

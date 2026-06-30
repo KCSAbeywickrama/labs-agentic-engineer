@@ -11,13 +11,13 @@ pnpm --filter @aep/agents playground
 ```
 
 Requires `ANTHROPIC_API_KEY` in `deployments/.env` (already set up by
-`deployments/scripts/setup-asdlc.sh`).
+`deployments/scripts/setup-aep.sh`).
 
 ## Steps
 1. Create a folder called `services/agents/chat_playground`
 2. **Add files** to that thread folder however you like, e.g. clone a spec repo:
    ```bash
-   cd services/agents/chat_playground && git clone https://github.com/asdlc-repos/apii043
+   cd services/agents/chat_playground && git clone https://github.com/aep-repos/apii043
    ```
    (the folder name is the thread — here `apii043`; pick it from the menu next run.)
 3. Run `pnpm --filter @aep/agents playground` you should see the project there.

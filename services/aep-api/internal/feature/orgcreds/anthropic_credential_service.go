@@ -52,9 +52,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/k8s"
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/k8s"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // AnthropicCredentialService — see package doc.
@@ -378,9 +378,9 @@ func (s *AnthropicCredentialService) applyAnthropicSecret(ctx context.Context, o
 			Name:      models.AnthropicSecretName,
 			Namespace: ns,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "app-factory-git-service",
-				"app-factory.openchoreo.dev/oc-org-id":   ocOrgID,
-				"app-factory.openchoreo.dev/secret-type": "anthropic-credentials",
+				"app.kubernetes.io/managed-by":           "aep-git-service",
+				"aep.openchoreo.dev/oc-org-id":   ocOrgID,
+				"aep.openchoreo.dev/secret-type": "anthropic-credentials",
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

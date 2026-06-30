@@ -1,9 +1,9 @@
-# Grants the asdlc-api service account admin access to OpenChoreo so it can
+# Grants the aep-api service account admin access to OpenChoreo so it can
 # create/manage projects, components, workflows, and deployments on behalf of users.
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterAuthzRoleBinding
 metadata:
-  name: asdlc-api-client-binding
+  name: aep-api-client-binding
 spec:
   effect: allow
   entitlement:

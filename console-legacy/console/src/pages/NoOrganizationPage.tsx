@@ -36,7 +36,7 @@ import { Box, Button, PageContent, Stack, Typography } from '@wso2/oxygen-ui';
  * Org creation is intentionally not offered here — orgs are provisioned
  * out-of-band (Thunder signup → platform-api-service in hosted;
  * seed-admin-org.sh in local dev). The BFF is read-only over OC
- * namespaces; see asdlc-service/controllers/organization_controller.go.
+ * namespaces; see aep-service/controllers/organization_controller.go.
  */
 export default function NoOrganizationPage() {
   const handleSignOut = () => {
