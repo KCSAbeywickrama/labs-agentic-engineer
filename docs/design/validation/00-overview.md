@@ -95,7 +95,7 @@ stateDiagram-v2
   [*] --> REQUIREMENTS
   REQUIREMENTS --> DESIGN: Approve
   DESIGN --> IMPLEMENT: Approve
-  IMPLEMENT --> MERGE: all tasks deployed
+  IMPLEMENT --> MERGE: implement finished
   MERGE --> VALIDATION: integrate done
   VALIDATION --> DESIGN: fail · reentry=design (v1 default)
   VALIDATION --> IMPLEMENT: fail · reentry=implement (future)
@@ -274,7 +274,12 @@ sequenceDiagram
   Job, or stand up an ephemeral validation deployment. This is a real prerequisite, not a detail.
 - **Test-oracle trust.** e2e specs are authored by `e2e-test-author`, independent of the coding agent
   that wrote the app — so the implementer does not write its own acceptance tests. Keep that separation.
-- **Deferred / future:**
+- **Deferred / team discussion:**
+  - **IMPLEMENT → MERGE handoff + where deployment happens.** The trigger is left neutral
+    (`implement finished`) on purpose. The exact completion semantics (all tasks merged / build green /
+    deployed) and *which phase deploys the app to the validation target* are to be settled with the team;
+    this crosses into the orchestration design (currently `all tasks deployed`). Until then, treat the
+    running app the lanes need as a prerequisite, not as something this phase defines.
   - Requirement-change handling (criterion ID stability + freshness/invalidation) — parked.
   - Per-task design-conformance check in IMPLEMENT — turns on `reentry: implement`.
   - DESIGN-gate traceability (design covers every criterion) — natural next phase after v1.
