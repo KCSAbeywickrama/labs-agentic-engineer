@@ -18,6 +18,9 @@ generated/
 .env.*
 !.env.example
 
+# Dev playground threads (services/agents/playground)
+chat_playground/
+
 # Editor / OS
 .DS_Store
 *.log
@@ -25,3 +28,5 @@ generated/
 .agents
 .claude
 docs/
+e2e_test_run.txt
+new_spec.yml

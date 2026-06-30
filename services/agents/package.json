@@ -8,22 +8,26 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:eval": "tsc -p tsconfig.eval.json",
+    "typecheck:playground": "tsc -p tsconfig.playground.json",
+    "playground": "tsx playground/playground.ts",
     "lint": "eslint .",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "test:eval": "tsx --test \"evals/**/*.test.ts\"",
+    "test:playground": "tsx --test \"playground/**/*.test.ts\"",
     "eval": "tsx evals/cli.ts",
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.0",
     "@aep/contracts": "workspace:*",
+    "@ai-sdk/anthropic": "^4.0.0",
     "ai": "^7.0.2",
     "express": "^5.0.0",
     "yaml": "^2.8.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@clack/prompts": "^1.6.0",
     "@types/express": "^5.0.0",
     "@types/node": "^25.6.0",
     "tsx": "^4.21.0"
