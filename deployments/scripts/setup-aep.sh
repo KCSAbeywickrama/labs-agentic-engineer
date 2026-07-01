@@ -103,6 +103,29 @@ else
     echo "✅ ClusterWorkflow 'aep-coding-agent' installed (DEV — /app/plugin overlay live from host)"
 fi
 
+# Pre-pull + import the coding-agent runner image into the k3d node. It's a
+# ~560MB image on a personal Docker Hub repo; on a fresh cluster the FIRST
+# coding-agent Job pulls it cold, which has taken ~17 min — long enough to blow
+# past the Job's activeDeadlineSeconds, so the pod is killed the moment it
+# starts and the task fails with DeadlineExceeded (and any dependent task then
+# sits On Hold forever). Pre-importing makes the first dispatch start instantly.
+# The tag is read from the manifest so it can't drift from what the Job uses.
+RUNNER_IMAGE="$(grep -oE 'image:[[:space:]]*docker.io/xlight05/aep-coding-agent-runner:[^[:space:]]+' "$CODING_AGENT_MANIFEST" | head -1 | awk '{print $2}')"
+if [ -n "$RUNNER_IMAGE" ]; then
+    echo ""
+    echo "🐳 Pre-importing coding-agent runner image ($RUNNER_IMAGE)..."
+    if docker image inspect "$RUNNER_IMAGE" &>/dev/null || docker pull "$RUNNER_IMAGE"; then
+        k3d image import "$RUNNER_IMAGE" -c "$CLUSTER_NAME" \
+            && echo "✅ runner image cached on node — first coding-agent dispatch won't cold-pull" \
+            || echo "⚠️  k3d image import failed; first dispatch may cold-pull (see DeadlineExceeded risk above)"
+    else
+        echo "⚠️  Could not pull $RUNNER_IMAGE — first coding-agent Job may exceed its deadline"
+        echo "    on the cold pull. Pre-pull it manually, or raise the Job activeDeadlineSeconds."
+    fi
+else
+    echo "⚠️  Could not determine runner image from $CODING_AGENT_MANIFEST — skipping pre-import."
+fi
+
 # ============================================================================
 # OpenChoreo infrastructure resources
 # ============================================================================
