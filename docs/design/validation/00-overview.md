@@ -5,11 +5,11 @@
 > Builds on the orchestration design (`docs/design/orchestration/00-overview.md`).
 
 This document describes how AEP validates that a delivered change actually **satisfies the user's
-requirements**. It introduces a structured acceptance artifact (`validation-criteria.yaml`), a new
+requirements**. It introduces a structured acceptance artifact (`validation-criteria.json`), a new
 durable **VALIDATION phase** in the development cycle, and the agents/workflows that run it.
 
 Two repos are in play. **AEP** (this repo) is the platform that authors and runs validation. The
-**project repo** is the application AEP is building; `validation-criteria.yaml`, the generated e2e
+**project repo** is the application AEP is building; `validation-criteria.json`, the generated e2e
 tests, and the validation report all live there, committed alongside the project's own `design.md`.
 
 ---
@@ -26,45 +26,46 @@ own artifact, agents, and human sign-off — not an ad-hoc check bolted onto an 
 
 ---
 
-## 2. The acceptance artifact — `validation-criteria.yaml`
+## 2. The acceptance artifact — `validation-criteria.json`
 
 The hybrid approach (executable tests + agentic judgment + traceability) only works if requirements are
-**structured and addressable**. Free-form prose cannot be traced or tested. So a dedicated agent
-compiles the prose requirement into a structured mirror.
+**structured and addressable**. Free-form prose cannot be traced or tested. So the prose requirement is
+compiled into a structured mirror.
 
-- **Authored by `validation-criteria-author`** on the **requirements → design** transition.
-- **Derived from the prose requirement only** — never from `design.md` or the code. Feeding it the
-  design would bend the criteria toward what was built, collapsing the independent oracle. The criteria
-  may legitimately demand something the design missed; that is the point.
-- **Committed and human-reviewed**, exactly like `design.md`: generated and committed directly (no PR),
-  re-committed on edits, reviewed as the committed file. It is the documented exception to the
-  repo's "generated artifacts are gitignored" rule, because it is the **oracle for all downstream
-  validation** and a bad one silently corrupts every check.
-- **Location:** `specs/validation/validation-criteria.yaml` in the **project repo**.
+- **Authored by a skill on the design agent.** The skill emits the structured criteria around the
+  design stage. The artifact contract below is what the rest of validation depends on, regardless of how
+  the file is produced.
+- **Input scope is an open decision** — whether the skill derives criteria from the **requirement only**
+  (independent oracle) or **also from the design** (coupled). Tracked as Variant A/B below.
+- **Committed to the project repo, reviewed via a dedicated UI.** The JSON is committed directly (no PR)
+  and re-committed on edits, like `design.md`. Raw JSON is **never shown to the user**: a separate UI
+  renders `validation-criteria.json` for review and sign-off. The committed file remains the source of
+  truth (the documented exception to the "generated artifacts are gitignored" rule), because it is the
+  **oracle for all downstream validation** and a bad one silently corrupts every check.
+- **Location:** `specs/validation/validation-criteria.json` in the **project repo**.
 
 ### Schema
 
-```yaml
-# specs/validation/validation-criteria.yaml   (in the PROJECT repo)
-requirements:
-  - id: REQ-001
-    statement: "Users can reset their password via email"
-    criteria:
-      - id: AC-001-a
-        must: "A registered email receives a reset link"
-        method: e2e            # e2e | scenario | manual
-        covered: false         # set true after a passing e2e run; skips regeneration
-      - id: AC-001-b
-        must: "Reset link expires after 1 hour"
-        method: e2e
-        covered: false
-      - id: AC-001-c
-        must: "The reset confirmation message is clear and actionable"
-        method: scenario
+`specs/validation/validation-criteria.json` (in the project repo):
+
+```json
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "statement": "Users can reset their password via email",
+      "criteria": [
+        { "id": "AC-001-a", "must": "A registered email receives a reset link", "method": "e2e", "covered": false },
+        { "id": "AC-001-b", "must": "Reset link expires after 1 hour", "method": "e2e", "covered": false },
+        { "id": "AC-001-c", "must": "The reset confirmation message is clear and actionable", "method": "scenario" }
+      ]
+    }
+  ]
+}
 ```
 
-- **`method`** routes a criterion into a lane: `e2e` (a generated, committed test), `scenario` (an agent
-  drives the app and judges), `manual` (a human must check it).
+- **`method`** (`e2e` | `scenario` | `manual`) routes a criterion into a lane: `e2e` (a generated,
+  committed test), `scenario` (an agent drives the app and judges), `manual` (a human must check it).
 - **`covered`** is a **validation-owned** field: set `true` after a criterion's e2e test passes, so
   future cycles re-run the committed test instead of regenerating it.
 
@@ -72,17 +73,18 @@ requirements:
 > for when the requirement itself changes. Both are out of scope until requirement-change handling is
 > finalized; the schema leaves room (`id`, a future `sourceHash`) so they slot in without reshaping.
 
-### Does the artifact feed the design phase? Two variants
+### Does the skill use the design, or the requirement only? Two variants
 
-Both are viable; the proposal carries both so the choice is explicit (see ADR-0005).
+The artifact's independence hinges on what the authoring skill reads. Both are viable; the proposal
+carries both, and the choice is left open (see ADR-0005).
 
-- **Variant A — criteria feed design.** `validation-criteria.yaml` is an *input* to the design and
-  coding agents ("here is what done means"). Upside: better-aimed implementations, fewer validation
-  loop-backs. Downside: the oracle now influences the work it grades, weakening independence.
-- **Variant B — review-only oracle (recommended default).** The file is committed beside `design.md`
-  for human review and does **not** feed design. The oracle stays fully independent of the work; a
-  design that misses a requirement gets caught at VALIDATION rather than quietly satisfied by a criteria
-  set that was shown to the designer.
+- **Variant A — design-informed.** The skill reads the requirement **and** the design when compiling
+  criteria. Upside: richer, better-aimed criteria, fewer gaps. Downside: the oracle is influenced by the
+  work it later grades, weakening independence.
+- **Variant B — requirement-only (recommended default).** The skill reads the **requirement only**
+  (e.g. in an isolated context), so the criteria stay independent of the design. A design that misses a
+  requirement is then caught at VALIDATION rather than quietly blessed by criteria derived from that
+  same design.
 
 ---
 
@@ -141,10 +143,12 @@ Jobs. `manual` criteria run no Job; they are collected straight into the report.
 
 | Agent | Runs at | Role |
 |---|---|---|
-| `validation-criteria-author` | req → design | Compiles the prose requirement into `validation-criteria.yaml`. |
 | `e2e-test-author` | VALIDATION (e2e Job) | Generates committed e2e specs from uncovered `e2e` criteria. |
 | `e2e-test-healer` | VALIDATION (e2e Job) | Repairs **brittle** specs (selector/timing/setup drift) only. |
 | `scenario-validator` | VALIDATION (scenario Job) | Validates `scenario` criteria via MCP + custom tools. |
+
+Criteria authoring is **not** an agent in this roster: it is the skill on the design agent (section 2)
+that produces `validation-criteria.json` before VALIDATION runs.
 
 **Failure diagnosis** is a *responsibility*, not (yet) a standalone agent: each lane agent's
 per-criterion result carries `{verdict, reason, reentry}` for real failures. It is promotable to a
@@ -201,7 +205,7 @@ sequenceDiagram
 
     DF->>DF: MERGE done → phase = VALIDATION
     DF->>VW: ExecuteChildWorkflow(ValidationWorkflow)
-    VW->>REPO: activity RouteCriteria (read validation-criteria.yaml + covered)
+    VW->>REPO: activity RouteCriteria (read validation-criteria.json + covered)
     Note over VW: partition → {e2e[], scenario[], manual[]}
 
     par e2e lane
@@ -291,8 +295,9 @@ sequenceDiagram
 ## 8. Advantages
 
 - **Requirement-satisfaction is verified, not asserted** — the missing keystone of a spec-driven flow.
-- **Independent oracle** — criteria authored from the requirement, tests authored independent of the
-  implementer; nobody grades their own work.
+- **Independent oracle (goal)** — tests are authored independent of the implementer, so code is not
+  graded by its own author; whether the criteria themselves stay independent of the design is the
+  Variant A/B decision (B preserves it).
 - **Regression for free** — committed e2e specs re-run every cycle; `covered` avoids needless
   regeneration.
 - **Autonomous self-correction with a human backstop** — fail auto-loops to DESIGN; pass always stops
@@ -307,12 +312,12 @@ sequenceDiagram
 | Complexity | Why it exists | Mitigation |
 |---|---|---|
 | **Healer false-pass** | A healer's incentive is green tests; it could edit a real failure into passing. | Real-vs-brittle adjudication kept independent of the healer; strict healer contract (locators/waits/setup only); genuine assertion failures route to diagnosis as real fails. |
-| **Oracle quality** | `validation-criteria.yaml` grades everything downstream; a bad one corrupts all checks. | Committed + human-reviewed like `design.md`; derived from the requirement only (Variant B default keeps it uninfluenced by design). |
+| **Oracle quality** | `validation-criteria.json` grades everything downstream; a bad one corrupts all checks. | Committed + human-reviewed via the dedicated UI; Variant B (requirement-only skill input) keeps it uninfluenced by the design. |
 | **Infinite loop-back** | Autonomous fail → DESIGN with no human present. | Max-attempt guard escalates to a human after N attempts. |
 | **Agent/judge non-determinism** | Workflow replay breaks on nondeterministic output. | All agent output captured once in activities; workflow branches on recorded verdict only. |
 | **Job cost** | Each Job spins a browser + app + MCP + agent. | Per-lane (not per-criterion) Jobs; parallelism inside the Job; reuse per-org quota. |
 | **Deployed-app prerequisite** | e2e/scenario lanes need a live target. | Validate against the post-MERGE dev deployment, or an ephemeral validation env; confirm reachability before the lane runs. |
-| **`covered` vs regeneration** | Two writers touch `validation-criteria.yaml`. | `covered` is validation-owned; regeneration (deferred) must preserve/reset it explicitly. |
+| **`covered` vs regeneration** | Two writers touch `validation-criteria.json`. | `covered` is validation-owned; regeneration (deferred) must preserve/reset it explicitly. |
 
 ---
 

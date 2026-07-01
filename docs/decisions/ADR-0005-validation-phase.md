@@ -14,14 +14,15 @@
 |---|---|
 | Validation kind | **Satisfaction (output)**: does the delivered change satisfy the requirements — not requirement input-quality (deferred). |
 | Mechanism | **Hybrid**: executable e2e tests + agentic scenario judgment + (later) traceability. |
-| Acceptance artifact | **`validation-criteria.yaml`** — structured mirror of the prose requirement, in the **project repo** at `specs/validation/`. |
-| Artifact authorship | **`validation-criteria-author`** agent, on the **requirements → design** transition; derived from the **prose requirement only** (never design/code) to keep the oracle independent. |
-| Artifact lifecycle | **Committed + human-reviewed like `design.md`** (generated and committed directly, no PR; re-committed on edits). Documented exception to the "generated artifacts are gitignored" rule, because it is the downstream oracle. |
-| Does it feed design? | **Two variants prosed** — A: criteria feed the design/coding agents (better aim, weaker independence); **B (recommended default): review-only oracle** that does not feed design (full independence). |
+| Acceptance artifact | **`validation-criteria.json`** — structured mirror of the prose requirement, in the **project repo** at `specs/validation/`. |
+| Artifact format | **JSON** (raw JSON never shown to users; a dedicated UI renders it). |
+| Artifact authorship | A **skill on the design agent** (not a standalone agent); the artifact contract is stable regardless of how it is produced. |
+| Artifact lifecycle | **Committed to the project repo** (directly, no PR; re-committed on edits) and **reviewed via a dedicated rendering UI** — raw JSON never shown to users. Documented exception to the "generated artifacts are gitignored" rule, because it is the downstream oracle. |
+| Skill input scope | **Open (Variant A/B)** — A: skill reads requirement **and** design (richer, coupled); **B (recommended default): requirement-only** (independent oracle). |
 | New phase | **`MERGE → VALIDATION → COMPLETE`**, with `VALIDATION → DESIGN` on failure. |
 | Topology | **`ValidationWorkflow` child** started by `DevelopmentFlowWorkflow` at VALIDATION. **No per-criterion task workflows** (a criterion is a bounded agentic loop, not a webhook-driven state machine). |
 | Job model | **Per-lane Jobs** (e2e-lane, scenario-lane), dispatched concurrently, reusing the coding-agent Job dispatch + `wc-<org>-remote-worker` `ResourceQuota`. Parallelism happens inside each Job. |
-| Agents | `validation-criteria-author`; `e2e-test-author`; `e2e-test-healer`; `scenario-validator`. Failure **diagnosis** is a field on lane output (`{verdict, reason, reentry}`), not a standalone agent yet. |
+| Agents | `e2e-test-author`; `e2e-test-healer`; `scenario-validator` (criteria authoring is the design-agent skill, not an agent here). Failure **diagnosis** is a field on lane output (`{verdict, reason, reentry}`), not a standalone agent yet. |
 | Healer contract | Repairs **brittle** specs only (locators/waits/setup). Real-vs-brittle adjudication kept **independent of the healer**; genuine assertion failures route to diagnosis as real fails — never healed to green. |
 | Report | Deterministic **`AssembleReport`** activity (not an agent): auto-validated results + manual checklist + hand sign-off space. Committed to the project repo + read-model. |
 | Sign-off | **Always human**, not subject to `GatePolicy`. **No cycle ever auto-COMPLETEs.** Execution autonomy is separate from sign-off. |

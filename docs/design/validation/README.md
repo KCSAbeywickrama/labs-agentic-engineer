@@ -7,6 +7,6 @@ acceptance artifact, a durable VALIDATION phase, and the agents/workflows that r
 
 | File | Shows |
 |---|---|
-| `00-overview.md` | **Design overview** — the `validation-criteria.yaml` artifact and its lifecycle, the VALIDATION phase (state machine + sequence), the `ValidationWorkflow` child + per-lane Jobs, the agent roster, fail/loop-back + always-human sign-off, Temporal integration, advantages, and complexities. |
+| `00-overview.md` | **Design overview** — the `validation-criteria.json` artifact and its lifecycle, the VALIDATION phase (state machine + sequence), the `ValidationWorkflow` child + per-lane Jobs, the agent roster, fail/loop-back + always-human sign-off, Temporal integration, advantages, and complexities. |
 
 Companion ADR: `../../decisions/ADR-0005-validation-phase.md`.
