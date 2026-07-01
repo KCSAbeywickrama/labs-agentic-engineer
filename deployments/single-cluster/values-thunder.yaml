@@ -116,6 +116,7 @@ bootstrap:
       CONFIDENTIAL_APPS=(
         "Workload Publisher|OpenChoreo Workload Publisher Client (used by dockerfile-builder generate-workload-cr step)|openchoreo-workload-publisher-client|openchoreo-workload-publisher-secret"
         "OpenChoreo Observer Resource Reader|Client used by the BFF to fetch tokens for the OC Observer service (live workflow logs). Bound by the openchoreo-observer-resource-reader-client-binding ClusterAuthzRoleBinding.|openchoreo-observer-resource-reader-client|openchoreo-observer-resource-reader-client-secret"
+        "OpenChoreo RCA Agent|SRE/RCA agent service-account identity. Authenticates to the OC API + Observer to run root-cause analyses. Bound by the rca-agent-binding ClusterAuthzRoleBinding (sub=openchoreo-rca-agent) shipped with the OC control-plane chart. Consumed by the openchoreo-observability-plane RCA agent (rca.oauth.clientId + rca-agent-secret OAUTH_CLIENT_SECRET).|openchoreo-rca-agent|openchoreo-rca-agent-secret"
         "AEP API Service|AEP API Service - service-to-service client for OpenChoreo|aep-api-client|aep-api-client-secret"
         "AEP BFF to git-service|BFF outbound Service JWT, audience: git-service|aep-bff-to-git-service|aep-bff-to-git-service-secret"
         "AEP BFF to agents-service|BFF outbound Service JWT, audience: agents-service|aep-bff-to-agents-service|aep-bff-to-agents-service-secret"

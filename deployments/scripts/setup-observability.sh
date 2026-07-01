@@ -112,6 +112,37 @@ spec:
 EOF
 echo "✅ ExternalSecrets applied"
 
+# ── 1b. RCA (SRE) agent image + secret ───────────────────────────────────
+# The RCA agent runs the patched image (Anthropic ToolStrategy fix). It's a
+# locally-built image, so import it into the k3d cluster (a cluster rebuild
+# loses imported images — this makes the import part of setup). Build once with:
+#   docker build -t openchoreo-sre-agent:anthropic-patched <openchoreo-repo>/agents/sre-agent
+# The agent reads its LLM key + OAuth client secret from the rca-agent-secret
+# Secret (envFrom). RCA_LLM_API_KEY comes from ANTHROPIC_API_KEY in deployments/.env;
+# OAUTH_CLIENT_SECRET must equal the openchoreo-rca-agent client secret registered
+# by the Thunder bootstrap (values-thunder.yaml CONFIDENTIAL_APPS).
+echo ""
+echo "1️⃣b RCA agent image + secret"
+RCA_IMAGE="openchoreo-sre-agent:anthropic-patched"
+if docker image inspect "$RCA_IMAGE" >/dev/null 2>&1; then
+    k3d image import "$RCA_IMAGE" -c "$CLUSTER_NAME"
+    echo "✅ imported $RCA_IMAGE into k3d-$CLUSTER_NAME"
+else
+    echo "⚠️  $RCA_IMAGE not found in local docker — build it from the openchoreo repo"
+    echo "    (docker build -t $RCA_IMAGE <openchoreo>/agents/sre-agent) or the RCA pod"
+    echo "    will stay ImagePullBackOff. Continuing; other obs-plane components are unaffected."
+fi
+ANTHROPIC_API_KEY="$(grep -E '^ANTHROPIC_API_KEY=' "$SCRIPT_DIR/../.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "⚠️  ANTHROPIC_API_KEY not set in deployments/.env — RCA agent will fail its"
+    echo "    LLM connection test. Set it (or switch rca.llm.modelName to an OpenAI model)."
+fi
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" create secret generic rca-agent-secret \
+    --from-literal=RCA_LLM_API_KEY="$ANTHROPIC_API_KEY" \
+    --from-literal=OAUTH_CLIENT_SECRET="openchoreo-rca-agent-secret" \
+    --dry-run=client -o yaml | kubectl --context "$CLUSTER_CONTEXT" apply -f - >/dev/null
+echo "✅ rca-agent-secret applied"
+
 # ── 2. Observability plane chart (Observer + cluster-agent + RCA) ────────
 echo ""
 echo "2️⃣  openchoreo-observability-plane chart (v${OBS_PLANE_VERSION})"
@@ -133,6 +164,32 @@ security:
     tokenUrl: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
     authServerBaseUrl: "http://thunder.openchoreo.localhost:8080"
 rca:
+  # SRE / RCA agent. Uses a locally-built image that carries the Anthropic
+  # structured-output fix (ToolStrategy instead of ProviderStrategy — the stock
+  # ghcr.io/openchoreo/sre-agent image rejects Anthropic with many tools:
+  # "grammar too large"). Built + imported in step 1b below. If you switch to an
+  # OpenAI model, the stock image works and you can drop the image override.
+  enabled: true
+  image:
+    repository: openchoreo-sre-agent
+    tag: anthropic-patched
+    pullPolicy: IfNotPresent          # locally-imported image, not a registry pull
+  llm:
+    modelName: anthropic:claude-sonnet-4-6
+  secretName: rca-agent-secret        # created in step 1b (RCA_LLM_API_KEY + OAUTH_CLIENT_SECRET)
+  oauth:
+    clientId: openchoreo-rca-agent    # registered by the Thunder bootstrap (values-thunder.yaml)
+  openchoreoApiUrl: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
+  # Stock limit is cpu:250m — too low for trace-heavy analyses. The agent can
+  # trip its liveness probe (exit 137) mid-run, which orphans the report in
+  # "pending". Bump CPU/mem so analyses complete.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
   http:
     hostnames:
       - rca-agent.openchoreo.localhost
@@ -283,6 +340,8 @@ spec:
         name: cluster-agent-tls
         namespace: $NS
   observerURL: http://observer.openchoreo.localhost:11080
+  # Lets the portal fetch RCA reports from the SRE agent (rca.enabled above).
+  rcaAgentURL: http://rca-agent.openchoreo.localhost:11080
 EOF
 echo "✅ ClusterObservabilityPlane registered"
 
