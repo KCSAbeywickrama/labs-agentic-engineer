@@ -23,7 +23,7 @@ import { loadDotenv, intEnv } from "./env.js";
 loadDotenv();
 
 export const config = {
-  model: process.env.AGENT_MODEL || "claude-sonnet-4-6",
+  model: process.env.AGENT_MODEL || "claude-sonnet-5",
   // A fresh "write an app" generation needs 10–15 file calls; steps batch
   // parallel tool calls, so the loop budget is higher than the call count.
   // intEnv guards a non-numeric value (which would NaN out the step cap).

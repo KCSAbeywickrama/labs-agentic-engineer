@@ -60,8 +60,8 @@ const (
 	internalBase = "/internal/v1"
 )
 
-// ErrNoAnthropicKey is returned by a KeyResolver when no effective key is
-// available for the org (no org key configured AND no platform fallback). The
+// ErrNoAnthropicKey is returned by a KeyResolver when the org has not
+// configured an Anthropic key (there is no platform fallback). The
 // streaming methods propagate it; callers surface it as a stream error.
 var ErrNoAnthropicKey = errors.New("no Anthropic API key configured for this organization")
 

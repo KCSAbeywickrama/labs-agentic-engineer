@@ -154,9 +154,6 @@ type Config struct {
 	TaskJWTAllowedIssuer   string
 	TaskJWTAllowedAudience string
 
-	// AnthropicPlatformKey — platform-wide fallback Anthropic API key.
-	AnthropicPlatformKey string
-
 	// AgentsServiceURL — in-cluster base URL of aep-agents-service.
 	// (Duplicates AgentsService.BaseURL under a different field name.)
 	AgentsServiceURL string

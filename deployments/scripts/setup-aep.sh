@@ -733,11 +733,7 @@ VITE_THUNDER_CLIENT_ID=aep-console-client
 VITE_THUNDER_SCOPES=openid profile email
 
 # ── Agents service ─────────────────────────────────────────────────────────
-# Anthropic key used as the platform fallback (returned by git-service to
-# agents-service when an org has not connected its own key). Required for
-# any AI flow to work in dev.
-ANTHROPIC_API_KEY=${ANTHROPIC_KEY}
-AGENT_MODEL=claude-sonnet-4-5
+AGENT_MODEL=claude-sonnet-5
 
 # ── GitHub App (optional — only for App-mode Connect) ──────────────────────
 # Each org connects via Settings → GitHub Integration using either GitHub
@@ -771,10 +767,13 @@ DEPLOYMENT_TIER=dev
 
 # ── Local-dev seed (scripts/seed-dev.sh) ────────────────────────────────────
 # Optional. When set, scripts/seed-dev.sh pre-connects the default org's
-# GitHub credentials so you don't have to clickthrough Settings → GitHub
-# after every fresh setup. Not read by any platform code path.
+# GitHub + Anthropic credentials so you don't have to clickthrough
+# Settings → GitHub / Settings → Anthropic after every fresh setup. These
+# are org-level credentials connected exactly as a user would; not read by
+# any platform code path.
 LOCAL_DEV_ADMIN_GITHUB_PAT=${LOCAL_DEV_ADMIN_GITHUB_PAT_VAL}
 LOCAL_DEV_ADMIN_GITHUB_OWNER=${LOCAL_DEV_ADMIN_GITHUB_OWNER_VAL}
+ANTHROPIC_API_KEY=${ANTHROPIC_KEY}
 EOF
 
 echo "✅ .env file generated at $(realpath "$ENV_FILE")"

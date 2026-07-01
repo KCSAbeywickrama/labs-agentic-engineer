@@ -575,7 +575,7 @@ func main() {
 	credService := orgcreds.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, githubClient)
 	buildCredService := orgcreds.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
-	anthropicCredService := orgcreds.NewAnthropicCredentialService(db, credStore, wpClient, cfg.AnthropicPlatformKey)
+	anthropicCredService := orgcreds.NewAnthropicCredentialService(db, credStore, wpClient)
 
 	// Task JWT manager — RS256, 24h TTL. The public key is published on the
 	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner

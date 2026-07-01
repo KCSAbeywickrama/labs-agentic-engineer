@@ -123,7 +123,6 @@ func Load() (Config, error) {
 		BFFJWKSURL:                  r.readOptionalString("BFF_JWKS_URL", ""),
 		TaskJWTAllowedIssuer:        r.readOptionalString("TASK_JWT_ISSUER", "aep-bff"),
 		TaskJWTAllowedAudience:      r.readOptionalString("TASK_JWT_AUDIENCE", "git-service"),
-		AnthropicPlatformKey:        r.readOptionalString("ANTHROPIC_PLATFORM_KEY", ""),
 		AgentsServiceURL:            r.readOptionalString("AGENTS_SERVICE_URL", ""),
 
 		// SM-API + cluster-gateway-proxy.

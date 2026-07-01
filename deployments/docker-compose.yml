@@ -142,7 +142,6 @@ services:
       BFF_JWKS_URL: "http://localhost:9090/auth/external/jwks.json"
       TASK_JWT_ISSUER: "aep-bff"
       TASK_JWT_AUDIENCE: "git-service"
-      ANTHROPIC_PLATFORM_KEY: "${ANTHROPIC_API_KEY}"
       AGENTS_SERVICE_URL: "http://agents-service:3400"
 
       # ── Phase 1 — sm-api + cluster-gateway-proxy. Compose-only stubs
@@ -190,8 +189,8 @@ services:
   # ---------------------------------------------------------------------------
   # agents-service — AI BA/Architect/TaskGen/Wireframe agents (Vercel AI SDK).
   # No ANTHROPIC_API_KEY env: the key is resolved per-call via git-service
-  # (org key if configured, platform fallback otherwise). See
-  # docs/design/anthropic-key-dual-token.md §6.4.
+  # (the org's own key, or 503 when the org hasn't connected one — there is
+  # no platform fallback). See docs/design/anthropic-key-dual-token.md §6.4.
   # ---------------------------------------------------------------------------
   agents-service:
     build:
@@ -202,7 +201,7 @@ services:
     environment:
       PORT: "3400"
       LOG_LEVEL: "debug"
-      AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-4-6}"
+      AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-5}"
       # Inbound identity verification — BFF-signed JWT. agents verifies against
       # the BFF JWKS (not Thunder) and reads org from the verified ocOrgId
       # claim; the BFF is the single issuer for S2S identity tokens.

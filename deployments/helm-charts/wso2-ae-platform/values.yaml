@@ -101,10 +101,6 @@ github:
   # Pass via: --set-file github.appPrivateKeyPem=key.pem
   appPrivateKeyPem: ""
 
-# ── Anthropic ─────────────────────────────────────────────────────────────────
-anthropic:
-  apiKey: ""
-
 # ── aep-api (BFF) ──────────────────────────────────────────────────────────
 aepApi:
   # Hostname for the OC control-plane gateway HTTPRoute (public/browser surface).
@@ -151,7 +147,7 @@ agentsService:
     pullPolicy: Always
   port: 3400
   logLevel: info
-  model: "claude-sonnet-4-6"
+  model: "claude-sonnet-5"
   jwt:
     # Audience the BFF stamps on outbound agents identity tokens and agents
     # verifies (matches IssueServiceToken). Was the Thunder M2M client id.
