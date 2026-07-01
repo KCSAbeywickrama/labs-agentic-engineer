@@ -113,13 +113,6 @@ type OUValidator interface {
 	OUExists(ctx context.Context, ouID string) (bool, error)
 }
 
-// OrganizationServiceWithOUValidator is the optional setter the composition
-// root uses to wire the OU validator once the Thunder admin client is built
-// (it is constructed after the org service).
-type OrganizationServiceWithOUValidator interface {
-	SetOUValidator(v OUValidator)
-}
-
 type organizationService struct {
 	db    *gorm.DB
 	nsCli openchoreo.NamespaceClient
@@ -140,7 +133,7 @@ type organizationService struct {
 	ensureInflight singleflight.Group
 }
 
-func NewOrganizationService(db *gorm.DB, nsCli openchoreo.NamespaceClient) OrganizationService {
+func NewOrganizationService(db *gorm.DB, nsCli openchoreo.NamespaceClient) *organizationService {
 	return &organizationService{
 		db:          db,
 		nsCli:       nsCli,
@@ -151,8 +144,6 @@ func NewOrganizationService(db *gorm.DB, nsCli openchoreo.NamespaceClient) Organ
 // SetOUValidator wires the Thunder OU-existence checker (composition root,
 // after the Thunder admin client is constructed).
 func (s *organizationService) SetOUValidator(v OUValidator) { s.ouValidator = v }
-
-var _ OrganizationServiceWithOUValidator = (*organizationService)(nil)
 
 // ouIsTrustworthy returns false ONLY when a wired validator positively reports
 // the OU does not exist. Empty id, no validator, or a transient validation
@@ -235,12 +226,6 @@ func (s *organizationService) EnsureForOuHandle(ctx context.Context, ouHandle st
 	s.ensureMu.RUnlock()
 	cacheWarm := ok && time.Since(verifiedAt) < ensureCacheTTL
 
-	slog.InfoContext(ctx, "[SHAKEOUT:ORG] EnsureForOuHandle entry",
-		"nsClientConfigured", s.nsCli != nil,
-		"ouHandle", ouHandle,
-		"thunderOrgUUID", thunderOrgUUID,
-		"cacheHit", cacheWarm)
-
 	if !cacheWarm {
 		// Coalesce concurrent first-sights of the same handle into one
 		// DB+OC verify.
@@ -279,8 +264,6 @@ func (s *organizationService) verifyForOuHandle(ctx context.Context, ouHandle, t
 	var row models.Organization
 	switch err := s.db.WithContext(ctx).Where("name = ?", ouHandle).First(&row).Error; {
 	case err == nil:
-		slog.InfoContext(ctx, "[SHAKEOUT:ORG] verifyForOuHandle local row exists",
-			"nsClientConfigured", s.nsCli != nil, "ouHandle", ouHandle, "localRowExisted", true)
 		return nil
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		// fall through to OC verify
@@ -290,23 +273,11 @@ func (s *organizationService) verifyForOuHandle(ctx context.Context, ouHandle, t
 
 	view, err := s.nsCli.GetNamespace(ctx, ouHandle)
 	if err != nil {
-		nsOutcome := "other-error"
-		if errors.Is(err, openchoreo.ErrNotFound) {
-			nsOutcome = "ErrOrganizationNotProvisioned"
-		}
-		slog.InfoContext(ctx, "[SHAKEOUT:ORG] verifyForOuHandle GetNamespace failed",
-			"nsClientConfigured", s.nsCli != nil, "ouHandle", ouHandle,
-			"localRowExisted", false, "getNamespaceOutcome", nsOutcome, "error", err.Error())
 		if errors.Is(err, openchoreo.ErrNotFound) {
 			return fmt.Errorf("%w: %s", ErrOrganizationNotProvisioned, ouHandle)
 		}
 		return translateHTTPError(err)
 	}
-	slog.InfoContext(ctx, "[SHAKEOUT:ORG] verifyForOuHandle GetNamespace found",
-		"nsClientConfigured", s.nsCli != nil, "ouHandle", ouHandle,
-		"localRowExisted", false, "getNamespaceOutcome", "found",
-		"viewName", view.Name, "viewNameMatchesHandle", view.Name == ouHandle)
-
 	// Key the row by the handle, not view.Name: platform-api returns the
 	// canonical namespace name (e.g. "wc-<uuid8>-<hash8>") in metadata.name,
 	// but every per-org lookup — this verify path, ensureThunderUUID, the

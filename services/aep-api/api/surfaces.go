@@ -23,7 +23,6 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
-	"github.com/wso2/aep/aep-api/middleware"
 	jwtmw "github.com/wso2/aep/aep-api/middleware/jwt"
 	"github.com/wso2/aep/aep-api/middleware/orgensure"
 )
@@ -37,7 +36,7 @@ import (
 //	───────────────────────────────────────────────────────────────────────────────────────────────────
 //	public         /api/v1              Thunder user JWT + org gate                *_huma.go · humakit.OrgScopedInput
 //	               (jwt → orgensure)    (org from the verified token, never input)  → api/openapi.yaml
-//	internal S2S   /internal/v1/tasks/  BFF Task-JWT or publisher-cc               internal.go · scope.RunnerScopedInput
+//	internal S2S   /internal/v1/tasks/  BFF Task-JWT or publisher-cc               internal.go · auth.RunnerScopedInput
 //	               (per-op resolver)    (dual-token verify + INT-6 fence)           → api/internal-openapi.yaml (non-public)
 //	external       /api/v1/webhooks,    per-route bespoke: GitHub HMAC /           webhook_routes.go · org_github_routes.go
 //	               .../github/connect    signed connect-state (org from payload)    (no generated spec; paths kept — Q4)
@@ -53,7 +52,7 @@ import (
 // never a trusted header. See docs/design/internal-s2s-api.md.
 //
 // "Where do I change X?" → credential verify/mint: internal/platform/auth ·
-// who-may-touch-what gates: humakit (public) + internal/auth/scope (internal) ·
+// who-may-touch-what gates: humakit (public) + internal/platform/auth (internal) ·
 // what's exposed: this file.
 func mountSurfaces(params AppParams) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -114,26 +113,14 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// ── internal S2S surface (/internal/v1/tasks/) ───────────────────────────
 	// Its own Huma API on its own mux, NOT wrapped by the /api/ user-JWT
 	// middleware. Each operation authenticates by construction via
-	// scope.RunnerScopedInput (BFF Task-JWT or publisher-cc) and is never
-	// gateway-advertised. Mounted at /internal/v1/tasks/ so it owns only the
-	// runner-callback subtree; the unscoped credentials route keeps its own mount
-	// below. See docs/design/internal-s2s-api.md §3.
+	// auth.RunnerScopedInput (BFF Task-JWT or publisher-cc) and is never
+	// gateway-advertised. Mounted at /internal/v1/tasks/ so it owns the whole
+	// runner-callback subtree (skills + credentials refresh). See
+	// docs/design/internal-s2s-api.md §3.
 	internalMux := http.NewServeMux()
 	internalAPI := newInternalAPI(internalMux)
 	RegisterAllInternal(internalAPI, params.InternalDeps)
 	mux.Handle(internalV1+"/tasks/", internalMux)
-
-	// Unscoped per-task credentials refresh (Task-JWT only) — a legacy runner
-	// path that retires with WS2.6; kept as a raw RequireTaskBearer-wrapped mount
-	// until the runner stops calling it. Fail closed: only mounted when the
-	// Task-JWT verifier is configured (set in every committed env).
-	if params.TaskJWT != nil {
-		taskMux := http.NewServeMux()
-		if params.CredCtrl != nil {
-			taskMux.HandleFunc("POST "+internalV1+"/credentials/refresh", params.CredCtrl.Refresh)
-		}
-		mux.Handle(internalV1+"/credentials/", middleware.RequireTaskBearer(params.TaskJWT)(taskMux))
-	}
 
 	// ── /api/ user-JWT wrapper ───────────────────────────────────────────────
 	// JIT org-onboarding sits between JWT verification and the org-aware route
@@ -141,8 +128,8 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	// manifest, or seed names an org. See default-org-seed-removal.md §3.2.
 	jwt := jwtmw.Middleware(jwtmw.Config{
 		JWKS:                params.ThunderJWKS,
-		AllowedIssuers:      splitAndTrim(params.Config.JWTAllowedIssuer),
-		AllowedAudiences:    splitAndTrim(params.Config.JWTAllowedAudience),
+		AllowedIssuers:      SplitAndTrim(params.Config.JWTAllowedIssuer),
+		AllowedAudiences:    SplitAndTrim(params.Config.JWTAllowedAudience),
 		ResourceMetadataURL: params.Config.JWTResourceMetadataURL,
 	})
 	ensureOrg := orgensure.Middleware(params.OrganizationService)

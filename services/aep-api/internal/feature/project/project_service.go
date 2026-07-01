@@ -65,15 +65,7 @@ type skillsProvisioner interface {
 	EnsureProvisioned(ctx context.Context, orgID string) error
 }
 
-// ProjectServiceWithSkills surfaces the skills-provisioner setter so main can
-// wire the skills store without widening the constructor signature.
-type ProjectServiceWithSkills interface {
-	SetSkillsProvisioner(p skillsProvisioner)
-}
-
 func (s *projectService) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
-
-var _ ProjectServiceWithSkills = (*projectService)(nil)
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -82,7 +74,7 @@ func NewProjectService(
 	artifactSvc artifacts.ArtifactService,
 	store *artifacts.ArtifactStore,
 	taskRepo repositories.TaskRepository,
-) ProjectService {
+) *projectService {
 	return &projectService{
 		client:      client,
 		repoSvc:     repoSvc,

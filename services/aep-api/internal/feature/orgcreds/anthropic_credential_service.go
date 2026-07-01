@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package services — Anthropic credential service.
+// anthropic_credential_service.go — Anthropic credential service.
 //
 // AnthropicCredentialService owns the per-org Anthropic API key surface:
 //

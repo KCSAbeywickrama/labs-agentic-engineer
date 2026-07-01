@@ -62,7 +62,7 @@ type AppParams struct {
 	// InternalDeps carries the services for the internal S2S Huma surface
 	// (runner skills + path-scoped credentials refresh). NewHandler builds the
 	// internal Huma API on its own mux and registers them via RegisterAllInternal;
-	// each op authenticates by construction via scope.RunnerScopedInput.
+	// each op authenticates by construction via auth.RunnerScopedInput.
 	InternalDeps InternalDeps
 
 	TaskRepo   repositories.TaskRepository
@@ -81,13 +81,8 @@ type AppParams struct {
 	// artifacts packages in-process. CredService + AnthropicCredService + DB
 	// also back the local-dev SM-API resync helper (testSMAPIResyncHandler).
 	DB                   *gorm.DB
-	CredCtrl             orgcreds.CredentialsRefreshController
 	CredService          *orgcreds.CredentialService
 	AnthropicCredService *orgcreds.AnthropicCredentialService
-
-	// TaskJWT verifies Task JWTs presented to /internal/v1/credentials/refresh.
-	// JWKS resolves to the BFF's /auth/external/jwks.json.
-	TaskJWT jwtassertion.Middleware
 }
 
 // NewHandler assembles the full HTTP handler with middleware and routes.
@@ -109,12 +104,12 @@ func NewHandler(params AppParams) http.Handler {
 	return handler
 }
 
-// splitAndTrim splits a comma-separated env value into a list, dropping
+// SplitAndTrim splits a comma-separated env value into a list, dropping
 // empty entries. Lets JWT_ISSUER / JWT_AUDIENCE accept multiple values
 // (e.g. "AEP_CONSOLE,local-dev-seeder") so a single BFF can
 // accept both end-user and S2S tokens that carry different `aud`
 // claims, without weakening the matcher to a wildcard.
-func splitAndTrim(s string) []string {
+func SplitAndTrim(s string) []string {
 	if s == "" {
 		return nil
 	}
@@ -131,4 +126,3 @@ func splitAndTrim(s string) []string {
 	}
 	return out
 }
-

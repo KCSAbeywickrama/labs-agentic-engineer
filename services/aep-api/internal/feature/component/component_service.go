@@ -18,14 +18,11 @@ package component
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 
 	"github.com/wso2/aep/aep-api/clients/observability"
 	"github.com/wso2/aep/aep-api/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/clients/requests"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
@@ -99,7 +96,7 @@ func NewComponentService(client openchoreo.ComponentClient, observClient observa
 func (s *componentService) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error) {
 	list, err := s.client.ListComponents(ctx, orgName, projectName, limit, cursor)
 	if err != nil {
-		return nil, translateComponentHTTPError(err)
+		return nil, err
 	}
 	return list, nil
 }
@@ -107,7 +104,7 @@ func (s *componentService) ListComponents(ctx context.Context, orgName, projectN
 func (s *componentService) GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error) {
 	comp, err := s.client.GetComponent(ctx, orgName, projectName, componentName)
 	if err != nil {
-		return nil, translateComponentHTTPError(err)
+		return nil, err
 	}
 	return comp, nil
 }
@@ -115,7 +112,7 @@ func (s *componentService) GetComponent(ctx context.Context, orgName, projectNam
 func (s *componentService) CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*models.Component, error) {
 	comp, err := s.client.CreateComponent(ctx, orgName, projectName, req)
 	if err != nil {
-		return nil, translateComponentHTTPError(err)
+		return nil, err
 	}
 	return comp, nil
 }
@@ -129,7 +126,7 @@ func (s *componentService) CreateComponent(ctx context.Context, orgName, project
 // after the first build has produced a binding.
 func (s *componentService) UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error {
 	if err := s.client.UpdateComponentWorkflowEnvVars(ctx, orgName, projectName, componentName, envVars); err != nil {
-		return translateComponentHTTPError(err)
+		return err
 	}
 	return nil
 }
@@ -178,7 +175,7 @@ func (s *componentService) GetComponentOpenAPI(ctx context.Context, orgName, pro
 func (s *componentService) ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error) {
 	list, err := s.client.ListDeployments(ctx, orgName, projectName, componentName)
 	if err != nil {
-		return nil, translateComponentHTTPError(err)
+		return nil, err
 	}
 	return list, nil
 }
@@ -210,7 +207,7 @@ func (s *componentService) TriggerBuild(ctx context.Context, orgName, projectNam
 	}
 	run, err := s.client.TriggerBuild(ctx, orgName, projectName, componentName, buildSecretRef, runName)
 	if err != nil {
-		return nil, translateComponentHTTPError(err)
+		return nil, err
 	}
 	return run, nil
 }
@@ -218,7 +215,7 @@ func (s *componentService) TriggerBuild(ctx context.Context, orgName, projectNam
 func (s *componentService) ListBuilds(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
 	list, err := s.client.ListWorkflowRuns(ctx, orgName, projectName, componentName, limit, cursor)
 	if err != nil {
-		return nil, translateComponentHTTPError(err)
+		return nil, err
 	}
 	return list, nil
 }
@@ -234,18 +231,3 @@ func (s *componentService) GetBuildLogs(ctx context.Context, orgName, projectNam
 	return logs, nil
 }
 
-func translateComponentHTTPError(err error) error {
-	if err == nil {
-		return nil
-	}
-	var httpErr *requests.HttpError
-	if errors.As(err, &httpErr) {
-		switch httpErr.StatusCode {
-		case http.StatusNotFound:
-			return fmt.Errorf("%w: %s", ErrComponentNotFound, httpErr.Body)
-		case http.StatusUnauthorized:
-			return ErrUnauthorized
-		}
-	}
-	return err
-}

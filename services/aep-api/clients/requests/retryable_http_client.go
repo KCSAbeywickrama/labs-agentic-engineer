@@ -58,7 +58,7 @@ func NewRetryableHTTPClient(client HttpClient, config ...RequestRetryConfig) *Re
 // reusable on their own). Honors ctx cancellation between attempts.
 func (c *RetryableHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
-	cfg := c.config.getRetryConfig(&HttpRequest{Method: req.Method})
+	cfg := c.config.getRetryConfig(req.Method)
 	log := slog.Default().With(
 		slog.String("method", req.Method),
 		slog.String("url", req.URL.String()),

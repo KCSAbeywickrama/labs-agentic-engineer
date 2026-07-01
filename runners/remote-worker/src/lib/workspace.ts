@@ -69,10 +69,10 @@ export interface ProvisionRequest {
   identity: { name: string; email: string; login?: string };
   gitServiceUrl: string;
   correlationId?: string;
-  // WS2.4 — full refresh URL override (defaults to
-  // `${gitServiceUrl}/api/v1/credentials/refresh`). oneshot.ts sets this
-  // to the path-scoped `${platformUrl}/api/v1/tasks/{taskId}/credentials/refresh`
-  // when publisher cc creds drive auth.
+  // WS2.6 — full refresh URL, set by oneshot.ts to the path-scoped
+  // `${platformUrl}/internal/v1/tasks/{taskId}/credentials/refresh` (accepts
+  // both publisher-cc and legacy Task-JWT). Falls back to a path-scoped URL
+  // built from gitServiceUrl below when unset.
   refreshUrl?: string;
 }
 
@@ -91,7 +91,7 @@ export function computeLayout(orgId: string, projectId: string, taskId: string):
   };
 }
 
-// resolvePATForClone calls git-service /api/v1/credentials/refresh using
+// resolvePATForClone calls the path-scoped credentials/refresh endpoint using
 // the task bearer to obtain the GitHub PAT.  Used during workspace
 // provisioning to embed credentials in the clone URL — avoids the
 // GIT_ASKPASS protocol mismatch where credhelper.sh outputs two-line
@@ -106,15 +106,16 @@ async function resolvePATForClone(
     throw new Error("bearer file is empty");
   }
 
-  // WS2.4 — refreshUrl overrides the legacy git-service path when
-  // publisher cc creds drive auth (oneshot.ts sets it).
+  // WS2.6 — refreshUrl (set by oneshot.ts) is the path-scoped endpoint. The
+  // fallback builds the same path-scoped URL from gitServiceUrl for the rare
+  // case oneshot didn't set it (AEP_PLATFORM_URL unset).
   let url: URL;
   if (req.refreshUrl && req.refreshUrl !== "") {
     url = new URL(req.refreshUrl);
   } else {
     url = new URL(req.gitServiceUrl);
     if (!url.pathname.endsWith("/")) url.pathname += "/";
-    url.pathname += "api/v1/credentials/refresh";
+    url.pathname += `internal/v1/tasks/${encodeURIComponent(req.taskId)}/credentials/refresh`;
   }
 
   const headers: Record<string, string> = {

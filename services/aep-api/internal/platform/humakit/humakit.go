@@ -26,7 +26,6 @@
 package humakit
 
 import (
-	"context"
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -56,7 +55,7 @@ const APIV1 = "/api/v1"
 
 // SecurityUserJWT is the OpenAPI security requirement for end-user Thunder JWT
 // routes. Attach to every org-scoped + user-facing carve-out operation. (The
-// internal S2S surface declares its own scheme — scope.SecurityRunner — on the
+// internal S2S surface declares its own scheme — auth.SecurityRunner — on the
 // separate internal Huma API.)
 var SecurityUserJWT = []map[string][]string{{"userJWT": {}}}
 
@@ -87,7 +86,7 @@ func (i *OrgScopedInput) Resolve(ctx huma.Context) []error {
 	tokenOrg := jwt.ResolveOuHandle(jwt.ClaimsFromContext(c))
 
 	if tokenOrg == "" {
-		slog.WarnContext(c, "[SHAKEOUT:would-deny]",
+		slog.WarnContext(c, "tenant gate would-deny",
 			"reason", "no-org-claim", "mode", string(gateMode))
 		if gateMode == tenant.GateModeEnforce {
 			return []error{huma.Error401Unauthorized("authentication required")}
@@ -98,15 +97,6 @@ func (i *OrgScopedInput) Resolve(ctx huma.Context) []error {
 	// Active org = the verified token org, never client input.
 	i.OrgHandle = tokenOrg
 	return nil
-}
-
-// OrgFromCtx returns the active org derived from the verified token in ctx (the
-// JWT middleware populated the claims). Returns "" when no verified org is
-// present. Huma handlers should read OrgScopedInput.OrgHandle (which Resolve has
-// already enforced non-empty); this helper is for non-Huma readers such as
-// middleware.
-func OrgFromCtx(ctx context.Context) string {
-	return jwt.ResolveOuHandle(jwt.ClaimsFromContext(ctx))
 }
 
 // ErrorFromStatus maps an HTTP status code to the matching Huma error, so

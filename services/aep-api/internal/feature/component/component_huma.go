@@ -24,17 +24,16 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
-	"github.com/wso2/aep/aep-api/internal/platform/ids"
 	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/utils/validate"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------
 // Inputs embed humakit.OrgScopedInput, whose Resolve binds the active org from the verified token (no {orgHandle} path param) and applies
 // the tenant gate (the IDOR fence) by construction. Extra path params are
-// declared as sibling fields alongside the embedded struct. The legacy
-// controllers validated projectName/componentName/buildName as DNS-label slugs
-// (requireProjectName / requireComponentName / validateSlugParam → 400); the
-// handlers below preserve that 400-on-malformed-slug behaviour.
+// declared as sibling fields alongside the embedded struct. projectName/
+// componentName/buildName are validated as DNS-label slugs (400 on malformed)
+// via the requireSlug helpers below.
 
 type componentProjectInput struct {
 	humakit.OrgScopedInput
@@ -242,16 +241,16 @@ func mapComponentError(err error, internalMsg string) error {
 }
 
 // requireSlug validates a single DNS-label slug path param, returning a 400
-// huma error on failure (mirrors validateSlugParam / httpkit.RequireSlug).
+// huma error on failure. Delegates to validate.Slug.
 func requireSlug(name, v string) error {
-	if err := ids.Slug(v); err != nil {
+	if err := validate.Slug(v); err != nil {
 		return huma.Error400BadRequest(name + ": " + err.Error())
 	}
 	return nil
 }
 
-// requireComponentSlugs validates the projectName + componentName path params,
-// mirroring requireProjectName + requireComponentName in the legacy controller.
+// requireComponentSlugs validates the projectName + componentName path params
+// as DNS-label slugs.
 func requireComponentSlugs(projectName, componentName string) error {
 	if err := requireSlug("projectName", projectName); err != nil {
 		return err

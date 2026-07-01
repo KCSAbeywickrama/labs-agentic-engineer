@@ -14,10 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package services hosts git-service's HTTP-tier orchestration. The
-// credential_service.go file implements the per-org credential connect /
-// status / disconnect surface defined in docs/design/github-integration-phase2.md
-// §5.2 and §6.4–6.7.
+// Package orgcreds owns the per-org credential surface (GitHub, Anthropic,
+// build). This file implements the credential connect / status / disconnect
+// surface defined in docs/design/github-integration-phase2.md §5.2 and §6.4–6.7.
 package orgcreds
 
 import (

@@ -64,7 +64,7 @@ type RequestRetryConfig struct {
 // getRetryConfig fills unset fields with defaults and wires a sane default
 // RetryOnStatus that idempotent-aware-picks from the two transient sets.
 // Returns by value so callers can keep their original cfg untouched.
-func (cfg RequestRetryConfig) getRetryConfig(req *HttpRequest) RequestRetryConfig {
+func (cfg RequestRetryConfig) getRetryConfig(method string) RequestRetryConfig {
 	if cfg.RetryWaitMin == 0 {
 		cfg.RetryWaitMin = DefaultRetryWaitMin
 	}
@@ -79,7 +79,7 @@ func (cfg RequestRetryConfig) getRetryConfig(req *HttpRequest) RequestRetryConfi
 	}
 	if cfg.RetryOnStatus == nil {
 		cfg.RetryOnStatus = func(status int) bool {
-			if req.Method == http.MethodGet || req.Method == http.MethodDelete {
+			if method == http.MethodGet || method == http.MethodDelete {
 				return slices.Contains(TransientHTTPGETErrorCodes, status)
 			}
 			return slices.Contains(TransientHTTPErrorCodes, status)

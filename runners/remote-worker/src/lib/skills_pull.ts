@@ -17,7 +17,7 @@
  */
 
 // Per-task skills pull — runner-side client for
-// GET $AEP_PLATFORM_URL/api/v1/tasks/$AEP_TASK_ID/skills.
+// GET $AEP_PLATFORM_URL/internal/v1/tasks/$AEP_TASK_ID/skills.
 //
 // Auth: the per-task RS256 bearer the runner already holds (same one
 // used by the verification-failed endpoint). Returns the resolved
@@ -58,7 +58,7 @@ export interface PullArgs {
  */
 export async function pullTaskSkills(args: PullArgs): Promise<SkillsPullResponse> {
   const base = new URL(args.platformURL);
-  const url = new URL(`/api/v1/tasks/${encodeURIComponent(args.taskId)}/skills`, base);
+  const url = new URL(`/internal/v1/tasks/${encodeURIComponent(args.taskId)}/skills`, base);
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${args.bearer.trim()}`,

@@ -30,7 +30,7 @@ import (
 // surface over internalMux. It is the sibling of newHumaAPI (the public edge),
 // with three deliberate differences: (1) it is NOT wrapped by the user-JWT
 // middleware — each operation authenticates by construction via
-// scope.RunnerScopedInput (BFF Task-JWT / publisher-cc); (2) its security
+// auth.RunnerScopedInput (BFF Task-JWT / publisher-cc); (2) its security
 // schemes are the S2S ones, not userJWT; (3) its spec is non-public — it is
 // generated to a checked-in file and is never advertised on the gateway. See
 // docs/design/internal-s2s-api.md §3.

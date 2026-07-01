@@ -189,13 +189,6 @@ func validateJWT(tokenString string, cfg Config, issuers compiledIssuers, audien
 		return nil, fmt.Errorf("failed to extract claims")
 	}
 
-	slog.Info("[SHAKEOUT:CLAIMS] validateJWT branch",
-		"branch", "jwks-verified",
-		"iss", claims.Issuer,
-		"aud", claims.Audience,
-		"allowedIssuers", cfg.AllowedIssuers,
-		"allowedAudiences", cfg.AllowedAudiences)
-
 	if err := issuers.match(claims.Issuer); err != nil {
 		return nil, err
 	}

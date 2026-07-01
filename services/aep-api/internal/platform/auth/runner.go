@@ -14,14 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package scope holds the by-construction tenant gates for the BFF's Huma
-// surfaces — embeddable input structs whose Resolve method IS the scope check.
-// RunnerScopedInput is the internal-S2S analogue of humakit.OrgScopedInput:
+package auth
+
+// This file holds the by-construction tenant gate for the BFF's internal-S2S
+// Huma surface — an embeddable input struct whose Resolve method IS the scope
+// check. RunnerScopedInput is the internal-S2S analogue of humakit.OrgScopedInput:
 // where OrgScopedInput binds the org from a verified user JWT on /api, this
 // binds it from a verified runner credential on /internal. Both express
 // "a request cannot act on an org it does not own" as a type, not a per-handler
-// check. See docs/design/internal-s2s-api.md §3.
-package scope
+// check. It lives beside the token verifiers (TaskTokenManager,
+// PublisherTokenVerifier) it drives — one auth home. See docs/design/internal-s2s-api.md §3.
 
 import (
 	"context"
@@ -30,7 +32,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
@@ -51,14 +52,14 @@ type TaskOrgLookup func(ctx context.Context, taskID string) (orgHandle string, e
 // for the dual-token logic + the path↔identity fence (INT-6) that used to live
 // inline in the task controller.
 type RunnerAuthorizer struct {
-	taskTokens *auth.TaskTokenManager
-	publisher  *auth.PublisherTokenVerifier // may be nil (Task-JWT only)
+	taskTokens *TaskTokenManager
+	publisher  *PublisherTokenVerifier // may be nil (Task-JWT only)
 	taskOrg    TaskOrgLookup
 }
 
 // NewRunnerAuthorizer builds the authorizer. publisher may be nil (local dev
 // without the platform IDP) — then only BFF Task-JWTs are accepted.
-func NewRunnerAuthorizer(taskTokens *auth.TaskTokenManager, publisher *auth.PublisherTokenVerifier, taskOrg TaskOrgLookup) *RunnerAuthorizer {
+func NewRunnerAuthorizer(taskTokens *TaskTokenManager, publisher *PublisherTokenVerifier, taskOrg TaskOrgLookup) *RunnerAuthorizer {
 	return &RunnerAuthorizer{taskTokens: taskTokens, publisher: publisher, taskOrg: taskOrg}
 }
 

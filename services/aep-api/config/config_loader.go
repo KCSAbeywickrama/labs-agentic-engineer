@@ -32,7 +32,7 @@ import (
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
 	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
-	runnerImageVersion = "v3"
+	runnerImageVersion = "v4"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
@@ -63,12 +63,9 @@ func Load() (Config, error) {
 		LocalOpenBaoRepairEnabled: r.readOptionalBool("LOCAL_OPENBAO_REPAIR", false),
 		DeploymentTier:            r.readOptionalString("DEPLOYMENT_TIER", "dev"),
 		TenantGateMode:            r.readOptionalString("TENANT_GATE_MODE", "enforce"),
-		GitHubWebhookSecret:    r.readOptionalString("GITHUB_WEBHOOK_SECRET", ""),
-		OAuthStateSigningKey:   r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
-		GithubAppSlug:          r.readOptionalString("GITHUB_APP_SLUG", "aep-platform"),
-		GithubAppClientID:      r.readOptionalString("GITHUB_CLIENT_ID", ""),
-		BFFPublicURL:           r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
-		BuildAuthRetryBudget:   r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
+		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
+		BFFPublicURL:              r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
+		BuildAuthRetryBudget:      r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
 		ThunderAdmin: ThunderAdminConfig{
 			BaseURL:      r.readOptionalString("THUNDER_ADMIN_URL", ""),
 			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "aep-system-client"),
@@ -120,10 +117,6 @@ func Load() (Config, error) {
 		GitHubAppSlug:               r.readOptionalString("GITHUB_APP_SLUG", "aep-platform"),
 		GitHubAppPrivateKeyPath:     r.readOptionalString("GITHUB_APP_PRIVATE_KEY_PATH", ""),
 		CredentialValidatorInterval: r.readOptionalDuration("CREDENTIAL_VALIDATOR_INTERVAL", 24*time.Hour),
-		BFFJWKSURL:                  r.readOptionalString("BFF_JWKS_URL", ""),
-		TaskJWTAllowedIssuer:        r.readOptionalString("TASK_JWT_ISSUER", "aep-bff"),
-		TaskJWTAllowedAudience:      r.readOptionalString("TASK_JWT_AUDIENCE", "git-service"),
-		AgentsServiceURL:            r.readOptionalString("AGENTS_SERVICE_URL", ""),
 
 		// SM-API + cluster-gateway-proxy.
 		SecretManagerAPIURL:     r.readOptionalString("SECRET_MANAGER_API_URL", ""),
@@ -141,6 +134,10 @@ func Load() (Config, error) {
 			msgs[i] = e.Error()
 		}
 		return Config{}, fmt.Errorf("configuration errors:\n%s", strings.Join(msgs, "\n"))
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil

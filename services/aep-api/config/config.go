@@ -16,7 +16,12 @@
 
 package config
 
-import "time"
+import (
+	"encoding/base64"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Config holds all application configuration.
 type Config struct {
@@ -47,13 +52,9 @@ type Config struct {
 	// TenantGateMode controls the central per-route tenant gate (§6.1b).
 	// ENFORCE BY DEFAULT (zero-config): "enforce" 404s a path-vs-JWT org
 	// mismatch (closes IDOR-1..5). Set TENANT_GATE_MODE=log to downgrade to
-	// observe-only — compute the decision, emit a [SHAKEOUT:would-deny] canary
+	// observe-only — compute the decision, emit a "would-deny" canary
 	// line, and pass through. Read from TENANT_GATE_MODE; unset ⇒ enforce.
 	TenantGateMode string
-
-	// GitHubWebhookSecret is the HMAC key for inbound webhook validation
-	// (one-shot, set per-org in production; one global value in dev).
-	GitHubWebhookSecret string
 
 	// OAuthStateSigningKey is the HS256 key used to sign the connect-state
 	// JWT that rides the GitHub App OAuth `state` query param (CSRF
@@ -61,9 +62,6 @@ type Config struct {
 	// TaskTokenSigningKey; this key has no other use.
 	OAuthStateSigningKey string
 
-	// GitHub App connect surface.
-	GithubAppSlug     string // App's URL slug, used in the install URL
-	GithubAppClientID string // App's OAuth client_id; used to build the OAuth authorize URL
 	// BFFPublicURL is the user-visible BFF base — used as the basis for
 	// the App-mode redirect after callback (302 → console settings page).
 	BFFPublicURL string
@@ -96,9 +94,9 @@ type Config struct {
 	// keymanager in gateway-config.yaml.
 	PlatformIDP PlatformIDPDefaults
 
-	Observability   ObservabilityConfig
-	AgentsService   AgentsServiceConfig
-	ServiceAuth     ServiceAuthConfig
+	Observability ObservabilityConfig
+	AgentsService AgentsServiceConfig
+	ServiceAuth   ServiceAuthConfig
 
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
 	// back to the BFF (every former git-service endpoint is served by the
@@ -115,9 +113,7 @@ type Config struct {
 	JWTAllowedAudience     string
 	JWTResourceMetadataURL string
 
-	// Git-service config fields. Some overlap conceptually with the
-	// aep-side fields above (e.g. GitHubAppSlug vs GithubAppSlug); the
-	// loader sets both from the same env vars.
+	// Git-service config fields.
 
 	RepoBasePath string
 
@@ -139,24 +135,14 @@ type Config struct {
 	OpenBaoToken string
 
 	GitHubAppID             string
-	GitHubAppClientID       string
+	GitHubAppClientID       string // App's OAuth client_id; used to build the OAuth authorize URL
 	GitHubAppClientSecret   string
-	GitHubAppSlug           string
+	GitHubAppSlug           string // App's URL slug, used in the install URL
 	GitHubAppPrivateKeyPath string
 
 	// CredentialValidatorInterval is the periodic credential-validator
 	// sweep interval. Default 24h.
 	CredentialValidatorInterval time.Duration
-
-	// BFFJWKSURL is the BFF's JWKS endpoint used to verify Task JWTs.
-	BFFJWKSURL string
-
-	TaskJWTAllowedIssuer   string
-	TaskJWTAllowedAudience string
-
-	// AgentsServiceURL — in-cluster base URL of aep-agents-service.
-	// (Duplicates AgentsService.BaseURL under a different field name.)
-	AgentsServiceURL string
 
 	// Secret Manager API + cluster-gateway-proxy.
 	// SM-API URL the binary writes per-org credentials to (the `sm-api`
@@ -187,6 +173,21 @@ type Config struct {
 	// and will silently no-op our reads. Local k3d reuses the existing
 	// `default` CSS.
 	AgentClusterSecretStore string
+}
+
+// Validate checks format/consistency invariants the per-field env readers
+// can't express — e.g. an AES key must decode from base64 to exactly 32 bytes.
+// Called at the end of Load; kept as a method so config_test.go can drive it
+// table-style without touching the environment. Accumulates all failures.
+func (c Config) Validate() error {
+	var errs []string
+	if key, err := base64.StdEncoding.DecodeString(c.CredentialEncryptionKey); err != nil || len(key) != 32 {
+		errs = append(errs, "CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("configuration errors:\n%s", strings.Join(errs, "\n"))
+	}
+	return nil
 }
 
 // ThunderAdminConfig holds the aep-system-client OAuth2 credentials
@@ -238,7 +239,6 @@ type ObservabilityConfig struct {
 	ClientID     string
 	ClientSecret string
 	HostHeader   string
-
 }
 
 // PlatformAPIConfig holds connection settings for the OpenChoreo platform API.
@@ -246,4 +246,3 @@ type PlatformAPIConfig struct {
 	BaseURL    string
 	HostHeader string
 }
-
