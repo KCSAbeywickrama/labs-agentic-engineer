@@ -21,7 +21,7 @@ import { Navigate, Outlet, Route, Routes, useOutletContext } from 'react-router-
 import { useAuth, useUserClaims } from './auth';
 import AuthGuard from './auth/AuthGuard';
 import { setTokenAccessor } from './services/api/rest';
-import AsdlcLayout from './layouts/AsdlcLayout';
+import AepLayout from './layouts/AepLayout';
 import OrgOverviewPage from './pages/OrgOverviewPage';
 import ProjectCreatePage from './pages/ProjectCreatePage';
 import ProjectArchitecturePage from './pages/ProjectArchitecturePage';
@@ -84,10 +84,10 @@ export function App() {
   }, [getAccessToken]);
 
   // Triggers server-side org/subscription provisioning so downstream entitlement checks pass.
-  useBillingOrg('app-factory', isSignedIn);
+  useBillingOrg('aep', isSignedIn);
 
   // Canonical OC org handle from the JWT claims, with the same precedence
-  // the BFF uses (asdlc-service/middleware/jwt.ResolveOuHandle). Returns
+  // the BFF uses (aep-service/middleware/jwt.ResolveOuHandle). Returns
   // undefined when the token has none of `ouHandle`/`ouName`/`ouId`; we
   // surface that as a fail-loud "no organization" page rather than
   // silently substituting a placeholder org.
@@ -106,7 +106,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<Navigate to={defaultLandingPath} replace />} />
 
-      <Route element={isSignedIn ? <AsdlcLayout /> : <Navigate to="/login" replace />}>
+      <Route element={isSignedIn ? <AepLayout /> : <Navigate to="/login" replace />}>
         <Route
           path="/"
           element={isSignedIn && !orgId ? <NoOrganizationPage /> : <Navigate to={defaultLandingPath} replace />}

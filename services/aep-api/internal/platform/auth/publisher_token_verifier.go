@@ -23,12 +23,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 )
 
 // PublisherTokenVerifier validates Thunder-issued client_credentials
 // access tokens whose audience identifies a per-org publisher OAuth app
-// ("asdlc-publisher-{orgHandle}"). Mirrors agent-manager's
+// ("aep-publisher-{orgHandle}"). Mirrors agent-manager's
 // PublisherClientAuthMiddleware at
 // agent-manager-service/middleware/jwtassertion/auth.go:106 — same
 // regex shape, same cross-org defense (subject's embedded org handle
@@ -55,7 +55,7 @@ type PublisherClaims struct {
 }
 
 // NewPublisherTokenVerifier returns a verifier. audiencePrefix is the
-// shared prefix on every per-org publisher client (e.g. "asdlc-publisher-").
+// shared prefix on every per-org publisher client (e.g. "aep-publisher-").
 // jwks must be a populated cache pointed at the platform IDP's JWKS
 // endpoint; expectedIssuer is the iss claim Thunder stamps (e.g.
 // "platform-idp"). Returns nil when any input is empty — composition root

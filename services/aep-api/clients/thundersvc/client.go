@@ -16,13 +16,13 @@
 
 // Package thundersvc is the BFF-side Thunder admin client. It mints
 // `scope=system` access tokens via client_credentials against a Thunder
-// OAuth app (asdlc-system-client) that has the Administrator role
+// OAuth app (aep-system-client) that has the Administrator role
 // assigned, then uses those tokens to manage per-org publisher OAuth
 // apps via Thunder's /applications endpoint.
 //
 // See docs/design/api-platform-integration.md §6.
 //
-//   - App naming convention: `asdlc-publisher-<orgHandle>`.
+//   - App naming convention: `aep-publisher-<orgHandle>`.
 //   - There is no OU UUID argument — every BFF caller passes the OC org
 //     handle and we look up the matching Thunder OU once at first call
 //     (cached on the client).
@@ -56,7 +56,7 @@ import (
 // returns false when the app is gone.
 type Client interface {
 	// EnsurePublisherApp creates an OAuth2 app named
-	// "asdlc-publisher-{orgHandle}" if it doesn't already exist.
+	// "aep-publisher-{orgHandle}" if it doesn't already exist.
 	// Returns the clientId and (on creation only) the clientSecret —
 	// Thunder doesn't expose the secret on subsequent reads, so callers
 	// MUST persist it to OpenBao on the `created=true` branch. When
@@ -99,7 +99,7 @@ type Client interface {
 	// `deployed` — its public URL is unknown until then, but Thunder
 	// rejects /oauth2/authorize requests whose redirect_uri isn't on
 	// the registered list. `clientID` is the OAuth client_id string
-	// (e.g. "asdlc-console-client") — NOT the application's UUID;
+	// (e.g. "aep-console-client") — NOT the application's UUID;
 	// findApp resolves it. Returns true when at least one URI was
 	// added, false when every URI was already present (a no-op).
 	EnsureRedirectURIs(ctx context.Context, clientID string, uris []string) (added bool, err error)
@@ -171,7 +171,7 @@ func New(cfg Config) Client {
 // PublisherAppName is the canonical naming function — exposed for the
 // idp_service so tests can assert names without re-deriving the prefix.
 func PublisherAppName(orgHandle string) string {
-	return "asdlc-publisher-" + orgHandle
+	return "aep-publisher-" + orgHandle
 }
 
 // -- system token --------------------------------------------------------
@@ -508,7 +508,7 @@ func (c *client) RegenerateClientSecret(ctx context.Context, orgHandle string) (
 // is just `projectName` so SPA code can read it from
 // `window._env_.THUNDER_CLIENT_ID`.
 func ProjectOAuthClientName(projectName string) string {
-	return "asdlc-project-" + projectName
+	return "aep-project-" + projectName
 }
 
 func (c *client) EnsureProjectOAuthClient(ctx context.Context, projectName string, redirectURIs []string) (string, bool, error) {

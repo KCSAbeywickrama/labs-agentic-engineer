@@ -1,6 +1,6 @@
 #!/bin/sh
-# ASDLC Thunder OAuth client bootstrap — runs as a post-install Helm hook.
-# Registers all ASDLC OAuth applications in OC's Thunder instance and assigns
+# AEP Thunder OAuth client bootstrap — runs as a post-install Helm hook.
+# Registers all AEP OAuth applications in OC's Thunder instance and assigns
 # the system client to the Administrator role. Fully idempotent.
 #
 # Targets OC's bundled Thunder (NOT a separate AE Thunder instance).
@@ -11,8 +11,8 @@
 #   THUNDER_ADMIN_CLIENT_ID     — OC Thunder admin client (e.g. openchoreo-system-app)
 #   THUNDER_ADMIN_CLIENT_SECRET — OC Thunder admin client secret
 #   THUNDER_OU_HANDLE           — organisation unit handle (e.g. "default")
-#   THUNDER_SYSTEM_CLIENT_ID    — ASDLC system client ID to register
-#   THUNDER_SYSTEM_CLIENT_SECRET — ASDLC system client secret
+#   THUNDER_SYSTEM_CLIENT_ID    — AEP system client ID to register
+#   THUNDER_SYSTEM_CLIENT_SECRET — AEP system client secret
 #   CONSOLE_PUBLIC_URL          — browser-facing console URL (PKCE redirect URI)
 
 set -eu
@@ -34,7 +34,7 @@ log_err() { echo "[$(date -u +%H:%M:%S)] ✗ $*" >&2; }
 
 # ── Patch Thunder CORS to include the console URL ───────────────────────────
 # Thunder's cors.allowed_origins is baked into its ConfigMap at OC install time
-# and does not include the ASDLC console URL. We patch it here via the K8s API
+# and does not include the AEP console URL. We patch it here via the K8s API
 # (using this job's ServiceAccount token) then trigger a rolling restart so the
 # new config is loaded before we register OAuth clients below.
 log "Checking Thunder CORS config for ${CONSOLE_URL}..."
@@ -227,34 +227,34 @@ ensure_confidential() {
 log "Registering confidential OAuth clients in OC Thunder..."
 
 ensure_confidential \
-    "ASDLC API Client" \
-    "ASDLC BFF service identity for OpenChoreo API calls" \
-    "asdlc-api-client" \
-    "asdlc-api-client-secret"
+    "AEP API Client" \
+    "AEP BFF service identity for OpenChoreo API calls" \
+    "aep-api-client" \
+    "aep-api-client-secret"
 
 ensure_confidential \
-    "ASDLC System Client" \
-    "ASDLC platform system client for per-org OAuth app lifecycle" \
+    "AEP System Client" \
+    "AEP platform system client for per-org OAuth app lifecycle" \
     "${THUNDER_SYSTEM_CLIENT_ID}" \
     "${THUNDER_SYSTEM_CLIENT_SECRET}"
 
 ensure_confidential \
-    "ASDLC BFF to agents-service" \
+    "AEP BFF to agents-service" \
     "BFF outbound service JWT, audience: agents-service" \
-    "asdlc-bff-to-agents-service" \
-    "asdlc-bff-to-agents-service-secret"
+    "aep-bff-to-agents-service" \
+    "aep-bff-to-agents-service-secret"
 
 ensure_confidential \
-    "ASDLC BFF to git-service" \
+    "AEP BFF to git-service" \
     "BFF outbound service JWT, audience: git-service" \
-    "asdlc-bff-to-git-service" \
-    "asdlc-bff-to-git-service-secret"
+    "aep-bff-to-git-service" \
+    "aep-bff-to-git-service-secret"
 
 ensure_confidential \
-    "ASDLC BFF to remote-worker" \
+    "AEP BFF to remote-worker" \
     "BFF outbound service JWT, audience: remote-worker" \
-    "asdlc-bff-to-remote-worker" \
-    "asdlc-bff-to-remote-worker-secret"
+    "aep-bff-to-remote-worker" \
+    "aep-bff-to-remote-worker-secret"
 
 # ── Public PKCE client (console) ─────────────────────────────────────────────
 log "Registering console PKCE client..."
@@ -264,10 +264,10 @@ console_payload=$(jq -n \
     --arg auth_flow_id "$AUTH_FLOW_ID" \
     --arg console_url "$CONSOLE_URL" \
     --argjson user_attrs "$USER_ATTRS" \
-    '{name:"ASDLC Console",description:"ASDLC Platform Console",ou_id:$ou_id,auth_flow_id:$auth_flow_id,inbound_auth_config:[{type:"oauth2",config:{client_id:"asdlc-console-client",redirect_uris:[$console_url],grant_types:["authorization_code","refresh_token"],response_types:["code"],token_endpoint_auth_method:"none",pkce_required:true,public_client:true,token:{access_token:{validity_period:86400,user_attributes:$user_attrs},id_token:{validity_period:86400,user_attributes:$user_attrs}}}}]}')
-upsert_app "asdlc-console-client" "$console_payload"
+    '{name:"AEP Console",description:"AEP Platform Console",ou_id:$ou_id,auth_flow_id:$auth_flow_id,inbound_auth_config:[{type:"oauth2",config:{client_id:"aep-console-client",redirect_uris:[$console_url],grant_types:["authorization_code","refresh_token"],response_types:["code"],token_endpoint_auth_method:"none",pkce_required:true,public_client:true,token:{access_token:{validity_period:86400,user_attributes:$user_attrs},id_token:{validity_period:86400,user_attributes:$user_attrs}}}}]}')
+upsert_app "aep-console-client" "$console_payload"
 
-# ── Assign ASDLC system client to Administrator role ─────────────────────────
+# ── Assign AEP system client to Administrator role ─────────────────────────
 log "Assigning ${THUNDER_SYSTEM_CLIENT_ID} to Administrator role..."
 ROLE_RESP=$(curl -sf --noproxy '*' -H "Authorization: Bearer $TOKEN" \
     "${THUNDER_URL}/roles?limit=200") || true

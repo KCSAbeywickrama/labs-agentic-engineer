@@ -7,8 +7,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Ensure, that ComponentClientMock does implement openchoreo.ComponentClient.

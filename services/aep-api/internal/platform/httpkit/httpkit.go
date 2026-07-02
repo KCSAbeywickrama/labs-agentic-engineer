@@ -24,8 +24,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/utils"
-	"github.com/wso2/asdlc/asdlc-service/utils/validate"
+	"github.com/wso2/aep/aep-api/middleware/jwt"
+	"github.com/wso2/aep/aep-api/utils"
+	"github.com/wso2/aep/aep-api/utils/validate"
 )
 
 // Write400 writes a 400 Bad Request with the given client-facing message.
@@ -49,29 +50,14 @@ func Write500(w http.ResponseWriter) {
 	utils.WriteErrorResponse(w, http.StatusInternalServerError, "internal error")
 }
 
-// ActorFromContext extracts the requesting user's identifier from the
-// JWT-authenticated context. Falls back to "unknown" when the JWT
-// middleware didn't populate claims.
+// ActorFromContext returns the requesting user's identifier (the verified
+// JWT subject) for audit attribution. Falls back to "unknown" when the JWT
+// middleware didn't populate claims (e.g. an unauthenticated path).
 func ActorFromContext(ctx context.Context) string {
-	if v := ctx.Value("user.sub"); v != nil { //nolint:revive — string-keyed legacy ctx
-		if s, ok := v.(string); ok {
-			return s
-		}
+	if c := jwt.ClaimsFromContext(ctx); c != nil && c.Subject != "" {
+		return c.Subject
 	}
 	return "unknown"
-}
-
-// RequireSlug validates a DNS-label-shaped slug path param. On failure it
-// writes a 400 to w (with paramName surfaced in the message) and returns
-// false; otherwise returns true. This is the single home of the
-// validate.Slug + WriteErrorResponse logic that the per-package require*
-// helpers delegate to.
-func RequireSlug(w http.ResponseWriter, paramName, v string) bool {
-	if err := validate.Slug(v); err != nil {
-		Write400(w, paramName+": "+err.Error())
-		return false
-	}
-	return true
 }
 
 // RequireUUID validates a canonical UUID path param. On failure it writes a

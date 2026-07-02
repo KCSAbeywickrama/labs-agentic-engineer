@@ -246,7 +246,7 @@ function NotConnectedPanel({ onConnected }: { onConnected: () => void }) {
           </Stack>
           <Stack gap={0.5} sx={{ mb: 2 }}>
             <Typography variant="body2">• Per-repo access — you choose which repos</Typography>
-            <Typography variant="body2">• Bot identity (asdlc-platform[bot]) on commits</Typography>
+            <Typography variant="body2">• Bot identity (aep-platform[bot]) on commits</Typography>
             <Typography variant="body2">• Tokens auto-rotate hourly</Typography>
             <Typography variant="body2">• App-wide webhook delivery</Typography>
           </Stack>

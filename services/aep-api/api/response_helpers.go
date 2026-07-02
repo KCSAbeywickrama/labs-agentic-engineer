@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 )
 
 // ----------------------------------------------------------------------------

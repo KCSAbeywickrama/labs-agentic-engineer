@@ -2,7 +2,7 @@
 name: go
 description: How to build a Go service on the platform — pinned golang:1.25-alpine builder (the build pod runs with GOTOOLCHAIN=local), pure-Go modernc.org/sqlite driver (CGO times out under the build pod's CPU throttle), suggested layout, port 9090, GET /health liveness, multi-stage Dockerfile → slim runtime, embedded SQLite for per-user data inside the owning service. Apply to every Go component.
 metadata:
-  asdlc.version: "2"
+  aep.version: "2"
 ---
 
 # Go

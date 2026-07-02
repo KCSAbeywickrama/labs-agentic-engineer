@@ -46,7 +46,7 @@ import (
 // FieldOwner is the Server-Side Apply field-manager string git-service stamps
 // on objects it owns. Picking a stable, distinctive value makes audit + drift
 // reconciliation tractable.
-const FieldOwner = "app-factory-git-service"
+const FieldOwner = "aep-git-service"
 
 // NewInClusterClient returns a controller-runtime client wired against the
 // in-cluster service-account token. Returns an error if no rest.Config is

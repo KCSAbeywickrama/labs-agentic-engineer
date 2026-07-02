@@ -45,7 +45,7 @@ func (c *appInstallationCred) Token(ctx context.Context) (string, time.Time, err
 	return c.minter.MintForInstallation(ctx, c.installationID)
 }
 
-// Identity returns the App's bot identity (e.g. asdlc-bot[bot]).
+// Identity returns the App's bot identity (e.g. aep-bot[bot]).
 func (c *appInstallationCred) Identity() Identity { return c.identity }
 
 // RepoOwner returns the GitHub account login the App is installed on

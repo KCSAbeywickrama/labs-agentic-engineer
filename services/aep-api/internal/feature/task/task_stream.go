@@ -29,10 +29,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // ghCreateConcurrency caps in-flight GitHub issue creations during the

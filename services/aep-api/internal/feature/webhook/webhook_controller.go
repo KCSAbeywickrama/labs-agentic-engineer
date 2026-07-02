@@ -24,12 +24,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 )
 
 // isLookupNotFound reports whether err is a 404 surfaced by the routing
 // lookup. A 404 means "this event is for a repo or installation that
-// isn't connected to ASDLC" — ack noop instead of 5xx-retrying for hours.
+// isn't connected to AEP" — ack noop instead of 5xx-retrying for hours.
 func isLookupNotFound(err error) bool {
 	var nfe *orgcreds.NotFoundError
 	if errors.As(err, &nfe) {
@@ -107,7 +107,7 @@ func (c *webhookController) Receive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// 404 from the routing lookup means "the install / repo isn't
-		// connected to this ASDLC instance." Ack 200 noop so GitHub
+		// connected to this AEP instance." Ack 200 noop so GitHub
 		// stops retrying — the event is genuinely not for us. Other
 		// errors (5xx, network) bubble up as 5xx so GitHub retries.
 		if isLookupNotFound(err) {

@@ -16,7 +16,7 @@
 
 # Stage 1: Build the React application.
 # Build context is the repo root so workspace packages (ui-components/*) are
-# reachable from console's workspace:* dependency on @asdlc/md-editor.
+# reachable from console's workspace:* dependency on @aep/md-editor.
 FROM node:22-alpine AS builder
 
 # Pin pnpm to match the local development version. The default corepack
@@ -40,7 +40,7 @@ RUN pnpm install --frozen-lockfile
 COPY console/ ./console/
 COPY ui-components/ ./ui-components/
 
-RUN pnpm --filter asdlc-console build
+RUN pnpm --filter aep-console build
 
 # Stage 2: Serve with nginx
 FROM nginx:1.28-alpine
@@ -54,8 +54,8 @@ RUN apk upgrade --no-cache \
       libcrypto3 libssl3 libexpat libpng libxml2 \
       musl musl-utils nghttp2-libs zlib
 
-RUN addgroup -g 10001 -S asdlcuser && \
-    adduser -u 10001 -S asdlcuser -G asdlcuser
+RUN addgroup -g 10001 -S aepuser && \
+    adduser -u 10001 -S aepuser -G aepuser
 
 COPY --chown=10001:10001 console/nginx.conf /etc/nginx/nginx.conf
 COPY --from=builder --chown=10001:10001 /repo/console/dist /usr/share/nginx/html

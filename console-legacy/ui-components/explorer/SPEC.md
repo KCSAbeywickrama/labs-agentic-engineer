@@ -3,7 +3,7 @@
 ## Overview
 
 A React component that pairs a Google Docs-style "Document tabs" sidebar
-with an `MdEditor` from `@asdlc/md-editor`. The sidebar is a **flat list of
+with an `MdEditor` from `@aep/md-editor`. The sidebar is a **flat list of
 files** — no folders, no path separators interpreted. Beneath each file, the
 component parses the markdown's headings and renders a **live Table of
 Contents (ToC)** tree nested under that file. Clicking a ToC entry scrolls
@@ -23,7 +23,7 @@ surface.
 
 ### Technology
 
-- Depends on `@asdlc/md-editor` (`workspace:*`)
+- Depends on `@aep/md-editor` (`workspace:*`)
 - No MUI, no Oxygen UI, no theme context — styling via a single injected `<style>` tag
 - Peer: `react ^19.0.0`, `react-dom ^19.0.0`
 
@@ -247,7 +247,7 @@ src/
 
 | Requirement | Target |
 |-------------|--------|
-| Bundle size (own code, excluding @asdlc/md-editor) | < 20KB minified |
+| Bundle size (own code, excluding @aep/md-editor) | < 20KB minified |
 | Accessibility | `role="tree"` / `role="treeitem"` / `aria-selected`; menu items have `role="menuitem"`; kebab and add-file buttons have `aria-label` |
 | Browser support | Chrome, Firefox, Safari, Edge (latest 2 versions) |
 

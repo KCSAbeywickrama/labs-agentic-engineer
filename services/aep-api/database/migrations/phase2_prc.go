@@ -29,7 +29,7 @@ import (
 //     (nullable initially; backfilled from repo_url; then NOT NULL via index)
 //
 // repo_slug is the SecretReference slug — `lower(replace(<owner>/<repo>, '/', '-'))`.
-// Used for OpenBao path keying (`secret/asdlc/{ocOrgId}/git/{repoSlug}`) and
+// Used for OpenBao path keying (`secret/aep/{ocOrgId}/git/{repoSlug}`) and
 // the OC `SecretReference` CR name (`git-{ocOrgId}-{repoSlug}`).
 //
 // Idempotent. Backfill is best-effort: rows whose repo_url cannot be parsed

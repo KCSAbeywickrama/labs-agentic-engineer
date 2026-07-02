@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
 )
 
 // Sentinel errors for OpenChoreo HTTP semantics. Callers in services/ and

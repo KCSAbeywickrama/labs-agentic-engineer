@@ -45,7 +45,7 @@ import (
 // The disconnect cascade itself runs on the BFF (where ComponentTask
 // lives), not in git-service. The validator calls back via the
 // CascadeTrigger callback — wired in cmd/git-service/main.go to the
-// asdlcservice client's TriggerDisconnect.
+// aepservice client's TriggerDisconnect.
 type Validator struct {
 	db       *gorm.DB
 	probes   ValidatorProbes

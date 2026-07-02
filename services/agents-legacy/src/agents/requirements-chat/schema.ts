@@ -43,7 +43,7 @@ export type RequirementsChatInput = z.infer<typeof RequirementsChatInput>;
 export type ChatHistoryMessage = z.infer<typeof ChatHistoryMessage>;
 
 // Element shapes accepted by the canvas tools — mirrored byte-for-byte by
-// the BFF schema (`asdlc-service/services/requirements_chat_*`) so the
+// the BFF schema (`aep-service/services/requirements_chat_*`) so the
 // wire format is symmetrical.
 
 export const WireframeElement = z.discriminatedUnion("kind", [

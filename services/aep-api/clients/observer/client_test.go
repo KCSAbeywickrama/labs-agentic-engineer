@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
+	"github.com/wso2/aep/aep-api/clients/oauth"
 )
 
 // fakeTokenProvider serves a static token. We construct a TokenProvider

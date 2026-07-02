@@ -20,7 +20,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/aep/aep-api/middleware"
 )
 
 // ContextHandler wraps an slog.Handler and enriches every record with the

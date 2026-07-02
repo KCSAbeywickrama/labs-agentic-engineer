@@ -105,7 +105,7 @@ func newTestClient(base string) *client {
 
 // Wrong OU → delete + recreate under the org OU, created=true, secret rotated.
 func TestEnsurePublisherApp_HealsWrongOU(t *testing.T) {
-	m := &thunderMock{appID: "app-1", appName: "asdlc-publisher-org1", clientID: "asdlc-publisher-org1", ouID: "default-ou"}
+	m := &thunderMock{appID: "app-1", appName: "aep-publisher-org1", clientID: "aep-publisher-org1", ouID: "default-ou"}
 	srv := m.server(t)
 	defer srv.Close()
 	c := newTestClient(srv.URL)
@@ -123,7 +123,7 @@ func TestEnsurePublisherApp_HealsWrongOU(t *testing.T) {
 	if !created || secret != "fresh-secret" {
 		t.Errorf("want created=true with rotated secret, got created=%v secret=%q", created, secret)
 	}
-	if id != "asdlc-publisher-org1" {
+	if id != "aep-publisher-org1" {
 		t.Errorf("client_id changed: got %q", id)
 	}
 }
@@ -131,7 +131,7 @@ func TestEnsurePublisherApp_HealsWrongOU(t *testing.T) {
 // Wrong OU + Thunder returns 500 on delete but the app is actually gone →
 // the heal must still recreate under the org OU (one-pass durability).
 func TestEnsurePublisherApp_HealsWrongOU_DeleteReturns500ButGone(t *testing.T) {
-	m := &thunderMock{appID: "app-1", appName: "asdlc-publisher-org1", clientID: "asdlc-publisher-org1", ouID: "default-ou", deleteStatus: 500}
+	m := &thunderMock{appID: "app-1", appName: "aep-publisher-org1", clientID: "aep-publisher-org1", ouID: "default-ou", deleteStatus: 500}
 	srv := m.server(t)
 	defer srv.Close()
 	c := newTestClient(srv.URL)
@@ -150,7 +150,7 @@ func TestEnsurePublisherApp_HealsWrongOU_DeleteReturns500ButGone(t *testing.T) {
 // recreate under a non-existent OU (Thunder 400 APP-1018). Regression test for
 // the runner publisher cc-token invalid_client root cause.
 func TestEnsurePublisherApp_PhantomOU_KeepsExistingApp(t *testing.T) {
-	m := &thunderMock{appID: "app-1", appName: "asdlc-publisher-org1", clientID: "asdlc-publisher-org1", ouID: "real-ou", ouMissing: true}
+	m := &thunderMock{appID: "app-1", appName: "aep-publisher-org1", clientID: "aep-publisher-org1", ouID: "real-ou", ouMissing: true}
 	srv := m.server(t)
 	defer srv.Close()
 	c := newTestClient(srv.URL)
@@ -165,14 +165,14 @@ func TestEnsurePublisherApp_PhantomOU_KeepsExistingApp(t *testing.T) {
 	if created || secret != "" {
 		t.Errorf("expected no recreate (created=false, empty secret), got created=%v secret=%q", created, secret)
 	}
-	if id != "asdlc-publisher-org1" {
+	if id != "aep-publisher-org1" {
 		t.Errorf("should return the existing client_id, got %q", id)
 	}
 }
 
 // Correct OU → no delete, no recreate, created=false.
 func TestEnsurePublisherApp_CorrectOU_NoHeal(t *testing.T) {
-	m := &thunderMock{appID: "app-1", appName: "asdlc-publisher-org1", clientID: "asdlc-publisher-org1", ouID: "org-ou-1"}
+	m := &thunderMock{appID: "app-1", appName: "aep-publisher-org1", clientID: "aep-publisher-org1", ouID: "org-ou-1"}
 	srv := m.server(t)
 	defer srv.Close()
 	c := newTestClient(srv.URL)
@@ -191,7 +191,7 @@ func TestEnsurePublisherApp_CorrectOU_NoHeal(t *testing.T) {
 
 // No existing app + org OU known → create under the org OU.
 func TestEnsurePublisherApp_CreatesUnderOrgOU(t *testing.T) {
-	m := &thunderMock{appName: "asdlc-publisher-org1"}
+	m := &thunderMock{appName: "aep-publisher-org1"}
 	srv := m.server(t)
 	defer srv.Close()
 	c := newTestClient(srv.URL)

@@ -20,7 +20,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/obs"
+	"github.com/wso2/aep/aep-api/internal/platform/obs"
 )
 
 // These are thin wrappers over the correlation-ID context helpers in

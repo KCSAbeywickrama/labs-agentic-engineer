@@ -50,7 +50,7 @@ const resourceMetadataUrl = process.env.JWT_RESOURCE_METADATA_URL;
 // Fail closed: every internal call carries a BFF-signed identity JWT, so the
 // gate covers the whole INTERNAL_V1 subtree — both the AGENTS_BASE routes and
 // the sibling dsl/render helper (previously unauthenticated). JWKS_URL +
-// JWT_ISSUER point at the BFF (/auth/external/jwks.json, iss asdlc-bff), and
+// JWT_ISSUER point at the BFF (/auth/external/jwks.json, iss aep-bff), and
 // the org travels in the verified ocOrgId claim, not a trusted header. A
 // missing value is a misconfiguration, not a dev mode, so refuse to start
 // rather than silently disable auth (matches the BFF).

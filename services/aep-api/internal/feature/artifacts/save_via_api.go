@@ -33,9 +33,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // saveDesignViaAPI implements §8.2 (Git Data API path): the working

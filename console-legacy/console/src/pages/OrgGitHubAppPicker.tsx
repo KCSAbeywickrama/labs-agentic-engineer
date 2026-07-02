@@ -116,7 +116,7 @@ export default function OrgGitHubAppPicker() {
         <Typography variant="h5" fontWeight={700}>Pick a GitHub installation</Typography>
       </Stack>
       <Typography variant="body1" color="text.secondary">
-        You administer multiple GitHub installations of the ASDLC App. Pick the one you want to connect to this organization.
+        You administer multiple GitHub installations of the AEP App. Pick the one you want to connect to this organization.
       </Typography>
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}

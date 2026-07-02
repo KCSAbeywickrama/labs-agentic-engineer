@@ -24,11 +24,11 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // RegisterInstallationHandlers wires the handlers for App-mode lifecycle

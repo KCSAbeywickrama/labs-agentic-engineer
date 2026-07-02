@@ -29,10 +29,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/k8sname"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // ErrSpecNotApproved is the design-domain sentinel surfaced (as 409 by the
@@ -117,34 +117,11 @@ type taskReconciler interface {
 	ReconcilePendingForDesignChange(ctx context.Context, orgID, projectID string) error
 }
 
-// DesignServiceWithTaskHook lets the construction wire-up surface the
-// reconciliation hook setter without polluting the public DesignService
-// interface.
-type DesignServiceWithTaskHook interface {
-	DesignService
-	SetTaskService(taskSvc taskReconciler)
-}
-
-// DesignServiceWithTraitSync surfaces the trait_sync setter so an
-// `exposesAPI.auth` toggle on design.md propagates to OC after the file is
-// written. Mirrors the DesignServiceWithTaskHook pattern.
-type DesignServiceWithTraitSync interface {
-	DesignService
-	SetTraitSync(traitSync traitSyncReconciler)
-}
-
-// DesignServiceWithSkills surfaces the skill-catalogue setter so the
-// architect call ships the org's skill set as input.
-type DesignServiceWithSkills interface {
-	DesignService
-	SetSkillService(svc skillCatalog)
-}
-
 func NewDesignService(
 	store *artifacts.ArtifactStore,
 	agentsClient agents.Client,
 	artifactSvc artifacts.ArtifactService,
-) DesignService {
+) *designService {
 	return &designService{
 		store:        store,
 		agentsClient: agentsClient,
@@ -163,17 +140,6 @@ func (s *designService) SetTraitSync(traitSync traitSyncReconciler) {
 func (s *designService) SetSkillService(svc skillCatalog) {
 	s.skillSvc = svc
 }
-
-// Compile-time guards: NewDesignService returns the DesignService interface,
-// and the composition root wires these optional setters via type-assertion.
-// Asserting *designService satisfies each optional interface here turns a
-// setter-signature drift into a build failure instead of a silently-skipped
-// wire at boot.
-var (
-	_ DesignServiceWithTaskHook  = (*designService)(nil)
-	_ DesignServiceWithTraitSync = (*designService)(nil)
-	_ DesignServiceWithSkills    = (*designService)(nil)
-)
 
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {
 	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)

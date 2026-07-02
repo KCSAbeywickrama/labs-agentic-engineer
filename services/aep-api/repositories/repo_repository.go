@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 	"gorm.io/gorm"
 )
 
@@ -111,7 +111,7 @@ func (r *repoRepository) DeleteByOrgAndProjectID(ctx context.Context, ocOrgID, p
 }
 
 // LookupOrgProjectByRepoURL translates a GitHub repo full_name to its owning
-// ASDLC (orgID, projectID) via the git_repositories table. The repo row is the
+// AEP (orgID, projectID) via the git_repositories table. The repo row is the
 // authority: repo URLs are globally unique, so the matched row disambiguates
 // the project. Callers MUST scope task lookups by BOTH org_id and project_id —
 // project_id is only a per-org slug and is reused across orgs, so a

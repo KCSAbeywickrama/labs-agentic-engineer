@@ -22,7 +22,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
 // apiVersion is the OpenAPI document version. Bump on contract changes.
@@ -41,7 +41,7 @@ const apiVersion = "1.0.0"
 // server-relative. That is why the version prefix appears once in the spec
 // (servers) instead of in all ~58 path keys, with no per-request rewriting.
 func newHumaAPI(apiMux *http.ServeMux) huma.API {
-	cfg := huma.DefaultConfig("ASDLC BFF API", apiVersion)
+	cfg := huma.DefaultConfig("AEP BFF API", apiVersion)
 	// Disable Huma's built-in spec/docs/schema routes: they would land on
 	// apiMux (unreachable — it only receives /api/*), and clearing SchemasPath
 	// also suppresses the $schema response-body link injection so converted
@@ -85,7 +85,7 @@ const docsHTML = `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <title>ASDLC BFF API</title>
+    <title>AEP BFF API</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://unpkg.com/@stoplight/elements/web-components.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/@stoplight/elements/styles.min.css">

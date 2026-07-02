@@ -1,4 +1,4 @@
-# POC log — WSO2 API Platform + Thunder JWT on App Factory v1 (`deployments/`)
+# POC log — WSO2 API Platform + Thunder JWT on AEP v1 (`deployments/`)
 
 Branch: `poc-api-platform` (tracking `upstream/design-revamp`)
 
@@ -59,7 +59,7 @@ Component Service → Pod (mendhak/http-https-echo:35)
 | RBAC | `wso2-api-platform-gateway-module` ClusterRole + Binding for `cluster-agent-dataplane` SA | `deployments/manifests/api-platform/rbac.yaml` |
 | APIGateway CR | `api-platform-default` in `openchoreo-data-plane` | `deployments/manifests/api-platform/api-gateway.yaml` |
 | ClusterTrait | `api-configuration` (canonical wso2cloud shape) | `deployments/manifests/api-platform/api-configuration-trait.yaml` |
-| ClusterComponentType patch | `service` gains `allowedTraits: [api-configuration]` | inline in `setup-asdlc.sh` |
+| ClusterComponentType patch | `service` gains `allowedTraits: [api-configuration]` | inline in `setup-aep.sh` |
 | Project CR | `poc-api-platform` | `deployments/manifests/poc-api-platform/00-project.yaml` |
 | Component+Workload+RB ×2 | `poc-public`, `poc-protected` | `deployments/manifests/poc-api-platform/{10,20}-*.yaml` |
 | Thunder OAuth client | `poc-api-platform-client` (client_credentials) | `deployments/scripts/setup-thunder-client.sh` |
@@ -88,9 +88,9 @@ Component Service → Pod (mendhak/http-https-echo:35)
          visibility: [external | internal | namespace]          # set; "project" is implicit
          basePath: /                                            # optional
    ```
-   ⚠️ `service` ClusterComponentType's HTTPRoute CEL filter (`setup-asdlc.sh:164`) lists `["HTTP", "REST", "GraphQL", "Websocket"]` — but the CRD doesn't allow `REST`. POC uses `HTTP`.
+   ⚠️ `service` ClusterComponentType's HTTPRoute CEL filter (`setup-aep.sh:164`) lists `["HTTP", "REST", "GraphQL", "Websocket"]` — but the CRD doesn't allow `REST`. POC uses `HTTP`.
 
-6. **`service` ClusterComponentType today has NO `allowedTraits`** (`setup-asdlc.sh:88-92`). POC must patch this in to allow `api-configuration`.
+6. **`service` ClusterComponentType today has NO `allowedTraits`** (`setup-aep.sh:88-92`). POC must patch this in to allow `api-configuration`.
 
 ### 🟡 To verify during apply
 
@@ -105,13 +105,13 @@ Component Service → Pod (mendhak/http-https-echo:35)
 ### 🔴 Known gotchas / open questions
 
 - **Ordering: AP install needs `openchoreo-data-plane` namespace**. Today `setup-prerequisites.sh` runs BEFORE `setup-openchoreo.sh` (which creates that namespace). Options:
-  1. Move AP install to AFTER OC install (new step in `setup.sh` between `setup-openchoreo.sh` and `setup-asdlc.sh`).
+  1. Move AP install to AFTER OC install (new step in `setup.sh` between `setup-openchoreo.sh` and `setup-aep.sh`).
   2. Create the namespace explicitly at the top of the AP install block.
   Picking option 2 — it keeps the user's directive ("fold into `setup-prerequisites.sh`") and only costs one `kubectl create namespace`.
 
 - **RBAC depends on `cluster-agent-dataplane` SA** which is created by OC. Applying the ClusterRoleBinding before the SA exists is allowed by k8s (subjects don't have to exist at bind time), but the trait reconciler that uses it won't work until OC is up. POC applies RBAC at setup-prerequisites and verifies behaviour at verify-time.
 
-- **Trait `allowedTraits` patch** — modifying the existing ClusterComponentType inline in `setup-asdlc.sh`. If the operator already created it without `allowedTraits`, `kubectl apply` should reconcile to the new spec. Worth verifying.
+- **Trait `allowedTraits` patch** — modifying the existing ClusterComponentType inline in `setup-aep.sh`. If the operator already created it without `allowedTraits`, `kubectl apply` should reconcile to the new spec. Worth verifying.
 
 - **CORS** — the `service` ClusterComponentType's HTTPRoute does NOT add a Gateway-API CORS filter (different from the wso2cloud overlay). No double-CORS risk. CORS via the trait's `cors` policy is the only layer.
 
@@ -133,7 +133,7 @@ Component Service → Pod (mendhak/http-https-echo:35)
 - ⚠️ **Finding: no separate `policy-engine` Deployment in chart v0.9.0.** The `policy-engine` config in `gateway-config.yaml` (`policy_engine:` block at lines 126–152) is still consumed, but the process runs **inside the gateway-runtime pod**. The Service exposes its admin/metrics ports (9002, 9003) on the same `api-platform-default-gateway-gateway-runtime` Service. The trait's hardcoded backend host (`...-gateway-gateway-runtime:8080`) still works.
 - ⚠️ **Finding: chart NOTES.txt mentions `GatewayConfiguration` + `APIConfiguration` CRDs in group `api.api-platform.wso2.com`** — those are documentation boilerplate, not installed in this version. Ignore.
 
-### ✅ Step 7 — `setup-asdlc.sh` (trait + allowedTraits)
+### ✅ Step 7 — `setup-aep.sh` (trait + allowedTraits)
 
 - `clustercomponenttype.openchoreo.dev/service configured` — `kubectl apply` updated the in-place CRD with the new `allowedTraits: [api-configuration]` block. No restart needed.
 - `clustertrait.openchoreo.dev/api-configuration created` — OC webhook accepted the trait on first try (no retry needed). `apply_with_retry` works.
@@ -185,7 +185,7 @@ The trait-generated `RestApi` names are also longer than what the trait template
 
 `setup-thunder-client.sh` failed with `401 unauthorized` even from inside the Thunder pod calling `localhost:8090`. Thunder v0.34 enforces auth on admin endpoints; bootstrap scripts that ship with the image presumably run during a pre-auth init phase. Getting an admin token from outside that path is non-trivial (no documented admin token endpoint in this env).
 
-**POC workaround**: use an already-bootstrapped confidential client (`asdlc-api-client` / `asdlc-api-client-secret`) to mint tokens. The trait's `jwt-auth v0` policy emits no `audience` or `issuers` filter, so any token signed by the cluster's configured keymanager passes — regardless of which client minted it. This is the same gap flagged earlier: the canonical trait can't constrain accepted audiences, which makes it both easier for POC and the reason BYO-IDP needs the upstream trait extension.
+**POC workaround**: use an already-bootstrapped confidential client (`aep-api-client` / `aep-api-client-secret`) to mint tokens. The trait's `jwt-auth v0` policy emits no `audience` or `issuers` filter, so any token signed by the cluster's configured keymanager passes — regardless of which client minted it. This is the same gap flagged earlier: the canonical trait can't constrain accepted audiences, which makes it both easier for POC and the reason BYO-IDP needs the upstream trait extension.
 
 **Production impact**: `setup-thunder-client.sh` as written is unusable. Either (a) wait for Thunder to expose a documented admin token mechanism, (b) drive client creation via Helm bootstrap rows in `values-thunder.yaml` (the existing pattern — all 7 platform clients live there), or (c) shell into Thunder during its early bootstrap phase. None are ideal for an automated POC verifier.
 
@@ -212,7 +212,7 @@ Helm output references `GatewayConfiguration` / `APIConfiguration` in group `api
 ### 🟢 Non-issues / good news
 
 - `kubectl apply` on an existing ClusterComponentType to add `allowedTraits` works cleanly — `configured`, no restart, no controller burp.
-- The `apply_with_retry` helper in `setup-asdlc.sh` is unnecessary for this — the OC webhook was up when we applied.
+- The `apply_with_retry` helper in `setup-aep.sh` is unnecessary for this — the OC webhook was up when we applied.
 - Component → ComponentRelease → RenderedRelease pipeline took ~25s end-to-end from Component apply to Pod Ready.
 - AP operator + gateway-runtime image pulls from ghcr.io took ~75s on first pull; subsequent re-runs skipped.
 
@@ -222,25 +222,25 @@ Helm output references `GatewayConfiguration` / `APIConfiguration` in group `api
 - **No rate-limit / add-headers policies** tested. The trait emits them under `environmentConfigs.{rateLimit,addHeaders}` but we left both `enabled: false`.
 - **No CORS preflight** tested — only direct curl. Worth a quick browser test from the console if we keep CORS on by default.
 - **No upstream MTLS** — gateway → backend is plain HTTP via Service DNS.
-- **No App Factory integration** — the BFF still has no idea this exists. The next step is wiring `design.md` frontmatter → BFF emits these YAMLs at build-workflow time. That's the actual product change; this POC just proved the substrate.
+- **No AEP integration** — the BFF still has no idea this exists. The next step is wiring `design.md` frontmatter → BFF emits these YAMLs at build-workflow time. That's the actual product change; this POC just proved the substrate.
 
 ## Updated scripts after POC
 
 - `verify-api-platform.sh` — needs an update to:
   - Look up the data-plane namespace dynamically (`kubectl get releasebinding ... -o jsonpath='{.status.endpoints[0].serviceURL.host}'`).
-  - Default to using `asdlc-api-client` instead of `setup-thunder-client.sh`.
+  - Default to using `aep-api-client` instead of `setup-thunder-client.sh`.
 - `setup-thunder-client.sh` — leave for now but flag as broken in the docstring. Either delete or rework once we understand the Thunder admin auth path.
 
 ## Net result
 
-The platform substrate works exactly as designed. App Factory can adopt this with confidence:
+The platform substrate works exactly as designed. AEP can adopt this with confidence:
 
 1. Install the AP operator (folded into `setup-prerequisites.sh`).
-2. Apply the canonical trait + add to `allowedTraits` (folded into `setup-asdlc.sh`).
+2. Apply the canonical trait + add to `allowedTraits` (folded into `setup-aep.sh`).
 3. Components opt-in by including the `api-configuration` trait + setting `jwtAuth.enabled: true` in the ReleaseBinding's `traitEnvironmentConfigs`.
 
 The remaining work is:
-- Decide how to drive Thunder client registration from App Factory (likely: add to `values-thunder.yaml` bootstrap or wait for Thunder admin token story).
+- Decide how to drive Thunder client registration from AEP (likely: add to `values-thunder.yaml` bootstrap or wait for Thunder admin token story).
 - Land the upstream trait extension to expose `issuers` + `audience` to enable BYO-IDP.
 - Wire `design.md` frontmatter → BFF spec emission (the v1 we discussed before the POC).
 
@@ -249,5 +249,5 @@ The remaining work is:
 - AP install vendor source: `deployments-v2/wso2cloud-deployment/wso2cloud-local/init/api-platform/{helm-release.yaml,gateway-config.yaml,rbac.yaml}` + `init/api-platform-gateway/api-gateway.yaml`
 - Canonical Trait: `deployments-v2/wso2cloud-deployment/wso2cloud-local/domains/platform/namespaces/wso2cloud/definitions/traits/api-configuration.yaml`
 - BYOI Workload example: `deployments-v2/wso2cloud-deployment/wso2cloud-local/domains/developers/namespaces/wso2cloud/projects/core/components/platform-idp/`
-- ComponentType CEL: `deployments/scripts/setup-asdlc.sh:83-195`
+- ComponentType CEL: `deployments/scripts/setup-aep.sh:83-195`
 - Workload CRD: `/Users/wso2/openchoreo-sources/openchoreo/config/crd/bases/openchoreo.dev_workloads.yaml`

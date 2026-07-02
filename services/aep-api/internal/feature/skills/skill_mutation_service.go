@@ -40,9 +40,9 @@ var (
 // design's 400 KB ceiling.
 const maxSkillBytes = 400 * 1024
 
-// reservedSkillNames cannot be used by custom/imported skills — `asdlc` is
+// reservedSkillNames cannot be used by custom/imported skills — `aep` is
 // the base plugin's name.
-var reservedSkillNames = map[string]bool{"asdlc": true}
+var reservedSkillNames = map[string]bool{"aep": true}
 
 // reservedSkillPrefixes are used at materialisation time; custom/imported
 // names must not collide with them.

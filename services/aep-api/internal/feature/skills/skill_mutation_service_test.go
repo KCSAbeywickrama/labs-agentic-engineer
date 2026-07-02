@@ -39,7 +39,7 @@ func TestValidateSkillName(t *testing.T) {
 		{"trailing hyphen", "payments-", "NAME_INVALID"},
 		{"double hyphen", "pay--ments", "NAME_INVALID"},
 		{"underscore", "pay_ments", "NAME_INVALID"},
-		{"reserved asdlc", "asdlc", "NAME_RESERVED"},
+		{"reserved aep", "aep", "NAME_RESERVED"},
 		{"reserved prefix builtin", "builtin-foo", "NAME_RESERVED"},
 		{"reserved prefix custom", "custom-foo", "NAME_RESERVED"},
 		{"reserved prefix imported", "imported-foo", "NAME_RESERVED"},
@@ -68,7 +68,7 @@ const validSkillMD = `---
 name: payments-pci-handling
 description: PCI-DSS logging requirements for components that touch card data.
 metadata:
-  asdlc.version: "2"
+  aep.version: "2"
 ---
 
 # Payments PCI Handling
@@ -124,9 +124,9 @@ func TestVersionFromMetadata(t *testing.T) {
 		md   string
 		want int
 	}{
-		{"flat dotted key string", "metadata:\n  asdlc.version: \"2\"\n", 2},
-		{"flat dotted key int", "metadata:\n  asdlc.version: 3\n", 3},
-		{"nested form", "metadata:\n  asdlc:\n    version: \"4\"\n", 4},
+		{"flat dotted key string", "metadata:\n  aep.version: \"2\"\n", 2},
+		{"flat dotted key int", "metadata:\n  aep.version: 3\n", 3},
+		{"nested form", "metadata:\n  aep:\n    version: \"4\"\n", 4},
 		{"absent defaults to 1", "metadata:\n  other: x\n", 1},
 		{"no metadata defaults to 1", "", 1},
 	}

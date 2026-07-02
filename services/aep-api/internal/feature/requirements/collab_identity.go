@@ -22,7 +22,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // repoOracle is the project-ownership port the collab handlers consult: it

@@ -26,15 +26,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/k8sname"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 	"gorm.io/gorm"
 )
 
@@ -49,10 +48,10 @@ type DispatchResult = contracts.DispatchResult
 //  1. Verifies a GitHub issue exists (created at task generation).
 //  2. Ensures the OC Component exists (with AutoBuild=false).
 //  3. Mints a fresh per-task RS256 JWT.
-//  4. Creates a WorkflowRun of ClusterWorkflow `app-factory-coding-agent`
+//  4. Creates a WorkflowRun of ClusterWorkflow `aep-coding-agent`
 //     via WorkflowRunService.TriggerCodingAgent. The Argo pod clones
 //     the project repo on its default branch and runs the Claude Agent
-//     SDK with the asdlc skill loaded; the agent itself creates the
+//     SDK with the aep skill loaded; the agent itself creates the
 //     feature branch and opens the PR with `Closes #<issue>` so the
 //     webhook handler can link the PR back to the task.
 //
@@ -148,20 +147,12 @@ type dispatchService struct {
 // db is required for the SM-API triplet lookup; clusterSecretStore +
 // runnerImage are pinned by the caller. Returns the receiver for
 // chained construction.
-func (s *dispatchService) WithCodingAgentDispatcher(d *Dispatcher, db *gorm.DB, clusterSecretStore, runnerImage string) DispatchService {
+func (s *dispatchService) WithCodingAgentDispatcher(d *Dispatcher, db *gorm.DB, clusterSecretStore, runnerImage string) *dispatchService {
 	s.codingAgentDispatcher = d
 	s.db = db
 	s.clusterSecretStore = clusterSecretStore
 	s.runnerImage = runnerImage
 	return s
-}
-
-// DispatchServiceWithTraitSync surfaces the trait_sync setter without
-// polluting the public DispatchService interface (parallels the
-// DesignServiceWithTaskHook pattern in design_service.go).
-type DispatchServiceWithTraitSync interface {
-	DispatchService
-	SetTraitSync(traitSync *component.TraitSyncService)
 }
 
 // SetIDPService wires the per-org Thunder publisher provisioning hook used
@@ -185,27 +176,6 @@ func (s *dispatchService) SetTraitSync(traitSync *component.TraitSyncService) {
 	s.traitSync = traitSync
 }
 
-// DispatchServiceWith* surface the optional setters the composition root
-// wires by type-assertion onto the DispatchService interface. Naming them
-// (and asserting the concrete satisfies them below) makes a setter-signature
-// drift a build failure instead of a wire silently skipped at boot.
-type DispatchServiceWithIDP interface {
-	SetIDPService(OrgPublisherProvisioner)
-}
-type DispatchServiceWithRuntimeConfig interface {
-	SetRuntimeConfig(RuntimeConfigEmitter)
-}
-type DispatchServiceWithCodingAgent interface {
-	WithCodingAgentDispatcher(*Dispatcher, *gorm.DB, string, string) DispatchService
-}
-
-var (
-	_ DispatchServiceWithTraitSync     = (*dispatchService)(nil)
-	_ DispatchServiceWithIDP           = (*dispatchService)(nil)
-	_ DispatchServiceWithRuntimeConfig = (*dispatchService)(nil)
-	_ DispatchServiceWithCodingAgent   = (*dispatchService)(nil)
-)
-
 func NewDispatchService(
 	taskRepo repositories.TaskRepository,
 	repoSvc gitrepo.RepoService,
@@ -221,7 +191,7 @@ func NewDispatchService(
 	projector TaskStateProjector,
 	gitServiceURL string,
 	platformURL string,
-) DispatchService {
+) *dispatchService {
 	return &dispatchService{
 		taskRepo:          taskRepo,
 		repoSvc:           repoSvc,
@@ -509,21 +479,10 @@ func (s *dispatchService) tryDispatchViaProxy(
 	identity *orgcreds.Identity,
 	bearer string,
 ) (bool, string, error) {
-	slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] tryDispatchViaProxy entry",
-		"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-		"task", task.ID, "orgID", task.OrgID,
-		"dispatcherNil", s.codingAgentDispatcher == nil, "dbNil", s.db == nil,
-		"imageEmpty", s.runnerImage == "", "storeEmpty", s.clusterSecretStore == "")
 	if s.codingAgentDispatcher == nil || s.db == nil {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fallback: dispatcher or db nil",
-			"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-			"task", task.ID, "dispatcherNil", s.codingAgentDispatcher == nil, "dbNil", s.db == nil)
 		return false, "", nil
 	}
 	if s.runnerImage == "" || s.clusterSecretStore == "" {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fallback: image or store empty",
-			"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-			"task", task.ID, "imageEmpty", s.runnerImage == "", "storeEmpty", s.clusterSecretStore == "")
 		slog.WarnContext(ctx, "proxy dispatch: missing runnerImage or clusterSecretStore — falling back to legacy path",
 			"task", task.ID)
 		return false, "", nil
@@ -538,27 +497,16 @@ func (s *dispatchService) tryDispatchViaProxy(
 		githubRow    models.OrgCredential
 	)
 	if err := s.db.WithContext(ctx).Where("oc_org_id = ?", task.OrgID).First(&anthropicRow).Error; err != nil {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fallback: anthropic row missing",
-			"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-			"task", task.ID, "ocOrgId", task.OrgID, "error", err.Error())
 		slog.InfoContext(ctx, "proxy dispatch: anthropic row missing; falling back",
 			"task", task.ID, "ocOrgId", task.OrgID, "error", err)
 		return false, "", nil
 	}
 	if err := s.db.WithContext(ctx).Where("oc_org_id = ?", task.OrgID).First(&githubRow).Error; err != nil {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fallback: github row missing",
-			"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-			"task", task.ID, "ocOrgId", task.OrgID, "error", err.Error())
 		slog.InfoContext(ctx, "proxy dispatch: github row missing; falling back",
 			"task", task.ID, "ocOrgId", task.OrgID, "error", err)
 		return false, "", nil
 	}
 	if anthropicRow.SMAPIKVPath == nil || githubRow.SMAPIKVPath == nil {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fallback: SM-API triplet nil",
-			"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-			"task", task.ID,
-			"anthropicMissing", anthropicRow.SMAPIKVPath == nil,
-			"githubMissing", githubRow.SMAPIKVPath == nil)
 		slog.InfoContext(ctx, "proxy dispatch: SM-API triplet missing on credential row(s); falling back",
 			"task", task.ID,
 			"anthropicMissing", anthropicRow.SMAPIKVPath == nil,
@@ -609,9 +557,6 @@ func (s *dispatchService) tryDispatchViaProxy(
 	// cannot authenticate (which would surface as an opaque
 	// "git-service returned 401" deep in the runner). Local k3d (http platform
 	// URL, no gateway) keeps using the per-task bearer fallback.
-	slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] publisher cc check",
-		"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-		"task", task.ID, "org", task.OrgID, "publisherSRPresent", publisherSR != nil)
 	if publisherSR != nil {
 		if pubErr != nil {
 			slog.WarnContext(ctx, "proxy dispatch: publisher cc path active but provisioning FAILED this run — runner will use possibly-stale publisher creds (expect cc-token invalid_client if the OU/secret drifted)",
@@ -621,8 +566,6 @@ func (s *dispatchService) tryDispatchViaProxy(
 				"task", task.ID, "org", task.OrgID)
 		}
 	} else if isGatewayPlatformURL(s.platformURL) {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fail: publisher cc missing on gateway platform",
-			"gatewayPlatform", true, "task", task.ID, "org", task.OrgID)
 		return false, "", fmt.Errorf("publisher cc not provisioned for org %q: the coding-agent runner cannot authenticate to the BFF through the gateway (a per-task JWT is rejected). Ensure Thunder + SM-API are healthy so the publisher can be provisioned and mirrored", task.OrgID)
 	}
 
@@ -630,18 +573,10 @@ func (s *dispatchService) tryDispatchViaProxy(
 	// NS derivation needs (`wc-<orgUUID8>-<orgHash8>-remote-worker`).
 	orgUUID, err := s.lookupOrgUUID(ctx, task.OrgID)
 	if err != nil {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] fallback: org UUID not found",
-			"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-			"task", task.ID, "ocOrgId", task.OrgID, "error", err.Error())
 		slog.InfoContext(ctx, "proxy dispatch: org UUID not found; falling back",
 			"task", task.ID, "ocOrgId", task.OrgID, "error", err)
 		return false, "", nil
 	}
-	slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] proxy dispatch proceeding",
-		"gatewayPlatform", isGatewayPlatformURL(s.platformURL),
-		"task", task.ID, "ocOrgId", task.OrgID, "orgUUID", orgUUID,
-		"remoteWorkerNamespace", tenant.RemoteWorkerNamespace(orgUUID))
-
 	runName := codingAgentRunName(task)
 	job := JobInputs{
 		RunName:       runName,
@@ -657,7 +592,7 @@ func (s *dispatchService) tryDispatchViaProxy(
 		IdentityLogin: identity.Login,
 		GitServiceURL: s.gitServiceURL,
 		CallbackURL:   s.platformURL,
-		// `ASDLC_BEARER` carries the per-task RS256 JWT path on the new
+		// `AEP_BEARER` carries the per-task RS256 JWT path on the new
 		// dispatcher. The runner's `oneshot.ts` validates the env var at
 		// startup and uses it for /credentials/refresh callbacks.
 		// PublisherSR (below) populates a 3rd per-run ExternalSecret; the
@@ -693,15 +628,11 @@ func (s *dispatchService) lookupOrgUUID(ctx context.Context, ocOrgID string) (st
 	// proxy path will silently fail, but we let it through so legacy
 	// callers don't lose dispatch capability mid-rollout.
 	if org.ThunderOrgUUID != nil && *org.ThunderOrgUUID != uuid.Nil {
-		slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] lookupOrgUUID using thunder_org_uuid",
-			"ocOrgId", ocOrgID, "branch", "thunder-org-uuid", "returned", org.ThunderOrgUUID.String())
 		return org.ThunderOrgUUID.String(), nil
 	}
 	if org.UUID == uuid.Nil {
 		return "", fmt.Errorf("organization %s has no UUID", ocOrgID)
 	}
-	slog.InfoContext(ctx, "[SHAKEOUT:DISPATCH] lookupOrgUUID using local PK fallback",
-		"ocOrgId", ocOrgID, "branch", "local-pk-fallback", "returned", org.UUID.String())
 	slog.WarnContext(ctx, "dispatch: thunder_org_uuid missing on org row; falling back to local PK (NS derivation will likely mismatch SM-API)",
 		"name", ocOrgID, "uuid", org.UUID.String())
 	return org.UUID.String(), nil

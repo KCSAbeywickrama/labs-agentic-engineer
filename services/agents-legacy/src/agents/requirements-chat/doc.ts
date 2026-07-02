@@ -29,7 +29,7 @@ import {
 } from "./dsl-edit.js";
 
 // Filename constants. The protected file is mirrored on the BFF side
-// (`asdlc-service/services/artifact_store.go:33`) — keep them in sync.
+// (`aep-service/services/artifact_store.go:33`) — keep them in sync.
 export const REQUIREMENTS_MAIN_FILE = "requirements.md";
 export const WIREFRAMES_DSL = "wireframes.dsl";
 export const DOMAIN_DSL = "domain-model.dsl";

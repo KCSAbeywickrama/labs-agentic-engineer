@@ -30,8 +30,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // newSkillValue assembles the in-memory Skill from validated mutation input so
@@ -80,7 +80,7 @@ type SkillSummary struct {
 
 // skillFrontmatter is the YAML frontmatter shape accepted on SKILL.md.
 // Spec-clean AgentSkills: name, description, optional license,
-// compatibility, allowed-tools. Platform extensions under metadata.asdlc.*
+// compatibility, allowed-tools. Platform extensions under metadata.aep.*
 type skillFrontmatter struct {
 	Name          string                 `yaml:"name"`
 	Description   string                 `yaml:"description"`
@@ -113,7 +113,7 @@ func parseSkillMD(content string) (skillFrontmatter, string, error) {
 	return s, body, nil
 }
 
-// versionFromMetadata pulls metadata.asdlc.version out of frontmatter
+// versionFromMetadata pulls metadata.aep.version out of frontmatter
 // (stored as a string-as-int by the spec) and returns the integer
 // version. Defaults to 1 when absent.
 func versionFromMetadata(s skillFrontmatter) int {
@@ -121,14 +121,14 @@ func versionFromMetadata(s skillFrontmatter) int {
 		return 1
 	}
 	// Flat dotted-key form — the documented AgentSkills string→string
-	// representation: `metadata: { "asdlc.version": "2" }`.
-	if v, ok := s.Metadata["asdlc.version"]; ok {
+	// representation: `metadata: { "aep.version": "2" }`.
+	if v, ok := s.Metadata["aep.version"]; ok {
 		return coerceVersion(v)
 	}
-	// Nested form — `metadata: { asdlc: { version: "2" } }`.
-	if asdlcAny, ok := s.Metadata["asdlc"]; ok {
-		if asdlcMap, ok := asdlcAny.(map[string]interface{}); ok {
-			if verAny, ok := asdlcMap["version"]; ok {
+	// Nested form — `metadata: { aep: { version: "2" } }`.
+	if aepAny, ok := s.Metadata["aep"]; ok {
+		if aepMap, ok := aepAny.(map[string]interface{}); ok {
+			if verAny, ok := aepMap["version"]; ok {
 				return coerceVersion(verAny)
 			}
 		}

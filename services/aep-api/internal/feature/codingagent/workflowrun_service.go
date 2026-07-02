@@ -24,13 +24,13 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // WorkflowRunService creates OC WorkflowRun CRs pinned to a specific commit
@@ -58,7 +58,7 @@ type WorkflowRunService interface {
 	// Returns the new run name; caller persists it onto the task row.
 	RetryAuthFailedBuild(ctx context.Context, task *models.ComponentTask) (runName string, err error)
 	// TriggerCodingAgent creates a WorkflowRun of ClusterWorkflow
-	// `app-factory-coding-agent` for the per-task ephemeral pod that runs the
+	// `aep-coding-agent` for the per-task ephemeral pod that runs the
 	// Claude Agent SDK. The pod clones the project's repo at its default
 	// branch; the agent itself creates the feature branch and opens the PR
 	// with `Closes #<issueNumber>`. The dispatch caller has already created
@@ -80,7 +80,7 @@ type CodingAgentTrigger struct {
 	GitServiceURL string
 	// PlatformURL is the BFF base URL the runner pod uses for its callbacks
 	// (credentials refresh, skills pull). Passed through to the pod as
-	// ASDLC_PLATFORM_URL.
+	// AEP_PLATFORM_URL.
 	PlatformURL string
 	// AnthropicSecretRef is the name of the K8s Secret in workflows-<orgID>
 	// carrying the per-org Anthropic API key. Materialised by git-service
@@ -186,7 +186,7 @@ func (s *workflowRunService) dispatchBuild(
 	// GitSecret) and capture the secretRef to pass to the build. Failing to
 	// provision the secret is non-fatal — StageBuildSecret degrades to an empty
 	// secretRef so the build still dispatches and clones unauthenticated (correct
-	// for the public repos app-factory creates by default; private-repo support
+	// for the public repos aep creates by default; private-repo support
 	// is tracked by wso2-enterprise/wso2cloud#319). Only an ownership/credential
 	// refusal (repo not in org, org disconnected) blocks the build here.
 	var buildSecretRef string
@@ -240,7 +240,7 @@ func (s *workflowRunService) dispatchBuild(
 }
 
 // TriggerCodingAgent creates a fresh WorkflowRun of ClusterWorkflow
-// `app-factory-coding-agent`. Each call increments the attempt counter
+// `aep-coding-agent`. Each call increments the attempt counter
 // implicitly via time.Now(); idempotency is at the dispatch-service level
 // (DispatchedAt + LastCodingAgentRunName).
 func (s *workflowRunService) TriggerCodingAgent(ctx context.Context, p CodingAgentTrigger) (string, error) {

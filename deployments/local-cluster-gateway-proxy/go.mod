@@ -1,4 +1,4 @@
-module github.com/wso2/asdlc/deployments/local-cluster-gateway-proxy
+module github.com/wso2/aep/deployments/local-cluster-gateway-proxy
 
 go 1.26.0
 

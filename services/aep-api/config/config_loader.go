@@ -31,8 +31,8 @@ import (
 // deploy as a matched pair: bump runnerImageVersion and push the image with the
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
-	runnerImageRepo    = "docker.io/xlight05/app-factory-coding-agent-runner"
-	runnerImageVersion = "v3"
+	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
+	runnerImageVersion = "v4"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
@@ -63,27 +63,24 @@ func Load() (Config, error) {
 		LocalOpenBaoRepairEnabled: r.readOptionalBool("LOCAL_OPENBAO_REPAIR", false),
 		DeploymentTier:            r.readOptionalString("DEPLOYMENT_TIER", "dev"),
 		TenantGateMode:            r.readOptionalString("TENANT_GATE_MODE", "enforce"),
-		GitHubWebhookSecret:    r.readOptionalString("GITHUB_WEBHOOK_SECRET", ""),
-		OAuthStateSigningKey:   r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
-		GithubAppSlug:          r.readOptionalString("GITHUB_APP_SLUG", "asdlc-platform"),
-		GithubAppClientID:      r.readOptionalString("GITHUB_CLIENT_ID", ""),
-		BFFPublicURL:           r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
-		BuildAuthRetryBudget:   r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
+		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
+		BFFPublicURL:              r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
+		BuildAuthRetryBudget:      r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
 		ThunderAdmin: ThunderAdminConfig{
 			BaseURL:      r.readOptionalString("THUNDER_ADMIN_URL", ""),
-			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "asdlc-system-client"),
-			ClientSecret: r.readOptionalString("THUNDER_SYSTEM_CLIENT_SECRET", "asdlc-system-client-secret"),
+			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "aep-system-client"),
+			ClientSecret: r.readOptionalString("THUNDER_SYSTEM_CLIENT_SECRET", "aep-system-client-secret"),
 		},
 		PlatformIDP: PlatformIDPDefaults{
 			Issuer:  r.readOptionalString("PLATFORM_IDP_ISSUER", "http://thunder.openchoreo.localhost:8080"),
 			JWKSURL: r.readOptionalString("PLATFORM_IDP_JWKS_URL", "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"),
 		},
 		TaskTokenSigningKey:    r.taskSigningKey(),
-		TaskTokenIssuer:        r.readOptionalString("BFF_TASK_TOKEN_ISSUER", "asdlc-bff"),
+		TaskTokenIssuer:        r.readOptionalString("BFF_TASK_TOKEN_ISSUER", "aep-bff"),
 		TaskTokenAudience:      r.readOptionalString("BFF_TASK_TOKEN_AUDIENCE", "git-service"),
 		JWKSURL:                r.readOptionalString("JWKS_URL", ""),
 		JWTAllowedIssuer:       r.readOptionalString("JWT_ISSUER", ""),
-		JWTAllowedAudience:     r.readOptionalString("JWT_AUDIENCE", "asdlc-bff"),
+		JWTAllowedAudience:     r.readOptionalString("JWT_AUDIENCE", "aep-bff"),
 		JWTResourceMetadataURL: r.readOptionalString("JWT_RESOURCE_METADATA_URL", ""),
 		Observability: ObservabilityConfig{
 			BaseURL:      r.readOptionalString("OBSERVER_URL", r.readOptionalString("OBSERVABILITY_SERVICE_BASE_URL", "")),
@@ -105,10 +102,10 @@ func Load() (Config, error) {
 
 		// Git-service config. Uses the same env-var names git-service used so
 		// existing local .env files / release-bindings keep working.
-		RepoBasePath:                r.readOptionalString("REPO_BASE_PATH", "/tmp/asdlc-repos"),
+		RepoBasePath:                r.readOptionalString("REPO_BASE_PATH", "/tmp/aep-repos"),
 		GitHubRepoVisibility:        r.readOptionalString("GITHUB_REPO_VISIBILITY", "public"),
-		GitHubCommitterName:         r.readOptionalString("GIT_COMMITTER_NAME", "ASDLC Bot"),
-		GitHubCommitterEmail:        r.readOptionalString("GIT_COMMITTER_EMAIL", "bot@asdlc.dev"),
+		GitHubCommitterName:         r.readOptionalString("GIT_COMMITTER_NAME", "AEP Bot"),
+		GitHubCommitterEmail:        r.readOptionalString("GIT_COMMITTER_EMAIL", "bot@aep.dev"),
 		WebhookDeliveryURL:          r.readOptionalString("GITHUB_WEBHOOK_DELIVERY_URL", ""),
 		WebhookHMACSecret:           r.readOptionalString("GITHUB_WEBHOOK_SECRET", ""),
 		CredentialEncryptionKey:     r.readOptionalString("CREDENTIAL_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
@@ -117,14 +114,9 @@ func Load() (Config, error) {
 		GitHubAppID:                 r.readOptionalString("GITHUB_APP_ID", ""),
 		GitHubAppClientID:           r.readOptionalString("GITHUB_CLIENT_ID", ""),
 		GitHubAppClientSecret:       r.readOptionalString("GITHUB_CLIENT_SECRET", ""),
-		GitHubAppSlug:               r.readOptionalString("GITHUB_APP_SLUG", "asdlc-platform"),
+		GitHubAppSlug:               r.readOptionalString("GITHUB_APP_SLUG", "aep-platform"),
 		GitHubAppPrivateKeyPath:     r.readOptionalString("GITHUB_APP_PRIVATE_KEY_PATH", ""),
 		CredentialValidatorInterval: r.readOptionalDuration("CREDENTIAL_VALIDATOR_INTERVAL", 24*time.Hour),
-		BFFJWKSURL:                  r.readOptionalString("BFF_JWKS_URL", ""),
-		TaskJWTAllowedIssuer:        r.readOptionalString("TASK_JWT_ISSUER", "asdlc-bff"),
-		TaskJWTAllowedAudience:      r.readOptionalString("TASK_JWT_AUDIENCE", "git-service"),
-		AnthropicPlatformKey:        r.readOptionalString("ANTHROPIC_PLATFORM_KEY", ""),
-		AgentsServiceURL:            r.readOptionalString("AGENTS_SERVICE_URL", ""),
 
 		// SM-API + cluster-gateway-proxy.
 		SecretManagerAPIURL:     r.readOptionalString("SECRET_MANAGER_API_URL", ""),
@@ -142,6 +134,10 @@ func Load() (Config, error) {
 			msgs[i] = e.Error()
 		}
 		return Config{}, fmt.Errorf("configuration errors:\n%s", strings.Join(msgs, "\n"))
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil

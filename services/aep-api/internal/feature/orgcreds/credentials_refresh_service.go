@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/credentials"
 )
 
 // RefreshResponse is what the workspace credential helper consumes. The

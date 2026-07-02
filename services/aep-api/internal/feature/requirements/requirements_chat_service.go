@@ -30,8 +30,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 )
 
 // RequirementsSnapshotFile is the JSON shape returned by GetSessionBaselineFile.

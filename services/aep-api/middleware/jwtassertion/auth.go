@@ -28,7 +28,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2/asdlc/asdlc-service/utils"
+	"github.com/wso2/aep/aep-api/utils"
 )
 
 // TokenClaims holds the verified claims extracted from a JWT.
@@ -150,7 +150,7 @@ func HasAllScopes(ctx context.Context, required []string) bool {
 // and RFC 9728. Empty errorCode omits the error param; empty resource URL
 // omits the resource_metadata hint.
 func buildBearerChallenge(resourceMetadataURL, errorCode string) string {
-	parts := []string{`realm="asdlc"`}
+	parts := []string{`realm="aep"`}
 	if errorCode != "" {
 		parts = append(parts, `error="`+errorCode+`"`)
 	}
@@ -188,13 +188,6 @@ func validateJWT(tokenString string, cfg Config, issuers compiledIssuers, audien
 	if !ok {
 		return nil, fmt.Errorf("failed to extract claims")
 	}
-
-	slog.Info("[SHAKEOUT:CLAIMS] validateJWT branch",
-		"branch", "jwks-verified",
-		"iss", claims.Issuer,
-		"aud", claims.Audience,
-		"allowedIssuers", cfg.AllowedIssuers,
-		"allowedAudiences", cfg.AllowedAudiences)
 
 	if err := issuers.match(claims.Issuer); err != nil {
 		return nil, err

@@ -1,5 +1,5 @@
 {
-  "name": "@asdlc/explorer",
+  "name": "@aep/explorer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,8 +12,8 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@asdlc/md-editor": "workspace:*",
-    "@asdlc/excalidraw-editor": "workspace:*"
+    "@aep/md-editor": "workspace:*",
+    "@aep/excalidraw-editor": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",

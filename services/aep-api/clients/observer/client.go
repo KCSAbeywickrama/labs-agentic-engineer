@@ -27,7 +27,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
+	"github.com/wso2/aep/aep-api/clients/oauth"
 )
 
 // LogLine is the BFF's projection of a single Observer log document.

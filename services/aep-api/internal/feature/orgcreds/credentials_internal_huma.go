@@ -22,7 +22,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/auth/scope"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
 // runnerRefreshOutput is the runner credentials-refresh response. The Body
@@ -32,10 +32,9 @@ type runnerRefreshOutput struct{ Body *RefreshResponse }
 
 // RegisterInternalCredentials registers the path-scoped runner credential
 // refresh on the internal S2S Huma API. Auth (dual-token verify + INT-6 fence)
-// is by construction via scope.RunnerScopedInput — same path + tokens as the
-// old raw taskController.RefreshCredentials handler. The unscoped
-// POST /internal/v1/credentials/refresh (Task-JWT only) stays a raw handler
-// until the runner stops using it (WS2.6).
+// is by construction via auth.RunnerScopedInput. This is the sole refresh
+// endpoint since WS2.6 — the unscoped POST /internal/v1/credentials/refresh
+// (Task-JWT only) was retired once the runner cut over to this path.
 func RegisterInternalCredentials(api huma.API, svc CredentialsRefreshService) {
 	huma.Register(api, huma.Operation{
 		OperationID: "runner-refresh-credentials",
@@ -43,8 +42,8 @@ func RegisterInternalCredentials(api huma.API, svc CredentialsRefreshService) {
 		Path:        "/internal/v1/tasks/{taskId}/credentials/refresh",
 		Summary:     "Refresh a task's git credentials (runner callback)",
 		Tags:        []string{"Internal"},
-		Security:    scope.SecurityRunner,
-	}, func(ctx context.Context, in *scope.RunnerScopedInput) (*runnerRefreshOutput, error) {
+		Security:    auth.SecurityRunner,
+	}, func(ctx context.Context, in *auth.RunnerScopedInput) (*runnerRefreshOutput, error) {
 		if svc == nil {
 			return nil, huma.Error503ServiceUnavailable("credentials refresh not configured")
 		}

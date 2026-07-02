@@ -24,8 +24,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/middleware"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Client fetches build logs from the observability service.

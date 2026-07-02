@@ -1,7 +1,6 @@
-/asdlc-api
+/aep-api
 /default
 
-# Generated OpenAPI specs — regenerate with `make openapi`. The drift guard
-# (TestOpenAPISpecFresh) + `make openapi-check` keep them current in CI.
-/api/openapi.yaml
-/api/internal-openapi.yaml
+# Generated OpenAPI specs (`make openapi`) — build artifacts, not committed.
+# root .gitignore already ignores build/; kept here to self-document.
+/build/

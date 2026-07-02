@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package controllers — phase 2's org-scoped GitHub integration surface.
+// org_github_controller.go — phase 2's org-scoped GitHub integration surface.
 //
 // Routes:
 //
@@ -41,7 +41,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
 // OrgGitHubController handles the per-org GitHub connect callback surface.
@@ -75,7 +75,7 @@ func NewOrgGitHubController(
 	appSlug, publicURL, appClientID string,
 ) OrgGitHubController {
 	if appSlug == "" {
-		appSlug = "asdlc-platform"
+		appSlug = "aep-platform"
 	}
 	if publicURL == "" {
 		publicURL = "http://localhost:8090"

@@ -165,7 +165,7 @@ export const restApi = {
   // The BFF is read-only over OC namespaces. Org creation is an out-of-band
   // onboarding flow (Thunder signup → platform-api-service in hosted;
   // seed-admin-org.sh in local). See
-  // asdlc-service/controllers/organization_controller.go.
+  // aep-service/controllers/organization_controller.go.
 
   async listOrganizations(): Promise<Organization[]> {
     try {

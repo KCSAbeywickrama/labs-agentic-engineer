@@ -28,10 +28,10 @@ import {
   Typography,
 } from '@wso2/oxygen-ui';
 import { Package, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
-import { Explorer, type CustomView, type ExplorerRef } from '@asdlc/explorer';
-import { CELL_DIAGRAM_VIEW_ID, CellDiagramView } from '@asdlc/cell-diagram-view';
-import { MdEditor } from '@asdlc/md-editor';
-import { OpenApiView } from '@asdlc/openapi-view';
+import { Explorer, type CustomView, type ExplorerRef } from '@aep/explorer';
+import { CELL_DIAGRAM_VIEW_ID, CellDiagramView } from '@aep/cell-diagram-view';
+import { MdEditor } from '@aep/md-editor';
+import { OpenApiView } from '@aep/openapi-view';
 import { api } from '../services/api';
 import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
 import { projectTasksPath } from '../lib/paths';

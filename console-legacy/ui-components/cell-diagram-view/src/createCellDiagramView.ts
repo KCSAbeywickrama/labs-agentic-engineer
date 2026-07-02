@@ -17,7 +17,7 @@
  */
 
 import { createElement, type ReactNode } from 'react';
-import type { CustomView } from '@asdlc/explorer';
+import type { CustomView } from '@aep/explorer';
 import { CellDiagramView } from './CellDiagramView.js';
 import type { CellDiagramComponent } from './buildProjectModel.js';
 

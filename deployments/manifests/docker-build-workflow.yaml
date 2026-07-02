@@ -1,4 +1,4 @@
-# Docker Build Workflow Infrastructure for ASDLC
+# Docker Build Workflow Infrastructure for AEP
 #
 # This file installs the Argo ClusterWorkflowTemplates and the OC ClusterWorkflow
 # needed for building Docker images from source code.

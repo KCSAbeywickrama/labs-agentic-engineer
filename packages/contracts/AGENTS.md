@@ -1,30 +1,15 @@
 # AGENTS.md — packages/contracts (`@aep/contracts`)
 
-The single source of truth for service boundaries: **OpenAPI** for REST,
-**JSON Schema** for internal events. Consumers import generated artifacts only and
-never redefine request/response types.
+Shared, hand-written TypeScript types for cross-service boundaries. Consumers
+import from here and never redefine the shapes locally.
 
 ## Layout
 
-- `openapi/<service>.yaml` — contract per producing service (REST only, no gRPC).
-- `events/*.schema.json` — internal event schemas (JSON Schema).
-- `src/generated/` — TS client (openapi-typescript). **Gitignored, never hand-edited.**
-- `example-server/` — Go module proving the producer rails (oapi-codegen
-  `StrictServerInterface` + a trivial handler). `api.gen.go` is gitignored.
+- `src/agents/sse-events.ts` — the agents SSE wire contract (`OpResult`,
+  `Skill`, `TurnRequest`, `SSE_DONE`, …), consumed by `services/agents`.
+- `src/index.ts` — the public barrel; re-exports the above.
 
-## Codegen (wired into the build graph, not run by hand)
+## Build
 
-- `make gen` runs `openapi-typescript` (TS client) + `go generate` (Go server
-  interface via the pinned `oapi-codegen` go tool).
-- `build`/`typecheck` depend on `gen`; consumers depend on this package — so a
-  contract change forces regeneration and fails consumers that are now wrong.
-
-## Drift guards (the self-correction thesis)
-
-1. Producer compile — handler ↔ `StrictServerInterface` (Go build).
-2. Consumer compile — generated TS client (`tsc`); renamed field → typecheck error.
-3. Build-graph freshness — `gen` is a prereq of `build`/`typecheck`.
-4. CI staleness — `make gen` then `git diff --exit-code`.
-
-**Status:** machinery + one minimal example. Per-service contracts are authored
-as each service lands.
+- `build` / `typecheck` run `tsc`. Consumers depend on this package, so a
+  breaking type change fails their typecheck — the drift guard.

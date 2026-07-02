@@ -33,8 +33,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/clustergatewayproxy"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
 // Inputs gathers everything one dispatch call needs. All fields are
@@ -65,7 +65,7 @@ type Inputs struct {
 	// emits a third per-run ExternalSecret materialising both
 	// client_id + client_secret into a K8s Secret that the runner
 	// mounts via envFrom (PUBLISHER_CLIENT_ID + PUBLISHER_CLIENT_SECRET).
-	// Optional — when absent the runner falls back to ASDLC_BEARER.
+	// Optional — when absent the runner falls back to AEP_BEARER.
 	PublisherSR *SecretRef
 
 	// ClusterSecretStoreName is the ESO CSS that backs reads. On
@@ -138,9 +138,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 	if err := d.proxy.EnsureNamespace(ctx, clustergatewayproxy.NamespaceMeta{
 		Name: ns,
 		Labels: map[string]string{
-			"app.kubernetes.io/managed-by": "asdlc",
-			"asdlc.io/purpose":             "remote-worker",
-			"asdlc.io/org-uuid":            in.OrgUUID,
+			"app.kubernetes.io/managed-by": "aep",
+			"aep.io/purpose":             "remote-worker",
+			"aep.io/org-uuid":            in.OrgUUID,
 		},
 	}); err != nil {
 		return "", fmt.Errorf("dispatcher: ensure namespace %s: %w", ns, err)

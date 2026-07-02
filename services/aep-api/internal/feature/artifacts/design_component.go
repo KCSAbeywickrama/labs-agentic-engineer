@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // ErrComponentRemovedAfterGeneration is returned when a task references a

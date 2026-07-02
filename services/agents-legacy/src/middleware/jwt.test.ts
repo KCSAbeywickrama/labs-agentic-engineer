@@ -109,7 +109,7 @@ test("jwtAuthMiddleware: rejects missing Authorization header", async () => {
     const resp = await fetch(`http://127.0.0.1:${ctx.appPort}/secure`);
     assert.equal(resp.status, 401);
     const wwwAuth = resp.headers.get("www-authenticate");
-    assert.ok(wwwAuth?.startsWith('Bearer realm="asdlc"'), `WWW-Authenticate=${wwwAuth}`);
+    assert.ok(wwwAuth?.startsWith('Bearer realm="aep"'), `WWW-Authenticate=${wwwAuth}`);
   } finally {
     await teardown(ctx);
   }

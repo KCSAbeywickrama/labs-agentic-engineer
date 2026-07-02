@@ -25,13 +25,13 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/agents"
-	"github.com/wso2/asdlc/asdlc-service/clients/oauth"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/component"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/clients/oauth"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 type TaskService interface {
@@ -96,15 +96,6 @@ func (s *taskService) SetSkillService(svc SkillResolver) {
 	s.skillSvc = svc
 }
 
-// TaskServiceWithSkills names the optional skill-resolver setter the
-// composition root wires by type-assertion onto the TaskService interface,
-// so a signature drift is a build failure, not a silently-skipped wire.
-type TaskServiceWithSkills interface {
-	SetSkillService(SkillResolver)
-}
-
-var _ TaskServiceWithSkills = (*taskService)(nil)
-
 func NewTaskService(
 	db *gorm.DB,
 	taskRepo repositories.TaskRepository,
@@ -116,7 +107,7 @@ func NewTaskService(
 	artifactSvc artifacts.ArtifactService,
 	repoSvc gitrepo.RepoService,
 	agentsClient agents.Client,
-) TaskService {
+) *taskService {
 	return &taskService{
 		db:            db,
 		taskRepo:      taskRepo,
@@ -279,7 +270,7 @@ func (s *taskService) ensureIssueForTask(
 	issue, err := s.issueSvc.CreateIssue(ctx, task.OrgID, task.ProjectID, gitrepo.CreateIssueRequest{
 		Title:  gitrepo.IssueTitle(task),
 		Body:   gitrepo.BuildIssueBody(task, comp, repoURL, repoSlug),
-		Labels: []string{"asdlc", "implementation"},
+		Labels: []string{"aep", "implementation"},
 	})
 	if err != nil {
 		return err

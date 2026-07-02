@@ -21,14 +21,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/namespace_client_mock.go . NamespaceClient
 
 // NamespaceClient defines operations for managing OpenChoreo namespaces. An
-// OC namespace *is* an ASDLC organization — there is no separate Organization
+// OC namespace *is* an AEP organization — there is no separate Organization
 // CRD. The BFF's local Organization table just side-cars a UUID per namespace.
 type NamespaceClient interface {
 	ListNamespaces(ctx context.Context) ([]models.OrganizationView, error)

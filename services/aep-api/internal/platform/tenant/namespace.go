@@ -55,7 +55,7 @@ func OrgBaseNamespace(orgUUID string) string {
 // RemoteWorkerNamespace returns the per-org remote-worker namespace
 // name = OrgBaseNamespace(orgUUID) + "-remote-worker".
 //
-// The `-remote-worker` suffix is the asdlc fork — wso2cloud's existing
+// The `-remote-worker` suffix is the aep fork — wso2cloud's existing
 // shapes all use `-development`, `-staging`, `-production`. The
 // env-less name is intentional: a coding-agent task isn't bound to a
 // user-facing env (per ADR-0001). When wso2cloud-deployement-main

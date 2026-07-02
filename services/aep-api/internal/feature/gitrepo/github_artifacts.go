@@ -36,7 +36,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/credentials"
 )
 
 // ----- Typed errors -----

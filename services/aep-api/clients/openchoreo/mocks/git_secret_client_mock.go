@@ -7,7 +7,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
 )
 
 // Ensure, that GitSecretClientMock does implement openchoreo.GitSecretClient.

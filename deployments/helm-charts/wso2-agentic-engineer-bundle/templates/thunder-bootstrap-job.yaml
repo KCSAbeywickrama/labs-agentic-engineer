@@ -34,7 +34,7 @@ stringData:
   adminClientSecret: {{ .Values.thunder.adminClientSecret | quote }}
   systemClientSecret: {{ .Values.thunder.systemClientSecret | quote }}
 ---
-# Post-install Job: registers all ASDLC OAuth clients in OC Thunder.
+# Post-install Job: registers all AEP OAuth clients in OC Thunder.
 # Idempotent — safe to re-run on helm upgrade.
 apiVersion: batch/v1
 kind: Job

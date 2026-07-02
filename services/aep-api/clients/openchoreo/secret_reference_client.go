@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
-	"github.com/wso2/asdlc/asdlc-service/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/clients/secretmanagersvc"
 )
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/secret_reference_client_mock.go . SecretReferenceClient

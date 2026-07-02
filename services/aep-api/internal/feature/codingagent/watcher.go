@@ -26,9 +26,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/clustergatewayproxy"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // finalLogTailBytes caps the captured snapshot size. Agents that go

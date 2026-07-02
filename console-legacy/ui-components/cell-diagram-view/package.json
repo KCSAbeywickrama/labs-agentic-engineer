@@ -1,5 +1,5 @@
 {
-  "name": "@asdlc/cell-diagram-view",
+  "name": "@aep/cell-diagram-view",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@asdlc/explorer": "workspace:*",
+    "@aep/explorer": "workspace:*",
     "@wso2/cell-diagram": "0.2.0"
   },
   "peerDependencies": {

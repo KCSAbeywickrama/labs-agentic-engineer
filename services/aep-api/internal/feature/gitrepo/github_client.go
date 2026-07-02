@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/credentials"
 )
 
 // GitHubClient abstracts the GitHub REST calls the git-service needs.

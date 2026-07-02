@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // WebhookService manages per-repo webhook registration on GitHub.

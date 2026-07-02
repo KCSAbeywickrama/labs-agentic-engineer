@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Box, CircularProgress } from '@wso2/oxygen-ui';
 import { useAuth } from './useAuth';
 
-const CALLBACK_KEY = 'app_factory_auth_callback_pending';
+const CALLBACK_KEY = 'aep_auth_callback_pending';
 const CALLBACK_TIMEOUT_MS = 60000;
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {

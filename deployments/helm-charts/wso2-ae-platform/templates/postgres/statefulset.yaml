@@ -6,22 +6,22 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: asdlc-db
+  name: aep-db
   namespace: {{ .Release.Namespace }}
   labels:
-    app: asdlc-db
+    app: aep-db
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
 spec:
-  serviceName: asdlc-db
+  serviceName: aep-db
   replicas: 1
   selector:
     matchLabels:
-      app: asdlc-db
+      app: aep-db
   template:
     metadata:
       labels:
-        app: asdlc-db
+        app: aep-db
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
       containers:
@@ -63,15 +63,15 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: asdlc-db
+  name: aep-db
   namespace: {{ .Release.Namespace }}
   labels:
-    app: asdlc-db
+    app: aep-db
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
 spec:
   selector:
-    app: asdlc-db
+    app: aep-db
   ports:
     - port: 5432
       targetPort: 5432

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Round-trip frontmatter ± exposesAPI block: components without

@@ -30,7 +30,7 @@ source "$SCRIPT_DIR/utils.sh"
 DEPLOY_DIR="$SCRIPT_DIR/.."
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yml"
 
-echo "=== Tearing Down App Factory v1 Environment ==="
+echo "=== Tearing Down AEP v1 Environment ==="
 
 # ── Stop OpenBao port-forward (started by start.sh as a fallback) ────────
 echo ""
@@ -72,13 +72,13 @@ echo "4️⃣  Clean generated artifacts"
 rm -f "$DEPLOY_DIR/.kube/config" 2>/dev/null && echo "   removed deployments/.kube/config" || true
 rm -rf "$DEPLOY_DIR/.kube" 2>/dev/null || true
 
-# asdlc-api stores cloned workspaces at the host bind mount declared in
+# aep-api stores cloned workspaces at the host bind mount declared in
 # docker-compose.yml `volumes:` (REPO_BASE_PATH=/data/repos). compose down
 # -v wipes named volumes but NOT bind mounts, so without this the next
 # project create can hit stale workspace dirs.
 # Read the host path from compose (currently ./data/repos) so this can't drift.
 REPOS_HOST_PATH=$(awk '
-  /^  asdlc-api:/        { in_svc=1; next }
+  /^  aep-api:/        { in_svc=1; next }
   in_svc && /^  [a-z]/   { in_svc=0 }
   in_svc && /:\/data\/repos$/ {
     sub(/^[[:space:]]*-[[:space:]]*/, "")

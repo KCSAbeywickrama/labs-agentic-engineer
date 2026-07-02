@@ -33,10 +33,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ----- Errors -----
@@ -175,7 +175,7 @@ type ArtifactService interface {
 
 	// Requirements directory snapshots (chat per-turn undo + chat
 	// session baseline). Stored out-of-band under
-	// `<clone>/.git/asdlc-reqchat-snapshots/` so they don't pollute the
+	// `<clone>/.git/aep-reqchat-snapshots/` so they don't pollute the
 	// working tree, get committed, or appear in tag lists. Auto-cleaned
 	// when the clone directory is recreated.
 	CaptureRequirementsSnapshot(ctx context.Context, orgID, projectID, snapshotID string) (map[string]string, error)
@@ -1146,11 +1146,11 @@ func validateSnapshotID(id string) error {
 	return nil
 }
 
-// snapshotDir returns `<clonePath>/.git/asdlc-reqchat-snapshots`. The
+// snapshotDir returns `<clonePath>/.git/aep-reqchat-snapshots`. The
 // snapshots live under `.git` so git ignores them, they're not committed,
 // and they're wiped when the clone is recreated.
 func snapshotDir(clonePath string) string {
-	return filepath.Join(clonePath, ".git", "asdlc-reqchat-snapshots")
+	return filepath.Join(clonePath, ".git", "aep-reqchat-snapshots")
 }
 
 func snapshotPath(clonePath, id string) string {

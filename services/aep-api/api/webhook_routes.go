@@ -19,7 +19,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/webhook"
+	"github.com/wso2/aep/aep-api/internal/feature/webhook"
 )
 
 // registerWebhookRoutes mounts the inbound GitHub webhook receiver. The route

@@ -24,7 +24,7 @@
 #     it from ReleaseBinding status.
 #   - Thunder admin API auth isn't trivially scriptable from outside the
 #     image's own bootstrap path. We mint tokens against an already-
-#     bootstrapped client (`asdlc-api-client`) instead — the trait's
+#     bootstrapped client (`aep-api-client`) instead — the trait's
 #     `jwt-auth v0` policy emits no audience filter so any cluster-signed
 #     token passes.
 
@@ -38,8 +38,8 @@ POC_MANIFESTS="${SCRIPT_DIR}/../manifests/poc-api-platform"
 # Already-bootstrapped Thunder client from values-thunder.yaml.
 # (Adding a dedicated POC client would mean editing values-thunder.yaml
 # and re-running setup-openchoreo.sh — see POC-API-PLATFORM.md gotcha #3.)
-CLIENT_ID="${POC_CLIENT_ID:-asdlc-api-client}"
-CLIENT_SECRET="${POC_CLIENT_SECRET:-asdlc-api-client-secret}"
+CLIENT_ID="${POC_CLIENT_ID:-aep-api-client}"
+CLIENT_SECRET="${POC_CLIENT_SECRET:-aep-api-client-secret}"
 THUNDER_PUBLIC="${THUNDER_PUBLIC:-http://thunder.openchoreo.localhost:8080}"
 
 echo "=== POC: API Platform + Thunder JWT verification ==="

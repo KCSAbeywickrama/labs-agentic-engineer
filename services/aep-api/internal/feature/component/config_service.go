@@ -22,8 +22,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 type ConfigService interface {

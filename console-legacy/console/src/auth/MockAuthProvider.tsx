@@ -20,7 +20,7 @@ import { createContext, useContext, useCallback, type ReactNode } from 'react';
 
 const MOCK_USER = {
   sub: 'mock-admin-001',
-  email: 'admin@appfactory.dev',
+  email: 'admin@aep.dev',
   name: 'Admin User',
   given_name: 'Admin',
   family_name: 'User',

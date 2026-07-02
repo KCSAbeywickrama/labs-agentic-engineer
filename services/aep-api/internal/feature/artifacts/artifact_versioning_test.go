@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
 func TestParseRequirementsTag(t *testing.T) {
@@ -215,7 +215,7 @@ func TestValidateRelPath(t *testing.T) {
 		{"absolute", "/etc/passwd", true},
 		{"traversal-up", "..", true},
 		{"traversal-mid", "specs/../etc/passwd", true},
-		{"non-asdlc", "src/main.go", true},
+		{"non-aep", "src/main.go", true},
 		{"non-canonical-trailing-slash", "specs/requirements/foo.md/", true},
 		{"non-canonical-double-slash", "specs//requirements/foo.md", true},
 	}

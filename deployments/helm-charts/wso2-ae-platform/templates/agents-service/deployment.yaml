@@ -39,11 +39,11 @@ spec:
             # flip as deployments/docker-compose.yml. Reaches the BFF by Service
             # DNS, so it is independent of the gateway HTTPRoute split.
             - name: JWKS_URL
-              value: "http://asdlc-api.{{ .Release.Namespace }}:{{ .Values.asdlcApi.port }}/auth/external/jwks.json"
+              value: "http://aep-api.{{ .Release.Namespace }}:{{ .Values.aepApi.port }}/auth/external/jwks.json"
             - name: JWT_ISSUER
               value: {{ .Values.taskSigning.issuer | quote }}
             - name: JWT_AUDIENCE
               value: {{ .Values.agentsService.jwt.audience | quote }}
             # Resolves per-org Anthropic key via the BFF
-            - name: ASDLC_API_URL
-              value: "http://asdlc-api.{{ .Release.Namespace }}:{{ .Values.asdlcApi.port }}"
+            - name: AEP_API_URL
+              value: "http://aep-api.{{ .Release.Namespace }}:{{ .Values.aepApi.port }}"

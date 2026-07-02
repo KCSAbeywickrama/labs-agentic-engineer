@@ -25,6 +25,6 @@ export const config = {
 // Route namespace for the agents service. Internal-only (S2S; only the BFF
 // calls it, never the gateway), so it sits under /internal/v1 — the version in
 // a fixed slot, matching the BFF's /api/v1 edge surface. Keep in sync with
-// asdlc-service/clients/agents/client.go.
+// aep-service/clients/agents/client.go.
 export const INTERNAL_V1 = "/internal/v1";
 export const AGENTS_BASE = `${INTERNAL_V1}/agents`;

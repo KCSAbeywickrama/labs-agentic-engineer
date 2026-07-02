@@ -20,7 +20,7 @@
 // forwards every request straight to the local k3d k8s API using the
 // mounted kubeconfig.
 //
-// Wire shape matches the cloud proxy exactly so asdlc-api's
+// Wire shape matches the cloud proxy exactly so aep-api's
 // `clients/clustergatewayproxy` HTTP client can target it without
 // branching on environment:
 //

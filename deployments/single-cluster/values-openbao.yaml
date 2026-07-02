@@ -1,8 +1,8 @@
-# OpenBao helm values for App Factory v1 local setup.
+# OpenBao helm values for AEP v1 local setup.
 #
 # Extends the OpenChoreo defaults
 # (https://raw.githubusercontent.com/openchoreo/openchoreo/v1.0.1-hotfix.1/install/k3d/common/values-openbao.yaml)
-# with the App Factory-specific `asdlc-secret-reader` policy + role so
+# with the AEP-specific `aep-secret-reader` policy + role so
 # git-service's ExternalSecret reconciler can resolve per-repo build
 # tokens written by mint-build. Mirrors agent-manager's
 # single-cluster/values-openbao.yaml pattern — declarative postStart,
@@ -54,21 +54,21 @@ server:
         bound_service_account_namespaces="openbao,openchoreo-workflow-plane" \
         policies=openchoreo-secret-writer-policy ttl=20m
 
-      # ── App Factory — narrow reader over secret/asdlc/* ─────────────
+      # ── AEP — narrow reader over secret/aep/* ─────────────
       # Used by git-service's ExternalSecret for per-org / per-repo
       # build tokens that mint-build writes (Phase 2 PR C).
-      bao policy write asdlc-secret-reader - <<POLICY
-      path "secret/data/asdlc/*" { capabilities = ["read", "list"] }
-      path "secret/metadata/asdlc/*" { capabilities = ["read", "list"] }
+      bao policy write aep-secret-reader - <<POLICY
+      path "secret/data/aep/*" { capabilities = ["read", "list"] }
+      path "secret/metadata/aep/*" { capabilities = ["read", "list"] }
       POLICY
 
       # Re-bind the existing openchoreo-secret-writer-role to also carry
-      # the asdlc-secret-reader policy. ESO's default ServiceAccount
+      # the aep-secret-reader policy. ESO's default ServiceAccount
       # (external-secrets-openbao in `openbao` ns) maps to this role.
       bao write auth/kubernetes/role/openchoreo-secret-writer-role \
         bound_service_account_names=external-secrets-openbao \
         bound_service_account_namespaces=openbao \
-        policies=openchoreo-secret-writer-policy,asdlc-secret-reader \
+        policies=openchoreo-secret-writer-policy,aep-secret-reader \
         ttl=1h
 
       # ── OC platform seed values (carry-over from OC defaults) ───────
@@ -84,11 +84,11 @@ server:
       bao kv put secret/opensearch-username value="admin"
       bao kv put secret/opensearch-password value="ThisIsTheOpenSearchPassword1"
 
-      # ── ASDLC system client (Phase 3 of api-platform-integration) ────
+      # ── AEP system client (Phase 3 of api-platform-integration) ────
       # The BFF's clients/thundersvc.getSystemToken reads this path to
       # mint Thunder admin tokens with scope=system. Value mirrors the
-      # asdlc-system-client row in values-thunder.yaml CONFIDENTIAL_APPS
+      # aep-system-client row in values-thunder.yaml CONFIDENTIAL_APPS
       # so a single source-of-truth rotation is one line + bounce.
-      bao kv put secret/asdlc/system/thunder-admin \
-        clientId="asdlc-system-client" \
-        clientSecret="asdlc-system-client-secret"
+      bao kv put secret/aep/system/thunder-admin \
+        clientId="aep-system-client" \
+        clientSecret="aep-system-client-secret"

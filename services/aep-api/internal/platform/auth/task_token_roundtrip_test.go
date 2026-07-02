@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 )
 
 // TestTaskTokenRoundtrip exercises the full chain from token issuance to
@@ -35,7 +35,7 @@ func TestTaskTokenRoundtrip(t *testing.T) {
 	pemKey, _ := writeTestKey(t, "pkcs1")
 	mgr, err := NewTaskTokenManager(TaskTokenConfig{
 		PrivateKey: pemKey,
-		Issuer:     "asdlc-bff",
+		Issuer:     "aep-bff",
 		Audience:   "git-service",
 		TTL:        10 * time.Minute,
 	})
@@ -52,7 +52,7 @@ func TestTaskTokenRoundtrip(t *testing.T) {
 	cache := jwtassertion.NewJWKSCache(srv.URL)
 	auth := jwtassertion.Authenticator(jwtassertion.Config{
 		JWKS:             cache,
-		AllowedIssuers:   []string{"asdlc-bff"},
+		AllowedIssuers:   []string{"aep-bff"},
 		AllowedAudiences: []string{"git-service"},
 	})
 
@@ -78,7 +78,7 @@ func TestTaskTokenRoundtrip(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/internal/v1/credentials/refresh", nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/tasks/task-abc/credentials/refresh", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -98,7 +98,7 @@ func TestTaskTokenRoundtrip_KidRotation(t *testing.T) {
 	// First key — initially serves JWKS.
 	pemKey1, _ := writeTestKey(t, "pkcs1")
 	mgr1, err := NewTaskTokenManager(TaskTokenConfig{
-		PrivateKey: pemKey1, Issuer: "asdlc-bff", Audience: "git-service", TTL: 10 * time.Minute,
+		PrivateKey: pemKey1, Issuer: "aep-bff", Audience: "git-service", TTL: 10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("mgr1: %v", err)
@@ -117,7 +117,7 @@ func TestTaskTokenRoundtrip_KidRotation(t *testing.T) {
 	cache := jwtassertion.NewJWKSCache(srv.URL)
 	auth := jwtassertion.Authenticator(jwtassertion.Config{
 		JWKS:             cache,
-		AllowedIssuers:   []string{"asdlc-bff"},
+		AllowedIssuers:   []string{"aep-bff"},
 		AllowedAudiences: []string{"git-service"},
 	})
 	handler := auth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -138,7 +138,7 @@ func TestTaskTokenRoundtrip_KidRotation(t *testing.T) {
 	// token's kid is unknown to the cached JWKS, which must trigger refresh.
 	pemKey2, _ := writeTestKey(t, "pkcs1")
 	mgr2, err := NewTaskTokenManager(TaskTokenConfig{
-		PrivateKey: pemKey2, Issuer: "asdlc-bff", Audience: "git-service", TTL: 10 * time.Minute,
+		PrivateKey: pemKey2, Issuer: "aep-bff", Audience: "git-service", TTL: 10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("mgr2: %v", err)
@@ -163,7 +163,7 @@ func TestTaskTokenRoundtrip_KidRotation(t *testing.T) {
 func TestTaskTokenRoundtrip_WrongAudience(t *testing.T) {
 	pemKey, _ := writeTestKey(t, "pkcs1")
 	mgr, _ := NewTaskTokenManager(TaskTokenConfig{
-		PrivateKey: pemKey, Issuer: "asdlc-bff", Audience: "git-service", TTL: 10 * time.Minute,
+		PrivateKey: pemKey, Issuer: "aep-bff", Audience: "git-service", TTL: 10 * time.Minute,
 	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +174,7 @@ func TestTaskTokenRoundtrip_WrongAudience(t *testing.T) {
 	cache := jwtassertion.NewJWKSCache(srv.URL)
 	auth := jwtassertion.Authenticator(jwtassertion.Config{
 		JWKS:             cache,
-		AllowedIssuers:   []string{"asdlc-bff"},
+		AllowedIssuers:   []string{"aep-bff"},
 		AllowedAudiences: []string{"some-other-service"},
 	})
 	handler := auth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -198,7 +198,7 @@ func TestTaskTokenRoundtrip_WrongAudience(t *testing.T) {
 func TestTaskTokenRoundtrip_ExpiredToken(t *testing.T) {
 	pemKey, _ := writeTestKey(t, "pkcs1")
 	mgr, err := NewTaskTokenManager(TaskTokenConfig{
-		PrivateKey: pemKey, Issuer: "asdlc-bff", Audience: "git-service", TTL: 1 * time.Millisecond,
+		PrivateKey: pemKey, Issuer: "aep-bff", Audience: "git-service", TTL: 1 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewTaskTokenManager: %v", err)
@@ -212,7 +212,7 @@ func TestTaskTokenRoundtrip_ExpiredToken(t *testing.T) {
 	cache := jwtassertion.NewJWKSCache(srv.URL)
 	auth := jwtassertion.Authenticator(jwtassertion.Config{
 		JWKS:             cache,
-		AllowedIssuers:   []string{"asdlc-bff"},
+		AllowedIssuers:   []string{"aep-bff"},
 		AllowedAudiences: []string{"git-service"},
 	})
 	handler := auth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

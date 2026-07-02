@@ -22,7 +22,7 @@
 // Client Registration. Publisher-app registration for BYO-IDP requires
 // creating an OAuth app in the user's IDP, which is per-IDP (Asgardeo
 // Management API, Okta DCR, Keycloak API, etc.); the org admin instead
-// pre-registers the App Factory publisher app in their IDP and feeds the
+// pre-registers the AEP publisher app in their IDP and feeds the
 // credentials back into PUT idp-profile.
 package oidc
 

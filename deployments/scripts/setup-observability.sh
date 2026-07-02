@@ -226,7 +226,7 @@ spec:
 EOF
 echo "✅ HTTPRoute observer-mainkgw applied"
 
-# ── 4b. App Factory authz role + binding for Observer ───────────────────
+# ── 4b. AEP authz role + binding for Observer ───────────────────
 # The OC control-plane chart ships a `observer-resource-reader` role
 # bound to `openchoreo-observer-resource-reader-client` (the Observer's
 # UID-resolver subject), but that role only has component/project/
@@ -235,12 +235,12 @@ echo "✅ HTTPRoute observer-mainkgw applied"
 # the Observer returns 403 "no matching policies found" even though
 # JWT auth succeeds. Mirrors v2 wso2cloud-deployment/.../init/layer-2/controlplane.yaml.
 echo ""
-echo "4b. App Factory ClusterAuthzRole + binding for Observer"
+echo "4b. AEP ClusterAuthzRole + binding for Observer"
 kubectl --context "$CLUSTER_CONTEXT" apply -f - <<'EOF'
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterAuthzRole
 metadata:
-  name: app-factory-observer-reader
+  name: aep-observer-reader
 spec:
   actions:
     - "logs:view"
@@ -253,7 +253,7 @@ spec:
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterAuthzRoleBinding
 metadata:
-  name: app-factory-observer-reader-binding
+  name: aep-observer-reader-binding
 spec:
   effect: allow
   entitlement:
@@ -262,9 +262,9 @@ spec:
   roleMappings:
     - roleRef:
         kind: ClusterAuthzRole
-        name: app-factory-observer-reader
+        name: aep-observer-reader
 EOF
-echo "✅ App Factory observer-reader role + binding applied"
+echo "✅ AEP observer-reader role + binding applied"
 
 # ── 5. ClusterObservabilityPlane CR (registers plane with the CP) ────────
 echo ""

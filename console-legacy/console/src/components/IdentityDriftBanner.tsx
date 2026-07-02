@@ -37,7 +37,7 @@ interface Props {
  * Per phase2.md §10.9.
  */
 export default function IdentityDriftBanner({ ocOrgId, identityChangedAt, prevIdentityLogin, identityLogin }: Props) {
-  const dismissalKey = `asdlc.identity-drift.dismissed:${ocOrgId}:${identityChangedAt}`;
+  const dismissalKey = `aep.identity-drift.dismissed:${ocOrgId}:${identityChangedAt}`;
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {

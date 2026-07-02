@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/config"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/config"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
 // TestJWKSRoute_PublishesActiveKey verifies the BFF's JWKS endpoint is

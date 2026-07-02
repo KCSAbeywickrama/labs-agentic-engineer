@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/credentials"
 )
 
 // (fakeResolver and fakeCred re-used from build_credentials_service_test.go)

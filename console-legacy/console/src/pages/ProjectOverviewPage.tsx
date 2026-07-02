@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Box, Button, CircularProgress, PageContent, Typography } from '@wso2/oxygen-ui';
-import { ProjectStatusPolyline, type Stage } from '@asdlc/project-status';
+import { ProjectStatusPolyline, type Stage } from '@aep/project-status';
 import { api, ApiError } from '../services/api';
 import type { ComponentTask, ProjectSdlcPhase, ProjectStatus } from '../services/api';
 import {

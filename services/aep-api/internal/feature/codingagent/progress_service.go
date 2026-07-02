@@ -30,12 +30,12 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/clustergatewayproxy"
-	"github.com/wso2/asdlc/asdlc-service/clients/observer"
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/contracts"
-	"github.com/wso2/asdlc/asdlc-service/internal/platform/tenant"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/clients/observer"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Default cap on lines per /progress/* response. Keeps Observer query
@@ -113,7 +113,7 @@ func NewProgressService(
 	taskSvc taskReader,
 	ocClient openchoreo.ComponentClient,
 	observerClient observer.Client,
-) ProgressService {
+) *progressService {
 	return &progressService{
 		taskSvc:        taskSvc,
 		ocClient:       ocClient,
@@ -126,20 +126,11 @@ func NewProgressService(
 // GetAgentProgress can serve new-path (`ca-…` runName) tasks via
 // pods/log + the `coding_agent_logs` sidecar instead of Observer.
 // Both must be non-nil to enable the path. Idempotent.
-func (s *progressService) WithCodingAgentLogSource(proxy *clustergatewayproxy.Client, db *gorm.DB) ProgressService {
+func (s *progressService) WithCodingAgentLogSource(proxy *clustergatewayproxy.Client, db *gorm.DB) *progressService {
 	s.proxy = proxy
 	s.db = db
 	return s
 }
-
-// ProgressServiceWithLogSource names the optional log-source setter the
-// composition root wires by type-assertion, so a signature drift fails the
-// build rather than silently skipping the proxy log path at boot.
-type ProgressServiceWithLogSource interface {
-	WithCodingAgentLogSource(*clustergatewayproxy.Client, *gorm.DB) ProgressService
-}
-
-var _ ProgressServiceWithLogSource = (*progressService)(nil)
 
 // ErrProgressUnavailable signals that the Observer is not reachable.
 // The controller maps this to HTTP 503 progress_unavailable. Aliased from

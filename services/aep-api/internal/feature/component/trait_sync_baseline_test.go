@@ -19,7 +19,7 @@ package component
 import (
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // TestBaseline_NoExposesAPI_ProducesNoTrait is the baseline-diff

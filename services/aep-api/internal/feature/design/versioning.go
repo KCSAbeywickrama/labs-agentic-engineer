@@ -19,8 +19,8 @@ package design
 import (
 	"fmt"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Tag scheme:

@@ -17,9 +17,9 @@
 
 set -e
 
-echo "App Factory Console — Initializing runtime configuration..."
+echo "AEP Console — Initializing runtime configuration..."
 
-ASDLC_API_PROXY_URL="${ASDLC_API_PROXY_URL:-http://localhost:9090}"
+AEP_API_PROXY_URL="${AEP_API_PROXY_URL:-http://localhost:9090}"
 THUNDER_URL="${VITE_THUNDER_URL:-}"
 THUNDER_CLIENT_ID="${VITE_THUNDER_CLIENT_ID:-}"
 THUNDER_SCOPES="${VITE_THUNDER_SCOPES:-openid profile email}"
@@ -30,9 +30,9 @@ BILLING_API_BASE_URL_VAL="${BILLING_API_BASE_URL:-}"
 
 # env-config.js is generated at start so the SPA can read runtime config.
 # The heredoc is unquoted so $VAR and ${VAR:-default} expand. We fall back
-# to /asdlc-api-service for VITE_CORE_API_BASE_URL because that's the
+# to /aep-api-service for VITE_CORE_API_BASE_URL because that's the
 # nginx-side proxy path; the rest are passed through from the env.
-VITE_CORE_API_BASE_URL_VAL="${VITE_CORE_API_BASE_URL:-/asdlc-api-service}"
+VITE_CORE_API_BASE_URL_VAL="${VITE_CORE_API_BASE_URL:-/aep-api-service}"
 NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 cat > /usr/share/nginx/html/env-config.js <<EOF_INNER || echo "env-config.js is read-only, skipping write"
 // Runtime environment configuration
@@ -75,13 +75,13 @@ if [ -z "$DNS_RESOLVERS" ]; then
 fi
 sed -i "s|__DNS_RESOLVERS__|${DNS_RESOLVERS}|g" /etc/nginx/nginx.conf
 
-sed -i "s|__ASDLC_API_PROXY_URL__|${ASDLC_API_PROXY_URL}|g" /etc/nginx/nginx.conf
+sed -i "s|__AEP_API_PROXY_URL__|${AEP_API_PROXY_URL}|g" /etc/nginx/nginx.conf
 
 # Extract host:port from the proxy URL for variable-based proxy_pass
 # (nginx variable triggers runtime DNS resolution via the resolver,
 # avoiding stale cached IPs after upstream pod restarts).
-ASDLC_API_BACKEND="$(echo "${ASDLC_API_PROXY_URL}" | sed 's|^https\{0,1\}://||' | sed 's|/.*||')"
-sed -i "s|__ASDLC_API_BACKEND__|${ASDLC_API_BACKEND}|g" /etc/nginx/nginx.conf
+AEP_API_BACKEND="$(echo "${AEP_API_PROXY_URL}" | sed 's|^https\{0,1\}://||' | sed 's|/.*||')"
+sed -i "s|__AEP_API_BACKEND__|${AEP_API_BACKEND}|g" /etc/nginx/nginx.conf
 
 # Collab-server upstream. nginx.conf uses `set $collab_backend host:port`
 # in the /collab/ block so DNS is resolved at request time (the container
@@ -97,7 +97,7 @@ if [ -n "$COLLAB_SERVER_URL" ]; then
 fi
 
 echo "Configuration summary:"
-echo "  API Proxy:     /asdlc-api-service/ -> ${ASDLC_API_PROXY_URL}/"
+echo "  API Proxy:     /aep-api-service/ -> ${AEP_API_PROXY_URL}/"
 echo "  Thunder URL:   ${THUNDER_URL:-[NOT SET]}"
 echo "  Client ID:     ${THUNDER_CLIENT_ID:-[NOT SET]}"
 echo "  BYPASS_AUTH:   ${DEV_BYPASS_AUTH:-[OFF]}"

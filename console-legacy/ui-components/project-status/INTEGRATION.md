@@ -1,4 +1,4 @@
-# Integration Guide — `@asdlc/project-status`
+# Integration Guide — `@aep/project-status`
 
 A drop-in React component that visualises the four-stage SDLC pipeline (Requirements → Architecture → Tasks → Deployment) as a polyline ridge banner. This guide covers wiring it into another package (typically `console/`).
 
@@ -23,7 +23,7 @@ This package lives in the `ui-components/*` workspace and is consumed via pnpm w
 ```json
 {
   "dependencies": {
-    "@asdlc/project-status": "workspace:*"
+    "@aep/project-status": "workspace:*"
   }
 }
 ```
@@ -66,7 +66,7 @@ If a consumer lacks one, the component still renders using the default MUI theme
 ## 4. Quickstart — minimum integration
 
 ```tsx
-import { ProjectStatusPolyline, type Stage } from '@asdlc/project-status';
+import { ProjectStatusPolyline, type Stage } from '@aep/project-status';
 
 const stages: Stage[] = [
   { id: 'req',  name: 'Requirements', iteration: 4, state: 'done',    headline: 'PRD locked' },
@@ -167,7 +167,7 @@ When `onStageClick` is set, the internal drawer is suppressed.
 If you want a custom panel instead of the bundled `StageDrawer`, take over click handling. The drawer is also exported standalone so you can use it under your own control:
 
 ```tsx
-import { ProjectStatusPolyline, StageDrawer, type Stage } from '@asdlc/project-status';
+import { ProjectStatusPolyline, StageDrawer, type Stage } from '@aep/project-status';
 import { useState } from 'react';
 
 function Overview({ stages }: { stages: Stage[] }) {
@@ -197,7 +197,7 @@ In this codebase the four stages map to existing artifacts:
 Sketch:
 
 ```ts
-import type { Stage } from '@asdlc/project-status';
+import type { Stage } from '@aep/project-status';
 import type { Spec, Design, ComponentTask } from '../services/api';
 
 function buildStages(spec: Spec | null, design: Design | null, tasks: ComponentTask[]): Stage[] {
@@ -308,7 +308,7 @@ import {
   type ProjectStatusPolylineProps,
   type StageDrawerProps,
   type ResolvedStateMeta,
-} from '@asdlc/project-status';
+} from '@aep/project-status';
 ```
 
 Anything not in this list is internal and may change without notice.

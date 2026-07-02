@@ -1,5 +1,5 @@
 {
-  "name": "@asdlc/excalidraw-dsl",
+  "name": "@aep/excalidraw-dsl",
   "version": "0.1.0",
   "private": true,
   "type": "module",

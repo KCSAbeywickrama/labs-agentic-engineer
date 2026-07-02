@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/mocks"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Tests exercising the OC-touching paths of TraitSyncService that don't

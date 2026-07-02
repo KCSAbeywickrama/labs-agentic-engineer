@@ -182,7 +182,7 @@ ${input.spec}
     prompt += `
 ## Platform skills — MUST consult before designing
 
-The following encode ASDLC platform best practices, contracts, and pitfalls. Apply them to every component where their concern is relevant. Their full content is below — you do not need to load them.
+The following encode AEP platform best practices, contracts, and pitfalls. Apply them to every component where their concern is relevant. Their full content is below — you do not need to load them.
 
 `;
     for (const sk of builtins) {

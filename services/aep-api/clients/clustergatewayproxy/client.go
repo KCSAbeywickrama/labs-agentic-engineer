@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package clustergatewayproxy is the asdlc-service HTTP client for the
+// Package clustergatewayproxy is the aep-service HTTP client for the
 // wso2cloud cluster-gateway-proxy. The proxy fronts the cloud-dp k8s API
 // and serves requests to the CR allow-list (apigateways, restapis,
 // configmaps, secrets, httproutes, jobs, externalsecrets, serviceaccounts).
@@ -46,7 +46,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/aep/aep-api/middleware"
 )
 
 // ErrNotFound is returned by Get* methods when the proxy returns 404.

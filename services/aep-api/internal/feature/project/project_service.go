@@ -23,11 +23,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/gitrepo"
-	"github.com/wso2/asdlc/asdlc-service/models"
-	"github.com/wso2/asdlc/asdlc-service/repositories"
+	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // Error sentinels for the project feature. ErrProjectNotFound is owned here.
@@ -65,15 +65,7 @@ type skillsProvisioner interface {
 	EnsureProvisioned(ctx context.Context, orgID string) error
 }
 
-// ProjectServiceWithSkills surfaces the skills-provisioner setter so main can
-// wire the skills store without widening the constructor signature.
-type ProjectServiceWithSkills interface {
-	SetSkillsProvisioner(p skillsProvisioner)
-}
-
 func (s *projectService) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
-
-var _ ProjectServiceWithSkills = (*projectService)(nil)
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -82,7 +74,7 @@ func NewProjectService(
 	artifactSvc artifacts.ArtifactService,
 	store *artifacts.ArtifactStore,
 	taskRepo repositories.TaskRepository,
-) ProjectService {
+) *projectService {
 	return &projectService{
 		client:      client,
 		repoSvc:     repoSvc,

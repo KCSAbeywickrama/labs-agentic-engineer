@@ -1,8 +1,8 @@
 # Glossary — domain terms
 
-# Lab App Factory — Domain Glossary
+# Lab AEP — Domain Glossary
 
-> Living glossary for the lab-app-factory codebase. Captures shared language
+> Living glossary for the lab-aep codebase. Captures shared language
 > between the platform, OpenChoreo (OC), wso2cloud, and Agent Manager (AM)
 > reference. Not a spec — terms only. Implementation decisions live in ADRs.
 
@@ -25,7 +25,7 @@ directory. Today the only env is `development`. Holds user-app runtime
 workloads on cluster `cloud-dp-oc-dp`.
 
 ### `remote-worker NS` (DP, new) — `wc-<orgUUID8>-<orgHash8>-remote-worker`
-The DP-cluster namespace **per organization** where app-factory's
+The DP-cluster namespace **per organization** where aep's
 **coding-agent** WorkflowRun pods run (LLM-driven source-editing work — a
 different category of workload from user-component image builds, which stay
 on WP). Lives on `cloud-dp-oc-dp` (the same cluster as user-app workloads),
@@ -37,7 +37,7 @@ Holds the per-org Anthropic key + GitHub PAT materialized via ESO from
 
 ### `workflows NS` (WP) — `workflows-wc-<orgUUID8>-<orgHash8>`
 The workflow-plane namespace on `cloud-dp-oc-ci`. **Continues to host
-app-factory's `dockerfile-builder` WorkflowRuns** (image builds — exactly
+aep's `dockerfile-builder` WorkflowRuns** (image builds — exactly
 WP's purpose). Coding-agent runs are migrating off this NS to the new
 remote-worker NS on DP, but builds stay.
 
@@ -56,7 +56,7 @@ Component/Workload CRs. **Not a Kubernetes namespace.** Multiple OC Projects
 share the same org NS and the same org-env / remote-worker NS — credential
 isolation is per-org, not per-project.
 
-### `app-factory Project` (Postgres)
+### `aep Project` (Postgres)
 The platform's own project entity (`ComponentTask.ProjectID`, etc.).
 One-to-one with an OC Project; the link is the OC Project name (a project
 handle).
@@ -115,7 +115,7 @@ because SM API is WriteOnly. See [[adr-effective-key-survives-sm-api]].
 
 ### `ClusterWorkflow`
 An OC cluster-scoped CR that defines a reusable workflow template. App-factory
-authors two: `app-factory-coding-agent` (one-shot remote-worker pod per task)
+authors two: `aep-coding-agent` (one-shot remote-worker pod per task)
 and `dockerfile-builder` (image build).
 
 ### `WorkflowRun`
@@ -127,12 +127,12 @@ bridge.
 The OC primitive that tells the `workflowrun-controller` **which cluster** to
 project a WorkflowRun onto. Today points at the CI cluster
 (`cloud-dp-oc-ci`); needs to be reconfigured / a new instance authored to
-project app-factory's runs onto the DP cluster's remote-worker NS.
+project aep's runs onto the DP cluster's remote-worker NS.
 
 ### `spec.resources` (on ClusterWorkflow)
 The template block for per-run resources (`ExternalSecret` for credentials)
 that OC projects alongside the workflow. Verified working on dev cloud for
-agent-platform. **No longer relevant for app-factory's coding-agent** —
+agent-platform. **No longer relevant for aep's coding-agent** —
 coding-agent moves off OC WorkflowRun entirely (see
 [[adr-coding-agent-via-cluster-gateway-proxy]]); the BFF authors the
 ExternalSecret directly via cluster-gateway-proxy.
@@ -156,10 +156,10 @@ App-factory's BFF (also on `cloud-dp-oc-cp`) follows the same pattern to
 dispatch coding-agent Jobs — see
 [[adr-coding-agent-via-cluster-gateway-proxy]].
 
-### `APP_FACTORY_BFF_TO_REMOTE_WORKER` — **legacy, unused**
+### `AEP_BFF_TO_REMOTE_WORKER` — **legacy, unused**
 Pre-provisioned Thunder OAuth2 M2M client (client_credentials grant) in
 cloud's platform-idp, secret in Vault as
-`app-factory-bff-to-remote-worker-client-secret`. **Provisioned for the
+`aep-bff-to-remote-worker-client-secret`. **Provisioned for the
 now-removed long-lived `remote-worker` service component**; not used by
 the new Job-based dispatch (the proxy is un-authed; see
 `cluster-gateway-proxy` term). Kept in the deployment configs as
@@ -176,12 +176,12 @@ Thunder instance via `deployments/single-cluster/values-thunder.yaml`.
 
 ### `M2M client secret`
 A `client_credentials` OAuth client provisioned in Thunder for service-to-
-service auth (e.g. `APP_FACTORY_BFF_TO_PLATFORM_API`,
-`app-factory-bff-to-remote-worker-client-secret`). Stored as a SecretReference
+service auth (e.g. `AEP_BFF_TO_PLATFORM_API`,
+`aep-bff-to-remote-worker-client-secret`). Stored as a SecretReference
 sourced from Vault on cloud; a literal env var locally.
 
 ### `Task JWT`
-The short-lived bearer the BFF mints per coding-agent dispatch (`ASDLC_BEARER`
+The short-lived bearer the BFF mints per coding-agent dispatch (`AEP_BEARER`
 in the WorkflowRun param today). M1 plan replaces this with **AMP's eval-job
 pattern**: per-org OAuth client-secret + per-run ExternalSecret +
 `client_credentials` exchange at runner startup. See [[adr-runner-auth-amp-pattern]].
@@ -190,7 +190,7 @@ pattern**: per-org OAuth client-secret + per-run ExternalSecret +
 
 ## Source repositories (reference layout, all under `wso2/software-factory/`)
 
-- `lab-app-factory/` — this repo. Platform code.
+- `lab-aep/` — this repo. Platform code.
 - `agent-manager/` — OSS open-core AM (the reference "right way"). Source of
   the `secretmanagersvc` interfaces + the `openbao` provider to port.
 - `agent-platform/` — Enterprise AM superset deployed on WSO2 Cloud. Source
@@ -199,7 +199,7 @@ pattern**: per-org OAuth client-secret + per-run ExternalSecret +
   org-unit provisioner; its `util.GenerateNamespaceName` is the canonical
   source of the `wc-<orgUUID8>-<orgHash8>` shape.
 - `wso2cloud-deployement-main/` — GitOps repo for cloud deployments. Holds
-  app-factory's release-bindings, ClusterWorkflow CRs, Vault SecretReference
+  aep's release-bindings, ClusterWorkflow CRs, Vault SecretReference
   definitions.
 - `openchoreo/` — OC source. Authoritative for what
   `ClusterWorkflow`/`WorkflowRun`/`SecretReference`/`GitSecret` actually mean.

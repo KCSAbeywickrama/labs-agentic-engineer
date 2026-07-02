@@ -20,7 +20,7 @@ package httpx
 import (
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/aep/aep-api/middleware"
 )
 
 // CorrelationTransport propagates the X-Correlation-ID header from the

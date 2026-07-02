@@ -19,8 +19,8 @@ package task
 import (
 	"context"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/artifacts"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // resolveDesignComponent reads the project's current `specs/design/` tree

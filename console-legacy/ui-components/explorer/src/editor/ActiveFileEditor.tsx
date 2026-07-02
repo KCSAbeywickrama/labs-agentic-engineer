@@ -17,11 +17,11 @@
  */
 
 import { useEffect, useImperativeHandle, useRef } from 'react';
-import { MdEditor, type MdEditorRef } from '@asdlc/md-editor';
+import { MdEditor, type MdEditorRef } from '@aep/md-editor';
 import {
   ExcalidrawEditor,
   type ExcalidrawEditorRef,
-} from '@asdlc/excalidraw-editor';
+} from '@aep/excalidraw-editor';
 import type { ExplorerEditorProps } from '../types.js';
 
 interface ActiveFileEditorProps {

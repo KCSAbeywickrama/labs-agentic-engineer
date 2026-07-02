@@ -25,10 +25,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/httpx"
-	"github.com/wso2/asdlc/asdlc-service/clients/openchoreo/gen"
-	"github.com/wso2/asdlc/asdlc-service/clients/requests"
-	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/aep/aep-api/clients/httpx"
+	"github.com/wso2/aep/aep-api/clients/openchoreo/gen"
+	"github.com/wso2/aep/aep-api/clients/requests"
+	"github.com/wso2/aep/aep-api/middleware"
 )
 
 // AuthProvider is the auth-token contract the OC client depends on. Lets us
@@ -125,15 +125,6 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 		userJWT := middleware.GetAuthToken(ctx)
 		useServiceIdentity := middleware.IsServiceIdentity(ctx) || userJWT == "" || cfg.ImpersonateOrgResolver == nil
 
-		slog.InfoContext(ctx, "[SHAKEOUT:OCAUTH] authEditor decision",
-			"resolverConfigured", cfg.ImpersonateOrgResolver != nil,
-			"method", req.Method, "path", req.URL.Path,
-			"hasUserJWT", userJWT != "",
-			"isServiceIdentity", middleware.IsServiceIdentity(ctx),
-			"useServiceIdentity", useServiceIdentity,
-			"branch", map[bool]string{true: "service-identity", false: "forward-user-jwt"}[useServiceIdentity],
-			"namespaceFromPath", namespaceFromPath(req.URL.Path))
-
 		if !useServiceIdentity {
 			slog.DebugContext(ctx, "openchoreo: forwarding inbound user JWT",
 				"method", req.Method, "path", req.URL.Path)
@@ -149,23 +140,14 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 				}
 				if orgUUID != "" {
 					req.Header.Set("X-Impersonate-Org", orgUUID)
-					slog.InfoContext(ctx, "[SHAKEOUT:OCAUTH] impersonation org resolved",
-						"resolverConfigured", cfg.ImpersonateOrgResolver != nil,
-						"namespace", ns, "impersonateOrg", orgUUID, "method", req.Method, "path", req.URL.Path)
 					slog.DebugContext(ctx, "openchoreo: service-identity call — impersonating org",
 						"namespace", ns, "orgUUID", orgUUID, "method", req.Method, "path", req.URL.Path,
 						"explicitServiceIdentity", middleware.IsServiceIdentity(ctx))
 				} else {
-					slog.InfoContext(ctx, "[SHAKEOUT:OCAUTH] impersonation: resolver returned no org",
-						"resolverConfigured", cfg.ImpersonateOrgResolver != nil,
-						"namespace", ns, "impersonateOrg", "no org", "method", req.Method, "path", req.URL.Path)
 					slog.DebugContext(ctx, "openchoreo: service-identity call — resolver returned no org, sending no impersonation header",
 						"namespace", ns, "method", req.Method, "path", req.URL.Path)
 				}
 			} else {
-				slog.InfoContext(ctx, "[SHAKEOUT:OCAUTH] impersonation: no namespace in path",
-					"resolverConfigured", cfg.ImpersonateOrgResolver != nil,
-					"impersonateOrg", "no ns", "method", req.Method, "path", req.URL.Path)
 				slog.DebugContext(ctx, "openchoreo: service-identity call — no namespace in path, sending no impersonation header",
 					"method", req.Method, "path", req.URL.Path)
 			}

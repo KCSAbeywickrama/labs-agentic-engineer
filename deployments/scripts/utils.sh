@@ -368,7 +368,7 @@ load_public_urls() {
 render_values_file() {
     local src="$1"
     local rendered
-    rendered="$(mktemp -t "asdlc-values.XXXXXX.yaml")"
+    rendered="$(mktemp -t "aep-values.XXXXXX.yaml")"
     # Only expand the public URL placeholders — bootstrap scripts contain
     # bash variables like ${SCRIPT_DIR} that must NOT be touched.
     envsubst '${PUBLIC_THUNDER_URL} ${PUBLIC_THUNDER_HOST} ${PUBLIC_THUNDER_PORT} ${PUBLIC_THUNDER_SCHEME} ${PUBLIC_CONSOLE_URL}' < "$src" > "$rendered"
@@ -484,7 +484,7 @@ PY
         kubectl -n thunder patch httproute thunder-httproute --type=merge \
             -p "{\"spec\":{\"hostnames\":${hostnames_json}}}" >/dev/null
 
-        # Update the asdlc-console-client redirect_uris in Thunder's SQLite.
+        # Update the aep-console-client redirect_uris in Thunder's SQLite.
         local pod
         pod="$(kubectl -n thunder get pod -l app.kubernetes.io/name=thunder \
                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
@@ -496,7 +496,7 @@ SET OAUTH_CONFIG_JSON = json_set(
   OAUTH_CONFIG_JSON,
   '\$.redirect_uris',
   json('["http://localhost:8090","${PUBLIC_CONSOLE_URL}"]'))
-WHERE CLIENT_ID = 'asdlc-console-client';
+WHERE CLIENT_ID = 'aep-console-client';
 SQL
             # Clear stale OAuth/flow state from prior public URL.
             kubectl -n thunder exec -i "$pod" -- sqlite3 \
@@ -542,8 +542,8 @@ PY
     echo "✅ Public URLs synced"
 }
 
-# ensure_repo_storage prepares the host bind mount for asdlc-api's
-# REPO_BASE_PATH (/data/repos). asdlc-api runs as uid 1000 (appuser); on
+# ensure_repo_storage prepares the host bind mount for aep-api's
+# REPO_BASE_PATH (/data/repos). aep-api runs as uid 1000 (appuser); on
 # Linux the host uid often differs, and Docker creates missing bind-mount
 # parents as root — both cause "permission denied" on clone. Mode 1777
 # (sticky, world-writable) is local-dev-only and avoids sudo chown.

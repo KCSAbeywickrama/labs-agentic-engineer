@@ -52,7 +52,7 @@ configuration:
       - "http://localhost:8090"
       - "${PUBLIC_THUNDER_URL}"
       - "${PUBLIC_CONSOLE_URL}"
-      - "http://asdlc.openchoreo.localhost:8080"
+      - "http://aep.openchoreo.localhost:8080"
 
   passkey:
     allowedOrigins:
@@ -86,18 +86,18 @@ setup:
 #
 # We currently rely on the default Thunder admin (`admin` / `admin`, in the
 # `Administrators` group) which the ClusterAuthzRoleBinding installed by
-# setup-asdlc.sh maps to the `admin` ClusterAuthzRole. No platform-users
+# setup-aep.sh maps to the `admin` ClusterAuthzRole. No platform-users
 # bootstrap script is needed for v1 dev.
 #
-# 59-asdlc-oauth-apps.sh registers ALL six OAuth applications the platform
+# 59-aep-oauth-apps.sh registers ALL six OAuth applications the platform
 # needs in a single pass: workload-publisher (consumed by OC dockerfile-builder
-# ClusterWorkflow), asdlc-api (BFF service principal), asdlc-bff-to-{git,
-# agents,remote-worker} (BFF outbound Service JWT clients), and asdlc-console
+# ClusterWorkflow), aep-api (BFF service principal), aep-bff-to-{git,
+# agents,remote-worker} (BFF outbound Service JWT clients), and aep-console
 # (public PKCE client for the React app). Adding a new client = one line in
 # CONFIDENTIAL_APPS or PUBLIC_APPS at the top of the script.
 bootstrap:
   scripts:
-    59-asdlc-oauth-apps.sh: |
+    59-aep-oauth-apps.sh: |
       #!/bin/bash
       set -e
       SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]:-$0}")"
@@ -116,16 +116,16 @@ bootstrap:
       CONFIDENTIAL_APPS=(
         "Workload Publisher|OpenChoreo Workload Publisher Client (used by dockerfile-builder generate-workload-cr step)|openchoreo-workload-publisher-client|openchoreo-workload-publisher-secret"
         "OpenChoreo Observer Resource Reader|Client used by the BFF to fetch tokens for the OC Observer service (live workflow logs). Bound by the openchoreo-observer-resource-reader-client-binding ClusterAuthzRoleBinding.|openchoreo-observer-resource-reader-client|openchoreo-observer-resource-reader-client-secret"
-        "ASDLC API Service|ASDLC API Service - service-to-service client for OpenChoreo|asdlc-api-client|asdlc-api-client-secret"
-        "ASDLC BFF to git-service|BFF outbound Service JWT, audience: git-service|asdlc-bff-to-git-service|asdlc-bff-to-git-service-secret"
-        "ASDLC BFF to agents-service|BFF outbound Service JWT, audience: agents-service|asdlc-bff-to-agents-service|asdlc-bff-to-agents-service-secret"
-        "ASDLC BFF to remote-worker|BFF outbound Service JWT, audience: remote-worker|asdlc-bff-to-remote-worker|asdlc-bff-to-remote-worker-secret"
-        "ASDLC Local Dev Seeder|Local-dev convenience client used by scripts/seed-dev.sh to POST GitHub PAT + Anthropic key to the default org. Not used by any platform code path.|asdlc-local-dev-seeder|asdlc-local-dev-seeder-secret"
-        "ASDLC System Client|System-level Thunder admin client used by the BFF (clients/thundersvc) to mint scope=system tokens for the publisher-app lifecycle (POST /applications). Bound to the Thunder Administrator role by the 60-asdlc-system-role.sh bootstrap script. See docs/design/api-platform-integration.md §6 Phase 3 (D7).|asdlc-system-client|asdlc-system-client-secret"
+        "AEP API Service|AEP API Service - service-to-service client for OpenChoreo|aep-api-client|aep-api-client-secret"
+        "AEP BFF to git-service|BFF outbound Service JWT, audience: git-service|aep-bff-to-git-service|aep-bff-to-git-service-secret"
+        "AEP BFF to agents-service|BFF outbound Service JWT, audience: agents-service|aep-bff-to-agents-service|aep-bff-to-agents-service-secret"
+        "AEP BFF to remote-worker|BFF outbound Service JWT, audience: remote-worker|aep-bff-to-remote-worker|aep-bff-to-remote-worker-secret"
+        "AEP Local Dev Seeder|Local-dev convenience client used by scripts/seed-dev.sh to POST GitHub PAT + Anthropic key to the default org. Not used by any platform code path.|aep-local-dev-seeder|aep-local-dev-seeder-secret"
+        "AEP System Client|System-level Thunder admin client used by the BFF (clients/thundersvc) to mint scope=system tokens for the publisher-app lifecycle (POST /applications). Bound to the Thunder Administrator role by the 60-aep-system-role.sh bootstrap script. See docs/design/api-platform-integration.md §6 Phase 3 (D7).|aep-system-client|aep-system-client-secret"
       )
 
       PUBLIC_APPS=(
-        "ASDLC Console|ASDLC Platform Console|asdlc-console-client|http://localhost:8090,${PUBLIC_CONSOLE_URL}|given_name,family_name,username,groups,ouId,ouName,ouHandle"
+        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,${PUBLIC_CONSOLE_URL}|given_name,family_name,username,groups,ouId,ouName,ouHandle"
       )
 
       # ──────────────────────────────────────────────────────────────────
@@ -308,18 +308,18 @@ bootstrap:
 
       log_success "All OAuth applications configured"
 
-    # Assigns the Administrator role to the asdlc-system-client OAuth app so
+    # Assigns the Administrator role to the aep-system-client OAuth app so
     # the BFF (via clients/thundersvc.getSystemToken) can mint scope=system
     # tokens and call Thunder's admin /applications endpoints to manage per-
     # org publisher apps. Mirrors the agent-manager precedent in
     # wso2-amp-thunder-extension's 56-amp-system-client.sh. Idempotent.
-    60-asdlc-system-role.sh: |
+    60-aep-system-role.sh: |
       #!/bin/bash
       set -e
       SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]:-$0}")"
       source "${SCRIPT_DIR}/common.sh"
 
-      SYSTEM_CLIENT_ID="asdlc-system-client"
+      SYSTEM_CLIENT_ID="aep-system-client"
 
       # ── Resolve the system app's internal id by its clientId. ───────────
       log_info "Looking up app id for ${SYSTEM_CLIENT_ID}..."
@@ -341,7 +341,7 @@ bootstrap:
 
       if [[ -z "$SYSTEM_APP_ID" ]]; then
         log_error "Could not find application with clientId=${SYSTEM_CLIENT_ID}"
-        log_error "Make sure 59-asdlc-oauth-apps.sh ran first."
+        log_error "Make sure 59-aep-oauth-apps.sh ran first."
         exit 1
       fi
       log_info "Found ${SYSTEM_CLIENT_ID} app id: $SYSTEM_APP_ID"

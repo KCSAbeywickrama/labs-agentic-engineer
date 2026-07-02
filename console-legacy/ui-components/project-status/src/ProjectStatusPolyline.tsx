@@ -34,11 +34,11 @@ const NODE_SIZE = 56;
 // hovering near its top edge.
 const CELL_BTN_PAD_TOP = 6;
 const RING_ANIM = `
-@keyframes asdlc-ps-ring {
+@keyframes aep-ps-ring {
   0%   { transform: scale(0.9); opacity: 0.55; }
   100% { transform: scale(1.35); opacity: 0; }
 }
-@keyframes asdlc-ps-pulse {
+@keyframes aep-ps-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: 0.5; transform: scale(1.25); }
 }
@@ -271,7 +271,7 @@ function StatePill({
           borderRadius: 999,
           background: 'currentColor',
           opacity: dotPulse ? 1 : 0.6,
-          animation: dotPulse ? 'asdlc-ps-pulse 1.6s cubic-bezier(.2,.7,.2,1) infinite' : undefined,
+          animation: dotPulse ? 'aep-ps-pulse 1.6s cubic-bezier(.2,.7,.2,1) infinite' : undefined,
         }}
       />
       {label}
@@ -394,7 +394,7 @@ export function ProjectStatusPolyline({
                   borderRadius: 999,
                   background: eyebrowDotBg,
                   animation: eyebrowDotPulse
-                    ? 'asdlc-ps-pulse 1.6s cubic-bezier(.2,.7,.2,1) infinite'
+                    ? 'aep-ps-pulse 1.6s cubic-bezier(.2,.7,.2,1) infinite'
                     : undefined,
                 }}
               />
@@ -635,7 +635,7 @@ export function ProjectStatusPolyline({
                           border: `1.5px solid ${accent}`,
                           opacity: 0,
                           animation:
-                            'asdlc-ps-ring 1.8s cubic-bezier(.2,.7,.2,1) infinite',
+                            'aep-ps-ring 1.8s cubic-bezier(.2,.7,.2,1) infinite',
                         }}
                       />
                     )}

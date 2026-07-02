@@ -28,7 +28,6 @@
 
 import { streamObject, type LanguageModel } from "ai";
 import {
-  PlanArraySchema,
   PlanItemSchema,
   type TechLeadPlanInput,
   type PlanIssue,
@@ -75,11 +74,17 @@ export async function runTechLeadPlan(
 ): Promise<TechLeadPlanRunResult> {
   const { model, input, diff, onSealed, isClosed, abortSignal } = opts;
 
+  // Anthropic (via AI SDK v6) requires a tool input_schema of type "object".
+  // A top-level array schema serializes to type "array" and is rejected, so
+  // use the SDK's array mode: pass the element schema + output:"array". The
+  // stream still yields the growing array + result.object is the full array,
+  // which is exactly what the seal-rule below consumes.
   const result = streamObject({
     model,
+    output: "array",
     system: planSystemPrompt,
     prompt: buildPlanUserPrompt(input),
-    schema: PlanArraySchema,
+    schema: PlanItemSchema,
     abortSignal,
     onError: ({ error }) => {
       console.error("[tech-lead/plan] streamObject error:", error);

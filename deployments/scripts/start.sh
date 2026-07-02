@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# Start all ASDLC services.
+# Start all AEP services.
 # Usage: cd deployments && bash scripts/start.sh
 set -e
 
@@ -28,7 +28,7 @@ source "$SCRIPT_DIR/env.sh"
 # shellcheck source=utils.sh
 source "$SCRIPT_DIR/utils.sh"
 
-echo "=== Starting ASDLC Platform ==="
+echo "=== Starting AEP Platform ==="
 
 # Pre-flight — mirrors agent-manager/deployments/scripts/setup-platform.sh.
 # These tools are required for the docker compose build + run flow; failing
@@ -98,8 +98,8 @@ elif kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>
         echo "   OpenBao port-forward already running"
     else
         kubectl port-forward --context "${CLUSTER_CONTEXT}" -n openbao svc/openbao 8200:8200 \
-            > /tmp/asdlc-openbao-portfwd.log 2>&1 &
-        echo "   port-forward PID: $! (logs: /tmp/asdlc-openbao-portfwd.log)"
+            > /tmp/aep-openbao-portfwd.log 2>&1 &
+        echo "   port-forward PID: $! (logs: /tmp/aep-openbao-portfwd.log)"
         for i in 1 2 3 4 5 6 7 8 9 10; do
             if curl -s --max-time 1 http://localhost:8200/v1/sys/health > /dev/null 2>&1; then
                 echo "✅ OpenBao reachable on :8200 (via port-forward)"
@@ -155,21 +155,21 @@ else
     [ -f "$INTERNAL_KUBECONFIG" ] || touch "$INTERNAL_KUBECONFIG"
 fi
 
-# 4. Repo workspace bind mount — asdlc-api clones project repos here
+# 4. Repo workspace bind mount — aep-api clones project repos here
 #    (REPO_BASE_PATH=/data/repos). Must exist and be writable by appuser
 #    (uid 1000) before compose creates the mount as root.
 echo ""
 echo "📁 Ensuring repo storage at $DEPLOY_DIR/data/repos..."
 ensure_repo_storage "$DEPLOY_DIR/data/repos"
 
-# 5. BFF Task JWT signing key — bind-mounted into asdlc-api as
+# 5. BFF Task JWT signing key — bind-mounted into aep-api as
 #    /app/keys/task-signing.pem (docker-compose volume). The BFF reads
 #    the PEM from BFF_TASK_SIGNING_KEY_PATH; mounting beats env-passing
 #    a multi-line value through compose's `${VAR}` substitution.
 TASK_KEY_PATH="$DEPLOY_DIR/keys/task-signing.pem"
 if [ ! -f "$TASK_KEY_PATH" ]; then
     echo "⚠️  BFF Task JWT signing key missing at $TASK_KEY_PATH — coding-agent dispatch will fail."
-    echo "   Run setup-asdlc.sh to generate it."
+    echo "   Run setup-aep.sh to generate it."
 else
     chmod 644 "$TASK_KEY_PATH"
 fi
@@ -187,8 +187,8 @@ fi
 
 # 7. Bring up the compose stack. The coding-agent runner is no longer a
 #    long-lived service — it's dispatched as a one-shot pod via the
-#    `app-factory-coding-agent` ClusterWorkflow in the cluster (installed
-#    by setup-asdlc.sh). No host-mode toggle here.
+#    `aep-coding-agent` ClusterWorkflow in the cluster (installed
+#    by setup-aep.sh). No host-mode toggle here.
 cd "$DEPLOY_DIR"
 echo ""
 echo "🐳 Starting Docker services..."
@@ -219,7 +219,7 @@ echo "  Git Service:      http://localhost:3300"
 echo "  Agents Service:   http://localhost:3400"
 echo ""
 echo "  Coding-agent:     dispatched as a one-shot pod via the"
-echo "                    'app-factory-coding-agent' ClusterWorkflow"
+echo "                    'aep-coding-agent' ClusterWorkflow"
 echo "                    (Workflow Plane namespace 'workflows-default')."
 echo ""
 echo "  Login: admin / admin (default Thunder admin, in the 'Administrators' group)"

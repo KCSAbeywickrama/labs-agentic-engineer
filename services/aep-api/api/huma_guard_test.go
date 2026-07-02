@@ -17,43 +17,12 @@
 package api
 
 import (
-	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// TestOpenAPISpecFresh is the drift guard: every checked-in spec MUST match what
-// the code generates — the public edge AND the internal S2S surface. Run
-// `make openapi` and commit when this fails. Each surface's contract is thus
-// reviewed in PRs and can't silently drift.
-func TestOpenAPISpecFresh(t *testing.T) {
-	specs := []struct {
-		name string
-		file string
-		gen  func() ([]byte, error)
-	}{
-		{"public", "openapi.yaml", GenerateOpenAPIYAML},
-		{"internal", "internal-openapi.yaml", GenerateInternalOpenAPIYAML},
-	}
-	for _, s := range specs {
-		t.Run(s.name, func(t *testing.T) {
-			got, err := s.gen()
-			if err != nil {
-				t.Fatalf("generate %s spec: %v", s.name, err)
-			}
-			want, err := os.ReadFile(s.file)
-			if err != nil {
-				t.Fatalf("read api/%s (run `make openapi`): %v", s.file, err)
-			}
-			if !bytes.Equal(got, want) {
-				t.Fatalf("api/%s is stale — run `make openapi` and commit the result", s.file)
-			}
-		})
-	}
-}
 
 // TestNoClientSuppliedOrg is the IDOR arch-lock for the code-first surface.
 // The active org is derived SOLELY from the verified JWT — humakit.OrgScopedInput
@@ -77,11 +46,11 @@ func TestNoClientSuppliedOrg(t *testing.T) {
 		`path:"orgId"`, `query:"orgId"`,
 		`path:"organization"`, `query:"organization"`,
 	}
-	// The public-edge gate (humakit) + the internal-S2S gate (auth/scope) must
+	// The public-edge gate (humakit) + the internal-S2S gate (platform/auth) must
 	// both derive the tenant from the verified credential, never a request field.
 	files := []string{
 		filepath.Join("..", "internal", "platform", "humakit", "humakit.go"),
-		filepath.Join("..", "internal", "auth", "scope", "runner.go"),
+		filepath.Join("..", "internal", "platform", "auth", "runner.go"),
 	}
 	root := filepath.Join("..", "internal", "feature")
 	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

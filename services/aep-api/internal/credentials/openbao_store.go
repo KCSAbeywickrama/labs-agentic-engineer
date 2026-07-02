@@ -30,7 +30,7 @@ import (
 
 // OpenBaoStore is the architectural enforcement boundary for OpenBao access.
 // The doc's deliberate decision to use a single OpenBao policy with
-// path-namespaced isolation (secret/asdlc/{ocOrgID}/...) places the per-org
+// path-namespaced isolation (secret/aep/{ocOrgID}/...) places the per-org
 // isolation property entirely on git-service code correctness — exactly what
 // the multi-tenant invariant says it shouldn't.
 //
@@ -76,13 +76,13 @@ func validateOrgID(ocOrgID string) error {
 
 // openBaoStore is the OpenBao-backed implementation of OpenBaoStore.
 //
-// Path scheme: secret/asdlc/{ocOrgID}/{key} on a KV v2 mount. The "secret/"
+// Path scheme: secret/aep/{ocOrgID}/{key} on a KV v2 mount. The "secret/"
 // mount is shared with OpenChoreo (which seeds at secret/{topkey}) and
-// agent-manager — namespacing under "asdlc/" keeps writes disjoint.
+// agent-manager — namespacing under "aep/" keeps writes disjoint.
 type openBaoStore struct {
 	client *vault.Client
 	mount  string // KV v2 mount name; "secret" in dev (the chart's default)
-	owner  string // KV v2 metadata managed-by tag — "asdlc-git-service"
+	owner  string // KV v2 metadata managed-by tag — "aep-git-service"
 }
 
 // NewOpenBaoStore constructs a real OpenBaoStore against the given address
@@ -99,7 +99,7 @@ func NewOpenBaoStore(addr, token, mount, owner string) (OpenBaoStore, error) {
 		mount = "secret"
 	}
 	if owner == "" {
-		owner = "asdlc-git-service"
+		owner = "aep-git-service"
 	}
 
 	cfg := vault.DefaultConfig()
@@ -124,14 +124,14 @@ func (s *openBaoStore) path(ocOrgID, key string) (string, error) {
 	if key == "" || strings.HasPrefix(key, "/") {
 		return "", fmt.Errorf("openbao: key must be non-empty and not start with '/': %q", key)
 	}
-	return path.Join(s.mount, "data", "asdlc", ocOrgID, key), nil
+	return path.Join(s.mount, "data", "aep", ocOrgID, key), nil
 }
 
 func (s *openBaoStore) metadataPath(ocOrgID, key string) (string, error) {
 	if err := validateOrgID(ocOrgID); err != nil {
 		return "", err
 	}
-	return path.Join(s.mount, "metadata", "asdlc", ocOrgID, key), nil
+	return path.Join(s.mount, "metadata", "aep", ocOrgID, key), nil
 }
 
 // platformPath constructs the platform-namespace path used for App
@@ -139,10 +139,10 @@ func (s *openBaoStore) metadataPath(ocOrgID, key string) (string, error) {
 // startup loader (see app_token_minter.go::loadAppKey). The import fence
 // test asserts no other call site references this function.
 func (s *openBaoStore) platformPath(key string) string {
-	return path.Join(s.mount, "data", "asdlc", "_platform", key)
+	return path.Join(s.mount, "data", "aep", "_platform", key)
 }
 
-// Get reads a value at secret/asdlc/{ocOrgID}/{key}. Returns ErrSecretNotFound
+// Get reads a value at secret/aep/{ocOrgID}/{key}. Returns ErrSecretNotFound
 // if absent (vs. a network/auth error).
 func (s *openBaoStore) Get(ctx context.Context, ocOrgID, key string) ([]byte, error) {
 	p, err := s.path(ocOrgID, key)
@@ -168,7 +168,7 @@ func (s *openBaoStore) Get(ctx context.Context, ocOrgID, key string) ([]byte, er
 	return []byte(val), nil
 }
 
-// Put writes value at secret/asdlc/{ocOrgID}/{key} and tags metadata with
+// Put writes value at secret/aep/{ocOrgID}/{key} and tags metadata with
 // managed-by + the supplied kind. The kind is stored as KV v2 custom
 // metadata so an out-of-band reader can audit ownership.
 func (s *openBaoStore) Put(ctx context.Context, ocOrgID, key string, value []byte) error {
@@ -202,7 +202,7 @@ func (s *openBaoStore) Put(ctx context.Context, ocOrgID, key string, value []byt
 }
 
 // SeedPlatformValue is the seed-only escape hatch for writing into the
-// secret/asdlc/_platform/* namespace. It's used by `internal/seed/`
+// secret/aep/_platform/* namespace. It's used by `internal/seed/`
 // (App private key, App webhook secret, etc.) and nothing else.
 //
 // Why this method instead of letting `internal/seed/` import the vault
@@ -216,13 +216,13 @@ func (s *openBaoStore) SeedPlatformValue(ctx context.Context, key, value, kind s
 	if key == "" || strings.HasPrefix(key, "/") {
 		return fmt.Errorf("openbao seed: key must be non-empty and not start with '/': %q", key)
 	}
-	p := path.Join(s.mount, "data", "asdlc", "_platform", key)
+	p := path.Join(s.mount, "data", "aep", "_platform", key)
 	if _, err := s.client.Logical().WriteWithContext(ctx, p, map[string]interface{}{
 		"data": map[string]interface{}{"value": value},
 	}); err != nil {
 		return fmt.Errorf("openbao seed write %s: %w", redactPath(p), err)
 	}
-	mp := path.Join(s.mount, "metadata", "asdlc", "_platform", key)
+	mp := path.Join(s.mount, "metadata", "aep", "_platform", key)
 	if _, err := s.client.Logical().WriteWithContext(ctx, mp, map[string]interface{}{
 		"custom_metadata": map[string]interface{}{
 			"managed-by": s.owner,
@@ -287,8 +287,8 @@ func CheckReachable(ctx context.Context, store OpenBaoStore) error {
 // see "which org" without seeing "which secret".
 func redactPath(p string) string {
 	parts := strings.Split(p, "/")
-	if len(parts) >= 4 && parts[2] == "asdlc" {
-		// secret/data/asdlc/{org}/{...} -> secret/data/asdlc/{org}/<redacted>
+	if len(parts) >= 4 && parts[2] == "aep" {
+		// secret/data/aep/{org}/{...} -> secret/data/aep/{org}/<redacted>
 		return strings.Join(parts[:4], "/") + "/<redacted>"
 	}
 	return "<redacted>"

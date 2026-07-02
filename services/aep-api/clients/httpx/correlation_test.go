@@ -22,7 +22,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wso2/asdlc/asdlc-service/middleware"
+	"github.com/wso2/aep/aep-api/middleware"
 )
 
 // roundTripFunc adapts a function to the http.RoundTripper interface so

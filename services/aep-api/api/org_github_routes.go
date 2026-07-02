@@ -19,7 +19,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/wso2/asdlc/asdlc-service/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 )
 
 // The org-scoped GitHub routes (connect/start, pat, status, disconnect) are now

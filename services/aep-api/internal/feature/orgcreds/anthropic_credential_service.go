@@ -14,13 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package services — Anthropic credential service.
+// anthropic_credential_service.go — Anthropic credential service.
 //
 // AnthropicCredentialService owns the per-org Anthropic API key surface:
 //
 //   - Connect / Status / Disconnect (POST/GET/DELETE /internal/credentials/orgs/{org}/anthropic)
 //   - EffectiveKey (GET .../anthropic/effective-key) — returns the org key
-//     or the platform fallback, used by agents-service per-call
+//     (or "none"), used by agents-service per-call. There is no platform
+//     fallback: orgs bring their own key.
 //   - ApplyWPSecret (POST .../anthropic/apply-wp-secret) — refreshes the
 //     per-org K8s Secret in workflows-<ocOrgID> with the freshest value
 //     from `org_secrets`. Same model as MintBuildToken's per-dispatch
@@ -52,9 +53,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/asdlc/asdlc-service/clients/k8s"
-	"github.com/wso2/asdlc/asdlc-service/internal/credentials"
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/clients/k8s"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // AnthropicCredentialService — see package doc.
@@ -62,7 +63,6 @@ type AnthropicCredentialService struct {
 	db           *gorm.DB
 	store        credentials.OpenBaoStore
 	wpClient     client.Client
-	platformKey  string
 	anthropicAPI string // "https://api.anthropic.com" by default; overridden in tests
 	httpClient   *http.Client
 
@@ -78,19 +78,17 @@ func (s *AnthropicCredentialService) WithSMAPIWriter(w *SMAPIWriter) *AnthropicC
 }
 
 // NewAnthropicCredentialService wires the service. db, store must be
-// non-nil; platformKey may be empty (no fallback); wpClient may be nil
-// (off-cluster degraded mode — same shape as BuildCredentialsService).
+// non-nil; wpClient may be nil (off-cluster degraded mode — same shape as
+// BuildCredentialsService).
 func NewAnthropicCredentialService(
 	db *gorm.DB,
 	store credentials.OpenBaoStore,
 	wpClient client.Client,
-	platformKey string,
 ) *AnthropicCredentialService {
 	return &AnthropicCredentialService{
 		db:           db,
 		store:        store,
 		wpClient:     wpClient,
-		platformKey:  platformKey,
 		anthropicAPI: "https://api.anthropic.com",
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 	}
@@ -289,13 +287,13 @@ func (s *AnthropicCredentialService) Disconnect(ctx context.Context, ocOrgID str
 
 // EffectiveKeyResponse is the shape returned to agents-service.
 type EffectiveKeyResponse struct {
-	Source string `json:"source"` // "org" | "platform" | "none"
+	Source string `json:"source"` // "org" | "none"
 	Key    string `json:"key,omitempty"`
 }
 
-// EffectiveKey returns the org key when configured (and active), else the
-// platform fallback. Returns { source: "none" } when neither is available
-// — agents-service maps to 503.
+// EffectiveKey returns the org key when configured (and active). Returns
+// { source: "none" } when the org has no usable key — agents-service maps
+// to 503. There is no platform fallback: orgs bring their own key.
 func (s *AnthropicCredentialService) EffectiveKey(ctx context.Context, ocOrgID string) (*EffectiveKeyResponse, error) {
 	row, err := s.fetchRow(ctx, ocOrgID)
 	if err == nil && row.Status == "active" {
@@ -303,16 +301,11 @@ func (s *AnthropicCredentialService) EffectiveKey(ctx context.Context, ocOrgID s
 		if getErr == nil && len(key) > 0 {
 			return &EffectiveKeyResponse{Source: "org", Key: string(key)}, nil
 		}
-		// Row says active but bytes are gone — log loudly and fall through
-		// to platform (or "none").
+		// Row says active but bytes are gone — log loudly and return "none".
 		slog.WarnContext(ctx, "anthropic effective-key: row=active but org_secrets missing",
 			"ocOrgId", ocOrgID, "error", getErr)
 	}
-	// `err != nil` falls through; either the row is absent (NotFoundError)
-	// or row.Status != active. Either way, try the platform fallback.
-	if s.platformKey != "" {
-		return &EffectiveKeyResponse{Source: "platform", Key: s.platformKey}, nil
-	}
+	// Row absent (NotFoundError) or not active, or bytes missing.
 	return &EffectiveKeyResponse{Source: "none"}, nil
 }
 
@@ -378,9 +371,9 @@ func (s *AnthropicCredentialService) applyAnthropicSecret(ctx context.Context, o
 			Name:      models.AnthropicSecretName,
 			Namespace: ns,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "app-factory-git-service",
-				"app-factory.openchoreo.dev/oc-org-id":   ocOrgID,
-				"app-factory.openchoreo.dev/secret-type": "anthropic-credentials",
+				"app.kubernetes.io/managed-by":           "aep-git-service",
+				"aep.openchoreo.dev/oc-org-id":   ocOrgID,
+				"aep.openchoreo.dev/secret-type": "anthropic-credentials",
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

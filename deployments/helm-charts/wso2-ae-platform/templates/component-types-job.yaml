@@ -8,7 +8,7 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: asdlc-component-type-provisioner
+  name: aep-component-type-provisioner
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -21,7 +21,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: asdlc-component-type-provisioner
+  name: aep-component-type-provisioner
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
@@ -40,7 +40,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: asdlc-component-type-provisioner
+  name: aep-component-type-provisioner
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/part-of: wso2-agentic-engineer
@@ -51,16 +51,16 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: asdlc-component-type-provisioner
+  name: aep-component-type-provisioner
 subjects:
   - kind: ServiceAccount
-    name: asdlc-component-type-provisioner
+    name: aep-component-type-provisioner
     namespace: {{ .Release.Namespace }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: asdlc-component-type-provisioner
+  name: aep-component-type-provisioner
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -74,11 +74,11 @@ spec:
   template:
     metadata:
       labels:
-        app: asdlc-component-type-provisioner
+        app: aep-component-type-provisioner
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
       restartPolicy: OnFailure
-      serviceAccountName: asdlc-component-type-provisioner
+      serviceAccountName: aep-component-type-provisioner
       containers:
         - name: provisioner
           image: "alpine/k8s:1.31.3"

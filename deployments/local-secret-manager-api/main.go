@@ -16,7 +16,7 @@
 
 // local-secret-manager-api is a docker-compose-only stand-in for the
 // wso2cloud secret-manager-api (sm-api). It exists so the public
-// app-factory repo can run the full local setup WITHOUT a private
+// aep repo can run the full local setup WITHOUT a private
 // `wso2cloud` checkout — the real sm-api builds from
 // `../../wso2cloud/backend/secret-manager-api`, which OSS users don't
 // have. Mirrors the `deployments/local-cluster-gateway-proxy` precedent.
@@ -32,7 +32,7 @@
 //   - wso2cloud/backend/secret-manager-api/internal/types/types.go
 //       (request/response JSON shapes)
 //
-// The asdlc-service client (asdlc-service/clients/secretmanagersvc) calls
+// The aep-service client (aep-service/clients/secretmanagersvc) calls
 // only CreateSecret + DeleteSecret, so this stub implements exactly the
 // routes those exercise: POST /secrets, GET /secrets?labelSelector=
 // (used by DeleteSecret's resolveSecretID), DELETE /secrets/{id}.

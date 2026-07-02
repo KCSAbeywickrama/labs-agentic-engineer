@@ -67,13 +67,13 @@ func TestValidateOrgID_Shape(t *testing.T) {
 }
 
 func TestOpenBaoStore_PathConstruction(t *testing.T) {
-	s := &openBaoStore{mount: "secret", owner: "asdlc-git-service"}
+	s := &openBaoStore{mount: "secret", owner: "aep-git-service"}
 
 	p, err := s.path("default", "github/pat")
 	if err != nil {
 		t.Fatalf("path: %v", err)
 	}
-	want := "secret/data/asdlc/default/github/pat"
+	want := "secret/data/aep/default/github/pat"
 	if p != want {
 		t.Errorf("path = %q; want %q", p, want)
 	}
@@ -82,20 +82,20 @@ func TestOpenBaoStore_PathConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("metadataPath: %v", err)
 	}
-	wantMeta := "secret/metadata/asdlc/default/github/pat"
+	wantMeta := "secret/metadata/aep/default/github/pat"
 	if mp != wantMeta {
 		t.Errorf("metadataPath = %q; want %q", mp, wantMeta)
 	}
 
 	pp := s.platformPath("github/app/private_key")
-	wantPlat := "secret/data/asdlc/_platform/github/app/private_key"
+	wantPlat := "secret/data/aep/_platform/github/app/private_key"
 	if pp != wantPlat {
 		t.Errorf("platformPath = %q; want %q", pp, wantPlat)
 	}
 }
 
 func TestOpenBaoStore_PathRejectsBadOrgID(t *testing.T) {
-	s := &openBaoStore{mount: "secret", owner: "asdlc-git-service"}
+	s := &openBaoStore{mount: "secret", owner: "aep-git-service"}
 
 	_, err := s.path("_platform", "github/pat")
 	if !errors.Is(err, ErrOrgIDInvalid) {
@@ -109,7 +109,7 @@ func TestOpenBaoStore_PathRejectsBadOrgID(t *testing.T) {
 }
 
 func TestOpenBaoStore_PathRejectsBadKey(t *testing.T) {
-	s := &openBaoStore{mount: "secret", owner: "asdlc-git-service"}
+	s := &openBaoStore{mount: "secret", owner: "aep-git-service"}
 
 	_, err := s.path("default", "")
 	if err == nil {
@@ -124,8 +124,8 @@ func TestOpenBaoStore_PathRejectsBadKey(t *testing.T) {
 
 func TestRedactPath(t *testing.T) {
 	cases := map[string]string{
-		"secret/data/asdlc/default/github/pat":           "secret/data/asdlc/default/<redacted>",
-		"secret/data/asdlc/_platform/github/app/private": "secret/data/asdlc/_platform/<redacted>",
+		"secret/data/aep/default/github/pat":           "secret/data/aep/default/<redacted>",
+		"secret/data/aep/_platform/github/app/private": "secret/data/aep/_platform/<redacted>",
 		"unexpected/shape":                               "<redacted>",
 	}
 	for in, want := range cases {

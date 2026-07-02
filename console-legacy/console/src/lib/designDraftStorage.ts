@@ -28,7 +28,7 @@ export interface StoredDesignFileDraft {
 
 export type StoredDesignDraftMap = Record<string, StoredDesignFileDraft>;
 
-const PREFIX = 'asdlc:design-drafts';
+const PREFIX = 'aep:design-drafts';
 
 function key(orgId: string, projectId: string): string {
   return `${PREFIX}:${orgId}:${projectId}`;

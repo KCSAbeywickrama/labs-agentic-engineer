@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/wso2/asdlc/asdlc-service/models"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // IssueTitle returns the GitHub issue title for a ComponentTask.
@@ -31,7 +31,7 @@ func IssueTitle(task *models.ComponentTask) string {
 // BuildIssueBody produces the markdown body for the GitHub issue that anchors
 // a single ComponentTask. The body is intentionally task-specific — workflow,
 // constraints, deny-list, and project-structure conventions live in the
-// `asdlc` skill (`runners/remote-worker/plugin/skills/asdlc/SKILL.md`), which the
+// `aep` skill (`runners/remote-worker/plugin/skills/aep/SKILL.md`), which the
 // platform's coding-agent loads at dispatch and a local-flow developer
 // installs into Claude Code via `claude plugin install`.
 //
@@ -61,7 +61,7 @@ func IssueTitle(task *models.ComponentTask) string {
 //     matched in `componentAgentInstructions` with the upstream's
 //     expected `window._env_` key.
 //
-// All of this lives in the `asdlc` skill and the architect/tech-lead
+// All of this lives in the `aep` skill and the architect/tech-lead
 // prompts; the issue body remains task-specific.
 //
 // The agent owns branch + PR creation. The PR body MUST contain
@@ -110,7 +110,7 @@ func BuildIssueBody(task *models.ComponentTask, comp *models.DesignComponent, _r
 	sb.WriteString("\n")
 
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("When you open the PR, include `Closes #%d` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `asdlc` skill loaded in your Claude Code session.\n", task.IssueNumber))
+	sb.WriteString(fmt.Sprintf("When you open the PR, include `Closes #%d` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `aep` skill loaded in your Claude Code session.\n", task.IssueNumber))
 
 	return sb.String()
 }

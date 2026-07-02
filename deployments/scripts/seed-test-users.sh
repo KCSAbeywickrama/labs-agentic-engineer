@@ -25,20 +25,20 @@
 #
 # Knobs (env, with defaults):
 #   THUNDER_URL          defaults to http://thunder.openchoreo.localhost:8080
-#   SYSTEM_CLIENT_ID     defaults to asdlc-system-client
-#   SYSTEM_CLIENT_SECRET defaults to asdlc-system-client-secret
+#   SYSTEM_CLIENT_ID     defaults to aep-system-client
+#   SYSTEM_CLIENT_SECRET defaults to aep-system-client-secret
 #   TEST_USER_PASSWORD   defaults to admin
 #
-# The `asdlc-system-client` is registered by the Thunder bootstrap
+# The `aep-system-client` is registered by the Thunder bootstrap
 # (see deployments/single-cluster/values-thunder.yaml) and bound to the
-# Thunder Administrator role by 60-asdlc-system-role.sh — it can mint
+# Thunder Administrator role by 60-aep-system-role.sh — it can mint
 # scope=system tokens that the /users admin endpoint accepts.
 
 set -u
 
 THUNDER_URL="${THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
-SYSTEM_CLIENT_ID="${SYSTEM_CLIENT_ID:-asdlc-system-client}"
-SYSTEM_CLIENT_SECRET="${SYSTEM_CLIENT_SECRET:-asdlc-system-client-secret}"
+SYSTEM_CLIENT_ID="${SYSTEM_CLIENT_ID:-aep-system-client}"
+SYSTEM_CLIENT_SECRET="${SYSTEM_CLIENT_SECRET:-aep-system-client-secret}"
 TEST_USER_PASSWORD="${TEST_USER_PASSWORD:-admin}"
 
 # username|email|given_name
