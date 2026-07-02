@@ -25,7 +25,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
-	"github.com/wso2/aep/aep-api/utils/validate"
+	"github.com/wso2/aep/aep-api/internal/platform/validate"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------

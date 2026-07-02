@@ -1,0 +1,13 @@
+{
+  "$schema": "http://localhost:9090/api/v1/ErrorModel.json",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "validation failed",
+  "errors": [
+    {
+      "message": "expected required property name to be present",
+      "location": "body",
+      "value": {}
+    }
+  ]
+}

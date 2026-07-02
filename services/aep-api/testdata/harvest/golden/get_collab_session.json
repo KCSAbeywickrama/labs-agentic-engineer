@@ -1,0 +1,7 @@
+{
+  "$schema": "http://localhost:9090/api/v1/CollabSessionOutputBody.json",
+  "roomId": "spec-default-hello-world-api",
+  "wsUrl": "/collab",
+  "userName": "Admin",
+  "email": ""
+}

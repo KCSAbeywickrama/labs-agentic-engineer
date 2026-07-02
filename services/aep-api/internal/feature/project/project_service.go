@@ -23,7 +23,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
@@ -160,6 +160,17 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 	if s.repoSvc != nil {
 		if err := s.repoSvc.DeleteRepo(ctx, orgName, projectName); err != nil {
 			slog.ErrorContext(ctx, "failed to delete git repo for project", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
+	// Clean up the project's task rows. Without this, deleted projects leave
+	// orphaned component_tasks behind that the trait_sync watcher keeps
+	// re-reconciling forever (observed as reconcile churn after every demo
+	// teardown). Best-effort like the repo cleanup — the project itself is
+	// already gone upstream.
+	if s.taskRepo != nil {
+		if err := s.taskRepo.DeleteByProjectID(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to delete task rows for project", "org", orgName, "project", projectName, "error", err)
 		}
 	}
 

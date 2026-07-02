@@ -83,14 +83,14 @@ func NewOrgResolver(db *gorm.DB, store OpenBaoStore, minter *AppTokenMinter) Res
 // models package into pkg/credentials (keeping the dependency arrow
 // pointing the right way: models → credentials, not the other way).
 type orgCredentialRow struct {
-	OcOrgID        string  `gorm:"column:oc_org_id"`
-	Kind           string  `gorm:"column:kind"`
-	GitHubLogin    string  `gorm:"column:github_login"`
-	IdentityName   string  `gorm:"column:identity_name"`
-	IdentityEmail  string  `gorm:"column:identity_email"`
-	IdentityLogin  string  `gorm:"column:identity_login"`
-	InstallationID *int64  `gorm:"column:installation_id"`
-	Status         string  `gorm:"column:status"`
+	OcOrgID        string `gorm:"column:oc_org_id"`
+	Kind           string `gorm:"column:kind"`
+	GitHubLogin    string `gorm:"column:github_login"`
+	IdentityName   string `gorm:"column:identity_name"`
+	IdentityEmail  string `gorm:"column:identity_email"`
+	IdentityLogin  string `gorm:"column:identity_login"`
+	InstallationID *int64 `gorm:"column:installation_id"`
+	Status         string `gorm:"column:status"`
 }
 
 // TableName binds to the same table the models package owns.

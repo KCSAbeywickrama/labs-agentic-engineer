@@ -164,7 +164,7 @@ export function TasksPageHeader({
                   <Box>
                     <Typography variant="body2" fontWeight={600}>Implement Locally</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Use the Platofrm plugin in your own Coding Agent session.
+                      Use the Platform plugin in your own Coding Agent session.
                     </Typography>
                   </Box>
                 </MenuItem>

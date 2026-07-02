@@ -37,12 +37,12 @@ import (
 // terminal (Failed/Succeeded). Read by the codingagent progress service
 // on the post-terminal branch of `GetAgentProgress`.
 type CodingAgentLog struct {
-	TaskID      uuid.UUID `gorm:"type:uuid;primaryKey;column:task_id" json:"taskId"`
-	RunName     string    `gorm:"type:text;primaryKey;column:run_name" json:"runName"`
-	FinalPhase  string    `gorm:"type:text;not null;column:final_phase" json:"finalPhase"`
-	CapturedAt  time.Time `gorm:"type:timestamptz;not null;default:now();column:captured_at" json:"capturedAt"`
-	LogText     string    `gorm:"type:text;not null;column:log_text" json:"-"`
-	SizeBytes   int64     `gorm:"type:bigint;not null;column:size_bytes" json:"sizeBytes"`
+	TaskID     uuid.UUID `gorm:"type:uuid;primaryKey;column:task_id" json:"taskId"`
+	RunName    string    `gorm:"type:text;primaryKey;column:run_name" json:"runName"`
+	FinalPhase string    `gorm:"type:text;not null;column:final_phase" json:"finalPhase"`
+	CapturedAt time.Time `gorm:"type:timestamptz;not null;default:now();column:captured_at" json:"capturedAt"`
+	LogText    string    `gorm:"type:text;not null;column:log_text" json:"-"`
+	SizeBytes  int64     `gorm:"type:bigint;not null;column:size_bytes" json:"sizeBytes"`
 }
 
 func (CodingAgentLog) TableName() string { return "coding_agent_logs" }

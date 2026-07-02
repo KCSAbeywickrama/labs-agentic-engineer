@@ -25,7 +25,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wso2/aep/aep-api/api"
+	"github.com/wso2/aep/aep-api/internal/api"
 )
 
 func main() {

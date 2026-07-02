@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 )
 
 // TestTaskTokenRoundtrip exercises the full chain from token issuance to

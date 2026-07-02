@@ -23,8 +23,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/ocerr"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -138,8 +139,9 @@ func RegisterProject(api huma.API, svc ProjectService) {
 }
 
 // mapProjectError translates project + OpenChoreo sentinel errors into RFC 9457
-// problem responses, preserving the status classification the legacy controller
-// applied (openchoreoErrorStatus lives in project_controller.go).
+// problem responses. The feature sentinels (translated from OC by the service's
+// translateHTTPError) carry the fixed user-facing messages; any remaining raw
+// OC sentinel rides the shared ocerr classifier.
 func mapProjectError(err error) error {
 	switch {
 	case errors.Is(err, ErrUnauthorized) || errors.Is(err, openchoreo.ErrUnauthorized):
@@ -149,7 +151,7 @@ func mapProjectError(err error) error {
 	case errors.Is(err, ErrForbidden):
 		return huma.Error403Forbidden("insufficient permissions to perform this action")
 	}
-	if status, ok := openchoreoErrorStatus(err); ok {
+	if status, ok := ocerr.Status(err); ok {
 		return humakit.ErrorFromStatus(status, err.Error())
 	}
 	return huma.Error500InternalServerError("internal error")

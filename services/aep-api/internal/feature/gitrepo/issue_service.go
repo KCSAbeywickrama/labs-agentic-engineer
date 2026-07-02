@@ -43,12 +43,12 @@ type IssueService interface {
 
 type issueService struct {
 	repo     repositories.RepoRepository
-	github   GitHubClient
-	githubV2 GitHubV2Client
+	github   IssueOps
+	githubV2 BoardOps
 	resolver credentials.Resolver
 }
 
-func NewIssueService(repo repositories.RepoRepository, github GitHubClient, githubV2 GitHubV2Client, resolver credentials.Resolver) IssueService {
+func NewIssueService(repo repositories.RepoRepository, github IssueOps, githubV2 BoardOps, resolver credentials.Resolver) IssueService {
 	return &issueService{
 		repo:     repo,
 		github:   github,

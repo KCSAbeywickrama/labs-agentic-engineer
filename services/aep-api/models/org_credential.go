@@ -34,21 +34,21 @@ import (
 // CHECK constraints (secrets_shape_per_kind, app_fields) live in raw SQL
 // in the migration — GORM does not model them well.
 type OrgCredential struct {
-	OcOrgID            string         `gorm:"primaryKey;type:text" json:"ocOrgId"`
-	Kind               string         `gorm:"type:text;not null;column:kind" json:"kind"`
-	GitHubLogin        string         `gorm:"type:text;not null;column:github_login" json:"githubLogin"`
-	IdentityName       string         `gorm:"type:text;not null;column:identity_name" json:"-"`
-	IdentityEmail      string         `gorm:"type:text;not null;column:identity_email" json:"-"`
-	IdentityLogin      string         `gorm:"type:text;not null;column:identity_login" json:"identityLogin"`
-	InstallationID     *int64         `gorm:"column:installation_id" json:"installationId,omitempty"`
-	SelectedRepos      JSONStringList `gorm:"type:jsonb;column:selected_repos" json:"selectedRepos,omitempty"`
-	PATSecretRef       *string        `gorm:"type:text;column:pat_secret_ref" json:"-"`
-	WebhookSecrets     WebhookSecrets `gorm:"type:jsonb;column:webhook_secrets" json:"-"`
-	Status             string         `gorm:"type:text;not null;default:active;column:status" json:"status"`
-	ConnectedAt        time.Time      `gorm:"column:connected_at;not null;default:now()" json:"connectedAt"`
-	LastValidatedAt    *time.Time     `gorm:"column:last_validated_at" json:"lastValidatedAt,omitempty"`
-	IdentityChangedAt  *time.Time     `gorm:"column:identity_changed_at" json:"identityChangedAt,omitempty"`
-	PrevIdentityLogin  *string        `gorm:"type:text;column:prev_identity_login" json:"prevIdentityLogin,omitempty"`
+	OcOrgID           string         `gorm:"primaryKey;type:text" json:"ocOrgId"`
+	Kind              string         `gorm:"type:text;not null;column:kind" json:"kind"`
+	GitHubLogin       string         `gorm:"type:text;not null;column:github_login" json:"githubLogin"`
+	IdentityName      string         `gorm:"type:text;not null;column:identity_name" json:"-"`
+	IdentityEmail     string         `gorm:"type:text;not null;column:identity_email" json:"-"`
+	IdentityLogin     string         `gorm:"type:text;not null;column:identity_login" json:"identityLogin"`
+	InstallationID    *int64         `gorm:"column:installation_id" json:"installationId,omitempty"`
+	SelectedRepos     JSONStringList `gorm:"type:jsonb;column:selected_repos" json:"selectedRepos,omitempty"`
+	PATSecretRef      *string        `gorm:"type:text;column:pat_secret_ref" json:"-"`
+	WebhookSecrets    WebhookSecrets `gorm:"type:jsonb;column:webhook_secrets" json:"-"`
+	Status            string         `gorm:"type:text;not null;default:active;column:status" json:"status"`
+	ConnectedAt       time.Time      `gorm:"column:connected_at;not null;default:now()" json:"connectedAt"`
+	LastValidatedAt   *time.Time     `gorm:"column:last_validated_at" json:"lastValidatedAt,omitempty"`
+	IdentityChangedAt *time.Time     `gorm:"column:identity_changed_at" json:"identityChangedAt,omitempty"`
+	PrevIdentityLogin *string        `gorm:"type:text;column:prev_identity_login" json:"prevIdentityLogin,omitempty"`
 
 	// SM-API triplet + write timestamp. See OrgAnthropicCredential for
 	// lifecycle. Four columns stamped atomically in the Connect tx.

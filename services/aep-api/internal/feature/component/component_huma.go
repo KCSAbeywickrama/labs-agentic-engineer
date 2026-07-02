@@ -24,8 +24,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/ocerr"
+	"github.com/wso2/aep/aep-api/internal/platform/validate"
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/utils/validate"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------
@@ -106,9 +107,10 @@ func RegisterComponent(api huma.API, svc ComponentService) {
 		}
 		comp, err := svc.GetComponent(ctx, in.OrgHandle, in.ProjectName, in.ComponentName)
 		if err != nil {
-			if errors.Is(err, ErrComponentNotFound) {
-				return nil, huma.Error404NotFound("component not found")
-			}
+			// A missing component surfaces as openchoreo.ErrNotFound from the
+			// client and is mapped to 404 by mapComponentError. (GetComponent
+			// never returns the feature-local ErrComponentNotFound — only the
+			// openapi handler below does.)
 			return nil, mapComponentError(err, "failed to get component")
 		}
 		return &componentOutput{Body: comp}, nil
@@ -228,14 +230,16 @@ func RegisterComponent(api huma.API, svc ComponentService) {
 	})
 }
 
-// mapComponentError mirrors the legacy controller's error→status mapping for
-// the branches shared across handlers: ErrUnauthorized → 401, everything else →
-// 500 with the supplied message. Handler-specific branches (404 not-found, 409
-// not-service, 503 logs-unavailable) are handled at the call site before
-// delegating here, matching each controller method's switch.
+// mapComponentError translates an OpenChoreo sentinel that reached
+// componentService into its RFC-9457 status via the shared ocerr classifier
+// (401/403/404/409/400/500, matching project and organization). An error that
+// is not an OC sentinel collapses to a fixed-message 500 that never echoes the
+// internal cause. Handler-specific branches (409 not-service, 503
+// logs-unavailable, 404 openapi-not-found) are handled at the call site before
+// delegating here.
 func mapComponentError(err error, internalMsg string) error {
-	if errors.Is(err, ErrUnauthorized) {
-		return huma.Error401Unauthorized("invalid or expired token")
+	if status, ok := ocerr.Status(err); ok {
+		return humakit.ErrorFromStatus(status, err.Error())
 	}
 	return huma.Error500InternalServerError(internalMsg)
 }

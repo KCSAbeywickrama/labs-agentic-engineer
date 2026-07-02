@@ -18,12 +18,12 @@ package organization
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/ocerr"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -63,10 +63,14 @@ func RegisterOrganization(api huma.API, svc OrganizationService) {
 	})
 }
 
-// mapOrganizationError mirrors the legacy controller's error→status mapping:
-// ErrUnauthorized surfaces as 401, everything else as a generic 500.
+// mapOrganizationError maps the List error to its status. The BFF is read-only
+// over OC namespaces, so the only distinction the contract makes is an OC 401
+// (surfaced as 401 so an upstream auth failure isn't masked); every other OC
+// sentinel and any opaque error collapse to a fixed-message 500 that never
+// echoes the internal cause. It reads the status via the shared ocerr
+// classifier rather than re-deriving the OC-sentinel switch.
 func mapOrganizationError(err error) error {
-	if errors.Is(err, ErrUnauthorized) {
+	if status, ok := ocerr.Status(err); ok && status == http.StatusUnauthorized {
 		return huma.Error401Unauthorized("invalid or expired token")
 	}
 	return huma.Error500InternalServerError("failed to list organizations")

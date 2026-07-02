@@ -39,11 +39,22 @@ type WebhookService interface {
 	Register(ctx context.Context, orgID, projectID string) (hookID *int64, err error)
 }
 
+// issueRepoResolver is the private capability webhookService borrows from the
+// issue service: resolving a project's (owner, repo, credential) in one place.
+// The production *issueService satisfies it. Storing the IssueService interface
+// (rather than a lossy `issueSvc.(*issueService)` cast that silently yields nil
+// and nil-derefs at request time) means Register reaches the resolver through a
+// checked assertion — an impl that can't resolve fails loudly with an error, not
+// a panic.
+type issueRepoResolver interface {
+	resolveRepoAndCredential(ctx context.Context, orgID, projectID string) (owner, repo string, cred credentials.Credential, err error)
+}
+
 type webhookService struct {
 	repo             repositories.RepoRepository
-	github           GitHubClient
+	github           WebhookOps
 	repoSvc          RepoService
-	issue            *issueService
+	issue            IssueService
 	deliveryURL      string
 	hmacSecret       string
 	subscribedEvents []string
@@ -51,17 +62,16 @@ type webhookService struct {
 
 func NewWebhookService(
 	repo repositories.RepoRepository,
-	github GitHubClient,
+	github WebhookOps,
 	repoSvc RepoService,
 	issueSvc IssueService,
 	deliveryURL, hmacSecret string,
 ) WebhookService {
-	is, _ := issueSvc.(*issueService)
 	return &webhookService{
 		repo:        repo,
 		github:      github,
 		repoSvc:     repoSvc,
-		issue:       is,
+		issue:       issueSvc,
 		deliveryURL: deliveryURL,
 		hmacSecret:  hmacSecret,
 		// Events subscribed to. Repo-level webhooks only — App-installation
@@ -80,7 +90,11 @@ func (s *webhookService) Register(ctx context.Context, orgID, projectID string) 
 		return nil, fmt.Errorf("webhook delivery URL or HMAC secret not configured — set GITHUB_WEBHOOK_DELIVERY_URL and GITHUB_WEBHOOK_SECRET")
 	}
 
-	owner, repoName, cred, err := s.issue.resolveRepoAndCredential(ctx, orgID, projectID)
+	resolver, ok := s.issue.(issueRepoResolver)
+	if !ok {
+		return nil, fmt.Errorf("webhook: issue service %T cannot resolve repo credentials", s.issue)
+	}
+	owner, repoName, cred, err := resolver.resolveRepoAndCredential(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}

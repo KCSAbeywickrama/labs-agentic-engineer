@@ -23,8 +23,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/clients/oidc"
-	"github.com/wso2/aep/aep-api/internal/platform/httpkit"
+	"github.com/wso2/aep/aep-api/internal/clients/oidc"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
@@ -113,7 +113,7 @@ func RegisterIDP(api huma.API, svc IDPService) {
 		Tags:        []string{"IDP"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *updateProfileInput) (*profileOutput, error) {
-		actor := httpkit.ActorFromContext(ctx)
+		actor := auth.ActorFromContext(ctx)
 		updated, err := svc.UpdateProfile(ctx, in.OrgHandle, actor, UpdateProfileRequest{
 			Kind:    in.Body.Kind,
 			Issuer:  in.Body.Issuer,
@@ -133,7 +133,7 @@ func RegisterIDP(api huma.API, svc IDPService) {
 		Tags:        []string{"IDP"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *orgInput) (*clientSecretOutput, error) {
-		actor := httpkit.ActorFromContext(ctx)
+		actor := auth.ActorFromContext(ctx)
 		newSecret, err := svc.RegenerateClientSecret(ctx, in.OrgHandle, actor)
 		if err != nil {
 			if errors.Is(err, ErrIDPThunderUnavailable) {

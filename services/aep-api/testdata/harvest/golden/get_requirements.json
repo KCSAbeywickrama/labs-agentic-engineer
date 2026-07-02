@@ -1,0 +1,16 @@
+{
+  "$schema": "http://localhost:9090/api/v1/RequirementsBundle.json",
+  "projectId": "hello-world-api",
+  "files": {
+    "requirements.md": "# Overview\n\nA simple API that responds with a friendly greeting, mainly used to test that everything is working.\n\n# Personas\n\n- developer — calls the API to check that it responds correctly.\n\n# Features\n\n- Someone sends a request to the API.\n- The API replies with a \"Hello, World!\" message.\n- The API can optionally include a name if one is given, saying \"Hello, [name]!\"\n\n"
+  },
+  "status": "approved",
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "tagName": "v1",
+      "commitHash": "f1582aff60d291d3081743c4649a20096b956ee0"
+    }
+  ]
+}

@@ -53,10 +53,10 @@ var rules = []fenceRule{
 	},
 	{
 		name:                 "openchoreo-gen-direct",
-		allowedPrefix:        filepath.Join("clients", "openchoreo") + string(filepath.Separator),
-		bannedImportPrefixes: []string{`"github.com/wso2/aep/aep-api/clients/openchoreo/gen"`},
-		reason: "The oapi-codegen layer (clients/openchoreo/gen) is an implementation detail. " +
-			"Services + controllers go through the typed wrappers in clients/openchoreo/ so a " +
+		allowedPrefix:        filepath.Join("internal", "clients", "openchoreo") + string(filepath.Separator),
+		bannedImportPrefixes: []string{`"github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"`},
+		reason: "The oapi-codegen layer (internal/clients/openchoreo/gen) is an implementation detail. " +
+			"Services + controllers go through the typed wrappers in internal/clients/openchoreo/ so a " +
 			"schema regen doesn't ripple across the BFF.",
 	},
 }

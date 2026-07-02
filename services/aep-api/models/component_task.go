@@ -53,16 +53,16 @@ const (
 type TaskStatus = contracts.TaskStatus
 
 const (
-	TaskStatusPending            = contracts.TaskStatusPending
-	TaskStatusInProgress         = contracts.TaskStatusInProgress
-	TaskStatusReadyForReview     = contracts.TaskStatusReadyForReview
-	TaskStatusMerged             = contracts.TaskStatusMerged
-	TaskStatusBuilding           = contracts.TaskStatusBuilding
-	TaskStatusDeployed           = contracts.TaskStatusDeployed
-	TaskStatusRejected           = contracts.TaskStatusRejected
-	TaskStatusFailed             = contracts.TaskStatusFailed
-	TaskStatusAbandoned          = contracts.TaskStatusAbandoned
-	TaskStatusOnHold             = contracts.TaskStatusOnHold
+	TaskStatusPending        = contracts.TaskStatusPending
+	TaskStatusInProgress     = contracts.TaskStatusInProgress
+	TaskStatusReadyForReview = contracts.TaskStatusReadyForReview
+	TaskStatusMerged         = contracts.TaskStatusMerged
+	TaskStatusBuilding       = contracts.TaskStatusBuilding
+	TaskStatusDeployed       = contracts.TaskStatusDeployed
+	TaskStatusRejected       = contracts.TaskStatusRejected
+	TaskStatusFailed         = contracts.TaskStatusFailed
+	TaskStatusAbandoned      = contracts.TaskStatusAbandoned
+	TaskStatusOnHold         = contracts.TaskStatusOnHold
 )
 
 // ComponentTask is one implementation task targeting a single component.

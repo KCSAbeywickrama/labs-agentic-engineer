@@ -40,7 +40,7 @@ ADDLICENSE := go run github.com/google/addlicense@v1.2.0
 LICENSE_HEADER := .github/license-header.txt
 LICENSE_FILES = $(shell git ls-files | \
 	grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
-	grep -vE '\.gen\.go$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/')
+	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/')
 
 .PHONY: install gen build dev test lint typecheck license license-check tools clean eval
 

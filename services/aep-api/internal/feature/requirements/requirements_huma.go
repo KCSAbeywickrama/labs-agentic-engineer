@@ -75,12 +75,12 @@ type requirementsVersionsOutput struct{ Body []models.ArtifactVersion }
 
 // RegisterRequirements registers the requirements feature's non-streaming HTTP
 // operations on the Huma API. It is the code-first replacement for
-// registerRequirementsRoutes (api/requirements_routes.go): same paths, same
+// the deleted legacy route registrations: same paths, same
 // auth posture, with the spec generated from the typed inputs/outputs.
 //
-// The streaming generate endpoint (POST .../files/{name}/generate, SSE) is NOT
-// migrated here — it stays on the legacy router because Huma's typed-output
-// model does not express an http.Flusher event stream.
+// The streaming generate endpoint (POST .../files/{name}/generate, SSE) IS
+// registered below via huma.StreamResponse — the raw huma.Context body writer
+// carries the text/event-stream frames.
 func RegisterRequirements(api huma.API, svc RequirementsService) {
 	prefix := "/projects/{projectName}/requirements"
 

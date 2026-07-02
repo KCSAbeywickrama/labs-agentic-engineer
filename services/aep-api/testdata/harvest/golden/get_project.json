@@ -1,0 +1,10 @@
+{
+  "$schema": "http://localhost:9090/api/v1/Project.json",
+  "uid": "bf1105ae-1c07-4015-8b32-c2e55bd56fdd",
+  "name": "hello-world-api",
+  "namespaceName": "default",
+  "displayName": "hello-world-api",
+  "deploymentPipeline": "default",
+  "createdAt": "2026-07-01T05:02:18Z",
+  "status": "ProjectCreated"
+}
