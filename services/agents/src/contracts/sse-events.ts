@@ -22,15 +22,17 @@
  *
  * The wire stays RAW `StreamPart` (the SDK's `TextStreamPart`, one frame per
  * part); this module does NOT add an envelope. It exists so the producer (the
- * Express SSE route in `@aep/agents`), the eval, and a future browser client
- * share ONE definition of: the emitted event catalog, the payloads carried
- * inside the frames (`OpResult`, the per-tool `*Input` shapes), the reviewable
- * `Change` projection, and the turn-request body (`TurnRequest`).
+ * Express SSE route in `server.ts`), the eval, and the playground share ONE
+ * definition of: the emitted event catalog, the payloads carried inside the
+ * frames (`OpResult`, the per-tool `*Input` shapes), the reviewable `Change`
+ * projection, and the turn-request body (`TurnRequest`).
  *
- * Ownership: `@aep/contracts` is the leaf source of truth. The domain
- * (`@aep/agents` `bundle.ts` / `tool.ts`) imports these types and the Zod
- * schemas carry a compile-time drift guard asserting they stay assignable to
- * the `*Input` types here — so there is no hand-maintained parallel copy.
+ * Ownership: this module is the leaf source of truth, owned by the producer.
+ * The domain (`agents/main/bundle.ts` / `tool.ts`) imports these types and the
+ * Zod schemas carry a compile-time drift guard asserting they stay assignable
+ * to the `*Input` types here — so there is no hand-maintained parallel copy.
+ * This stream is NOT part of the generated OpenAPI contracts in
+ * `packages/contracts` (raw AI SDK frames aren't OpenAPI-representable).
  */
 
 // --- Result payloads (the `tool-result.output` value) -----------------------

@@ -19,8 +19,13 @@
 # `default` org's GitHub PAT and Anthropic API key by POSTing to the
 # BFF's Connect endpoints with a Thunder S2S token.
 #
-# NOT part of install. Run manually after a fresh teardown when you
-# want to skip the Settings → GitHub / Settings → Anthropic clickthrough.
+# Auto-invoked by start.sh (stage 9) whenever LOCAL_DEV_ADMIN_GITHUB_PAT
+# and/or ANTHROPIC_API_KEY are set in .env; with neither set it's skipped
+# and the Settings → GitHub / Settings → Anthropic clickthrough applies.
+# SKIP_DEV_SEED=1 on start.sh disables the auto-run without touching .env.
+# Idempotent: credentials already connected are skipped (each re-connect
+# would mint a new SecretReference CR); set SEED_FORCE=1 to rotate them.
+# Also fine to run standalone:
 #
 #   cd deployments && bash scripts/seed-dev.sh
 #
@@ -135,14 +140,33 @@ _post_connect() {
     rm -f "$resp_tmp"
 }
 
+# True when the credential's status projection reports anything other than
+# "not_connected". Each connect mints a fresh SecretReference CR + OpenBao
+# entry without deleting the previous one, so blind re-connects (e.g.
+# start.sh auto-seeding every run) would accumulate orphans. GET failures
+# count as not-connected so the connect below still runs. Bypass with
+# SEED_FORCE=1 to rotate a credential that's already connected.
+_already_connected() {
+    local url="$1" resp status
+    [ "${SEED_FORCE:-0}" = "1" ] && return 1
+    resp=$(curl -fsS --max-time 5 -H "Authorization: Bearer ${TOKEN}" "$url" 2>/dev/null) || return 1
+    status=$(printf '%s' "$resp" \
+        | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    [ -n "$status" ] && [ "$status" != "not_connected" ]
+}
+
 # 3. Anthropic
 echo ""
 if [ -n "$ANTHROPIC_KEY" ]; then
-    echo "🤖 Connecting Anthropic key (org derived from the seeder token)..."
-    body=$(printf '{"apiKey":"%s"}' "$ANTHROPIC_KEY")
-    _post_connect "Anthropic" \
-        "${BFF_URL%/}/api/v1/org/credentials/anthropic" \
-        "$body"
+    if _already_connected "${BFF_URL%/}/api/v1/org/credentials/anthropic"; then
+        echo "✅ Anthropic already connected — skipping (SEED_FORCE=1 to re-connect)"
+    else
+        echo "🤖 Connecting Anthropic key (org derived from the seeder token)..."
+        body=$(printf '{"apiKey":"%s"}' "$ANTHROPIC_KEY")
+        _post_connect "Anthropic" \
+            "${BFF_URL%/}/api/v1/org/credentials/anthropic" \
+            "$body"
+    fi
 else
     echo "⏭️  ANTHROPIC_API_KEY not set in $ENV_FILE — skipping Anthropic seed"
 fi
@@ -150,11 +174,15 @@ fi
 # 4. GitHub PAT
 echo ""
 if [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_OWNER" ]; then
-    echo "🐙 Connecting GitHub PAT (org derived from the seeder token, owner=$GITHUB_OWNER)..."
-    body=$(printf '{"pat":"%s","githubLogin":"%s"}' "$GITHUB_PAT" "$GITHUB_OWNER")
-    _post_connect "GitHub PAT" \
-        "${BFF_URL%/}/api/v1/org/credentials/github/pat" \
-        "$body"
+    if _already_connected "${BFF_URL%/}/api/v1/org/credentials/github"; then
+        echo "✅ GitHub already connected — skipping (SEED_FORCE=1 to re-connect)"
+    else
+        echo "🐙 Connecting GitHub PAT (org derived from the seeder token, owner=$GITHUB_OWNER)..."
+        body=$(printf '{"pat":"%s","githubLogin":"%s"}' "$GITHUB_PAT" "$GITHUB_OWNER")
+        _post_connect "GitHub PAT" \
+            "${BFF_URL%/}/api/v1/org/credentials/github/pat" \
+            "$body"
+    fi
 else
     echo "⏭️  LOCAL_DEV_ADMIN_GITHUB_PAT / LOCAL_DEV_ADMIN_GITHUB_OWNER not set in $ENV_FILE — skipping GitHub seed"
     echo "   To enable, append to $ENV_FILE:"

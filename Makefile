@@ -4,7 +4,7 @@
 # This is how Go packages get the same verb names without a package.json.
 #
 #   make install      install JS deps (pnpm) and sync the Go workspace
-#   make gen          regenerate contracts (TS clients + Go server interfaces)
+#   make gen          regenerate contracts (codegen + OpenAPI spec export)
 #   make build        build everything (runs gen first)
 #   make dev          start dev servers (TS)
 #   make test         run tests
@@ -51,6 +51,8 @@ install:
 gen:
 	$(TURBO) run gen
 	@for d in $(GO_MODULE_DIRS); do echo ">> go generate $$d"; ( cd "$$d" && go generate ./... ); done
+	@echo ">> openapi export (aep-api public spec → packages/contracts/api/v1)"
+	@$(MAKE) -C services/aep-api openapi
 
 build: gen
 	$(TURBO) run build

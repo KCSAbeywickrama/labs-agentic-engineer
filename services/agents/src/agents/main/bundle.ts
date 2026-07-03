@@ -46,10 +46,10 @@ import type {
   OpOk,
   OpErr,
   OpResult,
-} from "@aep/contracts";
+} from "../../contracts/sse-events.js";
 
 // The op shapes & result types are the WIRE contract — defined once in
-// `@aep/contracts` and imported here type-only (erased at runtime, so the
+// `src/contracts/sse-events.ts` and imported here type-only (erased at runtime, so the
 // domain stays dependency-light). Re-exported so in-package consumers
 // (`tool.ts`, the tests) keep importing them from the domain module.
 // NOTE: a successful `OpOk` carries NO file content (no `newContent`) — see §5

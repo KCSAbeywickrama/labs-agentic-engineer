@@ -2,26 +2,5 @@
   "name": "@aep/contracts",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "dependencies": {
-    "ai": "^7.0.2"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint .",
-    "test": "echo \"@aep/contracts: no tests yet\"",
-    "dev": "echo \"@aep/contracts: no dev server\""
-  }
+  "description": "Generated cross-service contracts. Holds the committed aep-api public OpenAPI spec (api/v1/openapi.yaml); regenerate via `make gen`."
 }

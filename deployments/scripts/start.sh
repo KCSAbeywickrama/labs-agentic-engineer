@@ -213,8 +213,12 @@ fi
 #    are preserved across setup-aep.sh re-runs). Connects the default
 #    org's credentials exactly as a user would via Settings — idempotent
 #    on re-runs, and best-effort: failure here doesn't fail start.sh.
+#    SKIP_DEV_SEED=1 disables the auto-run (e.g. to exercise the manual
+#    Settings clickthrough, or to run scripts/seed-dev.sh yourself later).
 echo ""
-if grep -qE '^(LOCAL_DEV_ADMIN_GITHUB_PAT|ANTHROPIC_API_KEY)=.+' "$DEPLOY_DIR/.env" 2>/dev/null; then
+if [ "${SKIP_DEV_SEED:-0}" = "1" ]; then
+    echo "⏭️  SKIP_DEV_SEED=1 — skipping dev seed (run scripts/seed-dev.sh manually when needed)"
+elif grep -qE '^(LOCAL_DEV_ADMIN_GITHUB_PAT|ANTHROPIC_API_KEY)=.+' "$DEPLOY_DIR/.env" 2>/dev/null; then
     bash "$SCRIPT_DIR/seed-dev.sh" || \
         echo "⚠️  seed-dev did not complete cleanly — see output above."
 else

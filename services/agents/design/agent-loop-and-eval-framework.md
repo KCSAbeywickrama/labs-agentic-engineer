@@ -37,7 +37,7 @@ canonical `FileBundle` ops to reconstruct file state — no second matcher.
 | **`ask_question` Option B** (placeholder `execute()`, disabled) | fully-resolved transcript (no `MissingToolResultsError`), uniform resume |
 | **Tool results carry no file content** (`OpOk` drops `newContent`) | echoing the file makes input scale file×edits (violates ADR-0001), and it is the only stale-able carrier |
 | **Append-only divergence note** (FE `filesChangedExternally`; no `reconcile`) | rewriting history breaks the prompt-cache prefix |
-| **SSE event types in `@aep/contracts`** | one shared definition for producer + eval + browser; `OpResult` / tool-input types re-exported from the domain Zod schemas (no parallel copy) |
+| **SSE event types in `src/contracts/sse-events.ts`** | one shared definition for producer + eval + playground, owned by the service; `OpResult` / tool-input types re-exported from the domain Zod schemas (no parallel copy) |
 
 ## Eval suite (`evals/`, sibling of `src/`)
 

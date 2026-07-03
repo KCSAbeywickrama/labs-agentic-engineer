@@ -7,10 +7,12 @@ files** — accept/edit/save is a separate concern.
 
 ## Design
 
-Wire types (SSE events, `OpResult`, `*Input`, `Change`) live in `@aep/contracts`
-(`src/agents/sse-events.ts`) — the source of truth; Zod schemas are drift-guarded
-against them. See `design/` (`ADR-0001-anchored-file-edits.md`,
-`ADR-0002-skills-progressive-disclosure.md`, `agent-loop-and-eval-framework.md`).
+Wire types (SSE events, `OpResult`, `*Input`, `Change`) live in
+`src/contracts/sse-events.ts` — the source of truth, owned by this service; Zod
+schemas are drift-guarded against them. (They are NOT in `packages/contracts`,
+which holds only generated OpenAPI contracts.) See `design/`
+(`ADR-0001-anchored-file-edits.md`, `ADR-0002-skills-progressive-disclosure.md`,
+`agent-loop-and-eval-framework.md`).
 
 **Skills** are guidance (not code): the caller pushes `skills: { name, description,
 content }[]` in the turn payload, the service shows a name+description **catalog** at

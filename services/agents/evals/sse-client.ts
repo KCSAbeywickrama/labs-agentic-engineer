@@ -24,7 +24,7 @@
  * real hazard is the cross-chunk buffering handled here.
  */
 
-import { SSE_DONE, type TurnRequest } from "@aep/contracts";
+import { SSE_DONE, type TurnRequest } from "../src/contracts/sse-events.js";
 import type { StreamPart } from "../src/agents/main/stream-types.js";
 
 // The turn-request body is the shared contract type (one definition, no drift).

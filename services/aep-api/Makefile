@@ -1,12 +1,25 @@
-.PHONY: build test test-db check-no-legacy-creds gen-oc-client gen-oc-client-check gen-mocks openapi
+.PHONY: build test test-db check-no-legacy-creds gen-oc-client gen-oc-client-check gen-mocks openapi openapi-check
 
 build:
 	go build ./...
 
-# Dump the code-first OpenAPI specs to build/ (gitignored) for offline tooling.
-# Not a source of truth — the live GET /openapi.yaml is authoritative, no drift guard.
+# Export the code-first OpenAPI specs (same code path as the live routes):
+#   public   → ../../packages/contracts/api/v1/openapi.yaml  (COMMITTED contract)
+#   internal → build/internal-openapi.yaml                    (gitignored tooling artifact)
+# Wired into the root `make gen`; `openapi-check` guards the committed copy.
 openapi:
 	go run ./cmd/openapigen
+
+# Sync check: regenerate, then fail if the committed public spec drifted from
+# the code. Make-level only (no CI wiring yet); same shape as gen-oc-client-check.
+openapi-check: openapi
+	@if ! git diff --exit-code --quiet -- ../../packages/contracts/api/v1/openapi.yaml; then \
+		git diff --color -- ../../packages/contracts/api/v1/openapi.yaml | cat; \
+		echo ""; \
+		echo "packages/contracts/api/v1/openapi.yaml is out of sync with the code."; \
+		echo "Run 'make gen' (or 'make -C services/aep-api openapi') and commit the change."; \
+		exit 1; \
+	fi
 
 # Fast lane: -short skips the DB tier (dbtest.New self-skips under -short), so
 # plain unit/component runs need no Docker.
