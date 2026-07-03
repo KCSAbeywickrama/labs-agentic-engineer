@@ -208,6 +208,19 @@ if [ -x "$SCRIPT_DIR/repair-secrets.sh" ]; then
         echo "⚠️  repair-secrets did not complete cleanly — see output above."
 fi
 
+# 9. Local-dev seed. Opt-in: runs only when the operator has set
+#    LOCAL_DEV_ADMIN_GITHUB_PAT and/or ANTHROPIC_API_KEY in .env (both
+#    are preserved across setup-aep.sh re-runs). Connects the default
+#    org's credentials exactly as a user would via Settings — idempotent
+#    on re-runs, and best-effort: failure here doesn't fail start.sh.
+echo ""
+if grep -qE '^(LOCAL_DEV_ADMIN_GITHUB_PAT|ANTHROPIC_API_KEY)=.+' "$DEPLOY_DIR/.env" 2>/dev/null; then
+    bash "$SCRIPT_DIR/seed-dev.sh" || \
+        echo "⚠️  seed-dev did not complete cleanly — see output above."
+else
+    echo "⏭️  no LOCAL_DEV_ADMIN_GITHUB_PAT / ANTHROPIC_API_KEY in .env — skipping dev seed (scripts/seed-dev.sh)"
+fi
+
 echo ""
 echo "============================================"
 echo "  ✅ All services running!"
