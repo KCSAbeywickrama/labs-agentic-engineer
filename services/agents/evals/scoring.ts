@@ -24,7 +24,7 @@
  */
 
 import { parse as parseYaml } from "yaml";
-import type { OpResult } from "@aep/contracts";
+import type { OpResult } from "../src/contracts/sse-events.js";
 import type { Expect } from "./fixture.js";
 
 export interface CheckResult {

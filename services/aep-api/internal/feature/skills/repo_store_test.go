@@ -34,7 +34,7 @@ import (
 // real GetRef→GetCommit→GetTree→GetBlob reads and CreateBlob→CreateTree→
 // CreateCommit→UpdateRef writes round-trip against actual data.
 type memGit struct {
-	gitrepo.GitHubClient // embedded: unimplemented methods would panic (untouched by these tests)
+	gitrepo.GitData // embedded: unimplemented methods would panic (untouched by these tests)
 
 	mu          sync.Mutex
 	snapshots   map[string]map[string]string // commitSHA → {path: content}
@@ -184,8 +184,8 @@ type fakeGitOps struct {
 	gh *memGit
 }
 
-func (f *fakeGitOps) GitHubClient() gitrepo.GitHubClient { return f.gh }
-func (f *fakeGitOps) Resolver() credentials.Resolver     { return fakeResolver{} }
+func (f *fakeGitOps) GitData() gitrepo.GitData       { return f.gh }
+func (f *fakeGitOps) Resolver() credentials.Resolver { return fakeResolver{} }
 func (f *fakeGitOps) ResolveSaveIdentities(credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity) {
 	gi := &gitrepo.GitIdentity{Name: "Bot", Email: "bot@aep.dev"}
 	return gi, gi

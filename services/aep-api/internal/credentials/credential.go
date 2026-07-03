@@ -26,11 +26,11 @@
 //
 // Three architectural rules these types enforce:
 //
-//   1. No call site type-switches on Credential.
-//   2. No call site reads identity, repo-owner, or token from any other
-//      source — not env, not the GitRepository row.
-//   3. Every external GitHub operation passes ocOrgID explicitly. Resolvers
-//      refuse an empty ocOrgID.
+//  1. No call site type-switches on Credential.
+//  2. No call site reads identity, repo-owner, or token from any other
+//     source — not env, not the GitRepository row.
+//  3. Every external GitHub operation passes ocOrgID explicitly. Resolvers
+//     refuse an empty ocOrgID.
 package credentials
 
 import (

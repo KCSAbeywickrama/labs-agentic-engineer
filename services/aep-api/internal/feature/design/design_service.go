@@ -29,7 +29,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/models"

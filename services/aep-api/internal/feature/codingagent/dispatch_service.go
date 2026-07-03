@@ -55,8 +55,9 @@ type DispatchResult = contracts.DispatchResult
 //     feature branch and opens the PR with `Closes #<issue>` so the
 //     webhook handler can link the PR back to the task.
 //
-// Idempotency: dispatch is gated on `DispatchedAt` — once set, re-dispatch
-// is a no-op. The agent owns branch+PR creation, and the
+// Idempotency: dispatch is gated on task STATUS (only `pending` tasks are
+// dispatched; the transition to in_progress closes the gate). `DispatchedAt`
+// is a written-only timestamp, not the gate. The agent owns branch+PR creation, and the
 // pull_request.opened webhook persists `BranchName` and
 // `PullRequestNumber` once the agent opens its PR.
 type DispatchService interface {

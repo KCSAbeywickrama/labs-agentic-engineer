@@ -1,0 +1,5 @@
+{
+  "$schema": "http://localhost:9090/api/v1/CollabValidateOutputBody.json",
+  "name": "Admin",
+  "email": ""
+}

@@ -120,10 +120,11 @@ func (a *RunnerAuthorizer) Authorize(ctx context.Context, authHeader, taskID str
 }
 
 // runnerAuthorizer is the process-wide authorizer used by RunnerScopedInput.
-// Resolve. Set once at wiring via SetRunnerAuthorizer — this mirrors humakit's
-// gateMode global and lets RunnerScopedInput stay a dependency-free embeddable
-// input (Huma constructs it per request from the zero value, so it cannot carry
-// injected services itself).
+// Resolve. Set once at wiring via SetRunnerAuthorizer (from app.Build only —
+// never from a test harness, so there are no concurrent writes) — it lets
+// RunnerScopedInput stay a dependency-free embeddable input (Huma constructs
+// it per request from the zero value, so it cannot carry injected services
+// itself).
 var runnerAuthorizer *RunnerAuthorizer
 
 // SetRunnerAuthorizer wires the authorizer at composition time.

@@ -1,0 +1,4 @@
+{
+  "error": "Unauthorized",
+  "message": "missing Authorization header"
+}

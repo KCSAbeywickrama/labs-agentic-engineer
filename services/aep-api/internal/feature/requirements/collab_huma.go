@@ -23,8 +23,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
-	jwtmw "github.com/wso2/aep/aep-api/middleware/jwt"
 )
 
 // --- Inputs / Outputs ------------------------------------------------------
@@ -105,8 +105,8 @@ func RegisterCollab(api huma.API, repos repoOracle) {
 		Tags:        []string{"Collaboration"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *collabValidateInput) (*collabValidateOutput, error) {
-		claims := jwtmw.ClaimsFromContext(ctx)
-		org := jwtmw.ResolveOuHandle(claims)
+		claims := auth.ClaimsFromContext(ctx)
+		org := auth.ResolveOuHandle(claims)
 		if claims == nil || org == "" {
 			return nil, huma.Error401Unauthorized("invalid or missing token")
 		}

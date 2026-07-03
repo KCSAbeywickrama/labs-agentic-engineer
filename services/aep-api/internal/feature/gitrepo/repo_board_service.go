@@ -34,11 +34,11 @@ type RepoBoardService interface {
 
 type repoBoardService struct {
 	repo     repositories.RepoRepository
-	github   GitHubV2Client
+	github   BoardOps
 	resolver credentials.Resolver
 }
 
-func NewRepoBoardService(repo repositories.RepoRepository, github GitHubV2Client, resolver credentials.Resolver) RepoBoardService {
+func NewRepoBoardService(repo repositories.RepoRepository, github BoardOps, resolver credentials.Resolver) RepoBoardService {
 	return &repoBoardService{repo: repo, github: github, resolver: resolver}
 }
 

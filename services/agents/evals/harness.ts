@@ -29,7 +29,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LanguageModel, ModelMessage } from "ai";
-import type { OpResult, Skill } from "@aep/contracts";
+import type { OpResult, Skill } from "../src/contracts/sse-events.js";
 import { createApp } from "../src/server.js";
 import { listen0 } from "../src/shared/listen.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";

@@ -53,7 +53,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/k8s"
+	"github.com/wso2/aep/aep-api/internal/clients/k8s"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -74,6 +74,14 @@ type AnthropicCredentialService struct {
 // the mirror — the org_secrets path remains authoritative.
 func (s *AnthropicCredentialService) WithSMAPIWriter(w *SMAPIWriter) *AnthropicCredentialService {
 	s.smAPIWriter = w
+	return s
+}
+
+// WithAnthropicAPIBase points key validation at base instead of the real
+// Anthropic API; chainable. Tests aim it at an httptest server so
+// validateAnthropicKey's probe never leaves the process.
+func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *AnthropicCredentialService {
+	s.anthropicAPI = base
 	return s
 }
 
@@ -186,8 +194,12 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 		LastValidatedAt: &now,
 		ValidationError: nil,
 	}
-	// Upsert via ON CONFLICT DO UPDATE so Replace is idempotent.
-	if err := tx.Exec(`
+	// Upsert via ON CONFLICT DO UPDATE so Replace is idempotent. The UPDATE
+	// deliberately omits connected_at so a replace preserves the ORIGINAL
+	// connection time; RETURNING that column reads the persisted value back so
+	// the projection we return matches the stored row (on a replace it's the
+	// original, not the in-memory `now`).
+	if err := tx.Raw(`
 		INSERT INTO org_anthropic_credentials
 		    (oc_org_id, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
 		VALUES (?, ?, ?, ?, ?, ?, NULL)
@@ -196,9 +208,10 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 		      key_last4          = EXCLUDED.key_last4,
 		      status             = EXCLUDED.status,
 		      last_validated_at  = EXCLUDED.last_validated_at,
-		      validation_error   = NULL`,
+		      validation_error   = NULL
+		RETURNING connected_at`,
 		row.OcOrgID, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
-	).Error; err != nil {
+	).Scan(&row.ConnectedAt).Error; err != nil {
 		return nil, fmt.Errorf("anthropic connect: upsert: %w", err)
 	}
 	if err := tx.Commit().Error; err != nil {
@@ -371,7 +384,7 @@ func (s *AnthropicCredentialService) applyAnthropicSecret(ctx context.Context, o
 			Name:      models.AnthropicSecretName,
 			Namespace: ns,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by":           "aep-git-service",
+				"app.kubernetes.io/managed-by":   "aep-git-service",
 				"aep.openchoreo.dev/oc-org-id":   ocOrgID,
 				"aep.openchoreo.dev/secret-type": "anthropic-credentials",
 			},
@@ -469,8 +482,10 @@ func (s *AnthropicCredentialService) fetchRow(ctx context.Context, ocOrgID strin
 }
 
 // validateAnthropicKey probes Anthropic's /v1/messages with a minimal
-// payload. 401 → ValidationError{anthropic_key_invalid}. 5xx → 503-shape
-// transient. Other non-2xx are treated as transient by default.
+// payload. 401 → ValidationError{anthropic_key_invalid}. A 5xx is the
+// upstream's fault → UpstreamError (mapped to 502 Bad Gateway), NOT a
+// client-fault 400. Other unexpected non-5xx statuses (e.g. 429) stay a
+// ValidationError.
 //
 // Anthropic's /v1/messages requires both `x-api-key` and `anthropic-version`
 // headers; a malformed request returns 400 (which still proves the key is
@@ -502,6 +517,14 @@ func (s *AnthropicCredentialService) validateAnthropicKey(ctx context.Context, k
 		// 200 = key valid; 400 = key recognized but request payload arguable
 		// (e.g. unknown model). Either way the key is authenticated.
 		return nil
+	}
+	if resp.StatusCode >= 500 {
+		// Upstream is broken, not the caller's key/request — surface a 502 at
+		// the edge so we don't blame the client for Anthropic's outage.
+		return &UpstreamError{
+			Code:    "anthropic_unavailable",
+			Message: fmt.Sprintf("Anthropic API returned %d: %s", resp.StatusCode, truncateForError(respBody)),
+		}
 	}
 	return &ValidationError{
 		Code:    "anthropic_unexpected_status",

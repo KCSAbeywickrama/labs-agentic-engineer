@@ -1,0 +1,298 @@
+[
+  {
+    "name": "get_organizations",
+    "method": "GET",
+    "path": "/organizations",
+    "status": 200,
+    "golden_file": "get_organizations.json",
+    "notes": "list-organizations; unscoped org list"
+  },
+  {
+    "name": "get_projects",
+    "method": "GET",
+    "path": "/projects",
+    "status": 200,
+    "golden_file": "get_projects.json",
+    "notes": "list-projects"
+  },
+  {
+    "name": "get_project",
+    "method": "GET",
+    "path": "/projects/hello-world-api",
+    "status": 200,
+    "golden_file": "get_project.json",
+    "notes": "get-project (primary subject)"
+  },
+  {
+    "name": "get_project_status",
+    "method": "GET",
+    "path": "/projects/hello-world-api/status",
+    "status": 200,
+    "golden_file": "get_project_status.json",
+    "notes": "get-project-status"
+  },
+  {
+    "name": "get_requirements",
+    "method": "GET",
+    "path": "/projects/hello-world-api/requirements",
+    "status": 200,
+    "golden_file": "get_requirements.json",
+    "notes": "get-requirements bundle"
+  },
+  {
+    "name": "get_requirements_versions",
+    "method": "GET",
+    "path": "/projects/hello-world-api/requirements/versions",
+    "status": 200,
+    "golden_file": "get_requirements_versions.json",
+    "notes": "list-requirements-versions"
+  },
+  {
+    "name": "get_requirements_at_version",
+    "method": "GET",
+    "path": "/projects/hello-world-api/requirements/versions/v1",
+    "status": 200,
+    "golden_file": "get_requirements_at_version.json",
+    "notes": "get-requirements-at-version tag=v1 (discovered)"
+  },
+  {
+    "name": "get_collab_session",
+    "method": "GET",
+    "path": "/projects/hello-world-api/requirements/collab-session",
+    "status": 200,
+    "golden_file": "get_collab_session.json",
+    "notes": "get-collab-session"
+  },
+  {
+    "name": "get_collab_validate",
+    "method": "GET",
+    "path": "/collab/validate",
+    "status": 200,
+    "golden_file": "get_collab_validate.json",
+    "notes": "validate-collab-access (S2S carve-out; needs X-Room-Id)"
+  },
+  {
+    "name": "get_design",
+    "method": "GET",
+    "path": "/projects/hello-world-api/design",
+    "status": 200,
+    "golden_file": "get_design.json",
+    "notes": "get-design"
+  },
+  {
+    "name": "get_design_bundle",
+    "method": "GET",
+    "path": "/projects/hello-world-api/design/bundle",
+    "status": 200,
+    "golden_file": "get_design_bundle.json",
+    "notes": "get-design-bundle"
+  },
+  {
+    "name": "get_design_versions",
+    "method": "GET",
+    "path": "/projects/hello-world-api/design/versions",
+    "status": 200,
+    "golden_file": "get_design_versions.json",
+    "notes": "list-design-versions"
+  },
+  {
+    "name": "get_design_bundle_at_tag",
+    "method": "GET",
+    "path": "/projects/hello-world-api/design/versions/v1-1/bundle",
+    "status": 200,
+    "golden_file": "get_design_bundle_at_tag.json",
+    "notes": "get-design-bundle-at-tag tag=v1-1 (discovered)"
+  },
+  {
+    "name": "get_tasks",
+    "method": "GET",
+    "path": "/projects/hello-world-api/tasks",
+    "status": 200,
+    "golden_file": "get_tasks.json",
+    "notes": "list-tasks"
+  },
+  {
+    "name": "get_tasks_generated",
+    "method": "GET",
+    "path": "/projects/hello-world-api/tasks/generated",
+    "status": 200,
+    "golden_file": "get_tasks_generated.json",
+    "notes": "get-generated-tasks (draft/generated set)"
+  },
+  {
+    "name": "get_task",
+    "method": "GET",
+    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744",
+    "status": 200,
+    "golden_file": "get_task.json",
+    "notes": "get-task taskId=26de64b5-beb8-445d-9acf-de0811552744 (discovered)"
+  },
+  {
+    "name": "get_task_status",
+    "method": "GET",
+    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744/status",
+    "status": 200,
+    "golden_file": "get_task_status.json",
+    "notes": "get-task-status"
+  },
+  {
+    "name": "get_task_progress_agent",
+    "method": "GET",
+    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744/progress/agent",
+    "status": 200,
+    "golden_file": "get_task_progress_agent.json",
+    "notes": "get-task-agent-progress"
+  },
+  {
+    "name": "get_task_progress_build",
+    "method": "GET",
+    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744/progress/build",
+    "status": 200,
+    "golden_file": "get_task_progress_build.json",
+    "notes": "get-task-build-progress"
+  },
+  {
+    "name": "get_board",
+    "method": "GET",
+    "path": "/projects/hello-world-api/board",
+    "status": 200,
+    "golden_file": "get_board.json",
+    "notes": "get-board"
+  },
+  {
+    "name": "get_components",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components",
+    "status": 200,
+    "golden_file": "get_components.json",
+    "notes": "list-components"
+  },
+  {
+    "name": "get_component",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components/hello-api",
+    "status": 200,
+    "golden_file": "get_component.json",
+    "notes": "get-component name=hello-api (discovered)"
+  },
+  {
+    "name": "get_component_builds",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components/hello-api/builds",
+    "status": 200,
+    "golden_file": "get_component_builds.json",
+    "notes": "list-builds"
+  },
+  {
+    "name": "get_component_deployments",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components/hello-api/deployments",
+    "status": 200,
+    "golden_file": "get_component_deployments.json",
+    "notes": "list-deployments"
+  },
+  {
+    "name": "get_component_openapi",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components/hello-api/openapi",
+    "status": 200,
+    "golden_file": "get_component_openapi.json",
+    "notes": "get-component-openapi"
+  },
+  {
+    "name": "get_component_config",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components/hello-api/configs",
+    "status": 200,
+    "golden_file": "get_component_config.json",
+    "notes": "get-component-config"
+  },
+  {
+    "name": "get_component_build_logs",
+    "method": "GET",
+    "path": "/projects/hello-world-api/components/hello-api/builds/hello-world-api-hello-api-1782887236864/logs",
+    "status": 500,
+    "golden_file": "get_component_build_logs.json",
+    "notes": "get-build-logs buildName=hello-world-api-hello-api-1782887236864 (discovered)"
+  },
+  {
+    "name": "get_org_skills",
+    "method": "GET",
+    "path": "/org/skills",
+    "status": 200,
+    "golden_file": "get_org_skills.json",
+    "notes": "list-skills"
+  },
+  {
+    "name": "get_org_skills_updates",
+    "method": "GET",
+    "path": "/org/skills/updates",
+    "status": 200,
+    "golden_file": "get_org_skills_updates.json",
+    "notes": "list-skill-updates"
+  },
+  {
+    "name": "get_org_skill",
+    "method": "GET",
+    "path": "/org/skills/go",
+    "status": 200,
+    "golden_file": "get_org_skill.json",
+    "notes": "get-skill name=go (discovered)"
+  },
+  {
+    "name": "get_org_idp",
+    "method": "GET",
+    "path": "/org/idp",
+    "status": 200,
+    "golden_file": "get_org_idp.json",
+    "notes": "get-idp-profile"
+  },
+  {
+    "name": "get_org_idp_discovery",
+    "method": "GET",
+    "path": "/org/idp/discovery?issuer=http://thunder.openchoreo.localhost:8080",
+    "status": 200,
+    "golden_file": "get_org_idp_discovery.json",
+    "notes": "discover-idp-issuer issuer=http://thunder.openchoreo.localhost:8080 (needs issuer query)"
+  },
+  {
+    "name": "get_org_credentials_github",
+    "method": "GET",
+    "path": "/org/credentials/github",
+    "status": 200,
+    "golden_file": "get_org_credentials_github.json",
+    "notes": "get-github-status"
+  },
+  {
+    "name": "get_org_credentials_anthropic",
+    "method": "GET",
+    "path": "/org/credentials/anthropic",
+    "status": 200,
+    "golden_file": "get_org_credentials_anthropic.json",
+    "notes": "get-anthropic-status"
+  },
+  {
+    "name": "err_401_projects",
+    "method": "GET",
+    "path": "/projects",
+    "status": 401,
+    "golden_file": "err_401_projects.json",
+    "notes": "401: no Authorization header"
+  },
+  {
+    "name": "err_404_project",
+    "method": "GET",
+    "path": "/projects/does-not-exist-xyz",
+    "status": 404,
+    "golden_file": "err_404_project.json",
+    "notes": "404: unknown project, valid token"
+  },
+  {
+    "name": "err_422_create_project",
+    "method": "POST",
+    "path": "/projects",
+    "status": 422,
+    "golden_file": "err_422_create_project.json",
+    "notes": "422: create-project invalid body {}, valid token"
+  }
+]

@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Skill, LoadSkillResult } from "@aep/contracts";
+import type { Skill, LoadSkillResult } from "../../contracts/sse-events.js";
 import { buildTools, LOAD_SKILL } from "./tool.js";
 import { FileBundle } from "./bundle.js";
 

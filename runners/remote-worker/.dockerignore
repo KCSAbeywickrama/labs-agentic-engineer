@@ -21,3 +21,4 @@ coverage
 .env
 .env.*
 plugin/node_modules
+local

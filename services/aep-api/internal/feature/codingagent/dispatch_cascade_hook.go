@@ -18,6 +18,7 @@ package codingagent
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 
@@ -88,69 +89,81 @@ func (h *DispatchCascadeHook) OnTaskDeployed(ctx context.Context, orgID, project
 	if h == nil || h.db == nil || h.dispatch == nil {
 		return
 	}
-	// Per-project advisory lock — mirrors webhook.acquireProjectLock.
-	// We take it in its own transaction so we can release before the
-	// dispatch loop (which may itself perform writes). Holding it across
-	// the dispatch loop would also be acceptable; we trade a tiny race
-	// window (two near-simultaneous deploys releasing the lock before
-	// the dispatch loop finishes) for shorter lock hold times. Since
-	// DispatchTasks is itself idempotent on (DispatchedAt, LastCodingAgentRunName),
-	// the worst case under that race is a single redundant lookup, not
-	// a double-dispatch.
-	if err := h.db.WithContext(ctx).Exec(
-		`SELECT pg_advisory_xact_lock(?)`,
-		hashCascadeKey("project:"+projectID),
-	).Error; err != nil {
-		slog.WarnContext(ctx, "dispatch cascade: acquire project lock failed",
-			"project", projectID, "error", err)
-		return
-	}
-	// Dependency URL handoff to consumer SPAs flows through the
-	// ReleaseBinding `env-config.js` (BFF emits per-env values into
-	// workloadOverrides.container.files). dispatch's
-	// resolveDependencyEndpoints enforces the §1.3 URL invariant at
-	// dispatch time.
+	// Per-project advisory lock — a per-project pg advisory lock. The lock
+	// and the whole guarded cascade (trait sync + env-config re-emit +
+	// DispatchTasks) run inside ONE real transaction so the lock is held for
+	// the full duration: a dependent shared between two deps must dispatch
+	// exactly once when the second dep lands, and two near-simultaneous deploys
+	// against the same project must serialise.
 	//
-	// For OIDC-SPA web-apps the platform IDP redirect_uris are
-	// registered by RuntimeConfigService.layerThunderKeys when the SPA
-	// gets its env-config.js emitted below — no separate dispatch-side
-	// Thunder call is needed.
-
-	// Sibling-CORS re-emit: any dispatch in a project re-emits the
-	// `cors.allowedOrigins` block on every protected API's ReleaseBinding
-	// so freshly added SPAs are echoed back on preflight. Without this,
-	// the first deploy of a new SPA cannot call the API cross-origin
-	// until something else triggers a sync. Idempotent + best-effort.
-	if h.traitSync != nil {
-		if err := h.traitSync.SyncProjectAPITraits(ctx, orgID, projectID); err != nil {
-			slog.WarnContext(ctx, "dispatch cascade: SyncProjectAPITraits failed",
-				"project", projectID, "deployedComponent", componentName, "error", err)
+	// pg_advisory_xact_lock releases only at transaction end. Taking it via a
+	// bare Exec under gorm's SkipDefaultTransaction autocommits and releases it
+	// immediately — before any guarded work — which is no exclusion at all.
+	// This transaction itself performs no writes; the guarded services use
+	// their own connections. Its sole job is to hold the lock, which blocks a
+	// concurrent hook on the same project for the length of the cascade.
+	err := h.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if lerr := tx.Exec(
+			`SELECT pg_advisory_xact_lock(?)`,
+			hashCascadeKey("project:"+projectID),
+		).Error; lerr != nil {
+			return fmt.Errorf("acquire project lock: %w", lerr)
 		}
-	}
 
-	// Env-config.js re-emit: when a sibling service's external URL just
-	// resolved, the depending SPAs need their `window._env_.API_BASE_URL`
-	// refreshed. Re-emit env-config.js on every SPA in the project so
-	// the next pod restart picks up the latest values. Idempotent +
-	// best-effort.
-	if h.runtimeConfig != nil {
-		if err := h.runtimeConfig.EmitForProjectSPAs(ctx, orgID, projectID); err != nil {
-			slog.WarnContext(ctx, "dispatch cascade: EmitForProjectSPAs failed",
-				"project", projectID, "deployedComponent", componentName, "error", err)
+		// Dependency URL handoff to consumer SPAs flows through the
+		// ReleaseBinding `env-config.js` (BFF emits per-env values into
+		// workloadOverrides.container.files). dispatch's
+		// resolveDependencyEndpoints enforces the §1.3 URL invariant at
+		// dispatch time.
+		//
+		// For OIDC-SPA web-apps the platform IDP redirect_uris are
+		// registered by RuntimeConfigService.layerThunderKeys when the SPA
+		// gets its env-config.js emitted below — no separate dispatch-side
+		// Thunder call is needed.
+
+		// Sibling-CORS re-emit: any dispatch in a project re-emits the
+		// `cors.allowedOrigins` block on every protected API's ReleaseBinding
+		// so freshly added SPAs are echoed back on preflight. Without this,
+		// the first deploy of a new SPA cannot call the API cross-origin
+		// until something else triggers a sync. Idempotent + best-effort.
+		if h.traitSync != nil {
+			if terr := h.traitSync.SyncProjectAPITraits(ctx, orgID, projectID); terr != nil {
+				slog.WarnContext(ctx, "dispatch cascade: SyncProjectAPITraits failed",
+					"project", projectID, "deployedComponent", componentName, "error", terr)
+			}
 		}
-	}
 
-	results, err := h.dispatch.DispatchTasks(ctx, orgID, projectID)
+		// Env-config.js re-emit: when a sibling service's external URL just
+		// resolved, the depending SPAs need their `window._env_.API_BASE_URL`
+		// refreshed. Re-emit env-config.js on every SPA in the project so
+		// the next pod restart picks up the latest values. Idempotent +
+		// best-effort.
+		if h.runtimeConfig != nil {
+			if rerr := h.runtimeConfig.EmitForProjectSPAs(ctx, orgID, projectID); rerr != nil {
+				slog.WarnContext(ctx, "dispatch cascade: EmitForProjectSPAs failed",
+					"project", projectID, "deployedComponent", componentName, "error", rerr)
+			}
+		}
+
+		results, derr := h.dispatch.DispatchTasks(ctx, orgID, projectID)
+		if derr != nil {
+			return fmt.Errorf("dispatch tasks: %w", derr)
+		}
+		slog.InfoContext(ctx, "dispatch cascade fired",
+			"project", projectID,
+			"deployedComponent", componentName,
+			"dispatched", len(results),
+		)
+		return nil
+	})
+	// Errors are logged but never propagated — the deploy transition already
+	// committed and the cascade is best-effort. Rolling back this transaction
+	// only releases the advisory lock; the guarded services' writes ran on
+	// their own connections and are unaffected.
 	if err != nil {
-		slog.WarnContext(ctx, "dispatch cascade: DispatchTasks failed",
+		slog.WarnContext(ctx, "dispatch cascade failed",
 			"project", projectID, "deployedComponent", componentName, "error", err)
-		return
 	}
-	slog.InfoContext(ctx, "dispatch cascade fired",
-		"project", projectID,
-		"deployedComponent", componentName,
-		"dispatched", len(results),
-	)
 }
 
 func hashCascadeKey(s string) int64 {

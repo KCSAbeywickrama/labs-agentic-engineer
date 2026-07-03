@@ -26,7 +26,7 @@
  *    browser ports it. No second matcher, no delta accumulation.
  */
 
-import type { Change, Op } from "@aep/contracts";
+import type { Change, Op } from "../../contracts/sse-events.js";
 import type { OpResult } from "./bundle.js";
 import type { FileBundle } from "./bundle.js";
 import type { StreamPart } from "./stream-types.js";

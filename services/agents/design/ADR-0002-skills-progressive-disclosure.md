@@ -41,7 +41,7 @@ pushing skills in the turn request payload.
   unregistered → byte-identical to today's behavior. `loadSkill` is not a bundle
   mutation, so it projects to **no `Change`**.
 
-Wire types (`Skill`, `LoadSkillInput`) live in `@aep/contracts`; the Zod schema is
+Wire types (`Skill`, `LoadSkillInput`) live in `src/contracts/sse-events.ts`; the Zod schema is
 drift-guarded against them, as with the file tools.
 
 ## Alternatives rejected

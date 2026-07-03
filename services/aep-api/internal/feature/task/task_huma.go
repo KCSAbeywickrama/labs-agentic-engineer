@@ -24,7 +24,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 	"github.com/wso2/aep/aep-api/models"
@@ -97,9 +97,11 @@ type TaskStatusResponse struct {
 //   - progressSvc ProgressReader         — agent/build progress polling
 //   - ocClient    openchoreo.ComponentClient — build-run steps for GetTaskStatus
 //
+// Registered here INCLUDING the SSE streams: generate-tasks +
+// regenerate-task-body use huma.StreamResponse (raw huma.Context writer for
+// text/event-stream).
+//
 // SKIPPED here (not registered by this func):
-//   - generate-tasks + regenerate-task-body — SSE streams (http.Flusher /
-//     text/event-stream); they stay on the legacy mux.
 //   - the runner-facing Task-JWT routes (skills, credentials/refresh) —
 //     registered on the outer mux in api/app.go, not org-scoped, handled
 //     separately.

@@ -23,54 +23,50 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/humatest"
 
-	"github.com/wso2/aep/aep-api/internal/platform/humakit"
-	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/models"
 )
 
-type fakeProjectService struct{}
+// fakeSpecProjectService satisfies ProjectService for registration only; no
+// request ever reaches it in this file.
+type fakeSpecProjectService struct{}
 
-func (fakeProjectService) ListProjects(_ context.Context, _ string, _ int, _ string) (*models.ProjectList, error) {
-	return &models.ProjectList{Items: []models.Project{{Name: "demo"}}}, nil
+func (fakeSpecProjectService) ListProjects(context.Context, string, int, string) (*models.ProjectList, error) {
+	return nil, nil
 }
-func (fakeProjectService) GetProject(_ context.Context, _, name string) (*models.Project, error) {
-	return &models.Project{Name: name}, nil
+func (fakeSpecProjectService) GetProject(context.Context, string, string) (*models.Project, error) {
+	return nil, nil
 }
-func (fakeProjectService) CreateProject(_ context.Context, _ string, req *models.CreateProjectRequest) (*models.Project, error) {
-	return &models.Project{Name: req.Name}, nil
+func (fakeSpecProjectService) CreateProject(context.Context, string, *models.CreateProjectRequest) (*models.Project, error) {
+	return nil, nil
 }
-func (fakeProjectService) DeleteProject(_ context.Context, _, _ string) error { return nil }
-func (fakeProjectService) GetProjectStatus(_ context.Context, _, _ string) (*models.ProjectStatus, error) {
-	return &models.ProjectStatus{Phase: "prompt"}, nil
+func (fakeSpecProjectService) DeleteProject(context.Context, string, string) error { return nil }
+func (fakeSpecProjectService) GetProjectStatus(context.Context, string, string) (*models.ProjectStatus, error) {
+	return nil, nil
 }
 
-// TestRegisterProject_SpecAndWiring proves the Huma registration does not panic,
-// the OpenAPI spec carries the project operations, and a request flows through
-// the typed handler. Gate is set to log mode so the no-claims test request is
-// not rejected by the tenant resolver (the gate itself is unit-tested in
-// humakit).
-func TestRegisterProject_SpecAndWiring(t *testing.T) {
-	humakit.SetGateMode(tenant.GateModeLog)
-	t.Cleanup(func() { humakit.SetGateMode(tenant.GateModeEnforce) })
+// TestRegisterProject_Spec is a registration/spec check ONLY: RegisterProject
+// does not panic and the generated OpenAPI carries every project operation.
+// It deliberately sends no requests — behavioral coverage (status codes,
+// validation, error mapping, the ENFORCE gate) lives in
+// project_component_test.go, which drives the real production chain through
+// the componenttest harness. This split is bff-component-testing.md §8.3:
+// spec tests must not flip the (now request-scoped) gate mode.
+func TestRegisterProject_Spec(t *testing.T) {
+	t.Parallel()
 
 	_, api := humatest.New(t)
-	RegisterProject(api, fakeProjectService{})
+	RegisterProject(api, fakeSpecProjectService{})
 
 	spec, err := api.OpenAPI().YAML()
 	if err != nil {
 		t.Fatalf("spec: %v", err)
 	}
-	for _, want := range []string{"list-projects", "create-project", "get-project", "delete-project", "get-project-status", "/projects"} {
+	for _, want := range []string{
+		"list-projects", "create-project", "get-project", "delete-project",
+		"get-project-status", "/projects", "/projects/{projectName}",
+	} {
 		if !strings.Contains(string(spec), want) {
 			t.Fatalf("spec missing %q", want)
 		}
-	}
-
-	resp := api.Get("/projects")
-	if resp.Code != 200 {
-		t.Fatalf("list projects: got %d, body=%s", resp.Code, resp.Body.String())
-	}
-	if !strings.Contains(resp.Body.String(), "demo") {
-		t.Fatalf("list projects body missing item: %s", resp.Body.String())
 	}
 }

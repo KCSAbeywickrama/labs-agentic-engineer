@@ -29,7 +29,7 @@ import (
 // CredentialService's identity-update helpers.
 type ValidatorProbes struct {
 	credSvc      *CredentialService
-	githubClient gitrepo.GitHubClient
+	githubClient gitrepo.AppInstallOps
 	resolver     credentials.Resolver
 	minter       *credentials.AppTokenMinter
 }
@@ -37,7 +37,7 @@ type ValidatorProbes struct {
 // NewValidatorProbes constructs the probes adapter. All four
 // dependencies must be non-nil; nil short-circuits the validator at
 // construction so we don't half-fire later.
-func NewValidatorProbes(credSvc *CredentialService, githubClient gitrepo.GitHubClient, resolver credentials.Resolver, minter *credentials.AppTokenMinter) *ValidatorProbes {
+func NewValidatorProbes(credSvc *CredentialService, githubClient gitrepo.AppInstallOps, resolver credentials.Resolver, minter *credentials.AppTokenMinter) *ValidatorProbes {
 	return &ValidatorProbes{
 		credSvc:      credSvc,
 		githubClient: githubClient,

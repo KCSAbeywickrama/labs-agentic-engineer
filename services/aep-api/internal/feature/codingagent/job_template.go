@@ -162,10 +162,10 @@ func Build(in JobInputs) (map[string]any, error) {
 	labels := map[string]string{
 		"app.kubernetes.io/name":    "remote-worker",
 		"app.kubernetes.io/part-of": "aep",
-		"aep.io/task":             in.TaskID,
-		"aep.io/org":              in.OrgID,
-		"aep.io/project":          in.ProjectID,
-		"aep.io/component":        in.ComponentName,
+		"aep.io/task":               in.TaskID,
+		"aep.io/org":                in.OrgID,
+		"aep.io/project":            in.ProjectID,
+		"aep.io/component":          in.ComponentName,
 	}
 
 	return map[string]any{

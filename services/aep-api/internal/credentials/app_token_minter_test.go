@@ -196,6 +196,104 @@ func TestAppTokenMinter_Singleflight(t *testing.T) {
 	}
 }
 
+// TestAppTokenMinter_MintForInstallation_NonSuccessStatus pins that a
+// non-2xx response from POST /app/installations/{id}/access_tokens
+// propagates as an error (not a zero-value token) and is not cached — the
+// mint path must fail loudly rather than silently handing back "".
+func TestAppTokenMinter_MintForInstallation_NonSuccessStatus(t *testing.T) {
+	_, pemBytes := generateTestKey(t)
+
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"Bad credentials"}`)
+	}))
+	defer srv.Close()
+
+	m, err := NewAppTokenMinter(&AppKeyMaterial{AppID: 55, PrivateKeyPEM: pemBytes})
+	if err != nil {
+		t.Fatalf("NewAppTokenMinter: %v", err)
+	}
+	m.httpClient = &http.Client{Transport: &rewriteTransport{target: srv.URL}}
+
+	tok, expiresAt, err := m.MintForInstallation(context.Background(), 1)
+	if err == nil {
+		t.Fatal("MintForInstallation with 403 upstream = nil error; want error")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error = %q; want it to mention status 403", err)
+	}
+	if tok != "" || !expiresAt.IsZero() {
+		t.Errorf("MintForInstallation on error = (%q, %v); want zero values", tok, expiresAt)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("upstream calls = %d; want 1", got)
+	}
+
+	// A failed mint must not populate the cache — the next call re-attempts.
+	if _, ok := m.cache.get(1); ok {
+		t.Error("failed mint left a cache entry; want no cache on error")
+	}
+}
+
+// TestAppTokenMinter_MintForInstallation_MalformedJSON pins that a 2xx
+// response whose body isn't valid JSON surfaces a decode error rather than
+// a zero-value token silently accepted.
+func TestAppTokenMinter_MintForInstallation_MalformedJSON(t *testing.T) {
+	_, pemBytes := generateTestKey(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{not valid json`)
+	}))
+	defer srv.Close()
+
+	m, err := NewAppTokenMinter(&AppKeyMaterial{AppID: 56, PrivateKeyPEM: pemBytes})
+	if err != nil {
+		t.Fatalf("NewAppTokenMinter: %v", err)
+	}
+	m.httpClient = &http.Client{Transport: &rewriteTransport{target: srv.URL}}
+
+	tok, _, err := m.MintForInstallation(context.Background(), 2)
+	if err == nil {
+		t.Fatal("MintForInstallation with malformed JSON body = nil error; want error")
+	}
+	if !strings.Contains(err.Error(), "decode") {
+		t.Errorf("error = %q; want it to mention decode failure", err)
+	}
+	if tok != "" {
+		t.Errorf("token = %q; want empty on decode error", tok)
+	}
+}
+
+// TestAppTokenMinter_MintForInstallation_EmptyTokenInResponse pins that a
+// well-formed 2xx JSON body with an empty "token" field is treated as an
+// error, not a valid-but-blank credential.
+func TestAppTokenMinter_MintForInstallation_EmptyTokenInResponse(t *testing.T) {
+	_, pemBytes := generateTestKey(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"token":"","expires_at":"%s"}`, time.Now().Add(1*time.Hour).Format(time.RFC3339))
+	}))
+	defer srv.Close()
+
+	m, err := NewAppTokenMinter(&AppKeyMaterial{AppID: 57, PrivateKeyPEM: pemBytes})
+	if err != nil {
+		t.Fatalf("NewAppTokenMinter: %v", err)
+	}
+	m.httpClient = &http.Client{Transport: &rewriteTransport{target: srv.URL}}
+
+	tok, _, err := m.MintForInstallation(context.Background(), 3)
+	if err == nil {
+		t.Fatal("MintForInstallation with empty token field = nil error; want error")
+	}
+	if tok != "" {
+		t.Errorf("token = %q; want empty on empty-token error", tok)
+	}
+}
+
 func TestAppTokenCache_SafetyMargin(t *testing.T) {
 	c := newAppTokenCache()
 	// Token expiring in 4 minutes — within safety margin → cache miss.

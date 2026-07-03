@@ -1,0 +1,11 @@
+{
+  "$schema": "http://localhost:9090/api/v1/OrganizationList.json",
+  "items": [
+    {
+      "uuid": "eb02929c-4e86-46c2-a587-105a40b89d9a",
+      "name": "default",
+      "status": "Active",
+      "createdAt": "2026-07-01T04:59:24.165238Z"
+    }
+  ]
+}

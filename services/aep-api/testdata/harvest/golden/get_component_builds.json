@@ -1,0 +1,39 @@
+{
+  "$schema": "http://localhost:9090/api/v1/WorkflowRunList.json",
+  "items": [
+    {
+      "name": "hello-world-api-hello-api-1782887236864",
+      "status": "WorkflowSucceeded",
+      "startedAt": "2026-07-01T06:27:17Z",
+      "componentName": "hello-api",
+      "projectName": "hello-world-api",
+      "completed": true,
+      "tasks": [
+        {
+          "name": "checkout-source",
+          "phase": "Succeeded",
+          "startedAt": "2026-07-01T06:27:20Z",
+          "completedAt": "2026-07-01T06:27:54Z"
+        },
+        {
+          "name": "build-image",
+          "phase": "Succeeded",
+          "startedAt": "2026-07-01T06:28:01Z",
+          "completedAt": "2026-07-01T06:30:10Z"
+        },
+        {
+          "name": "publish-image",
+          "phase": "Succeeded",
+          "startedAt": "2026-07-01T06:30:20Z",
+          "completedAt": "2026-07-01T06:30:25Z"
+        },
+        {
+          "name": "generate-workload-cr",
+          "phase": "Succeeded",
+          "startedAt": "2026-07-01T06:30:31Z",
+          "completedAt": "2026-07-01T06:30:58Z"
+        }
+      ]
+    }
+  ]
+}

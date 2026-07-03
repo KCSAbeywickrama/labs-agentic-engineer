@@ -68,7 +68,7 @@ type GitOpsService interface {
 	PrepareAuthedEnv(ctx context.Context, repoRecord *models.GitRepository) ([]string, func(), error)
 	ResolveSaveIdentities(cred credentials.Credential) (*GitIdentity, *GitIdentity)
 	BestEffortPullDefaultBranch(ctx context.Context, repoRecord *models.GitRepository) error
-	GitHubClient() GitHubClient
+	GitData() GitData
 	Resolver() credentials.Resolver
 }
 
@@ -77,16 +77,16 @@ type gitOpsService struct {
 	resolver     credentials.Resolver
 	repoBasePath string
 	locks        sync.Map // per-project mutex
-	// gitHub is the GitHubClient injected for artifact-store save flows.
+	// gitHub is the GitData port injected for artifact-store save flows.
 	// May be nil in test wiring that doesn't exercise SaveDesign /
 	// SaveRequirements; the save flows nil-check before dereferencing.
-	gitHub GitHubClient
+	gitHub GitData
 }
 
 // NewGitOpsService builds the service. The optional `github` arg is the
-// GitHub HTTP client used by the artifact-store v2 save flow. Pass nil from
-// tests that don't exercise save paths.
-func NewGitOpsService(repo repositories.RepoRepository, resolver credentials.Resolver, repoBasePath string, github GitHubClient) GitOpsService {
+// GitData port (git-host client) used by the artifact-store v2 save flow. Pass
+// nil from tests that don't exercise save paths.
+func NewGitOpsService(repo repositories.RepoRepository, resolver credentials.Resolver, repoBasePath string, github GitData) GitOpsService {
 	return &gitOpsService{repo: repo, resolver: resolver, repoBasePath: repoBasePath, gitHub: github}
 }
 
@@ -354,9 +354,11 @@ func runGitOutput(ctx context.Context, dir string, args ...string) (string, erro
 // through the GitOpsService port, so the artifacts package never imports
 // gitrepo's concrete type.
 
-// GitHubClient returns the GitHubClient wired into gitOpsService at
-// construction (the artifact-store v2 save flow client).
-func (s *gitOpsService) GitHubClient() GitHubClient { return s.gitHub }
+// GitHubClient returns the GitData port wired into gitOpsService at
+// construction (the artifact-store v2 save flow client). The name is retained
+// (not GitData()) to keep the artifacts GitWorkspace / skills consumer ports
+// stable; the return type is the provider-neutral port.
+func (s *gitOpsService) GitData() GitData { return s.gitHub }
 
 // Resolver returns the credential resolver wired into gitOpsService.
 func (s *gitOpsService) Resolver() credentials.Resolver { return s.resolver }

@@ -30,9 +30,9 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
-	"github.com/wso2/aep/aep-api/clients/observer"
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/internal/clients/observer"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/models"

@@ -24,7 +24,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -35,9 +35,22 @@ import (
 // Why polling instead of per-build goroutines: a goroutine that owns a
 // single build dies on BFF restart, leaving the task stuck in `building`.
 // A periodic sweep is restart-safe by construction — the next tick picks
-// up every `building` task with no in-memory state. Multi-replica safe via
-// FOR UPDATE SKIP LOCKED so two BFF replicas don't double-poll the same
-// task.
+// up every `building` task with no in-memory state.
+//
+// Multi-replica behaviour: the claim query uses FOR UPDATE SKIP LOCKED, but
+// that only dedups the SELECTION. The row locks release when the claim
+// transaction commits (in sweep) — BEFORE the per-row OC polling + projector
+// apply run — so it is NOT held across processing. Two replicas whose claim
+// windows overlap split the batch; a replica whose sweep begins after
+// another's claim committed can re-pick the same `building` task. That
+// post-claim double-processing is harmless: every terminal transition goes
+// through projector.ApplyBuildResult, which takes a cluster-wide per-task
+// advisory lock and routes the event through the task state machine — once
+// the task has advanced past `building`, ApplyTaskEvent returns
+// ErrInvalidTransition and the apply is absorbed as a no-op. Holding the row
+// locks across the slow OC HTTP calls would serialise replicas but is worse
+// (long lock holds, head-of-line blocking behind a stuck build); the
+// idempotent apply is the cheaper, correct guarantee.
 //
 // Cadence is 10 s — agent-manager precedent (clients/openchoreosvc/client/
 // builds.go uses similar timing) and a fine starting point per
@@ -96,22 +109,29 @@ func (w *BuildWatcher) Run(ctx context.Context) {
 	}
 }
 
+// buildWatcherClaimSQL is sweep's batch claim. It lives in a const so the
+// dbtest SKIP LOCKED proof runs THIS query, not a hand-copied twin — dropping
+// the FOR UPDATE SKIP LOCKED clause here fails the proof, structurally.
+const buildWatcherClaimSQL = `
+	SELECT * FROM component_tasks
+	WHERE status = ? AND last_build_run_name <> ''
+	ORDER BY last_event_at NULLS FIRST
+	LIMIT 50
+	FOR UPDATE SKIP LOCKED`
+
 func (w *BuildWatcher) sweep(ctx context.Context) {
 	if w.asServiceIdentity != nil {
 		ctx = w.asServiceIdentity(ctx)
 	}
 
 	// Acquire a batch of `building` tasks under FOR UPDATE SKIP LOCKED so
-	// concurrent BFF replicas split the work without coordination.
+	// concurrent BFF replicas split the work without coordination. This is
+	// selection-window dedup only — the locks release on commit here, not
+	// across the per-row processing below (see the type doc); the projector's
+	// idempotent apply is what makes an overlapping re-pick safe.
 	var batch []models.ComponentTask
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return tx.Raw(`
-			SELECT * FROM component_tasks
-			WHERE status = ? AND last_build_run_name <> ''
-			ORDER BY last_event_at NULLS FIRST
-			LIMIT 50
-			FOR UPDATE SKIP LOCKED
-		`, string(models.TaskStatusBuilding)).
+		return tx.Raw(buildWatcherClaimSQL, string(models.TaskStatusBuilding)).
 			Scan(&batch).Error
 	})
 	if err != nil {

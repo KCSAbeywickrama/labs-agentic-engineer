@@ -147,7 +147,9 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 		}
 	}
 
+	cardURLs := make(map[string]bool, len(result.Items))
 	for _, item := range result.Items {
+		cardURLs[item.URL] = true
 		task := BoardTask{
 			ID:              item.ID,
 			Title:           item.Title,
@@ -197,50 +199,21 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 	}
 	board.URL = result.URL
 
-	// Fallback: when the GitHub board has no items, show all component tasks from DB.
-	if len(result.Items) == 0 && len(allComponentTasks) > 0 {
-		for _, ct := range allComponentTasks {
-			labels := make([]gitrepo.LabelInfo, 0, len(ct.Labels))
-			for _, l := range ct.Labels {
-				labels = append(labels, gitrepo.LabelInfo{Name: l})
-			}
-			// Board has 0 items — GitHub Project hasn't synced yet.
-			// Override gh_issue_created → gh_issue_syncing in the response so
-			// the frontend shows a skeleton instead of a labelless task card.
-			// This value is never written to DB.
-			lifecycleStatus := ct.LifecycleStatus
-			if lifecycleStatus == string(models.TaskLifecycleGhIssueCreated) {
-				lifecycleStatus = string(models.TaskLifecycleGhIssueSyncing)
-			}
-			task := BoardTask{
-				ID:                  ct.ID,
-				Title:               ct.Title,
-				URL:                 ct.IssueURL,
-				Description:         ct.Body,
-				ComponentTaskID:     ct.ID,
-				Labels:              labels,
-				LifecycleStatus:     lifecycleStatus,
-				Status:              ct.Status,
-				DispatchedAt:        ct.DispatchedAt,
-				ExecType:            ct.ExecType,
-				DependsOnComponents: []string(ct.DependsOnComponents),
-				ComponentName:       ct.ComponentName,
-				ErrorMessage:        ct.ErrorMessage,
-			}
-			switch ct.Status {
-			case "on_hold":
-				board.OnHold = append(board.OnHold, task)
-			case "in_progress":
-				board.InProgress = append(board.InProgress, task)
-			case "ready_for_review", "merged", "building", "deployed":
-				board.Done = append(board.Done, task)
-			case "failed", "rejected":
-				board.Failed = append(board.Failed, task)
-			default:
-				board.Todo = append(board.Todo, task)
-			}
+	// DB is the source of truth for task EXISTENCE. An issued task whose GitHub
+	// Project CARD is missing — the board hasn't synced yet, or AddIssueToProject
+	// failed after CreateIssue — has no matching item above and would otherwise
+	// be invisible. Surface every issued task with no covering card straight from
+	// the DB, routed by its own ComponentTask.Status; cards keep enriching the
+	// tasks they DO cover. When the board is completely empty every issued task
+	// is uncovered and renders here — the former whole-board DB fallback, now a
+	// natural consequence rather than a special case.
+	for i := range allComponentTasks {
+		ct := &allComponentTasks[i]
+		if ct.IssueURL == "" || cardURLs[ct.IssueURL] {
+			continue // unissued (surfaced below) or already shown via its card
 		}
-		return board, nil
+		task := dbBoardTask(*ct)
+		routeDBTaskByStatus(board, task, ct.Status)
 	}
 
 	// Always surface unissued tasks (gh_issue_waiting / gh_issue_failed) even
@@ -271,4 +244,53 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 
 func normalizeStatus(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// dbBoardTask projects a ComponentTask row straight to a BoardTask for the
+// DB-sourced paths (uncarded issued tasks + the empty-board case). It surfaces
+// gh_issue_created as gh_issue_syncing so the frontend renders a skeleton
+// instead of a labelless card while the GitHub Project card is still syncing.
+// The syncing value is response-only — never written to DB.
+func dbBoardTask(ct models.ComponentTask) BoardTask {
+	labels := make([]gitrepo.LabelInfo, 0, len(ct.Labels))
+	for _, l := range ct.Labels {
+		labels = append(labels, gitrepo.LabelInfo{Name: l})
+	}
+	lifecycleStatus := ct.LifecycleStatus
+	if lifecycleStatus == string(models.TaskLifecycleGhIssueCreated) {
+		lifecycleStatus = string(models.TaskLifecycleGhIssueSyncing)
+	}
+	return BoardTask{
+		ID:                  ct.ID,
+		Title:               ct.Title,
+		URL:                 ct.IssueURL,
+		Description:         ct.Body,
+		ComponentTaskID:     ct.ID,
+		Labels:              labels,
+		LifecycleStatus:     lifecycleStatus,
+		Status:              ct.Status,
+		DispatchedAt:        ct.DispatchedAt,
+		ExecType:            ct.ExecType,
+		DependsOnComponents: []string(ct.DependsOnComponents),
+		ComponentName:       ct.ComponentName,
+		ErrorMessage:        ct.ErrorMessage,
+	}
+}
+
+// routeDBTaskByStatus appends a DB-sourced task to the column derived from its
+// ComponentTask.Status. Kept identical to the original whole-board fallback so
+// the empty-board projection is unchanged.
+func routeDBTaskByStatus(board *ProjectBoard, task BoardTask, status string) {
+	switch status {
+	case "on_hold":
+		board.OnHold = append(board.OnHold, task)
+	case "in_progress":
+		board.InProgress = append(board.InProgress, task)
+	case "ready_for_review", "merged", "building", "deployed":
+		board.Done = append(board.Done, task)
+	case "failed", "rejected":
+		board.Failed = append(board.Failed, task)
+	default:
+		board.Todo = append(board.Todo, task)
+	}
 }

@@ -23,7 +23,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 )
 
 // PublisherTokenVerifier validates Thunder-issued client_credentials

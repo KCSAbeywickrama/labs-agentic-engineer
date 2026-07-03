@@ -26,9 +26,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
-	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 	"github.com/wso2/aep/aep-api/models"
 )
 

@@ -55,7 +55,7 @@ type RepoService interface {
 
 type repoService struct {
 	repo         repositories.RepoRepository
-	github       GitHubClient
+	github       RepoAdmin
 	resolver     credentials.Resolver
 	repoVis      string
 	repoBasePath string
@@ -63,7 +63,7 @@ type repoService struct {
 
 func NewRepoService(
 	repo repositories.RepoRepository,
-	github GitHubClient,
+	github RepoAdmin,
 	resolver credentials.Resolver,
 	repoVisibility, repoBasePath string,
 ) RepoService {

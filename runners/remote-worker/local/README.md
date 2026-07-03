@@ -1,0 +1,52 @@
+# Local one-shot harness
+
+Run the coding-agent runner on your machine without the platform (no k3d,
+no BFF, no Argo). The runner executes in its real Docker image; the only
+substitution is `token-stub.mjs`, a loopback HTTP server that plays the
+platform's `POST /internal/v1/tasks/{taskId}/credentials/refresh` endpoint
+and hands back your GitHub PAT.
+
+## What a run does
+
+1. Starts the token stub on `127.0.0.1:8377` (host side).
+2. Builds the runner image from `../Dockerfile` (cached after the first time).
+3. Runs the one-shot container: clones `AEP_REPO_URL`'s default branch,
+   loads the `aep` skill plugin, and lets the agent work `AEP_PROMPT` —
+   branch, commit, push, PR, exactly as a cluster run would.
+
+`AEP_PLATFORM_URL` is left unset, so the per-task skills pull is skipped;
+the base plugin at `../plugin` is bind-mounted read-only into the
+container, so skill edits are live on the next run without a rebuild.
+
+## Usage
+
+```bash
+colima start                        # or however you run the docker daemon
+cp env.local.example .env.local     # fill in the four required values
+./run-local.sh
+```
+
+The runner streams progress NDJSON to stdout. After exit, the cloned
+workspace (including `.logs/claude.log`, the full SDK transcript) is kept
+under `workspace/<org>/<project>/<taskId>/` for inspection.
+
+## Testing a custom task
+
+- **Real flow:** create a GitHub issue in the test repo whose body is the
+  task spec, and set `AEP_PROMPT` to point at its URL — the `aep` skill
+  drives issue-comment/branch/PR conventions from there.
+- **Skill iteration:** edit `../plugin/skills/aep/SKILL.md` or add a new
+  `../plugin/skills/<name>/SKILL.md`; the mount picks it up on the next run.
+  (In-cluster, per-task skills come from the BFF snapshot instead — that
+  path needs the full `deployments/` setup.)
+
+## Safety notes
+
+- The agent runs with `bypassPermissions` — that is why the harness only
+  runs it containerized, never bare on the host.
+- Scope `GITHUB_PAT` to a single throwaway test repo (fine-grained PAT).
+- The stub returns the PAT to any caller; keep `STUB_BIND=127.0.0.1`
+  (default). On a Linux host `host-gateway` cannot reach loopback, so you
+  would need `STUB_BIND=0.0.0.0` — accept that trade-off consciously.
+- `.env.local` and `workspace/` are gitignored; `local/` is dockerignored
+  so secrets never enter the image build context.

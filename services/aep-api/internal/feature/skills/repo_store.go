@@ -216,7 +216,7 @@ func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *mode
 	if err != nil {
 		return nil, fmt.Errorf("resolve credential: %w", err)
 	}
-	gh := s.git.GitHubClient()
+	gh := s.git.GitData()
 	branch := defaultBranch(repo)
 
 	headSHA, err := gh.GetRef(ctx, owner, name, cred, "heads/"+branch)
@@ -253,7 +253,7 @@ func (s *SkillService) parseTree(ctx context.Context, owner, repo string, cred c
 	bodies := map[key]string{}
 	refs := map[key]map[string]string{}
 
-	gh := s.git.GitHubClient()
+	gh := s.git.GitData()
 	for _, e := range tree.Entries {
 		if e.Type != "blob" {
 			continue
@@ -339,7 +339,7 @@ func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *mode
 	if err != nil {
 		return "", fmt.Errorf("resolve credential: %w", err)
 	}
-	gh := s.git.GitHubClient()
+	gh := s.git.GitData()
 	author, committer := s.git.ResolveSaveIdentities(cred)
 	branch := defaultBranch(repo)
 

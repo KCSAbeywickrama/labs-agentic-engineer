@@ -29,7 +29,7 @@
  */
 
 import { isStepCount, type LanguageModel, type ModelMessage } from "ai";
-import type { Skill } from "@aep/contracts";
+import type { Skill } from "../contracts/sse-events.js";
 import { runTurn } from "../agents/main/run-turn.js";
 import { buildTools, ASK_QUESTION } from "../agents/main/tool.js";
 import { FileBundle } from "../agents/main/bundle.js";
