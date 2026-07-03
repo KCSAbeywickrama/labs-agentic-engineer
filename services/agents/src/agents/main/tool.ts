@@ -40,6 +40,8 @@ import type {
   SetFrontmatterFieldInput,
   LoadSkillInput,
   LoadSkillResult,
+  LoadSkillReferenceInput,
+  LoadSkillReferenceResult,
   Skill,
 } from "@aep/contracts";
 import { FileBundle } from "./bundle.js";
@@ -50,6 +52,8 @@ export const REMOVE_FILE = "removeFile" as const;
 export const SET_FRONTMATTER_FIELD = "setFrontmatterField" as const;
 /** Progressive-disclosure skill loader — registered only when skills are supplied (ADR-0002). */
 export const LOAD_SKILL = "loadSkill" as const;
+/** Third disclosure level — registered only when some skill carries `references`. */
+export const LOAD_SKILL_REFERENCE = "loadSkillReference" as const;
 /** A tool for human-in-the-loop questions — implemented, but disabled. */
 export const ASK_QUESTION = "ask_question" as const;
 
@@ -87,6 +91,13 @@ export const loadSkillInputSchema = z.object({
   name: z.string().describe("The skill name to load, exactly as listed in the Skills catalog."),
 });
 
+export const loadSkillReferenceInputSchema = z.object({
+  name: z.string().describe("The skill whose reference to read, exactly as listed in the Skills catalog."),
+  path: z
+    .string()
+    .describe('A reference path exactly as listed by loadSkill, e.g. "references/schema.md".'),
+});
+
 // --- Drift guard: Zod schema ⇄ @aep/contracts wire type ---------------------
 // Compile-time only. If a schema's inferred input diverges from its wire type,
 // the corresponding `true` is no longer assignable and this fails to compile,
@@ -100,7 +111,8 @@ const _drift: [
   Equal<z.infer<typeof removeFileInputSchema>, RemoveFileInput>,
   Equal<z.infer<typeof setFrontmatterFieldInputSchema>, SetFrontmatterFieldInput>,
   Equal<z.infer<typeof loadSkillInputSchema>, LoadSkillInput>,
-] = [true, true, true, true, true];
+  Equal<z.infer<typeof loadSkillReferenceInputSchema>, LoadSkillReferenceInput>,
+] = [true, true, true, true, true, true];
 void _drift;
 
 // --- ask_question (HITL, Option B) — implemented but NOT registered ----------
@@ -173,7 +185,7 @@ export function buildTools(bundle: FileBundle, skills: readonly Skill[] = []): R
   };
 
   if (skills.length > 0) {
-    const byName = new Map(skills.map((s) => [s.name, s.content] as const));
+    const byName = new Map(skills.map((s) => [s.name, s] as const));
     const available = skills.map((s) => s.name);
     tools[LOAD_SKILL] = tool({
       description:
@@ -182,12 +194,38 @@ export function buildTools(bundle: FileBundle, skills: readonly Skill[] = []): R
         "available names if the name is unknown — re-call with one of those.",
       inputSchema: loadSkillInputSchema,
       execute: async ({ name }): Promise<LoadSkillResult> => {
-        const content = byName.get(name);
-        return content === undefined
-          ? { ok: false, name, error: `unknown skill: ${name}`, available }
-          : { ok: true, name, content };
+        const skill = byName.get(name);
+        if (skill === undefined) return { ok: false, name, error: `unknown skill: ${name}`, available };
+        const refs = Object.keys(skill.references ?? {});
+        return { ok: true, name, content: skill.content, ...(refs.length > 0 ? { references: refs } : {}) };
       },
     });
+
+    // Third disclosure level (agentskills.io structure): registered only when
+    // some skill actually carries references, so a references-free library
+    // keeps today's exact tool set.
+    const withRefs = skills.filter((s) => s.references && Object.keys(s.references).length > 0);
+    if (withRefs.length > 0) {
+      const refSkillNames = withRefs.map((s) => s.name);
+      tools[LOAD_SKILL_REFERENCE] = tool({
+        description:
+          "Read ONE reference file of a loaded skill (loadSkill lists each skill's reference paths). Call it only " +
+          "when the skill's body points you at that reference. On a miss the error lists what is addressable — " +
+          "re-call with one of those.",
+        inputSchema: loadSkillReferenceInputSchema,
+        execute: async ({ name, path }): Promise<LoadSkillReferenceResult> => {
+          const skill = byName.get(name);
+          const refs = skill?.references ?? {};
+          if (skill === undefined || Object.keys(refs).length === 0) {
+            return { ok: false, name, path, error: `unknown skill: ${name}`, available: refSkillNames };
+          }
+          const content = refs[path];
+          return content === undefined
+            ? { ok: false, name, path, error: `unknown reference: ${path}`, available: Object.keys(refs) }
+            : { ok: true, name, path, content };
+        },
+      });
+    }
   }
 
   return tools;

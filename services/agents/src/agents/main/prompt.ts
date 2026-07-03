@@ -56,11 +56,17 @@ Keep prose outside tool calls to a single short sentence. When the instruction i
 export function buildSkillCatalog(skills: readonly Skill[]): string {
   if (skills.length === 0) return "";
   const lines = skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
+  // The reference note appears only when some skill actually carries reference
+  // files, so a references-free library keeps today's byte-identical catalog.
+  const hasRefs = skills.some((s) => s.references && Object.keys(s.references).length > 0);
+  const refNote = hasRefs
+    ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
+    : "";
   return `
 
 # Skills
 
-You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. If a skill is relevant to the instruction, call loadSkill(name) to read its guidance BEFORE applying it — never guess a skill's contents.
+You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. If a skill is relevant to the instruction, call loadSkill(name) to read its guidance BEFORE applying it — never guess a skill's contents.${refNote}
 
 ${lines}`;
 }

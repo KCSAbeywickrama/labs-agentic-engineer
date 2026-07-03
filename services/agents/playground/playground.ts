@@ -46,8 +46,9 @@ import { applyToolCall } from "../src/agents/main/change.js";
 import type { StreamPart } from "../src/agents/main/stream-types.js";
 import { streamTurn } from "../evals/sse-client.js";
 import { loadRepoSkills } from "../evals/skills.js";
-import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile } from "./threads.js";
+import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
+import { compileDslArtifacts } from "./dsl.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // pushed every turn (ADR-0002); the service still reads none.
@@ -114,7 +115,19 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   // real server-side mutations, so they still apply.
   const bundle = new FileBundle(before);
   for (const tc of toolCalls) applyToolCall(bundle, tc);
-  renderSummary(reconcile(ctx.thread, before, bundle.snapshot(), ctx.dryRun), ctx.dryRun);
+  const changes = reconcile(ctx.thread, before, bundle.snapshot(), ctx.dryRun);
+  renderSummary(changes, ctx.dryRun);
+
+  // Compile any freshly-written *.dsl into its sibling .excalidraw (the
+  // deterministic legacy compiler) so the diagram is immediately openable.
+  if (!ctx.dryRun) {
+    for (const r of compileDslArtifacts(
+      threadDir(ctx.thread),
+      changes.filter((c) => c.kind !== "remove").map((c) => c.path),
+    )) {
+      output.write(r.ok ? `  ⚙ ${r.outPath} (compiled)\n` : `  ✗ ${r.path}: DSL error — ${r.error}\n`);
+    }
+  }
 }
 
 function printHelp(): void {
