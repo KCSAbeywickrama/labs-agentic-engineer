@@ -115,7 +115,6 @@ func (r *taskRepository) GetByComponentName(ctx context.Context, orgID, projectI
 	return &task, nil
 }
 
-
 func (r *taskRepository) ListByProjectID(ctx context.Context, orgID, projectID string) ([]models.ComponentTask, error) {
 	var tasks []models.ComponentTask
 	err := r.db.WithContext(ctx).

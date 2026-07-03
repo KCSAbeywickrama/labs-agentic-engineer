@@ -14,5 +14,5 @@ linters:
   exclusions:
     generated: lax
     paths:
-      - clients/openchoreo/gen
-      - clients/openchoreo/mocks
+      - internal/clients/openchoreo/gen
+      - internal/clients/openchoreo/mocks

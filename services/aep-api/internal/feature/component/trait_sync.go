@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/models"

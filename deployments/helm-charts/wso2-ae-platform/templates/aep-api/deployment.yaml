@@ -124,12 +124,6 @@ spec:
               value: {{ .Values.taskSigning.issuer | quote }}
             - name: BFF_TASK_TOKEN_AUDIENCE
               value: {{ .Values.taskSigning.audience | quote }}
-            - name: BFF_JWKS_URL
-              value: "http://localhost:{{ .Values.aepApi.port }}/auth/external/jwks.json"
-            - name: TASK_JWT_ISSUER
-              value: {{ .Values.taskSigning.issuer | quote }}
-            - name: TASK_JWT_AUDIENCE
-              value: {{ .Values.taskSigning.audience | quote }}
             - name: BFF_PUBLIC_URL
               value: {{ .Values.bff.publicURL | quote }}
 

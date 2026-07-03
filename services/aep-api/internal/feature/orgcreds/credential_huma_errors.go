@@ -31,8 +31,10 @@ import (
 // mapCredentialError translates the typed errors returned by
 // CredentialService / AnthropicCredentialService into RFC 9457 problem
 // responses: 404 for NotFoundError, 409 for ConflictError, 400 for
-// ValidationError, 503 for ErrAppBindNotConfigured, 500 otherwise. The error
-// message is preserved so the console can read the structured cause where present.
+// ValidationError, 502 for UpstreamError, 503 for ErrAppBindNotConfigured, 500
+// otherwise. The structured cause of the TYPED errors is preserved so the
+// console can render field-level text; an untyped error collapses to a fixed
+// opaque 500 that never echoes the internal cause (matching project).
 func mapCredentialError(err error) error {
 	var nfe *NotFoundError
 	if errors.As(err, &nfe) {
@@ -46,10 +48,14 @@ func mapCredentialError(err error) error {
 	if errors.As(err, &ve) {
 		return huma.Error400BadRequest(err.Error())
 	}
+	var ue *UpstreamError
+	if errors.As(err, &ue) {
+		return huma.Error502BadGateway(err.Error())
+	}
 	if errors.Is(err, ErrAppBindNotConfigured) {
 		return huma.Error503ServiceUnavailable(err.Error())
 	}
-	return huma.Error500InternalServerError(err.Error())
+	return huma.Error500InternalServerError("internal error")
 }
 
 // structToMap round-trips a value through JSON into a flat map so a typed

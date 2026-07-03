@@ -23,7 +23,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/internal/auth/scope"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
 // runnerSkillsOutput is the runner skills response. The Body field serializes
@@ -33,7 +33,7 @@ type runnerSkillsOutput struct{ Body *TaskSkillsResponse }
 
 // RegisterInternalTask registers the runner-facing per-task operations on the
 // internal S2S Huma API. Auth (dual-token verify + INT-6 fence) is by
-// construction via scope.RunnerScopedInput — same path + tokens as the old raw
+// construction via auth.RunnerScopedInput — same path + tokens as the old raw
 // taskController.Skills handler, now with a typed, spec-described contract.
 func RegisterInternalTask(api huma.API, skillsSvc *TaskSkillsService) {
 	huma.Register(api, huma.Operation{
@@ -42,8 +42,8 @@ func RegisterInternalTask(api huma.API, skillsSvc *TaskSkillsService) {
 		Path:        "/internal/v1/tasks/{taskId}/skills",
 		Summary:     "Fetch the snapshotted skill bodies for a task (runner callback)",
 		Tags:        []string{"Internal"},
-		Security:    scope.SecurityRunner,
-	}, func(ctx context.Context, in *scope.RunnerScopedInput) (*runnerSkillsOutput, error) {
+		Security:    auth.SecurityRunner,
+	}, func(ctx context.Context, in *auth.RunnerScopedInput) (*runnerSkillsOutput, error) {
 		if skillsSvc == nil {
 			return nil, huma.Error503ServiceUnavailable("skills endpoint not configured")
 		}

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package services — build credentials.
+// build_credentials_service.go — build credentials.
 //
 // StageBuildSecret is the BFF entry point for provisioning the git credential
 // a component build's checkout step uses to clone the repo. It mints a fresh
@@ -47,7 +47,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/repositories"
 )

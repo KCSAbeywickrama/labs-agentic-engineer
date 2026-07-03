@@ -18,8 +18,31 @@ package gitrepo
 
 import "errors"
 
+// Sentinel errors. Those a git-provider implementation must return are part of
+// the port contract (ports.go): conflict_retry.go keys off ErrRefNotFastForward
+// and ErrTagAlreadyExists to drive CAS/tag-collision retries, and repoService
+// keys off ErrRepoNameConflict. Any Host impl (clients/github today) MUST
+// reproduce them, and IsRepoNameConflict / IsHTTPStatus (wire.go) are the
+// caller-side checks.
 var (
-	ErrRepoNotFound     = errors.New("repository not found")
-	ErrRepoNotReady     = errors.New("repository is not ready")
+	// ErrRepoNotFound is a gitrepo-domain error (no repo row) returned by
+	// repoService/issueService lookups.
+	ErrRepoNotFound = errors.New("repository not found")
+	// ErrRepoNotReady is a gitrepo-domain error (repo row not in "ready" state).
+	ErrRepoNotReady = errors.New("repository is not ready")
+
+	// ErrTagAlreadyExists — port contract: CreateTagRef returns it on a 422
+	// tag-collision so the save flow recomputes the next tag.
 	ErrTagAlreadyExists = errors.New("tag already exists")
+	// ErrRefNotFastForward — port contract: UpdateRef(force=false) returns it
+	// when the ref tip moved between read and write so conflict_retry re-anchors.
+	ErrRefNotFastForward = errors.New("github ref: update is not a fast-forward")
+	// ErrRepoNameConflict — port contract: CreateOrgRepo returns it when the
+	// requested repo name is already taken (repoService retries with a fresh suffix).
+	ErrRepoNameConflict = errors.New("repo name already taken")
 )
+
+// IsRepoNameConflict reports whether err represents a host name-conflict rejection.
+func IsRepoNameConflict(err error) bool {
+	return errors.Is(err, ErrRepoNameConflict)
+}

@@ -208,7 +208,7 @@ type GitWorkspace interface {
 	PrepareAuthedEnv(ctx context.Context, repoRecord *models.GitRepository) ([]string, func(), error)
 	ResolveSaveIdentities(cred credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity)
 	BestEffortPullDefaultBranch(ctx context.Context, repoRecord *models.GitRepository) error
-	GitHubClient() gitrepo.GitHubClient
+	GitData() gitrepo.GitData
 	Resolver() credentials.Resolver
 }
 

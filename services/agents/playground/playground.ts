@@ -35,7 +35,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as clack from "@clack/prompts";
-import type { Skill, TurnRequest } from "@aep/contracts";
+import type { Skill, TurnRequest } from "../src/contracts/sse-events.js";
 import { createApp } from "../src/server.js";
 import { createModel } from "../src/shared/model.js";
 import { loadDotenv, loadAnthropicKey } from "../src/shared/env.js";

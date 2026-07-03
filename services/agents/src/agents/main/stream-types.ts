@@ -21,7 +21,7 @@
  * `runTurn`'s `onEvent`, `change.ts`, and the SSE route are typed against).
  *
  * This is deliberately a small structural subset of the SDK's `TextStreamPart`
- * (re-exported as the full type from `@aep/contracts`): it covers the fields the
+ * (re-exported as the full type from `src/contracts/sse-events.ts`): it covers the fields the
  * consumers read, so synthetic parts (tests, captured fixtures) satisfy it
  * without reconstructing the full provider union. `tool-input-delta` carries
  * `.delta` (the server part), NOT `.inputTextDelta` (the UI chunk).

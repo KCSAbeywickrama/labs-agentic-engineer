@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/models"
 )
 

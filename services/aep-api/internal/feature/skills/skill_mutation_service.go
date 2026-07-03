@@ -18,7 +18,6 @@ package skills
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -289,11 +288,4 @@ func normalizeRefs(in map[string]string) References {
 		out[k] = v
 	}
 	return out
-}
-
-// MarshalValidationIssues is a JSON helper for controllers rendering a
-// SkillValidationError into the wire body.
-func MarshalValidationIssues(e *SkillValidationError) []byte {
-	b, _ := json.Marshal(map[string]any{"error": "Bad Request", "issues": e.Issues})
-	return b
 }

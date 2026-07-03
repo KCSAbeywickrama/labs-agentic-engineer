@@ -4,7 +4,7 @@
 # This is how Go packages get the same verb names without a package.json.
 #
 #   make install      install JS deps (pnpm) and sync the Go workspace
-#   make gen          regenerate contracts (TS clients + Go server interfaces)
+#   make gen          regenerate contracts (codegen + OpenAPI spec export)
 #   make build        build everything (runs gen first)
 #   make dev          start dev servers (TS)
 #   make test         run tests
@@ -40,7 +40,7 @@ ADDLICENSE := go run github.com/google/addlicense@v1.2.0
 LICENSE_HEADER := .github/license-header.txt
 LICENSE_FILES = $(shell git ls-files | \
 	grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
-	grep -vE '\.gen\.go$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/')
+	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/')
 
 .PHONY: install gen build dev test lint typecheck license license-check tools clean eval
 
@@ -51,6 +51,8 @@ install:
 gen:
 	$(TURBO) run gen
 	@for d in $(GO_MODULE_DIRS); do echo ">> go generate $$d"; ( cd "$$d" && go generate ./... ); done
+	@echo ">> openapi export (aep-api public spec → packages/contracts/api/v1)"
+	@$(MAKE) -C services/aep-api openapi
 
 build: gen
 	$(TURBO) run build

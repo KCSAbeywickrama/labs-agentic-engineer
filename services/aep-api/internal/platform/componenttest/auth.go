@@ -1,0 +1,50 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package componenttest
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
+)
+
+// hdrClaims carries a JSON-encoded auth.Claims from the request builder to
+// fakeInboundAuth. A private header (deleted before the request proceeds) keeps
+// the injector parallel-safe: no shared process state, one claims value per
+// request, so table tests with t.Parallel() don't race.
+const hdrClaims = "X-Componenttest-Claims"
+
+// fakeInboundAuth is the component tier's stand-in for the production
+// JWKS-backed auth.Middleware (bff-component-testing.md §3). It does NOT verify a
+// token — it projects the harness-supplied claims into the request context at
+// the exact auth.WithClaims seam a verified Thunder token would use, then runs
+// the request through the rest of the real chain (orgensure → Huma gate in
+// ENFORCE). No header (NoAuth) ⇒ no claims ⇒ an org-scoped op 401s at the gate's
+// no-claims branch — the same code path production runs, minus the signature.
+func fakeInboundAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if raw := r.Header.Get(hdrClaims); raw != "" {
+			var c auth.Claims
+			if err := json.Unmarshal([]byte(raw), &c); err == nil {
+				r = r.WithContext(auth.WithClaims(r.Context(), &c))
+			}
+			r.Header.Del(hdrClaims)
+		}
+		next.ServeHTTP(w, r)
+	})
+}

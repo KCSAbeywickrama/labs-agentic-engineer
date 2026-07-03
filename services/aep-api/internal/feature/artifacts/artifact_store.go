@@ -38,30 +38,22 @@ type ArtifactStore struct {
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
-	store := &ArtifactStore{artifactSvc: artifactSvc, externalAPIs: DefaultExternalAPICatalog()}
-	registerSplitDesignCatalog(store.externalAPIs)
-	return store
+	return &ArtifactStore{artifactSvc: artifactSvc, externalAPIs: DefaultExternalAPICatalog()}
 }
 
 // SetExternalAPICatalog overrides the catalog the store uses to resolve
 // architect-declared dependent-API names into concrete URLs. Optional —
-// without it, NewArtifactStore wires the shipped default catalog.
+// without it, NewArtifactStore wires the shipped default catalog. The catalog
+// is instance state only, threaded into splitDesign by WriteDesign — the
+// former package-level catalog pointer is gone (every NewArtifactStore wrote
+// it, racing under parallel construction and leaking one store's catalog into
+// another's saves).
 func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
 	if s == nil {
 		return
 	}
 	s.externalAPIs = c
-	registerSplitDesignCatalog(c)
 }
-
-// splitDesignCatalogRef is a process-wide pointer the free-function
-// SplitDesign reads to strip catalog-resolved URLs on save. Set by
-// NewArtifactStore so production paths get the catalog automatically;
-// nil in tests / standalone SplitDesign callers.
-var splitDesignCatalogRef *ExternalAPICatalog
-
-func registerSplitDesignCatalog(c *ExternalAPICatalog) { splitDesignCatalogRef = c }
-func splitDesignCatalog() *ExternalAPICatalog          { return splitDesignCatalogRef }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
 
@@ -251,7 +243,7 @@ func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
 // the caller is expected to call DeleteDesignDirectory for removed
 // components separately.
 func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string, design *DesignFile) error {
-	files, err := SplitDesign(design)
+	files, err := splitDesign(design, s.externalAPIs)
 	if err != nil {
 		return fmt.Errorf("split design: %w", err)
 	}
@@ -510,8 +502,16 @@ func ComponentNamesIn(files map[string]string) []string {
 // SplitDesign takes a flat in-memory design and produces the file map for
 // the working tree. The caller is responsible for deleting any
 // pre-existing files NOT present in the returned map (e.g. components
-// removed across a regeneration).
+// removed across a regeneration). Standalone callers get NO external-API
+// catalog (dependent-API URLs are written verbatim); the store's WriteDesign
+// threads its instance catalog via splitDesign so catalog-resolved URLs are
+// stripped on save.
 func SplitDesign(d *DesignFile) (map[string]string, error) {
+	return splitDesign(d, nil)
+}
+
+// splitDesign is the implementation; catalog may be nil (no URL stripping).
+func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string, error) {
 	if d == nil {
 		return nil, fmt.Errorf("nil design")
 	}
@@ -573,10 +573,10 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 				// from ReadDesign's catalog substitution, not from the
 				// architect. Persisting it would defeat the
 				// "name-only declaration" contract and break catalog
-				// rotation. (catalog == nil in tests / standalone
-				// SplitDesign callers — fall through to write URL.)
+				// rotation. (catalog == nil for standalone SplitDesign
+				// callers — fall through to write URL.)
 				url := d.URL
-				if catalog := splitDesignCatalog(); catalog != nil {
+				if catalog != nil {
 					if entry := catalog.Lookup(d.Name); entry.URL != "" && entry.URL == d.URL {
 						url = ""
 					}

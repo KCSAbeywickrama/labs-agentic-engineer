@@ -33,7 +33,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
@@ -139,8 +139,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 		Name: ns,
 		Labels: map[string]string{
 			"app.kubernetes.io/managed-by": "aep",
-			"aep.io/purpose":             "remote-worker",
-			"aep.io/org-uuid":            in.OrgUUID,
+			"aep.io/purpose":               "remote-worker",
+			"aep.io/org-uuid":              in.OrgUUID,
 		},
 	}); err != nil {
 		return "", fmt.Errorf("dispatcher: ensure namespace %s: %w", ns, err)

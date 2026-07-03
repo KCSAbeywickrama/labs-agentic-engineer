@@ -35,7 +35,7 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, type Skill } from "@aep/contracts";
+import { SSE_DONE, type Skill } from "./contracts/sse-events.js";
 import type { ConversationStore } from "./store/conversation-store.js";
 import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";

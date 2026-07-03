@@ -262,11 +262,18 @@ func (p *Projector) ApplyBuildResult(
 		return err
 	}
 	if landedDeployed && p.dispatchHook != nil {
-		// Fire-and-forget; the hook owns its own context lifecycle. We
-		// pass a detached context so the watcher's tick deadline doesn't
-		// cancel a cascade that may itself need to create WorkflowRuns.
-		hookCtx := context.WithoutCancel(ctx)
-		go p.dispatchHook.OnTaskDeployed(hookCtx, orgID, projectID, componentName)
+		// Fire-and-forget; detached from the caller so the watcher's tick
+		// deadline doesn't cancel a cascade that may itself need to create
+		// WorkflowRuns — but NOT unbounded: the cascade holds a per-project
+		// advisory lock (dispatch_cascade_hook), so a hung downstream call
+		// must not wedge all future deploys to the project. 10 minutes
+		// comfortably covers trait-sync + config emit + a multi-task
+		// dispatch (each downstream client is itself 30s-bounded).
+		hookCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+		go func() {
+			defer cancel()
+			p.dispatchHook.OnTaskDeployed(hookCtx, orgID, projectID, componentName)
+		}()
 	}
 	return nil
 }

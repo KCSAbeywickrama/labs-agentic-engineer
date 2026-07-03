@@ -27,7 +27,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/wso2/aep/aep-api/clients/agents"
+	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -66,7 +66,7 @@ func NewRequirementsService(
 	store *artifacts.ArtifactStore,
 	agentsClient agents.Client,
 	artifactSvc artifacts.ArtifactService,
-) RequirementsService {
+) *requirementsService {
 	return &requirementsService{
 		store:        store,
 		agentsClient: agentsClient,
@@ -81,19 +81,10 @@ func NewRequirementsService(
 // docs/design/requirements-chat.md §4.4).
 //
 // Returned for ergonomic chaining; the receiver is mutated.
-func (s *requirementsService) WithLocker(locker *RequirementsDirLocker) RequirementsService {
+func (s *requirementsService) WithLocker(locker *RequirementsDirLocker) *requirementsService {
 	s.locker = locker
 	return s
 }
-
-// RequirementsServiceWithLocker names the optional dir-locker setter the
-// composition root wires by type-assertion, so a signature drift is a build
-// failure instead of a silently-skipped wire.
-type RequirementsServiceWithLocker interface {
-	WithLocker(*RequirementsDirLocker) RequirementsService
-}
-
-var _ RequirementsServiceWithLocker = (*requirementsService)(nil)
 
 // withLock runs `fn` under the dir lock when the locker is configured.
 // Returns RequirementsDirLockBusy if the lock is held by another writer

@@ -24,7 +24,7 @@ import (
 
 // GitRepository stores metadata about a platform-provisioned git repository.
 type GitRepository struct {
-	ID            string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ID string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
 	// OrgID + ProjectID form a composite UNIQUE so two orgs can own a
 	// same-named project and lookups must be org-scoped
 	// (GetByOrgAndProjectID). The composite's leading org_id column also
@@ -90,4 +90,3 @@ func OwnerRepoFromURL(repoURL string) (owner, repo string) {
 	}
 	return parts[0], parts[1]
 }
-

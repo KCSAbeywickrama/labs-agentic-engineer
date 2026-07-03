@@ -39,8 +39,20 @@ import (
 // the task dispatches; if still missing and within the 2-minute deadline it
 // stays on_hold for the next tick; after the deadline dispatchOne fails it.
 //
-// Multi-replica safe: FOR UPDATE SKIP LOCKED ensures two BFF replicas don't
-// process the same project simultaneously.
+// Multi-replica behaviour: the claim query uses FOR UPDATE SKIP LOCKED, but
+// (as in BuildWatcher) the row locks release when the claim transaction
+// commits — BEFORE DispatchTasks runs — so it dedups the SELECTION of
+// (org, project) pairs only, not the dispatch itself. Within one replica the
+// sweep is idempotent via the STATUS gate: DispatchTasks acts only on
+// pending / newly-eligible on_hold tasks and flips a dispatched task to
+// in_progress, so the next tick skips it. Across replicas the dedup is
+// best-effort — two sweeps whose claim windows do not overlap can both call
+// DispatchTasks for the same project. Unlike the build/coding-agent watchers
+// (whose applies serialise on the projector's per-task advisory lock),
+// DispatchTasks has no per-task lock; dispatch is status-gated, not
+// guaranteed-once, so a genuinely concurrent double-claim is a tolerated
+// residual race rather than a hard exclusion. The 10s cadence makes the
+// sub-second overlap needed to hit it rare in practice.
 type OnHoldWatcher struct {
 	db       *gorm.DB
 	dispatch OnHoldDispatcher
@@ -77,20 +89,25 @@ type projectKey struct {
 	projectID string
 }
 
+// onHoldWatcherClaimSQL is sweep's batch claim — a const so the dbtest
+// SKIP LOCKED guard covers THIS query (see buildWatcherClaimSQL).
+const onHoldWatcherClaimSQL = `
+	SELECT org_id, project_id
+	FROM component_tasks
+	WHERE status = ? AND dispatch_deferred_at IS NOT NULL
+	FOR UPDATE SKIP LOCKED`
+
 func (w *OnHoldWatcher) sweep(ctx context.Context) {
 	// Collect distinct (org_id, project_id) pairs with on_hold tasks whose
 	// deps are all deployed — i.e., dispatch_deferred_at IS NOT NULL (these
 	// are the timing-race cases, not tasks waiting on undeployed deps).
-	// FOR UPDATE SKIP LOCKED prevents concurrent BFF replicas from
-	// double-processing the same project.
+	// FOR UPDATE SKIP LOCKED dedups concurrent sweeps within this claim
+	// transaction window only; the locks release on commit here, so it does
+	// not serialise the DispatchTasks calls below (see the type doc for the
+	// status-gate idempotency + the cross-replica residual race).
 	var rows []models.ComponentTask
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return tx.Raw(`
-			SELECT org_id, project_id
-			FROM component_tasks
-			WHERE status = ? AND dispatch_deferred_at IS NOT NULL
-			FOR UPDATE SKIP LOCKED
-		`, string(models.TaskStatusOnHold)).Scan(&rows).Error
+		return tx.Raw(onHoldWatcherClaimSQL, string(models.TaskStatusOnHold)).Scan(&rows).Error
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "on_hold watcher: select batch failed", "error", err)

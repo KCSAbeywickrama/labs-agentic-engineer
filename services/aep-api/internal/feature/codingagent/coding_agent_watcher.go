@@ -23,7 +23,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -31,12 +31,21 @@ import (
 // CodingAgentWatcher polls OC for the status of in-flight coding-agent
 // WorkflowRuns and applies coding_agent.failed via the projector when a
 // run terminates Failed/Error. Mirrors BuildWatcher's shape (10s sweep,
-// FOR UPDATE SKIP LOCKED, multi-replica safe).
+// claim under FOR UPDATE SKIP LOCKED).
 //
 // Why polling: a goroutine that owns a single WorkflowRun dies on BFF
 // restart, leaving the task stuck `in_progress`. A periodic sweep is
 // restart-safe — the next tick picks up every `in_progress` task with
 // LastCodingAgentRunName set.
+//
+// Multi-replica behaviour: same as BuildWatcher. FOR UPDATE SKIP LOCKED
+// dedups the SELECTION only — the locks release when the claim transaction
+// commits, before the per-row polling + apply — so a replica whose sweep
+// starts after another's claim committed can re-pick the same `in_progress`
+// task. That is safe because the terminal transition goes through
+// projector.ApplyBuildResult under a cluster-wide per-task advisory lock;
+// once the task has left `in_progress`, ApplyTaskEvent returns
+// ErrInvalidTransition and the second apply is a no-op.
 //
 // Success path is webhook-driven: the agent runs `gh pr ready` from inside
 // the pod; that fires `pull_request:ready_for_review` which the projector
@@ -82,6 +91,15 @@ func (w *CodingAgentWatcher) Run(ctx context.Context) {
 	}
 }
 
+// codingAgentWatcherClaimSQL is sweep's batch claim — a const so the dbtest
+// SKIP LOCKED guard covers THIS query (see buildWatcherClaimSQL).
+const codingAgentWatcherClaimSQL = `
+	SELECT * FROM component_tasks
+	WHERE status = ? AND last_coding_agent_run_name <> ''
+	ORDER BY last_event_at NULLS FIRST
+	LIMIT 50
+	FOR UPDATE SKIP LOCKED`
+
 func (w *CodingAgentWatcher) sweep(ctx context.Context) {
 	if w.asServiceIdentity != nil {
 		ctx = w.asServiceIdentity(ctx)
@@ -89,13 +107,7 @@ func (w *CodingAgentWatcher) sweep(ctx context.Context) {
 
 	var batch []models.ComponentTask
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return tx.Raw(`
-			SELECT * FROM component_tasks
-			WHERE status = ? AND last_coding_agent_run_name <> ''
-			ORDER BY last_event_at NULLS FIRST
-			LIMIT 50
-			FOR UPDATE SKIP LOCKED
-		`, string(models.TaskStatusInProgress)).
+		return tx.Raw(codingAgentWatcherClaimSQL, string(models.TaskStatusInProgress)).
 			Scan(&batch).Error
 	})
 	if err != nil {

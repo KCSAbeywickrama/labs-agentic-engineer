@@ -1,0 +1,14 @@
+{
+  "$schema": "http://localhost:9090/api/v1/DeploymentList.json",
+  "items": [
+    {
+      "name": "hello-world-api-hello-api-development",
+      "environment": "development",
+      "releaseName": "hello-world-api-hello-api-77767bbd6",
+      "componentName": "hello-api",
+      "endpointUrl": "http://development-default.openchoreoapis.localhost:19080/hello-world-api-hello-api-http",
+      "createdAt": "2026-07-01T06:30:57Z",
+      "status": "Ready"
+    }
+  ]
+}

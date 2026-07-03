@@ -14,17 +14,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command openapigen writes the BFF's code-first OpenAPI documents to disk. It
-// is the `make openapi` generator and the source of truth for the checked-in
-// specs the console client + drift guard consume: api/openapi.yaml (public
-// edge) and api/internal-openapi.yaml (internal S2S surface, non-public).
+// Command openapigen writes the code-first OpenAPI documents. Same code path
+// as the live GET /openapi.yaml routes. Run via `make openapi` (wired into the
+// root `make gen`); paths are relative to services/aep-api.
+//
+//   - The PUBLIC spec (/api/v1) goes to packages/contracts/api/v1/openapi.yaml
+//     and is COMMITTED — it is the published contract consumers codegen from.
+//     `make openapi-check` fails if the committed copy drifts from the code.
+//   - The INTERNAL (S2S) spec goes to build/ (gitignored) — offline tooling
+//     only, not a published contract.
 package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
-	"github.com/wso2/aep/aep-api/api"
+	"github.com/wso2/aep/aep-api/internal/api"
 )
 
 func main() {
@@ -32,10 +38,14 @@ func main() {
 		path string
 		gen  func() ([]byte, error)
 	}{
-		{"api/openapi.yaml", api.GenerateOpenAPIYAML},
-		{"api/internal-openapi.yaml", api.GenerateInternalOpenAPIYAML},
+		{filepath.Join("..", "..", "packages", "contracts", "api", "v1", "openapi.yaml"), api.GenerateOpenAPIYAML},
+		{filepath.Join("build", "internal-openapi.yaml"), api.GenerateInternalOpenAPIYAML},
 	}
 	for _, s := range specs {
+		if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, "mkdir", filepath.Dir(s.path)+":", err)
+			os.Exit(1)
+		}
 		b, err := s.gen()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "generate", s.path+":", err)

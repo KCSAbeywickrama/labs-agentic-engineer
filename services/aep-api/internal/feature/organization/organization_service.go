@@ -29,37 +29,9 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/models"
 )
-
-// ErrUnauthorized / ErrForbidden are feature-local sentinels the controllers
-// branch on. ErrProjectNotFound is referenced only by this feature's
-// translateHTTPError.
-var (
-	ErrProjectNotFound = errors.New("project not found")
-	ErrUnauthorized    = errors.New("unauthorized")
-	ErrForbidden       = errors.New("forbidden")
-)
-
-// translateHTTPError lifts OC-level sentinel errors (openchoreo.ErrNotFound
-// etc.) into the service vocabulary the controllers branch on. The underlying
-// err is preserved in the chain so deeper layers can still errors.Is against
-// openchoreo.* if they want richer context.
-func translateHTTPError(err error) error {
-	if err == nil {
-		return nil
-	}
-	switch {
-	case errors.Is(err, openchoreo.ErrNotFound):
-		return fmt.Errorf("%w: %v", ErrProjectNotFound, err)
-	case errors.Is(err, openchoreo.ErrUnauthorized):
-		return ErrUnauthorized
-	case errors.Is(err, openchoreo.ErrForbidden):
-		return ErrForbidden
-	}
-	return err
-}
 
 // ensureCacheTTL bounds how long a successful EnsureForOuHandle result
 // suppresses re-verification. Short enough that a deleted+recreated
@@ -113,13 +85,6 @@ type OUValidator interface {
 	OUExists(ctx context.Context, ouID string) (bool, error)
 }
 
-// OrganizationServiceWithOUValidator is the optional setter the composition
-// root uses to wire the OU validator once the Thunder admin client is built
-// (it is constructed after the org service).
-type OrganizationServiceWithOUValidator interface {
-	SetOUValidator(v OUValidator)
-}
-
 type organizationService struct {
 	db    *gorm.DB
 	nsCli openchoreo.NamespaceClient
@@ -140,7 +105,7 @@ type organizationService struct {
 	ensureInflight singleflight.Group
 }
 
-func NewOrganizationService(db *gorm.DB, nsCli openchoreo.NamespaceClient) OrganizationService {
+func NewOrganizationService(db *gorm.DB, nsCli openchoreo.NamespaceClient) *organizationService {
 	return &organizationService{
 		db:          db,
 		nsCli:       nsCli,
@@ -151,8 +116,6 @@ func NewOrganizationService(db *gorm.DB, nsCli openchoreo.NamespaceClient) Organ
 // SetOUValidator wires the Thunder OU-existence checker (composition root,
 // after the Thunder admin client is constructed).
 func (s *organizationService) SetOUValidator(v OUValidator) { s.ouValidator = v }
-
-var _ OrganizationServiceWithOUValidator = (*organizationService)(nil)
 
 // ouIsTrustworthy returns false ONLY when a wired validator positively reports
 // the OU does not exist. Empty id, no validator, or a transient validation
@@ -177,7 +140,8 @@ func (s *organizationService) ouIsTrustworthy(ctx context.Context, ouID string) 
 func (s *organizationService) List(ctx context.Context) (*models.OrganizationList, error) {
 	views, err := s.nsCli.ListNamespaces(ctx)
 	if err != nil {
-		return nil, translateHTTPError(err)
+		// Raw OC sentinel — the huma edge (mapOrganizationError) classifies it.
+		return nil, err
 	}
 
 	if len(views) == 0 {
@@ -235,12 +199,6 @@ func (s *organizationService) EnsureForOuHandle(ctx context.Context, ouHandle st
 	s.ensureMu.RUnlock()
 	cacheWarm := ok && time.Since(verifiedAt) < ensureCacheTTL
 
-	slog.InfoContext(ctx, "[SHAKEOUT:ORG] EnsureForOuHandle entry",
-		"nsClientConfigured", s.nsCli != nil,
-		"ouHandle", ouHandle,
-		"thunderOrgUUID", thunderOrgUUID,
-		"cacheHit", cacheWarm)
-
 	if !cacheWarm {
 		// Coalesce concurrent first-sights of the same handle into one
 		// DB+OC verify.
@@ -279,8 +237,6 @@ func (s *organizationService) verifyForOuHandle(ctx context.Context, ouHandle, t
 	var row models.Organization
 	switch err := s.db.WithContext(ctx).Where("name = ?", ouHandle).First(&row).Error; {
 	case err == nil:
-		slog.InfoContext(ctx, "[SHAKEOUT:ORG] verifyForOuHandle local row exists",
-			"nsClientConfigured", s.nsCli != nil, "ouHandle", ouHandle, "localRowExisted", true)
 		return nil
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		// fall through to OC verify
@@ -290,23 +246,13 @@ func (s *organizationService) verifyForOuHandle(ctx context.Context, ouHandle, t
 
 	view, err := s.nsCli.GetNamespace(ctx, ouHandle)
 	if err != nil {
-		nsOutcome := "other-error"
-		if errors.Is(err, openchoreo.ErrNotFound) {
-			nsOutcome = "ErrOrganizationNotProvisioned"
-		}
-		slog.InfoContext(ctx, "[SHAKEOUT:ORG] verifyForOuHandle GetNamespace failed",
-			"nsClientConfigured", s.nsCli != nil, "ouHandle", ouHandle,
-			"localRowExisted", false, "getNamespaceOutcome", nsOutcome, "error", err.Error())
 		if errors.Is(err, openchoreo.ErrNotFound) {
 			return fmt.Errorf("%w: %s", ErrOrganizationNotProvisioned, ouHandle)
 		}
-		return translateHTTPError(err)
+		// Raw OC sentinel — the auth middleware only logs this, and the List
+		// edge classifies it. No feature-local translation needed.
+		return err
 	}
-	slog.InfoContext(ctx, "[SHAKEOUT:ORG] verifyForOuHandle GetNamespace found",
-		"nsClientConfigured", s.nsCli != nil, "ouHandle", ouHandle,
-		"localRowExisted", false, "getNamespaceOutcome", "found",
-		"viewName", view.Name, "viewNameMatchesHandle", view.Name == ouHandle)
-
 	// Key the row by the handle, not view.Name: platform-api returns the
 	// canonical namespace name (e.g. "wc-<uuid8>-<hash8>") in metadata.name,
 	// but every per-org lookup — this verify path, ensureThunderUUID, the
@@ -334,12 +280,21 @@ func (s *organizationService) ensureThunderUUID(ctx context.Context, ouHandle, t
 	if row.ThunderOrgUUID != nil && *row.ThunderOrgUUID == parsed {
 		return
 	}
-	if row.ThunderOrgUUID != nil {
-		if !s.ouIsTrustworthy(ctx, parsed.String()) {
-			slog.ErrorContext(ctx, "ensureThunderUUID: JWT ouId is NOT a known Thunder OU — REFUSING to overwrite the org's thunder_org_uuid with a phantom (keeping current). A phantom OU poisons wc- namespace derivation + the publisher OU binding (runner cc-token would 401).",
-				"ouHandle", ouHandle, "current", row.ThunderOrgUUID.String(), "phantomFromJWT", parsed.String())
-			return
+	// Trust-check BEFORE any write — both the fresh-org NULL→set path and the
+	// overwrite path. A just-backfilled NULL row must not be poisoned with a
+	// phantom (Thunder-unknown) ouId any more than an existing value may be
+	// overwritten by one; a phantom OU poisons wc- namespace derivation + the
+	// publisher OU binding (runner cc-token would 401).
+	if !s.ouIsTrustworthy(ctx, parsed.String()) {
+		current := "<null>"
+		if row.ThunderOrgUUID != nil {
+			current = row.ThunderOrgUUID.String()
 		}
+		slog.ErrorContext(ctx, "ensureThunderUUID: JWT ouId is NOT a known Thunder OU — REFUSING to persist a phantom onto thunder_org_uuid (keeping current).",
+			"ouHandle", ouHandle, "current", current, "phantomFromJWT", parsed.String())
+		return
+	}
+	if row.ThunderOrgUUID != nil {
 		slog.WarnContext(ctx, "ensureThunderUUID: row UUID differs from JWT — overwriting (new OU validated against Thunder)",
 			"ouHandle", ouHandle, "current", row.ThunderOrgUUID.String(), "newFromJWT", parsed.String())
 	}

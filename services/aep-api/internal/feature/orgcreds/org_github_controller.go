@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package controllers — phase 2's org-scoped GitHub integration surface.
+// org_github_controller.go — phase 2's org-scoped GitHub integration surface.
 //
 // Routes:
 //

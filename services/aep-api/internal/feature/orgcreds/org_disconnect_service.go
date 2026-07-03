@@ -36,13 +36,13 @@ var ErrOrgNotFound = errors.New("org credentials: not found")
 // OrgDisconnectService runs the BFF-side disconnect cascade defined in
 // phase2.md §6.7.
 //
-// Phase A (status flip — sub-second; runs synchronously on the request):
+// Phase A (confirm — sub-second; runs synchronously on the request):
 //   - Calls git-service's internal projection to confirm the row exists.
-//   - Begins the cascade by calling git-service to flip status='disconnecting'.
-//     Phase D is wired separately via a single DELETE call that does
-//     flip-then-finalize. The 'disconnecting' intermediate state lives in
-//     phase2.md §6.7 but isn't load-bearing because Phases A–D run
-//     synchronously on this path.
+//     There is no intermediate 'disconnecting' status: the credential row's
+//     status CHECK constraint only permits active/suspended/disconnected, and
+//     because Phases A–D run synchronously on this path the finalize goes
+//     straight to 'disconnected' in Phase D (phase2.md §6.7's staged
+//     intermediate state was never wired).
 //
 // Phase B (best-effort issue comments — async, no lock):
 //   - Per task, post `gh issue comment "abandoned: org disconnected"` via

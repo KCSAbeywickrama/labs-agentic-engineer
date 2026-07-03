@@ -27,6 +27,5 @@ chat_playground/
 .playwright-cli
 .agents
 .claude
-docs/
 e2e_test_run.txt
 new_spec.yml

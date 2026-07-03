@@ -26,7 +26,7 @@
  * decide its next step.
  *
  * The Zod `inputSchema`s are the runtime validators; the corresponding wire
- * `*Input` types live in `@aep/contracts` (the source of truth). A compile-time
+ * `*Input` types live in `src/contracts/sse-events.ts` (the source of truth). A compile-time
  * drift guard below asserts `z.infer<schema>` stays equal to each wire type.
  */
 
@@ -43,7 +43,7 @@ import type {
   LoadSkillReferenceInput,
   LoadSkillReferenceResult,
   Skill,
-} from "@aep/contracts";
+} from "../../contracts/sse-events.js";
 import { FileBundle } from "./bundle.js";
 
 export const ADD_FILE = "addFile" as const;
@@ -91,6 +91,7 @@ export const loadSkillInputSchema = z.object({
   name: z.string().describe("The skill name to load, exactly as listed in the Skills catalog."),
 });
 
+
 export const loadSkillReferenceInputSchema = z.object({
   name: z.string().describe("The skill whose reference to read, exactly as listed in the Skills catalog."),
   path: z
@@ -98,7 +99,7 @@ export const loadSkillReferenceInputSchema = z.object({
     .describe('A reference path exactly as listed by loadSkill, e.g. "references/schema.md".'),
 });
 
-// --- Drift guard: Zod schema ⇄ @aep/contracts wire type ---------------------
+// --- Drift guard: Zod schema ⇄ sse-events wire type -------------------------
 // Compile-time only. If a schema's inferred input diverges from its wire type,
 // the corresponding `true` is no longer assignable and this fails to compile,
 // forcing the schema and contract back in sync. No meaningful runtime effect.

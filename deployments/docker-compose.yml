@@ -136,12 +136,6 @@ services:
       GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
       GITHUB_APP_PRIVATE_KEY_PATH: "${GITHUB_APP_PRIVATE_KEY_PATH:-/etc/github-app/private-key.pem}"
-      # Task JWT verification on /internal/v1/credentials/refresh: the binary
-      # signs Task JWTs against its own /auth/external/jwks.json and
-      # verifies them on the same endpoint. Self-loopback URL.
-      BFF_JWKS_URL: "http://localhost:9090/auth/external/jwks.json"
-      TASK_JWT_ISSUER: "aep-bff"
-      TASK_JWT_AUDIENCE: "git-service"
       AGENTS_SERVICE_URL: "http://agents-service:3400"
 
       # ── Phase 1 — sm-api + cluster-gateway-proxy. Compose-only stubs

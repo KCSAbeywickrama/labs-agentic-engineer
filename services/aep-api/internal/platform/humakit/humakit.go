@@ -26,22 +26,21 @@
 package humakit
 
 import (
-	"context"
 	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
-	"github.com/wso2/aep/aep-api/middleware/jwt"
 )
 
-// gateMode is the process-wide tenant gate mode (ENFORCE by default — mirrors
-// tenant.ParseGateMode). Set once at startup via SetGateMode.
-var gateMode = tenant.GateModeEnforce
-
-// SetGateMode configures the tenant gate mode used by OrgScopedInput.Resolve.
-// Pass tenant.ParseGateMode(cfg.TenantGateMode) at composition time.
-func SetGateMode(m tenant.GateMode) { gateMode = m }
+// The tenant gate mode is NOT process state: it rides the request context,
+// stamped per-request by the composition root (api.mountSurfaces wraps the
+// /api/ chain with tenant.WithGateMode(cfg mode)) and read here via
+// tenant.GateModeFromContext, which defaults to ENFORCE when nothing stamped
+// it. This replaced a package-global SetGateMode: the global raced under
+// parallel component-test harness builds and let a test flip the gate for the
+// whole process. bff-component-testing.md §8.3.
 
 // APIV1 is the client-facing edge's version prefix, declared ONCE. It is passed
 // to the humago adapter as its route prefix (humago.NewWithPrefix), which both
@@ -56,7 +55,7 @@ const APIV1 = "/api/v1"
 
 // SecurityUserJWT is the OpenAPI security requirement for end-user Thunder JWT
 // routes. Attach to every org-scoped + user-facing carve-out operation. (The
-// internal S2S surface declares its own scheme — scope.SecurityRunner — on the
+// internal S2S surface declares its own scheme — auth.SecurityRunner — on the
 // separate internal Huma API.)
 var SecurityUserJWT = []map[string][]string{{"userJWT": {}}}
 
@@ -84,12 +83,13 @@ var _ huma.Resolver = (*OrgScopedInput)(nil)
 // from the token alone makes a cross-org request unrepresentable.
 func (i *OrgScopedInput) Resolve(ctx huma.Context) []error {
 	c := ctx.Context()
-	tokenOrg := jwt.ResolveOuHandle(jwt.ClaimsFromContext(c))
+	tokenOrg := auth.ResolveOuHandle(auth.ClaimsFromContext(c))
 
 	if tokenOrg == "" {
-		slog.WarnContext(c, "[SHAKEOUT:would-deny]",
-			"reason", "no-org-claim", "mode", string(gateMode))
-		if gateMode == tenant.GateModeEnforce {
+		mode := tenant.GateModeFromContext(c)
+		slog.WarnContext(c, "tenant gate would-deny",
+			"reason", "no-org-claim", "mode", string(mode))
+		if mode == tenant.GateModeEnforce {
 			return []error{huma.Error401Unauthorized("authentication required")}
 		}
 		return nil
@@ -98,15 +98,6 @@ func (i *OrgScopedInput) Resolve(ctx huma.Context) []error {
 	// Active org = the verified token org, never client input.
 	i.OrgHandle = tokenOrg
 	return nil
-}
-
-// OrgFromCtx returns the active org derived from the verified token in ctx (the
-// JWT middleware populated the claims). Returns "" when no verified org is
-// present. Huma handlers should read OrgScopedInput.OrgHandle (which Resolve has
-// already enforced non-empty); this helper is for non-Huma readers such as
-// middleware.
-func OrgFromCtx(ctx context.Context) string {
-	return jwt.ResolveOuHandle(jwt.ClaimsFromContext(ctx))
 }
 
 // ErrorFromStatus maps an HTTP status code to the matching Huma error, so

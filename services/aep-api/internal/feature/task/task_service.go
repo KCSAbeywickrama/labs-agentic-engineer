@@ -25,10 +25,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/agents"
-	"github.com/wso2/aep/aep-api/clients/oauth"
+	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
-	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -64,16 +62,13 @@ type TaskService interface {
 }
 
 type taskService struct {
-	db            *gorm.DB
-	taskRepo      repositories.TaskRepository
-	store         *artifacts.ArtifactStore
-	componentSvc  component.ComponentService // for creating OC components and checking build/deploy status
-	tokenProvider *oauth.TokenProvider       // for service-to-service auth (OC API)
-	configSvc     component.ConfigService    // for fetching env vars at deploy time
-	issueSvc      gitrepo.IssueService       // GitHub issue CRUD for task lifecycle
-	artifactSvc   artifacts.ArtifactService  // artifact version + at-tag reads for in-flight tasks
-	repoSvc       gitrepo.RepoService        // repo metadata lookups (clone path, slug, …)
-	agentsClient  agents.Client              // for calling tech-lead agent (plan + detail)
+	db           *gorm.DB
+	taskRepo     repositories.TaskRepository
+	store        *artifacts.ArtifactStore
+	issueSvc     gitrepo.IssueService      // GitHub issue CRUD for task lifecycle
+	artifactSvc  artifacts.ArtifactService // artifact version + at-tag reads for in-flight tasks
+	repoSvc      gitrepo.RepoService       // repo metadata lookups (clone path, slug, …)
+	agentsClient agents.Client             // for calling tech-lead agent (plan + detail)
 	// skillSvc resolves the per-org skill catalogue for tech-lead plan
 	// (attached-skills context) + detail (full bodies). Snapshot writes
 	// to design_version_skill_snapshots also go through here. Optional
@@ -96,38 +91,23 @@ func (s *taskService) SetSkillService(svc SkillResolver) {
 	s.skillSvc = svc
 }
 
-// TaskServiceWithSkills names the optional skill-resolver setter the
-// composition root wires by type-assertion onto the TaskService interface,
-// so a signature drift is a build failure, not a silently-skipped wire.
-type TaskServiceWithSkills interface {
-	SetSkillService(SkillResolver)
-}
-
-var _ TaskServiceWithSkills = (*taskService)(nil)
-
 func NewTaskService(
 	db *gorm.DB,
 	taskRepo repositories.TaskRepository,
 	store *artifacts.ArtifactStore,
-	componentSvc component.ComponentService,
-	tokenProvider *oauth.TokenProvider,
-	configSvc component.ConfigService,
 	issueSvc gitrepo.IssueService,
 	artifactSvc artifacts.ArtifactService,
 	repoSvc gitrepo.RepoService,
 	agentsClient agents.Client,
-) TaskService {
+) *taskService {
 	return &taskService{
-		db:            db,
-		taskRepo:      taskRepo,
-		store:         store,
-		componentSvc:  componentSvc,
-		tokenProvider: tokenProvider,
-		configSvc:     configSvc,
-		issueSvc:      issueSvc,
-		artifactSvc:   artifactSvc,
-		repoSvc:       repoSvc,
-		agentsClient:  agentsClient,
+		db:           db,
+		taskRepo:     taskRepo,
+		store:        store,
+		issueSvc:     issueSvc,
+		artifactSvc:  artifactSvc,
+		repoSvc:      repoSvc,
+		agentsClient: agentsClient,
 	}
 }
 

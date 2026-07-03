@@ -49,12 +49,11 @@ export function credHelperScript(params: CredHelperParams): string {
   const { taskId, workspaceDir } = params;
   return `#!/usr/bin/env bash
 # Git credential helper for AEP platform-managed repos.
-# Two auth modes (WS2.4):
+# Two auth modes (WS2.6 — both call the path-scoped endpoint
+# POST /internal/v1/tasks/{taskId}/credentials/refresh, which accepts either token):
 #   (a) publisher cc — when PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL are set,
-#       mint a Thunder access token via client_credentials and call the
-#       path-scoped endpoint POST /api/v1/tasks/{taskId}/credentials/refresh.
-#   (b) legacy TaskJWT — read the per-task bearer from \$AEP_BEARER_FILE
-#       and call POST /api/v1/credentials/refresh.
+#       mint a Thunder access token via client_credentials.
+#   (b) legacy TaskJWT — read the per-task bearer from \$AEP_BEARER_FILE.
 # Stays silent on errors so git's own error message reaches the user.
 #
 # Phase 2 PR D §6.6 anti-misroute: refuses if the refresh response's
@@ -91,12 +90,12 @@ if [ -n "$PUBLISHER_CLIENT_ID" ] && [ -n "$PUBLISHER_CLIENT_SECRET" ] && [ -n "$
     bearer="$(echo "$cc_resp" | sed -n 's/.*"access_token":"\\([^"]*\\)".*/\\1/p')"
   fi
   if [ -n "$bearer" ]; then
-    refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/api/v1/tasks/$expected_task_id/credentials/refresh"
+    refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/tasks/$expected_task_id/credentials/refresh"
   fi
 fi
 if [ -z "$bearer" ]; then
   bearer="$(cat "$AEP_BEARER_FILE" 2>/dev/null || true)"
-  refresh_url="$AEP_GIT_SERVICE_URL/api/v1/credentials/refresh"
+  refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/tasks/$expected_task_id/credentials/refresh"
 fi
 if [ -z "$bearer" ]; then
   exit 1
@@ -215,7 +214,7 @@ if [ -n "$bearer" ]; then
     -H "Content-Type: application/json" \\
     "\${corr_header[@]}" \\
     -d '{}' \\
-    "$AEP_GIT_SERVICE_URL/api/v1/credentials/refresh" 2>/dev/null || true)"
+    "\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/tasks/$expected_task_id/credentials/refresh" 2>/dev/null || true)"
   if [ -n "$resp" ]; then
     token=""
     login=""

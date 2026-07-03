@@ -125,20 +125,22 @@ async function main(): Promise<number> {
     console.log("[oneshot] publisher cc creds present — using client_credentials for runner callbacks");
   }
 
-  // When publisher cc is in play, pre-mint a token and stuff it into
-  // req.bearer + retarget the workspace-bootstrap refresh URL at the
-  // path-scoped WS2.4 endpoint. provisionWorkspace doesn't otherwise
-  // need to know which auth mode is active.
+  // WS2.6 — always target the path-scoped refresh endpoint. It accepts BOTH
+  // the publisher-cc token AND the legacy AEP_BEARER Task-JWT (verified first),
+  // so the unscoped /internal/v1/credentials/refresh route is retired.
   const platformURL = process.env.AEP_PLATFORM_URL ?? "";
+  if (platformURL) {
+    const base = platformURL.endsWith("/") ? platformURL.slice(0, -1) : platformURL;
+    req.refreshUrl = `${base}/internal/v1/tasks/${encodeURIComponent(req.taskId)}/credentials/refresh`;
+  }
+
+  // When publisher cc is in play, pre-mint a token and stuff it into req.bearer.
+  // provisionWorkspace doesn't otherwise need to know which auth mode is active.
   if (ccProvider) {
     try {
       const ccToken = await ccProvider.getToken();
       req.bearer = ccToken;
       primeScrubber([ccToken]);
-      if (platformURL) {
-        const base = platformURL.endsWith("/") ? platformURL.slice(0, -1) : platformURL;
-        req.refreshUrl = `${base}/api/v1/tasks/${encodeURIComponent(req.taskId)}/credentials/refresh`;
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[oneshot] cc token mint failed:", msg);

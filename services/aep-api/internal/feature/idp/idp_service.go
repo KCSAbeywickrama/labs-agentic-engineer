@@ -26,7 +26,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/thundersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -167,7 +167,13 @@ func (s *idpService) GetOrCreateProfile(ctx context.Context, orgID string) (*mod
 		// row at creation. If the config changed since (e.g. the cluster
 		// moved from an in-cluster Thunder URL to the gateway URL), refresh
 		// the row so the derived per-org publisher token URL stays correct.
-		if s.platform.JWKSURL != "" &&
+		//
+		// ONLY for platform-kind profiles: a BYO org (kind=custom/asgardeo)
+		// owns its own issuer/JWKS URL, which never match the platform
+		// defaults. Self-healing those would silently clobber the org's real
+		// IDP config back to the cluster default on the next read — data loss.
+		if existing.Kind == "platform" &&
+			s.platform.JWKSURL != "" &&
 			(existing.JWKSURL != s.platform.JWKSURL || existing.Issuer != s.platform.Issuer) {
 			if err := s.db.WithContext(ctx).Model(existing).Where("org_id = ?", orgID).
 				Updates(map[string]interface{}{

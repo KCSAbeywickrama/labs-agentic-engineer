@@ -1,0 +1,6 @@
+{
+  "$schema": "http://localhost:9090/api/v1/ErrorModel.json",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "project not found"
+}

@@ -83,14 +83,14 @@ func NewOrgResolver(db *gorm.DB, store OpenBaoStore, minter *AppTokenMinter) Res
 // models package into pkg/credentials (keeping the dependency arrow
 // pointing the right way: models → credentials, not the other way).
 type orgCredentialRow struct {
-	OcOrgID        string  `gorm:"column:oc_org_id"`
-	Kind           string  `gorm:"column:kind"`
-	GitHubLogin    string  `gorm:"column:github_login"`
-	IdentityName   string  `gorm:"column:identity_name"`
-	IdentityEmail  string  `gorm:"column:identity_email"`
-	IdentityLogin  string  `gorm:"column:identity_login"`
-	InstallationID *int64  `gorm:"column:installation_id"`
-	Status         string  `gorm:"column:status"`
+	OcOrgID        string `gorm:"column:oc_org_id"`
+	Kind           string `gorm:"column:kind"`
+	GitHubLogin    string `gorm:"column:github_login"`
+	IdentityName   string `gorm:"column:identity_name"`
+	IdentityEmail  string `gorm:"column:identity_email"`
+	IdentityLogin  string `gorm:"column:identity_login"`
+	InstallationID *int64 `gorm:"column:installation_id"`
+	Status         string `gorm:"column:status"`
 }
 
 // TableName binds to the same table the models package owns.
@@ -106,12 +106,6 @@ func (r *orgResolver) Resolve(ctx context.Context, ocOrgID string) (Credential, 
 	var row orgCredentialRow
 	err := r.db.WithContext(ctx).Where("oc_org_id = ?", ocOrgID).First(&row).Error
 	if err != nil {
-		errClass := "lookup-error"
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			errClass = "OrgNotFoundError"
-		}
-		slog.InfoContext(ctx, "[SHAKEOUT:CRED] Resolve lookup failed",
-			"ocOrgId", ocOrgID, "errorClass", errClass)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, &OrgNotFoundError{OcOrgID: ocOrgID}
 		}
@@ -119,15 +113,8 @@ func (r *orgResolver) Resolve(ctx context.Context, ocOrgID string) (Credential, 
 	}
 
 	if row.Status != "active" {
-		slog.InfoContext(ctx, "[SHAKEOUT:CRED] Resolve org not active",
-			"ocOrgId", ocOrgID, "kind", row.Kind, "status", row.Status,
-			"hasInstallationID", row.InstallationID != nil, "errorClass", "OrgNotActiveError")
 		return nil, &OrgNotActiveError{OcOrgID: ocOrgID, Status: row.Status}
 	}
-
-	slog.InfoContext(ctx, "[SHAKEOUT:CRED] Resolve row loaded",
-		"ocOrgId", ocOrgID, "kind", row.Kind, "status", row.Status,
-		"hasInstallationID", row.InstallationID != nil, "identityLogin", row.IdentityLogin)
 
 	identity := Identity{
 		Name:  row.IdentityName,

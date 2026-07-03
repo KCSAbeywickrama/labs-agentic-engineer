@@ -1,0 +1,11 @@
+{
+  "$schema": "http://localhost:9090/api/v1/ProjectStatus.json",
+  "phase": "components",
+  "repoStatus": "ready",
+  "repoUrl": "https://github.com/asdlc-repos/hello-world-api158.git",
+  "hasSpec": true,
+  "hasDesign": true,
+  "hasTasks": true,
+  "specStatus": "approved",
+  "designStatus": "approved"
+}

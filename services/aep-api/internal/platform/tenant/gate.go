@@ -16,7 +16,10 @@
 
 package tenant
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // GateMode controls whether the tenant gate enforces or only observes. With the
 // active org now derived solely from the verified token (humakit.OrgScopedInput),
@@ -37,6 +40,28 @@ const (
 func ParseGateMode(s string) GateMode {
 	if strings.EqualFold(strings.TrimSpace(s), string(GateModeLog)) {
 		return GateModeLog
+	}
+	return GateModeEnforce
+}
+
+// gateModeCtxKey carries the request's gate mode. The mode travels on the
+// request context — stamped once per request by the composition root's
+// middleware (api.mountSurfaces) — instead of a process-global, so concurrently
+// built handlers (production + N parallel component-test harnesses) can never
+// race on it. bff-component-testing.md §8.3.
+type gateModeCtxKey struct{}
+
+// WithGateMode returns a copy of ctx carrying the given gate mode.
+func WithGateMode(ctx context.Context, m GateMode) context.Context {
+	return context.WithValue(ctx, gateModeCtxKey{}, m)
+}
+
+// GateModeFromContext returns the gate mode stamped by WithGateMode. When no
+// mode was stamped (a stray path that bypassed the middleware, or a bare test
+// context) it returns ENFORCE — the same fail-secure default as ParseGateMode.
+func GateModeFromContext(ctx context.Context) GateMode {
+	if m, ok := ctx.Value(gateModeCtxKey{}).(GateMode); ok {
+		return m
 	}
 	return GateModeEnforce
 }

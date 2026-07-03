@@ -43,7 +43,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/internal/platform/httpkit"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
@@ -132,7 +132,7 @@ func RegisterOrgGitHub(
 		if appClientID == "" {
 			return nil, huma.Error503ServiceUnavailable("github app oauth client not configured")
 		}
-		actor := httpkit.ActorFromContext(ctx)
+		actor := auth.ActorFromContext(ctx)
 		state, err := bearerSvc.IssueConnectState(in.OrgHandle, actor, in.Body.InstallationID, 15*time.Minute)
 		if err != nil {
 			slog.ErrorContext(ctx, "issue connect-state failed", "error", err, "org", in.OrgHandle)

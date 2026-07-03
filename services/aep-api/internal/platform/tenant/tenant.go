@@ -22,57 +22,30 @@
 // §6.1.
 package tenant
 
-import (
-	"context"
-	"errors"
-	"strings"
-)
+import "context"
 
 // OrgHandle is the universal tenant key. It is the OC org handle and the value
 // stored in every tenant table's org column (the "oc_org_id"/"org_id" columns
 // all hold this). It is NOT the Thunder ouId/UUID.
 type OrgHandle string
 
-// ProjectID identifies a project within an org. It is always paired with an
-// OrgHandle; it is not a tenant identifier on its own.
-type ProjectID string
-
 // Source records how a Caller's org was established, so non-user paths
 // (S2S/webhook/runner) can assert their provenance.
 type Source uint8
 
 const (
-	// SourceUserJWT — a verified end-user Thunder JWT; org from the ouHandle
-	// claim, matched against the path (BindUserOrg).
-	SourceUserJWT Source = iota
-	// SourceServiceJWT — the platform-wide Service JWT (no org claim); org is
-	// bound from a resolved row, providing scoping/observability not authz.
-	SourceServiceJWT
 	// SourceTaskJWT — a per-task RS256 bearer; org from the task row.
-	SourceTaskJWT
+	SourceTaskJWT Source = iota
 	// SourcePublisherCC — a publisher client-credentials token.
 	SourcePublisherCC
-	// SourceWebhookHMAC — an HMAC-verified inbound webhook; org from the
-	// routing key.
-	SourceWebhookHMAC
-	// SourceServiceIdentity — the BFF's own M2M identity for sweeps/dispatch.
-	SourceServiceIdentity
 )
 
 func (s Source) String() string {
 	switch s {
-	case SourceUserJWT:
-		return "user-jwt"
-	case SourceServiceJWT:
-		return "service-jwt"
 	case SourceTaskJWT:
 		return "task-jwt"
 	case SourcePublisherCC:
 		return "publisher-cc"
-	case SourceWebhookHMAC:
-		return "webhook-hmac"
-	case SourceServiceIdentity:
-		return "service-identity"
 	default:
 		return "unknown"
 	}
@@ -91,56 +64,9 @@ type Caller struct {
 	Source      Source
 }
 
-var (
-	// ErrNoScope is returned when no Caller is present in context (deny, never
-	// fall back to a global/all-org scope).
-	ErrNoScope = errors.New("no tenant scope in context")
-	// ErrOrgMismatch is returned when a path org does not match the Caller's
-	// org. Surfaced to clients as a 404 (no existence leak).
-	ErrOrgMismatch = errors.New("organization not found")
-)
-
 type callerCtxKey struct{}
 
 // With returns a copy of ctx carrying the Caller.
 func With(ctx context.Context, c Caller) context.Context {
 	return context.WithValue(ctx, callerCtxKey{}, c)
-}
-
-// FromContext returns the Caller established by a Bind* gate, if any.
-func FromContext(ctx context.Context) (Caller, bool) {
-	c, ok := ctx.Value(callerCtxKey{}).(Caller)
-	return c, ok
-}
-
-// MustOrg returns the Caller's org or an error. It never returns an empty/
-// global scope — a missing scope is a deny.
-func MustOrg(ctx context.Context) (OrgHandle, error) {
-	c, ok := FromContext(ctx)
-	if !ok || c.Org == "" {
-		return "", ErrNoScope
-	}
-	return c.Org, nil
-}
-
-// Scope is the seam that closes the systemic IDOR: it returns the caller's org
-// only when it matches the path org (case-insensitively). Wrong-org and
-// no-scope are deliberately indistinguishable to the caller (same error → same
-// 404 body upstream).
-func Scope(c Caller, pathOrg string) (OrgHandle, error) {
-	if c.Org == "" {
-		return "", ErrNoScope
-	}
-	if !strings.EqualFold(string(c.Org), pathOrg) {
-		return "", ErrOrgMismatch
-	}
-	return c.Org, nil
-}
-
-// Resolver is the consumer-defined org port. The gate does not require it (a
-// pure claim-vs-path check closes the IDOR class); it is defined here so the
-// organization feature can satisfy it and JIT-ensure can be wired through the
-// gate.
-type Resolver interface {
-	EnsureForOuHandle(ctx context.Context, ouHandle string, thunderOrgUUID string) error
 }
