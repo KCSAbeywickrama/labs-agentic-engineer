@@ -68,7 +68,11 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
-- _none_
+- Projects listing page — card-grid landing page with server-side search and
+  requirement-first create (`/projects/new`) —
+  [#71](https://github.com/wso2/labs-agentic-engineer/issues/71) (BE
+  handshake: [#72](https://github.com/wso2/labs-agentic-engineer/issues/72),
+  ADR-0005)
 
 ## Feature inventory
 

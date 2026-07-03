@@ -16,14 +16,14 @@
  * under the License.
  */
 
-export const projectKeys = {
-  all: ["projects"] as const,
-  lists: () => [...projectKeys.all, "list"] as const,
-  list: (search: string) => [...projectKeys.lists(), { search }] as const,
-  details: () => [...projectKeys.all, "detail"] as const,
-  detail: (name: string) => [...projectKeys.details(), name] as const,
-};
+import { createFileRoute } from "@tanstack/react-router";
+import { ProjectOverview } from "../features/projects/components/ProjectOverview";
 
-export const githubKeys = {
-  status: ["github", "status"] as const,
-};
+export const Route = createFileRoute("/projects/$projectName")({
+  component: ProjectOverviewRoute,
+});
+
+function ProjectOverviewRoute() {
+  const { projectName } = Route.useParams();
+  return <ProjectOverview projectName={projectName} />;
+}

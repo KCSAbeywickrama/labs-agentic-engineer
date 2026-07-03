@@ -26,7 +26,7 @@ import {
   UserMenu,
   version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
-import { Home, Settings, User as UserIcon, WSO2 } from "@wso2/oxygen-ui-icons-react";
+import { FolderOpen, Settings, User as UserIcon, WSO2 } from "@wso2/oxygen-ui-icons-react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 
 // TODO(auth): replace with the signed-in user when auth lands.
@@ -38,8 +38,8 @@ const devUser = {
 
 // Sidebar highlight follows the route; grows one mapping per top-level route.
 function activeItemFor(pathname: string): string {
-  if (pathname === "/") return "home";
-  return "home";
+  if (pathname === "/" || pathname.startsWith("/projects")) return "projects";
+  return "projects";
 }
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
@@ -55,10 +55,21 @@ export function AppLayout() {
         <Header>
           <Header.Toggle />
           <Header.Brand>
-            <Header.BrandLogo>
-              <WSO2 size={24} />
-            </Header.BrandLogo>
-            <Header.BrandTitle>Agentic Engineer</Header.BrandTitle>
+            {/* Logo/title lead home — the projects list (issue #71). */}
+            <Link
+              to="/"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
+              <Header.BrandLogo>
+                <WSO2 size={24} />
+              </Header.BrandLogo>
+              <Header.BrandTitle>Agentic Engineer</Header.BrandTitle>
+            </Link>
           </Header.Brand>
           <Header.Spacer />
           <Header.Actions>
@@ -82,11 +93,11 @@ export function AppLayout() {
         <Sidebar activeItem={activeItem}>
           <Sidebar.Nav>
             <Sidebar.Category>
-              <Sidebar.Item id="home" link={<Link to="/" />}>
+              <Sidebar.Item id="projects" link={<Link to="/" />}>
                 <Sidebar.ItemIcon>
-                  <Home />
+                  <FolderOpen />
                 </Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>Home</Sidebar.ItemLabel>
+                <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
               </Sidebar.Item>
             </Sidebar.Category>
           </Sidebar.Nav>
