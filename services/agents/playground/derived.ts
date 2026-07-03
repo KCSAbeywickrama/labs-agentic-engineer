@@ -23,9 +23,7 @@
  * a single seam, so the turn loop stays chat mechanics only.
  *
  *   *.dsl                 → sibling .excalidraw          (compile)
- *   design.md frontmatter → specs/design/design.gen.json (project view)
- *                         → specs/design/cell-diagram.gen.json
- *                         → components/<id>/design.gen.json (slices)
+ *   design.json (all components) → specs/design/cell-diagram.gen.json
  *
  * Everything written here ends in .excalidraw / .gen.json — the extensions
  * readSnapshot excludes — so derived output can never leak into the agent's
@@ -36,7 +34,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FileChange } from "./threads.js";
 import { compileDslArtifacts } from "./dsl.js";
-import { projectDesignJson, componentSlices, toCellDiagramProject } from "@aep/design-projection";
+import { buildProjectDesign, toCellDiagramProject } from "@aep/design-projection";
 
 export interface DerivedNote {
   ok: boolean;
@@ -64,15 +62,18 @@ export function materializeDerived(
   }
 
   if (changes.some((c) => c.path.startsWith("specs/design/"))) {
-    const dj = projectDesignJson(threadName, snapshot);
-    const views: Record<string, unknown> = {
-      "specs/design/design.gen.json": dj,
-      "specs/design/cell-diagram.gen.json": toCellDiagramProject(dj),
-      ...componentSlices(dj),
-    };
-    for (const [rel, view] of Object.entries(views)) {
-      writeFileSync(join(threadDir, rel), JSON.stringify(view, null, 2) + "\n");
+    // The project-level ProjectDesign aggregate stays IN MEMORY — it is the
+    // BFF's on-demand serving shape, not a stored artifact. Only the
+    // cell-diagram view is materialized (for the diagram team to consume).
+    const rel = "specs/design/cell-diagram.gen.json";
+    try {
+      const cell = toCellDiagramProject(buildProjectDesign(threadName, snapshot));
+      writeFileSync(join(threadDir, rel), JSON.stringify(cell, null, 2) + "\n");
       notes.push({ ok: true, message: `${rel} (projected)` });
+    } catch (e) {
+      // e.g. a hand-edited design.json with an unsupported type — report,
+      // don't kill the chat session over a derived view.
+      notes.push({ ok: false, message: `${rel}: ${e instanceof Error ? e.message : String(e)}` });
     }
   }
 

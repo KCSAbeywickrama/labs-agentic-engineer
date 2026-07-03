@@ -17,7 +17,7 @@
  */
 
 /**
- * DesignJson → wso2/cell-diagram Project. Second-stage projection (derived
+ * ProjectDesign → wso2/cell-diagram Project. Second-stage projection (derived
  * from a derived artifact — still pure and deterministic end to end). The
  * shape and id conventions follow the legacy console's buildProjectModel.ts,
  * which fed the same @wso2/cell-diagram component:
@@ -29,7 +29,7 @@
  *     off-platform systems group under "external-apis"
  */
 
-import type { DesignJson } from "@aep/contracts";
+import type { ProjectDesign } from "@aep/contracts";
 
 // Minimal structural mirror of @wso2/cell-diagram's Project model — the lib
 // isn't a dependency here; the diagram team's renderer owns the real types.
@@ -44,7 +44,7 @@ export interface CellDiagramComponent {
   id: string;
   label: string;
   version: string;
-  type: "service" | "web-app";
+  type: string; // the lib's spelling for known kinds; unknown kinds render as a service box
   buildPack?: string;
   services: Record<string, CellDiagramService>;
   connections: CellDiagramConnection[];
@@ -73,7 +73,7 @@ const EXTERNAL_SEGMENT = "external-apis";
 /** "datastore://postgres" → "postgres" */
 const targetOf = (connId: string): string => connId.slice(connId.indexOf("://") + 3);
 
-export function toCellDiagramProject(design: DesignJson): CellDiagramProject {
+export function toCellDiagramProject(design: ProjectDesign): CellDiagramProject {
   const componentIds = new Set(design.components.map((c) => c.id));
 
   const components: CellDiagramComponent[] = design.components.map((comp) => {
@@ -103,6 +103,9 @@ export function toCellDiagramProject(design: DesignJson): CellDiagramProject {
       id: comp.id,
       label: comp.id,
       version: comp.version,
+      // Known kinds use the lib's vocabulary; anything else renders as a plain
+      // service box (the legacy TYPE_MAP fallback) — the true kind stays in
+      // the ProjectDesign, this is a view-layer concession only.
       type: isWebapp ? "web-app" : "service",
       ...(comp.build.language ? { buildPack: comp.build.language } : {}),
       services: {

@@ -47,6 +47,8 @@ export type ErrCode =
   | "NO_SUCH_FILE"
   | "EMPTY_OLD_STRING"
   | "INVALID_YAML"
+  | "INVALID_JSON"
+  | "SCHEMA_VIOLATION"
   | "NO_FRONTMATTER"
   | "PROTECTED_PATH";
 

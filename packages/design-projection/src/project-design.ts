@@ -18,7 +18,7 @@
 
 /**
  * design.json projection — the frontmatter-authored design bundle, folded
- * into the derived machine view (`DesignJson` in @aep/contracts) that the
+ * into the derived machine view (`ProjectDesign` in @aep/contracts) that the
  * cell diagram, coding-agent dispatch, and task generation consume. Pure:
  * files in, JSON out; nobody authors this artifact and the agent never sees
  * it (like the compiled .excalidraw, it is excluded from snapshots). In
@@ -27,7 +27,7 @@
  */
 
 import { parse as parseYaml } from "yaml";
-import type { DesignJson, DesignJsonComponent, DesignJsonConnection } from "@aep/contracts";
+import type { ProjectDesign, ProjectDesignComponent, ProjectDesignConnection } from "@aep/contracts";
 
 // Same frontmatter grammar as the agents service (bundle.ts) — a local copy
 // keeps this package dependency-light; the shape is trivial and stable
@@ -35,7 +35,7 @@ import type { DesignJson, DesignJsonComponent, DesignJsonConnection } from "@aep
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
 const lf = (s: string): string => s.replace(/\r\n/g, "\n");
 
-const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\/design\.md$/;
+const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\/design\.json$/;
 
 /** Parse a markdown file's YAML frontmatter into a record ({} when absent/invalid). */
 function frontmatter(raw: string): Record<string, unknown> {
@@ -51,9 +51,9 @@ function frontmatter(raw: string): Record<string, unknown> {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-function connections(v: unknown): DesignJsonConnection[] {
+function connections(v: unknown): ProjectDesignConnection[] {
   if (!Array.isArray(v)) return [];
-  const out: DesignJsonConnection[] = [];
+  const out: ProjectDesignConnection[] = [];
   for (const c of v) {
     if (!c || typeof c !== "object") continue;
     const rec = c as Record<string, unknown>;
@@ -67,21 +67,31 @@ function connections(v: unknown): DesignJsonConnection[] {
 
 /**
  * STAGE 1 — the base unit: ONE component's design.md (+ sibling artifact
- * presence) → its DesignJsonComponent. Everything here comes from the
+ * presence) → its ProjectDesignComponent. Everything here comes from the
  * component's own directory; no cross-component knowledge.
  */
-export function projectComponent(id: string, files: Record<string, string>): DesignJsonComponent {
+export function projectComponent(id: string, files: Record<string, string>): ProjectDesignComponent {
   const dir = `specs/design/components/${id}`;
-  const fm = frontmatter(files[`${dir}/design.md`] ?? "");
-  const type = fm.type === "webapp" ? "webapp" : "service";
+  // The authored file is schema-validated at write time (FileBundle); parse
+  // defensively anyway so a hand-edited bundle degrades to defaults, not a throw.
+  let fm: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(files[`${dir}/design.json`] ?? "");
+    if (parsed && typeof parsed === "object") fm = parsed as Record<string, unknown>;
+  } catch {
+    /* defaults below */
+  }
+  // The design phase accepts ANY component kind the requirements imply; the
+  // authored type passes through untouched (support-gating is a later phase).
+  const type = str(fm.type) ?? "service";
   const exposure = str(fm.exposure) ?? "intranet";
 
-  const artifacts: Record<string, string> = { design: `${dir}/design.md` };
+  const artifacts: Record<string, string> = { design: `${dir}/design.json` };
   if (files[`${dir}/openapi.yaml`] !== undefined) artifacts.openapi = `${dir}/openapi.yaml`;
   if (files[`${dir}/wireframes.dsl`] !== undefined) artifacts.wireframes = `${dir}/wireframes.dsl`;
 
   // exactOptionalPropertyTypes: omit absent keys instead of `key: undefined`.
-  const build: DesignJsonComponent["build"] = {};
+  const build: ProjectDesignComponent["build"] = {};
   for (const key of ["language", "buildpack", "appPath", "entrypoint"] as const) {
     const v = str(fm[key]);
     if (v !== undefined) build[key] = v;
@@ -117,10 +127,10 @@ export function projectComponent(id: string, files: Record<string, string>): Des
 /**
  * STAGE 2 — aggregation: every component projection + the top-level
  * design.md frontmatter (skillsApplied) folded into the project-wide
- * DesignJson. Downstream views (cell diagram, task planning) build on THIS,
+ * ProjectDesign. Downstream views (cell diagram, task planning) build on THIS,
  * because their subject is the relationships BETWEEN components.
  */
-export function projectDesignJson(projectName: string, files: Record<string, string>): DesignJson {
+export function buildProjectDesign(projectName: string, files: Record<string, string>): ProjectDesign {
   const topFm = frontmatter(files["specs/design/design.md"] ?? "");
   const skillsApplied = Array.isArray(topFm.skillsApplied)
     ? topFm.skillsApplied.filter((s): s is string => typeof s === "string")
@@ -133,26 +143,4 @@ export function projectDesignJson(projectName: string, files: Record<string, str
   const components = ids.map((id) => projectComponent(id, files));
 
   return { modelVersion: "0.4.0", id: projectName, name: projectName, skillsApplied, components };
-}
-
-/** One component's derived view + enough project context to stand alone. */
-export interface ComponentSlice {
-  project: { id: string; name: string; skillsApplied: string[] };
-  component: DesignJsonComponent;
-}
-
-/**
- * Slice the project-level DesignJson into one per-component document, keyed
- * by its bundle-relative path (`components/<id>/design.gen.json`). Same
- * projection run as the project doc, so the two can never disagree. The
- * per-component file is what a coding-agent pod reads from its own clone
- * without any platform call.
- */
-export function componentSlices(design: DesignJson): Record<string, ComponentSlice> {
-  const project = { id: design.id, name: design.name, skillsApplied: design.skillsApplied };
-  const out: Record<string, ComponentSlice> = {};
-  for (const component of design.components) {
-    out[`specs/design/components/${component.id}/design.gen.json`] = { project, component };
-  }
-  return out;
 }

@@ -43,6 +43,8 @@ Reacting to tool results (each result tells you the next move):
   oldString that includes a surrounding unique line.
 - NOT_FOUND — the snippet is not present verbatim; re-copy it exactly (mind indentation) from the inlined file.
 - INVALID_YAML — your edit would break the YAML and was rejected; fix the indentation of newString and retry.
+- INVALID_JSON / SCHEMA_VIOLATION — a components/<name>/design.json write was rejected (broken JSON or a
+  schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
 
 Keep prose outside tool calls to a single short sentence. When the instruction is fully applied, stop.`;
 
@@ -110,17 +112,18 @@ skillsApplied:
 A simple public API service that responds with "Hello, World!" in JSON format. Built as a single Go service exposing one endpoint, requiring no authentication.
 `,
 
-  "specs/design/components/hello-api/design.md": `---
-type: service
-language: Go
-buildpack: docker
-appPath: hello-api
-entrypoint: deployment/service
----
-
-# hello-api
-
-Implement a simple Go HTTP service on port 9090 using net/http. Expose GET /hello that returns {"message": "Hello, World!"} with Content-Type: application/json. Include GET /health returning 200 OK for liveness probes. This is a public API — no authentication required, no X-User-Id checks.
+  "specs/design/components/hello-api/design.json": `{
+  "name": "hello-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "hello-api",
+  "entrypoint": "deployment/service",
+  "exposure": "internet",
+  "connections": [],
+  "description": "Implement a simple Go HTTP service on port 9090 using net/http. Expose GET /hello that returns {\\"message\\": \\"Hello, World!\\"} with Content-Type: application/json. Include GET /health returning 200 OK for liveness probes. This is a public API — no authentication required, no X-User-Id checks."
+}
 `,
 
   "specs/design/components/hello-api/openapi.yaml": `openapi: 3.0.3

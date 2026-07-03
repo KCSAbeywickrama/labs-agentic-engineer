@@ -16,5 +16,5 @@
  * under the License.
  */
 
-export * from "./design-json.js";
+export * from "./project-design.js";
 export * from "./cell-diagram.js";

@@ -18,10 +18,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { DesignJson } from "@aep/contracts";
+import type { ProjectDesign } from "@aep/contracts";
 import { toCellDiagramProject } from "../src/cell-diagram.js";
 
-const DESIGN: DesignJson = {
+const DESIGN: ProjectDesign = {
   modelVersion: "0.4.0",
   id: "expense-claim",
   name: "expense-claim",
@@ -57,7 +57,7 @@ const DESIGN: DesignJson = {
   ],
 };
 
-test("maps DesignJson to the cell-diagram Project shape (legacy buildProjectModel conventions)", () => {
+test("maps ProjectDesign to the cell-diagram Project shape (legacy buildProjectModel conventions)", () => {
   const p = toCellDiagramProject(DESIGN);
   assert.equal(p.id, "project");
   assert.equal(p.name, "expense-claim");

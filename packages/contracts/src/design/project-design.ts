@@ -25,7 +25,7 @@
  * The authored source of truth stays in the spec bundle's frontmatter.
  */
 
-export interface DesignJson {
+export interface ProjectDesign {
   /** Cell-diagram model version this projection targets. */
   modelVersion: string;
   /** Project identity (the platform's project id; thread name in the playground). */
@@ -33,13 +33,13 @@ export interface DesignJson {
   name: string;
   /** Skill names applied to the design (top-level design.md frontmatter). */
   skillsApplied: string[];
-  components: DesignJsonComponent[];
+  components: ProjectDesignComponent[];
 }
 
-export interface DesignJsonComponent {
+export interface ProjectDesignComponent {
   /** Component directory name, e.g. "expense-api". */
   id: string;
-  type: "service" | "webapp";
+  type: string; // authored kind, passed through ("service" | "webapp" | future kinds)
   version: string;
   /** Build facts for the coding agent / OpenChoreo (from frontmatter). */
   build: {
@@ -49,14 +49,14 @@ export interface DesignJsonComponent {
     entrypoint?: string;
   };
   /** Exposed services (cell-diagram shape); present for type=service. */
-  services?: Record<string, DesignJsonService>;
+  services?: Record<string, ProjectDesignService>;
   /** Typed dependency edges (cell-diagram shape). */
-  connections: DesignJsonConnection[];
+  connections: ProjectDesignConnection[];
   /** Bundle-relative paths of this component's spec artifacts. */
   artifacts: Record<string, string>;
 }
 
-export interface DesignJsonService {
+export interface ProjectDesignService {
   id: string;
   label: string;
   /** Protocol, e.g. "http". */
@@ -69,7 +69,7 @@ export interface DesignJsonService {
   };
 }
 
-export interface DesignJsonConnection {
+export interface ProjectDesignConnection {
   /** "<type>://<target>", e.g. "http://expense-api", "datastore://postgres". */
   id: string;
   type: string;

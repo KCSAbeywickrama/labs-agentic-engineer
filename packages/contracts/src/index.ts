@@ -17,7 +17,8 @@
  */
 
 export * from "./agents/sse-events";
-export * from "./design/design-json";
+export * from "./design/project-design";
+export * from "./design/component-design";
 
 import type { components } from "./generated/example";
 
