@@ -2,7 +2,9 @@
 
 Issue-driven (ADR-0001): a feature lives in a **GitHub issue** from idea to
 ship. The repo keeps only what must outlive the feature — the PRD, the
-guides, and concise ADRs. Console work requires `gh` auth.
+guides, and concise ADRs. Console work requires `gh` auth. The
+`/console-feature` skill drives this flow end-to-end (with a checkpoint at
+each stage); this doc remains the spec it follows.
 
 Issues live in the **upstream** repo — pass
 `--repo wso2/labs-agentic-engineer` to every `gh issue` command (working

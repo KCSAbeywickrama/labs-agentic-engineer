@@ -21,14 +21,25 @@ to `API_PROXY_TARGET`, default `http://localhost:9090`).
 
 Console features are built in **Claude Code sessions** following a fixed,
 issue-driven cycle — feature issue → grilling interview → decisions comment
-(durable ones become ADRs) → contract → mocks → UI → ship. Don't freestyle a
-feature; start the cycle:
+(durable ones become ADRs) → contract → mocks → UI → ship
+(spec: [`design/development-flow.md`](design/development-flow.md)). Don't
+freestyle a feature — run the cycle with the `/console-feature` skill:
 
-1. Read [`PRD.md`](PRD.md) for the current product picture.
-2. Open a GitHub issue (labels `console` + `feature`) using the body template
-   in [`design/development-flow.md`](design/development-flow.md).
-3. In a Claude Code session, run `/grill-me` on it and follow the flow from
-   there.
+```
+/console-feature I want the project list to show each project's environments
+```
+
+It reads the PRD and ADRs, drafts the feature issue from the template,
+creates it with `gh` (labels `console` + `feature`, upstream repo), prints
+it, and then asks at each stage whether to continue: grill it (the
+`/grill-me` interview), post the decisions comment, graduate ADRs, open the
+BE handshake issue if the contract changes, mark the PRD in-flight, build
+(contract → `make gen` → mocks → UI in mock mode), and ship. Stop at any
+checkpoint and pick the feature back up later with the issue number:
+
+```
+/console-feature 42
+```
 
 ## Docs map
 
