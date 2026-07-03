@@ -25,7 +25,7 @@ chat_playground/
 .DS_Store
 *.log
 .playwright-cli
-.agents
+.agents/settings.local.json
 .claude
 e2e_test_run.txt
 new_spec.yml
