@@ -48,7 +48,7 @@ import { streamTurn } from "../evals/sse-client.js";
 import { loadRepoSkills } from "../evals/skills.js";
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
-import { compileDslArtifacts } from "./dsl.js";
+import { materializeDerived } from "./derived.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // pushed every turn (ADR-0002); the service still reads none.
@@ -118,14 +118,11 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   const changes = reconcile(ctx.thread, before, bundle.snapshot(), ctx.dryRun);
   renderSummary(changes, ctx.dryRun);
 
-  // Compile any freshly-written *.dsl into its sibling .excalidraw (the
-  // deterministic legacy compiler) so the diagram is immediately openable.
+  // Refresh the derived artifacts (.excalidraw, *.gen.json) — one pipeline
+  // seam, see derived.ts. Skipped under --dry-run: nothing landed on disk.
   if (!ctx.dryRun) {
-    for (const r of compileDslArtifacts(
-      threadDir(ctx.thread),
-      changes.filter((c) => c.kind !== "remove").map((c) => c.path),
-    )) {
-      output.write(r.ok ? `  ⚙ ${r.outPath} (compiled)\n` : `  ✗ ${r.path}: DSL error — ${r.error}\n`);
+    for (const n of materializeDerived(threadDir(ctx.thread), ctx.thread, changes, bundle.snapshot())) {
+      output.write(n.ok ? `  ⚙ ${n.message}\n` : `  ✗ ${n.message}\n`);
     }
   }
 }

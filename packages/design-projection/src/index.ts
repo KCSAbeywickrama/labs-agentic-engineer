@@ -16,22 +16,5 @@
  * under the License.
  */
 
-export * from "./agents/sse-events";
-export * from "./design/design-json";
-
-import type { components } from "./generated/example";
-
-/**
- * Widget is sourced from the generated OpenAPI types — never hand-defined.
- * The OpenAPI spec (`openapi/example.yaml`) is the single source of truth.
- */
-export type Widget = components["schemas"]["Widget"];
-
-/**
- * A trivial consumer of the generated type. Renaming or removing the `name`
- * field in the OpenAPI spec breaks this line at typecheck time — guard #2,
- * the self-correction signal at a contract consumer.
- */
-export function widgetLabel(w: Widget): string {
-  return w.name;
-}
+export * from "./design-json.js";
+export * from "./cell-diagram.js";

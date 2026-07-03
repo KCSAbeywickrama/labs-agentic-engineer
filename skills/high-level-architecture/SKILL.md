@@ -76,6 +76,26 @@ explicitly does not do):
 | `buildpack` | always `docker` |
 | `appPath` | repo-relative source dir, the component name, e.g. `expense-api` |
 | `entrypoint` | deploy entry, e.g. `deployment/service` |
+| `version` | semantic version, `0.1.0` for a new component |
+| `exposure` | `internet` (public API/webapp) or `intranet` (internal only) |
+| `connections` | typed dependency list — every arrow in the Interactions section appears here (this drives the platform's architecture diagram and dispatch) |
+
+`connections` entries are `{to, type, onPlatform}`:
+
+```yaml
+connections:
+  - to: expense-api        # another component → type: http
+    type: http
+  - to: postgres           # managed datastore
+    type: datastore
+  - to: email-gateway      # external system, not on the platform
+    type: connector
+    onPlatform: false
+```
+
+Keep frontmatter and prose consistent: an interaction described in
+design.md's Interactions section with no matching `connections` entry (or
+vice versa) is a defect. Maintain these keys with `setFrontmatterField`.
 
 One component per directory. Every `service` gets an `openapi.yaml`
 (load `openapi-conventions` before writing it); every `webapp` gets a

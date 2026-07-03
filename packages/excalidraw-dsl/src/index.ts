@@ -16,22 +16,34 @@
  * under the License.
  */
 
-// Tiny DSL → Excalidraw scene converter, used by:
-//   • agents-service skills (server-side, applied at stream finish)
-//   • console (best-effort live preview while the DSL streams in)
+// Tiny DSL → Excalidraw scene converter (@aep/excalidraw-dsl — the single
+// workspace copy; the legacy per-project duplicates are gone).
 //
-// The agents/ project keeps its own copy at
-// `agents/src/skills/document-generation/excalidraw-dsl.ts` because it lives
-// in a separate Docker context and is not part of the pnpm workspace. KEEP
-// THE TWO FILES IN SYNC — fixtures in `__fixtures__/` are the canonical
-// reference both copies must match.
+// The `wireframes` dialect targets DESKTOP webapp wireframes in the gray,
+// structural style: screens default to 1280×800, web primitives (navbar,
+// sidebar, table, input, card, image) render as grayscale boxes — layout
+// first, no visual polish. The agent writes the DSL; this compiler owns
+// every Excalidraw-format concern (required fields, ids, styling).
 
 export type DslKind = 'wireframes' | 'domain-model';
 
 // ---------- Wireframes DSL ----------
 
+type WireframeKind =
+  | 'rect'
+  | 'ellipse'
+  | 'button'
+  | 'text'
+  | 'heading'
+  | 'input'
+  | 'card'
+  | 'image'
+  | 'table'
+  | 'navbar'
+  | 'sidebar';
+
 interface WireframeElement {
-  kind: 'rect' | 'ellipse' | 'button' | 'text';
+  kind: WireframeKind;
   label: string;
   x: number;
   y: number;
@@ -41,6 +53,8 @@ interface WireframeElement {
 
 interface WireframeScreen {
   name: string;
+  width: number;
+  height: number;
   elements: WireframeElement[];
 }
 
@@ -223,9 +237,14 @@ function parseWireframesDsl(dsl: string): WireframeAst {
 
     if (!indented) {
       // Top-level: screen / flow
-      const screenMatch = /^screen\s+(.+)$/i.exec(trimmed);
+      const screenMatch = /^screen\s+(.+?)(?:\s+(\d+)\s*x\s*(\d+))?$/i.exec(trimmed);
       if (screenMatch) {
-        currentScreen = { name: screenMatch[1]!.trim(), elements: [] };
+        currentScreen = {
+          name: screenMatch[1]!.trim(),
+          width: screenMatch[2] ? parseInt(screenMatch[2], 10) : DEFAULT_SCREEN_W,
+          height: screenMatch[3] ? parseInt(screenMatch[3], 10) : DEFAULT_SCREEN_H,
+          elements: [],
+        };
         ast.screens.push(currentScreen);
         inFlow = false;
         continue;
@@ -258,24 +277,50 @@ function parseWireframesDsl(dsl: string): WireframeAst {
   return ast;
 }
 
+/** Per-kind default sizes when no `WxH` is given. Texts auto-size to label. */
+function defaultSize(kind: WireframeKind, label: string): { width: number; height: number } {
+  switch (kind) {
+    case 'text':
+      return { width: Math.max(60, label.length * 9), height: 24 };
+    case 'heading':
+      return { width: Math.max(80, label.length * 12), height: 30 };
+    case 'input':
+      return { width: 320, height: 36 };
+    case 'button':
+      return { width: 140, height: 40 };
+    case 'table':
+      return { width: 640, height: 240 };
+    case 'card':
+      return { width: 300, height: 160 };
+    case 'image':
+      return { width: 240, height: 140 };
+    default:
+      return { width: 160, height: 32 };
+  }
+}
+
 function parseWireframeElement(line: string): WireframeElement | null {
-  const kindMatch = /^(rect|ellipse|button|text)\b/i.exec(line);
+  const kindMatch = /^(rect|ellipse|button|text|heading|input|card|image|table|navbar|sidebar)\b/i.exec(line);
   if (!kindMatch) return null;
-  const kind = kindMatch[1]!.toLowerCase() as WireframeElement['kind'];
+  const kind = kindMatch[1]!.toLowerCase() as WireframeKind;
   const rest = line.slice(kindMatch[0].length).trim();
 
   const labelMatch = QUOTED.exec(rest);
   const label = labelMatch ? unescapeQuoted(labelMatch[1]!) : '';
   const afterLabel = labelMatch ? rest.slice(labelMatch.index + labelMatch[0].length).trim() : rest;
 
+  // navbar/sidebar are positioned by the renderer — coordinates are ignored
+  // and may be omitted entirely.
   const coordsMatch = COORDS.exec(afterLabel);
-  if (!coordsMatch) return null;
-  const x = parseInt(coordsMatch[1]!, 10);
-  const y = parseInt(coordsMatch[2]!, 10);
+  if (!coordsMatch && kind !== 'navbar' && kind !== 'sidebar') return null;
+  const x = coordsMatch ? parseInt(coordsMatch[1]!, 10) : 0;
+  const y = coordsMatch ? parseInt(coordsMatch[2]!, 10) : 0;
 
-  let width = kind === 'text' ? Math.max(60, label.length * 9) : 160;
-  let height = kind === 'text' ? 24 : 32;
-  const sizeMatch = SIZE.exec(afterLabel.slice(coordsMatch.index + coordsMatch[0].length));
+  let { width, height } = defaultSize(kind, label);
+  const afterCoords = coordsMatch
+    ? afterLabel.slice(coordsMatch.index + coordsMatch[0].length)
+    : afterLabel;
+  const sizeMatch = SIZE.exec(afterCoords);
   if (sizeMatch) {
     width = parseInt(sizeMatch[1]!, 10);
     height = parseInt(sizeMatch[2]!, 10);
@@ -290,12 +335,33 @@ function unescapeQuoted(s: string): string {
 
 // ---------- Wireframes renderer ----------
 
-const SCREEN_W = 360;
-const SCREEN_H = 540;
-const SCREEN_GAP_X = 80;
-const SCREEN_GAP_Y = 80;
-const SCREEN_HEADER_H = 36;
-const COLUMNS = 3;
+const DEFAULT_SCREEN_W = 1280; // desktop webapp frame (override: `screen Name WxH`)
+const DEFAULT_SCREEN_H = 800;
+const SCREEN_GAP_X = 120;
+const SCREEN_GAP_Y = 120;
+const COLUMNS = 2;
+const TITLE_H = 28; // screen-name row drawn ABOVE the outline
+const NAVBAR_H = 56;
+const SIDEBAR_W = 240;
+const TABLE_HEADER_H = 36;
+const TABLE_ROW_H = 36;
+
+// Gray structural palette — wireframes deliberately avoid color so review
+// stays about layout, not styling. The flow accent is the one exception.
+const STROKE = '#495057';
+const SCREEN_STROKE = '#343a40';
+const FILL_CHROME = '#e9ecef'; // navbar, sidebar, table header
+const FILL_SOFT = '#f1f3f5'; // generic rect / ellipse
+const FILL_CARD = '#f8f9fa';
+const FILL_BUTTON = '#dee2e6';
+
+/** Split a pipe-separated label ("Home | Risks | Reports") into items. */
+function splitItems(label: string): string[] {
+  return label
+    .split('|')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 // Accent color for flow markers + screen number badges. Picked to read
 // against the standard wireframe palette without competing with element
@@ -321,35 +387,44 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
   // with no button still surface as a marker beside the screen title.
   const screenHeaderAnchor = new Map<string, ButtonAnchor>();
 
+  // Variable-size screens flow left-to-right, COLUMNS per row; each row is as
+  // tall as its tallest screen.
+  let curX = 0;
+  let curY = 0;
+  let rowMaxH = 0;
   ast.screens.forEach((screen, idx) => {
     const number = idx + 1;
-    const col = idx % COLUMNS;
-    const row = Math.floor(idx / COLUMNS);
-    const sx = col * (SCREEN_W + SCREEN_GAP_X);
-    const sy = row * (SCREEN_H + SCREEN_GAP_Y);
+    if (idx > 0 && idx % COLUMNS === 0) {
+      curX = 0;
+      curY += rowMaxH + SCREEN_GAP_Y;
+      rowMaxH = 0;
+    }
+    const sx = curX;
+    const sy = curY;
+    curX += screen.width + SCREEN_GAP_X;
+    rowMaxH = Math.max(rowMaxH, screen.height + TITLE_H);
     const screenId = stableId(`screen:${screen.name}:${idx}`);
 
-    out.push(makeRect(screenId, sx, sy, SCREEN_W, SCREEN_H, '#1e1e1e', 'transparent'));
+    // Screen name + number badge sit ABOVE the outline so chrome (navbar)
+    // can occupy the screen's full interior.
     out.push(
       makeText(
         stableId(`screen-label:${screen.name}:${idx}`),
-        sx + 12,
-        sy + 8,
-        SCREEN_W - 24,
-        SCREEN_HEADER_H - 12,
+        sx,
+        sy,
+        screen.width - 60,
+        20,
         screen.name,
         16,
         'left',
       ),
     );
-    // Numbered badge in the top-right corner so flow markers (`→(N)`)
-    // are immediately resolvable to a screen.
     out.push(
       withColor(
         makeText(
           stableId(`screen-num:${screen.name}:${idx}`),
-          sx + SCREEN_W - 44,
-          sy + 8,
+          sx + screen.width - 44,
+          sy,
           32,
           18,
           `(${number})`,
@@ -359,26 +434,148 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
         FLOW_ACCENT,
       ),
     );
+    const frameY = sy + TITLE_H;
+    out.push(makeRect(screenId, sx, frameY, screen.width, screen.height, SCREEN_STROKE, '#ffffff', null));
     screenNumber.set(screen.name.toLowerCase(), number);
     screenHeaderAnchor.set(screen.name.toLowerCase(), {
-      rightX: sx + SCREEN_W - 56,
-      midY: sy + 12,
+      rightX: sx + screen.width - 56,
+      midY: sy + 2,
     });
 
     for (const el of screen.elements) {
-      const ex = sx + 12 + el.x; // 12px inner padding
-      const ey = sy + SCREEN_HEADER_H + el.y;
+      // Coordinates are screen-local from the outline's top-left corner —
+      // what the author writes is where it lands, no hidden padding.
+      const ex = sx + el.x;
+      const ey = frameY + el.y;
       const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
       switch (el.kind) {
+        case 'navbar': {
+          out.push(makeRect(eid, sx, frameY, screen.width, NAVBAR_H, STROKE, FILL_CHROME, null));
+          const items = splitItems(el.label);
+          items.forEach((item, i) => {
+            out.push(
+              makeText(
+                stableId(`${eid}:item:${item}:${i}`),
+                sx + 24 + i * ((screen.width - 48) / Math.max(1, items.length)),
+                frameY + (NAVBAR_H - 18) / 2,
+                Math.max(60, item.length * 9),
+                18,
+                item,
+                14,
+                'left',
+              ),
+            );
+          });
+          break;
+        }
+        case 'sidebar': {
+          out.push(
+            makeRect(eid, sx, frameY + NAVBAR_H, SIDEBAR_W, screen.height - NAVBAR_H, STROKE, FILL_CHROME, null),
+          );
+          splitItems(el.label).forEach((item, i) => {
+            out.push(
+              makeText(
+                stableId(`${eid}:item:${item}:${i}`),
+                sx + 16,
+                frameY + NAVBAR_H + 20 + i * 40,
+                SIDEBAR_W - 32,
+                18,
+                item,
+                14,
+                'left',
+              ),
+            );
+          });
+          break;
+        }
+        case 'table': {
+          const cols = splitItems(el.label);
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, 'transparent', null));
+          out.push(makeRect(stableId(`${eid}:hdr`), ex, ey, el.width, TABLE_HEADER_H, STROKE, FILL_CHROME, null));
+          const colW = el.width / Math.max(1, cols.length);
+          cols.forEach((col, i) => {
+            out.push(
+              makeText(
+                stableId(`${eid}:col:${col}:${i}`),
+                ex + 12 + i * colW,
+                ey + (TABLE_HEADER_H - 18) / 2,
+                Math.max(60, col.length * 9),
+                18,
+                col,
+                14,
+                'left',
+              ),
+            );
+            if (i > 0) {
+              out.push(makeLine(stableId(`${eid}:vline:${i}`), ex + i * colW, ey, 0, el.height));
+            }
+          });
+          for (let ry = ey + TABLE_HEADER_H + TABLE_ROW_H; ry < ey + el.height; ry += TABLE_ROW_H) {
+            out.push(makeLine(stableId(`${eid}:hline:${ry}`), ex, ry, el.width, 0));
+          }
+          break;
+        }
+        case 'image':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT, null));
+          out.push(makeLine(stableId(`${eid}:d1`), ex, ey, el.width, el.height));
+          out.push(makeLine(stableId(`${eid}:d2`), ex, ey + el.height, el.width, -el.height));
+          if (el.label) {
+            out.push(
+              makeText(
+                stableId(`${eid}:label`),
+                ex + 8,
+                ey + el.height + 4,
+                Math.max(60, el.label.length * 8),
+                16,
+                el.label,
+                12,
+                'left',
+              ),
+            );
+          }
+          break;
+        case 'input':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, '#ffffff'));
+          out.push(
+            makeText(
+              stableId(`${eid}:label`),
+              ex + 10,
+              ey + Math.max(0, (el.height - 16) / 2),
+              el.width - 20,
+              16,
+              el.label,
+              14,
+              'left',
+            ),
+          );
+          break;
+        case 'card':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_CARD));
+          out.push(
+            makeText(
+              stableId(`${eid}:label`),
+              ex + 12,
+              ey + 12,
+              el.width - 24,
+              18,
+              el.label,
+              14,
+              'left',
+            ),
+          );
+          break;
+        case 'heading':
+          out.push(makeText(eid, ex, ey, el.width, el.height, el.label, 18, 'left'));
+          break;
         case 'rect':
-          out.push(makeRect(eid, ex, ey, el.width, el.height, '#1971c2', '#a5d8ff'));
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT));
           out.push(
             makeText(
               stableId(`${eid}:label`),
               ex + 6,
               ey + 6,
               el.width - 12,
-              el.height - 12,
+              Math.max(14, el.height - 12),
               el.label,
               14,
               'left',
@@ -386,7 +583,7 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           );
           break;
         case 'button':
-          out.push(makeRect(eid, ex, ey, el.width, el.height, '#2f9e44', '#b2f2bb', { type: 3 }));
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_BUTTON, { type: 3 }));
           out.push(
             makeText(
               stableId(`${eid}:label`),
@@ -408,7 +605,7 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           break;
         case 'ellipse':
           out.push({
-            ...makeRect(eid, ex, ey, el.width, el.height, '#1e1e1e', '#ffd8a8'),
+            ...makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT),
             type: 'ellipse',
           });
           out.push(
@@ -466,6 +663,29 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
 /** Override an element's stroke colour without mutating the input. */
 function withColor<T extends ExcalidrawElementBase>(el: T, color: string): T {
   return { ...el, strokeColor: color };
+}
+
+/**
+ * An unbound straight line from (x, y) spanning (dx, dy) — table grid rules
+ * and image-placeholder diagonals. Negative spans are fine (the points are
+ * relative); width/height are normalized for the bounding box.
+ */
+function makeLine(id: string, x: number, y: number, dx: number, dy: number): ArrowElement {
+  return {
+    ...baseElement(id, x, y, Math.abs(dx), Math.abs(dy)),
+    type: 'line',
+    strokeColor: STROKE,
+    roundness: null,
+    points: [
+      [0, 0],
+      [dx, dy],
+    ],
+    lastCommittedPoint: null,
+    startBinding: null,
+    endBinding: null,
+    startArrowhead: null,
+    endArrowhead: null,
+  };
 }
 
 // ---------- Domain Model parser ----------

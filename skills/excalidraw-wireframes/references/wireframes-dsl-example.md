@@ -1,51 +1,61 @@
-# Worked example — expense claim webapp wireframes
+# Worked example — risk register webapp wireframes
 
-A complete `wireframes.dsl` for a three-screen employee flow. Note the
-rhythm: heading at 16,16; full-width inputs `328x36` stacked with 12px gaps;
-list rows as `328x48` rects; the screen's primary action as the bottom-most
-button (the compiler attaches the flow marker to it).
+A complete `wireframes.dsl` for a three-screen desktop flow. Note the
+rhythm: every screen opens with the same `navbar` and `sidebar` (consistent
+chrome); content sits right of the sidebar (`x ≥ 280`) and below the navbar
+(`y ≥ 80`); the screen's primary action is the bottom-most `button` (the
+compiler attaches the `→(N)` flow marker to it).
 
 ```
-// Employee expense claims — three screens
+// Risk register — three screens, desktop 1280x800
 
-screen ClaimList
-  text "My Claims" 16,16
-  rect "search claims" 16,52 328x36
-  rect "Claim: Team offsite — $420 — Approved" 16,100 328x48
-  rect "Claim: Client dinner — $180 — Pending" 16,156 328x48
-  rect "Claim: Taxi — $32 — Rejected" 16,212 328x48
-  button "New claim" 16,480 328x44
+screen RiskDashboard
+  navbar "RiskHub | Dashboard | Risks | Reports | Profile"
+  sidebar "Overview | My Risks | All Registers | Audits | Settings"
+  heading "Risk Overview" 280,80
+  card "Open risks: 24" 280,130 300x120
+  card "Overdue actions: 6" 600,130 300x120
+  card "High severity: 3" 920,130 300x120
+  heading "Recent activity" 280,280
+  table "Risk | Owner | Severity | Updated" 280,320 940x320
+  button "New risk" 1100,80 140x40
 
-screen NewClaim
-  text "New Claim" 16,16
-  rect "title" 16,52 328x36
-  rect "description" 16,100 328x64
-  rect "amount" 16,176 156x36
-  rect "currency" 188,176 156x36
-  rect "receipt upload" 16,224 328x64
-  button "Cancel" 16,480 156x44
-  button "Submit" 188,480 156x44
+screen NewRisk
+  navbar "RiskHub | Dashboard | Risks | Reports | Profile"
+  sidebar "Overview | My Risks | All Registers | Audits | Settings"
+  heading "New Risk" 280,80
+  input "title" 280,130 640x36
+  input "description" 280,182 640x72
+  input "register (dropdown)" 280,270 300x36
+  input "owner (dropdown)" 620,270 300x36
+  input "impact" 280,322 300x36
+  input "likelihood" 620,322 300x36
+  button "Cancel" 280,400 140x40
+  button "Create risk" 440,400 160x40
 
-screen ClaimDetail
-  text "Claim Detail" 16,16
-  text "Team offsite — $420" 16,52
-  ellipse "status" 300,52 24x24
-  rect "line items" 16,92 328x160
-  rect "history / audit trail" 16,264 328x120
-  button "Back to list" 16,480 328x44
+screen RiskDetail
+  navbar "RiskHub | Dashboard | Risks | Reports | Profile"
+  sidebar "Overview | My Risks | All Registers | Audits | Settings"
+  heading "Risk: Unpatched edge servers" 280,80
+  text "Severity: High — Owner: Platform team" 280,120
+  card "Remediation progress" 280,160 640x140
+  table "Action | Assignee | Due | Status" 280,330 940x240
+  button "Update status" 280,610 160x40
 
 flow
-  ClaimList -> NewClaim
-  NewClaim -> ClaimList
-  ClaimList -> ClaimDetail
-  ClaimDetail -> ClaimList
+  RiskDashboard -> NewRisk
+  NewRisk -> RiskDashboard
+  RiskDashboard -> RiskDetail
+  RiskDetail -> RiskDashboard
 ```
 
 Checklist before finishing a wireframe file:
 
 - Every screen from the requirements has a `screen` block; no extras.
-- Every element within `0,0`–`360,540`; no overlaps.
-- Every screen is reachable in `flow` (no orphan screens), and names in
-  `flow` exactly match the `screen` names.
-- Labels are content-bearing ("Claim: Taxi — $32 — Rejected"), not
-  placeholders ("rect 1") — the wireframe is a communication artifact.
+- Chrome (`navbar`, `sidebar`) is identical across screens of the same app.
+- Content stays inside the screen, right of the sidebar, below the navbar;
+  nothing overlaps.
+- Every screen is reachable in `flow`, and `flow` names exactly match
+  `screen` names.
+- Labels are content-bearing ("Open risks: 24", "register (dropdown)"), not
+  placeholders — the wireframe is a communication artifact.

@@ -39,6 +39,19 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/design-projection:
+    dependencies:
+      '@aep/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      yaml:
+        specifier: ^2.8.4
+        version: 2.9.0
+    devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.22.4
+
   packages/excalidraw-dsl:
     devDependencies:
       tsx:
@@ -82,6 +95,9 @@ importers:
         specifier: ^4.3.6
         version: 4.4.3
     devDependencies:
+      '@aep/design-projection':
+        specifier: workspace:*
+        version: link:../../packages/design-projection
       '@aep/excalidraw-dsl':
         specifier: workspace:*
         version: link:../../packages/excalidraw-dsl
