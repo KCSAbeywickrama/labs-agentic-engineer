@@ -29,7 +29,7 @@
  *     off-platform systems group under "external-apis"
  */
 
-import type { ProjectDesign } from "@aep/contracts";
+import type { ProjectDesign } from "./types.js";
 
 // Minimal structural mirror of @wso2/cell-diagram's Project model — the lib
 // isn't a dependency here; the diagram team's renderer owns the real types.

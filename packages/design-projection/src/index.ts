@@ -16,5 +16,6 @@
  * under the License.
  */
 
+export * from "./types.js";
 export * from "./project-design.js";
 export * from "./cell-diagram.js";

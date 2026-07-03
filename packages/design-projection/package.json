@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Pure projections over the design bundle: frontmatter → DesignJson → cell-diagram model / per-component slices.",
+  "description": "Pure projections over the design bundle: authored component design.json files \u2192 ProjectDesign aggregate \u2192 cell-diagram model.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -23,7 +23,6 @@
     "dev": "echo \"@aep/design-projection: no dev server\""
   },
   "dependencies": {
-    "@aep/contracts": "workspace:*",
     "yaml": "^2.8.4"
   },
   "devDependencies": {

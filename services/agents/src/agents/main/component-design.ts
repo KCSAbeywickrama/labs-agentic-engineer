@@ -18,7 +18,7 @@
 
 /**
  * Runtime validation for the AUTHORED `components/<name>/design.json`
- * (`ComponentDesign` in @aep/contracts — the wire source of truth; the Zod
+ * (`ComponentDesign` in src/contracts/component-design.ts — the wire source of truth; the Zod
  * schema below is drift-guarded against it). The FileBundle calls
  * `checkComponentDesign` on every write to a matching path so the model gets
  * a one-round-trip self-correction (INVALID_JSON / SCHEMA_VIOLATION) instead
@@ -26,7 +26,7 @@
  */
 
 import { z } from "zod";
-import type { ComponentDesign } from "@aep/contracts";
+import type { ComponentDesign } from "../../contracts/component-design.js";
 
 const componentConnectionSchema = z.object({
   to: z.string().min(1),

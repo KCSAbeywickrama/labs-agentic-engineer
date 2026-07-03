@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { ProjectDesign } from "@aep/contracts";
+import type { ProjectDesign } from "../src/types.js";
 import { toCellDiagramProject } from "../src/cell-diagram.js";
 
 const DESIGN: ProjectDesign = {

@@ -18,7 +18,7 @@
 
 /**
  * design.json projection — the frontmatter-authored design bundle, folded
- * into the derived machine view (`ProjectDesign` in @aep/contracts) that the
+ * into the derived machine view (`ProjectDesign` in types.ts) that the
  * cell diagram, coding-agent dispatch, and task generation consume. Pure:
  * files in, JSON out; nobody authors this artifact and the agent never sees
  * it (like the compiled .excalidraw, it is excluded from snapshots). In
@@ -27,7 +27,7 @@
  */
 
 import { parse as parseYaml } from "yaml";
-import type { ProjectDesign, ProjectDesignComponent, ProjectDesignConnection } from "@aep/contracts";
+import type { ProjectDesign, ProjectDesignComponent, ProjectDesignConnection } from "./types.js";
 
 // Same frontmatter grammar as the agents service (bundle.ts) — a local copy
 // keeps this package dependency-light; the shape is trivial and stable
