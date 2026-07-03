@@ -121,3 +121,70 @@ test("setFrontmatterField: file without frontmatter returns NO_FRONTMATTER", () 
   const b = fresh();
   assert.equal(expectErr(b.setFrontmatterField(OPENAPI, "x", "y")).code, "NO_FRONTMATTER");
 });
+
+// --- component design.json validation (authored JSON, schema-gated) ---------
+
+const CD_PATH = "specs/design/components/expense-api/design.json";
+const CD_VALID = JSON.stringify({
+  name: "expense-api",
+  type: "service",
+  version: "0.1.0",
+  language: "Go",
+  buildpack: "docker",
+  appPath: "expense-api",
+  entrypoint: "deployment/service",
+  exposure: "internet",
+  connections: [{ to: "postgres", type: "datastore" }],
+  description: "Owns claims and approvals.",
+});
+
+test("addFile: a valid component design.json is accepted", () => {
+  const b = fresh();
+  assert.equal(expectOk(b.addFile(CD_PATH, CD_VALID)).status, "applied");
+});
+
+test("addFile: malformed JSON at a component design.json path returns INVALID_JSON, no write", () => {
+  const b = fresh();
+  const r = expectErr(b.addFile(CD_PATH, '{ "name": "expense-api", '));
+  assert.equal(r.code, "INVALID_JSON");
+  assert.equal(b.has(CD_PATH), false);
+});
+
+test("addFile: schema-violating design.json returns SCHEMA_VIOLATION naming the problems", () => {
+  const b = fresh();
+  const bad = JSON.parse(CD_VALID) as Record<string, unknown>;
+  delete bad.type;
+  bad.exposure = "public"; // not internet|intranet
+  const r = expectErr(b.addFile(CD_PATH, JSON.stringify(bad)));
+  assert.equal(r.code, "SCHEMA_VIOLATION");
+  assert.match(r.message, /type/);
+  assert.match(r.message, /exposure/);
+  assert.equal(b.has(CD_PATH), false);
+});
+
+test("addFile: design.json name must match the component directory", () => {
+  const b = fresh();
+  const bad = { ...(JSON.parse(CD_VALID) as Record<string, unknown>), name: "other-name" };
+  const r = expectErr(b.addFile(CD_PATH, JSON.stringify(bad)));
+  assert.equal(r.code, "SCHEMA_VIOLATION");
+  assert.match(r.message, /name.*expense-api/);
+});
+
+test("editFile: an edit that breaks a design.json returns INVALID_JSON and leaves it unchanged", () => {
+  const b = fresh();
+  expectOk(b.addFile(CD_PATH, CD_VALID));
+  const r = expectErr(b.editFile(CD_PATH, '"type":"service"', '"type":"service",,'));
+  assert.equal(r.code, "INVALID_JSON");
+  assert.equal(b.read(CD_PATH), CD_VALID); // byte-for-byte untouched
+});
+
+test("addFile: ordinary .json files elsewhere are NOT schema-gated", () => {
+  const b = fresh();
+  assert.equal(expectOk(b.addFile("specs/notes/random.json", '{"anything": true}')).status, "applied");
+});
+
+test("addFile: any component type string is accepted at design time (support-gating is a later phase)", () => {
+  const b = fresh();
+  const task = { ...(JSON.parse(CD_VALID) as Record<string, unknown>), type: "scheduled-task" };
+  assert.equal(expectOk(b.addFile(CD_PATH, JSON.stringify(task))).status, "applied");
+});

@@ -46,3 +46,19 @@ test("catalog NEVER inlines skill bodies (progressive disclosure)", () => {
   assert.doesNotMatch(out, /BODY A/);
   assert.doesNotMatch(out, /secret guidance/);
 });
+
+test("catalog mentions loadSkillReference only when a skill carries references", () => {
+  const withRefs: Skill[] = [
+    ...SKILLS,
+    {
+      name: "c-skill",
+      description: "does C",
+      content: "see references/deep.md",
+      references: { "references/deep.md": "REF BODY — never inlined" },
+    },
+  ];
+  const out = buildInstructions(withRefs);
+  assert.match(out, /loadSkillReference/);
+  assert.doesNotMatch(out, /REF BODY/); // reference bodies are third-level, never in the prompt
+  assert.doesNotMatch(buildInstructions(SKILLS), /loadSkillReference/); // refs-free library = today's catalog
+});

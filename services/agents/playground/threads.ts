@@ -74,6 +74,10 @@ function walk(dir: string, rel: string, out: Record<string, string>): void {
       continue;
     }
     if (!e.isFile()) continue;
+    // Derived artifacts (compiled .excalidraw, projected *.gen.json) never
+    // enter the bundle: the agent must not see or edit them, and inlining
+    // generated JSON into every turn's prompt would be pure token waste.
+    if (e.name.endsWith(".excalidraw") || e.name.endsWith(".gen.json")) continue;
     const buf = readFileSync(abs);
     if (buf.includes(0)) continue; // a NUL byte → binary; the agent only edits text
     out[key] = buf.toString("utf8");

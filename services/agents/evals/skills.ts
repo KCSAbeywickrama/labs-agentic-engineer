@@ -65,9 +65,28 @@ export function loadRepoSkills(skillsDir: string): Skill[] {
     .sort((a, b) => a.name.localeCompare(b.name))
     .flatMap((d) => {
       try {
-        return [parseSkill(d.name, readFileSync(join(skillsDir, d.name, "SKILL.md"), "utf8"))];
+        const skill = parseSkill(d.name, readFileSync(join(skillsDir, d.name, "SKILL.md"), "utf8"));
+        const references = loadReferences(join(skillsDir, d.name));
+        return [references ? { ...skill, references } : skill];
       } catch {
         return []; // a directory without a readable SKILL.md is simply not a skill
       }
     });
+}
+
+/**
+ * Read `references/*.md` for one skill dir into a path→body map keyed
+ * `references/<file>` (the wire shape `loadSkillReference` addresses).
+ * Returns undefined — not an empty map — when the dir is absent or empty, so a
+ * references-free skill stays byte-identical to today's `Skill`.
+ */
+function loadReferences(skillDir: string): Record<string, string> | undefined {
+  const refsDir = join(skillDir, "references");
+  if (!existsSync(refsDir)) return undefined;
+  const out: Record<string, string> = {};
+  for (const f of readdirSync(refsDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!f.isFile() || !f.name.endsWith(".md")) continue;
+    out[`references/${f.name}`] = readFileSync(join(refsDir, f.name), "utf8");
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
