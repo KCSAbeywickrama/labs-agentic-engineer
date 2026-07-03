@@ -1,5 +1,6 @@
 import type { components } from "../../generated/aep-api";
 
+type Project = components["schemas"]["Project"];
 type ProjectList = components["schemas"]["ProjectList"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
@@ -10,20 +11,92 @@ export type ProjectsScenario = "empty" | "some" | "error";
 
 export const emptyProjects: ProjectList = { items: [] };
 
-export const someProjects: ProjectList = {
-  items: [
-    {
-      name: "demo-shop",
-      displayName: "Demo Shop",
-      description: "Sample project seeded by the mock layer",
-      status: "active",
-    },
-  ],
-};
+export const seedProjects: Project[] = [
+  {
+    name: "demo-shop",
+    displayName: "Demo Shop",
+    description: "Sample storefront seeded by the mock layer",
+    status: "active",
+    createdAt: "2026-06-12T09:30:00Z",
+  },
+  {
+    name: "gym-tracker",
+    displayName: "Gym Tracker",
+    description: "Track workouts, sets, and progress over time",
+    status: "active",
+    createdAt: "2026-06-20T14:05:00Z",
+  },
+  {
+    name: "invoice-hub",
+    displayName: "Invoice Hub",
+    description: "Small-business invoicing with PDF export",
+    status: "active",
+    createdAt: "2026-07-01T08:15:00Z",
+  },
+  {
+    name: "salon-booking",
+    displayName: "Salon Booking",
+    description: "Appointments with staff calendars and SMS reminders",
+    status: "active",
+    createdAt: "2026-06-25T10:00:00Z",
+  },
+  {
+    name: "pet-adoption",
+    displayName: "Pet Adoption",
+    description: "Browse shelters and apply to adopt",
+    status: "active",
+    createdAt: "2026-06-18T16:45:00Z",
+  },
+  {
+    name: "recipe-box",
+    displayName: "Recipe Box",
+    description: "Save, tag, and share family recipes",
+    status: "active",
+    createdAt: "2026-06-15T11:20:00Z",
+  },
+  {
+    name: "event-radar",
+    displayName: "Event Radar",
+    description: "Local events with reminders and friends' plans",
+    status: "active",
+    createdAt: "2026-06-22T09:10:00Z",
+  },
+  {
+    name: "fleet-watch",
+    displayName: "Fleet Watch",
+    description: "Delivery fleet tracking and route history",
+    status: "active",
+    createdAt: "2026-06-28T13:40:00Z",
+  },
+  {
+    name: "study-buddy",
+    displayName: "Study Buddy",
+    description: "Flashcards and spaced-repetition study plans",
+    status: "active",
+    createdAt: "2026-06-30T18:05:00Z",
+  },
+];
+
+// Mock server-side page size for the projects list (View more pagination).
+export const PROJECTS_PAGE_SIZE = 6;
 
 export const projectsError: ErrorModel = {
   type: "about:blank",
   status: 500,
   title: "Internal Server Error",
   detail: "Mock error scenario for the projects list",
+};
+
+export const duplicateProjectError: ErrorModel = {
+  type: "about:blank",
+  status: 409,
+  title: "Conflict",
+  detail: "A project with this name already exists",
+};
+
+// The connected GitHub org surfaced by get-github-status; the create flow
+// derives the repo-URL preview from it (issue #72 confirms the field name).
+export const githubStatus = {
+  connected: true,
+  org: "acme-dev",
 };

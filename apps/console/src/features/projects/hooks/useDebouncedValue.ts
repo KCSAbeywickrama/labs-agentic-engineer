@@ -16,14 +16,15 @@
  * under the License.
  */
 
-export const projectKeys = {
-  all: ["projects"] as const,
-  lists: () => [...projectKeys.all, "list"] as const,
-  list: (search: string) => [...projectKeys.lists(), { search }] as const,
-  details: () => [...projectKeys.all, "detail"] as const,
-  detail: (name: string) => [...projectKeys.details(), name] as const,
-};
+import { useEffect, useState } from "react";
 
-export const githubKeys = {
-  status: ["github", "status"] as const,
-};
+export function useDebouncedValue<T>(value: T, delayMs = 300): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
+}

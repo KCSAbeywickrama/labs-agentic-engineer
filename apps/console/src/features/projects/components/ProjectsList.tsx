@@ -16,79 +16,126 @@
  * under the License.
  */
 
+import { useState } from "react";
 import {
   Alert,
   Box,
   Button,
+  Card,
+  CardActionArea,
+  CardContent,
   CircularProgress,
-  List,
-  ListItem,
-  ListItemText,
+  Grid,
   PageContent,
   PageTitle,
+  SearchBar,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Folder, Plus } from "@wso2/oxygen-ui-icons-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import type { components } from "../../../generated/aep-api";
 import { useProjectsList } from "../api/queries";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 
-function ProjectsBody() {
-  const { data, isPending, isError, error, refetch } = useProjectsList();
+type Project = components["schemas"]["Project"];
 
-  if (isPending) {
-    return (
-      <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-        <CircularProgress aria-label="Loading projects" />
-      </Box>
-    );
-  }
+function formatCreatedAt(createdAt?: string): string | null {
+  if (!createdAt) return null;
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return `Created ${date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })}`;
+}
 
-  if (isError) {
-    return (
-      <Alert
-        severity="error"
-        action={<Button onClick={() => void refetch()}>Retry</Button>}
-      >
-        Failed to load projects
-        {error instanceof Error && error.message ? `: ${error.message}` : ""}
-      </Alert>
-    );
-  }
-
-  const items = data.items ?? [];
-
-  if (items.length === 0) {
-    // PRD: home = projects list; empty state prompts "start building".
-    return (
-      <Box sx={{ textAlign: "center", py: 8 }}>
-        <Folder size={48} style={{ opacity: 0.3, marginBottom: 16 }} />
-        <Typography variant="h6" gutterBottom>
-          No projects yet
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Start building — give a requirement and AEP turns it into a project.
-        </Typography>
-        <Button variant="contained" startIcon={<Plus size={20} />} disabled>
-          Start building
-        </Button>
-      </Box>
-    );
-  }
+function ProjectCard({ project }: { project: Project }) {
+  const navigate = useNavigate();
+  const created = formatCreatedAt(project.createdAt);
 
   return (
-    <List>
-      {items.map((project) => (
-        <ListItem key={project.name}>
-          <ListItemText
-            primary={project.displayName ?? project.name}
-            secondary={project.description}
-          />
-        </ListItem>
-      ))}
-    </List>
+    <Card variant="outlined" sx={{ height: "100%" }}>
+      <CardActionArea
+        sx={{ height: "100%", alignItems: "stretch" }}
+        onClick={() =>
+          void navigate({
+            to: "/projects/$projectName",
+            params: { projectName: project.name },
+          })
+        }
+      >
+        <CardContent
+          sx={{ display: "flex", flexDirection: "column", height: "100%" }}
+        >
+          <Typography variant="h6" gutterBottom>
+            {project.displayName ?? project.name}
+          </Typography>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{
+              flexGrow: 1,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {project.description}
+          </Typography>
+          {created && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5 }}>
+              {created}
+            </Typography>
+          )}
+        </CardContent>
+      </CardActionArea>
+    </Card>
+  );
+}
+
+function EmptyState() {
+  return (
+    <Box sx={{ textAlign: "center", py: 8 }}>
+      <Folder size={48} style={{ opacity: 0.3, marginBottom: 16 }} />
+      <Typography variant="h6" gutterBottom>
+        No projects yet
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Tell AEP what you want to build and it becomes your first project.
+      </Typography>
+      <Button
+        variant="contained"
+        startIcon={<Plus size={20} />}
+        component={Link}
+        to="/projects/new"
+      >
+        Create project
+      </Button>
+    </Box>
   );
 }
 
 export function ProjectsList() {
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const {
+    data,
+    isPending,
+    isError,
+    error,
+    refetch,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useProjectsList(debouncedSearch);
+
+  const items = data?.pages.flatMap((page) => page.items ?? []) ?? [];
+  // True-empty (no projects at all, not a fruitless search) hides the page
+  // action and centers the create button instead — issue #71 decision.
+  const isTrueEmpty = !isPending && !isError && items.length === 0 && !debouncedSearch;
+
   return (
     <PageContent>
       <PageTitle>
@@ -96,13 +143,71 @@ export function ProjectsList() {
         <PageTitle.SubHeader>
           Everything AEP is building for you, one project per app.
         </PageTitle.SubHeader>
-        <PageTitle.Actions>
-          <Button variant="contained" startIcon={<Plus size={20} />} disabled>
-            Start building
-          </Button>
-        </PageTitle.Actions>
+        {!isTrueEmpty && (
+          <PageTitle.Actions>
+            <Button
+              variant="contained"
+              startIcon={<Plus size={20} />}
+              component={Link}
+              to="/projects/new"
+            >
+              Create project
+            </Button>
+          </PageTitle.Actions>
+        )}
       </PageTitle>
-      <ProjectsBody />
+
+      {isPending ? (
+        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
+          <CircularProgress aria-label="Loading projects" />
+        </Box>
+      ) : isError ? (
+        <Alert
+          severity="error"
+          action={<Button onClick={() => void refetch()}>Retry</Button>}
+        >
+          Failed to load projects
+          {error instanceof Error && error.message ? `: ${error.message}` : ""}
+        </Alert>
+      ) : isTrueEmpty ? (
+        <EmptyState />
+      ) : (
+        <>
+          <Box sx={{ maxWidth: 420, mb: 3 }}>
+            <SearchBar
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search projects..."
+            />
+          </Box>
+          {items.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
+              No projects match “{debouncedSearch}”.
+            </Typography>
+          ) : (
+            <>
+              <Grid container spacing={3}>
+                {items.map((project) => (
+                  <Grid key={project.name} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+                    <ProjectCard project={project} />
+                  </Grid>
+                ))}
+              </Grid>
+              {hasNextPage && (
+                <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => void fetchNextPage()}
+                    loading={isFetchingNextPage}
+                  >
+                    View more
+                  </Button>
+                </Box>
+              )}
+            </>
+          )}
+        </>
+      )}
     </PageContent>
   );
 }
