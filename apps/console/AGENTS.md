@@ -1,7 +1,13 @@
-# AGENTS.md — apps/aep-console (`@aep/aep-console`)
+# AGENTS.md — apps/console (`@aep/console`)
 
 React SPA console for AEP. Vite + TypeScript + Oxygen UI, talking to the
 `aep-api` BFF through the generated OpenAPI client.
+
+> [!IMPORTANT]
+> All UI in this project must be built with WSO2 Oxygen UI. For ANY React UI work —
+> setup, components, pages, layouts, forms, tables, dialogs, theming — consult the
+> `oxygen-ui` skill before writing or editing UI code, even when the request does not
+> mention Oxygen UI by name.
 
 **Read before working on any feature:**
 
@@ -16,17 +22,23 @@ React SPA console for AEP. Vite + TypeScript + Oxygen UI, talking to the
 ## Layout
 
 - `features/<feature>/{components,hooks,api,routes}` + small shared `ui/`.
+- `src/layouts/` — the app shell (`AppLayout`, per the oxygen-ui skill's
+  canonical structure); pages render `PageContent > PageTitle > body`.
 - `src/mocks/` — MSW handlers + fixtures, typed against `@aep/contracts`
   generated types. Dev-only; excluded from production builds.
 - Request/response types come from the generated OpenAPI client — never
   redefined locally.
 - Runtime config via `window._env_` (BFF-owned `env-config.js`).
 
-## Feature docs
+## Feature docs (issue-driven — ADR-0001)
 
-- `design/features/<NNN>-<slug>/feature.md` — intent, written at feature start.
-- `design/features/<NNN>-<slug>/decisions.md` — grilling outcomes; the record
-  future sessions load to understand why things are the way they are.
-- `design/decisions/` — post-ship ADRs (repo-wide convention: final state).
+- **A feature is a GitHub issue** (labels `console` + `feature`): body = the
+  feature doc, grilling decisions land as a comment. Requires `gh` auth.
+- **`design/decisions/` ADRs are the current truth** — read them FIRST for
+  context, then `gh issue list --repo wso2/labs-agentic-engineer --label
+  console --label feature` (closed issues are frozen history, never edited;
+  issues live upstream, not in forks).
+- Durable decisions graduate from issue-comments to ADRs (rule in
+  `design/development-flow.md` step 4).
 
 Commands are the uniform verbs from the root `Makefile` (`make build`, etc.).

@@ -1,25 +1,34 @@
-# AEP Console
+# Console
 
 The web frontend of the Agentic Engineer Platform: a React + TypeScript
 single-page app (Vite + Oxygen UI) talking to the `aep-api` BFF through a
 generated OpenAPI client. See [`PRD.md`](PRD.md) for what it does and for
 whom.
 
-> **Status:** docs-first. The development cycle and design docs are in place;
-> the app scaffold lands with the first feature. A quickstart section will be
-> added here when `make dev` can actually start the console.
+## Quickstart
+
+```bash
+make install                                   # pnpm install + go work sync (repo root)
+make gen                                       # generated API types + route tree
+VITE_API_MODE=mock pnpm --filter @aep/console dev   # http://localhost:8090, no backend needed
+```
+
+Mock scenarios: `localStorage.setItem('aep:mock:projects', 'empty' | 'some' | 'error')`.
+Against a real BFF: `pnpm --filter @aep/console dev` (proxies `/aep-api-service`
+to `API_PROXY_TARGET`, default `http://localhost:9090`).
 
 ## How development works
 
-Console features are built in **Claude Code sessions** following a fixed
-cycle — feature doc → grilling interview → recorded decisions → contract →
-mocks → UI → ship. Don't freestyle a feature; start the cycle:
+Console features are built in **Claude Code sessions** following a fixed,
+issue-driven cycle — feature issue → grilling interview → decisions comment
+(durable ones become ADRs) → contract → mocks → UI → ship. Don't freestyle a
+feature; start the cycle:
 
 1. Read [`PRD.md`](PRD.md) for the current product picture.
-2. Copy `design/features/_template/` to `design/features/<NNN>-<slug>/` and
-   fill in `feature.md`.
-3. In a Claude Code session, run `/grill-me` on it and follow
-   [`design/development-flow.md`](design/development-flow.md) from there.
+2. Open a GitHub issue (labels `console` + `feature`) using the body template
+   in [`design/development-flow.md`](design/development-flow.md).
+3. In a Claude Code session, run `/grill-me` on it and follow the flow from
+   there.
 
 ## Docs map
 
@@ -31,7 +40,7 @@ Start at the top, go down as needed:
 | [`design/development-flow.md`](design/development-flow.md) | How a feature goes from idea to shipped |
 | [`design/design-system.md`](design/design-system.md) | How things should look; which skills to use |
 | [`design/api-guidelines.md`](design/api-guidelines.md) | How to call the BFF; the mock layer; error handling |
-| [`design/features/<NNN>-*/`](design/features/) | Why each feature is the way it is (`feature.md` + `decisions.md`) |
+| [`design/decisions/`](design/decisions/) | ADRs — the durable conventions and why (feature history lives in GitHub issues) |
 | [`AGENTS.md`](AGENTS.md) | Entry point for AI sessions (same docs, terser) |
 
 ## Commands

@@ -23,6 +23,10 @@ Never pull raw MUI or another component library alongside Oxygen UI.
 - **`oxygen-ui` skill** — the authority on Oxygen UI usage patterns
   (components, theming, dos/don'ts). Consult it for any Oxygen UI work; the
   conventions below are the console-specific layer on top, not a replacement.
+  Installed at `.claude/skills/oxygen-ui/`; its `references/` (app-structure,
+  components, patterns, theming, migration) and `sample/` canonical app source
+  are the primary material — read them before scaffolding pages or reaching for
+  a component.
 - **`dataviz` skill** — read it **before** writing any chart, dashboard, stat
   tile, or visualization code. Non-optional for anything chart-shaped.
 - **`grill-me` skill** — for refining feature experience docs (see
