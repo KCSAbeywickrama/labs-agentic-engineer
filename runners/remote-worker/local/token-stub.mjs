@@ -29,7 +29,10 @@
 //
 // SECURITY: every response carries a real GitHub PAT. Keep the bind
 // address on loopback (the default) and never expose this beyond your
-// machine.
+// machine. When STUB_BEARER is set (run-local.sh always sets it to the
+// per-run AEP_BEARER), callers must present that exact
+// `Authorization: Bearer` value — the runner already sends it on every
+// refresh call, so this costs nothing and de-fangs a non-loopback bind.
 
 import http from "node:http";
 
@@ -39,9 +42,15 @@ if (pat === "") {
   process.exit(1);
 }
 const port = Number(process.env.STUB_PORT || 8377);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error(`[token-stub] STUB_PORT is not a valid port: ${process.env.STUB_PORT}`);
+  process.exit(1);
+}
 const bind = process.env.STUB_BIND || "127.0.0.1";
+const expectedBearer = process.env.STUB_BEARER ?? "";
 
 const REFRESH_RE = /^\/internal\/v1\/tasks\/([^/]+)\/credentials\/refresh$/;
+const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -52,15 +61,30 @@ const server = http.createServer((req, res) => {
   const m = req.method === "POST" ? REFRESH_RE.exec(url.pathname) : null;
   if (!m) {
     console.error(`[token-stub] 404 ${req.method} ${url.pathname}`);
-    res
-      .writeHead(404, { "Content-Type": "application/json" })
-      .end('{"error":"not found"}');
+    res.writeHead(404, JSON_HEADERS).end('{"error":"not found"}');
     return;
   }
-  const taskId = decodeURIComponent(m[1]);
+  if (expectedBearer !== "" && req.headers.authorization !== `Bearer ${expectedBearer}`) {
+    console.error(`[token-stub] 401 bad or missing bearer for ${url.pathname}`);
+    res.writeHead(401, JSON_HEADERS).end('{"error":"unauthorized"}');
+    return;
+  }
+  let taskId;
+  try {
+    taskId = decodeURIComponent(m[1]);
+  } catch {
+    console.error(`[token-stub] 400 malformed task id segment`);
+    res.writeHead(400, JSON_HEADERS).end('{"error":"malformed task id"}');
+    return;
+  }
   console.error(`[token-stub] 200 refresh for task ${taskId}`);
-  res.writeHead(200, { "Content-Type": "application/json" });
+  res.writeHead(200, JSON_HEADERS);
   res.end(JSON.stringify({ token: pat, taskId }));
+});
+
+server.on("error", (err) => {
+  console.error(`[token-stub] server error: ${err.message}`);
+  process.exit(1);
 });
 
 server.listen(port, bind, () => {

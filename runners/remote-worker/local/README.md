@@ -22,6 +22,7 @@ container, so skill edits are live on the next run without a rebuild.
 
 ```bash
 colima start                        # or however you run the docker daemon
+cd runners/remote-worker/local
 cp env.local.example .env.local     # fill in the four required values
 ./run-local.sh
 ```
@@ -45,8 +46,10 @@ under `workspace/<org>/<project>/<taskId>/` for inspection.
 - The agent runs with `bypassPermissions` — that is why the harness only
   runs it containerized, never bare on the host.
 - Scope `GITHUB_PAT` to a single throwaway test repo (fine-grained PAT).
-- The stub returns the PAT to any caller; keep `STUB_BIND=127.0.0.1`
-  (default). On a Linux host `host-gateway` cannot reach loopback, so you
-  would need `STUB_BIND=0.0.0.0` — accept that trade-off consciously.
+- The stub only releases the PAT to callers presenting the per-run
+  `AEP_BEARER` (a fresh random value each run, passed automatically as
+  `STUB_BEARER`). Still keep `STUB_BIND=127.0.0.1` (default); on a Linux
+  host `host-gateway` cannot reach loopback, so you would need
+  `STUB_BIND=0.0.0.0` — the bearer check is what keeps that tolerable.
 - `.env.local` and `workspace/` are gitignored; `local/` is dockerignored
   so secrets never enter the image build context.
