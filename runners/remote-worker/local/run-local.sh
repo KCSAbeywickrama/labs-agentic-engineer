@@ -50,13 +50,17 @@ for v in ANTHROPIC_API_KEY GITHUB_PAT AEP_REPO_URL AEP_PROMPT; do
   fi
 done
 
-export AEP_TASK_ID="${AEP_TASK_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+# node (required by the stub anyway) generates UUIDs — uuidgen is not
+# universally present. The bearer defaults to a fresh random value per
+# run; the stub requires it on every refresh call, so the PAT is never
+# handed out unauthenticated even if STUB_BIND is widened.
+export AEP_TASK_ID="${AEP_TASK_ID:-$(node -e 'console.log(crypto.randomUUID())')}"
 export AEP_ORG_ID="${AEP_ORG_ID:-local-org}"
 export AEP_PROJECT_ID="${AEP_PROJECT_ID:-local-project}"
 export AEP_COMPONENT_NAME="${AEP_COMPONENT_NAME:-demo-component}"
 export AEP_IDENTITY_NAME="${AEP_IDENTITY_NAME:-AEP Local Agent}"
 export AEP_IDENTITY_EMAIL="${AEP_IDENTITY_EMAIL:-aep-local@users.noreply.github.com}"
-export AEP_BEARER="${AEP_BEARER:-local-dev-bearer}"
+export AEP_BEARER="${AEP_BEARER:-$(node -e 'console.log(crypto.randomUUID())')}"
 STUB_PORT="${STUB_PORT:-8377}"
 STUB_BIND="${STUB_BIND:-127.0.0.1}"
 IMAGE_TAG="${IMAGE_TAG:-aep-remote-worker:local}"
@@ -72,6 +76,7 @@ fi
 
 echo ">> starting token stub on ${STUB_BIND}:${STUB_PORT}"
 GITHUB_PAT="$GITHUB_PAT" STUB_PORT="$STUB_PORT" STUB_BIND="$STUB_BIND" \
+  STUB_BEARER="$AEP_BEARER" \
   node "$SCRIPT_DIR/token-stub.mjs" &
 STUB_PID=$!
 trap 'kill "$STUB_PID" 2>/dev/null || true' EXIT
