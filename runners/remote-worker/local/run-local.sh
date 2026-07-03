@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Run the coding-agent runner as a local one-shot container, standing in
+# for the platform dispatch flow (BFF -> Argo -> pod). A loopback token
+# stub (token-stub.mjs) plays the git-service credentials/refresh
+# endpoint; everything else is the same code path as a cluster run.
+#
+# Usage:
+#   cp env.local.example .env.local    # then fill in
+#   ./run-local.sh [path/to/env-file]
+#
+# The plugin/ dir is bind-mounted read-only over /app/plugin, so skill
+# edits are live without an image rebuild (mirrors the k3d dev flow).
+# Exit code mirrors the runner: 0 success, 1 agent failure, 2 provisioning.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKER_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="${1:-$SCRIPT_DIR/.env.local}"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "env file not found: $ENV_FILE (cp env.local.example .env.local and fill it in)" >&2
+  exit 2
+fi
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+
+for v in ANTHROPIC_API_KEY GITHUB_PAT AEP_REPO_URL AEP_PROMPT; do
+  if [ -z "${!v:-}" ]; then
+    echo "missing required var in $ENV_FILE: $v" >&2
+    exit 2
+  fi
+done
+
+export AEP_TASK_ID="${AEP_TASK_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+export AEP_ORG_ID="${AEP_ORG_ID:-local-org}"
+export AEP_PROJECT_ID="${AEP_PROJECT_ID:-local-project}"
+export AEP_COMPONENT_NAME="${AEP_COMPONENT_NAME:-demo-component}"
+export AEP_IDENTITY_NAME="${AEP_IDENTITY_NAME:-AEP Local Agent}"
+export AEP_IDENTITY_EMAIL="${AEP_IDENTITY_EMAIL:-aep-local@users.noreply.github.com}"
+export AEP_BEARER="${AEP_BEARER:-local-dev-bearer}"
+STUB_PORT="${STUB_PORT:-8377}"
+STUB_BIND="${STUB_BIND:-127.0.0.1}"
+IMAGE_TAG="${IMAGE_TAG:-aep-remote-worker:local}"
+# The container reaches the host-side stub via host.docker.internal.
+# AEP_PLATFORM_URL stays unset: oneshot.ts then skips the per-task skills
+# pull and credhelper/gh fall back to AEP_GIT_SERVICE_URL for refreshes.
+export AEP_GIT_SERVICE_URL="http://host.docker.internal:${STUB_PORT}"
+
+if ! docker info >/dev/null 2>&1; then
+  echo "docker daemon not reachable — start it first (e.g. 'colima start')" >&2
+  exit 2
+fi
+
+echo ">> starting token stub on ${STUB_BIND}:${STUB_PORT}"
+GITHUB_PAT="$GITHUB_PAT" STUB_PORT="$STUB_PORT" STUB_BIND="$STUB_BIND" \
+  node "$SCRIPT_DIR/token-stub.mjs" &
+STUB_PID=$!
+trap 'kill "$STUB_PID" 2>/dev/null || true' EXIT
+
+for _ in $(seq 1 20); do
+  curl -sf "http://127.0.0.1:${STUB_PORT}/healthz" >/dev/null 2>&1 && break
+  sleep 0.25
+done
+if ! curl -sf "http://127.0.0.1:${STUB_PORT}/healthz" >/dev/null 2>&1; then
+  echo "token stub failed to start on port ${STUB_PORT}" >&2
+  exit 2
+fi
+
+echo ">> building runner image ${IMAGE_TAG}"
+docker build -t "$IMAGE_TAG" "$WORKER_DIR"
+
+mkdir -p "$SCRIPT_DIR/workspace"
+
+echo ">> dispatching task ${AEP_TASK_ID} on ${AEP_REPO_URL}"
+EXIT_CODE=0
+docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -v "$SCRIPT_DIR/workspace:/home/aep/aep-workspace" \
+  -v "$WORKER_DIR/plugin:/app/plugin:ro" \
+  -e ANTHROPIC_API_KEY \
+  -e AEP_TASK_ID -e AEP_ORG_ID -e AEP_PROJECT_ID -e AEP_COMPONENT_NAME \
+  -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e AEP_GIT_SERVICE_URL \
+  -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL \
+  "$IMAGE_TAG" || EXIT_CODE=$?
+
+WS="$SCRIPT_DIR/workspace/$AEP_ORG_ID/$AEP_PROJECT_ID/$AEP_TASK_ID"
+case "$EXIT_CODE" in
+  0) STATUS="success" ;;
+  1) STATUS="agent reported failure" ;;
+  2) STATUS="provisioning error (agent never ran)" ;;
+  *) STATUS="unexpected exit" ;;
+esac
+echo ""
+echo ">> runner finished: ${STATUS} (exit code ${EXIT_CODE})"
+echo ">> workspace kept at: $WS"
+echo ">> full SDK transcript: $WS/.logs/claude.log"
+exit "$EXIT_CODE"
