@@ -50,7 +50,7 @@ PRD.md ──(context)──▶ feature issue ──▶ /grill-me ──▶ deci
 6. **Mark it in flight.** One line + issue link in the PRD's **In flight**
    section.
 
-7. **Build.** Contract diff in `packages/contracts/aep-api/openapi.yaml` →
+7. **Build.** Contract diff in `packages/contracts/api/v1/openapi.yaml` →
    `make gen` → typed MSW mocks (cover the scenarios from the decisions
    comment) → UI in mock mode (`VITE_API_MODE=mock`). Follow
    `design-system.md` and `api-guidelines.md`.

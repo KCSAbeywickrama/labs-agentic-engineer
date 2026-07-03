@@ -32,5 +32,7 @@ const auth401: Middleware = {
   },
 };
 
-export const client = createClient<paths>({ baseUrl: env.apiBaseUrl });
+// The contract's paths are unprefixed; its `servers` entry is /api/v1, which
+// openapi-fetch does not apply automatically — so it lives in the baseUrl.
+export const client = createClient<paths>({ baseUrl: `${env.apiBaseUrl}/api/v1` });
 client.use(auth401);

@@ -22,6 +22,7 @@ export const someProjects: ProjectList = {
 };
 
 export const projectsError: ErrorModel = {
+  type: "about:blank",
   status: 500,
   title: "Internal Server Error",
   detail: "Mock error scenario for the projects list",

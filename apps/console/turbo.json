@@ -4,7 +4,7 @@
   "tasks": {
     "gen": {
       "inputs": [
-        "$TURBO_ROOT$/packages/contracts/aep-api/openapi.yaml",
+        "$TURBO_ROOT$/packages/contracts/api/v1/openapi.yaml",
         "src/routes/**",
         "tsr.config.json"
       ]

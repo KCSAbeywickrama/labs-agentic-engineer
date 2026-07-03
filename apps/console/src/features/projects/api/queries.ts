@@ -24,7 +24,7 @@ export function useProjectsList() {
   return useQuery({
     queryKey: projectKeys.lists(),
     queryFn: async () => {
-      const { data, error } = await client.GET("/api/v1/projects");
+      const { data, error } = await client.GET("/projects");
       if (error) {
         throw new Error(error.detail ?? error.title ?? "Failed to load projects");
       }
