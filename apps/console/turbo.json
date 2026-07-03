@@ -1,0 +1,13 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "gen": {
+      "inputs": [
+        "$TURBO_ROOT$/packages/contracts/aep-api/openapi.yaml",
+        "src/routes/**",
+        "tsr.config.json"
+      ]
+    }
+  }
+}

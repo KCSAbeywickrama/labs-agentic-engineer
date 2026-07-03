@@ -1,0 +1,38 @@
+{
+  "name": "@aep/console",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "msw": {
+    "workerDirectory": ["public"]
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "echo \"@aep/console: no tests yet\"",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "gen": "openapi-typescript ../../packages/contracts/aep-api/openapi.yaml -o src/generated/aep-api.d.ts && tsr generate"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.90.5",
+    "@tanstack/react-router": "1.170.17",
+    "@wso2/oxygen-ui": "0.11.0",
+    "@wso2/oxygen-ui-icons-react": "0.11.0",
+    "openapi-fetch": "0.14.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tanstack/router-cli": "1.167.18",
+    "@tanstack/router-plugin": "1.168.19",
+    "@types/react": "19.1.6",
+    "@types/react-dom": "19.0.2",
+    "@vitejs/plugin-react-swc": "4.2.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "msw": "^2.12.0",
+    "openapi-typescript": "^7.4.2",
+    "typescript": "5.9.3",
+    "vite": "7.2.2"
+  }
+}
