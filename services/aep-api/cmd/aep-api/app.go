@@ -697,6 +697,7 @@ func buildApp(cfg config.Config, db *gorm.DB) (*App, error) {
 		RequirementsSvc:     requirementsService,
 		RequirementsChatSvc: requirementsChatService,
 		CollabRepo:          repoService,
+		IssueSvc:            issueService,
 		DesignSvc:           designService,
 		TaskSvc:             taskService,
 		TaskDispatcher:      dispatchSvc,

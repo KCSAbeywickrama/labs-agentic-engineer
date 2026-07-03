@@ -36,6 +36,11 @@ import (
 type TaskDispatcher interface {
 	DispatchTasks(ctx context.Context, orgID, projectID string) ([]contracts.DispatchResult, error)
 	RetryTask(ctx context.Context, taskID string) (contracts.DispatchResult, error)
+	// DispatchFromIssue creates a task bound to an ad-hoc issue (not part of
+	// the generation/batch pipeline) and dispatches it immediately. Backs
+	// the dispatch-task-from-issue operation used by external handoffs (see
+	// codingagent.DispatchService.DispatchFromIssue).
+	DispatchFromIssue(ctx context.Context, orgID, projectID, componentName, title string, issueNumber int, issueURL string) (contracts.DispatchResult, error)
 }
 
 // ProgressReader is the /progress/* read surface the task controller invokes.

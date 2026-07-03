@@ -49,6 +49,7 @@ type HumaDeps struct {
 	RequirementsSvc     requirements.RequirementsService
 	RequirementsChatSvc requirements.RequirementsChatService
 	CollabRepo          gitrepo.RepoService
+	IssueSvc            gitrepo.IssueService
 	DesignSvc           design.DesignService
 	TaskSvc             task.TaskService
 	TaskDispatcher      task.TaskDispatcher
@@ -80,6 +81,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	requirements.RegisterRequirements(api, d.RequirementsSvc)
 	requirements.RegisterRequirementsChat(api, d.RequirementsChatSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
+	gitrepo.RegisterIssue(api, d.IssueSvc)
 	design.RegisterDesign(api, d.DesignSvc)
 	task.RegisterTask(api, d.TaskSvc, d.TaskDispatcher, d.TaskProgress, d.ComponentClient)
 	task.RegisterBoard(api, d.BoardSvc)

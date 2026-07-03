@@ -68,6 +68,23 @@ type regenerateTaskBodyInput struct {
 	TaskID      string `path:"taskId" doc:"ComponentTask UUID"`
 }
 
+// DispatchFromIssueRequest is the body for dispatch-task-from-issue: the
+// caller has already created the GitHub issue (e.g. via gitrepo's
+// create-issue operation) and supplies its number/url here so a task can be
+// bound to it and dispatched in one step.
+type DispatchFromIssueRequest struct {
+	ComponentName string `json:"componentName" doc:"Component this issue is about"`
+	Title         string `json:"title" doc:"Issue title, used as the task title"`
+	IssueNumber   int    `json:"issueNumber" doc:"GitHub issue number to bind the task to"`
+	IssueURL      string `json:"issueUrl" doc:"GitHub issue URL"`
+}
+
+type dispatchFromIssueInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	Body        DispatchFromIssueRequest
+}
+
 type taskListOutput struct{ Body []models.ComponentTask }
 type taskOutput struct{ Body *models.ComponentTask }
 type tasksOutput struct{ Body *models.Tasks }
@@ -201,6 +218,27 @@ func RegisterTask(
 			return nil, huma.Error500InternalServerError("failed to dispatch tasks")
 		}
 		return &dispatchResultsOutput{Body: results}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "dispatch-task-from-issue",
+		Method:      http.MethodPost,
+		Path:        "/projects/{projectName}/tasks/dispatch-from-issue",
+		Summary:     "Create a task for an ad-hoc GitHub issue and dispatch the coding agent",
+		Tags:        []string{"Tasks"},
+		Security:    humakit.SecurityUserJWT,
+	}, func(ctx context.Context, in *dispatchFromIssueInput) (*dispatchResultOutput, error) {
+		if dispatchSvc == nil {
+			return nil, huma.Error503ServiceUnavailable("dispatch service not configured")
+		}
+		res, err := dispatchSvc.DispatchFromIssue(
+			ctx, in.OrgHandle, in.ProjectName,
+			in.Body.ComponentName, in.Body.Title, in.Body.IssueNumber, in.Body.IssueURL,
+		)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to dispatch task from issue")
+		}
+		return &dispatchResultOutput{Body: res}, nil
 	})
 
 	huma.Register(api, huma.Operation{

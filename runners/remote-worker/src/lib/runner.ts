@@ -95,7 +95,14 @@ export function runClaudeQuery(
   const plugins: Array<{ type: "local"; path: string }> = [
     { type: "local", path: PLUGIN_PATH },
   ];
-  const skillPreload: string[] = ["aep:aep"];
+  // aep:related-issues is force-preloaded alongside aep:aep (not left to
+  // standard discovery) because the agent should run its search on every
+  // task, not just when it happens to notice the skill's description —
+  // it's the only thing that looks into this repo's issue history on
+  // behalf of external callers (e.g. the SRE/RCA agent handoff) that
+  // can't see it themselves. See AE-HANDOFF-DESIGN.md in
+  // openchoreo/agents/sre-agent.
+  const skillPreload: string[] = ["aep:aep", "aep:related-issues"];
   if (perTaskSkills?.skillsPluginDir) {
     plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
     for (const name of perTaskSkills.preloadBuiltinNames) {

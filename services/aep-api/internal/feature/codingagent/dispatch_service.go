@@ -65,6 +65,14 @@ type DispatchService interface {
 	// task and re-dispatches it so a fresh WorkflowRun is created with a
 	// freshly minted bearer. Returns the resulting DispatchResult.
 	RetryTask(ctx context.Context, taskID string) (DispatchResult, error)
+	// DispatchFromIssue creates a ComponentTask bound to an already-created
+	// GitHub issue and immediately dispatches it. Unlike DispatchTasks, the
+	// task has no BatchID/DependsOnComponents — it did not come from the
+	// tech-lead generation pipeline, so there is nothing to gate on. This is
+	// the entry point for ad-hoc issues filed by an external caller (e.g.
+	// the OpenChoreo SRE/RCA agent handoff — see AE-HANDOFF-DESIGN.md in
+	// openchoreo/agents/sre-agent).
+	DispatchFromIssue(ctx context.Context, orgID, projectID, componentName, title string, issueNumber int, issueURL string) (DispatchResult, error)
 }
 
 // Consumer ports for collaborators owned by other features/platform layers
@@ -764,6 +772,69 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	res := s.dispatchOne(ctx, task, repoInfo, identity)
 	slog.InfoContext(ctx, "task retried",
 		"task", taskID, "status", res.Status)
+	return res, nil
+}
+
+// DispatchFromIssue creates a ComponentTask bound to an already-created
+// GitHub issue and dispatches it immediately. It is the counterpart to
+// DispatchTasks for callers that create a single ad-hoc issue outside the
+// tech-lead generation/batch pipeline (BatchID stays nil, DependsOnComponents
+// stays empty) — dispatchOne does not gate on either, so the task runs
+// unconditionally, same as RetryTask.
+//
+// componentName must name a component AE already knows about (i.e. one that
+// has a design doc under specs/design/components/<componentName>/ in the
+// project's artifact store) — ensureOCComponent resolves it from there. This
+// holds for any component that was originally created through AE's own
+// generation flow, which is the expected case for a component an external
+// SRE/RCA agent is filing a code-level issue against.
+func (s *dispatchService) DispatchFromIssue(
+	ctx context.Context,
+	orgID, projectID, componentName, title string,
+	issueNumber int,
+	issueURL string,
+) (DispatchResult, error) {
+	if strings.TrimSpace(componentName) == "" {
+		return DispatchResult{}, fmt.Errorf("dispatch from issue: componentName is required")
+	}
+	if issueNumber == 0 || issueURL == "" {
+		return DispatchResult{}, fmt.Errorf("dispatch from issue: issue number and url are required")
+	}
+
+	task := &models.ComponentTask{
+		ProjectID:       projectID,
+		OrgID:           orgID,
+		ComponentName:   componentName,
+		Title:           title,
+		Order:           1,
+		Status:          string(models.TaskStatusPending),
+		ExecType:        "WORKER",
+		IssueURL:        issueURL,
+		IssueNumber:     issueNumber,
+		LifecycleStatus: string(models.TaskLifecycleGhIssueCreated),
+	}
+	if err := s.taskRepo.Create(ctx, task); err != nil {
+		return DispatchResult{}, fmt.Errorf("dispatch from issue: create task: %w", err)
+	}
+
+	repoInfo, err := s.repoSvc.GetRepo(ctx, orgID, projectID)
+	if err != nil {
+		return DispatchResult{}, fmt.Errorf("dispatch from issue: get repo: %w", err)
+	}
+	if repoInfo == nil {
+		return DispatchResult{}, fmt.Errorf("dispatch from issue: project repo not provisioned")
+	}
+	if repoInfo.DefaultBranch == "" {
+		repoInfo.DefaultBranch = "main"
+	}
+	identity, err := s.credSvc.IdentityFor(ctx, orgID)
+	if err != nil {
+		return DispatchResult{}, fmt.Errorf("dispatch from issue: get identity: %w", err)
+	}
+
+	res := s.dispatchOne(ctx, task, repoInfo, identity)
+	slog.InfoContext(ctx, "task dispatched from ad-hoc issue",
+		"task", task.ID, "component", componentName, "issue", issueNumber, "status", res.Status)
 	return res, nil
 }
 
