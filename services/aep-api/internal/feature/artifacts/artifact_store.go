@@ -321,6 +321,137 @@ func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string
 	return nil
 }
 
+// SetComponentOrgPublished durably persists `exposesAPI.orgPublished:true` on
+// the provider component and COMMITS that one `design.json` to remote main
+// (no new design version tag). This is the grant-cascade durability write: when
+// a provider's org-publish task deploys, the flag must survive a future
+// re-implementation so namespace visibility isn't silently dropped.
+//
+// `componentName` may be the design's logical component name OR the OC
+// component name `<project>-<logical>` — both forms match. Idempotent: a no-op
+// (no commit) when the component already has the flag set, when no design
+// exists, or when no matching component is found. Unlike a plain
+// WriteDesignFile (working-tree only), this reaches a real GitHub commit so
+// the change is never lost.
+func (s *ArtifactStore) SetComponentOrgPublished(ctx context.Context, orgID, projectID, componentName string) error {
+	design, err := s.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return nil // no design yet — nothing to persist.
+	}
+	for i := range design.Components {
+		comp := design.Components[i]
+		if !designComponentMatches(comp.Name, projectID, componentName) {
+			continue
+		}
+		if comp.ExposesAPI == nil {
+			comp.ExposesAPI = &models.ExposesAPI{}
+		}
+		if comp.ExposesAPI.OrgPublished {
+			return nil // idempotent — already durable, no commit.
+		}
+		comp.ExposesAPI.OrgPublished = true
+
+		// Render ONLY this component's design.json through the canonical codec
+		// so the file round-trips identically, then commit that single file to
+		// remote main without tagging.
+		files, ferr := SplitDesign(&DesignFile{Components: []models.DesignComponent{comp}})
+		if ferr != nil {
+			return fmt.Errorf("render component %q design: %w", comp.Name, ferr)
+		}
+		subPath := componentDirPrefix + comp.Name + "/" + ComponentDesignFile
+		content, ok := files[subPath]
+		if !ok {
+			return fmt.Errorf("render component %q design: %q missing from split", comp.Name, subPath)
+		}
+		msg := fmt.Sprintf("chore(dependencies): mark %s org-published (namespace visibility)", comp.Name)
+		if _, cerr := s.artifactSvc.CommitDesignFile(ctx, orgID, projectID, subPath, content, msg); cerr != nil {
+			return fmt.Errorf("commit %s: %w", subPath, cerr)
+		}
+		return nil
+	}
+	return nil // no matching component — nothing to persist.
+}
+
+// SetDependencySpecPath records specPath on the named dependency within the
+// named component by writing that component's design.json to the working-tree
+// draft (no commit, no version tag). This is the spec-collection draft write:
+// after StoreConsumedSpec writes the spec blob to the draft, this records the
+// specPath on the dependency so the needsSpec gate is cleared on next read.
+// Both changes are committed atomically when SaveDesign is called.
+//
+// Idempotent: a no-op (no write) when the component/dependency is not found
+// or when specPath already matches. Returns nil in all no-op cases.
+func (s *ArtifactStore) SetDependencySpecPath(ctx context.Context, orgID, projectID, component, depName, specPath string) error {
+	design, err := s.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return nil // no design yet — nothing to persist.
+	}
+	for i := range design.Components {
+		comp := design.Components[i]
+		if comp.Name != component {
+			continue
+		}
+		// Found the component — now find the dependency.
+		found := false
+		for j := range comp.Dependencies {
+			if comp.Dependencies[j].Name != depName {
+				continue
+			}
+			if comp.Dependencies[j].SpecPath == specPath && comp.Dependencies[j].SpecUrl == "" {
+				return nil // idempotent — already recorded + transient hint cleared.
+			}
+			comp.Dependencies[j].SpecPath = specPath
+			// Clear the transient architect hint now that specPath is recorded; also
+			// clear the computed status so the next read re-derives it from specPath
+			// (needsSpec+specPath set → resolved, not unresolved).
+			comp.Dependencies[j].SpecUrl = ""
+			comp.Dependencies[j].Status = ""
+			comp.Dependencies[j].Reason = ""
+			found = true
+			break
+		}
+		if !found {
+			return nil // dep not found — nothing to persist.
+		}
+		// Render ONLY this component's design.json through the canonical codec,
+		// then write it to the working-tree draft via WriteDesignFile (not
+		// CommitDesignFile). The draft save (SaveDesign) will commit both the
+		// spec blob and this design.json atomically with the v<N>-<M> tag.
+		files, ferr := SplitDesign(&DesignFile{Components: []models.DesignComponent{comp}})
+		if ferr != nil {
+			return fmt.Errorf("render component %q design: %w", comp.Name, ferr)
+		}
+		subPath := componentDirPrefix + comp.Name + "/" + ComponentDesignFile
+		content, ok := files[subPath]
+		if !ok {
+			return fmt.Errorf("render component %q design: %q missing from split", comp.Name, subPath)
+		}
+		if _, werr := s.WriteDesignFile(ctx, orgID, projectID, subPath, content); werr != nil {
+			return fmt.Errorf("write %s: %w", subPath, werr)
+		}
+		return nil
+	}
+	return nil // component not found — nothing to persist.
+}
+
+// designComponentMatches reports whether a design component named `logical` is
+// the provider identified by `target`, which may be the bare logical name or
+// the OC component name `<project>-<logical>`. Mirrors the componentMatches
+// helper used elsewhere in the deploy cascade so the durability write lands in
+// either form.
+func designComponentMatches(logical, project, target string) bool {
+	if strings.EqualFold(logical, target) {
+		return true
+	}
+	return strings.EqualFold(project+"-"+logical, target)
+}
+
 // ---- Helpers ------------------------------------------------------------
 
 // IsNotFound is sugar for callers that want to distinguish "no artifact yet"

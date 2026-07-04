@@ -1,0 +1,178 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package artifacts
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/wso2/aep/aep-api/models"
+)
+
+// commitRecord captures one CommitDesignFile call.
+type commitRecord struct {
+	sub     string
+	content string
+	message string
+}
+
+// putRecord captures one PutFile call.
+type putRecord struct {
+	relPath string
+	content string
+}
+
+// fakeArtifactSvc embeds ArtifactService so it satisfies the interface while we
+// implement only the methods the tests exercise:
+//   - ListDesignFiles (the read)
+//   - CommitDesignFile (the durable commit — used by SetComponentOrgPublished only)
+//   - PutFile (the working-tree draft write — used by WriteDesignFile, which
+//     StoreConsumedSpec and SetDependencySpecPath call instead of CommitDesignFile)
+//
+// Every other method panics if reached (the embedded interface value is nil).
+type fakeArtifactSvc struct {
+	ArtifactService
+	files   map[string]string
+	commits []commitRecord
+	puts    []putRecord
+}
+
+func (f *fakeArtifactSvc) ListDesignFiles(_ context.Context, _, _ string) (map[string]string, error) {
+	// Return a copy so in-place mutations to the map don't affect the fake's
+	// stored state between ReadDesign and PutFile calls.
+	out := make(map[string]string, len(f.files))
+	for k, v := range f.files {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func (f *fakeArtifactSvc) CommitDesignFile(_ context.Context, _, _, sub, content, message string) (string, error) {
+	f.commits = append(f.commits, commitRecord{sub: sub, content: content, message: message})
+	return "deadbeef", nil
+}
+
+func (f *fakeArtifactSvc) PutFile(_ context.Context, _, _, relPath, content, _ string) (*PutResult, error) {
+	f.puts = append(f.puts, putRecord{relPath: relPath, content: content})
+	// Also update the in-memory files map so that a subsequent ListDesignFiles
+	// (e.g. inside SetDependencySpecPath's ReadDesign) sees the written content.
+	// Keys in files are relative to specs/design/; relPath includes the full
+	// DesignDir prefix ("specs/design/..."), so strip the prefix.
+	const prefix = DesignDir + "/"
+	if key := strings.TrimPrefix(relPath, prefix); key != relPath {
+		f.files[key] = content
+	}
+	return &PutResult{SHA: "cafebabe"}, nil
+}
+
+// designFilesFor builds a minimal working-tree map for a single service
+// component, optionally pre-marked org-published.
+func designFilesFor(t *testing.T, name string, alreadyPublished bool) map[string]string {
+	t.Helper()
+	comp := models.DesignComponent{
+		Name:                       name,
+		ComponentType:              "service",
+		Language:                   "Go",
+		AppPath:                    name,
+		ComponentAgentInstructions: "serve " + name,
+		ExposesAPI:                 &models.ExposesAPI{Managed: true},
+	}
+	if alreadyPublished {
+		comp.ExposesAPI.OrgPublished = true
+	}
+	files, err := SplitDesign(&DesignFile{Overview: "root", Components: []models.DesignComponent{comp}})
+	if err != nil {
+		t.Fatalf("SplitDesign: %v", err)
+	}
+	files[DesignRootFile] = "# Design\n" // ensure ReadDesign sees a non-empty root
+	return files
+}
+
+func TestSetComponentOrgPublished_CommitsWhenUnset(t *testing.T) {
+	svc := &fakeArtifactSvc{files: designFilesFor(t, "employee-api", false)}
+	store := NewArtifactStore(svc)
+
+	if err := store.SetComponentOrgPublished(context.Background(), "acme", "hr-directory", "employee-api"); err != nil {
+		t.Fatalf("SetComponentOrgPublished: %v", err)
+	}
+	if len(svc.commits) != 1 {
+		t.Fatalf("want exactly one commit, got %d", len(svc.commits))
+	}
+	c := svc.commits[0]
+	if c.sub != "components/employee-api/design.json" {
+		t.Fatalf("unexpected committed path %q", c.sub)
+	}
+	if !strings.Contains(c.content, `"orgPublished": true`) {
+		t.Fatalf("committed design.json missing orgPublished:\n%s", c.content)
+	}
+	if !strings.Contains(c.message, "org-published") {
+		t.Fatalf("unexpected commit message %q", c.message)
+	}
+	if strings.Contains(strings.ToLower(c.message), "marketplace") {
+		t.Fatalf("commit message must not contain %q: %q", "marketplace", c.message)
+	}
+}
+
+func TestSetComponentOrgPublished_IdempotentNoCommit(t *testing.T) {
+	svc := &fakeArtifactSvc{files: designFilesFor(t, "employee-api", true)}
+	store := NewArtifactStore(svc)
+
+	if err := store.SetComponentOrgPublished(context.Background(), "acme", "hr-directory", "employee-api"); err != nil {
+		t.Fatalf("SetComponentOrgPublished: %v", err)
+	}
+	if len(svc.commits) != 0 {
+		t.Fatalf("already-published component must not commit, got %d", len(svc.commits))
+	}
+}
+
+func TestSetComponentOrgPublished_MatchesOCName(t *testing.T) {
+	svc := &fakeArtifactSvc{files: designFilesFor(t, "employee-api", false)}
+	store := NewArtifactStore(svc)
+
+	// Provider identified by OC component name `<project>-<logical>`.
+	if err := store.SetComponentOrgPublished(context.Background(), "acme", "hr-directory", "hr-directory-employee-api"); err != nil {
+		t.Fatalf("SetComponentOrgPublished: %v", err)
+	}
+	if len(svc.commits) != 1 {
+		t.Fatalf("OC-name match should commit once, got %d", len(svc.commits))
+	}
+}
+
+func TestSetComponentOrgPublished_NoMatchNoCommit(t *testing.T) {
+	svc := &fakeArtifactSvc{files: designFilesFor(t, "employee-api", false)}
+	store := NewArtifactStore(svc)
+
+	if err := store.SetComponentOrgPublished(context.Background(), "acme", "hr-directory", "no-such-component"); err != nil {
+		t.Fatalf("SetComponentOrgPublished: %v", err)
+	}
+	if len(svc.commits) != 0 {
+		t.Fatalf("unknown component must not commit, got %d", len(svc.commits))
+	}
+}
+
+func TestSetComponentOrgPublished_NoDesignYetNoOp(t *testing.T) {
+	svc := &fakeArtifactSvc{files: map[string]string{}}
+	store := NewArtifactStore(svc)
+
+	if err := store.SetComponentOrgPublished(context.Background(), "acme", "hr-directory", "employee-api"); err != nil {
+		t.Fatalf("SetComponentOrgPublished: %v", err)
+	}
+	if len(svc.commits) != 0 {
+		t.Fatalf("no design yet must not commit, got %d", len(svc.commits))
+	}
+}

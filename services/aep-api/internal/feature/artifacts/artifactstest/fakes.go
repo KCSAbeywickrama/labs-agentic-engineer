@@ -42,6 +42,7 @@ type FakeArtifactService struct {
 	ListDesignFilesFunc                  func(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	DeleteDesignFileFunc                 func(ctx context.Context, orgID, projectID, sub string) error
 	DeleteDesignDirectoryFunc            func(ctx context.Context, orgID, projectID, sub string) error
+	CommitDesignFileFunc                 func(ctx context.Context, orgID, projectID, subPath, content, message string) (string, error)
 	SaveRequirementsFunc                 func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error)
 	SaveDesignFunc                       func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error)
 	DiscardRequirementsFunc              func(ctx context.Context, orgID, projectID string) (map[string]string, error)
@@ -105,6 +106,13 @@ func (f *FakeArtifactService) DeleteDesignDirectory(ctx context.Context, orgID, 
 		panic("artifactstest: DeleteDesignDirectory called but DeleteDesignDirectoryFunc is not set")
 	}
 	return f.DeleteDesignDirectoryFunc(ctx, orgID, projectID, sub)
+}
+
+func (f *FakeArtifactService) CommitDesignFile(ctx context.Context, orgID, projectID, subPath, content, message string) (string, error) {
+	if f.CommitDesignFileFunc == nil {
+		panic("artifactstest: CommitDesignFile called but CommitDesignFileFunc is not set")
+	}
+	return f.CommitDesignFileFunc(ctx, orgID, projectID, subPath, content, message)
 }
 
 func (f *FakeArtifactService) SaveRequirements(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {
