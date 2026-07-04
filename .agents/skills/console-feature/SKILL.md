@@ -64,9 +64,13 @@ AskUserQuestion**: continue to the next stage, or stop here (offer the
 resume command). Skip a checkpoint only when the user already told you how
 far to go.
 
-1. **Grill.** Run the `grill-me` skill on the issue. While the issue is
-   open, edit the body in place (`gh issue edit`) so it always reflects the
-   current shape of the feature.
+1. **Grill.** Run the `grill-me` skill on the issue. If it isn't invocable
+   in this session, conduct the interview yourself in its spirit: relentless
+   rounds of pointed questions (AskUserQuestion) attacking the walkthrough's
+   weak points and every Open question until each is decided — never answer
+   one on the user's behalf, and on a timeout re-ask rather than defaulting.
+   While the issue is open, edit the body in place (`gh issue edit`) so it
+   always reflects the current shape of the feature.
 2. **Decisions comment.** Post the grilling outcome as a comment on the
    issue: what was decided, why, what was rejected.
 3. **ADR graduation.** Apply the spec's step-4 rule: a decision earns an ADR
