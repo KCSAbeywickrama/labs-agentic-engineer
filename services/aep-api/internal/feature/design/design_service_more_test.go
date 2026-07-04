@@ -441,7 +441,7 @@ func TestStreamGenerate_HappyPersistsAndConsultsSkillCatalog(t *testing.T) {
 	agentsClient := &fakeAgentsClient{
 		streamArchitect: func(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
 			return sseFinish("Generated overview", models.DesignComponent{
-				Name: "svc-a", ComponentType: "service", Language: "Go", DependsOn: []string{},
+				Name: "svc-a", ComponentType: "service", Language: "Go", Dependencies: []models.Dependency{},
 			}), nil
 		},
 	}

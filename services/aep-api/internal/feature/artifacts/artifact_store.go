@@ -30,29 +30,13 @@ import (
 )
 
 // ArtifactStore wraps the in-process artifact service to add value beyond
-// pure file I/O: external-API catalog resolution and the typed `DesignFile`
-// shape (YAML split/assemble).
+// pure file I/O: the typed `DesignFile` shape (YAML split/assemble).
 type ArtifactStore struct {
-	artifactSvc  ArtifactService
-	externalAPIs *ExternalAPICatalog
+	artifactSvc ArtifactService
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
-	return &ArtifactStore{artifactSvc: artifactSvc, externalAPIs: DefaultExternalAPICatalog()}
-}
-
-// SetExternalAPICatalog overrides the catalog the store uses to resolve
-// architect-declared dependent-API names into concrete URLs. Optional —
-// without it, NewArtifactStore wires the shipped default catalog. The catalog
-// is instance state only, threaded into splitDesign by WriteDesign — the
-// former package-level catalog pointer is gone (every NewArtifactStore wrote
-// it, racing under parallel construction and leaking one store's catalog into
-// another's saves).
-func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
-	if s == nil {
-		return
-	}
-	s.externalAPIs = c
+	return &ArtifactStore{artifactSvc: artifactSvc}
 }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
@@ -205,36 +189,7 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	if err != nil {
 		return nil, err
 	}
-	// Resolve architect-declared dependent-API names against the external
-	// API catalog so the in-memory design always has concrete URLs even
-	// when the on-disk frontmatter declared by intent only.
-	s.resolveExternalAPIs(design)
 	return design, nil
-}
-
-// resolveExternalAPIs fills in URLs for catalog-known dependent-API
-// entries whose URL was left blank by the architect. Idempotent — already-
-// populated URLs are left untouched.
-func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
-	if s == nil || s.externalAPIs == nil || d == nil {
-		return
-	}
-	for i := range d.Components {
-		for j := range d.Components[i].DependentApis {
-			dep := &d.Components[i].DependentApis[j]
-			if dep.URL != "" {
-				continue
-			}
-			entry := s.externalAPIs.Lookup(dep.Name)
-			if entry.URL == "" {
-				continue
-			}
-			dep.URL = entry.URL
-			if dep.Authentication == "" {
-				dep.Authentication = entry.Authentication
-			}
-		}
-	}
 }
 
 // WriteDesign splits the in-memory design into multiple files, then writes
@@ -243,7 +198,7 @@ func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
 // the caller is expected to call DeleteDesignDirectory for removed
 // components separately.
 func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string, design *DesignFile) error {
-	files, err := splitDesign(design, s.externalAPIs)
+	files, err := SplitDesign(design)
 	if err != nil {
 		return fmt.Errorf("split design: %w", err)
 	}
@@ -297,7 +252,6 @@ type componentFrontmatter struct {
 	Entrypoint     string                `yaml:"entrypoint,omitempty"`
 	ExposesAPI     *exposesAPIConfig     `yaml:"exposesAPI,omitempty"`
 	CallerIdentity *callerIdentityConfig `yaml:"callerIdentity,omitempty"`
-	DependentApis  []dependentApiConfig  `yaml:"dependentApis,omitempty"`
 }
 
 // exposesAPIConfig is the on-disk shape for a service component's API
@@ -314,15 +268,6 @@ type exposesAPIConfig struct {
 // against the platform IDP.
 type callerIdentityConfig struct {
 	Mode string `yaml:"mode,omitempty"`
-}
-
-// dependentApiConfig is the on-disk shape for an external upstream API the
-// component consumes at runtime. See models.DependentAPI for the wire shape.
-type dependentApiConfig struct {
-	Name           string `yaml:"name"`
-	URL            string `yaml:"url"`
-	Description    string `yaml:"description,omitempty"`
-	Authentication string `yaml:"authentication,omitempty"`
 }
 
 // SplitFrontmatter separates the leading YAML frontmatter block (delimited
@@ -426,9 +371,15 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 		// Fallback: support .yml as well.
 		openapi = files[componentDirPrefix+name+"/openapi.yml"]
 	}
-	dependsOn := append([]string(nil), cfm.DependsOn...)
-	if dependsOn == nil {
-		dependsOn = []string{}
+	// Frontmatter still carries the flat `dependsOn:` name list (a later task
+	// replaces this codec with design.json). Map each entry to a unified
+	// component-kind Dependency so the in-memory model is uniform.
+	deps := make([]models.Dependency, 0, len(cfm.DependsOn))
+	for _, name := range cfm.DependsOn {
+		if name == "" {
+			continue
+		}
+		deps = append(deps, models.Dependency{Kind: models.DependencyKindComponent, Name: name})
 	}
 	var exposes *models.ExposesAPI
 	if cfm.ExposesAPI != nil && (cfm.ExposesAPI.Auth != "" || cfm.ExposesAPI.Managed || cfm.ExposesAPI.UserContext != "") {
@@ -442,29 +393,11 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 	if cfm.CallerIdentity != nil && cfm.CallerIdentity.Mode != "" {
 		caller = &models.CallerIdentity{Mode: cfm.CallerIdentity.Mode}
 	}
-	var depApis []models.DependentAPI
-	if len(cfm.DependentApis) > 0 {
-		depApis = make([]models.DependentAPI, 0, len(cfm.DependentApis))
-		for _, d := range cfm.DependentApis {
-			if d.Name == "" {
-				continue
-			}
-			// URL may be empty here — the architect can declare an
-			// intent by name only; the ArtifactStore's catalog post-
-			// process resolves it on the way out of ReadDesign.
-			depApis = append(depApis, models.DependentAPI{
-				Name:           d.Name,
-				URL:            d.URL,
-				Description:    d.Description,
-				Authentication: d.Authentication,
-			})
-		}
-	}
 	return models.DesignComponent{
 		Name:                       name,
 		ComponentType:              cfm.Type,
 		Language:                   cfm.Language,
-		DependsOn:                  dependsOn,
+		Dependencies:               deps,
 		Entrypoint:                 cfm.Entrypoint,
 		Buildpack:                  cfm.Buildpack,
 		AppPath:                    cfm.AppPath,
@@ -472,7 +405,6 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 		ComponentAgentInstructions: strings.TrimSpace(body),
 		ExposesAPI:                 exposes,
 		CallerIdentity:             caller,
-		DependentApis:              depApis,
 	}, nil
 }
 
@@ -502,16 +434,8 @@ func ComponentNamesIn(files map[string]string) []string {
 // SplitDesign takes a flat in-memory design and produces the file map for
 // the working tree. The caller is responsible for deleting any
 // pre-existing files NOT present in the returned map (e.g. components
-// removed across a regeneration). Standalone callers get NO external-API
-// catalog (dependent-API URLs are written verbatim); the store's WriteDesign
-// threads its instance catalog via splitDesign so catalog-resolved URLs are
-// stripped on save.
+// removed across a regeneration).
 func SplitDesign(d *DesignFile) (map[string]string, error) {
-	return splitDesign(d, nil)
-}
-
-// splitDesign is the implementation; catalog may be nil (no URL stripping).
-func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string, error) {
 	if d == nil {
 		return nil, fmt.Errorf("nil design")
 	}
@@ -545,7 +469,7 @@ func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string,
 		cfm := componentFrontmatter{
 			Type:       comp.ComponentType,
 			Language:   comp.Language,
-			DependsOn:  comp.DependsOn,
+			DependsOn:  comp.ComponentDependsOn(),
 			Buildpack:  comp.Buildpack,
 			AppPath:    comp.AppPath,
 			Entrypoint: comp.Entrypoint,
@@ -561,38 +485,6 @@ func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string,
 		}
 		if comp.CallerIdentity != nil && comp.CallerIdentity.Mode != "" {
 			cfm.CallerIdentity = &callerIdentityConfig{Mode: comp.CallerIdentity.Mode}
-		}
-		if len(comp.DependentApis) > 0 {
-			cfm.DependentApis = make([]dependentApiConfig, 0, len(comp.DependentApis))
-			for _, d := range comp.DependentApis {
-				if d.Name == "" {
-					continue
-				}
-				// Drop the URL on save when it matches the current
-				// catalog entry for this name — the in-memory URL came
-				// from ReadDesign's catalog substitution, not from the
-				// architect. Persisting it would defeat the
-				// "name-only declaration" contract and break catalog
-				// rotation. (catalog == nil for standalone SplitDesign
-				// callers — fall through to write URL.)
-				url := d.URL
-				if catalog != nil {
-					if entry := catalog.Lookup(d.Name); entry.URL != "" && entry.URL == d.URL {
-						url = ""
-					}
-				}
-				if url == "" && d.Description == "" && d.Authentication == "" {
-					// Name-only declaration — emit just the name.
-					cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{Name: d.Name})
-					continue
-				}
-				cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{
-					Name:           d.Name,
-					URL:            url,
-					Description:    d.Description,
-					Authentication: d.Authentication,
-				})
-			}
 		}
 		cfmBytes, err := marshalFrontmatter(cfm)
 		if err != nil {

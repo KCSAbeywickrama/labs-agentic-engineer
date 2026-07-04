@@ -444,7 +444,7 @@ func (s *taskService) persistAndIssue(
 	rows := make([]persistedItem, len(plan))
 	for i, p := range plan {
 		comp := byName[strings.ToLower(p.ComponentName)]
-		deps := append([]string(nil), comp.DependsOn...)
+		deps := comp.ComponentDependsOn()
 		for _, dep := range deps {
 			if _, ok := componentNameSet[dep]; !ok {
 				return nil, fmt.Errorf(
@@ -821,10 +821,9 @@ func buildPlanRequest(
 ) agents.TechLeadPlanRequest {
 	slim := make([]agents.TechLeadSlimComponent, len(components))
 	for i, c := range components {
-		dep := c.DependsOn
-		if dep == nil {
-			dep = []string{}
-		}
+		// Populate the agents S2S wire field (still named DependsOn — a later
+		// task owns that contract) from the unified component dependencies.
+		dep := c.ComponentDependsOn()
 		slim[i] = agents.TechLeadSlimComponent{
 			Name:          c.Name,
 			ComponentType: c.ComponentType,
@@ -910,16 +909,14 @@ func buildDetailRequest(
 		// Slim summaries for dependsOn components. Initialised non-nil so it
 		// marshals as `[]` rather than `null` — agents-service's Zod schema
 		// rejects null arrays.
-		depSummaries := make([]agents.TechLeadSlimComponent, 0, len(comp.DependsOn))
-		for _, d := range comp.DependsOn {
+		compDeps := comp.ComponentDependsOn()
+		depSummaries := make([]agents.TechLeadSlimComponent, 0, len(compDeps))
+		for _, d := range compDeps {
 			dep, ok := byName[strings.ToLower(d)]
 			if !ok {
 				continue
 			}
-			depDeps := dep.DependsOn
-			if depDeps == nil {
-				depDeps = []string{}
-			}
+			depDeps := dep.ComponentDependsOn()
 			depSummaries = append(depSummaries, agents.TechLeadSlimComponent{
 				Name:          dep.Name,
 				ComponentType: dep.ComponentType,

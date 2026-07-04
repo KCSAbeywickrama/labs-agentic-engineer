@@ -182,7 +182,7 @@ func TestPersistAndIssue_UnknownDependencyIsRejected(t *testing.T) {
 	}}
 	svc := streamSvc(repo, &fakeIssueSvc{}, nil)
 
-	design := &artifacts.DesignFile{Components: []models.DesignComponent{{Name: "svc-a", DependsOn: []string{"ghost"}}}}
+	design := &artifacts.DesignFile{Components: []models.DesignComponent{{Name: "svc-a", Dependencies: []models.Dependency{{Kind: models.DependencyKindComponent, Name: "ghost"}}}}}
 	plan := []planItemFrame{{TempID: "p1", ComponentName: "svc-a"}}
 
 	if _, err := svc.persistAndIssue(context.Background(), newSseWriter(&bytes.Buffer{}, nopFlush), "acme", "web", "b", "v1", "v1-1", plan, design, "", ""); err == nil {
