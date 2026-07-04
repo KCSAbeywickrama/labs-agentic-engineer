@@ -23,6 +23,10 @@ export const projectKeys = {
     [...projectKeys.lists(), { search, limit }] as const,
   details: () => [...projectKeys.all, "detail"] as const,
   detail: (name: string) => [...projectKeys.details(), name] as const,
+  status: (name: string) => [...projectKeys.detail(name), "status"] as const,
+  components: (name: string) =>
+    [...projectKeys.detail(name), "components"] as const,
+  board: (name: string) => [...projectKeys.detail(name), "board"] as const,
 };
 
 export const githubKeys = {

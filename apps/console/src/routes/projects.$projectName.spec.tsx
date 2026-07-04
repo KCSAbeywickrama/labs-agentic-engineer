@@ -17,13 +17,15 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { ProjectLayout } from "../features/projects/components/ProjectLayout";
+import { FileText } from "@wso2/oxygen-ui-icons-react";
+import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
 
-export const Route = createFileRoute("/projects/$projectName")({
-  component: ProjectLayoutRoute,
+export const Route = createFileRoute("/projects/$projectName/spec")({
+  component: () => (
+    <SectionPlaceholder
+      icon={<FileText size={48} />}
+      title="Spec is on its way"
+      description="This is where you and the agents work out what to build — the requirement and the design together, as one living spec. Its own feature issue will land it."
+    />
+  ),
 });
-
-function ProjectLayoutRoute() {
-  const { projectName } = Route.useParams();
-  return <ProjectLayout projectName={projectName} />;
-}

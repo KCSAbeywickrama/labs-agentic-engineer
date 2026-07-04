@@ -275,6 +275,11 @@ components:
           type: string
         displayName:
           type: string
+        endpointUrl:
+          description: >-
+            Public URL of the running dev deployment. Populated for web
+            applications only; absent until deployed.
+          type: string
         name:
           type: string
         projectName:
@@ -1194,6 +1199,16 @@ components:
           format: uri
           readOnly: true
           type: string
+        deployStatus:
+          description: >-
+            Result of the latest dev deployment (e.g. in_progress /
+            succeeded / failed); absent when nothing was deployed.
+          type: string
+        deployedVersion:
+          description: >-
+            Version tag currently deployed to the dev environment; absent
+            when nothing deployed.
+          type: string
         designStatus:
           type: string
         hasDesign:
@@ -1210,7 +1225,17 @@ components:
           type: string
         repoUrl:
           type: string
+        specDirty:
+          description: >-
+            True when the spec/design changed after specVersion was
+            published.
+          type: boolean
         specStatus:
+          type: string
+        specVersion:
+          description: >-
+            Latest published spec version tag (e.g. v1); absent when
+            nothing published.
           type: string
       required:
         - phase
