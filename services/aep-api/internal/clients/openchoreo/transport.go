@@ -75,12 +75,31 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 		return nil, errors.New("openchoreo: Config.BaseURL is required")
 	}
 
+	inner := &http.Client{Transport: httpx.WrapTransport(nil)}
+	outer := requests.NewRetryableHTTPClient(inner, buildRetryConfig(cfg))
+
+	c, err := gen.NewClientWithResponses(
+		cfg.BaseURL,
+		gen.WithHTTPClient(outer),
+		gen.WithRequestEditorFn(authRequestEditor(cfg)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("openchoreo: build gen client: %w", err)
+	}
+	return c, nil
+}
+
+// buildRetryConfig returns cfg.RetryConfig with the package's default
+// RetryOnStatus wired in when the caller hasn't set one: invalidate the
+// cached service token and retry on 401, otherwise fall back to the
+// transient-status set. Shared by newGenClient and any hand-rolled REST
+// client in this package (e.g. resource_client.go) so 401 semantics stay
+// identical everywhere the BFF talks to OpenChoreo. We intentionally don't
+// expose this as the requests package default — keeping it here ties the
+// rule to its only valid caller (AuthProvider.Invalidate).
+func buildRetryConfig(cfg Config) requests.RequestRetryConfig {
 	retryCfg := cfg.RetryConfig
 	if retryCfg.RetryOnStatus == nil {
-		// Default OC policy: invalidate token on 401, retry; otherwise fall
-		// back to the transient-error set. We intentionally don't expose this
-		// as the package default — passing it via Config keeps the rule next
-		// to its only valid caller (AuthProvider.Invalidate).
 		retryCfg.RetryOnStatus = func(status int) bool {
 			if status == http.StatusUnauthorized {
 				if cfg.AuthProvider != nil {
@@ -92,11 +111,17 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 			return slices.Contains(requests.TransientHTTPErrorCodes, status)
 		}
 	}
+	return retryCfg
+}
 
-	inner := &http.Client{Transport: httpx.WrapTransport(nil)}
-	outer := requests.NewRetryableHTTPClient(inner, retryCfg)
-
-	authEditor := func(ctx context.Context, req *http.Request) error {
+// authRequestEditor returns the per-request auth hook every OC client in this
+// package applies before issuing a request — the oapi-codegen
+// RequestEditorFn for the generated client, and the equivalent hook
+// hand-rolled REST clients (e.g. resource_client.go) call directly from
+// their `do` method. Centralizing it here means the generated and
+// hand-rolled clients can never drift on auth selection.
+func authRequestEditor(cfg Config) func(ctx context.Context, req *http.Request) error {
+	return func(ctx context.Context, req *http.Request) error {
 		if cfg.HostHeader != "" {
 			req.Host = cfg.HostHeader
 		}
@@ -164,16 +189,6 @@ func newGenClient(cfg Config) (*gen.ClientWithResponses, error) {
 		}
 		return nil
 	}
-
-	c, err := gen.NewClientWithResponses(
-		cfg.BaseURL,
-		gen.WithHTTPClient(outer),
-		gen.WithRequestEditorFn(authEditor),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("openchoreo: build gen client: %w", err)
-	}
-	return c, nil
 }
 
 // namespaceFromPath extracts the {namespace} segment from an OpenChoreo REST
