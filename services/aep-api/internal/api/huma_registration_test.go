@@ -36,7 +36,7 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 	wantOps := []string{
 		"list-projects", "list-organizations", "list-components", "get-component-config",
 		"get-requirements", "get-collab-session", "get-design", "list-tasks", "get-board",
-		"get-idp-profile", "get-github-status", "get-anthropic-status",
+		"get-idp-profile", "get-github-status", "get-anthropic-status", "collect-dependency-spec",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -70,9 +71,26 @@ type generateDesignInput struct {
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
 }
 
+type collectSpecInput struct {
+	humakit.OrgScopedInput
+	ProjectName   string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	ComponentName string `path:"componentName" doc:"Component name"`
+	DepName       string `path:"depName" doc:"Dependency name"`
+	Body          struct {
+		RawSpec string `json:"rawSpec,omitempty" doc:"Raw OpenAPI YAML/JSON (paste path)"`
+		SpecURL string `json:"specUrl,omitempty" doc:"HTTPS URL to fetch the OpenAPI spec from"`
+	}
+}
+
 type designOutput struct{ Body *models.Design }
 type designBundleOutput struct{ Body *DesignBundle }
 type designVersionsOutput struct{ Body []models.ArtifactVersion }
+
+type collectSpecOutput struct {
+	Body struct {
+		SpecPath string `json:"specPath" doc:"Component-relative path where the spec was stored"`
+	}
+}
 
 // RegisterDesign registers the design feature's NON-STREAMING HTTP operations
 // on the Huma API. It is the code-first replacement for registerDesignRoutes
@@ -185,6 +203,9 @@ func RegisterDesign(api huma.API, svc DesignService) {
 			if errors.Is(err, ErrSpecNotApproved) {
 				return nil, huma.Error409Conflict("save requirements first — no v<N> baseline tag")
 			}
+			if errors.Is(err, ErrUnresolvedDependency) {
+				return nil, huma.Error409Conflict(err.Error())
+			}
 			return nil, huma.Error500InternalServerError("failed to save and proceed design")
 		}
 		return &designOutput{Body: design}, nil
@@ -267,6 +288,38 @@ func RegisterDesign(api huma.API, svc DesignService) {
 			// service after headers are sent; the HTTP status cannot change here.
 			_ = svc.StreamGenerateDesign(hctx.Context(), in.OrgHandle, in.ProjectName, w, flush)
 		}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "collect-dependency-spec",
+		Method:        http.MethodPost,
+		Path:          "/projects/{projectName}/components/{componentName}/dependencies/{depName}/spec",
+		Summary:       "Store a consumed OpenAPI spec for an external dependency",
+		Tags:          []string{"Design(Deprecated)"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusOK,
+	}, func(ctx context.Context, in *collectSpecInput) (*collectSpecOutput, error) {
+		rawSpec := strings.TrimSpace(in.Body.RawSpec)
+		specURL := strings.TrimSpace(in.Body.SpecURL)
+		if rawSpec == "" && specURL == "" {
+			return nil, huma.Error400BadRequest("provide exactly one of rawSpec or specUrl")
+		}
+		if rawSpec != "" && specURL != "" {
+			return nil, huma.Error400BadRequest("provide only one of rawSpec or specUrl")
+		}
+		specPath, err := svc.CollectSpec(ctx, in.OrgHandle, in.ProjectName, in.ComponentName, in.DepName, []byte(rawSpec), specURL)
+		if err != nil {
+			if errors.Is(err, ErrSpecFetchFailed) {
+				return nil, huma.Error502BadGateway("failed to fetch spec from URL", err)
+			}
+			if errors.Is(err, ErrInvalidSpec) {
+				return nil, huma.Error400BadRequest("invalid spec: " + err.Error())
+			}
+			return nil, huma.Error500InternalServerError("failed to store spec")
+		}
+		out := &collectSpecOutput{}
+		out.Body.SpecPath = specPath
+		return out, nil
 	})
 }
 

@@ -57,11 +57,15 @@ const (
 // The 4-state org-service resolution model (artifacts.resolveOrgServices)
 // produces DependencyStatusResolved / DependencyStatusBlocked (with
 // DependencyReasonAccessRequired) / DependencyStatusUnresolved (with
-// DependencyReasonNotFound).
+// DependencyReasonNotFound). DependencyStatusAmbiguous is reserved for a
+// dependency with multiple unresolved candidates (see Dependency.Candidates);
+// the design-save proceed-gate (design.ErrUnresolvedDependency) blocks on all
+// three non-resolved states.
 const (
 	DependencyStatusResolved   = "resolved"
 	DependencyStatusBlocked    = "blocked"
 	DependencyStatusUnresolved = "unresolved"
+	DependencyStatusAmbiguous  = "ambiguous"
 
 	DependencyReasonAccessRequired = "access-required"
 	DependencyReasonNotFound       = "not-found"
