@@ -19,4 +19,12 @@
 // "component" (another component in the same org/project) and "org-service"
 // (an endpoint published across an org boundary). It is the endpoints half
 // of OpenChoreo's Workload.spec.dependencies.endpoints[].
+//
+// Catalog (catalog.go) is the dynamic source of "org-service" targets: it
+// enumerates every provider-side endpoint published by an org namespace's
+// Workloads (via the OC ResourceClient's ListWorkloadEndpoints) and resolves
+// them by namespace visibility, project sibling, or owning component. Naming
+// (naming.go) derives the `<UPPER_SNAKE>_URL` env var OC binds a resolved
+// org-service address to. This package depends only on the OC client and
+// models — no other feature package.
 package endpoints
