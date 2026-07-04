@@ -127,6 +127,12 @@ func EventCause(event TaskEvent) string {
 		return "repo.unselected"
 	case TaskEventBuildPathMismatch:
 		return "build.component_path_mismatch"
+	case TaskEventValuesProvisioned:
+		return "values.provisioned"
+	case TaskEventResourceReady:
+		return "resource.ready"
+	case TaskEventProvisionFailed:
+		return "resource.provision_failed"
 	default:
 		return ""
 	}

@@ -137,3 +137,21 @@ func TestApplyTaskEventRefusesUnknownTransition(t *testing.T) {
 		t.Fatalf("expected ErrInvalidTransition, got %v", err)
 	}
 }
+
+func TestEventCauseCompletionEvents(t *testing.T) {
+	cases := []struct {
+		event TaskEvent
+		want  string
+	}{
+		{TaskEventValuesProvisioned, "values.provisioned"},
+		{TaskEventResourceReady, "resource.ready"},
+		{TaskEventProvisionFailed, "resource.provision_failed"},
+		// provision_started is not terminal — must fall through to the default.
+		{TaskEventProvisionStarted, ""},
+	}
+	for _, c := range cases {
+		if got := EventCause(c.event); got != c.want {
+			t.Errorf("EventCause(%s): got %q, want %q", c.event, got, c.want)
+		}
+	}
+}
