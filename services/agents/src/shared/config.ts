@@ -22,14 +22,46 @@ import { loadDotenv, intEnv } from "./env.js";
 // AGENT_MAX_STEPS set only in .env are honored (not silently dropped).
 loadDotenv();
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export const config = {
   model: process.env.AGENT_MODEL || "claude-sonnet-5",
   // A fresh "write an app" generation needs 10–15 file calls; steps batch
   // parallel tool calls, so the loop budget is higher than the call count.
   // intEnv guards a non-numeric value (which would NaN out the step cap).
   maxSteps: intEnv(process.env.AGENT_MAX_STEPS, 20),
+  // Per-step output-token ceiling. The Anthropic provider defaults to a low cap
+  // (~4096) when unset, which truncates a real spec/design mid-tool-call: the
+  // model hits the limit before the `addFile` input JSON closes, so NO `tool-call`
+  // frame is emitted, the client fold applies nothing, and the draft ends empty.
+  // Sonnet-class models support 64k output tokens; default high so a single-doc
+  // generation completes in one step. intEnv guards a non-numeric override.
+  maxOutputTokens: intEnv(process.env.AGENT_MAX_OUTPUT_TOKENS, 64_000),
   logLevel: process.env.LOG_LEVEL || "info",
   // Max request body for the SSE turn endpoint (the inlined files snapshot). The
   // express default 100kb silently rejects a real spec repo, so set it explicitly.
   bodyLimit: process.env.AGENT_BODY_LIMIT || "10mb",
+  // SSE keep-alive cadence: a `: keep-alive` comment this often while a turn
+  // streams, so long generations don't die behind an idle-timeout ingress.
+  keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),
+
+  // M2M gate (§12.3.2): a Bearer JWT with this audience, verified against a JWKS
+  // (RS256) OR a shared secret (HS256) — whichever is configured. The gate is
+  // ALWAYS ON; the composition root refuses to start if neither is set. No org
+  // claim is required (nothing calls back to the BFF); `X-Org-Id` is log-only.
+  auth: {
+    audience: process.env.AGENT_JWT_AUDIENCE || "agents-service",
+    issuer: process.env.AGENT_JWT_ISSUER || undefined,
+    jwksUrl: process.env.AGENT_JWT_JWKS_URL || undefined,
+    secret: process.env.AGENT_JWT_SECRET || undefined,
+  },
+
+  // ConversationStore selection: Postgres when DATABASE_URL is set, else the
+  // in-memory store (tests/evals). Threads embed inlined file snapshots, so
+  // stored rows have real size — a TTL sweep on updated_at reclaims them.
+  database: {
+    url: process.env.DATABASE_URL || undefined,
+    conversationsTtlMs: intEnv(process.env.CONVERSATIONS_TTL_MS, 7 * DAY_MS),
+    conversationsSweepMs: intEnv(process.env.CONVERSATIONS_SWEEP_MS, 60 * 60 * 1000),
+  },
 } as const;

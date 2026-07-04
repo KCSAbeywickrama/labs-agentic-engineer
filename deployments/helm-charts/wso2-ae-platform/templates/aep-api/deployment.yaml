@@ -175,9 +175,6 @@ spec:
             - name: OBSERVER_OAUTH_HOST_HEADER
               value: ""
 
-            - name: REPO_BASE_PATH
-              value: "/data/repos"
-
           volumeMounts:
             - name: task-signing-key
               mountPath: /app/keys
@@ -187,8 +184,6 @@ spec:
               mountPath: /etc/github-app
               readOnly: true
             {{- end }}
-            - name: repos
-              mountPath: /data/repos
 
       volumes:
         - name: task-signing-key
@@ -199,8 +194,6 @@ spec:
           configMap:
             name: aep-api-github-app-key
         {{- end }}
-        - name: repos
-          emptyDir: {}
 {{- if .Values.taskSigning.privateKeyPem }}
 ---
 # ConfigMap holding the task-signing RSA private key (only if custom key provided).

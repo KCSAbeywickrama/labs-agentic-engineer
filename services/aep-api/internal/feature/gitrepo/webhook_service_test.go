@@ -42,7 +42,7 @@ func newWebhookSvcOnStub(t *testing.T, stub *gittest.Stub, strategy credentials.
 	resolver := fakeResolver{cred: fakeCred{strategy: strategy}}
 	gh := githubclient.NewClient(githubclient.WithAPIBase(stub.URL))
 	issueSvc := gitrepo.NewIssueService(repo, nil, nil, resolver)
-	repoSvc := gitrepo.NewRepoService(repo, gh, resolver, "public", t.TempDir())
+	repoSvc := gitrepo.NewRepoService(repo, gh, resolver, "public")
 
 	wh := gitrepo.NewWebhookService(
 		repo,
@@ -129,7 +129,7 @@ func TestWebhookRegister_MissingConfigErrors(t *testing.T) {
 	issRepo := newFakeRepoRepo()
 	issRepo.preload(&models.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: "https://github.com/acme/widgets"})
 	issueSvc := gitrepo.NewIssueService(issRepo, nil, nil, fakeResolver{})
-	repoSvc := gitrepo.NewRepoService(issRepo, githubclient.NewClient(), fakeResolver{}, "public", t.TempDir())
+	repoSvc := gitrepo.NewRepoService(issRepo, githubclient.NewClient(), fakeResolver{}, "public")
 	// Empty delivery URL + secret.
 	wh := gitrepo.NewWebhookService(issRepo, githubclient.NewClient(), repoSvc, issueSvc, "", "")
 
@@ -172,7 +172,7 @@ func TestWebhookRegister_NonResolvingIssueServiceErrorsNotPanics(t *testing.T) {
 	wh := gitrepo.NewWebhookService(
 		repo,
 		githubclient.NewClient(),
-		gitrepo.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "public", t.TempDir()),
+		gitrepo.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "public"),
 		nonResolvingIssueSvc{},
 		"https://webhook.example/deliver",
 		"s3cr3t",

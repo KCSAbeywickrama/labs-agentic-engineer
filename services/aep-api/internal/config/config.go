@@ -96,6 +96,7 @@ type Config struct {
 
 	Observability ObservabilityConfig
 	AgentsService AgentsServiceConfig
+	AgentsSvc     AgentsSvcConfig
 	ServiceAuth   ServiceAuthConfig
 
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
@@ -120,8 +121,6 @@ type Config struct {
 	// and only supported value today is "github". Validate() rejects anything
 	// else with a boot error.
 	GitProvider string
-
-	RepoBasePath string
 
 	GitHubRepoVisibility string
 	GitHubCommitterName  string
@@ -228,9 +227,22 @@ type ServiceAuthConfig struct {
 }
 
 // AgentsServiceConfig holds connection settings for the aep-agents-service
-// (AI SDK v6-based; BA, architect, tech-lead).
+// (AI SDK v6-based; kept for tech-lead task generation — the requirements/
+// design/chat flows moved to AgentsSvcConfig below).
 type AgentsServiceConfig struct {
 	BaseURL string
+}
+
+// AgentsSvcConfig holds connection + M2M settings for the NEW file-mutation
+// agents service (services/agents) — the requirements/design/chat generation
+// flows. Distinct from AgentsService (the legacy AI-SDK service kept for task
+// generation). The BFF mints a per-call HS256 M2M bearer from JWTSecret with
+// aud=JWTAudience (the service's AGENT_JWT_SECRET / AGENT_JWT_AUDIENCE).
+type AgentsSvcConfig struct {
+	BaseURL     string
+	JWTSecret   string
+	JWTAudience string
+	JWTIssuer   string
 }
 
 // ObservabilityConfig holds connection settings for the OpenChoreo Observer

@@ -179,7 +179,7 @@ func TestRepoRepository_Update(t *testing.T) {
 
 	r := mkRepo(t, repo, &models.GitRepository{OrgID: "orga", ProjectID: "proj", RepoURL: "https://github.com/a/proj", Status: "pending"})
 	r.Status = "ready"
-	r.ClonePath = "/data/clones/a-proj"
+	r.DefaultBranch = "trunk"
 	if err := repo.Update(ctx, r); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestRepoRepository_Update(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("reload: %v / %v", got, err)
 	}
-	if got.Status != "ready" || got.ClonePath != "/data/clones/a-proj" {
+	if got.Status != "ready" || got.DefaultBranch != "trunk" {
 		t.Fatalf("Update did not persist: %+v", got)
 	}
 }

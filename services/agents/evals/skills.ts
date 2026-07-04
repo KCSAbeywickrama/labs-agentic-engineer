@@ -27,10 +27,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { Skill } from "../src/contracts/sse-events.js";
 // Reuse the bundle's single frontmatter grammar + LF canonicalizer so the
 // SKILL.md fence parsing can't drift from the spec-file fence parsing.
-import { FRONTMATTER_RE, lf } from "../src/agents/main/bundle.js";
+import { FRONTMATTER_RE, lf, type Skill } from "@aep/agent-stream";
 
 /** Split a `SKILL.md` into its YAML frontmatter block and markdown body. */
 function splitFrontmatter(raw: string): { frontmatter: string; body: string } {

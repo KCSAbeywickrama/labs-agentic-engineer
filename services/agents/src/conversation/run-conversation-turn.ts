@@ -29,12 +29,10 @@
  */
 
 import { isStepCount, type LanguageModel, type ModelMessage } from "ai";
-import type { Skill } from "../contracts/sse-events.js";
+import { FileBundle, type Skill, type StreamPart } from "@aep/agent-stream";
 import { runTurn } from "../agents/main/run-turn.js";
 import { buildTools, ASK_QUESTION } from "../agents/main/tool.js";
-import { FileBundle } from "../agents/main/bundle.js";
 import { buildInstructions, buildPrompt } from "../agents/main/prompt.js";
-import type { StreamPart } from "../agents/main/stream-types.js";
 import { config } from "../shared/config.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
 
@@ -133,6 +131,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       messages: conv.messages, // appended in place by runTurn
       tools,
       stopWhen: [isStepCount(config.maxSteps) /*, hasToolCall("ask_question") */],
+      maxOutputTokens: config.maxOutputTokens,
       onEvent: input.onEvent,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     });

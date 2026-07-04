@@ -447,6 +447,38 @@ func (c *Client) CreateTagRef(ctx context.Context, owner, repo string, cred cred
 	return fmt.Errorf("github create-tag-ref (status %d): %s", resp.StatusCode, string(respBody))
 }
 
+func (c *Client) GetTagObject(ctx context.Context, owner, repo string, cred credentials.Credential, tagSHA string) (string, error) {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/git/tags/%s", owner, repo, tagSHA)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("create get-tag request: %w", err)
+	}
+	if err := authHeaders(ctx, req, cred); err != nil {
+		return "", err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("github get-tag: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return "", &gitrepo.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(body), URL: url}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("github get-tag (status %d): %s", resp.StatusCode, string(body))
+	}
+	var parsed struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("decode get-tag: %w", err)
+	}
+	return parsed.Object.SHA, nil
+}
+
 func (c *Client) ListMatchingRefs(ctx context.Context, owner, repo string, cred credentials.Credential, prefix string) ([]gitrepo.MatchingRef, error) {
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/git/matching-refs/%s", owner, repo, prefix)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

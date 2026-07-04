@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { Skill } from "../../contracts/sse-events.js";
+import type { Skill } from "@aep/agent-stream";
 
 /** System instructions for the file-mutating main agent. */
 export const instructions = `You are a spec-bundle editing agent. You are given a set of existing files

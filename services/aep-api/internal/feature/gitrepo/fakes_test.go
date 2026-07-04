@@ -32,7 +32,6 @@ package gitrepo_test
 import (
 	"context"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
@@ -203,17 +202,3 @@ var _ repositories.RepoRepository = (*fakeRepoRepo)(nil)
 // ---- shared helpers --------------------------------------------------------
 
 func testContext() context.Context { return context.Background() }
-
-// waitFor polls cond up to timeout; fails the test if it never holds. Used to
-// join async goroutines (performClone) deterministically without a fixed sleep.
-func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out after %s waiting for: %s", timeout, what)
-}

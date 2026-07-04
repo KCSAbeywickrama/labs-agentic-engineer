@@ -18,6 +18,8 @@
     "vite": "7.2.2"
   },
   "dependencies": {
+    "@aep/agent-stream": "file:../../packages/agent-stream",
+    "@aep/design-projection": "file:../../packages/design-projection",
     "@aep/cell-diagram-view": "workspace:*",
     "@aep/excalidraw-dsl": "workspace:*",
     "@aep/explorer": "workspace:*",

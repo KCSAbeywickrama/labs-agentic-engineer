@@ -16,102 +16,158 @@
 
 package artifacts
 
-// Discard reverts the working tree to the latest tag: files added since the
-// tag are removed, deletions are restored. Discard fetches tags itself, so the
-// tag only needs to exist on the remote.
+// Discard = a revert-commit that rewrites the artifact subtree on `main` back to
+// its last tag (or to empty when no tag exists). The commit is real: assertions
+// read the bare repo's `main` tip.
 
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
-func TestDiscardRequirements_RevertsToLatestTag(t *testing.T) {
+func TestDiscardRequirements_RevertsToLastTag(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{
-		"specs/requirements/requirements.md": "baseline\n",
-		"specs/requirements/keep.md":         "keep\n",
-	})
-	r.remote.Tag(t, "v1", "requirements v1") // baseline snapshot
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "approved\n"})
+	ctx := context.Background()
+	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	// Draft drift on main: edit the main doc, add a new one, add an unrelated file.
+	r.seed(map[string]string{
+		"specs/requirements/requirements.md": "draft edit\n",
+		"specs/requirements/extra.md":        "new draft doc\n",
+		"unrelated.md":                       "outside the artifact\n",
+	}, "draft changes")
 
-	// Diverge the working tree: modify, add, and delete.
-	r.writeWT("specs/requirements/requirements.md", "edited since tag\n")
-	r.writeWT("specs/requirements/added.md", "added since tag\n")
-	r.rmWT("specs/requirements/keep.md")
-
-	restored, err := r.svc.DiscardRequirements(context.Background(), r.org, r.proj)
+	files, err := r.svc.DiscardRequirements(ctx, r.org, r.proj)
 	if err != nil {
 		t.Fatalf("DiscardRequirements: %v", err)
 	}
-	want := map[string]string{"requirements.md": "baseline\n", "keep.md": "keep\n"}
-	if len(restored) != len(want) {
-		t.Fatalf("restored = %v, want %v", restored, want)
+	if files["requirements.md"] != "approved\n" {
+		t.Errorf("returned bundle = %v, want requirements.md reverted to approved", files)
 	}
-	for k, v := range want {
-		if restored[k] != v {
-			t.Errorf("restored[%q] = %q, want %q", k, restored[k], v)
-		}
+	if _, ok := files["extra.md"]; ok {
+		t.Errorf("extra.md should be gone after discard, got %v", files)
 	}
-	// The added-since-tag file must be gone from the working tree — this proves
-	// the "remove current contents first" step, not just a checkout overlay.
-	if _, ok := r.readWT("specs/requirements/added.md"); ok {
-		t.Error("added.md should be removed by discard")
+	// main reflects the revert; the unrelated file is untouched.
+	if got := r.fileAt("main", "specs/requirements/requirements.md"); got != "approved\n" {
+		t.Errorf("main requirements.md = %q, want approved", got)
 	}
-	if got, _ := r.readWT("specs/requirements/keep.md"); got != "keep\n" {
-		t.Errorf("keep.md not restored: %q", got)
+	if r.blobExistsAt("main", "specs/requirements/extra.md") {
+		t.Error("extra.md should have been tombstoned on main")
 	}
-	if got, _ := r.readWT("specs/requirements/requirements.md"); got != "baseline\n" {
-		t.Errorf("requirements.md not reverted: %q", got)
+	if got := r.fileAt("main", "unrelated.md"); got != "outside the artifact\n" {
+		t.Errorf("unrelated.md = %q, want preserved (revert only touches the artifact subtree)", got)
 	}
 }
 
-func TestDiscardRequirements_NoTag_ErrNoVersionToDiscard(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "r\n"})
-	_, err := r.svc.DiscardRequirements(context.Background(), r.org, r.proj)
-	if !errors.Is(err, ErrNoVersionToDiscard) {
-		t.Fatalf("err = %v, want ErrNoVersionToDiscard", err)
-	}
-}
-
-func TestDiscardDesign_RevertsToLatestTag(t *testing.T) {
+func TestDiscardRequirements_NoTag_RevertsToEmpty(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
-		"specs/design/design.md":                "baseline root\n",
-		"specs/design/components/api/design.md": "baseline comp\n",
+		"specs/requirements/requirements.md": "never approved\n",
+		"keep.md":                            "outside\n",
 	})
-	r.remote.Tag(t, "v1-1", "design v1-1")
+	files, err := r.svc.DiscardRequirements(context.Background(), r.org, r.proj)
+	if err != nil {
+		t.Fatalf("DiscardRequirements: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("bundle = %v, want empty (no approved version to revert to)", files)
+	}
+	if r.blobExistsAt("main", "specs/requirements/requirements.md") {
+		t.Error("requirements.md should be gone on main (revert-to-empty)")
+	}
+	if got := r.fileAt("main", "keep.md"); got != "outside\n" {
+		t.Errorf("keep.md = %q, want preserved", got)
+	}
+}
 
-	// Diverge: modify root, add a nested file not in the tag.
-	r.writeWT("specs/design/design.md", "edited\n")
-	r.writeWT("specs/design/components/api/openapi.yaml", "openapi: 3.0.0\n")
+func TestDiscardDesign_RevertsToLastTag(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	ctx := context.Background()
+	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save requirements: %v", err)
+	}
+	r.seed(map[string]string{
+		"specs/design/design.md":                  "# Approved\n",
+		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
+	}, "design")
+	if _, err := r.svc.SaveDesign(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save design: %v", err)
+	}
+	// Drift the design on main.
+	r.seed(map[string]string{"specs/design/design.md": "# Draft edit\n"}, "design draft")
 
-	restored, err := r.svc.DiscardDesign(context.Background(), r.org, r.proj)
+	files, err := r.svc.DiscardDesign(ctx, r.org, r.proj)
 	if err != nil {
 		t.Fatalf("DiscardDesign: %v", err)
 	}
-	want := map[string]string{
-		"design.md":                "baseline root\n",
-		"components/api/design.md": "baseline comp\n",
+	if files["design.md"] != "# Approved\n" {
+		t.Errorf("design.md = %q, want reverted to approved", files["design.md"])
 	}
-	if len(restored) != len(want) {
-		t.Fatalf("restored = %v, want %v", restored, want)
-	}
-	for k, v := range want {
-		if restored[k] != v {
-			t.Errorf("restored[%q] = %q, want %q", k, restored[k], v)
-		}
-	}
-	if _, ok := r.readWT("specs/design/components/api/openapi.yaml"); ok {
-		t.Error("added-since-tag openapi.yaml should be removed by discard")
+	if got := r.fileAt("main", "specs/design/design.md"); got != "# Approved\n" {
+		t.Errorf("main design.md = %q, want approved", got)
 	}
 }
 
-func TestDiscardDesign_NoTag_ErrNoVersionToDiscard(t *testing.T) {
+func TestDiscardRequirements_CASConflict_RetriesAndSucceeds(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/design/design.md": "d\n"})
-	_, err := r.svc.DiscardDesign(context.Background(), r.org, r.proj)
-	if !errors.Is(err, ErrNoVersionToDiscard) {
-		t.Fatalf("err = %v, want ErrNoVersionToDiscard", err)
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "approved\n"})
+	ctx := context.Background()
+	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	r.seed(map[string]string{"specs/requirements/requirements.md": "draft\n"}, "draft")
+
+	var updateRefCalls int32
+	var once sync.Once
+	r.gd.BeforeUpdateRef = func() {
+		atomic.AddInt32(&updateRefCalls, 1)
+		// Once, right before the discard commit's ref move, an external writer
+		// advances main → the first UpdateRef is a real non-fast-forward.
+		once.Do(func() {
+			r.seed(map[string]string{"external.md": "external\n"}, "external push")
+		})
+	}
+
+	if _, err := r.svc.DiscardRequirements(ctx, r.org, r.proj); err != nil {
+		t.Fatalf("DiscardRequirements: %v", err)
+	}
+	if n := atomic.LoadInt32(&updateRefCalls); n != 2 {
+		t.Errorf("UpdateRef attempts = %d, want 2 (first non-FF, retry succeeds)", n)
+	}
+	if got := r.fileAt("main", "specs/requirements/requirements.md"); got != "approved\n" {
+		t.Errorf("requirements.md = %q, want reverted to approved", got)
+	}
+	if got := r.fileAt("main", "external.md"); got != "external\n" {
+		t.Errorf("external.md = %q, want preserved (base_tree refresh on retry)", got)
+	}
+}
+
+func TestDiscardRequirements_CASBudgetExhausted(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "approved\n"})
+	ctx := context.Background()
+	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	r.seed(map[string]string{"specs/requirements/requirements.md": "draft\n"}, "draft")
+
+	key := r.org + ":" + r.proj
+	for i := 0; i < bucketCapacity; i++ {
+		globalRetrier.claim(key)
+	}
+	// Advance main on every UpdateRef so the client can never fast-forward.
+	r.gd.BeforeUpdateRef = func() {
+		r.seed(map[string]string{"ext.md": "push\n"}, "external push")
+	}
+
+	_, err := r.svc.DiscardRequirements(ctx, r.org, r.proj)
+	if !errors.Is(err, ErrConflictBudgetExhausted) {
+		t.Fatalf("err = %v, want wrapped ErrConflictBudgetExhausted", err)
 	}
 }

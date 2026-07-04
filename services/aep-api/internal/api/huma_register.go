@@ -26,6 +26,8 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/files"
+	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
@@ -42,31 +44,32 @@ import (
 // registration list in one place (RegisterAllHuma) is what keeps the served
 // handler, the spec artifact, and the tests in lockstep.
 type HumaDeps struct {
-	ProjectSvc          project.ProjectService
-	OrgSvc              organization.OrganizationService
-	ComponentSvc        component.ComponentService
-	ConfigSvc           component.ConfigService
-	RequirementsSvc     requirements.RequirementsService
-	RequirementsChatSvc requirements.RequirementsChatService
-	CollabRepo          gitrepo.RepoService
-	DesignSvc           design.DesignService
-	TaskSvc             task.TaskService
-	TaskDispatcher      task.TaskDispatcher
-	TaskProgress        task.ProgressReader
-	ComponentClient     openchoreo.ComponentClient
-	BoardSvc            task.BoardService
-	IDPSvc              idp.IDPService
-	CredentialSvc       *orgcreds.CredentialService
-	DisconnectSvc       *orgcreds.OrgDisconnectService
-	BearerSvc           *orgcreds.BearerService
-	AnthropicSvc        *orgcreds.AnthropicCredentialService
-	TaskTokens          *auth.TaskTokenManager
-	SkillSvc            *skills.SkillService
-	SkillMutationSvc    *skills.SkillMutationService
-	SkillImportSvc      *skills.SkillImportService
-	GitHubAppSlug       string
-	BFFPublicURL        string
-	GitHubAppClientID   string
+	ProjectSvc        project.ProjectService
+	OrgSvc            organization.OrganizationService
+	ComponentSvc      component.ComponentService
+	ConfigSvc         component.ConfigService
+	RequirementsSvc   requirements.RequirementsService
+	CollabRepo        gitrepo.RepoService
+	DesignSvc         design.DesignService
+	TaskSvc           task.TaskService
+	TaskDispatcher    task.TaskDispatcher
+	TaskProgress      task.ProgressReader
+	ComponentClient   openchoreo.ComponentClient
+	BoardSvc          task.BoardService
+	IDPSvc            idp.IDPService
+	CredentialSvc     *orgcreds.CredentialService
+	DisconnectSvc     *orgcreds.OrgDisconnectService
+	BearerSvc         *orgcreds.BearerService
+	AnthropicSvc      *orgcreds.AnthropicCredentialService
+	TaskTokens        *auth.TaskTokenManager
+	SkillSvc          *skills.SkillService
+	SkillMutationSvc  *skills.SkillMutationService
+	SkillImportSvc    *skills.SkillImportService
+	FilesSvc          files.FilesService
+	GenAISvc          genai.GenAIService
+	GitHubAppSlug     string
+	BFFPublicURL      string
+	GitHubAppClientID string
 }
 
 // RegisterAllHuma registers every migrated feature's operations on the Huma API.
@@ -78,7 +81,6 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	component.RegisterComponent(api, d.ComponentSvc)
 	component.RegisterConfig(api, d.ConfigSvc)
 	requirements.RegisterRequirements(api, d.RequirementsSvc)
-	requirements.RegisterRequirementsChat(api, d.RequirementsChatSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
 	design.RegisterDesign(api, d.DesignSvc)
 	task.RegisterTask(api, d.TaskSvc, d.TaskDispatcher, d.TaskProgress, d.ComponentClient)
@@ -87,6 +89,8 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	orgcreds.RegisterOrgGitHub(api, d.CredentialSvc, d.DisconnectSvc, d.BearerSvc, d.GitHubAppSlug, d.BFFPublicURL, d.GitHubAppClientID)
 	orgcreds.RegisterOrgAnthropic(api, d.AnthropicSvc)
 	skills.RegisterSkill(api, d.SkillSvc, d.SkillMutationSvc, d.SkillImportSvc)
+	files.RegisterFiles(api, d.FilesSvc)
+	genai.RegisterGenAI(api, d.GenAISvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)

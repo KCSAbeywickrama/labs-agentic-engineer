@@ -21,9 +21,8 @@ import assert from "node:assert/strict";
 import type { ModelMessage } from "ai";
 import { runTurn } from "./run-turn.js";
 import { buildTools } from "./tool.js";
-import { FileBundle } from "./bundle.js";
+import { FileBundle, type StreamPart } from "@aep/agent-stream";
 import { SEED_FILES } from "./prompt.js";
-import type { StreamPart } from "./stream-types.js";
 import { mockModel } from "../../shared/mock-model.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";

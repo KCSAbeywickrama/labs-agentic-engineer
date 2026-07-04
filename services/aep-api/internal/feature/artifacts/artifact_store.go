@@ -18,9 +18,9 @@ package artifacts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 
@@ -29,9 +29,10 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// ArtifactStore wraps the in-process artifact service to add value beyond
-// pure file I/O: external-API catalog resolution and the typed `DesignFile`
-// shape (YAML split/assemble).
+// ArtifactStore wraps the GitHub-direct ArtifactService to add value beyond raw
+// file reads: external-API catalog resolution and the typed `DesignFile` shape
+// (YAML split/assemble). It is a read + assemble surface — mutations happen via
+// the Files API and are committed straight to `main`.
 type ArtifactStore struct {
 	artifactSvc  ArtifactService
 	externalAPIs *ExternalAPICatalog
@@ -43,11 +44,7 @@ func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
 
 // SetExternalAPICatalog overrides the catalog the store uses to resolve
 // architect-declared dependent-API names into concrete URLs. Optional —
-// without it, NewArtifactStore wires the shipped default catalog. The catalog
-// is instance state only, threaded into splitDesign by WriteDesign — the
-// former package-level catalog pointer is gone (every NewArtifactStore wrote
-// it, racing under parallel construction and leaking one store's catalog into
-// another's saves).
+// without it, NewArtifactStore wires the shipped default catalog.
 func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
 	if s == nil {
 		return
@@ -57,14 +54,9 @@ func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
 
-// RequirementsMainFile is the canonical primary requirements document. It
-// cannot be deleted/renamed via the API — controllers should reject
-// destructive operations on it.
-const RequirementsMainFile = "requirements.md"
-
-// ListRequirements returns the working-tree file map under
-// `specs/requirements/`. A first-time project with no requirements yet
-// returns an empty map (not an error).
+// ListRequirements returns the requirements file map at HEAD, under
+// `specs/requirements/`. A first-time project with no requirements yet returns
+// an empty map (not an error).
 func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	files, err := s.artifactSvc.ListRequirementFiles(ctx, orgID, projectID)
 	if err != nil {
@@ -76,43 +68,10 @@ func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID s
 	return files, nil
 }
 
-// ReadRequirementFile reads a single requirement file by basename.
-func (s *ArtifactStore) ReadRequirementFile(ctx context.Context, orgID, projectID, name string) (string, error) {
-	res, err := s.artifactSvc.GetFile(ctx, orgID, projectID, path.Join(RequirementsDir, name))
-	if err != nil {
-		return "", err
-	}
-	return res.Content, nil
-}
-
-// WriteRequirementFile creates or overwrites a single requirement file.
-// The optional ifMatch sha (returned by the previous PUT) gives the
-// streaming caller optimistic concurrency control.
-func (s *ArtifactStore) WriteRequirementFile(ctx context.Context, orgID, projectID, name, content string) (sha string, err error) {
-	res, err := s.artifactSvc.PutFile(ctx, orgID, projectID, path.Join(RequirementsDir, name), content, "")
-	if err != nil {
-		return "", fmt.Errorf("write requirement file %q: %w", name, err)
-	}
-	return res.SHA, nil
-}
-
-// DeleteRequirementFile removes a requirement file from the working tree.
-// The change is persisted on the next SaveRequirements call.
-func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projectID, name string) error {
-	if name == RequirementsMainFile {
-		return fmt.Errorf("cannot delete %s", RequirementsMainFile)
-	}
-	if err := s.artifactSvc.DeleteRequirementFile(ctx, orgID, projectID, name); err != nil {
-		return fmt.Errorf("delete requirement file %q: %w", name, err)
-	}
-	return nil
-}
-
 // ---- Design (multi-file directory) --------------------------------------
 
 // DesignFile is the BFF's in-memory representation of the multi-file design
-// artifact. It assembles from / splits to the working-tree layout under
-// `specs/design/`:
+// artifact. It assembles from the repo layout under `specs/design/`:
 //
 //	design.md                              # overview prose + sourceSpec frontmatter
 //	components/<name>/design.md            # frontmatter (type, language, dependsOn,
@@ -126,15 +85,14 @@ type DesignFile struct {
 	SkillsApplied []string                 `json:"skillsApplied,omitempty"`
 }
 
-// DesignRootFile is the canonical root design document. It cannot be deleted
-// via the API.
+// DesignRootFile is the canonical root design document.
 const DesignRootFile = "design.md"
 
 // componentDirPrefix is the path prefix under specs/design/ for per-component
 // directories.
 const componentDirPrefix = "components/"
 
-// ListDesignFiles returns the working-tree file map under `specs/design/`.
+// ListDesignFiles returns the design file map at HEAD, under `specs/design/`.
 // Keys are paths relative to that directory, using forward slashes (e.g.
 // `design.md`, `components/user-api/design.md`).
 func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
@@ -148,51 +106,10 @@ func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID st
 	return files, nil
 }
 
-// ReadDesignFile reads a single design file by sub-path.
-func (s *ArtifactStore) ReadDesignFile(ctx context.Context, orgID, projectID, subPath string) (string, error) {
-	res, err := s.artifactSvc.GetFile(ctx, orgID, projectID, path.Join(DesignDir, subPath))
-	if err != nil {
-		return "", err
-	}
-	return res.Content, nil
-}
-
-// WriteDesignFile creates or overwrites a single design file. The path is
-// relative to `specs/design/` (forward slashes; nested components allowed).
-func (s *ArtifactStore) WriteDesignFile(ctx context.Context, orgID, projectID, subPath, content string) (sha string, err error) {
-	res, err := s.artifactSvc.PutFile(ctx, orgID, projectID, path.Join(DesignDir, subPath), content, "")
-	if err != nil {
-		return "", fmt.Errorf("write design file %q: %w", subPath, err)
-	}
-	return res.SHA, nil
-}
-
-// DeleteDesignFile removes a single design file. Refuses to delete the root
-// `design.md`.
-func (s *ArtifactStore) DeleteDesignFile(ctx context.Context, orgID, projectID, subPath string) error {
-	if subPath == DesignRootFile {
-		return fmt.Errorf("cannot delete %s", DesignRootFile)
-	}
-	if err := s.artifactSvc.DeleteDesignFile(ctx, orgID, projectID, subPath); err != nil {
-		return fmt.Errorf("delete design file %q: %w", subPath, err)
-	}
-	return nil
-}
-
-// DeleteDesignDirectory removes a directory under `specs/design/` and all
-// its contents (e.g. `components/user-api` to remove a component's whole
-// subtree).
-func (s *ArtifactStore) DeleteDesignDirectory(ctx context.Context, orgID, projectID, subPath string) error {
-	if err := s.artifactSvc.DeleteDesignDirectory(ctx, orgID, projectID, subPath); err != nil {
-		return fmt.Errorf("delete design directory %q: %w", subPath, err)
-	}
-	return nil
-}
-
-// ReadDesign lists the working-tree design files and assembles them into the
-// flat `DesignFile` shape that the rest of the BFF expects (task generation,
-// OC provisioning, issue bodies, etc.). Returns
-// (nil, ErrArtifactNotFound) when no design root exists yet.
+// ReadDesign lists the design files at HEAD and assembles them into the flat
+// `DesignFile` shape the rest of the BFF expects (task generation, OC
+// provisioning, issue bodies, etc.). Returns (nil, nil) when no design root
+// exists yet.
 func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string) (*DesignFile, error) {
 	files, err := s.artifactSvc.ListDesignFiles(ctx, orgID, projectID)
 	if err != nil {
@@ -205,16 +122,15 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	if err != nil {
 		return nil, err
 	}
-	// Resolve architect-declared dependent-API names against the external
-	// API catalog so the in-memory design always has concrete URLs even
-	// when the on-disk frontmatter declared by intent only.
+	// Resolve architect-declared dependent-API names against the external API
+	// catalog so the in-memory design always has concrete URLs even when the
+	// on-disk frontmatter declared by intent only.
 	s.resolveExternalAPIs(design)
 	return design, nil
 }
 
-// resolveExternalAPIs fills in URLs for catalog-known dependent-API
-// entries whose URL was left blank by the architect. Idempotent — already-
-// populated URLs are left untouched.
+// resolveExternalAPIs fills in URLs for catalog-known dependent-API entries
+// whose URL was left blank by the architect. Idempotent.
 func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
 	if s == nil || s.externalAPIs == nil || d == nil {
 		return
@@ -237,32 +153,14 @@ func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
 	}
 }
 
-// WriteDesign splits the in-memory design into multiple files, then writes
-// every file via the git-service. Files no longer referenced by the new
-// design (e.g. components removed by a regeneration) are NOT auto-deleted —
-// the caller is expected to call DeleteDesignDirectory for removed
-// components separately.
-func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string, design *DesignFile) error {
-	files, err := splitDesign(design, s.externalAPIs)
-	if err != nil {
-		return fmt.Errorf("split design: %w", err)
-	}
-	for subPath, content := range files {
-		if _, err := s.WriteDesignFile(ctx, orgID, projectID, subPath, content); err != nil {
-			return fmt.Errorf("write %s: %w", subPath, err)
-		}
-	}
-	return nil
-}
-
 // ---- Helpers ------------------------------------------------------------
 
 // IsNotFound is sugar for callers that want to distinguish "no artifact yet"
 // from a real error.
 func IsNotFound(err error) bool { return errors.Is(err, ErrArtifactNotFound) }
 
-// DesignFilesEqual compares two design file maps after trimming whitespace
-// from each value. Used by the has-unsaved-changes check.
+// DesignFilesEqual compares two design file maps after trimming whitespace from
+// each value. Used by the has-unsaved-changes check.
 func DesignFilesEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
@@ -300,23 +198,22 @@ type componentFrontmatter struct {
 	DependentApis  []dependentApiConfig  `yaml:"dependentApis,omitempty"`
 }
 
-// exposesAPIConfig is the on-disk shape for a service component's API
-// exposure policy. `Auth: "end-user-required"` ⇒ gateway validates a
-// user JWT and injects UserContext upstream.
+// exposesAPIConfig is the on-disk shape for a service component's API exposure
+// policy. `Auth: "end-user-required"` ⇒ gateway validates a user JWT and injects
+// UserContext upstream.
 type exposesAPIConfig struct {
 	Managed     bool   `yaml:"managed,omitempty"`
 	Auth        string `yaml:"auth,omitempty"`
 	UserContext string `yaml:"userContext,omitempty"`
 }
 
-// callerIdentityConfig is the on-disk shape for a web-app's caller-
-// identity intent. `Mode: "end-user"` ⇒ the SPA performs OIDC + PKCE
-// against the platform IDP.
+// callerIdentityConfig is the on-disk shape for a web-app's caller-identity
+// intent. `Mode: "end-user"` ⇒ the SPA performs OIDC + PKCE against the IDP.
 type callerIdentityConfig struct {
 	Mode string `yaml:"mode,omitempty"`
 }
 
-// dependentApiConfig is the on-disk shape for an external upstream API the
+// dependentApiConfig is the on-disk shape for an external upstream API a
 // component consumes at runtime. See models.DependentAPI for the wire shape.
 type dependentApiConfig struct {
 	Name           string `yaml:"name"`
@@ -325,8 +222,8 @@ type dependentApiConfig struct {
 	Authentication string `yaml:"authentication,omitempty"`
 }
 
-// SplitFrontmatter separates the leading YAML frontmatter block (delimited
-// by `---` lines) from the body. If the file has no frontmatter, returns
+// SplitFrontmatter separates the leading YAML frontmatter block (delimited by
+// `---` lines) from the body. If the file has no frontmatter, returns
 // ("", content, nil).
 func SplitFrontmatter(content string) (fm string, body string, err error) {
 	trimmed := strings.TrimLeft(content, " \t\r\n")
@@ -335,41 +232,25 @@ func SplitFrontmatter(content string) (fm string, body string, err error) {
 	if !strings.HasPrefix(trimmed, "---") {
 		return "", content, nil
 	}
-	// Find the closing fence — must be a `---` on its own line after the open.
 	rest := trimmed[3:]
-	// Skip optional newline directly after opening fence.
 	rest = strings.TrimLeft(rest, " \t")
 	if !strings.HasPrefix(rest, "\n") && !strings.HasPrefix(rest, "\r\n") {
-		// Open fence was not followed by a newline — treat as no frontmatter.
 		return "", content, nil
 	}
-	// Locate the end fence.
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
 		return "", content, fmt.Errorf("frontmatter: unterminated --- block")
 	}
 	fm = strings.TrimSpace(rest[:end])
 	after := rest[end+len("\n---"):]
-	// Drop optional newline + spaces after the closing fence.
 	after = strings.TrimPrefix(after, "\r")
 	after = strings.TrimPrefix(after, "\n")
 	return fm, after, nil
 }
 
-// joinFrontmatter writes the YAML frontmatter block + body. If the
-// frontmatter is empty, returns the body unchanged.
-func joinFrontmatter(fm string, body string) string {
-	fm = strings.TrimSpace(fm)
-	body = strings.TrimLeft(body, "\r\n")
-	if fm == "" {
-		return body
-	}
-	return "---\n" + fm + "\n---\n\n" + body
-}
-
-// AssembleDesign reconstructs a flat DesignFile from the multi-file working
-// tree map. Path separator is `/`. Returns an error if the root `design.md`
-// is missing (callers handle that as "no design yet").
+// AssembleDesign reconstructs a flat DesignFile from the multi-file map (keys
+// relative to specs/design/, forward slashes). Returns an error if the root
+// `design.md` is missing (callers handle that as "no design yet").
 func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	root, ok := files[DesignRootFile]
 	if !ok {
@@ -392,12 +273,21 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 		SkillsApplied: append([]string(nil), rfm.SkillsApplied...),
 	}
 
-	// Iterate component dirs in deterministic order.
 	componentNames := ComponentNamesIn(files)
 	out.Components = make([]models.DesignComponent, 0, len(componentNames))
 	for _, name := range componentNames {
-		designPath := componentDirPrefix + name + "/design.md"
-		raw, ok := files[designPath]
+		// design.json is the component model since PR #70 (the agent's write
+		// gate and the save gate both validate it); design.md frontmatter is
+		// the legacy shape, kept as a fallback for pre-#70 projects.
+		if raw, ok := files[componentDirPrefix+name+"/design.json"]; ok {
+			comp, err := assembleComponentFromJSON(name, raw, componentNames, files)
+			if err != nil {
+				return nil, fmt.Errorf("assemble component %q: %w", name, err)
+			}
+			out.Components = append(out.Components, comp)
+			continue
+		}
+		raw, ok := files[componentDirPrefix+name+"/design.md"]
 		if !ok {
 			continue
 		}
@@ -408,6 +298,80 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 		out.Components = append(out.Components, comp)
 	}
 	return out, nil
+}
+
+// componentDesignJSON is the on-disk shape of `components/<name>/design.json`
+// (the published component-design schema — packages/contracts/schemas/
+// component-design.schema.json; same definition the agent's write gate and the
+// save-time hard gate validate).
+type componentDesignJSON struct {
+	Name        string                    `json:"name"`
+	Type        string                    `json:"type"`
+	Version     string                    `json:"version"`
+	Language    string                    `json:"language"`
+	Buildpack   string                    `json:"buildpack"`
+	AppPath     string                    `json:"appPath"`
+	Entrypoint  string                    `json:"entrypoint"`
+	Exposure    string                    `json:"exposure"`
+	Connections []componentConnectionJSON `json:"connections"`
+	Description string                    `json:"description"`
+}
+
+// componentConnectionJSON is one design.json connection. OnPlatform defaults
+// to true when omitted (matching @aep/design-projection's `!== false`).
+type componentConnectionJSON struct {
+	To         string `json:"to"`
+	Type       string `json:"type"`
+	OnPlatform *bool  `json:"onPlatform,omitempty"`
+}
+
+// assembleComponentFromJSON builds a DesignComponent from design.json.
+// DependsOn keeps its legacy meaning — sibling components built by this
+// project — so it takes only on-platform connections whose target is another
+// component directory; off-platform connections surface as DependentApis
+// (design.json carries no URL — the name/type is all we know at design time).
+func assembleComponentFromJSON(name, raw string, componentNames []string, files map[string]string) (models.DesignComponent, error) {
+	var cd componentDesignJSON
+	if err := json.Unmarshal([]byte(raw), &cd); err != nil {
+		return models.DesignComponent{}, fmt.Errorf("parse design.json: %w", err)
+	}
+	siblings := make(map[string]bool, len(componentNames))
+	for _, n := range componentNames {
+		siblings[n] = true
+	}
+	dependsOn := []string{}
+	var depApis []models.DependentAPI
+	for _, conn := range cd.Connections {
+		if conn.To == "" {
+			continue
+		}
+		onPlatform := conn.OnPlatform == nil || *conn.OnPlatform
+		switch {
+		case onPlatform && siblings[conn.To] && conn.To != name:
+			dependsOn = append(dependsOn, conn.To)
+		case !onPlatform:
+			depApis = append(depApis, models.DependentAPI{
+				Name:        conn.To,
+				Description: conn.Type + " connection (off-platform)",
+			})
+		}
+	}
+	openapi := files[componentDirPrefix+name+"/openapi.yaml"]
+	if openapi == "" {
+		openapi = files[componentDirPrefix+name+"/openapi.yml"]
+	}
+	return models.DesignComponent{
+		Name:                       name,
+		ComponentType:              cd.Type,
+		Language:                   cd.Language,
+		DependsOn:                  dependsOn,
+		Entrypoint:                 cd.Entrypoint,
+		Buildpack:                  cd.Buildpack,
+		AppPath:                    cd.AppPath,
+		OpenAPISpec:                openapi,
+		ComponentAgentInstructions: strings.TrimSpace(cd.Description),
+		DependentApis:              depApis,
+	}, nil
 }
 
 func assembleComponent(name, designMd string, files map[string]string) (models.DesignComponent, error) {
@@ -423,7 +387,6 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 	}
 	openapi := files[componentDirPrefix+name+"/openapi.yaml"]
 	if openapi == "" {
-		// Fallback: support .yml as well.
 		openapi = files[componentDirPrefix+name+"/openapi.yml"]
 	}
 	dependsOn := append([]string(nil), cfm.DependsOn...)
@@ -449,9 +412,6 @@ func assembleComponent(name, designMd string, files map[string]string) (models.D
 			if d.Name == "" {
 				continue
 			}
-			// URL may be empty here — the architect can declare an
-			// intent by name only; the ArtifactStore's catalog post-
-			// process resolves it on the way out of ReadDesign.
 			depApis = append(depApis, models.DependentAPI{
 				Name:           d.Name,
 				URL:            d.URL,
@@ -497,132 +457,4 @@ func ComponentNamesIn(files map[string]string) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// SplitDesign takes a flat in-memory design and produces the file map for
-// the working tree. The caller is responsible for deleting any
-// pre-existing files NOT present in the returned map (e.g. components
-// removed across a regeneration). Standalone callers get NO external-API
-// catalog (dependent-API URLs are written verbatim); the store's WriteDesign
-// threads its instance catalog via splitDesign so catalog-resolved URLs are
-// stripped on save.
-func SplitDesign(d *DesignFile) (map[string]string, error) {
-	return splitDesign(d, nil)
-}
-
-// splitDesign is the implementation; catalog may be nil (no URL stripping).
-func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string, error) {
-	if d == nil {
-		return nil, fmt.Errorf("nil design")
-	}
-	out := make(map[string]string, 1+2*len(d.Components))
-
-	// Root design.md — body + optional frontmatter. SourceSpec is encoded
-	// in the design tag name (`v<N>-<M>`); we only write it to the file
-	// frontmatter when there is some other field that requires the block
-	// (currently: skillsApplied per docs/design/skills-system.md). The
-	// console's markdown preview strips frontmatter via SplitFrontmatter,
-	// so the visible Overview prose is unchanged.
-	if len(d.SkillsApplied) > 0 {
-		// Sorted copy for stable diffs.
-		sortedSkills := append([]string(nil), d.SkillsApplied...)
-		sort.Strings(sortedSkills)
-		rfm := rootFrontmatter{SkillsApplied: sortedSkills}
-		rfmBytes, err := marshalFrontmatter(rfm)
-		if err != nil {
-			return nil, fmt.Errorf("encode root frontmatter: %w", err)
-		}
-		out[DesignRootFile] = joinFrontmatter(string(rfmBytes), strings.TrimSpace(d.Overview)+"\n")
-	} else {
-		out[DesignRootFile] = strings.TrimSpace(d.Overview) + "\n"
-	}
-
-	for _, comp := range d.Components {
-		if comp.Name == "" {
-			return nil, fmt.Errorf("component with empty name")
-		}
-		base := componentDirPrefix + comp.Name
-		cfm := componentFrontmatter{
-			Type:       comp.ComponentType,
-			Language:   comp.Language,
-			DependsOn:  comp.DependsOn,
-			Buildpack:  comp.Buildpack,
-			AppPath:    comp.AppPath,
-			Entrypoint: comp.Entrypoint,
-		}
-		// Preserve any non-empty field — gating on `Auth != ""` would drop
-		// designs that set only `managed` or `userContext`.
-		if comp.ExposesAPI != nil && (comp.ExposesAPI.Auth != "" || comp.ExposesAPI.Managed || comp.ExposesAPI.UserContext != "") {
-			cfm.ExposesAPI = &exposesAPIConfig{
-				Managed:     comp.ExposesAPI.Managed,
-				Auth:        comp.ExposesAPI.Auth,
-				UserContext: comp.ExposesAPI.UserContext,
-			}
-		}
-		if comp.CallerIdentity != nil && comp.CallerIdentity.Mode != "" {
-			cfm.CallerIdentity = &callerIdentityConfig{Mode: comp.CallerIdentity.Mode}
-		}
-		if len(comp.DependentApis) > 0 {
-			cfm.DependentApis = make([]dependentApiConfig, 0, len(comp.DependentApis))
-			for _, d := range comp.DependentApis {
-				if d.Name == "" {
-					continue
-				}
-				// Drop the URL on save when it matches the current
-				// catalog entry for this name — the in-memory URL came
-				// from ReadDesign's catalog substitution, not from the
-				// architect. Persisting it would defeat the
-				// "name-only declaration" contract and break catalog
-				// rotation. (catalog == nil for standalone SplitDesign
-				// callers — fall through to write URL.)
-				url := d.URL
-				if catalog != nil {
-					if entry := catalog.Lookup(d.Name); entry.URL != "" && entry.URL == d.URL {
-						url = ""
-					}
-				}
-				if url == "" && d.Description == "" && d.Authentication == "" {
-					// Name-only declaration — emit just the name.
-					cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{Name: d.Name})
-					continue
-				}
-				cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{
-					Name:           d.Name,
-					URL:            url,
-					Description:    d.Description,
-					Authentication: d.Authentication,
-				})
-			}
-		}
-		cfmBytes, err := marshalFrontmatter(cfm)
-		if err != nil {
-			return nil, fmt.Errorf("encode component %q frontmatter: %w", comp.Name, err)
-		}
-		header := fmt.Sprintf("# %s\n\n", comp.Name)
-		out[base+"/design.md"] = joinFrontmatter(string(cfmBytes), header+strings.TrimSpace(comp.ComponentAgentInstructions)+"\n")
-		if openapi := strings.TrimSpace(comp.OpenAPISpec); openapi != "" {
-			out[base+"/openapi.yaml"] = openapi + "\n"
-		}
-	}
-	return out, nil
-}
-
-// ComponentDirPath returns the directory path for a given component name
-// (relative to specs/design/), used by DeleteDesignDirectory.
-func ComponentDirPath(componentName string) string {
-	return path.Join(componentDirPrefix, componentName)
-}
-
-// marshalFrontmatter encodes v as YAML, but returns an empty string when
-// the encoded form is "{}\n" (yaml.Marshal of an all-zero struct).
-func marshalFrontmatter(v interface{}) ([]byte, error) {
-	out, err := yaml.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "{}" {
-		return []byte{}, nil
-	}
-	return []byte(trimmed), nil
 }

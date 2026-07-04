@@ -14,14 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// COMPONENT tier (bff-component-testing.md §4): the REAL requirements +
-// requirements-chat + collab services behind the REAL production chain — global
-// middleware → faked auth at the jwt.WithClaims seam → orgensure → Huma
-// parsing/validation → the tenant gate in ENFORCE → each handler's inline error
-// mapping — driven in-process via the componenttest harness. Only the artifact
-// seam is faked (real ArtifactStore decorator over FakeArtifactService); the
-// agents client is nil because no streaming route is exercised here (StreamGenerate/
-// StreamChat completion + side-effects are unit-proven, per the SSE rule §7).
+// COMPONENT tier (bff-component-testing.md §4): the REAL requirements + collab
+// services behind the REAL production chain — global middleware → faked auth at
+// the jwt.WithClaims seam → orgensure → Huma parsing/validation → the tenant gate
+// in ENFORCE → each handler's inline error mapping — driven in-process via the
+// componenttest harness. Only the artifact seam is faked (real ArtifactStore
+// decorator over FakeArtifactService). Per the GitHub-direct rework
+// (docs/design/agents-generation-migration.md §12.2) the per-file PUT/DELETE, the
+// generate stream, and the whole requirements-chat surface are gone; what remains
+// is the read + version + save/discard + collab surface exercised below.
 //
 // ORG SCOPE: the active org is derived SOLELY from the token (no {orgHandle}
 // path param), so the only runtime auth assertion the tier adds is the gate's
@@ -52,7 +53,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
-	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -87,17 +87,15 @@ func (f *fakeCollabRepos) DeleteRepo(context.Context, string, string) error {
 	panic("fakeCollabRepos: DeleteRepo not expected")
 }
 
-// newReqHarness assembles the real chain around the REAL requirements/chat/collab
-// services. The store decorator wraps `fake`; the agents client is nil (no
-// streaming route driven here); no locker (withLock runs inline — lock contention
-// is proven in the dbtest tier and, for the 409 mapping, the DB-backed test below).
+// newReqHarness assembles the real chain around the REAL requirements/collab
+// services. The store decorator wraps `fake`, which is also the direct artifactSvc
+// seam.
 func newReqHarness(t *testing.T, fake *artifactstest.FakeArtifactService, repos gitrepo.RepoService) *componenttest.Harness {
 	t.Helper()
 	store := artifacts.NewArtifactStore(fake)
 	return componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{
-		RequirementsSvc:     requirements.NewRequirementsService(store, nil, fake),
-		RequirementsChatSvc: requirements.NewRequirementsChatService(store, nil, fake, nil),
-		CollabRepo:          repos,
+		RequirementsSvc: requirements.NewRequirementsService(store, fake),
+		CollabRepo:      repos,
 	}})
 }
 
@@ -212,64 +210,6 @@ func TestReqComponent_GetRequirements_OpaqueErrorIs500(t *testing.T) {
 	}
 }
 
-// --- update-file -------------------------------------------------------------
-
-func TestReqComponent_UpdateFile_HappyAndMissingBody(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha1"}, nil
-		},
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"functional.md": "body"}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	h := newReqHarness(t, fake, nil)
-
-	// Happy path: PUT with a well-formed body → 200 with the refreshed bundle.
-	resp := h.AsOrg("acme").Put(reqPrefix+"/files/functional.md", `{"content":"hello"}`)
-	if resp.Code != 200 {
-		t.Fatalf("update: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-
-	// Missing body on a required-body op → Huma hard-400 before the handler runs.
-	resp = h.AsOrg("acme").Put(reqPrefix+"/files/functional.md", "")
-	if resp.Code != 400 {
-		t.Fatalf("missing body: want 400, got %d body=%s", resp.Code, resp.Body.String())
-	}
-}
-
-// TestReqComponent_UpdateFile_LockBusyMapsTo409 proves the RequirementsDirLockBusy
-// → 409 mapping through the REAL chain. The busy condition is a genuine advisory
-// lock, so this rides a real dbtest Postgres and self-skips under -short (fast
-// lane). A held session lock forces the writer's pg_try_advisory_xact_lock to
-// fail, so the closure never runs (PutFile stays unset — reaching it would panic).
-func TestReqComponent_UpdateFile_LockBusyMapsTo409(t *testing.T) {
-	t.Parallel()
-	db := dbtest.New(t) // self-skips under -short / no Docker
-	ctx := context.Background()
-
-	locker := requirements.NewRequirementsDirLocker(db)
-	held, err := locker.AcquireSession(ctx, "acme", "web")
-	if err != nil {
-		t.Fatalf("acquire holding lock: %v", err)
-	}
-	defer held.Release(ctx)
-
-	fake := &artifactstest.FakeArtifactService{} // no method should be reached
-	store := artifacts.NewArtifactStore(fake)
-	svc := requirements.NewRequirementsService(store, nil, fake).WithLocker(locker)
-	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{RequirementsSvc: svc}})
-
-	resp := h.AsOrg("acme").Put(reqPrefix+"/files/functional.md", `{"content":"x"}`)
-	if resp.Code != 409 {
-		t.Fatalf("lock busy: want 409, got %d body=%s", resp.Code, resp.Body.String())
-	}
-}
-
 // --- save / discard ----------------------------------------------------------
 
 func TestReqComponent_SaveAndDiscard_Happy(t *testing.T) {
@@ -366,79 +306,6 @@ func TestReqComponent_GetAtVersion_HappyAndNotFound(t *testing.T) {
 	resp = h.AsOrg("acme").Get(reqPrefix + "/versions/v9")
 	if resp.Code != 404 {
 		t.Fatalf("get-at-version missing: want 404, got %d body=%s", resp.Code, resp.Body.String())
-	}
-}
-
-// --- chat: undo / baseline-file / revert / drop ------------------------------
-
-func TestReqComponent_ChatUndo_Happy(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		RestoreRequirementsSnapshotFunc: func(context.Context, string, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "restored"}, nil
-		},
-		DeleteRequirementsSnapshotFunc: func(context.Context, string, string, string) error { return nil },
-	}
-	h := newReqHarness(t, fake, nil)
-
-	resp := h.AsOrg("acme").Post(reqPrefix+"/chat/turns/t_1/undo", "{}")
-	if resp.Code != 200 {
-		t.Fatalf("undo: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	var out struct {
-		Files map[string]string `json:"files"`
-	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
-		t.Fatalf("undo body: %v\n%s", err, resp.Body.String())
-	}
-	if out.Files["requirements.md"] != "restored" {
-		t.Fatalf("undo files: %v", out.Files)
-	}
-}
-
-func TestReqComponent_ChatBaselineFile_HappyAndNotFound(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ReadFileFromRequirementsSnapshotFunc: func(_ context.Context, _, _, _, filename string) (string, bool, error) {
-			if filename == "missing.md" {
-				return "", false, artifacts.ErrArtifactNotFound
-			}
-			return "baseline-body", true, nil
-		},
-	}
-	h := newReqHarness(t, fake, nil)
-
-	resp := h.AsOrg("acme").Get(reqPrefix + "/chat/baseline/sb_1/files/functional.md")
-	if resp.Code != 200 {
-		t.Fatalf("baseline-file: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-
-	resp = h.AsOrg("acme").Get(reqPrefix + "/chat/baseline/sb_1/files/missing.md")
-	if resp.Code != 404 {
-		t.Fatalf("baseline-file missing: want 404, got %d body=%s", resp.Code, resp.Body.String())
-	}
-}
-
-func TestReqComponent_ChatRevertAndDrop_NoContent(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ReadFileFromRequirementsSnapshotFunc: func(context.Context, string, string, string, string) (string, bool, error) {
-			return "original", true, nil
-		},
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha1"}, nil
-		},
-		DeleteRequirementsSnapshotFunc: func(context.Context, string, string, string) error { return nil },
-	}
-	h := newReqHarness(t, fake, nil)
-
-	// Revert (existed → write-back) → 204.
-	if resp := h.AsOrg("acme").Post(reqPrefix+"/chat/baseline/sb_1/files/functional.md/revert", "{}"); resp.Code != 204 {
-		t.Fatalf("revert: want 204, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	// Drop the baseline snapshot → 204.
-	if resp := h.AsOrg("acme").Delete(reqPrefix + "/chat/baseline/sb_1"); resp.Code != 204 {
-		t.Fatalf("drop: want 204, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

@@ -29,14 +29,20 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LanguageModel, ModelMessage } from "ai";
-import type { OpResult, Skill } from "../src/contracts/sse-events.js";
+import {
+  FileBundle,
+  applyToolCall,
+  isFileMutationTool,
+  streamTurn,
+  type OpResult,
+  type Skill,
+  type StreamPart,
+  type TurnRequest,
+} from "@aep/agent-stream";
 import { createApp } from "../src/server.js";
 import { listen0 } from "../src/shared/listen.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
-import { FileBundle } from "../src/agents/main/bundle.js";
-import { applyToolCall, isFileMutationTool } from "../src/agents/main/change.js";
-import type { StreamPart } from "../src/agents/main/stream-types.js";
-import { streamTurn, type TurnRequest } from "./sse-client.js";
+import { EVAL_AUTH, evalTurnHeaders } from "./auth.js";
 import { scoreExpect, allPass, type CheckResult } from "./scoring.js";
 import { writePreview } from "./preview.js";
 import type { Fixture } from "./fixture.js";
@@ -76,6 +82,12 @@ export interface SuiteResult {
 export interface RunOptions {
   model: LanguageModel;
   samples: number;
+  /**
+   * The Anthropic key sent as `X-Anthropic-Key` (like any caller). The in-process
+   * server injects `model` directly, so the value only has to satisfy the
+   * required-header gate; defaults to a placeholder for the mock-model tests.
+   */
+  apiKey?: string;
   /** When set, dump the reconstructed snapshot per turn (k === 0 only). */
   writePreviewDir?: string;
   /** The whole skill library, pushed in every turn body (ADR-0002). */
@@ -91,7 +103,13 @@ interface Booted {
 
 async function boot(model: LanguageModel): Promise<Booted> {
   const store = new InMemoryConversationStore();
-  const app = createApp({ store, model });
+  // The in-process server injects the (mock or real) model directly; the M2M gate
+  // still runs on the shared-secret path, so turns carry an eval-minted token.
+  const app = createApp({
+    store,
+    buildModel: () => model,
+    auth: { audience: EVAL_AUTH.audience, secret: EVAL_AUTH.secret },
+  });
   const { baseUrl, close } = await listen0(app.listen(0));
   return { store, baseUrl, close };
 }
@@ -132,9 +150,14 @@ function turnBody(
 }
 
 /** Drive one turn over HTTP and collect every raw StreamPart frame. */
-async function collectTurn(baseUrl: string, id: string, body: TurnRequest): Promise<StreamPart[]> {
+async function collectTurn(
+  baseUrl: string,
+  id: string,
+  body: TurnRequest,
+  headers: Record<string, string>,
+): Promise<StreamPart[]> {
   const parts: StreamPart[] = [];
-  for await (const part of streamTurn(baseUrl, id, body)) parts.push(part);
+  for await (const part of streamTurn(baseUrl, id, body, { headers })) parts.push(part);
   return parts;
 }
 
@@ -149,6 +172,7 @@ async function runSample(
   const { store, baseUrl, close } = await boot(opts.model);
   try {
     const id = fixture.name;
+    const headers = await evalTurnHeaders(opts.apiKey ?? "eval");
     let current = seed;
 
     if (fixture.messages && fixture.messages.length > 0) {
@@ -164,7 +188,7 @@ async function runSample(
       const files = turn.files ?? current;
 
       const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, opts.skills);
-      const parts = await collectTurn(baseUrl, id, body);
+      const parts = await collectTurn(baseUrl, id, body, headers);
 
       const toolCalls = parts.filter((p) => p.type === "tool-call");
       const toolNames = toolCalls.map((p) => p.toolName ?? "");
@@ -237,16 +261,18 @@ export async function recordFixture(
   fixture: Fixture,
   model: LanguageModel,
   skills?: Skill[],
+  apiKey?: string,
 ): Promise<ModelMessage[]> {
   const seed = fixture.seed ?? suite.defaultSeed;
   const { store, baseUrl, close } = await boot(model);
   try {
     const id = fixture.name;
+    const headers = await evalTurnHeaders(apiKey ?? "eval");
     let current = seed;
     for (const turn of fixture.turns) {
       const files = turn.files ?? current;
       const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, skills);
-      const parts = await collectTurn(baseUrl, id, body);
+      const parts = await collectTurn(baseUrl, id, body, headers);
       current = reconstruct(files, parts.filter((p) => p.type === "tool-call"));
     }
     const conv = await store.get(id);

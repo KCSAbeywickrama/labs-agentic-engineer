@@ -32,7 +32,6 @@ type GitRepository struct {
 	OrgID         string `gorm:"not null;uniqueIndex:ux_git_repositories_org_project,priority:1" json:"orgId"`
 	ProjectID     string `gorm:"not null;uniqueIndex:ux_git_repositories_org_project,priority:2" json:"projectId"`
 	RepoURL       string `gorm:"not null" json:"repoUrl"`
-	ClonePath     string `gorm:"type:text" json:"clonePath"`
 	DefaultBranch string `gorm:"default:main" json:"defaultBranch"`
 	Status        string `gorm:"default:pending" json:"status"`
 	ErrorMessage  string `gorm:"type:text" json:"errorMessage,omitempty"`

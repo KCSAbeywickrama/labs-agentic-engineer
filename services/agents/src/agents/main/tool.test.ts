@@ -18,9 +18,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Skill, LoadSkillResult, LoadSkillReferenceResult } from "../../contracts/sse-events.js";
+import { FileBundle, type Skill, type LoadSkillResult, type LoadSkillReferenceResult } from "@aep/agent-stream";
 import { buildTools, LOAD_SKILL, LOAD_SKILL_REFERENCE } from "./tool.js";
-import { FileBundle } from "./bundle.js";
 
 const SKILLS: Skill[] = [
   { name: "component-architecture", description: "deriving components", content: "Components live at specs/design/components/<name>/design.md." },

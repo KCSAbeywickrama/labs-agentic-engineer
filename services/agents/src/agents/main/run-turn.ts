@@ -38,7 +38,7 @@ import {
   type LanguageModelUsage,
   type ToolSet,
 } from "ai";
-import type { StreamPart } from "./stream-types.js";
+import type { StreamPart } from "@aep/agent-stream";
 
 export interface RunTurnInput {
   model: LanguageModel;
@@ -57,6 +57,12 @@ export interface RunTurnInput {
   onEvent?: (part: StreamPart) => void;
   abortSignal?: AbortSignal;
   maxSteps?: number;
+  /**
+   * Per-step output-token ceiling. Left unset the provider applies a low default
+   * (~4096) that truncates a large file mid-`addFile`, so the tool call never
+   * closes and nothing folds. Pass a generous value for spec/design generations.
+   */
+  maxOutputTokens?: number;
 }
 
 export interface RunTurnResult {
@@ -74,6 +80,7 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
     instructions: input.instructions,
     tools: input.tools,
     stopWhen: input.stopWhen ?? [isStepCount(input.maxSteps ?? 20)],
+    ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
   });
 
   const result = await agent.stream({

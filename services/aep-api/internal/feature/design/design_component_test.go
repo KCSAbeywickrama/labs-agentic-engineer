@@ -19,9 +19,10 @@
 // jwt.WithClaims seam → orgensure → Huma parsing/validation → the tenant gate
 // in ENFORCE → mapDesignError — driven in-process via the componenttest
 // harness. The store is the REAL artifacts.NewArtifactStore decorator; only its
-// out-of-process artifact service (git) is faked at the interface. The agents
-// client is nil here: the streaming generate op is an SSE side-effect proven at
-// the unit tier (design_service_more_test.go), not an on-wire JSON contract.
+// out-of-process artifact service (git) is faked at the interface. Per the
+// GitHub-direct rework the read + save + version surface is all that remains
+// (per-file PUT/DELETE, component delete, and the architect generate stream are
+// gone), so only those routes are exercised here.
 //
 // Body shapes are asserted against the harvested goldens (testdata/harvest/
 // golden/) by FIELD SET — the low-maintenance contract, values scrubbed. Both
@@ -44,7 +45,6 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/api"
-	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
@@ -79,13 +79,11 @@ func happyReads() *artifactstest.FakeArtifactService {
 	}
 }
 
-// newHarness assembles the real chain around the REAL design service; the
-// agents client is nil (SSE generate is unit-tier), only the artifact service
-// (git) is faked.
+// newHarness assembles the real chain around the REAL design service; only the
+// out-of-process artifact service (git) is faked.
 func newHarness(t *testing.T, fake *artifactstest.FakeArtifactService) *componenttest.Harness {
 	t.Helper()
-	var agentsClient agents.Client // nil — generate op not exercised here
-	svc := design.NewDesignService(artifacts.NewArtifactStore(fake), agentsClient, fake)
+	svc := design.NewDesignService(artifacts.NewArtifactStore(fake), fake)
 	return componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{DesignSvc: svc}})
 }
 
@@ -182,56 +180,6 @@ func TestDesignComponent_VersionsMatchesGolden(t *testing.T) {
 	}
 }
 
-func TestDesignComponent_UpdateFileHappyAndValidation(t *testing.T) {
-	t.Parallel()
-	fake := happyReads()
-	fake.PutFileFunc = func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-		return &artifacts.PutResult{SHA: "sha"}, nil
-	}
-	h := newHarness(t, fake)
-
-	// Happy: writing a file returns the refreshed bundle.
-	resp := h.AsOrg("acme").Put(
-		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.md",
-		`{"content":"# hello-api\n\nnew body"}`,
-	)
-	if resp.Code != 200 {
-		t.Fatalf("update file: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if fs := dropSchema(componenttest.FieldSet(t, resp.Body.String())); strings.Join(fs, ",") != "design,files" {
-		t.Fatalf("update-file must return the bundle {design,files}, got %v", fs)
-	}
-
-	// Validation: the body's `content` is a required schema property — a body
-	// missing it is a Huma 422 that never reaches the service.
-	resp = h.AsOrg("acme").Put(
-		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.md",
-		`{}`,
-	)
-	if resp.Code != 422 {
-		t.Fatalf("missing content: want 422, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	p := componenttest.DecodeProblem(t, resp.Body.String())
-	if len(p.Errors) == 0 || !strings.Contains(p.Errors[0].Message, "expected required property content to be present") {
-		t.Fatalf("422 shape drifted: %s", resp.Body.String())
-	}
-}
-
-func TestDesignComponent_DeleteComponentHappy(t *testing.T) {
-	t.Parallel()
-	fake := happyReads()
-	fake.DeleteDesignDirectoryFunc = func(context.Context, string, string, string) error { return nil }
-	h := newHarness(t, fake)
-
-	resp := h.AsOrg("acme").Delete("/api/v1/projects/hello-world-api/design/components/hello-api")
-	if resp.Code != 200 {
-		t.Fatalf("delete component: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if fs := dropSchema(componenttest.FieldSet(t, resp.Body.String())); strings.Join(fs, ",") != "design,files" {
-		t.Fatalf("delete-component must return the bundle {design,files}, got %v", fs)
-	}
-}
-
 // TestDesignComponent_ErrorMapping drives every design error branch that maps
 // to an HTTP status through the real chain:
 //   - the two mapDesignError branches (opaque→500, ErrDesignNotFound→404), and
@@ -286,7 +234,7 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 				return validDesignTree(), nil
 			},
 			SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
-				return nil, errors.New("save failed: no requirements baseline exists")
+				return nil, artifacts.ErrNoRequirementsBaseline
 			},
 		}
 		resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")

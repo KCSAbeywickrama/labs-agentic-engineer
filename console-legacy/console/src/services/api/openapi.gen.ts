@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/api/v1/collab/validate": {
+    "/collab/validate": {
         parameters: {
             query?: never;
             header?: never;
@@ -21,7 +21,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/credentials/anthropic": {
+    "/org/credentials/anthropic": {
         parameters: {
             query?: never;
             header?: never;
@@ -40,7 +40,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/credentials/github": {
+    "/org/credentials/github": {
         parameters: {
             query?: never;
             header?: never;
@@ -58,7 +58,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/credentials/github/connect/start": {
+    "/org/credentials/github/connect/start": {
         parameters: {
             query?: never;
             header?: never;
@@ -75,7 +75,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/credentials/github/pat": {
+    "/org/credentials/github/pat": {
         parameters: {
             query?: never;
             header?: never;
@@ -92,7 +92,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/idp": {
+    "/org/idp": {
         parameters: {
             query?: never;
             header?: never;
@@ -110,7 +110,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/idp/discovery": {
+    "/org/idp/discovery": {
         parameters: {
             query?: never;
             header?: never;
@@ -127,7 +127,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/idp/rotate": {
+    "/org/idp/rotate": {
         parameters: {
             query?: never;
             header?: never;
@@ -144,7 +144,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/skills": {
+    "/org/skills": {
         parameters: {
             query?: never;
             header?: never;
@@ -162,7 +162,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/skills/import": {
+    "/org/skills/import": {
         parameters: {
             query?: never;
             header?: never;
@@ -179,7 +179,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/skills/sync": {
+    "/org/skills/sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -196,7 +196,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/skills/updates": {
+    "/org/skills/updates": {
         parameters: {
             query?: never;
             header?: never;
@@ -213,7 +213,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/org/skills/{name}": {
+    "/org/skills/{name}": {
         parameters: {
             query?: never;
             header?: never;
@@ -232,7 +232,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/organizations": {
+    "/organizations": {
         parameters: {
             query?: never;
             header?: never;
@@ -249,7 +249,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects": {
+    "/projects": {
         parameters: {
             query?: never;
             header?: never;
@@ -267,7 +267,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}": {
+    "/projects/{projectName}": {
         parameters: {
             query?: never;
             header?: never;
@@ -285,7 +285,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/board": {
+    "/projects/{projectName}/board": {
         parameters: {
             query?: never;
             header?: never;
@@ -302,7 +302,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components": {
+    "/projects/{projectName}/components": {
         parameters: {
             query?: never;
             header?: never;
@@ -319,7 +319,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components/{componentName}": {
+    "/projects/{projectName}/components/{componentName}": {
         parameters: {
             query?: never;
             header?: never;
@@ -336,7 +336,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components/{componentName}/builds": {
+    "/projects/{projectName}/components/{componentName}/builds": {
         parameters: {
             query?: never;
             header?: never;
@@ -354,7 +354,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components/{componentName}/builds/{buildName}/logs": {
+    "/projects/{projectName}/components/{componentName}/builds/{buildName}/logs": {
         parameters: {
             query?: never;
             header?: never;
@@ -371,7 +371,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components/{componentName}/configs": {
+    "/projects/{projectName}/components/{componentName}/configs": {
         parameters: {
             query?: never;
             header?: never;
@@ -389,7 +389,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components/{componentName}/deployments": {
+    "/projects/{projectName}/components/{componentName}/deployments": {
         parameters: {
             query?: never;
             header?: never;
@@ -406,7 +406,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/components/{componentName}/openapi": {
+    "/projects/{projectName}/components/{componentName}/openapi": {
         parameters: {
             query?: never;
             header?: never;
@@ -423,7 +423,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/design": {
+    "/projects/{projectName}/conversations/{conversationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rehydrate a chat conversation (messages only) */
+        get: operations["get-conversation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/conversations/{conversationId}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a generation/chat turn (SSE — raw StreamPart frames + [DONE]) */
+        post: operations["create-turn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/design": {
         parameters: {
             query?: never;
             header?: never;
@@ -440,7 +474,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/design/bundle": {
+    "/projects/{projectName}/design/bundle": {
         parameters: {
             query?: never;
             header?: never;
@@ -457,24 +491,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/design/components/{componentName}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete a component directory under components/ */
-        delete: operations["delete-design-component"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/design/discard": {
+    "/projects/{projectName}/design/discard": {
         parameters: {
             query?: never;
             header?: never;
@@ -491,42 +508,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/design/files/{path...}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Write a single file under specs/design/ */
-        put: operations["update-design-file"];
-        post?: never;
-        /** Delete a single file under specs/design/ */
-        delete: operations["delete-design-file"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/design/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Generate the design (architect agent, SSE stream) */
-        post: operations["generate-design"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/design/save": {
+    "/projects/{projectName}/design/save": {
         parameters: {
             query?: never;
             header?: never;
@@ -543,7 +525,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/design/versions": {
+    "/projects/{projectName}/design/versions": {
         parameters: {
             query?: never;
             header?: never;
@@ -560,7 +542,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/design/versions/{tag}/bundle": {
+    "/projects/{projectName}/design/versions/{tag}/bundle": {
         parameters: {
             query?: never;
             header?: never;
@@ -577,7 +559,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/requirements": {
+    "/projects/{projectName}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List spec files at HEAD */
+        get: operations["list-files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/files/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Atomically apply a batch of writes/deletes (single commit to main) */
+        post: operations["apply-files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/files/{path...}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a spec file at HEAD */
+        get: operations["read-file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/requirements": {
         parameters: {
             query?: never;
             header?: never;
@@ -594,92 +627,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/requirements/chat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Stream a requirements-chat turn (SSE) */
-        post: operations["stream-requirements-chat"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/chat/baseline/{baselineId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Drop the chat-session baseline snapshot */
-        delete: operations["drop-requirements-chat-baseline"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/chat/baseline/{baselineId}/files/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a requirement file as captured in the chat-session baseline */
-        get: operations["get-requirements-chat-baseline-file"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/chat/baseline/{baselineId}/files/{name}/revert": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Revert a requirement file to the chat-session baseline */
-        post: operations["revert-requirements-chat-baseline-file"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/chat/turns/{turnId}/undo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Undo a requirements-chat turn */
-        post: operations["undo-requirements-chat-turn"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/collab-session": {
+    "/projects/{projectName}/requirements/collab-session": {
         parameters: {
             query?: never;
             header?: never;
@@ -696,7 +644,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/requirements/discard": {
+    "/projects/{projectName}/requirements/discard": {
         parameters: {
             query?: never;
             header?: never;
@@ -713,42 +661,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/requirements/files/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Create or update a requirement file */
-        put: operations["update-requirement-file"];
-        post?: never;
-        /** Delete a requirement file */
-        delete: operations["delete-requirement-file"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/files/{name}/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Generate a requirement file via a skill (SSE stream) */
-        post: operations["generate-requirement-file"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{projectName}/requirements/save": {
+    "/projects/{projectName}/requirements/save": {
         parameters: {
             query?: never;
             header?: never;
@@ -765,7 +678,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/requirements/versions": {
+    "/projects/{projectName}/requirements/versions": {
         parameters: {
             query?: never;
             header?: never;
@@ -782,7 +695,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/requirements/versions/{tag}": {
+    "/projects/{projectName}/requirements/versions/{tag}": {
         parameters: {
             query?: never;
             header?: never;
@@ -799,7 +712,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/status": {
+    "/projects/{projectName}/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -816,7 +729,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks": {
+    "/projects/{projectName}/tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -833,7 +746,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/dispatch": {
+    "/projects/{projectName}/tasks/dispatch": {
         parameters: {
             query?: never;
             header?: never;
@@ -850,7 +763,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/generate": {
+    "/projects/{projectName}/tasks/generate": {
         parameters: {
             query?: never;
             header?: never;
@@ -867,7 +780,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/generated": {
+    "/projects/{projectName}/tasks/generated": {
         parameters: {
             query?: never;
             header?: never;
@@ -884,7 +797,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/{taskId}": {
+    "/projects/{projectName}/tasks/{taskId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -901,7 +814,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/{taskId}/progress/agent": {
+    "/projects/{projectName}/tasks/{taskId}/progress/agent": {
         parameters: {
             query?: never;
             header?: never;
@@ -918,7 +831,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/{taskId}/progress/build": {
+    "/projects/{projectName}/tasks/{taskId}/progress/build": {
         parameters: {
             query?: never;
             header?: never;
@@ -935,7 +848,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/{taskId}/regenerate-body": {
+    "/projects/{projectName}/tasks/{taskId}/regenerate-body": {
         parameters: {
             query?: never;
             header?: never;
@@ -952,7 +865,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/{taskId}/retry": {
+    "/projects/{projectName}/tasks/{taskId}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -969,7 +882,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectName}/tasks/{taskId}/status": {
+    "/projects/{projectName}/tasks/{taskId}/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -986,40 +899,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List all tasks in an organization */
-        get: operations["list-org-tasks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/auth/external/jwks.json": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Task-JWT public key set (JWKS) — unauthenticated discovery */
-        get: operations["get-jwks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1028,7 +907,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/AnthropicProjection.json
+             * @example /api/v1/AnthropicProjection.json
              */
             readonly $schema?: string;
             /** Format: date-time */
@@ -1040,6 +919,28 @@ export interface components {
             ocOrgId: string;
             status: string;
             validationError?: string;
+        };
+        ApplyRequest: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/ApplyRequest.json
+             */
+            readonly $schema?: string;
+            deletes?: components["schemas"]["DeleteOp"][] | null;
+            message?: string;
+            writes?: components["schemas"]["WriteOp"][] | null;
+        };
+        ApplyResult: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/ApplyResult.json
+             */
+            readonly $schema?: string;
+            commitSha: string;
+            files: components["schemas"]["FileMeta"][] | null;
+            warnings?: components["schemas"]["Warning"][] | null;
         };
         ArtifactVersion: {
             commitHash: string;
@@ -1075,7 +976,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/BuildLogs.json
+             * @example /api/v1/BuildLogs.json
              */
             readonly $schema?: string;
             logs: components["schemas"]["BuildLogEntry"][] | null;
@@ -1085,39 +986,11 @@ export interface components {
         CallerIdentity: {
             mode?: string;
         };
-        ChatHistoryMessage: {
-            content: string;
-            role: string;
-        };
-        ChatTurnRequest: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ChatTurnRequest.json
-             */
-            readonly $schema?: string;
-            files?: string[] | null;
-            history: components["schemas"]["ChatHistoryMessage"][] | null;
-            message: string;
-            mode: string;
-            requestSessionBaseline?: boolean;
-        };
-        ChatUndoOutputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ChatUndoOutputBody.json
-             */
-            readonly $schema?: string;
-            files: {
-                [key: string]: string;
-            };
-        };
         ClientSecretOutputBody: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ClientSecretOutputBody.json
+             * @example /api/v1/ClientSecretOutputBody.json
              */
             readonly $schema?: string;
             clientSecret: string;
@@ -1126,7 +999,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/CollabSessionOutputBody.json
+             * @example /api/v1/CollabSessionOutputBody.json
              */
             readonly $schema?: string;
             email: string;
@@ -1138,7 +1011,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/CollabValidateOutputBody.json
+             * @example /api/v1/CollabValidateOutputBody.json
              */
             readonly $schema?: string;
             email: string;
@@ -1148,7 +1021,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/Component.json
+             * @example /api/v1/Component.json
              */
             readonly $schema?: string;
             autoBuild?: boolean;
@@ -1166,7 +1039,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ComponentConfig.json
+             * @example /api/v1/ComponentConfig.json
              */
             readonly $schema?: string;
             componentName: string;
@@ -1182,7 +1055,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ComponentList.json
+             * @example /api/v1/ComponentList.json
              */
             readonly $schema?: string;
             items: components["schemas"]["Component"][] | null;
@@ -1191,7 +1064,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ComponentOpenAPI.json
+             * @example /api/v1/ComponentOpenAPI.json
              */
             readonly $schema?: string;
             componentName: string;
@@ -1202,7 +1075,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ComponentTask.json
+             * @example /api/v1/ComponentTask.json
              */
             readonly $schema?: string;
             batchId?: string;
@@ -1253,7 +1126,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/CreateProjectRequest.json
+             * @example /api/v1/CreateProjectRequest.json
              */
             readonly $schema?: string;
             deploymentPipeline?: string;
@@ -1265,7 +1138,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/CreateSkillInput.json
+             * @example /api/v1/CreateSkillInput.json
              */
             readonly $schema?: string;
             name: string;
@@ -1273,6 +1146,10 @@ export interface components {
                 [key: string]: string;
             };
             skillMd: string;
+        };
+        DeleteOp: {
+            baseSha?: string;
+            path: string;
         };
         DependentAPI: {
             authentication?: string;
@@ -1293,7 +1170,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/DeploymentList.json
+             * @example /api/v1/DeploymentList.json
              */
             readonly $schema?: string;
             items: components["schemas"]["Deployment"][] | null;
@@ -1302,7 +1179,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/Design.json
+             * @example /api/v1/Design.json
              */
             readonly $schema?: string;
             components: components["schemas"]["DesignComponent"][] | null;
@@ -1319,7 +1196,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/DesignBundle.json
+             * @example /api/v1/DesignBundle.json
              */
             readonly $schema?: string;
             design: components["schemas"]["Design"];
@@ -1341,21 +1218,11 @@ export interface components {
             name: string;
             openAPISpec: string;
         };
-        DesignFileInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/DesignFileInputBody.json
-             */
-            readonly $schema?: string;
-            /** @description New file contents */
-            content: string;
-        };
         DiscoverOutputBody: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/DiscoverOutputBody.json
+             * @example /api/v1/DiscoverOutputBody.json
              */
             readonly $schema?: string;
             issuer: string;
@@ -1365,7 +1232,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/DispatchResult.json
+             * @example /api/v1/DispatchResult.json
              */
             readonly $schema?: string;
             componentName: string;
@@ -1390,7 +1257,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ErrorModel.json
+             * @example /api/v1/ErrorModel.json
              */
             readonly $schema?: string;
             /**
@@ -1430,6 +1297,23 @@ export interface components {
             managed?: boolean;
             userContext?: string;
         };
+        FileContent: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/FileContent.json
+             */
+            readonly $schema?: string;
+            content: string;
+            path: string;
+            sha: string;
+        };
+        FileMeta: {
+            path: string;
+            sha: string;
+            /** Format: int64 */
+            size?: number;
+        };
         FormFile: {
             ContentType: string;
             Filename: string;
@@ -1437,25 +1321,11 @@ export interface components {
             /** Format: int64 */
             Size: number;
         };
-        GenerateRequirementFileInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/GenerateRequirementFileInputBody.json
-             */
-            readonly $schema?: string;
-            /** @description Optional user prompt (for bootstrap skills) */
-            prompt?: string;
-            /** @description Document-generation skill ID (required) */
-            skillId: string;
-            /** @description Optional source filenames to feed the skill */
-            sources?: string[] | null;
-        };
         ImportResult: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ImportResult.json
+             * @example /api/v1/ImportResult.json
              */
             readonly $schema?: string;
             compatibility?: string;
@@ -1463,23 +1333,6 @@ export interface components {
             license?: string;
             name: string;
             warnings: string[] | null;
-        };
-        JWK: {
-            alg: string;
-            e: string;
-            kid: string;
-            kty: string;
-            n: string;
-            use: string;
-        };
-        JWKSResponse: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/JWKSResponse.json
-             */
-            readonly $schema?: string;
-            keys: components["schemas"]["JWK"][] | null;
         };
         LabelInfo: {
             color: string;
@@ -1489,7 +1342,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/OrgAnthropicConnectInputBody.json
+             * @example /api/v1/OrgAnthropicConnectInputBody.json
              */
             readonly $schema?: string;
             /** @description Anthropic API key (sk-ant-...) */
@@ -1499,7 +1352,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/OrgGitHubConnectPATInputBody.json
+             * @example /api/v1/OrgGitHubConnectPATInputBody.json
              */
             readonly $schema?: string;
             /** @description GitHub login the PAT belongs to */
@@ -1511,7 +1364,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/OrgGitHubStartConnectInputBody.json
+             * @example /api/v1/OrgGitHubStartConnectInputBody.json
              */
             readonly $schema?: string;
             /**
@@ -1524,7 +1377,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/OrganizationList.json
+             * @example /api/v1/OrganizationList.json
              */
             readonly $schema?: string;
             items: components["schemas"]["OrganizationView"][] | null;
@@ -1565,7 +1418,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ProgressResponse.json
+             * @example /api/v1/ProgressResponse.json
              */
             readonly $schema?: string;
             /** Format: int64 */
@@ -1581,7 +1434,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/Project.json
+             * @example /api/v1/Project.json
              */
             readonly $schema?: string;
             createdAt?: string;
@@ -1597,7 +1450,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ProjectBoard.json
+             * @example /api/v1/ProjectBoard.json
              */
             readonly $schema?: string;
             done: components["schemas"]["BoardTask"][] | null;
@@ -1611,7 +1464,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ProjectList.json
+             * @example /api/v1/ProjectList.json
              */
             readonly $schema?: string;
             items: components["schemas"]["Project"][] | null;
@@ -1620,7 +1473,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ProjectStatus.json
+             * @example /api/v1/ProjectStatus.json
              */
             readonly $schema?: string;
             designStatus: string;
@@ -1637,7 +1490,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/Projection.json
+             * @example /api/v1/Projection.json
              */
             readonly $schema?: string;
             /** Format: date-time */
@@ -1658,21 +1511,11 @@ export interface components {
             selectedRepos?: string[] | null;
             status: string;
         };
-        ReqFileInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/ReqFileInputBody.json
-             */
-            readonly $schema?: string;
-            /** @description New file content */
-            content: string;
-        };
         RequirementsBundle: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/RequirementsBundle.json
+             * @example /api/v1/RequirementsBundle.json
              */
             readonly $schema?: string;
             files: {
@@ -1685,23 +1528,11 @@ export interface components {
             version?: number;
             versions?: components["schemas"]["ArtifactVersion"][] | null;
         };
-        RequirementsSnapshotFile: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/RequirementsSnapshotFile.json
-             */
-            readonly $schema?: string;
-            content?: string;
-            existed: boolean;
-            filename: string;
-            snapshotId: string;
-        };
         SkillDetailBody: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/SkillDetailBody.json
+             * @example /api/v1/SkillDetailBody.json
              */
             readonly $schema?: string;
             compatibility?: string;
@@ -1725,7 +1556,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/TaskStatusResponse.json
+             * @example /api/v1/TaskStatusResponse.json
              */
             readonly $schema?: string;
             buildSteps?: components["schemas"]["WorkflowRunTask"][] | null;
@@ -1735,7 +1566,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/Tasks.json
+             * @example /api/v1/Tasks.json
              */
             readonly $schema?: string;
             hasUnsavedChanges: boolean;
@@ -1747,11 +1578,34 @@ export interface components {
             version: number;
             versions?: components["schemas"]["ArtifactVersion"][] | null;
         };
+        TurnInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/TurnInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The FE's current draft (latest truth) */
+            files?: {
+                [key: string]: string;
+            };
+            /** @description User hand-edited since the last turn (chat) */
+            filesChangedExternally?: boolean;
+            /** @description User message / generation directive */
+            instruction: string;
+            /** @description Optional target (e.g. a doc type) */
+            target?: string;
+            /**
+             * @description Which generation/chat flow
+             * @enum {string}
+             */
+            useCase: "requirements-generate" | "requirements-chat" | "design-generate";
+        };
         UpdateConfigBody: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/UpdateConfigBody.json
+             * @example /api/v1/UpdateConfigBody.json
              */
             readonly $schema?: string;
             envVars: components["schemas"]["EnvVar"][] | null;
@@ -1760,7 +1614,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/UpdateProfileInputBody.json
+             * @example /api/v1/UpdateProfileInputBody.json
              */
             readonly $schema?: string;
             /** @description OIDC issuer URL; empty leaves the existing value unchanged */
@@ -1774,7 +1628,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/UpdateSkillInput.json
+             * @example /api/v1/UpdateSkillInput.json
              */
             readonly $schema?: string;
             references: {
@@ -1782,11 +1636,16 @@ export interface components {
             };
             skillMd: string;
         };
+        Warning: {
+            code: string;
+            message: string;
+            path: string;
+        };
         WorkflowRun: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/WorkflowRun.json
+             * @example /api/v1/WorkflowRun.json
              */
             readonly $schema?: string;
             completed?: boolean;
@@ -1801,7 +1660,7 @@ export interface components {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/WorkflowRunList.json
+             * @example /api/v1/WorkflowRunList.json
              */
             readonly $schema?: string;
             items: components["schemas"]["WorkflowRun"][] | null;
@@ -1812,6 +1671,11 @@ export interface components {
             name: string;
             phase?: string;
             startedAt?: string;
+        };
+        WriteOp: {
+            baseSha?: string;
+            content: string;
+            path: string;
         };
     };
     responses: never;
@@ -2972,6 +2836,76 @@ export interface operations {
             };
         };
     };
+    "get-conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description FE-chosen conversation uuid */
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description FE-chosen conversation uuid */
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-design": {
         parameters: {
             query?: never;
@@ -3036,40 +2970,6 @@ export interface operations {
             };
         };
     };
-    "delete-design-component": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Component directory name under components/ */
-                componentName: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DesignBundle"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
     "discard-design-changes": {
         parameters: {
             query?: never;
@@ -3090,108 +2990,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Design"];
                 };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "update-design-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description File path under specs/design/ */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DesignFileInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DesignBundle"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "delete-design-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description File path under specs/design/ */
-                path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DesignBundle"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "generate-design": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Error */
             default: {
@@ -3302,6 +3100,111 @@ export interface operations {
             };
         };
     };
+    "list-files": {
+        parameters: {
+            query?: {
+                /** @description Only list paths under this prefix (e.g. specs/design/) */
+                prefix?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileMeta"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "apply-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "read-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description File path under specs/ */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileContent"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-requirements": {
         parameters: {
             query?: never;
@@ -3321,176 +3224,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequirementsBundle"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "stream-requirements-chat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChatTurnRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "drop-requirements-chat-baseline": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Session baseline snapshot identifier */
-                baselineId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-requirements-chat-baseline-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Session baseline snapshot identifier */
-                baselineId: string;
-                /** @description Requirement filename */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequirementsSnapshotFile"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "revert-requirements-chat-baseline-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Session baseline snapshot identifier */
-                baselineId: string;
-                /** @description Requirement filename */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "undo-requirements-chat-turn": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Chat turn identifier to undo */
-                turnId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChatUndoOutputBody"];
                 };
             };
             /** @description Error */
@@ -3559,114 +3292,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RequirementsBundle"];
                 };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "update-requirement-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Requirement filename */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReqFileInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequirementsBundle"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "delete-requirement-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Requirement filename */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequirementsBundle"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "generate-requirement-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description Requirement filename */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GenerateRequirementFileInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Error */
             default: {
@@ -4134,71 +3759,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskStatusResponse"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "list-org-tasks": {
-        parameters: {
-            query?: {
-                /** @description Filter by ComponentTask execution status */
-                status?: string;
-                /** @description Filter by abandonment cause */
-                cause?: string;
-                /** @description RFC3339 timestamp or duration shorthand (e.g. 24h, 7d→168h) */
-                since?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ComponentTask"][] | null;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-jwks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JWKSResponse"];
                 };
             };
             /** @description Error */

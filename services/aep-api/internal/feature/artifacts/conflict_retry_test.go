@@ -16,156 +16,19 @@
 
 package artifacts
 
-// The CAS + tag-collision retry policies, at two levels:
-//   - full-flow: real save over the Git Data API fake, using BeforeUpdateRef to
-//     inject a deterministic external branch advance mid-save;
-//   - unit: retryOnCASConflict / retryOnTagCollision / the leaky bucket /
-//     isCASConflict driven directly, for the branches the full flow can't reach.
+// Unit-level retry mechanics: retryOnCASConflict / retryOnTagCollision / the
+// leaky bucket / isCASConflict, driven directly. The full-flow proofs (a real
+// 422 through the github client, base_tree refresh on retry) live with the save
+// and discard tests, which drive these policies over the Git Data API fake.
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
-
-func TestSaveRequirements_CASConflict_RetriesAndSucceeds(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v0\n"})
-	ctx := context.Background()
-
-	var updateRefCalls int32
-	var once sync.Once
-	r.gd.BeforeUpdateRef = func() {
-		atomic.AddInt32(&updateRefCalls, 1)
-		// Exactly once, right before the ref moves, an external writer advances
-		// main to a divergent commit — so the client's first UpdateRef is a real
-		// non-fast-forward (422 → ErrRefNotFastForward) and the CAS loop retries.
-		once.Do(func() {
-			r.remote.Seed(t, map[string]string{"external.md": "external edit\n"}, "external push")
-		})
-	}
-
-	r.writeWT("specs/requirements/requirements.md", "my edit\n")
-	res, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{})
-	if err != nil {
-		t.Fatalf("SaveRequirements: %v", err)
-	}
-	if res.Status != "approved" || res.Tag != "v1" {
-		t.Fatalf("result = %+v, want approved/v1", res)
-	}
-	if n := atomic.LoadInt32(&updateRefCalls); n != 2 {
-		t.Errorf("UpdateRef attempts = %d, want 2 (first non-FF, retry succeeds)", n)
-	}
-	// Our edit landed AND the external change survives: the retry re-fetched a
-	// fresh base_tree over the advanced main rather than clobbering it.
-	if got := r.remote.FileAt(t, "main", "specs/requirements/requirements.md"); got != "my edit\n" {
-		t.Errorf("requirements.md = %q, want my edit", got)
-	}
-	if got := r.remote.FileAt(t, "main", "external.md"); got != "external edit\n" {
-		t.Errorf("external.md = %q, want external edit (base_tree refresh must preserve it)", got)
-	}
-}
-
-func TestSaveRequirements_CASBudgetExhausted(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v0\n"})
-	ctx := context.Background()
-
-	// Drain this project's leaky bucket so the first retry can't claim a token.
-	// The bucket key is unique per test (derived from t.Name), so draining it
-	// pollutes no other test.
-	key := r.org + ":" + r.proj
-	for i := 0; i < bucketCapacity; i++ {
-		globalRetrier.claim(key)
-	}
-
-	// Advance main on every UpdateRef so the client can never fast-forward.
-	r.gd.BeforeUpdateRef = func() {
-		r.remote.Seed(t, map[string]string{"ext.md": "push\n"}, "external push")
-	}
-
-	r.writeWT("specs/requirements/requirements.md", "my edit\n")
-	_, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{})
-	if !errors.Is(err, ErrConflictBudgetExhausted) {
-		t.Fatalf("err = %v, want wrapped ErrConflictBudgetExhausted", err)
-	}
-}
-
-func TestSaveRequirements_TagCollision_RecomputesToNextName(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v0\n"})
-	ctx := context.Background()
-
-	// v1 is already claimed on the remote. The tag step recomputes the next name
-	// from a fresh tag list on each attempt, so it skips the taken v1 and lands
-	// v2 without clobbering v1.
-	r.remote.Tag(t, "v1", "external v1")
-
-	r.writeWT("specs/requirements/requirements.md", "my edit\n")
-	res, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{})
-	if err != nil {
-		t.Fatalf("SaveRequirements: %v", err)
-	}
-	if res.Tag != "v2" || res.Version != 2 {
-		t.Fatalf("result tag = %+v, want v2/2 (skip the taken v1)", res)
-	}
-	tags := r.remote.Tags(t)
-	if len(tags) != 2 || tags[0] != "v1" || tags[1] != "v2" {
-		t.Errorf("remote tags = %v, want [v1 v2] (v1 preserved)", tags)
-	}
-}
-
-// TestSaveRequirements_TagCollision_Real422ThroughRealClient forces a true
-// external-pusher collision in the microsecond window between the save's
-// fresh tag-list fetch and its CreateTagRef, via the harness's
-// BeforeCreateTagRef hook. The REAL clients/github CreateTagRef receives a
-// genuine 422 and must translate it to ErrTagAlreadyExists for
-// retryOnTagCollision to recompute (v2) instead of failing the save — the
-// ONLY test proving that 422→sentinel mapping (review finding: a mutation
-// swallowing the 422 survived every other test).
-func TestSaveRequirements_TagCollision_Real422ThroughRealClient(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v0\n"})
-	ctx := context.Background()
-
-	fired := false
-	r.gd.BeforeCreateTagRef = func() {
-		if fired {
-			return // only sabotage the first attempt
-		}
-		fired = true
-		r.remote.Tag(t, "v1", "external claim in the race window")
-	}
-
-	r.writeWT("specs/requirements/requirements.md", "my edit\n")
-	res, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{})
-	if err != nil {
-		t.Fatalf("SaveRequirements: %v", err)
-	}
-	if !fired {
-		t.Fatal("BeforeCreateTagRef hook never fired — collision was not injected")
-	}
-	if res.Tag != "v2" || res.Version != 2 {
-		t.Fatalf("result = %+v, want v2/2 (retry after the real 422 recomputes past the claimed v1)", res)
-	}
-	if tags := r.remote.Tags(t); len(tags) != 2 || tags[0] != "v1" || tags[1] != "v2" {
-		t.Errorf("remote tags = %v, want [v1 v2] (external v1 preserved)", tags)
-	}
-}
-
-// ----- unit-level retry mechanics -----
-
-// NOTE: within one save flow the retryOnTagCollision LOOP normally never
-// re-attempts a taken name — createAnnotatedTagViaAPI recomputes the tag from
-// a fresh fetch immediately before CreateTagRef. The real-client collision
-// path is proven by TestSaveRequirements_TagCollision_Real422ThroughRealClient
-// above (BeforeCreateTagRef hook); these unit tests pin the loop policy
-// (backoff schedule, give-up) directly.
 
 func TestRetryOnTagCollision_RetriesThenSucceeds(t *testing.T) {
 	t.Parallel()
@@ -238,8 +101,6 @@ func TestRetryOnCASConflict_NonConflictReturnsImmediately(t *testing.T) {
 
 func TestLeakyBucket_ClaimCapacityThenEmpty(t *testing.T) {
 	t.Parallel()
-	// A fresh retrier (not the global) so the tight loop sees no time-based
-	// refill (elapsed < bucketRefillEv) and no cross-test pollution.
 	cr := &conflictRetrier{buckets: map[string]*bucketState{}}
 	key := "k"
 	for i := 0; i < bucketCapacity; i++ {

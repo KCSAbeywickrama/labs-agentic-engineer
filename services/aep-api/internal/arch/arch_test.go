@@ -57,6 +57,8 @@ var featureEdgeAllowlist = map[string][]string{
 	"codingagent":   {"artifacts", "component", "gitrepo", "orgcreds"},
 	"component":     {"artifacts", "gitrepo"},
 	"design":        {"artifacts"},
+	"files":         {"gitrepo"},
+	"genai":         {"gitrepo"},
 	"gitrepo":       {},
 	"idp":           {"orgcreds"},
 	"organization":  {},

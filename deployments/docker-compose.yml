@@ -37,6 +37,8 @@ services:
         condition: service_healthy
       agents-service:
         condition: service_started
+      agents:
+        condition: service_started
     environment:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9090"
@@ -60,6 +62,12 @@ services:
 
       # ── Sister services on the aep compose network
       AGENTS_SERVICE_BASE_URL: "http://agents-service:3400"
+      # NEW file-mutation agents service (services/agents) — requirements/design/
+      # chat generation. Plain HS256 M2M bearer; the secret must match the
+      # service's AGENT_JWT_SECRET below.
+      AGENTS_SVC_BASE_URL: "http://agents:4000"
+      AGENTS_SVC_JWT_SECRET: "${AGENTS_M2M_SECRET:-dev-agents-m2m-secret}"
+      AGENTS_SVC_JWT_AUDIENCE: "agents-service"
       # After WS0.1, git-service is folded into the aep-api binary. The
       # ── Coding-agent runner reach-back URL. The pod runs in
       # `workflows-<orgID>` inside the cluster, so it must reach the
@@ -128,7 +136,6 @@ services:
       # block. The merged binary owns the repo/credential/anthropic
       # endpoints on the same port; envs are renamed only where the
       # binary historically used different names.
-      REPO_BASE_PATH: "/data/repos"
       GITHUB_REPO_VISIBILITY: "${GITHUB_REPO_VISIBILITY:-private}"
       GITHUB_WEBHOOK_DELIVERY_URL: "${GITHUB_WEBHOOK_PROXY_URL}"
       OPENBAO_ADDR: "${OPENBAO_ADDR:-http://host.docker.internal:8200}"
@@ -166,9 +173,6 @@ services:
       OBSERVER_OAUTH_HOST_HEADER: "${OBSERVER_OAUTH_HOST_HEADER:-thunder.openchoreo.localhost}"
     volumes:
       - ./keys/task-signing.pem:/app/keys/task-signing.pem:ro
-      # Folded-in git-service volumes (after WS0.1). Host path is prepared by
-      # start.sh (ensure_repo_storage) so appuser (uid 1000) can mkdir clones.
-      - ./data/repos:/data/repos
       - ./github-app-private-key.pem:/etc/github-app/private-key.pem:ro
       - ./.kube/config:/app/.kube/config:ro
     networks:
@@ -210,6 +214,39 @@ services:
       - aep
     extra_hosts:
       - "thunder.openchoreo.localhost:host-gateway"
+
+  # ---------------------------------------------------------------------------
+  # agents — NEW file-mutation agents service (services/agents). Serves the
+  # requirements/design/chat generation turns migrated off agents-legacy. The
+  # BFF (aep-api/internal/feature/genai) is its only caller. Tenancy-blind: the
+  # acting org rides the log-only X-Org-Id header; the per-org Anthropic key
+  # arrives per-turn in X-Anthropic-Key (no boot-time key). agents-legacy stays
+  # composed for task generation. See docs/design/agents-generation-migration.md.
+  # Built from the repo root so pnpm resolves the workspace:* deps
+  # (@aep/agent-stream, @aep/excalidraw-dsl, @aep/design-projection).
+  # ---------------------------------------------------------------------------
+  agents:
+    build:
+      context: ..
+      dockerfile: services/agents/Dockerfile
+    container_name: aep-agents
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "4000"
+      LOG_LEVEL: "${LOG_LEVEL:-debug}"
+      AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-5}"
+      # Shared postgres — the service owns its own `conversations` table (TTL-swept).
+      DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
+      # M2M inbound auth — HS256 shared secret; the BFF mints a matching bearer
+      # (AGENTS_SVC_JWT_SECRET). aud must match the BFF's AGENTS_SVC_JWT_AUDIENCE.
+      AGENT_JWT_SECRET: "${AGENTS_M2M_SECRET:-dev-agents-m2m-secret}"
+      AGENT_JWT_AUDIENCE: "agents-service"
+    networks:
+      - aep
 
   # ---------------------------------------------------------------------------
   # secret-manager-api (Phase 1 — WS1.1) — in-repo local STUB of the cloud
@@ -309,8 +346,12 @@ services:
   # ---------------------------------------------------------------------------
   console:
     build:
-      context: ../console-legacy
-      dockerfile: console/Dockerfile
+      # Repo root — not console-legacy/ — so the build can reach the shared
+      # packages/agent-stream + packages/design-projection workspace packages
+      # console/package.json depends on across the console-legacy boundary.
+      # See console-legacy/console/Dockerfile's pkg-builder stage.
+      context: ..
+      dockerfile: console-legacy/console/Dockerfile
     container_name: aep-console
     ports:
       - "8090:3000"

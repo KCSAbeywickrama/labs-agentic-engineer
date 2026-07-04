@@ -35,17 +35,21 @@ import { stdin as input, stdout as output } from "node:process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as clack from "@clack/prompts";
-import type { Skill, TurnRequest } from "../src/contracts/sse-events.js";
+import {
+  FileBundle,
+  applyToolCall,
+  streamTurn,
+  type Skill,
+  type StreamPart,
+  type TurnRequest,
+} from "@aep/agent-stream";
 import { createApp } from "../src/server.js";
 import { createModel } from "../src/shared/model.js";
 import { loadDotenv, loadAnthropicKey } from "../src/shared/env.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
 import { listen0 } from "../src/shared/listen.js";
-import { FileBundle } from "../src/agents/main/bundle.js";
-import { applyToolCall } from "../src/agents/main/change.js";
-import type { StreamPart } from "../src/agents/main/stream-types.js";
-import { streamTurn } from "../evals/sse-client.js";
 import { loadRepoSkills } from "../evals/skills.js";
+import { EVAL_AUTH, evalTurnHeaders } from "../evals/auth.js";
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
@@ -59,6 +63,8 @@ interface ChatCtx {
   baseUrl: string;
   skills: Skill[];
   dryRun: boolean;
+  /** M2M token + `X-Anthropic-Key` sent on every turn, like any caller. */
+  headers: Record<string, string>;
 }
 
 const NEW = "\0new";
@@ -100,7 +106,7 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
 
   const toolCalls: StreamPart[] = [];
   try {
-    for await (const part of streamTurn(ctx.baseUrl, ctx.thread, body)) {
+    for await (const part of streamTurn(ctx.baseUrl, ctx.thread, body, { headers: ctx.headers })) {
       renderPart(part);
       if (part.type === "tool-call") toolCalls.push(part);
     }
@@ -177,8 +183,15 @@ async function main(): Promise<void> {
 
   const skills = loadRepoSkills(SKILLS_DIR);
   const store = new InMemoryConversationStore();
-  const app = createApp({ store, model: createModel({ apiKey }) });
+  // In-process server: the M2M gate runs on the shared-secret path, and the model
+  // is built per turn from the X-Anthropic-Key header (like the deployed service).
+  const app = createApp({
+    store,
+    buildModel: (key) => createModel({ apiKey: key }),
+    auth: { audience: EVAL_AUTH.audience, secret: EVAL_AUTH.secret },
+  });
   const { baseUrl, close } = await listen0(app.listen(0));
+  const headers = await evalTurnHeaders(apiKey);
 
   clack.intro("AEP spec-agent playground");
   if (skills.length > 0) clack.log.info(`skills: ${skills.map((s) => s.name).join(", ")}`);
@@ -198,7 +211,7 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, headers });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }

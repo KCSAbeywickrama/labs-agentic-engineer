@@ -64,7 +64,7 @@ async function main(): Promise<void> {
       return;
     }
     const fixture = loadFixture(join(mainSuite.fixturesDir, `${nameFilter}.json`));
-    const messages = await recordFixture(mainSuite, fixture, model, skills);
+    const messages = await recordFixture(mainSuite, fixture, model, skills, apiKey);
     process.stdout.write(`${JSON.stringify(messages, null, 2)}\n`);
     return;
   }
@@ -80,6 +80,7 @@ async function main(): Promise<void> {
   const opts: RunOptions = {
     model,
     samples,
+    apiKey, // sent as X-Anthropic-Key, like any caller
     ...(skills.length > 0 ? { skills } : {}),
     onLog: (m) => process.stdout.write(`${m}\n`),
     writePreviewDir: join(here, ".eval-preview"),

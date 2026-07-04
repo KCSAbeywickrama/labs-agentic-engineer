@@ -90,6 +90,14 @@ type GitData interface {
 	// ListMatchingRefs lists all refs under the given prefix (e.g. "tags/v").
 	// Returns an empty slice (not 404) when no refs match.
 	ListMatchingRefs(ctx context.Context, owner, repo string, cred credentials.Credential, prefix string) ([]MatchingRef, error)
+
+	// GetTagObject dereferences an annotated tag object to the SHA it points at
+	// (typically a commit) via GET /git/tags/{sha}. Returns an HTTPStatusError
+	// wrapping 404 when the sha is not a tag object (e.g. a lightweight tag ref
+	// that already points at a commit). Used to read repository content at a tag
+	// — a tag ref's object.sha is the tag object, which must be peeled to the
+	// commit before GetCommit/GetTree can walk the tree.
+	GetTagObject(ctx context.Context, owner, repo string, cred credentials.Credential, tagSHA string) (string, error)
 }
 
 // RepoAdmin is the repository-lifecycle surface. Consumed by repoService

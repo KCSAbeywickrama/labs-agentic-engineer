@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Skill } from "../../contracts/sse-events.js";
+import type { Skill } from "@aep/agent-stream";
 import { instructions, buildInstructions, buildSkillCatalog } from "./prompt.js";
 
 const SKILLS: Skill[] = [

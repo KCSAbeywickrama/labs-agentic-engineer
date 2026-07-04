@@ -92,6 +92,12 @@ func Load() (Config, error) {
 		AgentsService: AgentsServiceConfig{
 			BaseURL: r.readOptionalString("AGENTS_SERVICE_BASE_URL", ""),
 		},
+		AgentsSvc: AgentsSvcConfig{
+			BaseURL:     r.readOptionalString("AGENTS_SVC_BASE_URL", ""),
+			JWTSecret:   r.readOptionalString("AGENTS_SVC_JWT_SECRET", ""),
+			JWTAudience: r.readOptionalString("AGENTS_SVC_JWT_AUDIENCE", "agents-service"),
+			JWTIssuer:   r.readOptionalString("AGENTS_SVC_JWT_ISSUER", "aep-bff"),
+		},
 		AgentPlatformURL: r.readOptionalString("AGENT_PLATFORM_URL", ""),
 		ServiceAuth: ServiceAuthConfig{
 			TokenURL:     r.readOptionalString("SERVICE_AUTH_TOKEN_URL", ""),
@@ -103,7 +109,6 @@ func Load() (Config, error) {
 		// Git-service config. Uses the same env-var names git-service used so
 		// existing local .env files / release-bindings keep working.
 		GitProvider:                 r.readOptionalString("GIT_PROVIDER", "github"),
-		RepoBasePath:                r.readOptionalString("REPO_BASE_PATH", "/tmp/aep-repos"),
 		GitHubRepoVisibility:        r.readOptionalString("GITHUB_REPO_VISIBILITY", "public"),
 		GitHubCommitterName:         r.readOptionalString("GIT_COMMITTER_NAME", "AEP Bot"),
 		GitHubCommitterEmail:        r.readOptionalString("GIT_COMMITTER_EMAIL", "bot@aep.dev"),

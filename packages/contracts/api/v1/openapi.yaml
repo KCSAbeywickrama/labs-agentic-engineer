@@ -33,6 +33,59 @@ components:
         - status
         - connectedAt
       type: object
+    ApplyRequest:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ApplyRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        deletes:
+          items:
+            $ref: "#/components/schemas/DeleteOp"
+          type:
+            - array
+            - "null"
+        message:
+          type: string
+        writes:
+          items:
+            $ref: "#/components/schemas/WriteOp"
+          type:
+            - array
+            - "null"
+      type: object
+    ApplyResult:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ApplyResult.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          type: string
+        files:
+          items:
+            $ref: "#/components/schemas/FileMeta"
+          type:
+            - array
+            - "null"
+        warnings:
+          items:
+            $ref: "#/components/schemas/Warning"
+          type:
+            - array
+            - "null"
+      required:
+        - commitSha
+        - files
+      type: object
     ArtifactVersion:
       additionalProperties: false
       properties:
@@ -136,67 +189,6 @@ components:
       properties:
         mode:
           type: string
-      type: object
-    ChatHistoryMessage:
-      additionalProperties: false
-      properties:
-        content:
-          type: string
-        role:
-          type: string
-      required:
-        - role
-        - content
-      type: object
-    ChatTurnRequest:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ChatTurnRequest.json
-          format: uri
-          readOnly: true
-          type: string
-        files:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        history:
-          items:
-            $ref: "#/components/schemas/ChatHistoryMessage"
-          type:
-            - array
-            - "null"
-        message:
-          type: string
-        mode:
-          type: string
-        requestSessionBaseline:
-          type: boolean
-      required:
-        - message
-        - history
-        - mode
-      type: object
-    ChatUndoOutputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ChatUndoOutputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        files:
-          additionalProperties:
-            type: string
-          type: object
-      required:
-        - files
       type: object
     ClientSecretOutputBody:
       additionalProperties: false
@@ -522,6 +514,16 @@ components:
         - skillMd
         - references
       type: object
+    DeleteOp:
+      additionalProperties: false
+      properties:
+        baseSha:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+      type: object
     DependentAPI:
       additionalProperties: false
       properties:
@@ -683,22 +685,6 @@ components:
         - openAPISpec
         - componentAgentInstructions
       type: object
-    DesignFileInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DesignFileInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        content:
-          description: New file contents
-          type: string
-      required:
-        - content
-      type: object
     DiscoverOutputBody:
       additionalProperties: false
       properties:
@@ -822,6 +808,41 @@ components:
         userContext:
           type: string
       type: object
+    FileContent:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/FileContent.json
+          format: uri
+          readOnly: true
+          type: string
+        content:
+          type: string
+        path:
+          type: string
+        sha:
+          type: string
+      required:
+        - path
+        - content
+        - sha
+      type: object
+    FileMeta:
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+        sha:
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+        - path
+        - sha
+      type: object
     FormFile:
       additionalProperties: false
       properties:
@@ -839,32 +860,6 @@ components:
         - IsSet
         - Size
         - Filename
-      type: object
-    GenerateRequirementFileInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/GenerateRequirementFileInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        prompt:
-          description: Optional user prompt (for bootstrap skills)
-          type: string
-        skillId:
-          description: Document-generation skill ID (required)
-          type: string
-        sources:
-          description: Optional source filenames to feed the skill
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-      required:
-        - skillId
       type: object
     ImportResult:
       additionalProperties: false
@@ -1269,22 +1264,6 @@ components:
         - status
         - connectedAt
       type: object
-    ReqFileInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ReqFileInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        content:
-          description: New file content
-          type: string
-      required:
-        - content
-      type: object
     RequirementsBundle:
       additionalProperties: false
       properties:
@@ -1318,29 +1297,6 @@ components:
         - projectId
         - files
         - status
-      type: object
-    RequirementsSnapshotFile:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/RequirementsSnapshotFile.json
-          format: uri
-          readOnly: true
-          type: string
-        content:
-          type: string
-        existed:
-          type: boolean
-        filename:
-          type: string
-        snapshotId:
-          type: string
-      required:
-        - snapshotId
-        - filename
-        - existed
       type: object
     SkillDetailBody:
       additionalProperties: false
@@ -1453,6 +1409,41 @@ components:
         - version
         - hasUnsavedChanges
       type: object
+    TurnInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        files:
+          additionalProperties:
+            type: string
+          description: The FE's current draft (latest truth)
+          type: object
+        filesChangedExternally:
+          description: User hand-edited since the last turn (chat)
+          type: boolean
+        instruction:
+          description: User message / generation directive
+          type: string
+        target:
+          description: Optional target (e.g. a doc type)
+          type: string
+        useCase:
+          description: Which generation/chat flow
+          enum:
+            - requirements-generate
+            - requirements-chat
+            - design-generate
+          type: string
+      required:
+        - useCase
+        - instruction
+      type: object
     UpdateConfigBody:
       additionalProperties: false
       properties:
@@ -1515,6 +1506,20 @@ components:
       required:
         - skillMd
         - references
+      type: object
+    Warning:
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+        - code
+        - message
       type: object
     WorkflowRun:
       additionalProperties: false
@@ -1579,6 +1584,19 @@ components:
           type: string
       required:
         - name
+      type: object
+    WriteOp:
+      additionalProperties: false
+      properties:
+        baseSha:
+          type: string
+        content:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+        - content
       type: object
   securitySchemes:
     userJWT:
@@ -2614,6 +2632,79 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
+  /projects/{projectName}/conversations/{conversationId}:
+    get:
+      operationId: get-conversation
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: FE-chosen conversation uuid
+          in: path
+          name: conversationId
+          required: true
+          schema:
+            description: FE-chosen conversation uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Rehydrate a chat conversation (messages only)
+      tags:
+        - GenAI
+  /projects/{projectName}/conversations/{conversationId}/turns:
+    post:
+      operationId: create-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: FE-chosen conversation uuid
+          in: path
+          name: conversationId
+          required: true
+          schema:
+            description: FE-chosen conversation uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TurnInputBody"
+        required: true
+      responses:
+        "200":
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Run a generation/chat turn (SSE — raw StreamPart frames + [DONE])
+      tags:
+        - GenAI
   /projects/{projectName}/design:
     get:
       operationId: get-design
@@ -2672,42 +2763,6 @@ paths:
       summary: Get the design bundle (file map + assembled design)
       tags:
         - Design(Deprecated)
-  /projects/{projectName}/design/components/{componentName}:
-    delete:
-      operationId: delete-design-component
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Component directory name under components/
-          in: path
-          name: componentName
-          required: true
-          schema:
-            description: Component directory name under components/
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a component directory under components/
-      tags:
-        - Design(Deprecated)
   /projects/{projectName}/design/discard:
     post:
       operationId: discard-design-changes
@@ -2735,108 +2790,6 @@ paths:
       security:
         - userJWT: []
       summary: Discard unsaved design changes
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/files/{path...}:
-    delete:
-      operationId: delete-design-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: File path under specs/design/
-          in: path
-          name: path
-          required: true
-          schema:
-            description: File path under specs/design/
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a single file under specs/design/
-      tags:
-        - Design(Deprecated)
-    put:
-      operationId: update-design-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: File path under specs/design/
-          in: path
-          name: path
-          required: true
-          schema:
-            description: File path under specs/design/
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DesignFileInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Write a single file under specs/design/
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/generate:
-    post:
-      operationId: generate-design
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Generate the design (architect agent, SSE stream)
       tags:
         - Design(Deprecated)
   /projects/{projectName}/design/save:
@@ -2937,6 +2890,118 @@ paths:
       summary: Get the design bundle at a tag
       tags:
         - Design(Deprecated)
+  /projects/{projectName}/files:
+    get:
+      operationId: list-files
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Only list paths under this prefix (e.g. specs/design/)
+          explode: false
+          in: query
+          name: prefix
+          schema:
+            description: Only list paths under this prefix (e.g. specs/design/)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/FileMeta"
+                type:
+                  - array
+                  - "null"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List spec files at HEAD
+      tags:
+        - Files
+  /projects/{projectName}/files/apply:
+    post:
+      operationId: apply-files
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyRequest"
+              description: Atomic write/delete batch with per-file baseSha
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Atomically apply a batch of writes/deletes (single commit to main)
+      tags:
+        - Files
+  /projects/{projectName}/files/{path...}:
+    get:
+      operationId: read-file
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: File path under specs/
+          in: path
+          name: path
+          required: true
+          schema:
+            description: File path under specs/
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContent"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Read a spec file at HEAD
+      tags:
+        - Files
   /projects/{projectName}/requirements:
     get:
       operationId: get-requirements
@@ -2964,188 +3029,6 @@ paths:
       security:
         - userJWT: []
       summary: Get the requirements bundle
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat:
-    post:
-      operationId: stream-requirements-chat
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ChatTurnRequest"
-              description: Chat turn request (message is required)
-        required: true
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Stream a requirements-chat turn (SSE)
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/baseline/{baselineId}:
-    delete:
-      operationId: drop-requirements-chat-baseline
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Session baseline snapshot identifier
-          in: path
-          name: baselineId
-          required: true
-          schema:
-            description: Session baseline snapshot identifier
-            type: string
-      responses:
-        "204":
-          description: No Content
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Drop the chat-session baseline snapshot
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/baseline/{baselineId}/files/{name}:
-    get:
-      operationId: get-requirements-chat-baseline-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Session baseline snapshot identifier
-          in: path
-          name: baselineId
-          required: true
-          schema:
-            description: Session baseline snapshot identifier
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsSnapshotFile"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a requirement file as captured in the chat-session baseline
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/baseline/{baselineId}/files/{name}/revert:
-    post:
-      operationId: revert-requirements-chat-baseline-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Session baseline snapshot identifier
-          in: path
-          name: baselineId
-          required: true
-          schema:
-            description: Session baseline snapshot identifier
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      responses:
-        "204":
-          description: No Content
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Revert a requirement file to the chat-session baseline
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/turns/{turnId}/undo:
-    post:
-      operationId: undo-requirements-chat-turn
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Chat turn identifier to undo
-          in: path
-          name: turnId
-          required: true
-          schema:
-            description: Chat turn identifier to undo
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ChatUndoOutputBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Undo a requirements-chat turn
       tags:
         - Requirements(Deprecated)
   /projects/{projectName}/requirements/collab-session:
@@ -3210,121 +3093,6 @@ paths:
       security:
         - userJWT: []
       summary: Discard unsaved requirements changes
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/files/{name}:
-    delete:
-      operationId: delete-requirement-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a requirement file
-      tags:
-        - Requirements(Deprecated)
-    put:
-      operationId: update-requirement-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ReqFileInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Create or update a requirement file
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/files/{name}/generate:
-    post:
-      operationId: generate-requirement-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GenerateRequirementFileInputBody"
-        required: true
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Generate a requirement file via a skill (SSE stream)
       tags:
         - Requirements(Deprecated)
   /projects/{projectName}/requirements/save:

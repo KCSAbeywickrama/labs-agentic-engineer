@@ -23,7 +23,7 @@
  */
 
 import { stdout } from "node:process";
-import type { StreamPart } from "../src/agents/main/stream-types.js";
+import type { StreamPart } from "@aep/agent-stream";
 import type { FileChange } from "./threads.js";
 
 // Color only on a real terminal — otherwise raw escapes litter piped/redirected output.

@@ -32,45 +32,22 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 )
 
-// FakeArtifactService implements artifacts.ArtifactService via settable
-// function fields.
+// FakeArtifactService implements the GitHub-direct artifacts.ArtifactService via
+// settable function fields.
 type FakeArtifactService struct {
-	GetFileFunc                          func(ctx context.Context, orgID, projectID, relPath string) (*artifacts.FileResult, error)
-	PutFileFunc                          func(ctx context.Context, orgID, projectID, relPath, content, ifMatch string) (*artifacts.PutResult, error)
-	ListRequirementFilesFunc             func(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	DeleteRequirementFileFunc            func(ctx context.Context, orgID, projectID, name string) error
-	ListDesignFilesFunc                  func(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	DeleteDesignFileFunc                 func(ctx context.Context, orgID, projectID, sub string) error
-	DeleteDesignDirectoryFunc            func(ctx context.Context, orgID, projectID, sub string) error
-	SaveRequirementsFunc                 func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error)
-	SaveDesignFunc                       func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error)
-	DiscardRequirementsFunc              func(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	DiscardDesignFunc                    func(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	CaptureRequirementsSnapshotFunc      func(ctx context.Context, orgID, projectID, snapshotID string) (map[string]string, error)
-	RestoreRequirementsSnapshotFunc      func(ctx context.Context, orgID, projectID, snapshotID string) (map[string]string, error)
-	DeleteRequirementsSnapshotFunc       func(ctx context.Context, orgID, projectID, snapshotID string) error
-	ReadFileFromRequirementsSnapshotFunc func(ctx context.Context, orgID, projectID, snapshotID, filename string) (string, bool, error)
-	ListRequirementsVersionsFunc         func(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
-	ListDesignVersionsFunc               func(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
-	GetRequirementsAtTagFunc             func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
-	GetDesignAtTagFunc                   func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
+	ListRequirementFilesFunc     func(ctx context.Context, orgID, projectID string) (map[string]string, error)
+	ListDesignFilesFunc          func(ctx context.Context, orgID, projectID string) (map[string]string, error)
+	SaveRequirementsFunc         func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error)
+	SaveDesignFunc               func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error)
+	DiscardRequirementsFunc      func(ctx context.Context, orgID, projectID string) (map[string]string, error)
+	DiscardDesignFunc            func(ctx context.Context, orgID, projectID string) (map[string]string, error)
+	ListRequirementsVersionsFunc func(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
+	ListDesignVersionsFunc       func(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
+	GetRequirementsAtTagFunc     func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
+	GetDesignAtTagFunc           func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 }
 
 var _ artifacts.ArtifactService = (*FakeArtifactService)(nil)
-
-func (f *FakeArtifactService) GetFile(ctx context.Context, orgID, projectID, relPath string) (*artifacts.FileResult, error) {
-	if f.GetFileFunc == nil {
-		panic("artifactstest: GetFile called but GetFileFunc is not set")
-	}
-	return f.GetFileFunc(ctx, orgID, projectID, relPath)
-}
-
-func (f *FakeArtifactService) PutFile(ctx context.Context, orgID, projectID, relPath, content, ifMatch string) (*artifacts.PutResult, error) {
-	if f.PutFileFunc == nil {
-		panic("artifactstest: PutFile called but PutFileFunc is not set")
-	}
-	return f.PutFileFunc(ctx, orgID, projectID, relPath, content, ifMatch)
-}
 
 func (f *FakeArtifactService) ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	if f.ListRequirementFilesFunc == nil {
@@ -79,32 +56,11 @@ func (f *FakeArtifactService) ListRequirementFiles(ctx context.Context, orgID, p
 	return f.ListRequirementFilesFunc(ctx, orgID, projectID)
 }
 
-func (f *FakeArtifactService) DeleteRequirementFile(ctx context.Context, orgID, projectID, name string) error {
-	if f.DeleteRequirementFileFunc == nil {
-		panic("artifactstest: DeleteRequirementFile called but DeleteRequirementFileFunc is not set")
-	}
-	return f.DeleteRequirementFileFunc(ctx, orgID, projectID, name)
-}
-
 func (f *FakeArtifactService) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	if f.ListDesignFilesFunc == nil {
 		panic("artifactstest: ListDesignFiles called but ListDesignFilesFunc is not set")
 	}
 	return f.ListDesignFilesFunc(ctx, orgID, projectID)
-}
-
-func (f *FakeArtifactService) DeleteDesignFile(ctx context.Context, orgID, projectID, sub string) error {
-	if f.DeleteDesignFileFunc == nil {
-		panic("artifactstest: DeleteDesignFile called but DeleteDesignFileFunc is not set")
-	}
-	return f.DeleteDesignFileFunc(ctx, orgID, projectID, sub)
-}
-
-func (f *FakeArtifactService) DeleteDesignDirectory(ctx context.Context, orgID, projectID, sub string) error {
-	if f.DeleteDesignDirectoryFunc == nil {
-		panic("artifactstest: DeleteDesignDirectory called but DeleteDesignDirectoryFunc is not set")
-	}
-	return f.DeleteDesignDirectoryFunc(ctx, orgID, projectID, sub)
 }
 
 func (f *FakeArtifactService) SaveRequirements(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {
@@ -133,34 +89,6 @@ func (f *FakeArtifactService) DiscardDesign(ctx context.Context, orgID, projectI
 		panic("artifactstest: DiscardDesign called but DiscardDesignFunc is not set")
 	}
 	return f.DiscardDesignFunc(ctx, orgID, projectID)
-}
-
-func (f *FakeArtifactService) CaptureRequirementsSnapshot(ctx context.Context, orgID, projectID, snapshotID string) (map[string]string, error) {
-	if f.CaptureRequirementsSnapshotFunc == nil {
-		panic("artifactstest: CaptureRequirementsSnapshot called but CaptureRequirementsSnapshotFunc is not set")
-	}
-	return f.CaptureRequirementsSnapshotFunc(ctx, orgID, projectID, snapshotID)
-}
-
-func (f *FakeArtifactService) RestoreRequirementsSnapshot(ctx context.Context, orgID, projectID, snapshotID string) (map[string]string, error) {
-	if f.RestoreRequirementsSnapshotFunc == nil {
-		panic("artifactstest: RestoreRequirementsSnapshot called but RestoreRequirementsSnapshotFunc is not set")
-	}
-	return f.RestoreRequirementsSnapshotFunc(ctx, orgID, projectID, snapshotID)
-}
-
-func (f *FakeArtifactService) DeleteRequirementsSnapshot(ctx context.Context, orgID, projectID, snapshotID string) error {
-	if f.DeleteRequirementsSnapshotFunc == nil {
-		panic("artifactstest: DeleteRequirementsSnapshot called but DeleteRequirementsSnapshotFunc is not set")
-	}
-	return f.DeleteRequirementsSnapshotFunc(ctx, orgID, projectID, snapshotID)
-}
-
-func (f *FakeArtifactService) ReadFileFromRequirementsSnapshot(ctx context.Context, orgID, projectID, snapshotID, filename string) (string, bool, error) {
-	if f.ReadFileFromRequirementsSnapshotFunc == nil {
-		panic("artifactstest: ReadFileFromRequirementsSnapshot called but ReadFileFromRequirementsSnapshotFunc is not set")
-	}
-	return f.ReadFileFromRequirementsSnapshotFunc(ctx, orgID, projectID, snapshotID, filename)
 }
 
 func (f *FakeArtifactService) ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error) {

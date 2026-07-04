@@ -26,25 +26,25 @@
  * decide its next step.
  *
  * The Zod `inputSchema`s are the runtime validators; the corresponding wire
- * `*Input` types live in `src/contracts/sse-events.ts` (the source of truth). A compile-time
+ * `*Input` types live in `@aep/agent-stream` (the source of truth). A compile-time
  * drift guard below asserts `z.infer<schema>` stays equal to each wire type.
  */
 
 import { tool } from "ai";
 import type { Tool } from "ai";
 import { z } from "zod";
-import type {
-  AddFileInput,
-  EditFileInput,
-  RemoveFileInput,
-  SetFrontmatterFieldInput,
-  LoadSkillInput,
-  LoadSkillResult,
-  LoadSkillReferenceInput,
-  LoadSkillReferenceResult,
-  Skill,
-} from "../../contracts/sse-events.js";
-import { FileBundle } from "./bundle.js";
+import {
+  FileBundle,
+  type AddFileInput,
+  type EditFileInput,
+  type RemoveFileInput,
+  type SetFrontmatterFieldInput,
+  type LoadSkillInput,
+  type LoadSkillResult,
+  type LoadSkillReferenceInput,
+  type LoadSkillReferenceResult,
+  type Skill,
+} from "@aep/agent-stream";
 
 export const ADD_FILE = "addFile" as const;
 export const EDIT_FILE = "editFile" as const;

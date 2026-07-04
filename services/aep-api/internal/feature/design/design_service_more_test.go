@@ -17,82 +17,37 @@
 // UNIT tier (bff-component-testing.md §2): the REAL designService with every
 // out-of-process seam faked — the artifact service (wrapped by the REAL
 // artifacts.NewArtifactStore decorator, so the store's split/assemble logic
-// runs for real), the agents client (an interface — hand-faked at the method
-// boundary, no httptest needed), and the three inline consumer ports
-// (taskReconciler, traitSyncReconciler, skillCatalog). No HTTP, no DB — design
-// has no SQL-shaped behavior (persistence delegates to artifacts/git), so there
-// is no dbtest tier for this feature.
+// runs for real) and the inline task-reconcile consumer port (taskReconciler).
+// No HTTP, no DB — design has no SQL-shaped behavior (persistence delegates to
+// artifacts/git), so there is no dbtest tier for this feature.
 //
-// This file proves the service's logic branches: the design assembly + status
-// projection, the versioning map, the ErrSpecNotApproved generation gate, the
-// StreamGenerateDesign completion + persisted-artifact side-effect, and — the
-// load-bearing part — that each of the three ports is invoked at the right
-// point with the right args, and that a nil port (setter never called) never
-// panics where production tolerates it. The HTTP contract (status codes,
-// validation, error mapping, the gate 401) lives in design_component_test.go.
+// Per the GitHub-direct rework (docs/design/agents-generation-migration.md
+// §12.2) the per-file PUT/DELETE, component delete, and the architect generate
+// stream are gone; what remains is the read + save + version surface. This file
+// proves the service's surviving logic branches: the design assembly + status
+// projection, the versioning map, the ErrSpecNotApproved save gate, and that
+// the task-reconcile port is invoked on save (and a nil port never panics). The
+// HTTP contract (status codes, error mapping, the gate 401) lives in
+// design_component_test.go.
 package design
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // --- fakes -------------------------------------------------------------------
 
-// fakeAgentsClient hand-fakes agents.Client (an interface — the out-of-process
-// boundary is the HTTP call inside the real client, not this seam). Only
-// StreamArchitect is exercised by design; the rest panic loudly. The last
-// request is captured so tests can assert the input assembly (skills, previous
-// design, wireframes) the service built.
-type fakeAgentsClient struct {
-	streamArchitect func(ctx context.Context, orgID string, req agents.ArchitectRequest) (io.ReadCloser, error)
-	lastOrg         string
-	lastReq         agents.ArchitectRequest
-	architectCalls  int
-}
-
-func (f *fakeAgentsClient) StreamArchitect(ctx context.Context, orgID string, req agents.ArchitectRequest) (io.ReadCloser, error) {
-	f.architectCalls++
-	f.lastOrg = orgID
-	f.lastReq = req
-	if f.streamArchitect == nil {
-		panic("fakeAgentsClient: StreamArchitect func not set")
-	}
-	return f.streamArchitect(ctx, orgID, req)
-}
-func (f *fakeAgentsClient) StreamDocumentGeneration(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-	panic("fakeAgentsClient: StreamDocumentGeneration not expected")
-}
-func (f *fakeAgentsClient) StreamTechLeadPlan(context.Context, string, agents.TechLeadPlanRequest) (io.ReadCloser, error) {
-	panic("fakeAgentsClient: StreamTechLeadPlan not expected")
-}
-func (f *fakeAgentsClient) StreamTechLeadDetail(context.Context, string, agents.TechLeadDetailRequest) (io.ReadCloser, error) {
-	panic("fakeAgentsClient: StreamTechLeadDetail not expected")
-}
-func (f *fakeAgentsClient) StreamRequirementsChat(context.Context, string, agents.RequirementsChatRequest) (io.ReadCloser, error) {
-	panic("fakeAgentsClient: StreamRequirementsChat not expected")
-}
-func (f *fakeAgentsClient) RenderDsl(context.Context, string, string) (string, error) {
-	panic("fakeAgentsClient: RenderDsl not expected")
-}
-
-var _ agents.Client = (*fakeAgentsClient)(nil)
-
-// portCall records the (org, project, extra) args a consumer port saw.
+// portCall records the (org, project) args the task-reconcile port saw.
 type portCall struct {
-	org, project, extra string
+	org, project string
 }
 
 // fakeTaskReconciler records ReconcilePendingForDesignChange invocations.
@@ -104,37 +59,6 @@ type fakeTaskReconciler struct {
 func (f *fakeTaskReconciler) ReconcilePendingForDesignChange(_ context.Context, orgID, projectID string) error {
 	f.calls = append(f.calls, portCall{org: orgID, project: projectID})
 	return f.err
-}
-
-// fakeTraitSync records SyncComponentTraits / DeleteComponentCascade calls.
-type fakeTraitSync struct {
-	syncCalls   []portCall
-	deleteCalls []portCall
-	syncErr     error
-	deleteErr   error
-}
-
-func (f *fakeTraitSync) SyncComponentTraits(_ context.Context, orgID, projectID, componentName string) error {
-	f.syncCalls = append(f.syncCalls, portCall{org: orgID, project: projectID, extra: componentName})
-	return f.syncErr
-}
-func (f *fakeTraitSync) DeleteComponentCascade(_ context.Context, orgID, projectID, componentName string) error {
-	f.deleteCalls = append(f.deleteCalls, portCall{org: orgID, project: projectID, extra: componentName})
-	return f.deleteErr
-}
-
-// fakeSkillCatalog records List and returns a canned per-org catalogue.
-type fakeSkillCatalog struct {
-	calls  int
-	lastCt string
-	skills []models.Skill
-	err    error
-}
-
-func (f *fakeSkillCatalog) List(_ context.Context, orgID string) ([]models.Skill, error) {
-	f.calls++
-	f.lastCt = orgID
-	return f.skills, f.err
 }
 
 // --- fixtures ----------------------------------------------------------------
@@ -151,47 +75,12 @@ func validDesignFiles() map[string]string {
 }
 
 // newService builds the REAL designService over the given fake artifact service,
-// wrapping it in the REAL ArtifactStore decorator. agentsClient may be nil for
-// tests that never generate.
-func newService(fake *artifactstest.FakeArtifactService, agentsClient agents.Client) *designService {
+// wrapping it in the REAL ArtifactStore decorator.
+func newService(fake *artifactstest.FakeArtifactService) *designService {
 	return &designService{
-		store:        artifacts.NewArtifactStore(fake),
-		agentsClient: agentsClient,
-		artifactSvc:  fake,
+		store:       artifacts.NewArtifactStore(fake),
+		artifactSvc: fake,
 	}
-}
-
-// sseFinish builds a minimal AI-SDK UI message stream whose data-finish frame
-// carries the given design. The service forwards every line downstream and
-// harvests the finish frame for persistence.
-func sseFinish(overview string, components ...models.DesignComponent) io.ReadCloser {
-	var sb strings.Builder
-	sb.WriteString("data: {\"type\":\"start\"}\n")
-	frame := agents.ArchitectDesign{Overview: overview, Components: components}
-	// Hand-encode the data-finish envelope so the exact wire shape the service
-	// parses (type + data.design) is what the test asserts against.
-	envelope, err := json.Marshal(map[string]any{
-		"type": "data-finish",
-		"data": map[string]any{"design": frame},
-	})
-	if err != nil {
-		panic(err)
-	}
-	sb.WriteString("data: ")
-	sb.Write(envelope)
-	sb.WriteString("\n")
-	sb.WriteString("data: [DONE]\n")
-	return io.NopCloser(strings.NewReader(sb.String()))
-}
-
-// mapValues returns a map's values in unspecified order — used to search the
-// captured write set for expected content.
-func mapValues(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for _, v := range m {
-		out = append(out, v)
-	}
-	return out
 }
 
 // --- GetDesign ---------------------------------------------------------------
@@ -203,7 +92,7 @@ func TestGetDesign_NoDesignYet(t *testing.T) {
 			return map[string]string{}, nil // empty tree → ReadDesign returns nil,nil
 		},
 	}
-	d, err := newService(fake, nil).GetDesign(context.Background(), "acme", "web")
+	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
 	if err != nil || d != nil {
 		t.Fatalf("no design: want (nil,nil), got (%v,%v)", d, err)
 	}
@@ -216,7 +105,7 @@ func TestGetDesign_NotFoundIsEmptyNotError(t *testing.T) {
 			return nil, artifacts.ErrArtifactNotFound
 		},
 	}
-	d, err := newService(fake, nil).GetDesign(context.Background(), "acme", "web")
+	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
 	if err != nil || d != nil {
 		t.Fatalf("NotFound must degrade to (nil,nil), got (%v,%v)", d, err)
 	}
@@ -238,7 +127,7 @@ func TestGetDesign_ApprovedWithVersions(t *testing.T) {
 			return validDesignFiles(), nil
 		},
 	}
-	d, err := newService(fake, nil).GetDesign(context.Background(), "acme", "web")
+	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("GetDesign: %v", err)
 	}
@@ -269,7 +158,7 @@ func TestGetDesign_UnsavedWhenTreeDiffersFromTag(t *testing.T) {
 			return map[string]string{artifacts.DesignRootFile: "different\n"}, nil
 		},
 	}
-	d, err := newService(fake, nil).GetDesign(context.Background(), "acme", "web")
+	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("GetDesign: %v", err)
 	}
@@ -288,7 +177,7 @@ func TestGetDesign_NoVersionsIsDraftAndUnsaved(t *testing.T) {
 			return nil, nil // never tagged
 		},
 	}
-	d, err := newService(fake, nil).GetDesign(context.Background(), "acme", "web")
+	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("GetDesign: %v", err)
 	}
@@ -315,7 +204,7 @@ func TestGetDesignAtTag_NotFoundMapsToDesignNotFound(t *testing.T) {
 			return nil, artifacts.ErrArtifactNotFound
 		},
 	}
-	_, err := newService(fake, nil).GetDesignAtTag(context.Background(), "acme", "web", "v1-1")
+	_, err := newService(fake).GetDesignAtTag(context.Background(), "acme", "web", "v1-1")
 	if !errors.Is(err, artifacts.ErrDesignNotFound) {
 		t.Fatalf("want ErrDesignNotFound, got %v", err)
 	}
@@ -328,7 +217,7 @@ func TestGetDesignAtTag_HappyDecodesParentFromTag(t *testing.T) {
 			return validDesignFiles(), nil
 		},
 	}
-	d, err := newService(fake, nil).GetDesignAtTag(context.Background(), "acme", "web", "v3-2")
+	d, err := newService(fake).GetDesignAtTag(context.Background(), "acme", "web", "v3-2")
 	if err != nil {
 		t.Fatalf("GetDesignAtTag: %v", err)
 	}
@@ -349,7 +238,7 @@ func TestGetDesignBundle_PairsFilesAndDesign(t *testing.T) {
 			return nil, nil
 		},
 	}
-	b, err := newService(fake, nil).GetDesignBundle(context.Background(), "acme", "web")
+	b, err := newService(fake).GetDesignBundle(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("GetDesignBundle: %v", err)
 	}
@@ -373,389 +262,12 @@ func TestGetDesignBundleAtTag_Happy(t *testing.T) {
 			return validDesignFiles(), nil
 		},
 	}
-	b, err := newService(fake, nil).GetDesignBundleAtTag(context.Background(), "acme", "web", "v1-1")
+	b, err := newService(fake).GetDesignBundleAtTag(context.Background(), "acme", "web", "v1-1")
 	if err != nil {
 		t.Fatalf("GetDesignBundleAtTag: %v", err)
 	}
 	if len(b.Files) == 0 || b.Design == nil {
 		t.Fatalf("bundle-at-tag must carry files + design: %+v", b)
-	}
-}
-
-// --- StreamGenerateDesign: the ErrSpecNotApproved gate + side effects --------
-
-func TestStreamGenerate_NoRequirementsIsSpecNotFound(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{}, nil // no requirements yet
-		},
-	}
-	err := newService(fake, &fakeAgentsClient{}).StreamGenerateDesign(context.Background(), "acme", "web", &bytes.Buffer{}, func() {})
-	if !errors.Is(err, artifacts.ErrSpecNotFound) {
-		t.Fatalf("want ErrSpecNotFound, got %v", err)
-	}
-}
-
-func TestStreamGenerate_UnapprovedSpecIsGated(t *testing.T) {
-	t.Parallel()
-	// Requirements files EXIST but were never tagged (no approved version).
-	// The gate returns the design-domain ErrSpecNotApproved sentinel (409 at
-	// the edge) BEFORE any call to the agents service.
-	agentsClient := &fakeAgentsClient{}
-	fake := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# Reqs\n\nBuild X."}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return nil, nil // never approved
-		},
-	}
-	err := newService(fake, agentsClient).StreamGenerateDesign(context.Background(), "acme", "web", &bytes.Buffer{}, func() {})
-	if !errors.Is(err, ErrSpecNotApproved) {
-		t.Fatalf("want ErrSpecNotApproved, got %v", err)
-	}
-	if agentsClient.architectCalls != 0 {
-		t.Fatal("the gate must short-circuit before calling the agents service")
-	}
-}
-
-func TestStreamGenerate_HappyPersistsAndConsultsSkillCatalog(t *testing.T) {
-	t.Parallel()
-	written := map[string]string{}
-	fake := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# Reqs\n\nBuild X."}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return []artifacts.RequirementsVersionInfo{{Tag: "v1", Version: 1}}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{}, nil // no prior design
-		},
-		PutFileFunc: func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
-			written[relPath] = content
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-	}
-	agentsClient := &fakeAgentsClient{
-		streamArchitect: func(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
-			return sseFinish("Generated overview", models.DesignComponent{
-				Name: "svc-a", ComponentType: "service", Language: "Go", DependsOn: []string{},
-			}), nil
-		},
-	}
-	skills := &fakeSkillCatalog{skills: []models.Skill{
-		{Name: "go", Kind: "builtin", Description: "Go skill", SkillMD: "# Go"},
-		{Name: "corp-style", Kind: "custom", Description: "House style"},
-	}}
-
-	svc := newService(fake, agentsClient)
-	svc.SetSkillService(skills)
-
-	var out bytes.Buffer
-	if err := svc.StreamGenerateDesign(context.Background(), "acme", "web", &out, func() {}); err != nil {
-		t.Fatalf("StreamGenerateDesign: %v", err)
-	}
-
-	// (1) The upstream SSE was forwarded verbatim to the caller.
-	if !strings.Contains(out.String(), "data-finish") {
-		t.Fatalf("stream not forwarded downstream: %q", out.String())
-	}
-	// (2) The finished design was PERSISTED via the store (the observable side
-	// effect the SSE rule cares about) — root overview + the component subtree.
-	all := strings.Join(mapValues(written), "\n")
-	if !strings.Contains(all, "Generated overview") || !strings.Contains(all, "svc-a") {
-		t.Fatalf("finished design not persisted: %v", written)
-	}
-	// (3) The skill catalogue was consulted for the acting org and its records
-	// flowed into the architect input assembly (builtin body + org manifest).
-	if skills.calls != 1 || skills.lastCt != "acme" {
-		t.Fatalf("skill catalogue not consulted for org acme: calls=%d org=%q", skills.calls, skills.lastCt)
-	}
-	if len(agentsClient.lastReq.BuiltinSkills) != 1 || agentsClient.lastReq.BuiltinSkills[0].Name != "go" {
-		t.Fatalf("builtin skill body not inlined into architect input: %+v", agentsClient.lastReq.BuiltinSkills)
-	}
-	if len(agentsClient.lastReq.OrgSkills) != 1 || agentsClient.lastReq.OrgSkills[0].Name != "corp-style" {
-		t.Fatalf("org skill manifest not attached to architect input: %+v", agentsClient.lastReq.OrgSkills)
-	}
-}
-
-func TestStreamGenerate_NilSkillCatalogDoesNotPanic(t *testing.T) {
-	t.Parallel()
-	written := map[string]string{}
-	fake := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# Reqs"}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return []artifacts.RequirementsVersionInfo{{Tag: "v1", Version: 1}}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{}, nil
-		},
-		PutFileFunc: func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
-			written[relPath] = content
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-	}
-	agentsClient := &fakeAgentsClient{
-		streamArchitect: func(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
-			return sseFinish("Overview", models.DesignComponent{Name: "svc-a", ComponentType: "service"}), nil
-		},
-	}
-	// No SetSkillService — skillSvc stays nil (pre-skills behaviour).
-	svc := newService(fake, agentsClient)
-	if err := svc.StreamGenerateDesign(context.Background(), "acme", "web", &bytes.Buffer{}, func() {}); err != nil {
-		t.Fatalf("nil skill catalogue must run with no skills, got: %v", err)
-	}
-	if len(agentsClient.lastReq.BuiltinSkills) != 0 || len(agentsClient.lastReq.OrgSkills) != 0 {
-		t.Fatalf("nil catalogue must attach no skills: %+v", agentsClient.lastReq)
-	}
-}
-
-func TestStreamGenerate_RemovedComponentDirsAreDeleted(t *testing.T) {
-	t.Parallel()
-	// A component present in the working tree but absent from the freshly
-	// generated design must have its components/<name>/ subtree deleted.
-	deletedDirs := []string{}
-	fake := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# Reqs"}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return []artifacts.RequirementsVersionInfo{{Tag: "v1", Version: 1}}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			// Prior tree has "old-svc"; the new design only has "svc-a".
-			return map[string]string{
-				artifacts.DesignRootFile:       "old\n",
-				"components/old-svc/design.md": "---\ntype: service\n---\n\n# old-svc\n",
-				"components/svc-a/design.md":   "---\ntype: service\n---\n\n# svc-a\n",
-			}, nil
-		},
-		DeleteDesignDirectoryFunc: func(_ context.Context, _, _, sub string) error {
-			deletedDirs = append(deletedDirs, sub)
-			return nil
-		},
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-	}
-	agentsClient := &fakeAgentsClient{
-		streamArchitect: func(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
-			return sseFinish("Overview", models.DesignComponent{Name: "svc-a", ComponentType: "service"}), nil
-		},
-	}
-	if err := newService(fake, agentsClient).StreamGenerateDesign(context.Background(), "acme", "web", &bytes.Buffer{}, func() {}); err != nil {
-		t.Fatalf("StreamGenerateDesign: %v", err)
-	}
-	if len(deletedDirs) != 1 || !strings.Contains(deletedDirs[0], "old-svc") {
-		t.Fatalf("removed component dir not GC'd: %v", deletedDirs)
-	}
-}
-
-func TestStreamGenerate_StreamWithoutFinishErrors(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# Reqs"}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return []artifacts.RequirementsVersionInfo{{Tag: "v1", Version: 1}}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{}, nil
-		},
-	}
-	agentsClient := &fakeAgentsClient{
-		streamArchitect: func(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
-			return io.NopCloser(strings.NewReader("data: {\"type\":\"start\"}\ndata: [DONE]\n")), nil
-		},
-	}
-	err := newService(fake, agentsClient).StreamGenerateDesign(context.Background(), "acme", "web", &bytes.Buffer{}, func() {})
-	if err == nil || !strings.Contains(err.Error(), "without finishing") {
-		t.Fatalf("a stream that never finishes must error, got %v", err)
-	}
-}
-
-// --- UpdateDesignFile: the trait-sync port -----------------------------------
-
-func TestUpdateDesignFile_ComponentDesignFiresTraitSync(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	trait := &fakeTraitSync{}
-	svc := newService(fake, nil)
-	svc.SetTraitSync(trait)
-
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/Hello API/design.md", "new"); err != nil {
-		t.Fatalf("UpdateDesignFile: %v", err)
-	}
-	if len(trait.syncCalls) != 1 {
-		t.Fatalf("component design.md edit must fire SyncComponentTraits once, got %d", len(trait.syncCalls))
-	}
-	c := trait.syncCalls[0]
-	// Args must carry the acting org/project and the k8s-normalised component name.
-	if c.org != "acme" || c.project != "web" || c.extra != toK8sName("Hello API") {
-		t.Fatalf("trait sync args: %+v (want acme/web/%s)", c, toK8sName("Hello API"))
-	}
-}
-
-func TestUpdateDesignFile_RootDesignDoesNotFireTraitSync(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	trait := &fakeTraitSync{}
-	svc := newService(fake, nil)
-	svc.SetTraitSync(trait)
-
-	// Editing the root design.md is not a per-component edit → no trait sync.
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "design.md", "prose"); err != nil {
-		t.Fatalf("UpdateDesignFile: %v", err)
-	}
-	if len(trait.syncCalls) != 0 {
-		t.Fatalf("root design.md edit must NOT fire trait sync, got %d calls", len(trait.syncCalls))
-	}
-}
-
-func TestUpdateDesignFile_NilTraitSyncDoesNotPanic(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	// No SetTraitSync — production tolerates a nil port on this best-effort hook.
-	svc := newService(fake, nil)
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.md", "x"); err != nil {
-		t.Fatalf("nil traitSync must be a no-op, got: %v", err)
-	}
-}
-
-func TestUpdateDesignFile_TraitSyncFailureIsBestEffort(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return &artifacts.PutResult{SHA: "sha"}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	trait := &fakeTraitSync{syncErr: errors.New("OC unreachable")}
-	svc := newService(fake, nil)
-	svc.SetTraitSync(trait)
-	// A trait-sync failure must never bubble — the design tree is canonical.
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.md", "x"); err != nil {
-		t.Fatalf("trait sync failure must be swallowed, got: %v", err)
-	}
-}
-
-// --- DeleteComponent: the cascade port ---------------------------------------
-
-func TestDeleteComponent_EmptyNameGuard(t *testing.T) {
-	t.Parallel()
-	svc := newService(&artifactstest.FakeArtifactService{}, nil)
-	if _, err := svc.DeleteComponent(context.Background(), "acme", "web", ""); err == nil {
-		t.Fatal("empty component name must error before any store call")
-	}
-}
-
-func TestDeleteComponent_FiresCascadeWithK8sName(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		DeleteDesignDirectoryFunc: func(context.Context, string, string, string) error { return nil },
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	trait := &fakeTraitSync{}
-	svc := newService(fake, nil)
-	svc.SetTraitSync(trait)
-
-	if _, err := svc.DeleteComponent(context.Background(), "acme", "web", "Hello API"); err != nil {
-		t.Fatalf("DeleteComponent: %v", err)
-	}
-	if len(trait.deleteCalls) != 1 {
-		t.Fatalf("delete must fire the OC cascade once, got %d", len(trait.deleteCalls))
-	}
-	c := trait.deleteCalls[0]
-	if c.org != "acme" || c.project != "web" || c.extra != toK8sName("Hello API") {
-		t.Fatalf("cascade args: %+v (want acme/web/%s)", c, toK8sName("Hello API"))
-	}
-}
-
-func TestDeleteComponent_NilTraitSyncDoesNotPanic(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		DeleteDesignDirectoryFunc: func(context.Context, string, string, string) error { return nil },
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	svc := newService(fake, nil) // no SetTraitSync
-	if _, err := svc.DeleteComponent(context.Background(), "acme", "web", "svc"); err != nil {
-		t.Fatalf("nil traitSync must be a no-op, got: %v", err)
-	}
-}
-
-// --- DeleteDesignFile --------------------------------------------------------
-
-func TestDeleteDesignFile_DelegatesAndRefreshes(t *testing.T) {
-	t.Parallel()
-	deleted := ""
-	fake := &artifactstest.FakeArtifactService{
-		DeleteDesignFileFunc: func(_ context.Context, _, _, sub string) error {
-			deleted = sub
-			return nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	b, err := newService(fake, nil).DeleteDesignFile(context.Background(), "acme", "web", "components/svc/openapi.yaml")
-	if err != nil {
-		t.Fatalf("DeleteDesignFile: %v", err)
-	}
-	if deleted != "components/svc/openapi.yaml" || b == nil {
-		t.Fatalf("delete must delegate the sub-path and return the refreshed bundle: deleted=%q b=%v", deleted, b)
 	}
 }
 
@@ -776,7 +288,7 @@ func TestSaveAndProceed_NoDesignIsNotFound(t *testing.T) {
 			return map[string]string{}, nil // nothing to save
 		},
 	}
-	_, err := newService(fake, nil).SaveAndProceed(context.Background(), "acme", "web")
+	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web")
 	if !errors.Is(err, artifacts.ErrDesignNotFound) {
 		t.Fatalf("want ErrDesignNotFound, got %v", err)
 	}
@@ -790,10 +302,10 @@ func TestSaveAndProceed_NoBaselineTranslatesToSpecNotApproved(t *testing.T) {
 		},
 		SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
 			// The git service refuses when there is no requirements baseline.
-			return nil, errors.New("save failed: no requirements baseline exists")
+			return nil, artifacts.ErrNoRequirementsBaseline
 		},
 	}
-	_, err := newService(fake, nil).SaveAndProceed(context.Background(), "acme", "web")
+	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web")
 	if !errors.Is(err, ErrSpecNotApproved) {
 		t.Fatalf("no-baseline must translate to ErrSpecNotApproved, got %v", err)
 	}
@@ -813,7 +325,7 @@ func TestSaveAndProceed_HappyReconcilesTasks(t *testing.T) {
 		},
 	}
 	task := &fakeTaskReconciler{}
-	svc := newService(fake, nil)
+	svc := newService(fake)
 	svc.SetTaskService(task)
 
 	d, err := svc.SaveAndProceed(context.Background(), "acme", "web")
@@ -842,7 +354,7 @@ func TestSaveAndProceed_NilTaskReconcilerDoesNotPanic(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := newService(fake, nil) // no SetTaskService
+	svc := newService(fake) // no SetTaskService
 	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("nil task reconciler must be a no-op, got: %v", err)
 	}
@@ -862,7 +374,7 @@ func TestSaveAndProceed_ReconcileFailureIsBestEffort(t *testing.T) {
 		},
 	}
 	task := &fakeTaskReconciler{err: errors.New("reconcile boom")}
-	svc := newService(fake, nil)
+	svc := newService(fake)
 	svc.SetTaskService(task)
 	// The save succeeded; a reconcile failure is logged, never surfaced.
 	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web"); err != nil {
@@ -887,9 +399,9 @@ func TestDiscardChanges_NothingToRevert(t *testing.T) {
 			return nil, artifacts.ErrArtifactNotFound
 		},
 	}
-	_, err := newService(fake, nil).DiscardChanges(context.Background(), "acme", "web")
-	if err == nil || !strings.Contains(err.Error(), "no saved version") {
-		t.Fatalf("want a no-saved-version error, got %v", err)
+	_, err := newService(fake).DiscardChanges(context.Background(), "acme", "web")
+	if !errors.Is(err, artifacts.ErrArtifactNotFound) {
+		t.Fatalf("a discard with no saved version must surface the not-found error, got %v", err)
 	}
 }
 
@@ -906,7 +418,7 @@ func TestDiscardChanges_HappyReturnsCurrentDesign(t *testing.T) {
 			return nil, nil
 		},
 	}
-	d, err := newService(fake, nil).DiscardChanges(context.Background(), "acme", "web")
+	d, err := newService(fake).DiscardChanges(context.Background(), "acme", "web")
 	if err != nil || d == nil {
 		t.Fatalf("discard must return the reverted design: d=%v err=%v", d, err)
 	}
@@ -930,7 +442,7 @@ func TestListDesignVersions_MapsThrough(t *testing.T) {
 			return []artifacts.DesignVersionInfo{{Tag: "v2-3", RequirementsVersion: 2, DesignRevision: 3, CommitHash: "h"}}, nil
 		},
 	}
-	v, err := newService(fake, nil).ListDesignVersions(context.Background(), "acme", "web")
+	v, err := newService(fake).ListDesignVersions(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("ListDesignVersions: %v", err)
 	}
@@ -1022,64 +534,5 @@ func TestAssembleDesignFromFiles(t *testing.T) {
 	}
 	if len(d.Components) != 1 || d.Components[0].Name != "hello-api" {
 		t.Fatalf("assembled design drifted: %+v", d)
-	}
-}
-
-func TestSeedDefaultSkillsApplied(t *testing.T) {
-	t.Parallel()
-	// Non-empty current set is preserved (sorted), builtins ignored.
-	got := seedDefaultSkillsApplied([]string{"b", "a"}, []agents.SkillRecord{{Name: "go"}})
-	if strings.Join(got, ",") != "a,b" {
-		t.Fatalf("current set must win, sorted: %v", got)
-	}
-	// Empty current → stamp every builtin, sorted.
-	got = seedDefaultSkillsApplied(nil, []agents.SkillRecord{{Name: "go"}, {Name: "api-management"}})
-	if strings.Join(got, ",") != "api-management,go" {
-		t.Fatalf("empty current must seed builtins, sorted: %v", got)
-	}
-}
-
-func TestResolveArchitectSkills(t *testing.T) {
-	t.Parallel()
-	// Nil catalogue → no skills, no error.
-	if b, o := newService(&artifactstest.FakeArtifactService{}, nil).resolveArchitectSkills(context.Background(), "acme"); b != nil || o != nil {
-		t.Fatalf("nil catalogue must return (nil,nil), got (%v,%v)", b, o)
-	}
-	// Builtins carry full bodies; everything else is a description-only manifest.
-	skills := &fakeSkillCatalog{skills: []models.Skill{
-		{Name: "go", Kind: "builtin", Description: "d1", SkillMD: "# body"},
-		{Name: "custom-a", Kind: "custom", Description: "d2"},
-		{Name: "imported-b", Kind: "imported", Description: "d3"},
-	}}
-	svc := newService(&artifactstest.FakeArtifactService{}, nil)
-	svc.SetSkillService(skills)
-	builtins, org := svc.resolveArchitectSkills(context.Background(), "acme")
-	if len(builtins) != 1 || builtins[0].Name != "go" || builtins[0].Body != "# body" {
-		t.Fatalf("builtin split drifted: %+v", builtins)
-	}
-	if len(org) != 2 {
-		t.Fatalf("custom+imported must land in the org manifest, got %+v", org)
-	}
-}
-
-func TestResolveArchitectSkills_ListErrorDegradesToNoSkills(t *testing.T) {
-	t.Parallel()
-	skills := &fakeSkillCatalog{err: errors.New("skills service down")}
-	svc := newService(&artifactstest.FakeArtifactService{}, nil)
-	svc.SetSkillService(skills)
-	if b, o := svc.resolveArchitectSkills(context.Background(), "acme"); b != nil || o != nil {
-		t.Fatalf("a skills lookup failure must degrade to no skills, got (%v,%v)", b, o)
-	}
-}
-
-func TestExtractWireframeDsls(t *testing.T) {
-	t.Parallel()
-	got := extractWireframeDsls(map[string]string{
-		"login.dsl":       "canvas-dsl-1",
-		"requirements.md": "# not a dsl",
-		"home.dsl":        "canvas-dsl-2",
-	})
-	if len(got) != 2 || got["login"] != "canvas-dsl-1" || got["home"] != "canvas-dsl-2" {
-		t.Fatalf("only .dsl files, keyed by canvas name: %+v", got)
 	}
 }

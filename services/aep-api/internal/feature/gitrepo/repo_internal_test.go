@@ -23,25 +23,9 @@ package gitrepo
 // (that would cycle through gitrepo).
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 )
-
-func TestDetectDefaultBranch(t *testing.T) {
-	t.Parallel()
-	remote := gittest.NewRemote(t, gittest.WithSeed(map[string]string{"README.md": "x"}, "seed"))
-	clone := remote.Clone(t)
-	if got := detectDefaultBranch(clone); got != "main" {
-		t.Fatalf("detectDefaultBranch(real clone) = %q, want main", got)
-	}
-	// Non-existent path → git errors → falls back to "main".
-	if got := detectDefaultBranch(filepath.Join(t.TempDir(), "not-a-repo")); got != "main" {
-		t.Fatalf("detectDefaultBranch(missing) = %q, want main fallback", got)
-	}
-}
 
 func TestSlugifyProjectName(t *testing.T) {
 	t.Parallel()

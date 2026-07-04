@@ -27,12 +27,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/agents"
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	githubclient "github.com/wso2/aep/aep-api/internal/clients/github"
 	k8sclient "github.com/wso2/aep/aep-api/internal/clients/k8s"
@@ -50,6 +50,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/files"
+	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
@@ -91,10 +93,6 @@ type App struct {
 // produced; the comments call out the couplings.
 func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	var err error
-
-	if mkErr := os.MkdirAll(cfg.RepoBasePath, 0o755); mkErr != nil {
-		return nil, fmt.Errorf("create repo base path %q: %w", cfg.RepoBasePath, mkErr)
-	}
 
 	// Skills are repo-backed now (one private org-skills repo per org —
 	// docs/design/skills-repo-storage.md). The store needs gitOpsService +
@@ -342,17 +340,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	repoService := gitrepo.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility, cfg.RepoBasePath)
-	gitOpsService := gitrepo.NewGitOpsService(repoRepo, credResolver, cfg.RepoBasePath, gitHost)
+	repoService := gitrepo.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility)
+	gitOpsService := gitrepo.NewGitOpsService(credResolver, gitHost)
 	artifactSvcGit := artifacts.NewArtifactService(repoRepo, gitOpsService)
 	issueService := gitrepo.NewIssueService(repoRepo, gitHost, gitHost, credResolver)
-	gitOpsService.CleanupOrphanTmpClones()
-	go func() {
-		warmCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		warmed, failed := gitOpsService.PreWarmClones(warmCtx, 10)
-		slog.Info("pre-warm complete", "warmed", warmed, "failed", failed)
-	}()
 	webhookRegService := gitrepo.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := orgcreds.NewCredentialsRefreshService(credResolver)
 	credService := orgcreds.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
@@ -382,13 +373,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
 	}
 
-	// Agents service client (AI SDK v6 — architect, tech-lead, requirements).
-	// It resolves the per-org effective Anthropic key in-process (from the
-	// gated, token-derived org) and forwards it as X-Anthropic-Key so
-	// agents-service consumes it directly. Every call also carries a per-call
-	// BFF-signed identity JWT (taskTokens) so agents derives org from a verified
-	// claim, not a trusted header. agentsClient is first used just below
-	// (requirements/design/task services).
+	// Legacy agents service client (AI SDK v6) — now only tech-lead task
+	// generation; the architect + requirements/chat flows moved to the genai
+	// turn endpoint (agentsvcClient, below). It resolves the per-org effective
+	// Anthropic key in-process (from the gated, token-derived org) and forwards
+	// it as X-Anthropic-Key so agents-service consumes it directly. Every call
+	// also carries a per-call BFF-signed identity JWT (taskTokens) so agents
+	// derives org from a verified claim, not a trusted header. agentsClient is
+	// first used just below (the task service).
 	var agentsSigner agents.ServiceTokenSigner
 	if taskTokens != nil {
 		// Guard the typed-nil interface trap: only assign the concrete signer
@@ -428,6 +420,58 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	skillMutationSvc := skills.NewSkillMutationService(skillSvc)
 	skillImportSvc := skills.NewSkillImportService(skillSvc)
 
+	// NEW file-mutation agents service (services/agents) — the
+	// requirements/design/chat generation flows. Plain HS256 M2M bearer; the
+	// per-org Anthropic key is resolved by genai pre-stream and forwarded as
+	// X-Anthropic-Key. Distinct from agentsClient (legacy, kept for tasks).
+	agentsvcClient := agentsvc.New(agentsvc.Config{
+		BaseURL:  cfg.AgentsSvc.BaseURL,
+		Secret:   cfg.AgentsSvc.JWTSecret,
+		Audience: cfg.AgentsSvc.JWTAudience,
+		Issuer:   cfg.AgentsSvc.JWTIssuer,
+	})
+
+	// Files API — generic specs/-scoped, GitHub-at-HEAD reads + atomic apply
+	// (commits straight to main under CAS retry). No local working tree.
+	filesSvc := files.NewService(repoService, gitOpsService)
+
+	// Unified genai turn/chat surface. It resolves the org Anthropic key (no
+	// platform fallback), pushes embedded flow skills + the org's auxiliary
+	// (non-builtin) skills, and streams the agents service's raw frames back.
+	anthropicKeyForGenAI := func(ctx context.Context, orgID string) (string, error) {
+		res, err := anthropicCredService.EffectiveKey(ctx, orgID)
+		if err != nil {
+			return "", err
+		}
+		if res == nil || res.Source == "none" {
+			return "", nil // no key → genai raises a pre-stream 4xx
+		}
+		return res.Key, nil
+	}
+	orgSkillsForGenAI := func(ctx context.Context, orgID string) ([]agentsvc.Skill, error) {
+		list, err := skillSvc.List(ctx, orgID)
+		if err != nil {
+			// Never block a generation on a skills-store hiccup — proceed with
+			// core flow skills only (matches the store's degrade philosophy).
+			slog.WarnContext(ctx, "genai: org skills unavailable — proceeding without", "org", orgID, "error", err)
+			return nil, nil
+		}
+		out := make([]agentsvc.Skill, 0, len(list))
+		for _, sk := range list {
+			if sk.Kind == "builtin" {
+				continue // builtins are coding-agent skills, not flow skills
+			}
+			out = append(out, agentsvc.Skill{
+				Name:        sk.Name,
+				Description: sk.Description,
+				Content:     sk.SkillMD,
+				References:  sk.References,
+			})
+		}
+		return out, nil
+	}
+	genaiSvc := genai.NewService(repoService, gitOpsService, anthropicKeyForGenAI, orgSkillsForGenAI, agentsvcClient)
+
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
 	// the OC Component's workflow params.
@@ -443,19 +487,16 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	}
 	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
 	configService := component.NewConfigService(configRepo, componentService)
-	requirementsDirLocker := requirements.NewRequirementsDirLocker(db)
-	requirementsService := requirements.NewRequirementsService(artifactStore, agentsClient, artifactSvcGit).WithLocker(requirementsDirLocker)
-	requirementsChatService := requirements.NewRequirementsChatService(artifactStore, agentsClient, artifactSvcGit, requirementsDirLocker)
-	designService := design.NewDesignService(artifactStore, agentsClient, artifactSvcGit)
+	requirementsService := requirements.NewRequirementsService(artifactStore, artifactSvcGit)
+	designService := design.NewDesignService(artifactStore, artifactSvcGit)
 
 	taskService := task.NewTaskService(db, taskRepo, artifactStore, issueService, artifactSvcGit, repoService, agentsClient)
 	boardService := task.NewBoardService(repoBoardService, taskRepo)
 
 	designService.SetTaskService(taskService)
-	// Wire the skills catalogue into design + task services so the
-	// architect input ships builtin/org skills, and the tech-lead detail
-	// phase ships full bodies of every attached skill.
-	designService.SetSkillService(skillSvc)
+	// Wire the skills catalogue into the task service so the tech-lead detail
+	// phase ships full bodies of every attached skill. (The architect flow
+	// moved to the genai turn endpoint, which assembles its own skills.)
 	taskService.SetSkillService(skillSvc)
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
@@ -471,7 +512,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// `components/<name>/design.md` PUT). See
 	// docs/design/api-platform-integration.md §6 Phase 2.
 	traitSyncService := component.NewTraitSyncService(componentClient, artifactStore)
-	designService.SetTraitSync(traitSyncService)
 
 	// Thunder admin client + IDP service. Reads
 	// aep-system-client credentials from env (THUNDER_*) and exposes
@@ -698,31 +738,32 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Huma API on apiMux and registers every migrated feature via
 	// RegisterAllHuma. See docs/design/bff-openapi-huma-migration.md.
 	params.HumaDeps = api.HumaDeps{
-		ProjectSvc:          projectService,
-		OrgSvc:              organizationService,
-		ComponentSvc:        componentService,
-		ConfigSvc:           configService,
-		RequirementsSvc:     requirementsService,
-		RequirementsChatSvc: requirementsChatService,
-		CollabRepo:          repoService,
-		DesignSvc:           designService,
-		TaskSvc:             taskService,
-		TaskDispatcher:      dispatchSvc,
-		TaskProgress:        taskProgressSvc,
-		ComponentClient:     componentClient,
-		BoardSvc:            boardService,
-		IDPSvc:              idpService,
-		CredentialSvc:       credService,
-		DisconnectSvc:       disconnectSvc,
-		BearerSvc:           bearerSvc,
-		AnthropicSvc:        anthropicCredService,
-		TaskTokens:          taskTokens,
-		SkillSvc:            skillSvc,
-		SkillMutationSvc:    skillMutationSvc,
-		SkillImportSvc:      skillImportSvc,
-		GitHubAppSlug:       cfg.GitHubAppSlug,
-		BFFPublicURL:        cfg.BFFPublicURL,
-		GitHubAppClientID:   cfg.GitHubAppClientID,
+		ProjectSvc:        projectService,
+		OrgSvc:            organizationService,
+		ComponentSvc:      componentService,
+		ConfigSvc:         configService,
+		RequirementsSvc:   requirementsService,
+		CollabRepo:        repoService,
+		DesignSvc:         designService,
+		TaskSvc:           taskService,
+		TaskDispatcher:    dispatchSvc,
+		TaskProgress:      taskProgressSvc,
+		ComponentClient:   componentClient,
+		BoardSvc:          boardService,
+		IDPSvc:            idpService,
+		CredentialSvc:     credService,
+		DisconnectSvc:     disconnectSvc,
+		BearerSvc:         bearerSvc,
+		AnthropicSvc:      anthropicCredService,
+		TaskTokens:        taskTokens,
+		SkillSvc:          skillSvc,
+		SkillMutationSvc:  skillMutationSvc,
+		SkillImportSvc:    skillImportSvc,
+		FilesSvc:          filesSvc,
+		GenAISvc:          genaiSvc,
+		GitHubAppSlug:     cfg.GitHubAppSlug,
+		BFFPublicURL:      cfg.BFFPublicURL,
+		GitHubAppClientID: cfg.GitHubAppClientID,
 	}
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)

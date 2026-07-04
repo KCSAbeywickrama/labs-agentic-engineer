@@ -29,34 +29,93 @@ import {
 } from '@wso2/oxygen-ui';
 import { Package, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
 import { Explorer, type CustomView, type ExplorerRef } from '@aep/explorer';
-import { CELL_DIAGRAM_VIEW_ID, CellDiagramView } from '@aep/cell-diagram-view';
+import {
+  CELL_DIAGRAM_VIEW_ID,
+  CellDiagramView,
+  type CellDiagramViewProps,
+} from '@aep/cell-diagram-view';
+import { buildProjectDesign, toCellDiagramProject } from '@aep/design-projection';
 import { MdEditor } from '@aep/md-editor';
 import { OpenApiView } from '@aep/openapi-view';
 import { api } from '../services/api';
 import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
+import { newConversationId, runTurn } from '../services/api/turns';
+import type { TurnFailure } from '../services/api/turns';
+import { applyFiles, readTree } from '../services/api/files';
+import {
+  buildApplyRequest,
+  clearSpecDraft,
+  commitApplied,
+  deleteDraftFile,
+  getSpecDraft,
+  hasDraftChanges,
+  patchDraftFile,
+  rebaseToServer,
+  setDraftFiles,
+  subscribeSpecDraft,
+  syncBase,
+} from '../services/specDraftSession';
+import type { SpecDraftKey, SpecDraftState } from '../services/specDraftSession';
+import { computeDerivedArtifacts, derivedPathsFor } from '../lib/derivedArtifacts';
 import { projectTasksPath } from '../lib/paths';
 import VersionSelector from '../components/VersionSelector';
 import LineageLabel from '../components/LineageLabel';
 import {
-  DESIGN_DOCUMENT_TYPES,
-  componentDesignPath,
   componentNameFromPath,
-  componentOpenApiPath,
   designDocumentTypeForPath,
 } from '../lib/designDocumentTypes';
-import {
-  clearAllDesignDrafts,
-  loadDesignDrafts,
-  saveDesignDraft,
-} from '../lib/designDraftStorage';
 
-const AUTO_SAVE_DEBOUNCE_MS = 1500;
 const DESIGN_ROOT_FILE = 'design.md';
 
+/** Shown when a generate turn hits the output-token limit; partial content kept. */
+const TRUNCATED_MESSAGE =
+  'Generation was cut off at the length limit. The partial result was kept — refine or regenerate to complete it.';
+
+// The design tree lives under `specs/design/` in the repo. The Files API and
+// the draft session speak FULL `specs/…` path keys; the design bundle and the
+// Explorer speak paths RELATIVE to `specs/design/` (e.g. `design.md`,
+// `components/x/design.json`). This one pair of helpers bridges the two spaces.
+const DESIGN_PREFIX = 'specs/design/';
+function toFullPath(rel: string): string {
+  return rel.startsWith(DESIGN_PREFIX) ? rel : DESIGN_PREFIX + rel;
+}
+function toRelPath(full: string): string {
+  return full.startsWith(DESIGN_PREFIX) ? full.slice(DESIGN_PREFIX.length) : full;
+}
+
+// Derived artifacts (`*.excalidraw` scenes, `*.gen.json` projections) are
+// machine-generated views committed alongside their sources — they belong to
+// the cell diagram / renderers, not the hand-editable file tree.
+function isDerivedRel(rel: string): boolean {
+  return rel.endsWith('.excalidraw') || rel.endsWith('.gen.json');
+}
+
+// Recompute the derived views (`*.excalidraw`, `cell-diagram.gen.json`) over the
+// agent-authored sources in `files` and return the merged set, pruning any stale
+// derived paths. Used after a generate fold AND before a manual-edit Publish, so a
+// hand-edited `design.json`/`.dsl` source never commits alongside a stale view.
+// Suffix-keyed, so it is path-space agnostic (full `specs/…` keys here).
+function withDerivedArtifacts(
+  projectName: string,
+  files: Record<string, string>,
+): Record<string, string> {
+  const sources: Record<string, string> = {};
+  for (const [path, content] of Object.entries(files)) {
+    if (!isDerivedRel(path)) sources[path] = content;
+  }
+  const derived = computeDerivedArtifacts(projectName, sources);
+  const valid = derivedPathsFor(sources);
+  const out: Record<string, string> = { ...sources };
+  for (const [path, content] of Object.entries(derived.files)) {
+    if (valid.has(path)) out[path] = content;
+  }
+  return out;
+}
+
 // Tree-display tweaks for the design Explorer. The on-disk layout is
-// `specs/design/components/<name>/{design.md,openapi.yaml}` but a "Components"
-// folder row in the sidebar adds nothing the user cares about, so we collapse
-// it. Each component then renders at top level with a package icon.
+// `specs/design/components/<name>/…` but a "Components" folder row in the
+// sidebar adds nothing the user cares about, so we collapse it. Each component
+// then renders at top level with a package icon.
 const ARCHITECTURE_TRANSPARENT_FOLDERS = new Set(['components']);
 function getArchitectureFolderIcon(folderPath: string) {
   if (folderPath.startsWith('components/')) return <Package size={16} style={{ flexShrink: 0 }} />;
@@ -64,8 +123,8 @@ function getArchitectureFolderIcon(folderPath: string) {
 }
 
 // Route the per-component `openapi.yaml` files to the dedicated OpenAPI
-// viewer. Every other path (component design.md, custom views, etc.)
-// returns undefined so Explorer's default editor chain handles them.
+// viewer. Every other path (component design, custom views, etc.) returns
+// undefined so Explorer's default editor chain handles them.
 const OPENAPI_PATH_RE = /^components\/[^/]+\/openapi\.ya?ml$/;
 function renderOpenApiFile(path: string, content: string): React.ReactNode | undefined {
   if (!OPENAPI_PATH_RE.test(path)) return undefined;
@@ -78,6 +137,24 @@ function getArchitectureFileLabel(path: string): string | undefined {
   return undefined;
 }
 
+// A component's primary design doc; deleting it retires the whole component.
+const COMPONENT_ROOT_RE = /^components\/[^/]+\/design\.(md|json)$/;
+
+// A pre-stream turn failure → an actionable banner message.
+function messageForTurnFailure(failure: TurnFailure): string {
+  switch (failure.code) {
+    case 'requirements_not_approved':
+      return 'Approve the requirements first — design generation needs a saved (tagged) requirements version.';
+    case 'missing_org_key':
+      return 'No Anthropic API key is configured for this organization. Add one under the org Anthropic settings, then try again.';
+    case 'turn_in_progress':
+      return 'A generation is already running for this design. Wait for it to finish, then try again.';
+    default:
+      // stream_error / upstream / anything else — surface the server's text.
+      return failure.message || 'Design generation failed.';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -87,129 +164,111 @@ export default function ProjectArchitecturePage() {
   const { orgId, projectId } = useParams();
   const routeOrgId = orgId ?? 'default';
 
+  // The FE-owned working copy (draft + folds + manual edits) lives in the shared
+  // spec-draft session, keyed by org/project/kind. It is the single source of
+  // truth for the file tree/editor; committed truth (GitHub HEAD) is the base.
+  const key = useMemo<SpecDraftKey>(
+    () => ({ orgId: routeOrgId, projectId: projectId ?? '', kind: 'design' }),
+    [routeOrgId, projectId],
+  );
+  const [session, setSession] = useState<SpecDraftState>(() => getSpecDraft(key));
+  useEffect(() => {
+    setSession(getSpecDraft(key));
+    return subscribeSpecDraft(key, () => setSession(getSpecDraft(key)));
+  }, [key]);
+  const draft = session.draft;
+
   const [loading, setLoading] = useState(true);
-  const [savedFiles, setSavedFiles] = useState<Record<string, string>>({});
-  const [liveContents, setLiveContents] = useState<Record<string, string>>({});
   const [activePath, setActivePath] = useState<string | null>(CELL_DIAGRAM_VIEW_ID);
   const [design, setDesign] = useState<Design | null>(null);
   const [versions, setVersions] = useState<ArtifactVersion[]>([]);
   const [currentVersion, setCurrentVersion] = useState(0);
   const [viewingHistorical, setViewingHistorical] = useState(false);
+  // Read-only snapshot of a historical version (bundle files are rel-keyed).
+  const [historical, setHistorical] = useState<
+    { files: Record<string, string>; components: DesignComponent[] } | null
+  >(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
 
-  // Streaming state populated from architect SSE events while `generating`.
-  // The cell diagram reads from `streamingComponents` and the file tree shows
-  // a spinner on every path in `pendingArtifacts`. Both reset on finish.
-  const [streamingComponents, setStreamingComponents] = useState<DesignComponent[]>([]);
+  // Transient live-fold preview populated from the turn stream while
+  // `generating` (full-path keys); the file tree shows a spinner on every path
+  // touched so far. Both reset on finish; the committed draft is only replaced
+  // once the turn succeeds.
+  const [livePreview, setLivePreview] = useState<Record<string, string> | null>(null);
   const [pendingArtifacts, setPendingArtifacts] = useState<Set<string>>(() => new Set());
 
   const editorRef = useRef<ExplorerRef>(null);
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load bundle.
+  // Refresh only the bundle-derived projection (cell-diagram components,
+  // versions, unsaved flag). The draft/base are never touched here.
   const refreshBundle = useCallback(async () => {
     if (!projectId) return;
     const bundle = await api.getDesignBundle(projectId);
     if (!bundle) {
-      setSavedFiles({});
       setDesign(null);
+      setHasUnsavedChanges(false);
       return;
     }
-    setSavedFiles(bundle.files);
     setDesign(bundle.design);
-    setLiveContents(bundle.files);
     setHasUnsavedChanges(bundle.design?.hasUnsavedChanges ?? false);
     setCurrentVersion(bundle.design?.version ?? 0);
     if (bundle.design?.versions) setVersions(bundle.design.versions);
-    if (activePath === null && bundle.files[DESIGN_ROOT_FILE]) {
-      setActivePath(DESIGN_ROOT_FILE);
-    }
-  }, [routeOrgId, projectId, activePath]);
+  }, [projectId]);
 
+  // Initial load: seed the draft base from the Files API at HEAD, and project
+  // the cell diagram / versions from the design bundle.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      await refreshBundle();
+      if (projectId) {
+        try {
+          const tree = await readTree(projectId, DESIGN_PREFIX);
+          if (!cancelled) syncBase(key, tree);
+        } catch {
+          // No design directory yet (fresh project) — start from an empty base.
+          if (!cancelled) syncBase(key, { files: {}, shas: {} });
+        }
+        await refreshBundle();
+      }
       if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeOrgId, projectId]);
+  }, [projectId, key, refreshBundle]);
 
-  // Restore drafts from localStorage on first load.
-  useEffect(() => {
-    if (!projectId) return;
-    const drafts = loadDesignDrafts(routeOrgId, projectId);
-    if (Object.keys(drafts).length === 0) return;
-    setLiveContents((prev) => {
-      const next = { ...prev };
-      for (const [path, draft] of Object.entries(drafts)) {
-        if (next[path] !== draft.draft) next[path] = draft.draft;
-      }
-      return next;
-    });
-  }, [routeOrgId, projectId]);
-
-  // Auto-save on edit.
-  const scheduleAutoSave = useCallback(
-    (path: string, content: string) => {
-      if (viewingHistorical) return;
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-      autoSaveTimer.current = setTimeout(async () => {
-        if (!projectId) return;
-        const bundle = await api.updateDesignFile(projectId, path, content);
-        if (bundle) {
-          setSavedFiles(bundle.files);
-          setDesign(bundle.design);
-          setHasUnsavedChanges(bundle.design?.hasUnsavedChanges ?? false);
-          if (bundle.design?.versions) setVersions(bundle.design.versions);
-        }
-      }, AUTO_SAVE_DEBOUNCE_MS);
-    },
-    [routeOrgId, projectId, viewingHistorical],
-  );
-
+  // Manual edit → draft patch (no network; committed only on Publish).
   const handleFileChange = useCallback(
-    (path: string, md: string) => {
-      setLiveContents((prev) => ({ ...prev, [path]: md }));
-      if (projectId) {
-        saveDesignDraft(routeOrgId, projectId, path, {
-          draft: md,
-          baseServerContent: savedFiles[path] ?? '',
-          savedAt: Date.now(),
-        });
-      }
-      scheduleAutoSave(path, md);
+    (rel: string, content: string) => {
+      if (viewingHistorical || generating) return;
+      patchDraftFile(key, toFullPath(rel), content);
     },
-    [routeOrgId, projectId, savedFiles, scheduleAutoSave],
+    [key, viewingHistorical, generating],
   );
 
   const handleDelete = useCallback(
-    async (path: string) => {
-      if (!projectId) return;
-      // Refuse root design.md.
-      const docType = designDocumentTypeForPath(path);
-      if (docType?.protected) return;
-      // Component design.md → delete the whole components/<name>/ dir for cleanliness.
-      const compName = componentNameFromPath(path);
-      const isComponentRoot = compName && path === componentDesignPath(compName);
-      const bundle = isComponentRoot && compName
-        ? await api.deleteDesignComponent(projectId, compName)
-        : await api.deleteDesignFile(projectId, path);
-      if (bundle) {
-        setSavedFiles(bundle.files);
-        setDesign(bundle.design);
-        setLiveContents(bundle.files);
-        if (activePath === path) setActivePath(DESIGN_ROOT_FILE);
+    (rel: string) => {
+      if (viewingHistorical || generating) return;
+      // Refuse the root design.md.
+      if (designDocumentTypeForPath(rel)?.protected) return;
+      const compName = componentNameFromPath(rel);
+      if (compName && COMPONENT_ROOT_RE.test(rel)) {
+        // Deleting a component's design doc retires the whole component: drop
+        // every draft path under components/<name>/.
+        const prefix = `${DESIGN_PREFIX}components/${compName}/`;
+        for (const full of Object.keys(getSpecDraft(key).draft)) {
+          if (full.startsWith(prefix)) deleteDraftFile(key, full);
+        }
+      } else {
+        deleteDraftFile(key, toFullPath(rel));
       }
+      if (activePath === rel) setActivePath(CELL_DIAGRAM_VIEW_ID);
     },
-    [routeOrgId, projectId, activePath],
+    [key, viewingHistorical, generating, activePath],
   );
 
   const handleVersionSelect = useCallback(
@@ -217,129 +276,187 @@ export default function ProjectArchitecturePage() {
       if (!projectId) return;
       if (!tag) {
         setViewingHistorical(false);
+        setHistorical(null);
         await refreshBundle();
         return;
       }
       const bundle = await api.getDesignBundleAtVersion(projectId, tag);
       if (bundle) {
-        setSavedFiles(bundle.files);
-        setLiveContents(bundle.files);
-        setDesign(bundle.design);
+        setHistorical({ files: bundle.files, components: bundle.design?.components ?? [] });
         setViewingHistorical(true);
-        if (activePath !== CELL_DIAGRAM_VIEW_ID && !bundle.files[activePath ?? '']) {
-          setActivePath(DESIGN_ROOT_FILE);
+        if (activePath !== CELL_DIAGRAM_VIEW_ID && !(activePath && bundle.files[activePath])) {
+          setActivePath(CELL_DIAGRAM_VIEW_ID);
         }
       }
     },
-    [routeOrgId, projectId, activePath, refreshBundle],
+    [projectId, activePath, refreshBundle],
   );
 
   const handleGenerate = useCallback(async () => {
     if (!projectId || generating) return;
     setGenerating(true);
     setPublishError(null);
-
-    // Reset streaming state. The root design.md goes pending immediately
-    // (it's recomposed from overview + requirements when finalize runs).
-    // Components and their files are added as `component-added` events
-    // arrive. Pull the user onto the cell diagram so they see it populate
-    // as each component lands.
-    setStreamingComponents([]);
-    setPendingArtifacts(new Set([DESIGN_ROOT_FILE]));
-    setLiveContents((prev) => {
-      // Seed an empty design.md so the row appears in the tree with its
-      // spinner even on a from-scratch generation (no saved files yet).
-      if (prev[DESIGN_ROOT_FILE] !== undefined) return prev;
-      return { ...prev, [DESIGN_ROOT_FILE]: '' };
-    });
+    setPendingArtifacts(new Set());
+    // Seed the live preview with the current draft so the tree/editor stay put
+    // until the first folded snapshot arrives. Pull the user onto the cell
+    // diagram so the design lands in front of them.
+    setLivePreview({ ...getSpecDraft(key).draft });
     setActivePath(CELL_DIAGRAM_VIEW_ID);
 
+    const conversationId = newConversationId();
     try {
-      await api.generateDesignStream(projectId, {
-        onComponentAdded: (component) => {
-          setStreamingComponents((prev) =>
-            prev.some((c) => c.name === component.name) ? prev : [...prev, component],
-          );
-          const designPath = componentDesignPath(component.name);
-          const openapiPath = componentOpenApiPath(component.name);
-          setPendingArtifacts((prev) => {
-            const next = new Set(prev);
-            next.add(designPath);
-            // Only services get an openapi.yaml — match BFF's writer.
-            if (component.componentType === 'service') next.add(openapiPath);
-            return next;
-          });
-          // Seed placeholders so the file rows appear in the tree under a
-          // spinner; the real content arrives in the post-finish bundle.
-          setLiveContents((prev) => {
-            const next = { ...prev };
-            if (next[designPath] === undefined) next[designPath] = '';
-            if (component.componentType === 'service' && next[openapiPath] === undefined) {
-              next[openapiPath] = '';
-            }
-            return next;
-          });
+      const result = await runTurn(
+        projectId,
+        conversationId,
+        {
+          useCase: 'design-generate',
+          instruction:
+            'Generate the system design and component designs from the approved requirements.',
+          // The BFF injects the approved requirements bundle server-side; we
+          // only send the current design draft (derived artifacts are stripped
+          // inside runTurn).
+          files: getSpecDraft(key).draft,
         },
-        onComponentUpdated: (name, patch) => {
-          setStreamingComponents((prev) =>
-            prev.map((c) => (c.name === name ? { ...c, ...patch } : c)),
-          );
+        {
+          onSnapshot: (files) => setLivePreview(files),
+          onBusyPaths: (paths) => {
+            const rel = new Set<string>();
+            for (const p of paths) rel.add(toRelPath(p));
+            setPendingArtifacts(rel);
+          },
         },
-        onComponentRemoved: (name) => {
-          setStreamingComponents((prev) => prev.filter((c) => c.name !== name));
-          const designPath = componentDesignPath(name);
-          const openapiPath = componentOpenApiPath(name);
-          setPendingArtifacts((prev) => {
-            const next = new Set(prev);
-            next.delete(designPath);
-            next.delete(openapiPath);
-            return next;
-          });
-          setLiveContents((prev) => {
-            const next = { ...prev };
-            delete next[designPath];
-            delete next[openapiPath];
-            return next;
-          });
-        },
-      });
-      await refreshBundle();
+      );
+
+      if (result.ok) {
+        // Fold succeeded → recompute derived views over the agent-authored
+        // files and adopt the merged snapshot as the new draft, pruning any
+        // stale derived paths.
+        setDraftFiles(key, withDerivedArtifacts(projectId, result.files));
+        await refreshBundle();
+        if (result.truncated) setPublishError(TRUNCATED_MESSAGE);
+      } else {
+        setPublishError(messageForTurnFailure(result));
+      }
     } finally {
       setGenerating(false);
-      setStreamingComponents([]);
+      setLivePreview(null);
       setPendingArtifacts(new Set());
     }
-  }, [routeOrgId, projectId, generating, refreshBundle]);
+  }, [projectId, generating, key, refreshBundle]);
 
   const handlePublish = useCallback(async () => {
     if (!projectId || publishing) return;
     setPublishing(true);
     setPublishError(null);
     try {
-      await api.saveAndProceedDesign(projectId);
-      clearAllDesignDrafts(routeOrgId, projectId);
+      // Recompute derived views first: a hand-edited design.json/.dsl source must
+      // commit with fresh `*.excalidraw` / `cell-diagram.gen.json`, not the stale
+      // ones from the last generate.
+      setDraftFiles(key, withDerivedArtifacts(projectId, getSpecDraft(key).draft));
+
+      // 1. Commit the draft delta to `main` (atomic; all-or-nothing).
+      if (hasDraftChanges(key)) {
+        let result;
+        try {
+          result = await applyFiles(projectId, buildApplyRequest(key));
+        } catch (err) {
+          // 400 path/size, 404 project, 5xx — surface the server message.
+          setPublishError(
+            err instanceof Error && err.message ? err.message : 'Failed to apply design changes.',
+          );
+          return;
+        }
+        if (!result.ok) {
+          // 409 — a stale baseSha; nothing was applied. Re-base the draft onto
+          // HEAD (keeps your edits) so a re-publish overwrites; no merge UI.
+          setPublishError(
+            'Your draft was based on an older version — it has been re-based onto the latest. Review and Publish again to overwrite the conflicting files.',
+          );
+          try {
+            rebaseToServer(key, await readTree(projectId, DESIGN_PREFIX));
+          } catch {
+            /* leave the draft as-is; the banner already told the user */
+          }
+          return;
+        }
+        commitApplied(key, result);
+      }
+
+      // 2. Cut the design tag (hard semantic validation happens here).
+      try {
+        await api.saveAndProceedDesign(projectId);
+      } catch (err) {
+        // A 422 arrives with joined validation errors already in `.message`.
+        setPublishError(
+          err instanceof Error && err.message ? err.message : 'Failed to save the design.',
+        );
+        await refreshBundle();
+        return;
+      }
       navigate(projectTasksPath(routeOrgId, projectId));
-    } catch (err) {
-      const msg = err instanceof Error && err.message ? err.message : 'Failed to publish design.';
-      setPublishError(msg);
     } finally {
       setPublishing(false);
     }
-  }, [routeOrgId, projectId, publishing, navigate]);
+  }, [projectId, publishing, key, routeOrgId, navigate, refreshBundle]);
 
   const handleDiscard = useCallback(async () => {
     if (!projectId) return;
     await api.discardDesignChanges(projectId);
-    if (projectId) clearAllDesignDrafts(routeOrgId, projectId);
+    clearSpecDraft(key);
+    try {
+      syncBase(key, await readTree(projectId, DESIGN_PREFIX));
+    } catch {
+      syncBase(key, { files: {}, shas: {} });
+    }
     await refreshBundle();
-  }, [routeOrgId, projectId, refreshBundle]);
+  }, [projectId, key, refreshBundle]);
 
-  // While generating, render the cell diagram from streaming components so
-  // each `component-added` event progressively populates the canvas. Once
-  // finalize fires and the bundle refreshes, fall back to design.components.
-  const effectiveComponents = generating ? streamingComponents : (design?.components ?? []);
+  // The files to display, keyed relative to `specs/design/`. Historical view
+  // shows the version snapshot (already rel-keyed); otherwise the live fold
+  // preview while generating, else the committed draft.
+  const displayFilesRel = useMemo<Record<string, string>>(() => {
+    if (viewingHistorical && historical) return historical.files;
+    const source = generating && livePreview ? livePreview : draft;
+    const out: Record<string, string> = {};
+    for (const [full, content] of Object.entries(source)) out[toRelPath(full)] = content;
+    return out;
+  }, [viewingHistorical, historical, generating, livePreview, draft]);
 
-  const designMdContent = liveContents[DESIGN_ROOT_FILE] ?? '';
+  // The cell diagram reads projected components: the historical snapshot when
+  // viewing history, otherwise the current bundle projection.
+  const effectiveComponents =
+    viewingHistorical && historical ? historical.components : design?.components ?? [];
+
+  // Project the cell diagram from the SAME files the tree shows (historical
+  // snapshot, live stream preview, or the working draft) through the exact
+  // pipeline that derives the committed `cell-diagram.gen.json`. Without this the
+  // diagram would render only `design.components` (the committed-HEAD bundle),
+  // so it stayed empty all through a generate and until Publish — the design
+  // page's "nothing streaming" symptom. A partial design.json mid-stream simply
+  // projects to a default box until its content closes.
+  const liveProject = useMemo<NonNullable<CellDiagramViewProps['project']> | null>(() => {
+    const sourceFull: Record<string, string> =
+      viewingHistorical && historical
+        ? Object.fromEntries(
+            Object.entries(historical.files).map(([rel, c]) => [toFullPath(rel), c]),
+          )
+        : generating && livePreview
+          ? livePreview
+          : draft;
+    try {
+      const proj = toCellDiagramProject(buildProjectDesign(projectId ?? '', sourceFull));
+      // `CellDiagramProject` (design-projection) is a structural mirror of the
+      // @wso2/cell-diagram `Project`; the only divergence is `type: string` vs
+      // the lib's `ComponentType` enum, which the diagram accepts.
+      return proj.components.length > 0
+        ? (proj as unknown as NonNullable<CellDiagramViewProps['project']>)
+        : null;
+    } catch {
+      return null;
+    }
+  }, [viewingHistorical, historical, generating, livePreview, draft, projectId]);
+
+  const designMdContent = displayFilesRel[DESIGN_ROOT_FILE] ?? '';
   const designReadOnly = viewingHistorical || generating;
   const handleDesignMdChange = useCallback(
     (md: string) => {
@@ -420,7 +537,10 @@ export default function ProjectArchitecturePage() {
                     '& button[aria-label^="Zoom"]': { display: 'none' },
                   }}
                 >
-                  <CellDiagramView components={effectiveComponents} />
+                  <CellDiagramView
+                    project={liveProject ?? undefined}
+                    components={effectiveComponents}
+                  />
                 </Box>
               </Box>
             </Box>
@@ -441,23 +561,25 @@ export default function ProjectArchitecturePage() {
         ),
       },
     ],
-    [
-      effectiveComponents,
-      designMdContent,
-      handleDesignMdChange,
-      designReadOnly,
-    ],
+    [effectiveComponents, liveProject, designMdContent, handleDesignMdChange, designReadOnly],
   );
 
-  // Strip the root `design.md` from the file list passed to Explorer — its
-  // content already lives in the merged "Component Design" view above.
-  // Doing it here (instead of skipping it in `setLiveContents`) keeps
-  // auto-save and version history working through the existing buffer.
+  // Strip the root `design.md` (folded into the "Component Design" view above)
+  // and the derived artifacts (machine-generated views) from the file list
+  // passed to Explorer — the tree shows only hand-editable sources.
   const treeFiles = useMemo(() => {
-    if (liveContents[DESIGN_ROOT_FILE] === undefined) return liveContents;
-    const { [DESIGN_ROOT_FILE]: _hidden, ...rest } = liveContents;
-    return rest;
-  }, [liveContents]);
+    const out: Record<string, string> = {};
+    for (const [rel, content] of Object.entries(displayFilesRel)) {
+      if (rel === DESIGN_ROOT_FILE) continue;
+      if (isDerivedRel(rel)) continue;
+      out[rel] = content;
+    }
+    return out;
+  }, [displayFilesRel]);
+
+  // Publish/Discard are enabled while the draft diverges from HEAD, or while the
+  // bundle still reports uncommitted (untagged) work to tag.
+  const dirty = hasDraftChanges(key) || hasUnsavedChanges;
 
   if (loading) {
     return (
@@ -497,7 +619,7 @@ export default function ProjectArchitecturePage() {
                   const tag = versions.find((x) => x.version === v)?.tagName ?? null;
                   void handleVersionSelect(tag);
                 }}
-                hasUnsavedChanges={hasUnsavedChanges}
+                hasUnsavedChanges={dirty}
                 onDiscard={handleDiscard}
               />
             )}
@@ -522,7 +644,7 @@ export default function ProjectArchitecturePage() {
               size="small"
               startIcon={publishing ? <CircularProgress size={14} color="inherit" /> : <Rocket size={16} />}
               onClick={handlePublish}
-              disabled={!hasUnsavedChanges || publishing || !design}
+              disabled={!dirty || publishing}
             >
               {publishing ? 'Publishing…' : 'Publish'}
             </Button>
@@ -577,8 +699,6 @@ export default function ProjectArchitecturePage() {
           />
         </Box>
       </Box>
-
-      {DESIGN_DOCUMENT_TYPES.length > 0 && null /* keep import used for tree-shake stability */}
     </PageContent>
   );
 }

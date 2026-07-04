@@ -155,14 +155,7 @@ else
     [ -f "$INTERNAL_KUBECONFIG" ] || touch "$INTERNAL_KUBECONFIG"
 fi
 
-# 4. Repo workspace bind mount — aep-api clones project repos here
-#    (REPO_BASE_PATH=/data/repos). Must exist and be writable by appuser
-#    (uid 1000) before compose creates the mount as root.
-echo ""
-echo "📁 Ensuring repo storage at $DEPLOY_DIR/data/repos..."
-ensure_repo_storage "$DEPLOY_DIR/data/repos"
-
-# 5. BFF Task JWT signing key — bind-mounted into aep-api as
+# BFF Task JWT signing key — bind-mounted into aep-api as
 #    /app/keys/task-signing.pem (docker-compose volume). The BFF reads
 #    the PEM from BFF_TASK_SIGNING_KEY_PATH; mounting beats env-passing
 #    a multi-line value through compose's `${VAR}` substitution.

@@ -117,6 +117,8 @@ func (g *GitData) route(w http.ResponseWriter, req *http.Request) {
 		g.getBlob(w, rest[0])
 	case req.Method == http.MethodGet && resource == "matching-refs":
 		g.matchingRefs(w, strings.Join(rest, "/"))
+	case req.Method == http.MethodGet && resource == "tags" && len(rest) == 1:
+		g.getTagObject(w, rest[0])
 	case req.Method == http.MethodPost && resource == "blobs" && len(rest) == 0:
 		g.createBlob(w, req)
 	case req.Method == http.MethodPost && resource == "trees" && len(rest) == 0:
@@ -272,6 +274,25 @@ func (g *GitData) matchingRefs(w http.ResponseWriter, prefix string) {
 		})
 	}
 	writeJSON(w, http.StatusOK, refs)
+}
+
+// getTagObject dereferences an annotated tag object (GET /git/tags/{sha}) to
+// the commit it points at. A non-tag sha 404s, mirroring GitHub, so the client
+// can fall back to treating the ref sha as a commit for lightweight tags.
+func (g *GitData) getTagObject(w http.ResponseWriter, sha string) {
+	typ, err := g.remote.exec(nil, nil, "cat-file", "-t", sha)
+	if err != nil || strings.TrimSpace(typ) != "tag" {
+		g.notFound(w)
+		return
+	}
+	commit, ok := g.git(w, "rev-parse", sha+"^{commit}")
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sha":    sha,
+		"object": map[string]any{"sha": strings.TrimSpace(commit), "type": "commit"},
+	})
 }
 
 // ----- write endpoints -----

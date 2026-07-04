@@ -17,6 +17,7 @@
  */
 
 import { lazy, memo, Suspense, useMemo } from 'react';
+import type { Project } from '@wso2/cell-diagram';
 import { Box, CircularProgress, Typography } from '@wso2/oxygen-ui';
 import { buildProjectModel, type CellDiagramComponent } from './buildProjectModel.js';
 
@@ -25,18 +26,32 @@ const CellDiagram = lazy(() =>
 );
 
 export interface CellDiagramViewProps {
-  components: CellDiagramComponent[];
+  /** Components projected into a diagram via {@link buildProjectModel}. */
+  components?: CellDiagramComponent[];
+  /**
+   * A pre-built cell-diagram project, rendered as-is (bypasses
+   * `buildProjectModel`) and taking precedence over `components`. Use when the
+   * caller already holds the projected model — e.g. the design page projects the
+   * live draft/stream through the SAME `toCellDiagramProject` pipeline that
+   * derives the committed `cell-diagram.gen.json`, so the diagram tracks the
+   * files exactly while streaming and before publish.
+   */
+  project?: Project;
   /** Optional override for the empty-state copy. */
   emptyState?: React.ReactNode;
 }
 
 export const CellDiagramView = memo(function CellDiagramView({
   components,
+  project,
   emptyState,
 }: CellDiagramViewProps) {
-  const project = useMemo(() => buildProjectModel(components), [components]);
+  const model = useMemo(
+    () => project ?? buildProjectModel(components ?? []),
+    [project, components],
+  );
 
-  if (components.length === 0) {
+  if (model.components.length === 0) {
     return (
       <Box
         sx={{
@@ -68,7 +83,7 @@ export const CellDiagramView = memo(function CellDiagramView({
           </Box>
         }
       >
-        <CellDiagram project={project} />
+        <CellDiagram project={model} />
       </Suspense>
     </Box>
   );

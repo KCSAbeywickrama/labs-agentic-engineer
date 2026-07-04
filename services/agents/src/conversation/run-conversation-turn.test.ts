@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./run-conversation-turn.js";
 import { InMemoryConversationStore } from "../store/memory-store.js";
 import { SEED_FILES } from "../agents/main/prompt.js";
-import type { StreamPart } from "../agents/main/stream-types.js";
+import type { StreamPart } from "@aep/agent-stream";
 import { mockModel, type MockStep } from "../shared/mock-model.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";

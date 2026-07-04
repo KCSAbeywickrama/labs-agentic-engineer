@@ -1,0 +1,14 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "gen": {
+      "inputs": [
+        "src/component-design-schema.ts",
+        "src/contracts/component-design.ts",
+        "src/json-schema.ts",
+        "scripts/**"
+      ],
+      "outputs": []
+    }
+  }
+}
