@@ -51,8 +51,6 @@ install:
 gen:
 	$(TURBO) run gen
 	@for d in $(GO_MODULE_DIRS); do echo ">> go generate $$d"; ( cd "$$d" && go generate ./... ); done
-	@echo ">> openapi export (aep-api public spec → packages/contracts/api/v1)"
-	@$(MAKE) -C services/aep-api openapi
 
 build: gen
 	$(TURBO) run build
