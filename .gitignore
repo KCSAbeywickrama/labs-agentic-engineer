@@ -29,3 +29,6 @@ chat_playground/
 **/.claude/settings.local.json
 e2e_test_run.txt
 new_spec.yml
+
+# Personal learning notes (not part of the project)
+learning/
