@@ -166,11 +166,13 @@ func hasGoFiles(t *testing.T, dir string) bool {
 // top-level dir, plus one level of recursion into a NESTED umbrella. A child
 // dir only becomes its own "<parent>/<child>" key when it is itself a
 // buildable Go package (dependencies/{endpoints,resources}); a child named
-// "*test" is a hand-fake package (see artifacts/artifactstest), not a
-// feature, and is skipped — the same exception TestPlatformAndContractsAreFeatureFree
-// carves out for componenttest. This keeps recursion from sweeping up
-// ordinary test-support packages as if they were siblings of the feature that
-// owns them.
+// EXACTLY "<top>test" (e.g. artifacts/artifactstest) is a hand-fake package,
+// not a feature, and is skipped — the same exception
+// TestPlatformAndContractsAreFeatureFree carves out for componenttest. The
+// match is exact rather than a "*test" suffix so a future real feature named,
+// say, "latest" isn't mistaken for one of these hand-fakes. This keeps
+// recursion from sweeping up ordinary test-support packages as if they were
+// siblings of the feature that owns them.
 func listFeatures(t *testing.T) []string {
 	t.Helper()
 	var keys []string
@@ -178,7 +180,7 @@ func listFeatures(t *testing.T) []string {
 		keys = append(keys, top)
 		topDir := filepath.Join("..", "feature", top)
 		for _, sub := range listDir(t, topDir) {
-			if strings.HasSuffix(sub, "test") {
+			if sub == top+"test" {
 				continue
 			}
 			if !hasGoFiles(t, filepath.Join(topDir, sub)) {
@@ -254,6 +256,10 @@ func TestFlatPackagesDeleted(t *testing.T) {
 // off the stale list — see the loop below.
 func TestFeatureEdgeAllowlist(t *testing.T) {
 	features := listFeatures(t)
+	featureSet := map[string]bool{}
+	for _, f := range features {
+		featureSet[f] = true
+	}
 
 	// Every on-disk feature must have an allowlist row (even an empty one) —
 	// a brand-new feature gets policed the moment it exists.
@@ -308,11 +314,13 @@ func TestFeatureEdgeAllowlist(t *testing.T) {
 			// A parent→own-child row inside a nested umbrella (e.g.
 			// dependencies → dependencies/endpoints) is a standing scope
 			// boundary — "the parent MAY reach into its children" — not a
-			// claim that it currently does. It can't rot the way a real
-			// cross-feature edge can: the moment the parent imports anything
-			// OUTSIDE its own children, the new-edge check above still
-			// fails it. So exempt it from the staleness check alone.
-			if strings.HasPrefix(stale, f+"/") {
+			// claim that it currently does, so it's exempt from staleness
+			// even with no import yet (declare-before-use). But the exemption
+			// only holds while that child still exists on disk: if the child
+			// feature is deleted, the row is real rot (a stale reference to a
+			// feature that no longer exists) and must still be caught, so we
+			// additionally require the child to be a member of featureSet.
+			if strings.HasPrefix(stale, f+"/") && featureSet[stale] {
 				continue
 			}
 			t.Errorf("allowlist edge %s → %s no longer exists — remove it so the list stays honest", f, stale)
