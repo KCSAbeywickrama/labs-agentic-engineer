@@ -442,6 +442,8 @@ func (s *taskService) persistAndIssue(
 	// authored, not LLM-authored) and validated against the component set
 	// at persist time. The LLM's `PlanItem.dependsOn` is context-only.
 	rows := make([]persistedItem, len(plan))
+	batchExternalResources := map[string]struct{}{} // distinct `external` resources the batch binds
+	batchResources := map[string]string{}           // distinct `platform-resource` deps: name → resourceType
 	for i, p := range plan {
 		comp := byName[strings.ToLower(p.ComponentName)]
 		deps := comp.ComponentDependsOn()
@@ -453,20 +455,40 @@ func (s *taskService) persistAndIssue(
 				)
 			}
 		}
+		// External-resource deps gate the component task until their
+		// config-collection task is provisioned (the typed task graph, plan §4).
+		var extDeps []string
+		// Platform-resource deps gate the component task until their
+		// resource-provisioning task is provisioned (plan §4, P5).
+		var resDeps []string
+		for _, dep := range comp.Dependencies {
+			switch dep.Kind {
+			case models.DependencyKindExternal:
+				extDeps = append(extDeps, dep.Name)
+				batchExternalResources[dep.Name] = struct{}{}
+			case models.DependencyKindPlatformResource:
+				resDeps = append(resDeps, dep.Name)
+				batchResources[dep.Name] = dep.ResourceType
+			}
+		}
 		task := &models.ComponentTask{
-			ProjectID:           projectID,
-			OrgID:               orgID,
-			ComponentName:       p.ComponentName,
-			Title:               p.Title,
-			Rationale:           p.Rationale,
-			DependsOnComponents: models.StringSlice(deps),
-			BatchID:             ptrString(batchID),
-			SourceSpecVersion:   specVersion,
-			SourceDesignVersion: designVersion,
-			Order:               i + 1,
-			Status:              string(models.TaskStatusPending),
-			LifecycleStatus:     string(models.TaskLifecycleGhIssueWaiting),
-			ExecType:            "WORKER",
+			ProjectID:                  projectID,
+			OrgID:                      orgID,
+			Type:                       models.TaskTypeComponent,
+			ComponentName:              p.ComponentName,
+			Title:                      p.Title,
+			Rationale:                  p.Rationale,
+			DependsOnComponents:        models.StringSlice(deps),
+			DependsOnExternalResources: models.StringSlice(extDeps),
+			DependsOnOrgServices:       models.StringSlice(comp.OrgServiceDependsOn()),
+			DependsOnResources:         models.StringSlice(resDeps),
+			BatchID:                    ptrString(batchID),
+			SourceSpecVersion:          specVersion,
+			SourceDesignVersion:        designVersion,
+			Order:                      i + 1,
+			Status:                     string(models.TaskStatusPending),
+			LifecycleStatus:            string(models.TaskLifecycleGhIssueWaiting),
+			ExecType:                   "WORKER",
 		}
 		if err := s.taskRepo.Create(ctx, task); err != nil {
 			return nil, fmt.Errorf("create task row %d: %w", i, err)
@@ -479,6 +501,97 @@ func (s *taskService) persistAndIssue(
 		compForPrompt.OpenAPISpec = ""
 		designSlice, _ := json.Marshal(compForPrompt)
 		rows[i] = persistedItem{TempID: p.TempID, Task: task, DesignSli: string(designSlice)}
+	}
+
+	// config-collection tasks: one per distinct `external` resource the batch
+	// binds, deduped against existing config-collection tasks for the project (a
+	// re-generation or a later batch binding an already-collected resource adds
+	// none). No GitHub issue — created outside `rows`, so the issue-creation loop
+	// below skips them; LifecycleStatus is gh_issue_created so GitHub reconcilers
+	// skip them too. They gate the component tasks until the value-collection
+	// endpoint provisions them → `deployed`.
+	if len(batchExternalResources) > 0 {
+		existing, lerr := s.taskRepo.ListByProjectID(ctx, orgID, projectID)
+		if lerr != nil {
+			return nil, fmt.Errorf("list tasks for config-collection dedup: %w", lerr)
+		}
+		haveExternal := map[string]struct{}{}
+		for _, t := range existing {
+			if t.Type == models.TaskTypeConfigCollection && t.ExternalResourceName != "" {
+				haveExternal[t.ExternalResourceName] = struct{}{}
+			}
+		}
+		order := len(rows)
+		for name := range batchExternalResources {
+			if _, ok := haveExternal[name]; ok {
+				continue
+			}
+			order++
+			cc := &models.ComponentTask{
+				ProjectID:            projectID,
+				OrgID:                orgID,
+				Type:                 models.TaskTypeConfigCollection,
+				ExternalResourceName: name,
+				ComponentName:        name, // surfaces the resource on the board
+				Title:                "Provide configuration: " + name,
+				Rationale:            "Collect the values for the '" + name + "' external resource.",
+				BatchID:              ptrString(batchID),
+				Order:                order,
+				Status:               string(models.TaskStatusPending),
+				LifecycleStatus:      string(models.TaskLifecycleGhIssueCreated),
+				ExecType:             "SYSTEM",
+			}
+			if err := s.taskRepo.Create(ctx, cc); err != nil {
+				return nil, fmt.Errorf("create config-collection task for %q: %w", name, err)
+			}
+		}
+	}
+
+	// resource-provisioning tasks: one per distinct `platform-resource` dep the
+	// batch binds, deduped against existing resource-provisioning tasks for the
+	// project (a re-generation or a later batch binding an already-provisioned
+	// resource adds none). No GitHub issue — created outside `rows`, so the issue
+	// loop below skips them; LifecycleStatus is gh_issue_created so reconcilers
+	// skip too.
+	// NOTE(§4): No GitHub issue is created here because P5 resource provisioning
+	// commits no repo artifacts (the OC Resource + binding are authored directly
+	// against the OC API, not committed to git). A future resourceType that does
+	// commit repo artifacts would re-introduce issue creation — keep the no-issue
+	// behavior keyed on "commits artifacts", do not treat it as universal.
+	if len(batchResources) > 0 {
+		existing, lerr := s.taskRepo.ListByProjectID(ctx, orgID, projectID)
+		if lerr != nil {
+			return nil, fmt.Errorf("list tasks for resource-provisioning dedup: %w", lerr)
+		}
+		haveRes := map[string]struct{}{}
+		for _, t := range existing {
+			if t.Type == models.TaskTypeResourceProvisioning && t.ResourceName != "" {
+				haveRes[t.ResourceName] = struct{}{}
+			}
+		}
+		order := len(rows)
+		for depName := range batchResources {
+			if _, ok := haveRes[depName]; ok {
+				continue
+			}
+			order++
+			rp := &models.ComponentTask{
+				ProjectID:       projectID,
+				OrgID:           orgID,
+				Type:            models.TaskTypeResourceProvisioning,
+				ResourceName:    depName,
+				ComponentName:   depName, // surfaces the resource on the board
+				Title:           "Provision resource: " + depName,
+				BatchID:         ptrString(batchID),
+				Order:           order,
+				Status:          string(models.TaskStatusPending),
+				LifecycleStatus: string(models.TaskLifecycleGhIssueCreated),
+				ExecType:        "SYSTEM",
+			}
+			if err := s.taskRepo.Create(ctx, rp); err != nil {
+				return nil, fmt.Errorf("create resource-provisioning task for %q: %w", depName, err)
+			}
+		}
 	}
 
 	// Parallel issue creation, bounded by ghCreateConcurrency.
@@ -644,6 +757,11 @@ func (s *taskService) runReconciliationStreamed(ctx context.Context, orgID, proj
 		if t.Status != string(models.TaskStatusPending) {
 			continue
 		}
+		// Non-code tasks (config-collection, resource-provisioning) aren't tied to
+		// a design component — never reject them on a design change.
+		if t.Type == models.TaskTypeConfigCollection || t.Type == models.TaskTypeResourceProvisioning {
+			continue
+		}
 		if _, ok := current[strings.ToLower(t.ComponentName)]; ok {
 			continue
 		}
@@ -693,6 +811,11 @@ func (s *taskService) ReconcilePendingForDesignChange(ctx context.Context, orgID
 	for i := range tasks {
 		t := &tasks[i]
 		if t.Status != string(models.TaskStatusPending) {
+			continue
+		}
+		// Non-code tasks (config-collection, resource-provisioning) aren't tied to
+		// a design component — never reject them on a design change.
+		if t.Type == models.TaskTypeConfigCollection || t.Type == models.TaskTypeResourceProvisioning {
 			continue
 		}
 		if _, ok := current[strings.ToLower(t.ComponentName)]; ok {

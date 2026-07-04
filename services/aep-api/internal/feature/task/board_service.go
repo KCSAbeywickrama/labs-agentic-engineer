@@ -45,20 +45,41 @@ type BoardTask struct {
 	// Nil for never-dispatched tasks; the frontend uses it to render
 	// "started Xm ago" and to gate the Live progress affordance.
 	DispatchedAt *time.Time `json:"dispatchedAt,omitempty"`
-	// ExecType mirrors ComponentTask.ExecType ("SYSTEM","WORKER"). Today
-	// every task is "WORKER" (coding-agent) and dispatches through the batch
-	// /tasks/dispatch path. "SYSTEM" is dormant — no producer sets it and
-	// nothing branches on it; it is reserved for the future
-	// database-provisioning rewrite that will re-attach behaviour.
+	// ExecType mirrors ComponentTask.ExecType ("SYSTEM","WORKER"). "WORKER"
+	// (coding-agent) tasks dispatch through the batch /tasks/dispatch path.
+	// "SYSTEM" tasks (config-collection, resource-provisioning) are resolved
+	// out-of-band — value collection / OC provisioning — never via that path.
 	ExecType string `json:"execType,omitempty"`
 	// DependsOnComponents mirrors ComponentTask.DependsOnComponents — the
 	// list of component names this task is waiting to be deployed before
 	// it can dispatch. Populated for every task; the On Hold column
 	// reads it to show "Waiting for: …".
 	DependsOnComponents []string `json:"dependsOnComponents,omitempty"`
+	// DependsOnExternalResources / DependsOnOrgServices / DependsOnResources
+	// mirror the same-named ComponentTask fields — the external-resource
+	// (config-collection), cross-project org-service, and platform-resource
+	// (resource-provisioning) gates a component task waits on in addition to
+	// DependsOnComponents. Surfaced so the On Hold column can explain the full
+	// reason a task is held, not just its component gates.
+	DependsOnExternalResources []string `json:"dependsOnExternalResources,omitempty"`
+	DependsOnOrgServices       []string `json:"dependsOnOrgServices,omitempty"`
+	DependsOnResources         []string `json:"dependsOnResources,omitempty"`
+	// Type mirrors ComponentTask.Type (component, org-publish,
+	// config-collection, resource-provisioning — the typed task graph). The
+	// frontend uses it to route the row's action: config-collection /
+	// resource-provisioning tasks are resolved in the architecture-page
+	// drawer, not via the per-task dispatch path.
+	Type string `json:"type,omitempty"`
+	// ExternalResourceName / ResourceName mirror the same-named ComponentTask
+	// fields — set only on config-collection / resource-provisioning tasks
+	// respectively, naming the dependency the SYSTEM task resolves. The
+	// frontend deep-links the architecture drawer to this dep name.
+	ExternalResourceName string `json:"externalResourceName,omitempty"`
+	ResourceName         string `json:"resourceName,omitempty"`
 	// ComponentName mirrors ComponentTask.ComponentName so the frontend
 	// can resolve dep -> task lookups (e.g. "what is component `todo-api`'s
-	// task currently doing while we wait?").
+	// task currently doing while we wait?"). For a config-collection /
+	// resource-provisioning task this is the dependency name itself.
 	ComponentName string `json:"componentName,omitempty"`
 	// ErrorMessage mirrors ComponentTask.ErrorMessage. For a failed task
 	// it's the diagnostic recorded for the failure, shown on the card so
@@ -109,37 +130,20 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 		return nil, fmt.Errorf("get board: %w", err)
 	}
 
-	// Load DB tasks for enrichment.
-	type taskDBMeta struct {
-		id                  string
-		lifecycleStatus     string
-		status              string
-		dispatchedAt        *time.Time
-		execType            string
-		dependsOnComponents []string
-		componentName       string
-		errorMessage        string
-	}
-	issueURLToMeta := map[string]taskDBMeta{}
+	// Load DB tasks for enrichment, keyed by issue URL.
+	issueURLToCT := map[string]models.ComponentTask{}
 	var allComponentTasks []models.ComponentTask
-	// unissuedTasks are tasks with no IssueURL (gh_issue_waiting or gh_issue_failed).
-	// They never appear on the GitHub Project board and must be surfaced separately.
+	// unissuedTasks are tasks with no IssueURL: either a code task still
+	// gh_issue_waiting/gh_issue_failed, or a SYSTEM task (config-collection /
+	// resource-provisioning) that never gets an issue by design. They never
+	// appear on the GitHub Project board and must be surfaced separately.
 	var unissuedTasks []models.ComponentTask
 	if s.taskRepo != nil {
 		if componentTasks, err := s.taskRepo.ListByProjectID(ctx, orgID, projectID); err == nil {
 			allComponentTasks = componentTasks
 			for _, ct := range componentTasks {
 				if ct.IssueURL != "" {
-					issueURLToMeta[ct.IssueURL] = taskDBMeta{
-						id:                  ct.ID,
-						lifecycleStatus:     ct.LifecycleStatus,
-						status:              ct.Status,
-						dispatchedAt:        ct.DispatchedAt,
-						execType:            ct.ExecType,
-						dependsOnComponents: []string(ct.DependsOnComponents),
-						componentName:       ct.ComponentName,
-						errorMessage:        ct.ErrorMessage,
-					}
+					issueURLToCT[ct.IssueURL] = ct
 				} else {
 					unissuedTasks = append(unissuedTasks, ct)
 				}
@@ -159,15 +163,8 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 			Labels:          item.Labels,
 			LifecycleStatus: string(models.TaskLifecycleGhIssueCreated),
 		}
-		if meta, ok := issueURLToMeta[item.URL]; ok {
-			task.ComponentTaskID = meta.id
-			task.LifecycleStatus = meta.lifecycleStatus
-			task.Status = meta.status
-			task.DispatchedAt = meta.dispatchedAt
-			task.ExecType = meta.execType
-			task.DependsOnComponents = meta.dependsOnComponents
-			task.ComponentName = meta.componentName
-			task.ErrorMessage = meta.errorMessage
+		if ct, ok := issueURLToCT[item.URL]; ok {
+			applyCTFields(&task, ct)
 		}
 		// The BFF's ComponentTask.Status is authoritative for kanban routing
 		// of `on_hold` (dep-gated) and terminal failure states. Terminal
@@ -216,25 +213,31 @@ func (s *boardService) GetBoard(ctx context.Context, orgID, projectID string) (*
 		routeDBTaskByStatus(board, task, ct.Status)
 	}
 
-	// Always surface unissued tasks (gh_issue_waiting / gh_issue_failed) even
-	// when the primary path is active. These have no IssueURL and are invisible
-	// to the GitHub Project board.
+	// Always surface unissued tasks even when the primary path is active. These
+	// have no IssueURL and are invisible to the GitHub Project board, so they're
+	// routed by their own ComponentTask.Status rather than a GitHub column: a
+	// SYSTEM task (config-collection / resource-provisioning) moves
+	// Todo → In Progress → Done as it resolves, exactly like an issued task
+	// moves across GitHub columns, instead of sitting in Todo forever.
 	for _, ct := range unissuedTasks {
-		task := BoardTask{
-			ID:                  ct.ID,
-			Title:               ct.Title,
-			ComponentTaskID:     ct.ID,
-			LifecycleStatus:     ct.LifecycleStatus,
-			Status:              ct.Status,
-			DispatchedAt:        ct.DispatchedAt,
-			ExecType:            ct.ExecType,
-			DependsOnComponents: []string(ct.DependsOnComponents),
-			ComponentName:       ct.ComponentName,
-			ErrorMessage:        ct.ErrorMessage,
-		}
-		if ct.LifecycleStatus == string(models.TaskLifecycleGhIssueFailed) {
+		// rawBoardTask, NOT dbBoardTask: a SYSTEM task's LifecycleStatus is
+		// permanently gh_issue_created (by design — it never gets a GitHub
+		// issue), so the "syncing" override below would mislabel it as an
+		// issue-in-flight forever. That override only makes sense for a task
+		// that DOES have (or will have) a real GitHub card.
+		task := rawBoardTask(ct)
+		switch {
+		case ct.LifecycleStatus == string(models.TaskLifecycleGhIssueFailed):
 			board.Failed = append(board.Failed, task)
-		} else {
+		case ct.Status == string(models.TaskStatusDeployed):
+			board.Done = append(board.Done, task)
+		case ct.Status == string(models.TaskStatusBuilding), ct.Status == string(models.TaskStatusInProgress):
+			board.InProgress = append(board.InProgress, task)
+		case ct.Status == string(models.TaskStatusOnHold):
+			board.OnHold = append(board.OnHold, task)
+		case ct.Status == string(models.TaskStatusFailed), ct.Status == string(models.TaskStatusRejected):
+			board.Failed = append(board.Failed, task)
+		default: // pending / empty — needs action, or a code task awaiting its issue
 			board.Todo = append(board.Todo, task)
 		}
 	}
@@ -246,35 +249,57 @@ func normalizeStatus(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// dbBoardTask projects a ComponentTask row straight to a BoardTask for the
-// DB-sourced paths (uncarded issued tasks + the empty-board case). It surfaces
-// gh_issue_created as gh_issue_syncing so the frontend renders a skeleton
-// instead of a labelless card while the GitHub Project card is still syncing.
-// The syncing value is response-only — never written to DB.
-func dbBoardTask(ct models.ComponentTask) BoardTask {
-	labels := make([]gitrepo.LabelInfo, 0, len(ct.Labels))
+// applyCTFields copies the ComponentTask-derived status / dependency / type
+// fields onto a BoardTask, leaving any GitHub-sourced fields (id / title / url /
+// body / labels / assignee) intact so the primary (carded) path keeps the
+// board item's own copy of those.
+func applyCTFields(task *BoardTask, ct models.ComponentTask) {
+	task.ComponentTaskID = ct.ID
+	task.LifecycleStatus = ct.LifecycleStatus
+	task.Status = ct.Status
+	task.DispatchedAt = ct.DispatchedAt
+	task.ExecType = ct.ExecType
+	task.Type = ct.Type
+	task.ExternalResourceName = ct.ExternalResourceName
+	task.ResourceName = ct.ResourceName
+	task.DependsOnComponents = []string(ct.DependsOnComponents)
+	task.DependsOnExternalResources = []string(ct.DependsOnExternalResources)
+	task.DependsOnOrgServices = []string(ct.DependsOnOrgServices)
+	task.DependsOnResources = []string(ct.DependsOnResources)
+	task.ComponentName = ct.ComponentName
+	task.ErrorMessage = ct.ErrorMessage
+}
+
+// rawBoardTask builds a BoardTask entirely from a ComponentTask — used by
+// paths that have no GitHub board item to source from. Unlike dbBoardTask it
+// does NOT apply the gh_issue_created→gh_issue_syncing override — appropriate
+// for a task with no IssueURL, since there is no GitHub card to sync.
+func rawBoardTask(ct models.ComponentTask) BoardTask {
+	task := BoardTask{
+		ID:          ct.ID,
+		Title:       ct.Title,
+		URL:         ct.IssueURL,
+		Description: ct.Body,
+	}
 	for _, l := range ct.Labels {
-		labels = append(labels, gitrepo.LabelInfo{Name: l})
+		task.Labels = append(task.Labels, gitrepo.LabelInfo{Name: l})
 	}
-	lifecycleStatus := ct.LifecycleStatus
-	if lifecycleStatus == string(models.TaskLifecycleGhIssueCreated) {
-		lifecycleStatus = string(models.TaskLifecycleGhIssueSyncing)
+	applyCTFields(&task, ct)
+	return task
+}
+
+// dbBoardTask projects a ComponentTask row straight to a BoardTask for the
+// uncarded-issued-task path: the task HAS a GitHub issue, but its Project
+// card hasn't landed on the canonical board yet. It surfaces gh_issue_created
+// as gh_issue_syncing so the frontend renders a skeleton instead of a
+// labelless card while the card is still syncing. The syncing value is
+// response-only — never written to DB.
+func dbBoardTask(ct models.ComponentTask) BoardTask {
+	task := rawBoardTask(ct)
+	if task.LifecycleStatus == string(models.TaskLifecycleGhIssueCreated) {
+		task.LifecycleStatus = string(models.TaskLifecycleGhIssueSyncing)
 	}
-	return BoardTask{
-		ID:                  ct.ID,
-		Title:               ct.Title,
-		URL:                 ct.IssueURL,
-		Description:         ct.Body,
-		ComponentTaskID:     ct.ID,
-		Labels:              labels,
-		LifecycleStatus:     lifecycleStatus,
-		Status:              ct.Status,
-		DispatchedAt:        ct.DispatchedAt,
-		ExecType:            ct.ExecType,
-		DependsOnComponents: []string(ct.DependsOnComponents),
-		ComponentName:       ct.ComponentName,
-		ErrorMessage:        ct.ErrorMessage,
-	}
+	return task
 }
 
 // routeDBTaskByStatus appends a DB-sourced task to the column derived from its

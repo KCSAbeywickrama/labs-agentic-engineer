@@ -211,3 +211,112 @@ func TestBoard_UnissuedTasksAreSurfaced(t *testing.T) {
 		t.Fatalf("gh_issue_failed unissued task must surface in Failed: %+v", b.Failed)
 	}
 }
+
+// TestBoard_SurfacesGateKindsAndTypedTaskFields asserts the payload carries the
+// full set of gate kinds (so the On Hold reason is complete) and the Type +
+// dep name of typed SYSTEM tasks (so the frontend can deep-link the drawer).
+func TestBoard_SurfacesGateKindsAndTypedTaskFields(t *testing.T) {
+	t.Parallel()
+	board := &fakeRepoBoardSvc{GetBoardFunc: func(context.Context, string, string) (*gitrepo.ProjectBoardResult, error) {
+		return &gitrepo.ProjectBoardResult{}, nil // 0 items → every task is unissued/uncarded
+	}}
+	repo := &fakeTaskRepo{ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+		return []models.ComponentTask{
+			{ID: "t-api", ComponentName: "order-api", Type: models.TaskTypeComponent, Status: "on_hold",
+				DependsOnResources:         models.StringSlice{"orders-db"},
+				DependsOnExternalResources: models.StringSlice{"exchangerate"},
+				DependsOnOrgServices:       models.StringSlice{"catalog-product-api"}},
+			{ID: "t-db", ComponentName: "orders-db", Type: models.TaskTypeResourceProvisioning, Status: "pending", ResourceName: "orders-db"},
+			{ID: "t-cfg", ComponentName: "exchangerate", Type: models.TaskTypeConfigCollection, Status: "pending", ExternalResourceName: "exchangerate"},
+		}, nil
+	}}
+	b, err := NewBoardService(board, repo).GetBoard(context.Background(), "o", "p")
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+
+	var api *BoardTask
+	for i := range b.OnHold {
+		if b.OnHold[i].ComponentName == "order-api" {
+			api = &b.OnHold[i]
+		}
+	}
+	if api == nil {
+		t.Fatal("order-api not in OnHold")
+	}
+	if len(api.DependsOnResources) != 1 || len(api.DependsOnExternalResources) != 1 || len(api.DependsOnOrgServices) != 1 {
+		t.Errorf("gate kinds not surfaced: res=%v ext=%v org=%v", api.DependsOnResources, api.DependsOnExternalResources, api.DependsOnOrgServices)
+	}
+
+	find := func(name string) *BoardTask {
+		for i := range b.Todo {
+			if b.Todo[i].ComponentName == name {
+				return &b.Todo[i]
+			}
+		}
+		return nil
+	}
+	if db := find("orders-db"); db == nil || db.Type != models.TaskTypeResourceProvisioning || db.ResourceName != "orders-db" {
+		t.Errorf("orders-db typed-task fields wrong: %+v", db)
+	}
+	if cfg := find("exchangerate"); cfg == nil || cfg.Type != models.TaskTypeConfigCollection || cfg.ExternalResourceName != "exchangerate" {
+		t.Errorf("exchangerate typed-task fields wrong: %+v", cfg)
+	}
+}
+
+// TestBoard_UnissuedTypedTaskRoutedByStatus asserts a resource-provisioning /
+// config-collection task (no issue → the unissued path) is routed by its own
+// status: deployed → Done (not pinned to Todo with a stale label), building /
+// in_progress → InProgress, pending → Todo. These tasks never get a GitHub
+// issue by design, so they must never be routed by a GitHub column.
+func TestBoard_UnissuedTypedTaskRoutedByStatus(t *testing.T) {
+	t.Parallel()
+	// One board item that matches no DB task keeps result.Items > 0 so the
+	// primary loop stays engaged; the DB-only typed tasks flow through unissued.
+	board := &fakeRepoBoardSvc{GetBoardFunc: func(context.Context, string, string) (*gitrepo.ProjectBoardResult, error) {
+		return &gitrepo.ProjectBoardResult{
+			Items: []gitrepo.BoardItem{{ID: "PVTI_x", URL: "https://github.com/o/r/issues/9", Status: "Todo"}},
+		}, nil
+	}}
+	repo := &fakeTaskRepo{ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+		return []models.ComponentTask{
+			{ID: "t-db", ComponentName: "orders-db", Type: models.TaskTypeResourceProvisioning, ResourceName: "orders-db",
+				Status: string(models.TaskStatusDeployed), LifecycleStatus: string(models.TaskLifecycleGhIssueCreated)},
+			{ID: "t-cfg", ComponentName: "exchangerate", Type: models.TaskTypeConfigCollection, ExternalResourceName: "exchangerate",
+				Status: string(models.TaskStatusPending), LifecycleStatus: string(models.TaskLifecycleGhIssueCreated)},
+			{ID: "t-prov", ComponentName: "cache", Type: models.TaskTypeResourceProvisioning, ResourceName: "cache",
+				Status: string(models.TaskStatusBuilding), LifecycleStatus: string(models.TaskLifecycleGhIssueCreated)},
+		}, nil
+	}}
+	b, err := NewBoardService(board, repo).GetBoard(context.Background(), "o", "p")
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	has := func(list []BoardTask, name string) bool {
+		for _, tk := range list {
+			if tk.ComponentName == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(b.Done, "orders-db") {
+		t.Errorf("deployed resource-provisioning task not in Done (Todo=%v)", has(b.Todo, "orders-db"))
+	}
+	if !has(b.Todo, "exchangerate") {
+		t.Errorf("pending config-collection task should be in Todo")
+	}
+	if !has(b.InProgress, "cache") {
+		t.Errorf("building resource-provisioning task should be in InProgress")
+	}
+	// LifecycleStatus is permanently gh_issue_created for these SYSTEM tasks (no
+	// GitHub issue is ever created) — it must NOT be upgraded to gh_issue_syncing
+	// (that override implies a GitHub card is about to land, which never happens).
+	for _, tk := range append(append([]BoardTask{}, b.Done...), append(b.Todo, b.InProgress...)...) {
+		if tk.ComponentName == "orders-db" || tk.ComponentName == "exchangerate" || tk.ComponentName == "cache" {
+			if tk.LifecycleStatus != string(models.TaskLifecycleGhIssueCreated) {
+				t.Errorf("%s: LifecycleStatus must stay gh_issue_created, got %q", tk.ComponentName, tk.LifecycleStatus)
+			}
+		}
+	}
+}

@@ -602,9 +602,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	cascadeHook.SetRuntimeConfig(runtimeConfigSvc)
 	projector.SetDispatchHook(cascadeHook)
 
+	// AccessRejector is nil here: endpoints.AccessService (the P3.5 access-request
+	// state machine) is not yet constructed at this composition root, so the
+	// PR-closed-unmerged reject close-out for org-publish tasks is a no-op until
+	// that wiring lands. RegisterHandlers tolerates nil like its other optional
+	// hooks.
 	task.RegisterHandlers(func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
 		webhookRouter.Register(event, action, webhook.EventHandlerFunc(h))
-	}, db, projector, wfRunService)
+	}, db, projector, wfRunService, nil)
 	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, taskRepo)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
 

@@ -113,6 +113,24 @@ components:
           type:
             - array
             - "null"
+        dependsOnExternalResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnOrgServices:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
         description:
           type: string
         dispatchedAt:
@@ -121,6 +139,8 @@ components:
         errorMessage:
           type: string
         execType:
+          type: string
+        externalResourceName:
           type: string
         id:
           type: string
@@ -132,9 +152,13 @@ components:
             - "null"
         lifecycleStatus:
           type: string
+        resourceName:
+          type: string
         status:
           type: string
         title:
+          type: string
+        type:
           type: string
         url:
           type: string
