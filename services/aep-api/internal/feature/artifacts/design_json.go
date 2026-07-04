@@ -147,13 +147,21 @@ func parseComponentDesignJSON(dir, raw string) (models.DesignComponent, error) {
 	if dj.Name != dir {
 		return models.DesignComponent{}, fmt.Errorf("design.json name %q must equal the component directory %q", dj.Name, dir)
 	}
+	if err := validateExposure(dir, dj.Exposure); err != nil {
+		return models.DesignComponent{}, err
+	}
+
+	deps, err := assembleDependencies(dir, dj.Dependencies)
+	if err != nil {
+		return models.DesignComponent{}, err
+	}
 
 	return models.DesignComponent{
 		Name:                       dj.Name,
 		ComponentType:              dj.Type,
 		Version:                    dj.Version,
 		Language:                   dj.Language,
-		Dependencies:               assembleDependencies(dj.Dependencies),
+		Dependencies:               deps,
 		Entrypoint:                 dj.Entrypoint,
 		Buildpack:                  dj.Buildpack,
 		AppPath:                    dj.AppPath,
@@ -165,15 +173,56 @@ func parseComponentDesignJSON(dir, raw string) (models.DesignComponent, error) {
 	}, nil
 }
 
+// validDependencyKinds is the closed set of dependency `kind` values a
+// design.json may declare, in the canonical listing order used across every
+// self-correction error message below.
+const validDependencyKinds = "component | org-service | external | platform-resource"
+
+// isValidDependencyKind reports whether kind is one of the four recognised
+// dependency kinds.
+func isValidDependencyKind(kind string) bool {
+	switch kind {
+	case models.DependencyKindComponent, models.DependencyKindOrgService, models.DependencyKindExternal, models.DependencyKindPlatformResource:
+		return true
+	default:
+		return false
+	}
+}
+
+// validateExposure enforces the `exposure` enum on read: only "internet",
+// "intranet", or absent/empty are valid. The error is phrased for a writing
+// agent to self-correct in one round trip.
+func validateExposure(dir, exposure string) error {
+	if exposure == "" || exposure == "internet" || exposure == "intranet" {
+		return nil
+	}
+	return fmt.Errorf("components/%s/design.json: exposure %q is invalid — must be %q, %q, or omitted", dir, exposure, "internet", "intranet")
+}
+
 // assembleDependencies converts the on-disk dependency entries to the unified
 // model and ports the read-time needs-spec computation: an external dependency
 // that declares needsSpec but has no specPath yet is unresolved at read time
 // (the user must supply the spec before the design can be saved).
-func assembleDependencies(in []dependencyJSON) []models.Dependency {
+//
+// A dependency entry missing `kind` or `name`, or declaring a `kind` outside
+// the closed set, is a schema ERROR (the entry used to be silently dropped,
+// which quietly lost data the architect authored). Errors are phrased for a
+// writing agent's one-round-trip self-correction: they name the file, the
+// offending entry's index, and the fix.
+func assembleDependencies(dir string, in []dependencyJSON) ([]models.Dependency, error) {
 	out := make([]models.Dependency, 0, len(in))
-	for _, d := range in {
-		if d.Name == "" || d.Kind == "" {
-			continue
+	for i, d := range in {
+		if d.Kind == "" {
+			return nil, fmt.Errorf("components/%s/design.json: dependencies[%d] is missing required key %q — every dependency needs kind (%s) and name",
+				dir, i, "kind", validDependencyKinds)
+		}
+		if d.Name == "" {
+			return nil, fmt.Errorf("components/%s/design.json: dependencies[%d] is missing required key %q — every dependency needs kind (%s) and name",
+				dir, i, "name", validDependencyKinds)
+		}
+		if !isValidDependencyKind(d.Kind) {
+			return nil, fmt.Errorf("components/%s/design.json: dependencies[%d] has unknown kind %q — every dependency needs kind (%s) and name",
+				dir, i, d.Kind, validDependencyKinds)
 		}
 		dep := models.Dependency{
 			Kind:         d.Kind,
@@ -196,7 +245,7 @@ func assembleDependencies(in []dependencyJSON) []models.Dependency {
 		}
 		out = append(out, dep)
 	}
-	return out
+	return out, nil
 }
 
 // marshalComponentDesignJSON encodes a component to canonical design.json bytes:

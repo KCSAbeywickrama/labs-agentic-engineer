@@ -208,6 +208,87 @@ func TestParseComponentDesignJSON_NameMustEqualDir(t *testing.T) {
 	}
 }
 
+func TestParseComponentDesignJSON_DependencyMissingKindRejected(t *testing.T) {
+	// Two well-formed entries then a kindless one at index 2 — the error must
+	// name the index and the missing key, self-correction style, so a writing
+	// agent can fix it in one round trip.
+	raw := `{"name":"checkout","type":"service","dependencies":[` +
+		`{"kind":"component","name":"cart"},` +
+		`{"kind":"org-service","name":"user-profile"},` +
+		`{"name":"orphan"}` +
+		`]}`
+	_, err := parseComponentDesignJSON("checkout", raw)
+	if err == nil {
+		t.Fatalf("expected dependency missing kind to be rejected as a schema error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"components/checkout/design.json", "dependencies[2]", `"kind"`, "component | org-service | external | platform-resource"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q for self-correction: %v", want, err)
+		}
+	}
+}
+
+func TestParseComponentDesignJSON_DependencyMissingNameRejected(t *testing.T) {
+	raw := `{"name":"checkout","type":"service","dependencies":[{"kind":"component"}]}`
+	_, err := parseComponentDesignJSON("checkout", raw)
+	if err == nil {
+		t.Fatalf("expected dependency missing name to be rejected as a schema error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"components/checkout/design.json", "dependencies[0]", `"name"`} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q for self-correction: %v", want, err)
+		}
+	}
+}
+
+func TestParseComponentDesignJSON_DependencyUnknownKindRejected(t *testing.T) {
+	raw := `{"name":"checkout","type":"service","dependencies":[{"kind":"sidecar","name":"cart"}]}`
+	_, err := parseComponentDesignJSON("checkout", raw)
+	if err == nil {
+		t.Fatalf("expected unknown dependency kind %q to be rejected as a schema error", "sidecar")
+	}
+	msg := err.Error()
+	for _, want := range []string{"components/checkout/design.json", "dependencies[0]", `"sidecar"`, "component | org-service | external | platform-resource"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q for self-correction: %v", want, err)
+		}
+	}
+}
+
+func TestParseComponentDesignJSON_ExposureInvalidRejected(t *testing.T) {
+	raw := `{"name":"checkout","type":"service","exposure":"public","dependencies":[]}`
+	_, err := parseComponentDesignJSON("checkout", raw)
+	if err == nil {
+		t.Fatalf("expected invalid exposure %q to be rejected as a schema error", "public")
+	}
+	msg := err.Error()
+	for _, want := range []string{"components/checkout/design.json", "exposure", `"public"`, "internet", "intranet"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q for self-correction: %v", want, err)
+		}
+	}
+}
+
+func TestParseComponentDesignJSON_ExposureAbsentOrEmptyAccepted(t *testing.T) {
+	raw := `{"name":"checkout","type":"service","dependencies":[]}`
+	comp, err := parseComponentDesignJSON("checkout", raw)
+	if err != nil {
+		t.Fatalf("expected absent exposure to be accepted: %v", err)
+	}
+	if comp.Exposure != "" {
+		t.Fatalf("want empty exposure, got %q", comp.Exposure)
+	}
+}
+
+func TestMarshalComponentDesignJSON_NameMustEqualDir(t *testing.T) {
+	comp := models.DesignComponent{Name: "other", ComponentType: "service"}
+	if _, err := marshalComponentDesignJSON("checkout", comp); err == nil {
+		t.Fatalf("expected component name %q != dir %q to be rejected", comp.Name, "checkout")
+	}
+}
+
 func TestParseComponentDesignJSON_NeedsSpecComputesUnresolved(t *testing.T) {
 	// external + needsSpec + no specPath ⇒ status=unresolved, reason=needs-spec.
 	raw := `{"name":"checkout","type":"service","dependencies":[{"kind":"external","name":"weather","needsSpec":true}]}`
