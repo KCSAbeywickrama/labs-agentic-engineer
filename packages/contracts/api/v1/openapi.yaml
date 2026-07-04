@@ -1,5 +1,51 @@
 components:
   schemas:
+    AccessRequest:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/AccessRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        consumerComponentName:
+          type: string
+        consumerProjectId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        orgServiceName:
+          type: string
+        providerComponentName:
+          type: string
+        providerIssueNumber:
+          format: int64
+          type: integer
+        providerIssueUrl:
+          type: string
+        providerProjectId:
+          type: string
+        providerTaskId:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+        - id
+        - consumerProjectId
+        - consumerComponentName
+        - orgServiceName
+        - status
+        - createdAt
+        - updatedAt
+      type: object
     AnthropicProjection:
       additionalProperties: false
       properties:
@@ -2855,6 +2901,49 @@ paths:
       summary: Update component config
       tags:
         - Config
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/access-request:
+    post:
+      operationId: create-access-request
+      parameters:
+        - description: Consumer project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Consumer project name (DNS-label slug)
+            type: string
+        - description: Consumer component requesting access
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Consumer component requesting access
+            type: string
+        - description: Org-service dependency name (== provider component to publish org-wide)
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Org-service dependency name (== provider component to publish org-wide)
+            type: string
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessRequest"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Request cross-project access to a project-only org-service dependency
+      tags:
+        - Dependencies
   /projects/{projectName}/components/{componentName}/dependencies/{depName}/provision:
     post:
       operationId: provision-dependency
@@ -3075,6 +3164,39 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
+  /projects/{projectName}/dependencies/access-requests:
+    get:
+      operationId: list-access-requests
+      parameters:
+        - description: Consumer project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Consumer project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/AccessRequest"
+                type:
+                  - array
+                  - "null"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List a project's cross-project access requests
+      tags:
+        - Dependencies
   /projects/{projectName}/dependencies/external-resources/{name}/values:
     post:
       operationId: save-external-resource-values

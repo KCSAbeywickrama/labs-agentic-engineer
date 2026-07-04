@@ -107,6 +107,88 @@ func TestBuildIssueBody_NilComponent_OnlyName(t *testing.T) {
 	}
 }
 
+func TestBuildIssueBody_ExternalContractLine(t *testing.T) {
+	t.Parallel()
+	task := &models.ComponentTask{ComponentName: "orders", IssueNumber: 7}
+	comp := &models.DesignComponent{
+		Name:          "orders",
+		ComponentType: "service",
+		Language:      "go",
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "stripe", SpecPath: "dependencies/stripe.openapi.yaml"},
+			{Kind: models.DependencyKindExternal, Name: "nospec"},                        // no SpecPath → omitted
+			{Kind: models.DependencyKindOrgService, Name: "employee-api", SpecPath: "x"}, // not external → omitted
+		},
+	}
+	out := BuildIssueBody(task, comp, "", "")
+	want := "- **API contract — stripe:** `specs/design/components/orders/dependencies/stripe.openapi.yaml` — implement the client against these exact operations; do not invent endpoints."
+	if !strings.Contains(out, want) {
+		t.Errorf("missing external contract line %q\n--- full output ---\n%s", want, out)
+	}
+	if strings.Contains(out, "nospec") {
+		t.Errorf("external dep without SpecPath must not render a contract line:\n%s", out)
+	}
+	if strings.Contains(out, "employee-api") {
+		t.Errorf("org-service dep must not render an external contract line:\n%s", out)
+	}
+}
+
+func TestBuildIssueBody_OrgPublishedBlock(t *testing.T) {
+	t.Parallel()
+	task := &models.ComponentTask{ComponentName: "employee-api", IssueNumber: 3}
+
+	published := &models.DesignComponent{Name: "employee-api", ComponentType: "service", ExposesAPI: &models.ExposesAPI{OrgPublished: true}}
+	out := BuildIssueBody(task, published, "", "")
+	for _, sub := range []string{
+		"## Org-published service — endpoint visibility",
+		"published org-wide",
+		"visibility: [external, namespace]",
+	} {
+		if !strings.Contains(out, sub) {
+			t.Errorf("org-published body missing %q\n--- full output ---\n%s", sub, out)
+		}
+	}
+
+	// Not org-published (nil ExposesAPI, or OrgPublished false) → block absent.
+	for _, comp := range []*models.DesignComponent{
+		{Name: "employee-api", ComponentType: "service"},
+		{Name: "employee-api", ComponentType: "service", ExposesAPI: &models.ExposesAPI{OrgPublished: false}},
+	} {
+		if got := BuildIssueBody(task, comp, "", ""); strings.Contains(got, "Org-published service") {
+			t.Errorf("non-published component must not render the org-published block:\n%s", got)
+		}
+	}
+}
+
+func TestBuildOrgPublishIssueBody(t *testing.T) {
+	t.Parallel()
+
+	withPath := BuildOrgPublishIssueBody("employee-api", "/services/employee-api", "store-front")
+	for _, sub := range []string{
+		"Access request from project `store-front`",
+		"publish the **employee-api** service org-wide",
+		"## What to do",
+		"targeted change to an already-built component",
+		"Open `services/employee-api/workload.yaml`.", // leading slash normalized
+		"visibility: [external, namespace]",
+		"- **Name:** employee-api",
+		"Closes #<this-issue>",
+	} {
+		if !strings.Contains(withPath, sub) {
+			t.Errorf("BuildOrgPublishIssueBody missing %q\n--- full output ---\n%s", sub, withPath)
+		}
+	}
+
+	// No app path → the generic workload.yaml instruction, no App Path line.
+	noPath := BuildOrgPublishIssueBody("employee-api", "", "store-front")
+	if !strings.Contains(noPath, "Open the component's `workload.yaml`.") {
+		t.Errorf("empty appPath should render the generic workload.yaml step:\n%s", noPath)
+	}
+	if strings.Contains(noPath, "App Path") {
+		t.Errorf("empty appPath must omit the App Path reference line:\n%s", noPath)
+	}
+}
+
 func TestBuildIssueBody_OmitsContractWhenNoOpenAPI(t *testing.T) {
 	t.Parallel()
 	task := &models.ComponentTask{ComponentName: "c", IssueNumber: 9}

@@ -106,11 +106,79 @@ func BuildIssueBody(task *models.ComponentTask, comp *models.DesignComponent, _r
 			sb.WriteString(fmt.Sprintf("- **Contract:** `specs/design/components/%s/openapi.yaml`\n", task.ComponentName))
 		}
 		sb.WriteString("- **System overview:** `specs/design/design.md`\n")
+
+		// External API contracts: for each external dependency with a stored
+		// OpenAPI spec, surface the contract path so the coding agent implements
+		// the client against the exact operations rather than guessing endpoints.
+		for _, dep := range comp.Dependencies {
+			if dep.Kind == models.DependencyKindExternal && dep.SpecPath != "" {
+				sb.WriteString(fmt.Sprintf(
+					"- **API contract — %s:** `specs/design/components/%s/%s` — implement the client against these exact operations; do not invent endpoints.\n",
+					dep.Name, comp.Name, dep.SpecPath))
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	// Org-published services (P3): the design marks this service consumable by
+	// OTHER projects in the org, so its endpoint must be exposed cross-project.
+	// This is per-task design data (not a static rule), so it's surfaced here in
+	// the issue rather than only in the baked `aep` skill.
+	if comp != nil && comp.ExposesAPI != nil && comp.ExposesAPI.OrgPublished {
+		sb.WriteString("## Org-published service — endpoint visibility\n")
+		sb.WriteString("This service is **published org-wide**: components in OTHER projects depend on it as an `org-service`. ")
+		sb.WriteString("In your `workload.yaml`, the HTTP endpoint's `visibility` list MUST include **`namespace`** (in addition to `external`) — e.g. `visibility: [external, namespace]`. ")
+		sb.WriteString("`namespace` visibility is what lets OpenChoreo resolve this endpoint for cross-project consumers; without it the dependent components in other projects cannot reach it.\n\n")
+	}
+
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("When you open the PR, include `Closes #%d` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `aep` skill loaded in your Claude Code session.\n", task.IssueNumber))
+
+	return sb.String()
+}
+
+// BuildOrgPublishIssueBody produces the markdown body for a cross-project
+// publish task's GitHub issue (P3.5). Unlike BuildIssueBody this is NOT a
+// build-from-design task: the provider component is already built and deployed,
+// and the requested change is a single targeted edit — add `namespace` to its
+// HTTP endpoint's `visibility` list in `workload.yaml` so OpenChoreo resolves
+// it for cross-project consumers. The body is purpose-built (it does not depend
+// on the design's `orgPublished` flag being set yet) and imperative, matching
+// the tone of BuildIssueBody.
+//
+// The trailing `Closes #<this-issue>` reminder is restated for the
+// human-on-GitHub audience and as a fail-safe if the `aep` skill isn't loaded.
+// The issue number isn't known until GitHub mints it, so the body references
+// "this issue" rather than a literal number (the agent reads the live number
+// via `gh issue view`).
+func BuildOrgPublishIssueBody(providerComponentName, appPath, requesterProject string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("> Access request from project `%s`: publish the **%s** service org-wide so it can be consumed across projects.\n\n",
+		requesterProject, providerComponentName))
+
+	sb.WriteString("## What to do\n")
+	sb.WriteString("This is a **targeted change to an already-built component** — do NOT regenerate or re-implement anything.\n\n")
+	sb.WriteString("1. Clone the repository.\n")
+	if appPath != "" {
+		sb.WriteString(fmt.Sprintf("2. Open `%s/workload.yaml`.\n", normalizeAppPath(appPath)))
+	} else {
+		sb.WriteString("2. Open the component's `workload.yaml`.\n")
+	}
+	sb.WriteString("3. Add `namespace` to the HTTP endpoint's `visibility` list — e.g. it should read `visibility: [external, namespace]`. ")
+	sb.WriteString("`namespace` visibility is what lets OpenChoreo resolve this endpoint for cross-project consumers.\n")
+	sb.WriteString("4. Do **NOT** change anything else — no code, no other config, no other endpoints.\n")
+	sb.WriteString("5. Open a PR for this single-line change.\n\n")
+
+	sb.WriteString("## Component Reference\n")
+	sb.WriteString(fmt.Sprintf("- **Name:** %s\n", providerComponentName))
+	if appPath != "" {
+		sb.WriteString(fmt.Sprintf("- **App Path (within repo):** `%s`\n", normalizeAppPath(appPath)))
 	}
 	sb.WriteString("\n")
 
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("When you open the PR, include `Closes #%d` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `aep` skill loaded in your Claude Code session.\n", task.IssueNumber))
+	sb.WriteString("When you open the PR, include `Closes #<this-issue>` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `aep` skill loaded in your Claude Code session.\n")
 
 	return sb.String()
 }

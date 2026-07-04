@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -69,6 +70,10 @@ type HumaDeps struct {
 	ExternalResourceValues   *resources.ValueService
 	ResourceSvc              *resources.ResourceService
 	ResourceClient           openchoreo.ResourceClient
+	// AccessSvc owns the cross-project access-request state machine
+	// (dependencies/endpoints). Wired by the composition root in a later task;
+	// a zero value nil-guards to 503 at the handlers.
+	AccessSvc *endpoints.AccessService
 	SkillSvc                 *skills.SkillService
 	SkillMutationSvc         *skills.SkillMutationService
 	SkillImportSvc           *skills.SkillImportService
@@ -90,6 +95,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	requirements.RegisterCollab(api, d.CollabRepo)
 	design.RegisterDesign(api, d.DesignSvc)
 	resources.RegisterResources(api, d.ExternalResourceRegistry, d.ExternalResourceValues, d.ResourceSvc, d.ResourceClient)
+	endpoints.RegisterAccess(api, d.AccessSvc)
 	task.RegisterTask(api, d.TaskSvc, d.TaskDispatcher, d.TaskProgress, d.ComponentClient)
 	task.RegisterBoard(api, d.BoardSvc)
 	idp.RegisterIDP(api, d.IDPSvc)

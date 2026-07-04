@@ -66,7 +66,13 @@ var featureEdgeAllowlist = map[string][]string{
 	// resources[]}); the parent may import its own children ONLY — anything
 	// wider is a design decision for a later task, added here with rationale.
 	"dependencies":           {"dependencies/endpoints", "dependencies/resources"},
-	"dependencies/endpoints": {},
+	// dependencies/endpoints owns the single cross-project access-request state
+	// machine. It calls gitrepo's pure issue-body builders
+	// (BuildOrgPublishIssueBody / BuildIssueBody) rather than duplicating them,
+	// so it imports gitrepo — the one permitted feature edge. Every other
+	// collaborator (access store, catalog, design reader, task creator,
+	// org-published marker) is a consumer-side port wired at the composition root.
+	"dependencies/endpoints": {"gitrepo"},
 	"dependencies/resources": {},
 	"design":                 {"artifacts"},
 	"gitrepo":                {},

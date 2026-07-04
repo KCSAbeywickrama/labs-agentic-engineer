@@ -39,6 +39,7 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 		"get-idp-profile", "get-github-status", "get-anthropic-status", "collect-dependency-spec",
 		"list-external-resources", "delete-external-resource", "save-external-resource-values",
 		"provision-dependency", "get-dependency-status",
+		"create-access-request", "list-access-requests",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {
