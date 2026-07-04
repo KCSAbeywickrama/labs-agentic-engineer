@@ -20,4 +20,20 @@
 // not provision) and "platform-resource" (a resource provisioned through an
 // OpenChoreo cluster resource type, e.g. a database or cache). It is the
 // resources half of OpenChoreo's Workload.spec.dependencies.resources[].
+//
+// External-resource machinery (external_*.go, naming.go):
+//
+//   - ValueService (external_values.go) — per-env value submission: split by
+//     the registered schema, provision, complete the config-collection task
+//     via the contracts state machine, re-dispatch gated tasks.
+//   - ExternalResourceProvisioner (external_provisioner.go) — authors the OC
+//     Resource model (ResourceType → Resource → pinned per-env bindings) with
+//     secret values routed through SM-API; Deprovision and
+//     ResolveRunnerSecrets for the dispatch path.
+//   - naming.go — ExternalResourceName / ExternalResourceBindingName, the
+//     single source of truth for the OC CR names.
+//
+// The package holds NO feature imports (empty arch-allowlist row): the org
+// catalog, SM-API writer, task repo and task projector are consumer-side
+// ports in ports.go, wired concretely in the composition root.
 package resources

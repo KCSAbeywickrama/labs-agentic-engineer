@@ -1,0 +1,68 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package resources
+
+// Consumer-side ports. dependencies/resources has an EMPTY arch-allowlist row
+// (internal/arch/arch_test.go) — it imports NO other feature package. Every
+// collaborator is expressed as a narrow interface here and wired concretely in
+// the composition root.
+
+import (
+	"context"
+
+	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/models"
+)
+
+// externalResourceLookup is the slice of the org-level external-resource
+// catalog this package reads. *repositories.ExternalResourceRepository
+// satisfies it. Returns (nil, nil) when the name is not registered.
+type externalResourceLookup interface {
+	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
+}
+
+// SecretWriter is the slice of the SM-API writer the provisioner needs.
+// Satisfied by *orgcreds.SMAPIWriter.
+type SecretWriter interface {
+	Enabled() bool
+	// WriteExternalResourceSecret uploads the secret fields for a
+	// (project, entity) and returns the Vault KV path the ExternalSecret
+	// reads (the secretStorePath).
+	WriteExternalResourceSecret(ctx context.Context, ocOrgID, projectName, entityName string, data map[string]string) (vaultKey, secretRefName string, err error)
+}
+
+// TaskStore is the slice of the component-task repo the value service needs
+// to FIND the config-collection task to complete. repositories.TaskRepository
+// satisfies it. Completion itself goes through TaskCompleter — this package
+// never writes ComponentTask.Status.
+type TaskStore interface {
+	ListByProjectID(ctx context.Context, orgID, projectID string) ([]models.ComponentTask, error)
+}
+
+// TaskCompleter applies a contracts task event to a task. Its shape matches
+// task.Projector.ApplyBuildResult exactly, so the composition root wires the
+// projector directly — the ONLY legal way to move ComponentTask.Status (the
+// source's direct status UPDATE is deliberately not ported).
+type TaskCompleter interface {
+	ApplyBuildResult(ctx context.Context, taskID string, event contracts.TaskEvent, errMsg string) error
+}
+
+// RedispatchFunc re-runs the dispatch gating loop after a config-collection
+// task completes, so component tasks gated on the external resource get
+// dispatched. Wraps the dispatch service in the composition root (avoids a
+// package dependency on the dispatcher's result type).
+type RedispatchFunc func(ctx context.Context, orgID, projectID string) error
