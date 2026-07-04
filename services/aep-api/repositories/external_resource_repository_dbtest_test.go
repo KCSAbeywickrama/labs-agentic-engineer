@@ -286,3 +286,39 @@ func TestExternalResourceRepository_Consumers_DedupAndScoped(t *testing.T) {
 		t.Fatalf("expected no consumers, got %+v", none)
 	}
 }
+
+// TestExternalResourceRepository_Consumers_NameWithDoubleQuote confirms
+// Consumers handles a resource name containing a double-quote without
+// erroring — the containment value must be JSON-encoded rather than built by
+// string concatenation, or a name like `we"ird` produces invalid JSON for the
+// `@> ?::jsonb` operand.
+func TestExternalResourceRepository_Consumers_NameWithDoubleQuote(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	extRepo := repositories.NewExternalResourceRepository(db)
+	taskRepo := repositories.NewTaskRepository(db)
+	ctx := context.Background()
+
+	const weird = `we"ird`
+
+	if _, err := extRepo.Upsert(ctx, "orga", weird, "", []models.ConfigKey{{Key: "k", Secret: false}}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	task := &models.ComponentTask{
+		OrgID: "orga", ProjectID: "proj1", ComponentName: "svc-a",
+		Type: models.TaskTypeComponent, DependsOnExternalResources: models.StringSlice{weird},
+		Status: string(models.TaskStatusPending),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	got, err := extRepo.Consumers(ctx, "orga", weird)
+	if err != nil {
+		t.Fatalf("Consumers(%q): %v", weird, err)
+	}
+	if len(got) != 1 || got[0].ProjectID != "proj1" || got[0].ComponentName != "svc-a" {
+		t.Fatalf("Consumers(%q) = %+v; want a single proj1/svc-a entry", weird, got)
+	}
+}

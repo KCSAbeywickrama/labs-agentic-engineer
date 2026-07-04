@@ -18,6 +18,7 @@ package repositories
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -130,9 +131,15 @@ func (r *ExternalResourceRepository) Consumers(ctx context.Context, orgID, name 
 	var tasks []models.ComponentTask
 	// jsonb containment: depends_on_external_resources @> ["name"] — exact
 	// element match (won't false-positive `openweather` against `openweathermap`).
+	// The containment value is JSON-encoded (not string-concatenated) so a name
+	// containing `"` or `\` still produces valid JSON.
+	containment, err := json.Marshal([]string{name})
+	if err != nil {
+		return nil, fmt.Errorf("external_resources: encode containment value for %q: %w", name, err)
+	}
 	if err := r.db.WithContext(ctx).
 		Where("org_id = ? AND type = ? AND depends_on_external_resources @> ?::jsonb",
-			orgID, models.TaskTypeComponent, `["`+name+`"]`).
+			orgID, models.TaskTypeComponent, string(containment)).
 		Find(&tasks).Error; err != nil {
 		return nil, fmt.Errorf("external_resources: consumers of %q: %w", name, err)
 	}
