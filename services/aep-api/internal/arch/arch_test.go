@@ -58,8 +58,18 @@ const mod = "github.com/wso2/aep/aep-api"
 // decision: extend this list in the same PR and say why, or (usually better)
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
-	"artifacts":   {"gitrepo"},
-	"codingagent": {"artifacts", "component", "gitrepo", "orgcreds"},
+	"artifacts": {"gitrepo"},
+	// codingagent's dispatch path imports dependencies/endpoints +
+	// dependencies/resources ONLY for their pure naming helpers
+	// (endpoints.OrgServiceURLEnv, resources.ExternalResourceName/BindingName) —
+	// the single source of truth for the dispatch-time consumer-wiring env-var +
+	// ref derivation, so the issue-comment renderer and the provisioners can't
+	// diverge. No state or types beyond those funcs cross the edge; every
+	// collaborator (org-service resolver, binding reader, external-resource secret
+	// resolver, access granter) is a consumer-side port wired at the composition
+	// root. resources.ExternalResourceRunnerSecret rides the same edge as the
+	// resolver port's return type.
+	"codingagent": {"artifacts", "component", "dependencies/endpoints", "dependencies/resources", "gitrepo", "orgcreds"},
 	"component":   {"artifacts", "gitrepo"},
 	// dependencies is the nested umbrella for a design component's external
 	// dependency graph (OpenChoreo Workload.spec.dependencies.{endpoints[],

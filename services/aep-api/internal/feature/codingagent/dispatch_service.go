@@ -25,10 +25,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	// dependencies/endpoints + dependencies/resources are imported ONLY for their
+	// pure naming helpers (endpoints.OrgServiceURLEnv, resources.ExternalResource
+	// Name/BindingName) — the single source of truth for the consumer-wiring env-var
+	// + ref derivation, so the dispatch-time comment and the provisioners can't
+	// diverge. Both feature edges are declared in internal/arch/arch_test.go with
+	// this same rationale. No state or types beyond those funcs are used; every
+	// collaborator (the org-service resolver, the binding reader, the external-
+	// resource secret resolver) is a consumer-side port wired at the composition
+	// root.
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
@@ -85,6 +98,29 @@ type (
 	RuntimeConfigEmitter interface {
 		EmitForComponent(ctx context.Context, orgID, projectID, componentName string) error
 	}
+	// OrgServiceResolver resolves a cross-project `org-service` name to its
+	// namespace-visible provider endpoint, and a same-project sibling
+	// `component` dependency to its (project-visible) endpoint. Satisfied by
+	// *endpoints.Catalog (C1); used by the dispatch-time consumer-dependency YAML
+	// renderer. ok=false ⇒ not yet published / not yet resolvable.
+	OrgServiceResolver interface {
+		ResolveNamespaceVisible(ctx context.Context, orgHandle, name string) (openchoreo.WorkloadEndpointInfo, bool, error)
+		ResolveProjectEndpoint(ctx context.Context, orgHandle, project, ocComponent string) (openchoreo.WorkloadEndpointInfo, bool, error)
+	}
+	// BindingReader reads a resource's per-env ResourceReleaseBinding so the
+	// renderer can enumerate its resolved outputs. Satisfied by
+	// openchoreo.ResourceClient.GetBinding (A5, narrowed) — a func port so this
+	// feature needn't import the full resource client.
+	BindingReader func(ctx context.Context, namespace, name string) (*openchoreo.ResourceReleaseBinding, error)
+	// IssueCommenter posts a comment to a task's GitHub issue. Satisfied by
+	// gitrepo.IssueService.CommentIssue (adapted at the composition root) — a
+	// narrow func so this feature needn't depend on the full issue service.
+	IssueCommenter func(ctx context.Context, orgID, projectID string, number int, body string) error
+	// ExternalResourceSecretResolveFunc resolves the per-run ExternalSecret inputs
+	// for the external resources a task binds (vault path + secret keys), for one
+	// env. The composition root adapts resources.ExternalResourceProvisioner.
+	// ResolveRunnerSecrets (C2) to it via a closure (D5).
+	ExternalResourceSecretResolveFunc func(ctx context.Context, orgHandle, projectName, env string, names []string) ([]resources.ExternalResourceRunnerSecret, error)
 )
 
 type dispatchService struct {
@@ -142,7 +178,65 @@ type dispatchService struct {
 	// first protected deploy, but the runner needs it for every component,
 	// so the dispatch pre-flight ensures it too. Wired via SetIDPService.
 	idp OrgPublisherProvisioner
+
+	// orgServiceResolver + bindingReader + issueCommenter back the dispatch-time
+	// consumer-dependency comment: when a task is dispatched, the BFF resolves the
+	// component's `org-service` / same-project `component` endpoints + its bound
+	// `external`-resource / `platform-resource` outputs and posts the exact
+	// `workload.yaml` `dependencies:` block to the task's GitHub issue so the
+	// coding agent declares them up front. Best-effort — all three nil ⇒ no comment
+	// is attempted. Wired via SetConsumerDependencyResolver.
+	orgServiceResolver OrgServiceResolver
+	bindingReader      BindingReader
+	issueCommenter     IssueCommenter
+
+	// externalResourceSecretResolver, when non-nil, resolves the task's bound
+	// external-resource secrets (vault path + keys) so the proxy dispatch path
+	// materialises them into the runner pod via per-run ExternalSecrets (the agent
+	// integration-tests against the live service). Wired via
+	// SetExternalResourceSecretResolver.
+	externalResourceSecretResolver ExternalResourceSecretResolveFunc
 }
+
+// SetConsumerDependencyResolver wires the dispatch-time consumer-dependency
+// comment (additive): the org-service/component resolver + resource-binding
+// reader resolve the component's deps and issueCommenter posts the resolved
+// `workload.yaml` block to the task's GitHub issue. All-or-nothing — leaving any
+// arg nil disables the comment.
+func (s *dispatchService) SetConsumerDependencyResolver(
+	r OrgServiceResolver,
+	b BindingReader,
+	c IssueCommenter,
+) {
+	s.orgServiceResolver = r
+	s.bindingReader = b
+	s.issueCommenter = c
+}
+
+// SetExternalResourceSecretResolver wires the resolver so the runner pod receives
+// the task's bound external-resource secrets via envFrom. Optional — nil skips
+// external-resource secrets.
+func (s *dispatchService) SetExternalResourceSecretResolver(f ExternalResourceSecretResolveFunc) {
+	s.externalResourceSecretResolver = f
+}
+
+// DispatchServiceWith* surface the optional setters the composition root wires by
+// type-assertion. Naming them (and asserting the concrete satisfies them below)
+// makes a setter-signature drift a build failure instead of a wire silently
+// skipped at boot.
+type (
+	DispatchServiceWithConsumerDeps interface {
+		SetConsumerDependencyResolver(OrgServiceResolver, BindingReader, IssueCommenter)
+	}
+	DispatchServiceWithExternalResourceSecrets interface {
+		SetExternalResourceSecretResolver(ExternalResourceSecretResolveFunc)
+	}
+)
+
+var (
+	_ DispatchServiceWithConsumerDeps            = (*dispatchService)(nil)
+	_ DispatchServiceWithExternalResourceSecrets = (*dispatchService)(nil)
+)
 
 // WithCodingAgentDispatcher wires the proxy-based dispatch path.
 // db is required for the SM-API triplet lookup; clusterSecretStore +
@@ -232,21 +326,54 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 		return nil, fmt.Errorf("get credential identity: %w", err)
 	}
 
-	// Deploy-gating. Build a {componentName → status} index for
-	// dependsOn resolution. A task is dispatchable only when every task
-	// it dependsOn (by component name) has reached `deployed`. This is
-	// per-batch — DependsOnComponents lists names that map 1:1 to tasks
-	// in the same batch (validated at persist time in task_stream.go).
+	// Deploy-gating. Build {componentName → status}, {externalResourceName →
+	// status}, and {resourceName → status} indexes for dependsOn resolution. A
+	// task is dispatchable only when every task it dependsOn has reached
+	// `deployed`. Per-batch — the DependsOn* names map 1:1 to tasks in the same
+	// batch (validated at persist time in task_stream.go).
+	//
+	// config-collection rows carry the external resource's status under
+	// ExternalResourceName; resource-provisioning rows under ResourceName; every
+	// other row (component tasks AND org-publish tasks) is keyed by ComponentName.
 	statusByComponent := make(map[string]string, len(tasks))
+	statusByExternalResource := make(map[string]string, len(tasks))
+	statusByResource := make(map[string]string, len(tasks))
 	for _, t := range tasks {
-		statusByComponent[t.ComponentName] = t.Status
+		switch t.Type {
+		case models.TaskTypeConfigCollection:
+			if t.ExternalResourceName != "" {
+				statusByExternalResource[t.ExternalResourceName] = t.Status
+			}
+		case models.TaskTypeResourceProvisioning:
+			if t.ResourceName != "" {
+				statusByResource[t.ResourceName] = t.Status
+			}
+		default:
+			statusByComponent[t.ComponentName] = t.Status
+		}
 	}
+
+	// NOTE: DependsOnOrgServices is NOT gated here. Under the block-at-proceed
+	// model a consumer task can only reach this dispatch sweep once its
+	// org-service deps are `resolved` (namespace-visible in the catalog), so it
+	// is impossible to arrive here with an unresolved org-service dep — the
+	// On-Hold gate for org-services would be a redundant double-check. Same-project
+	// component, external-resource, and platform-resource gating in depsAllDeployed
+	// are unchanged.
 
 	var results []DispatchResult
 	for i := range tasks {
 		task := &tasks[i]
+		// config-collection tasks are completed by the value-save endpoint, and
+		// resource-provisioning tasks by the resource provisioner + readiness
+		// watcher — never the coding agent. Skip them before any pending/on-hold
+		// or no-issue failure path (reaching `deployed` = provisioned). org-publish
+		// rows are NOT skipped — they dispatch like component tasks.
+		if task.Type == models.TaskTypeConfigCollection || task.Type == models.TaskTypeResourceProvisioning {
+			continue
+		}
 		if task.Status == string(models.TaskStatusOnHold) {
-			if !depsAllDeployed(task, statusByComponent) {
+			if !depsAllDeployed(task, statusByComponent, statusByExternalResource, statusByResource) {
 				continue
 			}
 			task.Status = string(models.TaskStatusPending)
@@ -259,7 +386,7 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 			continue
 		}
 
-		if !depsAllDeployed(task, statusByComponent) {
+		if !depsAllDeployed(task, statusByComponent, statusByExternalResource, statusByResource) {
 			task.Status = string(models.TaskStatusOnHold)
 			if err := s.taskRepo.Update(ctx, task); err != nil {
 				slog.WarnContext(ctx, "set on_hold", "task", task.ID, "error", err)
@@ -280,17 +407,34 @@ func (s *dispatchService) DispatchTasks(ctx context.Context, orgID, projectID st
 	return results, nil
 }
 
-// depsAllDeployed returns true when every component name listed in
-// DependsOnComponents corresponds to a task whose Status == deployed.
-// Unknown component names return false (fail closed; the persist-time
-// validator in task_stream.go is the upstream guard).
-func depsAllDeployed(task *models.ComponentTask, statusByComponent map[string]string) bool {
+// depsAllDeployed returns true when every same-project blocker the task lists is
+// satisfied: each DependsOnComponents name maps to a task whose Status ==
+// deployed, AND each DependsOnExternalResources name maps to a config-collection
+// task whose Status == deployed (values collected + the OC Resource provisioned),
+// AND each DependsOnResources name maps to a resource-provisioning task whose
+// Status == deployed (the platform resource is provisioned and Ready).
+//
+// DependsOnOrgServices is NOT gated here — under block-at-proceed a consumer can
+// only reach dispatch after its org-service deps are `resolved`, so the On-Hold
+// gate was a redundant double-check. DependsOnOrgServices is still stored on the
+// row and used for workload.yaml dep-comment rendering
+// (resolveConsumerDependenciesYAML) — it just no longer gates dispatch.
+//
+// Unknown component/external-resource/resource names return false (fail closed;
+// the persist-time validator in task_stream.go is the upstream guard).
+func depsAllDeployed(task *models.ComponentTask, statusByComponent, statusByExternalResource, statusByResource map[string]string) bool {
 	for _, depComponent := range task.DependsOnComponents {
-		st, ok := statusByComponent[depComponent]
-		if !ok {
+		if statusByComponent[depComponent] != string(models.TaskStatusDeployed) {
 			return false
 		}
-		if st != string(models.TaskStatusDeployed) {
+	}
+	for _, depExtRes := range task.DependsOnExternalResources {
+		if statusByExternalResource[depExtRes] != string(models.TaskStatusDeployed) {
+			return false
+		}
+	}
+	for _, depRes := range task.DependsOnResources {
+		if statusByResource[depRes] != string(models.TaskStatusDeployed) {
 			return false
 		}
 	}
@@ -452,6 +596,12 @@ func (s *dispatchService) dispatchOne(
 	slog.InfoContext(ctx, "task dispatched",
 		"task", task.ID, "component", task.ComponentName, "run", runName)
 
+	// Post the resolved `workload.yaml` `dependencies:` block to the issue so the
+	// coding agent declares the consumer deps up front. Best-effort — never fails
+	// the dispatch. The post-deploy cascade still re-drives resolution, so this is
+	// purely a head-start for the agent.
+	s.postConsumerDependencyComment(ctx, task)
+
 	res.RunName = runName
 	res.Status = "running"
 	return res
@@ -603,12 +753,28 @@ func (s *dispatchService) tryDispatchViaProxy(
 		PublisherTokenURL: publisherTokenURL,
 	}
 
+	// External resources the task binds: materialise their secrets into the runner
+	// via per-run ExternalSecrets so the agent integration-tests against the live
+	// service. Best-effort — a resolve hiccup must not block dispatch.
+	var extResSRs []ExternalResourceSecretInputs
+	if s.externalResourceSecretResolver != nil && len(task.DependsOnExternalResources) > 0 {
+		if resolved, rerr := s.externalResourceSecretResolver(ctx, task.OrgID, task.ProjectID, "development", []string(task.DependsOnExternalResources)); rerr != nil {
+			slog.WarnContext(ctx, "resolve external-resource runner secrets failed", "task", task.ID, "error", rerr)
+		} else {
+			extResSRs = make([]ExternalResourceSecretInputs, 0, len(resolved))
+			for _, r := range resolved {
+				extResSRs = append(extResSRs, ExternalResourceSecretInputs{KVPath: r.KVPath, Keys: r.Keys})
+			}
+		}
+	}
+
 	rn, err := s.codingAgentDispatcher.Dispatch(ctx, Inputs{
 		OrgUUID:                orgUUID,
 		Job:                    job,
 		AnthropicSR:            SecretRef{SecretRefName: derefStr(anthropicRow.SMAPISecretRefName), KVPath: derefStr(anthropicRow.SMAPIKVPath), Property: derefStr(anthropicRow.SMAPIProperty)},
 		GitHubSR:               SecretRef{SecretRefName: derefStr(githubRow.SMAPISecretRefName), KVPath: derefStr(githubRow.SMAPIKVPath), Property: derefStr(githubRow.SMAPIProperty)},
 		PublisherSR:            publisherSR,
+		ExternalResourceSRs:    extResSRs,
 		ClusterSecretStoreName: s.clusterSecretStore,
 	})
 	if err != nil {
@@ -797,11 +963,17 @@ func buildAgentPrompt(task *models.ComponentTask) string {
 
 // resolveDependencyEndpoints turns the task's DependsOnComponents list into
 // a slice of (component, url) pairs by calling ComponentService.ListDeployments
-// — the same path that powers the Deploy page (single source of truth). Under
-// deploy-gating every dep is `deployed` at dispatch time, so each
-// ListDeployments call MUST return a non-empty external URL. An empty URL
-// means the provider component is missing `visibility: external` on its
-// `spec.endpoints` — that is the §1.3 invariant breaking. Fail loudly here.
+// — the same path that powers the Deploy page (single source of truth). The
+// result is informational only (logged at dispatch); the actual consumer→
+// provider wire is declared in the consumer's `workload.yaml`
+// (resolveConsumerDependenciesYAML) and resolved internally by OC.
+//
+// The §1.3 "dep must be external" invariant has been RELAXED: web-apps now
+// reverse-proxy `/api/*` to their backends (same-origin), so a dependency that
+// resolves only internally (no external URL) is valid and MUST NOT fail
+// dispatch. A dep with no external URL is simply skipped here (it's an
+// internal-only provider); genuinely-external deps still surface their URL. A
+// real ListDeployments error is still returned (transient OC failure).
 func (s *dispatchService) resolveDependencyEndpoints(
 	ctx context.Context,
 	task *models.ComponentTask,
@@ -821,10 +993,9 @@ func (s *dispatchService) resolveDependencyEndpoints(
 		}
 		url := firstExternalURL(list)
 		if url == "" {
-			return nil, fmt.Errorf(
-				"dep %q has no external URL — confirm the provider's `workload.yaml` spec.endpoints declares `visibility: external` (see docs/design/cross-component-wiring-gaps.md §1.3)",
-				depComponent,
-			)
+			// Internal-only provider — valid under the same-origin proxy model.
+			// Skip; the wire is carried by the workload.yaml deps block.
+			continue
 		}
 		out = append(out, DependencyEndpoint{Component: depComponent, URL: url})
 	}
@@ -841,6 +1012,204 @@ func firstExternalURL(list *models.DeploymentList) string {
 		}
 	}
 	return ""
+}
+
+// ---- dispatch-time consumer-dependency comment -----------------------------
+//
+// The post-deploy cascade already patches the resolved deps onto the consumer
+// Workload after the provider deploys — that stays. The comment below is
+// ADDITIVE: it hands the coding agent the exact `dependencies:` block to author
+// in its own `workload.yaml` up front, so the consumer's Workload declares the
+// deps the moment it's built rather than only after the cascade re-drives. Both
+// converge on the same OC flat WorkloadDescriptor shape.
+
+// workloadDeps is the flat OC WorkloadDescriptor `dependencies:` block, rendered
+// to the YAML the coding agent merges into its component's `workload.yaml`.
+// Sub-keys are emitted only when non-empty (`omitempty`) so a resource-only
+// component gets `resources:` without an empty `endpoints:` and vice-versa.
+type workloadDeps struct {
+	Endpoints []workloadEndpointDepYAML `yaml:"endpoints,omitempty"`
+	Resources []workloadResourceDepYAML `yaml:"resources,omitempty"`
+}
+
+type workloadEndpointDepYAML struct {
+	Project     string            `yaml:"project,omitempty"` // omit if same project
+	Component   string            `yaml:"component"`
+	Name        string            `yaml:"name"`
+	Visibility  string            `yaml:"visibility"`
+	EnvBindings map[string]string `yaml:"envBindings"` // {address: <ENV>}
+}
+
+type workloadResourceDepYAML struct {
+	Ref         string            `yaml:"ref"`
+	EnvBindings map[string]string `yaml:"envBindings"` // {<output>: <ENV>}
+}
+
+// resolveConsumerDependenciesYAML resolves the task component's consumer deps —
+// cross-project `org-service` endpoints, same-project `component` siblings, bound
+// `external`-resource outputs, and `platform-resource` outputs — into the YAML
+// `dependencies:` block the coding agent should add to its `workload.yaml`.
+// Returns "" when nothing resolves (no deps, or providers not yet published /
+// resources not yet provisioned). orgHandle is task.OrgID (the OC namespace).
+func (s *dispatchService) resolveConsumerDependenciesYAML(
+	ctx context.Context,
+	task *models.ComponentTask,
+) (string, error) {
+	var deps workloadDeps
+
+	// org-service + same-project component endpoints both need the design
+	// component to enumerate dep names. Resolve lazily — only when the org-service
+	// resolver is wired — so the resource branches can run without a store in unit
+	// tests.
+	if s.orgServiceResolver != nil {
+		comp, err := artifacts.ResolveDesignComponent(ctx, s.store, task)
+		if err != nil {
+			return "", fmt.Errorf("resolve design component: %w", err)
+		}
+
+		// org-service endpoints (cross-project, visibility namespace). Skip any
+		// whose provider hasn't published namespace-visible yet — the cascade
+		// re-drives, and the agent can add it later.
+		for _, name := range comp.OrgServiceDependsOn() {
+			target, ok, rerr := s.orgServiceResolver.ResolveNamespaceVisible(ctx, task.OrgID, name)
+			if rerr != nil {
+				return "", fmt.Errorf("resolve org-service %q: %w", name, rerr)
+			}
+			if !ok {
+				continue
+			}
+			deps.Endpoints = append(deps.Endpoints, workloadEndpointDepYAML{
+				Project:     target.Project,
+				Component:   target.Component,
+				Name:        target.Name,
+				Visibility:  "namespace",
+				EnvBindings: map[string]string{"address": endpoints.OrgServiceURLEnv(name)},
+			})
+		}
+
+		// same-project `component` siblings (visibility project). The sibling's OC
+		// component name is `<project>-<logicalName>`; the gate held this consumer
+		// until every same-project dep was deployed, so the sibling's Workload is
+		// in the catalog. project visibility is implicit, so this uses
+		// ResolveProjectEndpoint (NOT the namespace-visible lookup). The env var
+		// keys on the LOGICAL dep name (e.g. `todo-api` → `TODO_API_URL`). Project
+		// is omitted (same project).
+		for _, depName := range comp.ComponentDependsOn() {
+			ocComponent := task.ProjectID + "-" + depName
+			target, ok, rerr := s.orgServiceResolver.ResolveProjectEndpoint(ctx, task.OrgID, task.ProjectID, ocComponent)
+			if rerr != nil {
+				return "", fmt.Errorf("resolve same-project component %q: %w", depName, rerr)
+			}
+			if !ok {
+				// Sibling not resolvable yet — skip; the cascade re-drives.
+				continue
+			}
+			deps.Endpoints = append(deps.Endpoints, workloadEndpointDepYAML{
+				Component:   target.Component,
+				Name:        target.Name,
+				Visibility:  "project",
+				EnvBindings: map[string]string{"address": endpoints.OrgServiceURLEnv(depName)},
+			})
+		}
+	}
+
+	if s.bindingReader != nil {
+		// external-resource outputs. Read each external resource's development
+		// binding for its resolved outputs. External-resource outputs are
+		// pre-namespaced by the resource schema, so the env-var name == output name
+		// verbatim. Skip any not provisioned yet — the cascade re-drives.
+		for _, name := range task.DependsOnExternalResources {
+			b, berr := s.bindingReader(ctx, task.OrgID, resources.ExternalResourceBindingName(task.ProjectID, name, "development"))
+			if berr != nil || b == nil || b.Status == nil || len(b.Status.Outputs) == 0 {
+				continue
+			}
+			envBindings := make(map[string]string, len(b.Status.Outputs))
+			for _, out := range b.Status.Outputs {
+				envBindings[out.Name] = out.Name
+			}
+			deps.Resources = append(deps.Resources, workloadResourceDepYAML{
+				Ref:         resources.ExternalResourceName(task.ProjectID, name),
+				EnvBindings: envBindings,
+			})
+		}
+
+		// platform-resource outputs (DependsOnResources). Unlike external-resource
+		// outputs (pre-namespaced by the resource schema), platform-resource
+		// outputs are generic names (host, port, user, password), so we prefix them
+		// with the dep name to avoid collisions when a component binds multiple
+		// resources: env var = envVarName(depName, outputName). e.g. dep
+		// "orders-db" output "host" → ORDERS_DB_HOST. The binding + ref names share
+		// the external-resource `<project>-<name>` form (resources.ExternalResource
+		// Name / BindingName is the single source of truth for that derivation).
+		for _, depName := range task.DependsOnResources {
+			b, berr := s.bindingReader(ctx, task.OrgID, resources.ExternalResourceBindingName(task.ProjectID, depName, "development"))
+			if berr != nil || b == nil || b.Status == nil || len(b.Status.Outputs) == 0 {
+				continue
+			}
+			envBindings := make(map[string]string, len(b.Status.Outputs))
+			for _, out := range b.Status.Outputs {
+				envBindings[out.Name] = envVarName(depName, out.Name)
+			}
+			deps.Resources = append(deps.Resources, workloadResourceDepYAML{
+				Ref:         resources.ExternalResourceName(task.ProjectID, depName),
+				EnvBindings: envBindings,
+			})
+		}
+	}
+
+	if len(deps.Endpoints) == 0 && len(deps.Resources) == 0 {
+		return "", nil
+	}
+
+	out, err := yaml.Marshal(map[string]workloadDeps{"dependencies": deps})
+	if err != nil {
+		return "", fmt.Errorf("marshal dependencies yaml: %w", err)
+	}
+	return string(out), nil
+}
+
+// envVarName builds a valid Kubernetes/C-identifier env-var name from a
+// platform-resource dep name + output name. The dep name is kebab-case (e.g.
+// "orders-db") and outputs are generic (host/port/user/…), so every character
+// outside [A-Za-z0-9_] is mapped to '_' and the whole thing upper-cased —
+// "orders-db" + "host" → "ORDERS_DB_HOST". A k8s env-var name must be a
+// C_IDENTIFIER; a hyphen would make the pod spec invalid and fail the deploy.
+func envVarName(depName, outName string) string {
+	mapped := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, depName+"_"+outName)
+	return strings.ToUpper(mapped)
+}
+
+// postConsumerDependencyComment renders the resolved consumer-dependency block
+// (if any) and posts it to the task's GitHub issue. Best-effort: a resolve or
+// post failure is logged and swallowed — it must never fail the dispatch.
+func (s *dispatchService) postConsumerDependencyComment(ctx context.Context, task *models.ComponentTask) {
+	if s.issueCommenter == nil || task.IssueNumber == 0 {
+		return
+	}
+	block, err := s.resolveConsumerDependenciesYAML(ctx, task)
+	if err != nil {
+		slog.WarnContext(ctx, "consumer-dependency comment: resolve failed",
+			"task", task.ID, "component", task.ComponentName, "error", err)
+		return
+	}
+	if block == "" {
+		return
+	}
+	body := "**Platform-resolved dependencies** — add the following to this component's " +
+		"`workload.yaml` (merge into any existing `dependencies:`). The platform has " +
+		"already resolved the targets + env-var bindings; copy it verbatim. OpenChoreo " +
+		"injects these addresses/outputs into your pod env at runtime:\n\n```yaml\n" + block + "```"
+	if err := s.issueCommenter(ctx, task.OrgID, task.ProjectID, task.IssueNumber, body); err != nil {
+		slog.WarnContext(ctx, "consumer-dependency comment: post failed",
+			"task", task.ID, "component", task.ComponentName, "issue", task.IssueNumber, "error", err)
+	}
 }
 
 // ocEntrypoint maps a design component type to its OpenChoreo deployment

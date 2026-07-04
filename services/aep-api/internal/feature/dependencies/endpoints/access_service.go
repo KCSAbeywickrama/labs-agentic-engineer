@@ -296,9 +296,13 @@ func (s *AccessService) ListByConsumerProject(ctx context.Context, orgHandle, pr
 
 // GrantByProviderComponent is the provider-side close-out fired when an
 // org-publish task lands `deployed` (D2 calls it via a port). componentName is
-// the just-deployed provider component in OC component-name form. Steps — each
-// isolated, none aborts the others (mirrors the source cascade's best-effort
-// semantics):
+// the just-deployed provider component's LOGICAL name — the org-publish task's
+// ComponentName (set to providerLogicalComponent at RequestAccess time, and the
+// value the deploy cascade carries into OnTaskDeployed). It matches
+// AccessRequest.ProviderComponentName (also the logical name) via
+// FindOpenForTarget; the durability marker below additionally accepts the OC
+// `<project>-<logical>` form. Steps — each isolated, none aborts the others
+// (mirrors the source cascade's best-effort semantics):
 //
 //  1. FindOpenForTarget — is there an open request whose provider IS this
 //     component? None ⇒ normal deploy, nil return.

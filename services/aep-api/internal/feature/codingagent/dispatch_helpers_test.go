@@ -37,22 +37,22 @@ func TestDepsAllDeployed(t *testing.T) {
 	pending := string(models.TaskStatusPending)
 
 	// No deps → always dispatchable.
-	if !depsAllDeployed(&models.ComponentTask{}, map[string]string{}) {
+	if !depsAllDeployed(&models.ComponentTask{}, map[string]string{}, nil, nil) {
 		t.Fatal("task with no deps must be dispatchable")
 	}
 
 	task := &models.ComponentTask{DependsOnComponents: models.StringSlice{"db", "cache"}}
 
 	// All deps deployed → true.
-	if !depsAllDeployed(task, map[string]string{"db": deployed, "cache": deployed}) {
+	if !depsAllDeployed(task, map[string]string{"db": deployed, "cache": deployed}, nil, nil) {
 		t.Fatal("all deps deployed must be dispatchable")
 	}
 	// One dep not deployed → false.
-	if depsAllDeployed(task, map[string]string{"db": deployed, "cache": pending}) {
+	if depsAllDeployed(task, map[string]string{"db": deployed, "cache": pending}, nil, nil) {
 		t.Fatal("a non-deployed dep must block dispatch")
 	}
 	// Unknown dep name → fail closed (false), never fail open on a bad identifier.
-	if depsAllDeployed(task, map[string]string{"db": deployed}) {
+	if depsAllDeployed(task, map[string]string{"db": deployed}, nil, nil) {
 		t.Fatal("an unknown dep component must fail closed")
 	}
 }
