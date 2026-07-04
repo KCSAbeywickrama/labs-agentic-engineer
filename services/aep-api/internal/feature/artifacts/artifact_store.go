@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -30,13 +31,47 @@ import (
 )
 
 // ArtifactStore wraps the in-process artifact service to add value beyond
-// pure file I/O: the typed `DesignFile` shape (YAML split/assemble).
+// pure file I/O: the typed `DesignFile` shape (YAML split/assemble) and
+// read-time org-service dependency resolution.
 type ArtifactStore struct {
 	artifactSvc ArtifactService
+	// orgServices resolves `org-service` dependencies against the live org
+	// endpoint catalog at design-read time (see resolveOrgServices). Nil
+	// until the composition root wires a concrete provider via
+	// SetOrgServiceResolver (a later task) — until then, org-service
+	// dependencies keep whatever Status/Reason they already carry (always
+	// empty: Status/Reason are read-time computed and never persisted to
+	// design.json).
+	orgServices OrgServiceResolver
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
 	return &ArtifactStore{artifactSvc: artifactSvc}
+}
+
+// OrgServiceResolver answers whether an `org-service` dependency name is
+// published namespace-visible in the org — the dynamic org endpoint catalog.
+// Declared here (consumer side) so the artifacts package stays free of an
+// OC-client dependency; the concrete provider is wired in by the
+// composition root via SetOrgServiceResolver in a later task.
+type OrgServiceResolver interface {
+	IsNamespaceVisible(ctx context.Context, orgHandle, name string) (bool, error)
+	// ExistsAnyVisibility reports whether a component named `name` publishes
+	// ANY endpoint in the org catalog regardless of visibility — used to
+	// refine an org-service dependency into `blocked`/`access-required`
+	// (exists, project-only) vs `unresolved`/`not-found` (no such
+	// component).
+	ExistsAnyVisibility(ctx context.Context, orgHandle, name string) (bool, error)
+}
+
+// SetOrgServiceResolver wires the dynamic org endpoint catalog used to mark
+// `org-service` dependencies resolved/unresolved at design-read time. A nil
+// store is a documented no-op (mirrors the other Set* setters).
+func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
+	if s == nil {
+		return
+	}
+	s.orgServices = r
 }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
@@ -195,7 +230,77 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	if err != nil {
 		return nil, err
 	}
+	// Mark org-service dependencies resolved/unresolved against the live org
+	// endpoint catalog so the architecture view renders status without user
+	// action. The concrete address is injected at wiring time by a later
+	// task (cascade).
+	s.resolveOrgServices(ctx, orgID, design)
 	return design, nil
+}
+
+// resolveOrgServices marks each `org-service` dependency with a 4-state
+// status at read time: `resolved` (namespace-visible), `blocked` +
+// `access-required` (exists but project-only — consumer must request
+// access), or `unresolved` + `not-found` (absent from the catalog). orgID is
+// the OC namespace (locally, the org handle).
+//
+// A no-op until the composition root wires a resolver via
+// SetOrgServiceResolver — this codebase deleted the static ExternalAPICatalog
+// fallback the ported source used when no dynamic resolver was wired (task
+// A1), so until wired, org-service dependencies simply keep the Status/Reason
+// AssembleDesign left them with (always empty, since Status/Reason are never
+// persisted to design.json).
+//
+// Best-effort: a resolver error never fails the design read.
+//   - An IsNamespaceVisible error leaves the dependency's Status/Reason
+//     completely untouched — matches the ported source's "leave whatever
+//     status is stored" behavior byte-for-byte.
+//   - An ExistsAnyVisibility error leaves Status = unresolved (already set
+//     before the refinement call, to be overwritten only on success) with an
+//     empty Reason — also ported byte-for-byte from the source, which is
+//     asymmetric with the IsNamespaceVisible case above by construction.
+func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d *DesignFile) {
+	if s == nil || d == nil || s.orgServices == nil {
+		return
+	}
+	for i := range d.Components {
+		for j := range d.Components[i].Dependencies {
+			dep := &d.Components[i].Dependencies[j]
+			if dep.Kind != models.DependencyKindOrgService {
+				continue
+			}
+			visible, err := s.orgServices.IsNamespaceVisible(ctx, orgID, dep.Name)
+			if err != nil {
+				slog.WarnContext(ctx, "org-service resolver: namespace-visible check failed",
+					"org", orgID, "dependency", dep.Name, "error", err)
+				continue
+			}
+			if visible {
+				dep.Status = models.DependencyStatusResolved
+				dep.Reason = ""
+				continue
+			}
+			// Not namespace-visible: refine into `blocked` (project-only —
+			// requestable via access request) vs `unresolved` (absent — not
+			// in the catalog at all).
+			dep.Status = models.DependencyStatusUnresolved
+			dep.Reason = ""
+			exists, err := s.orgServices.ExistsAnyVisibility(ctx, orgID, dep.Name)
+			if err != nil {
+				slog.WarnContext(ctx, "org-service resolver: exists-any-visibility check failed",
+					"org", orgID, "dependency", dep.Name, "error", err)
+				continue
+			}
+			if exists {
+				// Provider exists but publishes only project-only — consumer
+				// must request access.
+				dep.Status = models.DependencyStatusBlocked
+				dep.Reason = models.DependencyReasonAccessRequired
+			} else {
+				dep.Reason = models.DependencyReasonNotFound
+			}
+		}
+	}
 }
 
 // WriteDesign splits the in-memory design into multiple files, then writes

@@ -52,6 +52,21 @@ const (
 	DependencyKindPlatformResource DependencyKind = "platform-resource"
 )
 
+// Dependency Status/Reason enum values. These are read-time computed (see
+// the Dependency.Status/Reason doc below) — never authored, never persisted.
+// The 4-state org-service resolution model (artifacts.resolveOrgServices)
+// produces DependencyStatusResolved / DependencyStatusBlocked (with
+// DependencyReasonAccessRequired) / DependencyStatusUnresolved (with
+// DependencyReasonNotFound).
+const (
+	DependencyStatusResolved   = "resolved"
+	DependencyStatusBlocked    = "blocked"
+	DependencyStatusUnresolved = "unresolved"
+
+	DependencyReasonAccessRequired = "access-required"
+	DependencyReasonNotFound       = "not-found"
+)
+
 // Dependency is the unified, kind-discriminated dependency entry on a
 // component. It subsumes the legacy DependsOn (sibling components) and the
 // external HTTP APIs a component consumed at runtime. Go has no native
