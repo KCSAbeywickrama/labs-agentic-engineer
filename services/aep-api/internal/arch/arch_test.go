@@ -31,8 +31,13 @@
 //     anchors), and the deliberately-flat models/ + repositories/ kernel.
 //
 // The feature and platform package lists are discovered from disk
-// (os.ReadDir), so a new package is policed the moment it exists. Runs under
-// plain `go test` — no extra tooling.
+// (os.ReadDir), so a new package is policed the moment it exists. Feature
+// discovery recurses one level into a top-level feature dir when it hosts a
+// NESTED umbrella (e.g. dependencies/{endpoints,resources}, mirroring
+// OpenChoreo's Workload.spec.dependencies split): each child that is itself a
+// buildable Go package becomes its own "<parent>/<child>" feature key,
+// policed exactly like a flat feature — including its own allowlist row.
+// Runs under plain `go test` — no extra tooling.
 package arch
 
 import (
@@ -53,20 +58,27 @@ const mod = "github.com/wso2/aep/aep-api"
 // decision: extend this list in the same PR and say why, or (usually better)
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
-	"artifacts":     {"gitrepo"},
-	"codingagent":   {"artifacts", "component", "gitrepo", "orgcreds"},
-	"component":     {"artifacts", "gitrepo"},
-	"design":        {"artifacts"},
-	"gitrepo":       {},
-	"idp":           {"orgcreds"},
-	"organization":  {},
-	"orgcreds":      {"gitrepo"},
-	"project":       {"artifacts", "gitrepo"},
-	"requirements":  {"artifacts"},
-	"runtimeconfig": {"artifacts"},
-	"skills":        {"artifacts", "gitrepo"},
-	"task":          {"artifacts", "gitrepo"},
-	"webhook":       {"gitrepo", "orgcreds"},
+	"artifacts":   {"gitrepo"},
+	"codingagent": {"artifacts", "component", "gitrepo", "orgcreds"},
+	"component":   {"artifacts", "gitrepo"},
+	// dependencies is the nested umbrella for a design component's external
+	// dependency graph (OpenChoreo Workload.spec.dependencies.{endpoints[],
+	// resources[]}); the parent may import its own children ONLY — anything
+	// wider is a design decision for a later task, added here with rationale.
+	"dependencies":           {"dependencies/endpoints", "dependencies/resources"},
+	"dependencies/endpoints": {},
+	"dependencies/resources": {},
+	"design":                 {"artifacts"},
+	"gitrepo":                {},
+	"idp":                    {"orgcreds"},
+	"organization":           {},
+	"orgcreds":               {"gitrepo"},
+	"project":                {"artifacts", "gitrepo"},
+	"requirements":           {"artifacts"},
+	"runtimeconfig":          {"artifacts"},
+	"skills":                 {"artifacts", "gitrepo"},
+	"task":                   {"artifacts", "gitrepo"},
+	"webhook":                {"gitrepo", "orgcreds"},
 }
 
 // depCache memoizes each package's transitive import set so the boundary
@@ -131,11 +143,77 @@ func listDir(t *testing.T, rel string) []string {
 	return names
 }
 
+// hasGoFiles reports whether dir (relative to this test file) contains at
+// least one top-level .go file, i.e. whether it is itself a buildable Go
+// package rather than a pure directory-only grouping. `go list` FATALs on a
+// directory with no .go files, so callers must check this before treating a
+// dir as a feature.
+func hasGoFiles(t *testing.T, dir string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
+			return true
+		}
+	}
+	return false
+}
+
+// listFeatures discovers every feature KEY under internal/feature: each
+// top-level dir, plus one level of recursion into a NESTED umbrella. A child
+// dir only becomes its own "<parent>/<child>" key when it is itself a
+// buildable Go package (dependencies/{endpoints,resources}); a child named
+// "*test" is a hand-fake package (see artifacts/artifactstest), not a
+// feature, and is skipped — the same exception TestPlatformAndContractsAreFeatureFree
+// carves out for componenttest. This keeps recursion from sweeping up
+// ordinary test-support packages as if they were siblings of the feature that
+// owns them.
+func listFeatures(t *testing.T) []string {
+	t.Helper()
+	var keys []string
+	for _, top := range listDir(t, "../feature") {
+		keys = append(keys, top)
+		topDir := filepath.Join("..", "feature", top)
+		for _, sub := range listDir(t, topDir) {
+			if strings.HasSuffix(sub, "test") {
+				continue
+			}
+			if !hasGoFiles(t, filepath.Join(topDir, sub)) {
+				continue
+			}
+			keys = append(keys, top+"/"+sub)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// featureKeyForImport maps a path relative to internal/feature/ (e.g.
+// "dependencies/resources" or, for a deeper import inside a nested feature,
+// "dependencies/resources/foo") to the feature KEY that owns it. It matches
+// the LONGEST known feature key that is a prefix of rel, so an import of
+// internal/feature/dependencies/resources registers as an edge to
+// "dependencies/resources", never the shorter "dependencies".
+func featureKeyForImport(features []string, rel string) (string, bool) {
+	best := ""
+	for _, f := range features {
+		if rel == f || strings.HasPrefix(rel, f+"/") {
+			if len(f) > len(best) {
+				best = f
+			}
+		}
+	}
+	return best, best != ""
+}
+
 // TestNoFlatServicesOrControllers asserts there are no flat layers: no
 // feature, platform leaf, or wiring package imports the deleted services/ or
 // controllers/ packages.
 func TestNoFlatServicesOrControllers(t *testing.T) {
-	for _, f := range listDir(t, "../feature") {
+	for _, f := range listFeatures(t) {
 		pkg := mod + "/internal/feature/" + f
 		if imports(t, pkg, mod+"/services") {
 			t.Errorf("%s imports the flat services package (should be gone)", f)
@@ -170,9 +248,12 @@ func TestFlatPackagesDeleted(t *testing.T) {
 // exactly featureEdgeAllowlist — new coupling fails loudly, and a stale
 // allowlist entry fails too so the list stays honest. This subsumes the old
 // 4-edge denylist (task↔codingagent, design→task/component are simply not on
-// the list).
+// the list). One exception to "stale": a nested umbrella's parent→own-child
+// row (dependencies → dependencies/endpoints|resources) is a scope boundary,
+// not a claim of current usage, so it doesn't need a real import yet to stay
+// off the stale list — see the loop below.
 func TestFeatureEdgeAllowlist(t *testing.T) {
-	features := listDir(t, "../feature")
+	features := listFeatures(t)
 
 	// Every on-disk feature must have an allowlist row (even an empty one) —
 	// a brand-new feature gets policed the moment it exists.
@@ -200,19 +281,40 @@ func TestFeatureEdgeAllowlist(t *testing.T) {
 		for _, e := range featureEdgeAllowlist[f] {
 			allowed[e] = true
 		}
-		var actual []string
+		// De-dupe through a set: a nested feature (e.g. dependencies) can
+		// have several direct imports that all resolve to the same child
+		// edge, and counting the same edge twice would falsely re-trigger
+		// the "not on the allowlist" check on its second occurrence.
+		actual := map[string]bool{}
 		for _, imp := range directImports(t, featPrefix+f) {
-			if strings.HasPrefix(imp, featPrefix) {
-				actual = append(actual, strings.TrimPrefix(imp, featPrefix))
+			if !strings.HasPrefix(imp, featPrefix) {
+				continue
 			}
+			rel := strings.TrimPrefix(imp, featPrefix)
+			edge, ok := featureKeyForImport(features, rel)
+			if !ok {
+				t.Errorf("%s imports %s, which is under internal/feature/ but matches no known feature key — is a new feature missing from listFeatures or the allowlist?", f, imp)
+				continue
+			}
+			actual[edge] = true
 		}
-		for _, edge := range actual {
+		for edge := range actual {
 			if !allowed[edge] {
 				t.Errorf("NEW feature edge %s → %s is not on the allowlist — prefer a consumer-side port; if the concrete edge is a deliberate design decision, add it to featureEdgeAllowlist with rationale in the PR", f, edge)
 			}
 			delete(allowed, edge)
 		}
 		for stale := range allowed {
+			// A parent→own-child row inside a nested umbrella (e.g.
+			// dependencies → dependencies/endpoints) is a standing scope
+			// boundary — "the parent MAY reach into its children" — not a
+			// claim that it currently does. It can't rot the way a real
+			// cross-feature edge can: the moment the parent imports anything
+			// OUTSIDE its own children, the new-edge check above still
+			// fails it. So exempt it from the staleness check alone.
+			if strings.HasPrefix(stale, f+"/") {
+				continue
+			}
 			t.Errorf("allowlist edge %s → %s no longer exists — remove it so the list stays honest", f, stale)
 		}
 	}
