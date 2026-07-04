@@ -33,7 +33,27 @@
 //   - naming.go — ExternalResourceName / ExternalResourceBindingName, the
 //     single source of truth for the OC CR names.
 //
+// Platform-resource machinery (platform_*.go, resources_service.go):
+//
+//   - ResourceTypeCatalog (platform_catalog.go) — read-only discovery of the
+//     installed cluster-scoped ClusterResourceTypes (AEP never authors them).
+//   - ResourceProvisioner / OCNativeProvisioner (platform_provisioner.go) —
+//     authors the OC Resource model for a platform-resource dep against a
+//     DISCOVERED ClusterResourceType (never EnsureResourceType), async: it
+//     pins the per-env bindings and returns without waiting for readiness.
+//   - ResourceService (resources_service.go) — design read → kind policy →
+//     provision → move the resource-provisioning task pending→building via
+//     the contracts TaskEventProvisionStarted event through the TaskCompleter.
+//
+// HTTP surface (resources_huma.go, org-implicit paths):
+//
+//	GET    /dependencies/external-resources
+//	DELETE /dependencies/external-resources/{name}
+//	POST   /projects/{p}/dependencies/external-resources/{name}/values
+//	POST   /projects/{p}/components/{c}/dependencies/{dep}/provision   (202)
+//	GET    /projects/{p}/components/{c}/dependencies/{dep}/status
+//
 // The package holds NO feature imports (empty arch-allowlist row): the org
-// catalog, SM-API writer, task repo and task projector are consumer-side
-// ports in ports.go, wired concretely in the composition root.
+// catalog, SM-API writer, task repo, task projector and design reader are
+// consumer-side ports in ports.go, wired concretely in the composition root.
 package resources

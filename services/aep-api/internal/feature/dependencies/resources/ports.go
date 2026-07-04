@@ -26,6 +26,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // externalResourceLookup is the slice of the org-level external-resource
@@ -66,3 +67,30 @@ type TaskCompleter interface {
 // dispatched. Wraps the dispatch service in the composition root (avoids a
 // package dependency on the dispatcher's result type).
 type RedispatchFunc func(ctx context.Context, orgID, projectID string) error
+
+// ExternalResourceRegistry is the slice of the org-level external-resource
+// catalog the HTTP surface reads and prunes: the listing (with per-entry
+// consumers for the in-use delete guard) and the guarded delete.
+// *repositories.ExternalResourceRepository satisfies it directly — per the
+// C2 decision there is NO registry wrapper service; repositories is the flat
+// shared kernel (not a feature package), so naming its consumer DTO here
+// keeps the package's feature-edge allowlist row empty.
+type ExternalResourceRegistry interface {
+	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)
+	Consumers(ctx context.Context, orgID, name string) ([]repositories.ExternalResourceConsumer, error)
+	Delete(ctx context.Context, orgID, name string) error
+}
+
+var _ ExternalResourceRegistry = (*repositories.ExternalResourceRepository)(nil)
+
+// DesignReader is the slice of the design store the ResourceService reads:
+// the project's authored design components, whose platform-resource entries
+// carry the ClusterResourceType to provision. It deliberately returns ONLY
+// models-typed data — NOT artifacts.DesignFile — so this package keeps its
+// empty arch-allowlist row (no dependencies/resources → artifacts feature
+// edge). The composition root adapts artifacts.ArtifactStore.ReadDesign with
+// a one-line wrapper returning design.Components ((nil, nil) design ⇒ nil
+// components — "no design yet").
+type DesignReader interface {
+	ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error)
+}

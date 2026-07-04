@@ -21,3 +21,20 @@ import "errors"
 // ErrNotRegistered is returned when a value submission names an external
 // resource the org has not registered. Endpoint layers map it to 404.
 var ErrNotRegistered = errors.New("external resource is not registered for the org")
+
+// Sentinels for the platform-resource provision/status flow. The HTTP layer
+// maps them: ErrDepNotFound → 404, ErrDepWrongKind → 400 (its wrap message
+// names the dep's actual kind and the applicable one), ErrProvisionFailed →
+// 502.
+var (
+	// ErrDepNotFound is returned when the named dependency (or its component,
+	// or the whole design) is absent from the project's design.
+	ErrDepNotFound = errors.New("platform-resource dependency not found")
+
+	// ErrDepWrongKind is returned when the named dependency exists but is not
+	// a platform-resource — the requested action does not apply to its kind.
+	ErrDepWrongKind = errors.New("dependency kind does not support this action")
+
+	// ErrProvisionFailed is returned when the ResourceProvisioner call fails.
+	ErrProvisionFailed = errors.New("platform provisioner failed")
+)

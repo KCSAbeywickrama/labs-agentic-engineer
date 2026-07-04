@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
@@ -61,12 +62,19 @@ type HumaDeps struct {
 	BearerSvc           *orgcreds.BearerService
 	AnthropicSvc        *orgcreds.AnthropicCredentialService
 	TaskTokens          *auth.TaskTokenManager
-	SkillSvc            *skills.SkillService
-	SkillMutationSvc    *skills.SkillMutationService
-	SkillImportSvc      *skills.SkillImportService
-	GitHubAppSlug       string
-	BFFPublicURL        string
-	GitHubAppClientID   string
+	// Dependencies/resources surface (external-resource catalog + values,
+	// platform-resource provision/status). Wired by the composition root in a
+	// later task; zero values nil-guard to 503 at the handlers.
+	ExternalResourceRegistry resources.ExternalResourceRegistry
+	ExternalResourceValues   *resources.ValueService
+	ResourceSvc              *resources.ResourceService
+	ResourceClient           openchoreo.ResourceClient
+	SkillSvc                 *skills.SkillService
+	SkillMutationSvc         *skills.SkillMutationService
+	SkillImportSvc           *skills.SkillImportService
+	GitHubAppSlug            string
+	BFFPublicURL             string
+	GitHubAppClientID        string
 }
 
 // RegisterAllHuma registers every migrated feature's operations on the Huma API.
@@ -81,6 +89,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	requirements.RegisterRequirementsChat(api, d.RequirementsChatSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
 	design.RegisterDesign(api, d.DesignSvc)
+	resources.RegisterResources(api, d.ExternalResourceRegistry, d.ExternalResourceValues, d.ResourceSvc, d.ResourceClient)
 	task.RegisterTask(api, d.TaskSvc, d.TaskDispatcher, d.TaskProgress, d.ComponentClient)
 	task.RegisterBoard(api, d.BoardSvc)
 	idp.RegisterIDP(api, d.IDPSvc)
