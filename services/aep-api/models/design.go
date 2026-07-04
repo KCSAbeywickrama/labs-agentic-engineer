@@ -19,13 +19,23 @@ package models
 // DesignComponent describes a single component within a design.
 // This matches the structured output schema from the AI Agent SDK.
 type DesignComponent struct {
-	Name                       string          `json:"name"`
-	ComponentType              string          `json:"componentType"`
-	Language                   string          `json:"language"`
-	Dependencies               []Dependency    `json:"dependencies"`
-	Entrypoint                 string          `json:"entrypoint"`
-	Buildpack                  string          `json:"buildpack"`
-	AppPath                    string          `json:"appPath"`
+	Name          string       `json:"name"`
+	ComponentType string       `json:"componentType"`
+	Version       string       `json:"version,omitempty"`
+	Language      string       `json:"language"`
+	Dependencies  []Dependency `json:"dependencies"`
+	Entrypoint    string       `json:"entrypoint"`
+	Buildpack     string       `json:"buildpack"`
+	AppPath       string       `json:"appPath"`
+	// Exposure is the gateway exposure of the component's endpoint
+	// ("internet" | "intranet"). It is distinct from ExposesAPI (which is the
+	// managed-API auth policy) — a component can be intranet-exposed without a
+	// managed API and vice versa. Sourced from the design.json `exposure` key.
+	Exposure string `json:"exposure,omitempty"`
+	// Description is the single-responsibility prose (what the component does /
+	// does NOT do) — the design.json `description` key. This is the successor to
+	// the per-component design.md markdown body.
+	Description                string          `json:"description,omitempty"`
 	OpenAPISpec                string          `json:"openAPISpec"`
 	ComponentAgentInstructions string          `json:"componentAgentInstructions"`
 	CallerIdentity             *CallerIdentity `json:"callerIdentity,omitempty"`

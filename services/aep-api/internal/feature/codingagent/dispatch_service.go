@@ -916,7 +916,7 @@ func (s *dispatchService) ensureOCComponent(
 	// yet — OC creates them after autoDeploy observes the build's Workload —
 	// so the next config save (or the caller's post-dispatch reconcile) is
 	// what lands env vars into them.
-	// Derive the `api-configuration` trait from design.md's optional
+	// Derive the `api-configuration` trait from design.json's optional
 	// `exposesAPI.auth` block. nil/none ⇒ no trait, no AP hop;
 	// `required` ⇒ trait attached with cors+jwtAuth enabled in every env.
 	// See services/trait_sync.go for the canonical emitter.

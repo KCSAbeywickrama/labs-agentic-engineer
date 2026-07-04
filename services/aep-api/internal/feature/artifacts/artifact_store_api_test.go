@@ -23,11 +23,11 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// Round-trip frontmatter ± exposesAPI block: components without
-// `exposesAPI` produce no `exposesAPI:` line in the YAML, and components
-// with `exposesAPI.auth: end-user-required` survive Split → Assemble
-// cleanly with managed/userContext preserved.
-func TestComponentFrontmatterAPIRoundTrip(t *testing.T) {
+// Round-trip design.json ± exposesAPI block: components without `exposesAPI`
+// produce no `exposesAPI` key in the design.json, and components with
+// `exposesAPI.auth: end-user-required` survive Split → Assemble cleanly with
+// managed/userContext preserved.
+func TestComponentDesignJSONAPIRoundTrip(t *testing.T) {
 	cases := []struct {
 		name                string
 		comp                models.DesignComponent
@@ -78,17 +78,17 @@ func TestComponentFrontmatterAPIRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SplitDesign: %v", err)
 			}
-			path := componentDirPrefix + c.comp.Name + "/design.md"
+			path := componentDirPrefix + c.comp.Name + "/" + ComponentDesignFile
 			content, ok := files[path]
 			if !ok {
 				t.Fatalf("expected %s in files; got keys: %v", path, keysOf(files))
 			}
 			if c.wantContainsExposes {
-				if !strings.Contains(content, "exposesAPI:") || !strings.Contains(content, "auth: "+c.wantAuthAfter) {
+				if !strings.Contains(content, `"exposesAPI"`) || !strings.Contains(content, `"auth": "`+c.wantAuthAfter+`"`) {
 					t.Fatalf("expected exposesAPI block with auth=%q in:\n%s", c.wantAuthAfter, content)
 				}
 			} else {
-				if strings.Contains(content, "exposesAPI:") {
+				if strings.Contains(content, `"exposesAPI"`) {
 					t.Fatalf("did NOT expect any exposesAPI block in:\n%s", content)
 				}
 			}

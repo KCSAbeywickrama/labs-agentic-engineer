@@ -193,7 +193,7 @@ func TestListDesignFiles_NestedKeysForwardSlashed(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
 		"specs/design/design.md":                        "root\n",
-		"specs/design/components/user-api/design.md":    "comp\n",
+		"specs/design/components/user-api/design.json":  "comp\n",
 		"specs/design/components/user-api/openapi.yaml": "openapi: 3.0.0\n",
 		"specs/design/notes.txt":                        "ignored",
 	})
@@ -203,7 +203,7 @@ func TestListDesignFiles_NestedKeysForwardSlashed(t *testing.T) {
 	}
 	want := map[string]string{
 		"design.md":                        "root\n",
-		"components/user-api/design.md":    "comp\n",
+		"components/user-api/design.json":  "comp\n",
 		"components/user-api/openapi.yaml": "openapi: 3.0.0\n",
 	}
 	if len(files) != len(want) {
@@ -282,7 +282,7 @@ func TestDeleteDesignFile(t *testing.T) {
 	t.Run("missing returns ErrArtifactNotFound", func(t *testing.T) {
 		t.Parallel()
 		r := newRig(t, map[string]string{"specs/design/design.md": "root\n"})
-		err := r.svc.DeleteDesignFile(context.Background(), r.org, r.proj, "components/ghost/design.md")
+		err := r.svc.DeleteDesignFile(context.Background(), r.org, r.proj, "components/ghost/design.json")
 		if !errors.Is(err, ErrArtifactNotFound) {
 			t.Fatalf("err = %v, want ErrArtifactNotFound", err)
 		}
@@ -291,10 +291,10 @@ func TestDeleteDesignFile(t *testing.T) {
 	t.Run("empty parent dirs cleaned up but walk stops at DesignDir", func(t *testing.T) {
 		t.Parallel()
 		r := newRig(t, map[string]string{
-			"specs/design/design.md":                "root\n",
-			"specs/design/components/foo/design.md": "foo\n",
+			"specs/design/design.md":                  "root\n",
+			"specs/design/components/foo/design.json": "foo\n",
 		})
-		if err := r.svc.DeleteDesignFile(context.Background(), r.org, r.proj, "components/foo/design.md"); err != nil {
+		if err := r.svc.DeleteDesignFile(context.Background(), r.org, r.proj, "components/foo/design.json"); err != nil {
 			t.Fatalf("DeleteDesignFile: %v", err)
 		}
 		// components/foo emptied -> removed; components then empty -> removed.
@@ -347,8 +347,8 @@ func TestDeleteDesignDirectory(t *testing.T) {
 	t.Run("happy removes the whole subtree", func(t *testing.T) {
 		t.Parallel()
 		r := newRig(t, map[string]string{
-			"specs/design/design.md":                "root\n",
-			"specs/design/components/foo/design.md": "foo\n",
+			"specs/design/design.md":                  "root\n",
+			"specs/design/components/foo/design.json": "foo\n",
 		})
 		if err := r.svc.DeleteDesignDirectory(context.Background(), r.org, r.proj, "components"); err != nil {
 			t.Fatalf("DeleteDesignDirectory: %v", err)

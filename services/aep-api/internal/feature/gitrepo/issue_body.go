@@ -101,7 +101,7 @@ func BuildIssueBody(task *models.ComponentTask, comp *models.DesignComponent, _r
 		if comp.AppPath != "" {
 			sb.WriteString(fmt.Sprintf("- **App Path (within repo):** `%s`\n", normalizeAppPath(comp.AppPath)))
 		}
-		sb.WriteString(fmt.Sprintf("- **Design:** `specs/design/components/%s/design.md`\n", task.ComponentName))
+		sb.WriteString(fmt.Sprintf("- **Design:** `specs/design/components/%s/design.json`\n", task.ComponentName))
 		if comp.OpenAPISpec != "" {
 			sb.WriteString(fmt.Sprintf("- **Contract:** `specs/design/components/%s/openapi.yaml`\n", task.ComponentName))
 		}

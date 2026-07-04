@@ -98,7 +98,7 @@ type ComponentTask struct {
 	OrgID     string `gorm:"index;not null" json:"-"`
 
 	// Component identity — name only. Full component shape lives under
-	// `specs/design/components/<ComponentName>/` (design.md +
+	// `specs/design/components/<ComponentName>/` (design.json +
 	// optional openapi.yaml).
 	ComponentName string `gorm:"not null" json:"componentName"`
 

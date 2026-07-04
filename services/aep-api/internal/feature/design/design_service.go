@@ -469,7 +469,7 @@ func (s *designService) GetDesignBundleAtTag(ctx context.Context, orgID, project
 // UpdateDesignFile writes a single file under specs/design/ and returns
 // the refreshed bundle.
 //
-// Side effect: when the written file is a per-component `design.md`,
+// Side effect: when the written file is a per-component `design.json`,
 // fire `SyncComponentTraits` so an `exposesAPI.auth` toggle propagates to
 // the OC Component + ReleaseBindings before the next dispatch. Best-
 // effort — failures are logged but never bubble (design tree is the
@@ -494,12 +494,12 @@ func (s *designService) UpdateDesignFile(ctx context.Context, orgID, projectID, 
 }
 
 // componentNameFromDesignPath returns the component name encoded in a
-// `components/<name>/design.md` sub-path, or false for any other path
+// `components/<name>/design.json` sub-path, or false for any other path
 // (root design.md, openapi.yaml, etc.). Used by UpdateDesignFile to gate
 // the trait_sync hook to the one path where `exposesAPI.auth` lives.
 func componentNameFromDesignPath(subPath string) (string, bool) {
 	const prefix = "components/"
-	const suffix = "/design.md"
+	const suffix = "/design.json"
 	if !strings.HasPrefix(subPath, prefix) || !strings.HasSuffix(subPath, suffix) {
 		return "", false
 	}

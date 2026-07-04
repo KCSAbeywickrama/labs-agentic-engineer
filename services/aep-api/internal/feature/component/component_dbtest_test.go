@@ -139,7 +139,8 @@ func TestConfigRepository_RoundTripAndScoping_DB(t *testing.T) {
 func multiComponentDesign(names ...string) map[string]string {
 	files := map[string]string{artifacts.DesignRootFile: "# Overview\n"}
 	for _, n := range names {
-		files["components/"+n+"/design.md"] = "---\ntype: service\n---\n\nbody\n"
+		files["components/"+n+"/design.json"] = "{\n  \"name\": \"" + n +
+			"\",\n  \"type\": \"service\",\n  \"description\": \"body\",\n  \"dependencies\": []\n}\n"
 	}
 	return files
 }

@@ -18,7 +18,7 @@ package design
 
 import "testing"
 
-// TestComponentNameFromDesignPath — only `components/<name>/design.md`
+// TestComponentNameFromDesignPath — only `components/<name>/design.json`
 // triggers trait_sync; root design.md and openapi.yaml are ignored. Gate
 // for the design-edit write site (componentNameFromDesignPath lives in
 // design_service.go).
@@ -28,12 +28,13 @@ func TestComponentNameFromDesignPath(t *testing.T) {
 		wantName string
 		wantOK   bool
 	}{
-		{"components/svc/design.md", "svc", true},
-		{"components/user-api/design.md", "user-api", true},
+		{"components/svc/design.json", "svc", true},
+		{"components/user-api/design.json", "user-api", true},
+		{"components/svc/design.md", "", false},
 		{"design.md", "", false},
 		{"components/svc/openapi.yaml", "", false},
-		{"components//design.md", "", false},
-		{"components/a/b/design.md", "", false},
+		{"components//design.json", "", false},
+		{"components/a/b/design.json", "", false},
 		{"", "", false},
 	}
 	for _, c := range cases {

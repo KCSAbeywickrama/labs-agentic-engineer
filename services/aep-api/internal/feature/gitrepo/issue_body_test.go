@@ -71,7 +71,7 @@ func TestBuildIssueBody_FullLayout(t *testing.T) {
 		"- **Type:** service",
 		"- **Language/Stack:** go",
 		"- **App Path (within repo):** `auth-api`", // leading slash normalized
-		"- **Design:** `specs/design/components/auth-api/design.md`",
+		"- **Design:** `specs/design/components/auth-api/design.json`",
 		"- **Contract:** `specs/design/components/auth-api/openapi.yaml`",
 		"- **System overview:** `specs/design/design.md`",
 		"include `Closes #42`",

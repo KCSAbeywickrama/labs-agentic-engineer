@@ -99,9 +99,10 @@ func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projec
 // `specs/design/`:
 //
 //	design.md                              # overview prose + sourceSpec frontmatter
-//	components/<name>/design.md            # frontmatter (type, language, dependsOn,
-//	                                       # buildpack, appPath, entrypoint) + body
-//	                                       # (componentAgentInstructions)
+//	components/<name>/design.json          # authored ComponentDesign (type, version,
+//	                                       # language, buildpack, appPath, entrypoint,
+//	                                       # exposure, description, dependencies[],
+//	                                       # exposesAPI, callerIdentity)
 //	components/<name>/openapi.yaml         # OpenAPI 3.0.3 (service components only)
 type DesignFile struct {
 	Overview      string                   `json:"overview"`
@@ -114,13 +115,18 @@ type DesignFile struct {
 // via the API.
 const DesignRootFile = "design.md"
 
+// ComponentDesignFile is the authored per-component design document basename,
+// stored at `components/<name>/design.json`. It replaces the former
+// per-component design.md.
+const ComponentDesignFile = "design.json"
+
 // componentDirPrefix is the path prefix under specs/design/ for per-component
 // directories.
 const componentDirPrefix = "components/"
 
 // ListDesignFiles returns the working-tree file map under `specs/design/`.
 // Keys are paths relative to that directory, using forward slashes (e.g.
-// `design.md`, `components/user-api/design.md`).
+// `design.md`, `components/user-api/design.json`).
 func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	files, err := s.artifactSvc.ListDesignFiles(ctx, orgID, projectID)
 	if err != nil {
@@ -240,36 +246,6 @@ type rootFrontmatter struct {
 	SkillsApplied []string `yaml:"skillsApplied,omitempty"`
 }
 
-// componentFrontmatter is the YAML frontmatter we accept on each
-// `components/<name>/design.md`. Field names mirror the user-facing keys
-// (snake-free) so frontmatter the architect emits is human-editable.
-type componentFrontmatter struct {
-	Type           string                `yaml:"type"`
-	Language       string                `yaml:"language,omitempty"`
-	DependsOn      []string              `yaml:"dependsOn,omitempty"`
-	Buildpack      string                `yaml:"buildpack,omitempty"`
-	AppPath        string                `yaml:"appPath,omitempty"`
-	Entrypoint     string                `yaml:"entrypoint,omitempty"`
-	ExposesAPI     *exposesAPIConfig     `yaml:"exposesAPI,omitempty"`
-	CallerIdentity *callerIdentityConfig `yaml:"callerIdentity,omitempty"`
-}
-
-// exposesAPIConfig is the on-disk shape for a service component's API
-// exposure policy. `Auth: "end-user-required"` ⇒ gateway validates a
-// user JWT and injects UserContext upstream.
-type exposesAPIConfig struct {
-	Managed     bool   `yaml:"managed,omitempty"`
-	Auth        string `yaml:"auth,omitempty"`
-	UserContext string `yaml:"userContext,omitempty"`
-}
-
-// callerIdentityConfig is the on-disk shape for a web-app's caller-
-// identity intent. `Mode: "end-user"` ⇒ the SPA performs OIDC + PKCE
-// against the platform IDP.
-type callerIdentityConfig struct {
-	Mode string `yaml:"mode,omitempty"`
-}
-
 // SplitFrontmatter separates the leading YAML frontmatter block (delimited
 // by `---` lines) from the body. If the file has no frontmatter, returns
 // ("", content, nil).
@@ -341,7 +317,7 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	componentNames := ComponentNamesIn(files)
 	out.Components = make([]models.DesignComponent, 0, len(componentNames))
 	for _, name := range componentNames {
-		designPath := componentDirPrefix + name + "/design.md"
+		designPath := componentDirPrefix + name + "/" + ComponentDesignFile
 		raw, ok := files[designPath]
 		if !ok {
 			continue
@@ -355,57 +331,20 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	return out, nil
 }
 
-func assembleComponent(name, designMd string, files map[string]string) (models.DesignComponent, error) {
-	fm, body, err := SplitFrontmatter(designMd)
+// assembleComponent parses a component's authored design.json and pairs it with
+// the sibling openapi.yaml (a separate file, not a design.json key).
+func assembleComponent(name, designJSON string, files map[string]string) (models.DesignComponent, error) {
+	comp, err := parseComponentDesignJSON(name, designJSON)
 	if err != nil {
-		return models.DesignComponent{}, fmt.Errorf("frontmatter: %w", err)
-	}
-	var cfm componentFrontmatter
-	if fm != "" {
-		if err := yaml.Unmarshal([]byte(fm), &cfm); err != nil {
-			return models.DesignComponent{}, fmt.Errorf("decode frontmatter: %w", err)
-		}
+		return models.DesignComponent{}, err
 	}
 	openapi := files[componentDirPrefix+name+"/openapi.yaml"]
 	if openapi == "" {
 		// Fallback: support .yml as well.
 		openapi = files[componentDirPrefix+name+"/openapi.yml"]
 	}
-	// Frontmatter still carries the flat `dependsOn:` name list (a later task
-	// replaces this codec with design.json). Map each entry to a unified
-	// component-kind Dependency so the in-memory model is uniform.
-	deps := make([]models.Dependency, 0, len(cfm.DependsOn))
-	for _, name := range cfm.DependsOn {
-		if name == "" {
-			continue
-		}
-		deps = append(deps, models.Dependency{Kind: models.DependencyKindComponent, Name: name})
-	}
-	var exposes *models.ExposesAPI
-	if cfm.ExposesAPI != nil && (cfm.ExposesAPI.Auth != "" || cfm.ExposesAPI.Managed || cfm.ExposesAPI.UserContext != "") {
-		exposes = &models.ExposesAPI{
-			Managed:     cfm.ExposesAPI.Managed,
-			Auth:        cfm.ExposesAPI.Auth,
-			UserContext: cfm.ExposesAPI.UserContext,
-		}
-	}
-	var caller *models.CallerIdentity
-	if cfm.CallerIdentity != nil && cfm.CallerIdentity.Mode != "" {
-		caller = &models.CallerIdentity{Mode: cfm.CallerIdentity.Mode}
-	}
-	return models.DesignComponent{
-		Name:                       name,
-		ComponentType:              cfm.Type,
-		Language:                   cfm.Language,
-		Dependencies:               deps,
-		Entrypoint:                 cfm.Entrypoint,
-		Buildpack:                  cfm.Buildpack,
-		AppPath:                    cfm.AppPath,
-		OpenAPISpec:                openapi,
-		ComponentAgentInstructions: strings.TrimSpace(body),
-		ExposesAPI:                 exposes,
-		CallerIdentity:             caller,
-	}, nil
+	comp.OpenAPISpec = openapi
+	return comp, nil
 }
 
 // ComponentNamesIn walks the file map and returns the unique component
@@ -466,32 +405,11 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 			return nil, fmt.Errorf("component with empty name")
 		}
 		base := componentDirPrefix + comp.Name
-		cfm := componentFrontmatter{
-			Type:       comp.ComponentType,
-			Language:   comp.Language,
-			DependsOn:  comp.ComponentDependsOn(),
-			Buildpack:  comp.Buildpack,
-			AppPath:    comp.AppPath,
-			Entrypoint: comp.Entrypoint,
-		}
-		// Preserve any non-empty field — gating on `Auth != ""` would drop
-		// designs that set only `managed` or `userContext`.
-		if comp.ExposesAPI != nil && (comp.ExposesAPI.Auth != "" || comp.ExposesAPI.Managed || comp.ExposesAPI.UserContext != "") {
-			cfm.ExposesAPI = &exposesAPIConfig{
-				Managed:     comp.ExposesAPI.Managed,
-				Auth:        comp.ExposesAPI.Auth,
-				UserContext: comp.ExposesAPI.UserContext,
-			}
-		}
-		if comp.CallerIdentity != nil && comp.CallerIdentity.Mode != "" {
-			cfm.CallerIdentity = &callerIdentityConfig{Mode: comp.CallerIdentity.Mode}
-		}
-		cfmBytes, err := marshalFrontmatter(cfm)
+		designJSON, err := marshalComponentDesignJSON(comp.Name, comp)
 		if err != nil {
-			return nil, fmt.Errorf("encode component %q frontmatter: %w", comp.Name, err)
+			return nil, fmt.Errorf("encode component %q design.json: %w", comp.Name, err)
 		}
-		header := fmt.Sprintf("# %s\n\n", comp.Name)
-		out[base+"/design.md"] = joinFrontmatter(string(cfmBytes), header+strings.TrimSpace(comp.ComponentAgentInstructions)+"\n")
+		out[base+"/"+ComponentDesignFile] = string(designJSON)
 		if openapi := strings.TrimSpace(comp.OpenAPISpec); openapi != "" {
 			out[base+"/openapi.yaml"] = openapi + "\n"
 		}

@@ -57,7 +57,7 @@ const goldenDir = "../../../testdata/harvest/golden"
 func validDesignTree() map[string]string {
 	return map[string]string{
 		artifacts.DesignRootFile:            "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
-		"components/hello-api/design.md":    "---\ntype: service\nlanguage: Go\n---\n\n# hello-api\n\nBuild it.\n",
+		"components/hello-api/design.json":  "{\n  \"name\": \"hello-api\",\n  \"type\": \"service\",\n  \"language\": \"Go\",\n  \"description\": \"Build it.\",\n  \"dependencies\": []\n}\n",
 		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
@@ -192,7 +192,7 @@ func TestDesignComponent_UpdateFileHappyAndValidation(t *testing.T) {
 
 	// Happy: writing a file returns the refreshed bundle.
 	resp := h.AsOrg("acme").Put(
-		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.md",
+		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.json",
 		`{"content":"# hello-api\n\nnew body"}`,
 	)
 	if resp.Code != 200 {
@@ -205,7 +205,7 @@ func TestDesignComponent_UpdateFileHappyAndValidation(t *testing.T) {
 	// Validation: the body's `content` is a required schema property — a body
 	// missing it is a Huma 422 that never reaches the service.
 	resp = h.AsOrg("acme").Put(
-		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.md",
+		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.json",
 		`{}`,
 	)
 	if resp.Code != 422 {

@@ -145,7 +145,7 @@ func (f *fakeSkillCatalog) List(_ context.Context, orgID string) ([]models.Skill
 func validDesignFiles() map[string]string {
 	return map[string]string{
 		artifacts.DesignRootFile:            "---\nsourceSpec: v1\n---\n\nOverview prose here.\n",
-		"components/hello-api/design.md":    "---\ntype: service\nlanguage: Go\n---\n\n# hello-api\n\nBuild it.\n",
+		"components/hello-api/design.json":  "{\n  \"name\": \"hello-api\",\n  \"type\": \"service\",\n  \"language\": \"Go\",\n  \"description\": \"Build it.\",\n  \"dependencies\": []\n}\n",
 		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
@@ -529,9 +529,9 @@ func TestStreamGenerate_RemovedComponentDirsAreDeleted(t *testing.T) {
 		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
 			// Prior tree has "old-svc"; the new design only has "svc-a".
 			return map[string]string{
-				artifacts.DesignRootFile:       "old\n",
-				"components/old-svc/design.md": "---\ntype: service\n---\n\n# old-svc\n",
-				"components/svc-a/design.md":   "---\ntype: service\n---\n\n# svc-a\n",
+				artifacts.DesignRootFile:         "old\n",
+				"components/old-svc/design.json": "{\n  \"name\": \"old-svc\",\n  \"type\": \"service\",\n  \"dependencies\": []\n}\n",
+				"components/svc-a/design.json":   "{\n  \"name\": \"svc-a\",\n  \"type\": \"service\",\n  \"dependencies\": []\n}\n",
 			}, nil
 		},
 		DeleteDesignDirectoryFunc: func(_ context.Context, _, _, sub string) error {
@@ -598,7 +598,7 @@ func TestUpdateDesignFile_ComponentDesignFiresTraitSync(t *testing.T) {
 	svc := newService(fake, nil)
 	svc.SetTraitSync(trait)
 
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/Hello API/design.md", "new"); err != nil {
+	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/Hello API/design.json", "new"); err != nil {
 		t.Fatalf("UpdateDesignFile: %v", err)
 	}
 	if len(trait.syncCalls) != 1 {
@@ -652,7 +652,7 @@ func TestUpdateDesignFile_NilTraitSyncDoesNotPanic(t *testing.T) {
 	}
 	// No SetTraitSync — production tolerates a nil port on this best-effort hook.
 	svc := newService(fake, nil)
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.md", "x"); err != nil {
+	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.json", "x"); err != nil {
 		t.Fatalf("nil traitSync must be a no-op, got: %v", err)
 	}
 }
@@ -674,7 +674,7 @@ func TestUpdateDesignFile_TraitSyncFailureIsBestEffort(t *testing.T) {
 	svc := newService(fake, nil)
 	svc.SetTraitSync(trait)
 	// A trait-sync failure must never bubble — the design tree is canonical.
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.md", "x"); err != nil {
+	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.json", "x"); err != nil {
 		t.Fatalf("trait sync failure must be swallowed, got: %v", err)
 	}
 }

@@ -468,7 +468,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// `api-configuration` ClusterTrait on a Component CR + per-environment
 	// ReleaseBindings. Hooked from both the dispatch path (after
 	// CreateComponent) and the design-edit path (after
-	// `components/<name>/design.md` PUT). See
+	// `components/<name>/design.json` PUT). See
 	// docs/design/api-platform-integration.md §6 Phase 2.
 	traitSyncService := component.NewTraitSyncService(componentClient, artifactStore)
 	designService.SetTraitSync(traitSyncService)
