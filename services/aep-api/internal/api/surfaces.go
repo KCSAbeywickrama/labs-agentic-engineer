@@ -21,13 +21,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
 // mountSurfaces wires every HTTP surface onto one outer mux and returns it. This
 // is the single screen that answers "what is exposed and who guards it" — the
-// whole boundary of the BFF in one place. There are four request surfaces plus
+// whole boundary of the BFF in one place. There are five request surfaces plus
 // the unauthenticated discovery endpoints:
 //
 //	Surface        Root                 Guard (who may call)                       Where it lives / spec
@@ -36,6 +37,8 @@ import (
 //	               (jwt → orgensure)    (org from the verified token, never input)  → api/openapi.yaml
 //	internal S2S   /internal/v1/tasks/  BFF Task-JWT or publisher-cc               internal.go · auth.RunnerScopedInput
 //	               (per-op resolver)    (dual-token verify + INT-6 fence)           → api/internal-openapi.yaml (non-public)
+//	internal MCP   /internal/v1/mcp     BFF-signed JWT, aud aep-api-mcp            dependencies/mcp_server.go ·
+//	               (POST, JSON-RPC)     (org from ocOrgId claim, never input)       auth.AgentsScopedVerifier (no spec — JSON-RPC)
 //	external       /api/v1/webhooks,    per-route bespoke: GitHub HMAC /           webhook_routes.go · org_github_routes.go
 //	               .../github/connect    signed connect-state (org from payload)    (no generated spec; paths kept — Q4)
 //	dev/test       /_dev/v1             none — registration-gated to dev tier      dev.go · RegisterAllDev
@@ -119,6 +122,22 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	internalAPI := newInternalAPI(internalMux)
 	RegisterAllInternal(internalAPI, params.InternalDeps)
 	mux.Handle(internalV1+"/tasks/", internalMux)
+
+	// ── internal MCP discovery (POST /internal/v1/mcp) ───────────────────────
+	// A raw (non-Huma) JSON-RPC mount: the MCP server the agent services'
+	// designing LLM queries for the org's registered external resources,
+	// published endpoints, and platform resource types. Gated by
+	// auth.AgentsScopedVerifier — the caller presents a BFF-signed token with
+	// aud aep-api-mcp and the acting org is bound from its ocOrgId claim, never
+	// from the request. Mounted only when the token manager exists (same
+	// conditional posture as the webhook/connect mounts): without it nothing
+	// could verify a caller, so the path 404s instead of 503-ing forever.
+	if params.HumaDeps.TaskTokens != nil {
+		mcpVerifier := auth.NewAgentsScopedVerifier(params.HumaDeps.TaskTokens)
+		mcpHandler := dependencies.NewMCPHandler(
+			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes)
+		mux.Handle("POST "+internalV1+"/mcp", mcpVerifier.Middleware(mcpHandler))
+	}
 
 	// ── /api/ user-JWT wrapper ───────────────────────────────────────────────
 	// JIT org-onboarding sits between JWT verification and the org-aware route
