@@ -496,6 +496,11 @@ components:
             as the project's requirement and triggers spec derivation for the
             new project.
           type: string
+        repoName:
+          description: >-
+            Name of the GitHub repository to create for the project's specs
+            and source (in the connected org). Defaults to the project name.
+          type: string
       required:
         - name
       type: object
@@ -2160,6 +2165,14 @@ paths:
           schema:
             description: Case-insensitive substring match on name and displayName
             type: string
+        - description: Maximum items per page (server default when absent)
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Maximum items per page (server default when absent)
+            format: int64
+            type: integer
       responses:
         "200":
           content:

@@ -54,8 +54,9 @@ export const projectsHandlers = [
     }
     // The cursor is opaque to the client; the mock's is a plain offset.
     const offset = Number(params.get("cursor") ?? 0) || 0;
-    const items = matches.slice(offset, offset + PROJECTS_PAGE_SIZE);
-    const next = offset + PROJECTS_PAGE_SIZE;
+    const limit = Number(params.get("limit")) || PROJECTS_PAGE_SIZE;
+    const items = matches.slice(offset, offset + limit);
+    const next = offset + limit;
     return HttpResponse.json({
       items,
       ...(next < matches.length && { nextCursor: String(next) }),

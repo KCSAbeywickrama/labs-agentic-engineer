@@ -30,6 +30,8 @@ import {
   PageTitle,
   SearchBar,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@wso2/oxygen-ui";
 import { Folder, Plus } from "@wso2/oxygen-ui-icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -117,9 +119,26 @@ function EmptyState() {
   );
 }
 
+// Grid columns per breakpoint — must mirror the card Grid size props below.
+function useGridColumns(): number {
+  const theme = useTheme();
+  const lg = useMediaQuery(theme.breakpoints.up("lg"));
+  const md = useMediaQuery(theme.breakpoints.up("md"));
+  const sm = useMediaQuery(theme.breakpoints.up("sm"));
+  if (lg) return 4;
+  if (md) return 3;
+  if (sm) return 2;
+  return 1;
+}
+
+// Rows requested per page: the page size is columns × rows, so View more
+// only ever appears under a completely filled last row (#71 feedback).
+const GRID_ROWS_PER_PAGE = 3;
+
 export function ProjectsList() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search.trim());
+  const columns = useGridColumns();
   const {
     data,
     isPending,
@@ -129,7 +148,7 @@ export function ProjectsList() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-  } = useProjectsList(debouncedSearch);
+  } = useProjectsList(debouncedSearch, columns * GRID_ROWS_PER_PAGE);
 
   const items = data?.pages.flatMap((page) => page.items ?? []) ?? [];
   // True-empty (no projects at all, not a fruitless search) hides the page

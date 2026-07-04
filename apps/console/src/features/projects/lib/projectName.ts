@@ -50,7 +50,3 @@ export function suggestProjectName(prompt: string): string {
     .replace(/-$/, "");
   return isValidProjectName(slug) ? slug : "my-project";
 }
-
-export function repoUrlFor(org: string | null, name: string): string {
-  return `github.com/${org ?? "<your-org>"}/${name || "<project-name>"}`;
-}

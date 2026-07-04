@@ -29,15 +29,16 @@ import { githubKeys, projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 
-export function useProjectsList(search = "") {
+export function useProjectsList(search = "", limit?: number) {
   return useInfiniteQuery({
-    queryKey: projectKeys.list(search),
+    queryKey: projectKeys.list(search, limit),
     queryFn: async ({ pageParam }) => {
       const { data, error } = await client.GET("/projects", {
         params: {
           query: {
             ...(search && { search }),
             ...(pageParam && { cursor: pageParam }),
+            ...(limit && { limit }),
           },
         },
       });

@@ -39,11 +39,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useCreateProject, useGithubOrg } from "../api/queries";
-import {
-  isValidProjectName,
-  repoUrlFor,
-  suggestProjectName,
-} from "../lib/projectName";
+import { isValidProjectName, suggestProjectName } from "../lib/projectName";
 
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
@@ -96,23 +92,38 @@ export function ProjectCreate() {
   const [step, setStep] = useState<"prompt" | "confirm">("prompt");
   const [prompt, setPrompt] = useState("");
   const [name, setName] = useState("");
+  // The repo name follows the project name until the user edits it (#71
+  // feedback: repo name is changeable, the org is fixed).
+  const [repoName, setRepoName] = useState("");
+  const [repoTouched, setRepoTouched] = useState(false);
   const { data: githubOrg } = useGithubOrg();
   const createProject = useCreateProject();
 
   const start = (chosenPrompt: string) => {
+    const suggested = suggestProjectName(chosenPrompt);
     setPrompt(chosenPrompt);
-    setName(suggestProjectName(chosenPrompt));
+    setName(suggested);
+    setRepoName(suggested);
+    setRepoTouched(false);
     createProject.reset();
     setStep("confirm");
   };
 
-  const nameError = name && !isValidProjectName(name)
-    ? "Lowercase letters, digits, and dashes; must start with a letter."
-    : null;
+  const changeName = (value: string) => {
+    setName(value);
+    if (!repoTouched) setRepoName(value);
+  };
+
+  const invalidNameMessage =
+    "Lowercase letters, digits, and dashes; must start with a letter.";
+  const nameError =
+    name && !isValidProjectName(name) ? invalidNameMessage : null;
+  const repoError =
+    repoName && !isValidProjectName(repoName) ? invalidNameMessage : null;
 
   const accept = () => {
     createProject.mutate(
-      { name, prompt },
+      { name, prompt, ...(repoName !== name && { repoName }) },
       {
         onSuccess: (project) =>
           void navigate({
@@ -178,22 +189,43 @@ export function ProjectCreate() {
             <TextField
               label="Project name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => changeName(e.target.value)}
               error={Boolean(nameError)}
               helperText={
                 nameError ?? "Suggested from your prompt — change it if you like."
               }
               fullWidth
             />
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-              <GitHub size={18} />
-              <Typography variant="body2" color="text.secondary">
-                Specs and source will live in{" "}
-                <Box component="span" sx={{ fontFamily: "monospace" }}>
-                  {repoUrlFor(githubOrg ?? null, name)}
-                </Box>
-              </Typography>
-            </Stack>
+            <TextField
+              label="Repository name"
+              value={repoName}
+              onChange={(e) => {
+                setRepoTouched(true);
+                setRepoName(e.target.value);
+              }}
+              error={Boolean(repoError)}
+              helperText={
+                repoError ??
+                "Holds the project's specs and source; the organization is fixed."
+              }
+              fullWidth
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <Stack
+                      direction="row"
+                      spacing={0.75}
+                      sx={{ alignItems: "center", mr: 0.5, flexShrink: 0 }}
+                    >
+                      <GitHub size={16} />
+                      <Typography variant="body2" color="text.secondary">
+                        github.com/{githubOrg ?? "<your-org>"}/
+                      </Typography>
+                    </Stack>
+                  ),
+                },
+              }}
+            />
             {createProject.isError && (
               <Alert severity="error">
                 {createProject.error instanceof Error
