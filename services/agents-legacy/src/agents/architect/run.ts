@@ -23,12 +23,33 @@
  * what makes the architect self-contained and evaluable in isolation.
  */
 
-import { streamText, stepCountIs, type LanguageModel } from "ai";
+import { streamText, stepCountIs, type LanguageModel, type ToolSet } from "ai";
+// anthropic is imported here solely for the provider-executed web_search tool.
+// Gated on the resolved model actually being an Anthropic model (checked at
+// runtime via `model.provider`) rather than assumed — this service's
+// `shared/model.ts` hard-wires createAnthropic today, but the guard makes the
+// injection degrade silently (no web_search tool) rather than break if a
+// non-Anthropic provider is ever wired in.
+import { anthropic } from "@ai-sdk/anthropic";
 import { DesignDoc } from "./doc.js";
 import { buildTools, type SseSink, type FinalizeResolver } from "./tools.js";
 import { systemPrompt, buildUserPrompt } from "./prompt.js";
 import { validate, type ValidationIssue } from "./validator.js";
 import type { ArchitectInput, ArchitectOutput } from "./schema.js";
+
+/** True iff `model` is served by the Anthropic provider (`provider` starts
+ * with "anthropic"). Used to gate the provider-executed web_search tool,
+ * which is Anthropic-specific — injecting it against another provider would
+ * error, so absence/mismatch degrades silently to no web_search tool. */
+export function isAnthropicModel(model: LanguageModel): boolean {
+  return (
+    typeof model === "object" &&
+    model !== null &&
+    "provider" in model &&
+    typeof (model as { provider?: unknown }).provider === "string" &&
+    (model as { provider: string }).provider.startsWith("anthropic")
+  );
+}
 
 export interface ArchitectRunResult {
   /** True iff the model called finalize() and the validator passed. */
@@ -38,6 +59,12 @@ export interface ArchitectRunResult {
   /** Validator issues against the final doc — empty when finalized. */
   issues: ValidationIssue[];
   usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Last finishReason reported by the model. "content-filter" means Anthropic's
+   * safety system declined the input (a benign refusal, not an agent fault) —
+   * the route surfaces that distinctly.
+   */
+  finishReason?: string;
 }
 
 export interface ArchitectRunOpts {
@@ -49,6 +76,15 @@ export interface ArchitectRunOpts {
   finalizer: FinalizeResolver;
   /** Aborted by the route on client disconnect, and by finalize() on success. */
   abortSignal: AbortSignal;
+  /**
+   * Read-only discovery tools merged into the architect's tool set — e.g. the
+   * aep-api dependency-discovery MCP tools (list_external_resources /
+   * get_external_resource_schema / list_org_endpoints /
+   * list_platform_resource_types) so the LLM reuses already-registered
+   * `external` dependencies and in-org catalog entries. Empty/omitted is
+   * fine; the design tools are unchanged.
+   */
+  extraTools?: ToolSet;
 }
 
 /**
@@ -62,9 +98,19 @@ export async function runArchitect(
   const { model, input, sink, finalizer, abortSignal } = opts;
 
   const doc = DesignDoc.fromPrevious(input.previousDesign);
-  const tools = buildTools(doc, sink, finalizer, input.wireframes ?? {});
+  // Design tools + any read-only discovery tools (aep-api's dependency MCP) +
+  // provider-executed web_search for external dependency discovery — gated on
+  // the model actually being Anthropic (see isAnthropicModel doc comment).
+  const tools = {
+    ...buildTools(doc, sink, finalizer, input.wireframes ?? {}),
+    ...(opts.extraTools ?? {}),
+    ...(isAnthropicModel(model)
+      ? { web_search: anthropic.tools.webSearch_20250305({ maxUses: 4 }) }
+      : {}),
+  };
 
   let usage = { inputTokens: 0, outputTokens: 0 };
+  let finishReason: string | undefined;
 
   const result = streamText({
     model,
@@ -82,6 +128,7 @@ export async function runArchitect(
         inputTokens: ev.usage?.inputTokens ?? 0,
         outputTokens: ev.usage?.outputTokens ?? 0,
       };
+      finishReason = ev.finishReason;
       console.log(
         `[architect] finish=${ev.finishReason} steps=${ev.steps?.length ?? 0} in=${usage.inputTokens} out=${usage.outputTokens}`,
       );
@@ -111,5 +158,6 @@ export async function runArchitect(
     design: doc.materialize(),
     issues: validate(doc),
     usage,
+    finishReason,
   };
 }
