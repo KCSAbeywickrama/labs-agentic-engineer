@@ -18,58 +18,85 @@
 
 import {
   Alert,
-  Box,
   Button,
-  CircularProgress,
-  PageContent,
-  PageTitle,
+  Grid,
+  Skeleton,
+  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Link } from "@tanstack/react-router";
-import { useProject } from "../api/queries";
+import {
+  useProjectBoard,
+  useProjectComponents,
+  useProjectStatus,
+} from "../api/queries";
+import { ComponentsList } from "./ComponentsList";
+import { StatusCards } from "./StatusCards";
 
-// Stub navigation target for the projects listing (issue #71). The real
-// overview — component map, deployment state, activity — is its own feature.
+function SectionError({
+  what,
+  message,
+  onRetry,
+}: {
+  what: string;
+  message?: string | undefined;
+  onRetry: () => void;
+}) {
+  return (
+    <Alert severity="error" action={<Button onClick={onRetry}>Retry</Button>}>
+      Failed to load {what}
+      {message ? `: ${message}` : ""}
+    </Alert>
+  );
+}
+
+// The overview never blocks entirely on one failed read: the cards and the
+// components list each degrade independently (issue #77).
 export function ProjectOverview({ projectName }: { projectName: string }) {
-  const { data, isPending, isError, error, refetch } = useProject(projectName);
-
-  if (isPending) {
-    return (
-      <PageContent>
-        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-          <CircularProgress aria-label="Loading project" />
-        </Box>
-      </PageContent>
-    );
-  }
-
-  if (isError) {
-    return (
-      <PageContent>
-        <Alert
-          severity="error"
-          action={<Button onClick={() => void refetch()}>Retry</Button>}
-        >
-          Failed to load project
-          {error instanceof Error && error.message ? `: ${error.message}` : ""}
-        </Alert>
-      </PageContent>
-    );
-  }
+  const status = useProjectStatus(projectName);
+  const board = useProjectBoard(projectName);
+  const componentsQuery = useProjectComponents(projectName);
 
   return (
-    <PageContent>
-      <PageTitle>
-        <PageTitle.Header>{data.displayName ?? data.name}</PageTitle.Header>
-        {data.description && (
-          <PageTitle.SubHeader>{data.description}</PageTitle.SubHeader>
+    <Stack spacing={4}>
+      {status.isError ? (
+        <SectionError
+          what="project status"
+          message={status.error instanceof Error ? status.error.message : undefined}
+          onRetry={() => void status.refetch()}
+        />
+      ) : (
+        <Grid container spacing={3}>
+          <StatusCards
+            projectName={projectName}
+            status={status.data}
+            board={board.data}
+          />
+        </Grid>
+      )}
+
+      <div>
+        <Typography variant="h6" gutterBottom>
+          Components
+        </Typography>
+        {componentsQuery.isError ? (
+          <SectionError
+            what="components"
+            message={
+              componentsQuery.error instanceof Error
+                ? componentsQuery.error.message
+                : undefined
+            }
+            onRetry={() => void componentsQuery.refetch()}
+          />
+        ) : componentsQuery.isPending ? (
+          <Skeleton variant="rounded" height={120} />
+        ) : (
+          <ComponentsList
+            projectName={projectName}
+            items={componentsQuery.data.items ?? []}
+          />
         )}
-      </PageTitle>
-      <Typography variant="body2" color="text.secondary">
-        The project overview — component map, deployment state, and activity —
-        is on its way. Meanwhile, head{" "}
-        <Link to="/">back to your projects</Link>.
-      </Typography>
-    </PageContent>
+      </div>
+    </Stack>
   );
 }
