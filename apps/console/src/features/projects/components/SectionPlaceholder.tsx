@@ -17,18 +17,25 @@
  */
 
 import type { ReactNode } from "react";
-import { Box, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Typography } from "@wso2/oxygen-ui";
+import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
+import { createLink } from "@tanstack/react-router";
 
-// Consistent "coming soon" frame for the Spec / Builds / Deployments tabs
+// Router-aware Button: renders an anchor with proper href + SPA navigation.
+const LinkButton = createLink(Button);
+
+// Consistent "coming soon" frame for the Spec / Builds / Deployments pages
 // (issue #77 ships them as navigation targets; each is its own feature).
 export function SectionPlaceholder({
   icon,
   title,
   description,
+  projectName,
 }: {
   icon: ReactNode;
   title: string;
   description: string;
+  projectName: string;
 }) {
   return (
     <Box sx={{ textAlign: "center", py: 10 }}>
@@ -39,10 +46,17 @@ export function SectionPlaceholder({
       <Typography
         variant="body2"
         color="text.secondary"
-        sx={{ maxWidth: 480, mx: "auto" }}
+        sx={{ maxWidth: 480, mx: "auto", mb: 3 }}
       >
         {description}
       </Typography>
+      <LinkButton
+        startIcon={<ArrowLeft size={18} />}
+        to="/projects/$projectName"
+        params={{ projectName }}
+      >
+        Back to overview
+      </LinkButton>
     </Box>
   );
 }

@@ -29,7 +29,7 @@ import {
   useProjectComponents,
   useProjectStatus,
 } from "../api/queries";
-import { ComponentsTable } from "./ComponentsTable";
+import { ComponentCards } from "./ComponentCards";
 import { StatusCards } from "./StatusCards";
 
 function SectionError({
@@ -91,7 +91,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
         ) : componentsQuery.isPending ? (
           <Skeleton variant="rounded" height={120} />
         ) : (
-          <ComponentsTable
+          <ComponentCards
             projectName={projectName}
             items={componentsQuery.data.items ?? []}
           />

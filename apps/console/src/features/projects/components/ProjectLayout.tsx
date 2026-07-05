@@ -26,11 +26,9 @@ import {
   PageContent,
   PageTitle,
   Stack,
-  Tab,
-  Tabs,
 } from "@wso2/oxygen-ui";
 import { GitHub } from "@wso2/oxygen-ui-icons-react";
-import { createLink, Outlet, useRouterState } from "@tanstack/react-router";
+import { Outlet } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { useProject, useProjectStatus } from "../api/queries";
 
@@ -61,28 +59,9 @@ function phaseChip(status: ProjectStatus): {
   }
 }
 
-const TABS = [
-  { path: "", label: "Overview", to: "/projects/$projectName" },
-  { path: "spec", label: "Spec", to: "/projects/$projectName/spec" },
-  { path: "builds", label: "Builds", to: "/projects/$projectName/builds" },
-  {
-    path: "deployments",
-    label: "Deployments",
-    to: "/projects/$projectName/deployments",
-  },
-] as const;
-
-// Router-aware Tab: renders an anchor with proper href + SPA navigation.
-const LinkTab = createLink(Tab);
-
 export function ProjectLayout({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeTab =
-    TABS.find(
-      (t) => t.path && pathname.startsWith(`/projects/${projectName}/${t.path}`),
-    )?.path ?? "";
 
   if (project.isPending) {
     return (
@@ -124,19 +103,21 @@ export function ProjectLayout({ projectName }: { projectName: string }) {
         {project.data.description && (
           <PageTitle.SubHeader>{project.data.description}</PageTitle.SubHeader>
         )}
-        {status.data?.repoUrl && (
-          <PageTitle.Actions>
-            <MuiLink
-              href={status.data.repoUrl}
-              target="_blank"
-              rel="noreferrer"
-              sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}
-            >
-              <GitHub size={18} /> Repository
-            </MuiLink>
-          </PageTitle.Actions>
-        )}
       </PageTitle>
+
+      {status.data?.repoUrl && (
+        <Box sx={{ mt: -1, mb: 3 }}>
+          <MuiLink
+            href={status.data.repoUrl}
+            target="_blank"
+            rel="noreferrer"
+            variant="body2"
+            sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}
+          >
+            <GitHub size={16} /> {status.data.repoUrl.replace(/^https?:\/\//, "")}
+          </MuiLink>
+        </Box>
+      )}
 
       {status.data?.phase === "repo-error" && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -146,18 +127,6 @@ export function ProjectLayout({ projectName }: { projectName: string }) {
             : ""}
         </Alert>
       )}
-
-      <Tabs value={activeTab} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
-        {TABS.map((tab) => (
-          <LinkTab
-            key={tab.label}
-            value={tab.path}
-            label={tab.label}
-            to={tab.to}
-            params={{ projectName }}
-          />
-        ))}
-      </Tabs>
 
       <Outlet />
     </PageContent>

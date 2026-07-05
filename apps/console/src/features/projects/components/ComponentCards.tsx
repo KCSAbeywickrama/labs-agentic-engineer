@@ -17,12 +17,16 @@
  */
 
 import {
+  Box,
+  Card,
+  CardContent,
   Chip,
+  Grid,
   Link as MuiLink,
-  ListingTable,
+  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ExternalLink, FileCode } from "@wso2/oxygen-ui-icons-react";
+import { AppWindow, Boxes, ExternalLink, FileCode } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import { env } from "../../../config/env";
 
@@ -37,6 +41,7 @@ function componentLink(projectName: string, c: Component) {
         href={c.endpointUrl}
         target="_blank"
         rel="noreferrer"
+        variant="body2"
         sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
       >
         Open app <ExternalLink size={14} />
@@ -47,12 +52,13 @@ function componentLink(projectName: string, c: Component) {
       </Typography>
     );
   }
-  // API/service rows link to the component's OpenAPI contract.
+  // API/service cards link to the component's OpenAPI contract.
   return (
     <MuiLink
       href={`${env.apiBaseUrl}/api/v1/projects/${projectName}/components/${c.name}/openapi`}
       target="_blank"
       rel="noreferrer"
+      variant="body2"
       sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
     >
       API contract <FileCode size={14} />
@@ -60,7 +66,9 @@ function componentLink(projectName: string, c: Component) {
   );
 }
 
-export function ComponentsTable({
+// Horizontal card layout (issue #77 feedback): one card per component,
+// flowing left to right.
+export function ComponentCards({
   projectName,
   items,
 }: {
@@ -77,38 +85,54 @@ export function ComponentsTable({
   }
 
   return (
-    <ListingTable.Container>
-      <ListingTable density="compact">
-        <ListingTable.Head>
-          <ListingTable.Row>
-            <ListingTable.Cell>Name</ListingTable.Cell>
-            <ListingTable.Cell>Type</ListingTable.Cell>
-            <ListingTable.Cell>Status</ListingTable.Cell>
-            <ListingTable.Cell>Link</ListingTable.Cell>
-          </ListingTable.Row>
-        </ListingTable.Head>
-        <ListingTable.Body>
-          {items.map((c) => (
-            <ListingTable.Row key={c.name}>
-              <ListingTable.Cell>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+    <Grid container spacing={2}>
+      {items.map((c) => (
+        <Grid key={c.name} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+          <Card variant="outlined" sx={{ height: "100%" }}>
+            <CardContent
+              sx={{ display: "flex", flexDirection: "column", height: "100%" }}
+            >
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: "center", mb: 1 }}
+              >
+                {isWebApp(c) ? <AppWindow size={18} /> : <Boxes size={18} />}
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                   {c.displayName ?? c.name}
                 </Typography>
-                {c.description && (
-                  <Typography variant="caption" color="text.secondary">
-                    {c.description}
-                  </Typography>
-                )}
-              </ListingTable.Cell>
-              <ListingTable.Cell>
-                <Chip size="small" label={isWebApp(c) ? "Web app" : (c.type ?? "—")} />
-              </ListingTable.Cell>
-              <ListingTable.Cell>{c.status ?? "—"}</ListingTable.Cell>
-              <ListingTable.Cell>{componentLink(projectName, c)}</ListingTable.Cell>
-            </ListingTable.Row>
-          ))}
-        </ListingTable.Body>
-      </ListingTable>
-    </ListingTable.Container>
+                <Box sx={{ flexGrow: 1 }} />
+                <Chip
+                  size="small"
+                  label={isWebApp(c) ? "Web app" : (c.type ?? "—")}
+                />
+              </Stack>
+              {c.description && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 1.5 }}
+                >
+                  {c.description}
+                </Typography>
+              )}
+              <Stack
+                direction="row"
+                sx={{
+                  mt: "auto",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Typography variant="caption" color="text.secondary">
+                  {c.status ?? "—"}
+                </Typography>
+                {componentLink(projectName, c)}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      ))}
+    </Grid>
   );
 }

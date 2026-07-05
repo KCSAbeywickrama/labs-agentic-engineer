@@ -21,11 +21,17 @@ import { Hammer } from "@wso2/oxygen-ui-icons-react";
 import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
 
 export const Route = createFileRoute("/projects/$projectName/builds")({
-  component: () => (
+  component: BuildsPlaceholderRoute,
+});
+
+function BuildsPlaceholderRoute() {
+  const { projectName } = Route.useParams();
+  return (
     <SectionPlaceholder
       icon={<Hammer size={48} />}
       title="Builds is on its way"
       description="The coding-agent task board — watch tasks move, dig into failures, and follow PRs out to GitHub. Its own feature issue will land it."
+      projectName={projectName}
     />
-  ),
-});
+  );
+}

@@ -21,11 +21,17 @@ import { FileText } from "@wso2/oxygen-ui-icons-react";
 import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
 
 export const Route = createFileRoute("/projects/$projectName/spec")({
-  component: () => (
+  component: SpecPlaceholderRoute,
+});
+
+function SpecPlaceholderRoute() {
+  const { projectName } = Route.useParams();
+  return (
     <SectionPlaceholder
       icon={<FileText size={48} />}
       title="Spec is on its way"
       description="This is where you and the agents work out what to build — the requirement and the design together, as one living spec. Its own feature issue will land it."
+      projectName={projectName}
     />
-  ),
-});
+  );
+}

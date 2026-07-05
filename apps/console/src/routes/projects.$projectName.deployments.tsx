@@ -21,11 +21,17 @@ import { Rocket } from "@wso2/oxygen-ui-icons-react";
 import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
 
 export const Route = createFileRoute("/projects/$projectName/deployments")({
-  component: () => (
+  component: DeploymentsPlaceholderRoute,
+});
+
+function DeploymentsPlaceholderRoute() {
+  const { projectName } = Route.useParams();
+  return (
     <SectionPlaceholder
       icon={<Rocket size={48} />}
       title="Deployments is on its way"
       description="Dev environment state, versions, and URLs — what's running and how it got there. Its own feature issue will land it."
+      projectName={projectName}
     />
-  ),
-});
+  );
+}
