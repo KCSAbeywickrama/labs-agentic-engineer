@@ -195,6 +195,65 @@ echo "🐳 Starting Docker services..."
 docker compose up --build -d
 echo "✅ Docker services started"
 
+# 7b. Verify the aep-mcp-server (the OpenChoreo SRE agent's door into AEP —
+#     issue creation + coding-agent dispatch during the RCA handoff). Compose
+#     starts it; this just fails loudly instead of leaving the handoff to 502
+#     at RCA time. See docs/developer-guide/sre-handoff-runbook.md.
+echo ""
+echo "🤝 Checking aep-mcp-server (SRE-agent handoff endpoint)..."
+MCP_OK=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -s --max-time 2 http://localhost:3401/healthz 2>/dev/null | grep -q '"ok"'; then
+        MCP_OK=yes; break
+    fi
+    sleep 2
+done
+if [ -n "$MCP_OK" ]; then
+    echo "✅ aep-mcp-server healthy on :3401"
+else
+    echo "⚠️  aep-mcp-server not responding on :3401 — the RCA→coding-agent handoff"
+    echo "    will fail its ae_* tool calls. Check: docker logs aep-mcp-server"
+fi
+
+# 7c. Verify the cluster half of the handoff — the ai-rca-agent deployment.
+#     Best-effort: a rebuilt cluster loses the locally-imported RCA image and
+#     the pod sits in ImagePullBackOff; re-running setup-observability.sh
+#     fixes it (it re-imports, auto-pulling tharindulak/openchoreo-sre-agent
+#     :handoff from Docker Hub if no local build exists).
+if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null; then
+    RCA_NS="openchoreo-observability-plane"
+    if kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" get deploy ai-rca-agent &>/dev/null; then
+        RCA_READY=$(kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" get deploy ai-rca-agent \
+            -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        RCA_HANDOFF=$(kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" get cm rca-agent-config \
+            -o jsonpath='{.data.AE_HANDOFF}' 2>/dev/null)
+        if [ "${RCA_READY:-0}" -ge 1 ]; then
+            echo "✅ ai-rca-agent ready (AE_HANDOFF=${RCA_HANDOFF:-unset})"
+        elif [ -n "$MCP_OK" ] && [ "$RCA_HANDOFF" = "true" ]; then
+            # Expected after a fresh setup.sh: with AE_HANDOFF=true the agent's
+            # boot-time MCP test is FATAL, and aep-mcp-server wasn't running
+            # until a moment ago — the pod is in CrashLoopBackOff whose next
+            # retry may be minutes away. Bounce it now that the MCP is up.
+            echo "   ai-rca-agent not ready but aep-mcp-server just came up —"
+            echo "   restarting it to break the crash-loop backoff..."
+            kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" rollout restart deploy/ai-rca-agent >/dev/null
+            if kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" rollout status deploy/ai-rca-agent --timeout=180s >/dev/null 2>&1; then
+                echo "✅ ai-rca-agent ready (AE_HANDOFF=${RCA_HANDOFF})"
+            else
+                echo "⚠️  ai-rca-agent still not ready — check:"
+                echo "    kubectl logs -n $RCA_NS deploy/ai-rca-agent"
+            fi
+        else
+            echo "⚠️  ai-rca-agent not ready — alert→RCA (and the handoff) won't run."
+            echo "    Likely a lost image import after a cluster rebuild. Fix:"
+            echo "    bash scripts/setup-observability.sh"
+        fi
+    else
+        echo "ℹ️  ai-rca-agent not installed — run scripts/setup-observability.sh to"
+        echo "    enable the alert→RCA→coding-agent pipeline."
+    fi
+fi
+
 # 8. Repair per-org secrets in OpenBao. When the local cluster (or just the
 #    OpenBao volume) has been torn down since the last credential connect,
 #    the SM-API metadata rows still point at OpenBao paths that no longer
@@ -217,6 +276,8 @@ echo "  Console:          http://localhost:8090"
 echo "  API:              http://localhost:9090"
 echo "  Git Service:      http://localhost:3300"
 echo "  Agents Service:   http://localhost:3400"
+echo "  SRE-handoff MCP:  http://localhost:3401 (alert → AI-RCA → issue → coding agent;"
+echo "                    see docs/developer-guide/sre-handoff-runbook.md)"
 echo ""
 echo "  Coding-agent:     dispatched as a one-shot pod via the"
 echo "                    'aep-coding-agent' ClusterWorkflow"
