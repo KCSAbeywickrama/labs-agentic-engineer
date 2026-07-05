@@ -69,7 +69,11 @@ export interface DesignComponent {
   name: string;
   componentType: "service" | "web-app";
   language: string;
-  dependsOn: string[];
+  // Unified dependency model — everything this component needs from outside
+  // itself, kind-discriminated. Assembled read-time from
+  // components/<name>/design.json (status/reason are computed, never
+  // persisted).
+  dependencies: Dependency[];
   entrypoint: "deployment/service";
   buildpack: "docker";
   appPath: string;
@@ -82,22 +86,68 @@ export interface DesignComponent {
   // `security: 'required'` ⇒ AP enforces JWT validation against the org's
   // IDP. See docs/design/api-platform-integration.md section 5.1.
   api?: APISecurity;
-  // External HTTP APIs this component consumes at runtime — e.g. a
-  // corporate directory like the Secret Santa employee API. Rendered
-  // outside the cell in the architecture diagram; surfaced in the
-  // tech-lead issue body so the coding agent knows the URL + auth.
-  dependentApis?: DependentApi[];
+}
+
+export type DependencyKind =
+  | "component"
+  | "org-service"
+  | "external"
+  | "platform-resource";
+
+// One env-var key a component reads at runtime. For an external resource
+// these keys form the resource's schema; secret keys route through SM-API.
+export interface ConfigKey {
+  key: string;
+  secret: boolean;
+  credentialClass?: "publishable" | "secret";
+}
+
+export interface DependencyCandidate {
+  label: string;
+  description?: string;
+  url?: string;
+}
+
+// Unified, kind-discriminated dependency. A single shape carries all kinds;
+// `kind` selects which optional fields are meaningful (config for external;
+// resourceType/parameters for platform-resource).
+export interface Dependency {
+  kind: DependencyKind;
+  name: string;
+  description?: string;
+  // Read-time computed 4-state resolution (never authored, never persisted).
+  status?: "resolved" | "ambiguous" | "unresolved" | "blocked";
+  // Why a dep is not yet resolved. `needs-spec` = external dep has no spec
+  // yet; `needs-input` = value entry required; `not-found` = no match found;
+  // `access-required` = org-service exists but is not accessible (requestable
+  // via access requests); `access-pending` = access request in flight;
+  // `unpublished` = org-service is project-only. `""` for resolved deps.
+  reason?:
+    | ""
+    | "needs-spec"
+    | "needs-input"
+    | "not-found"
+    | "access-required"
+    | "access-pending"
+    | "unpublished";
+  // external: whether the architect requires a spec file for this dep.
+  needsSpec?: boolean;
+  // external: path (relative to the component dir) where the spec lives.
+  specPath?: string;
+  // external: transient published-OpenAPI hint auto-fetched at design save,
+  // then cleared once specPath is set.
+  specUrl?: string;
+  // external: the config key schema the consuming component codes against.
+  config?: ConfigKey[];
+  // platform-resource: the registered (Cluster)ResourceType + provisioning params.
+  resourceType?: string;
+  parameters?: Record<string, string>;
+  // resolution UI: candidates attached when status === "ambiguous".
+  candidates?: DependencyCandidate[];
 }
 
 export interface APISecurity {
   security: "required" | "none";
-}
-
-export interface DependentApi {
-  name: string;
-  url: string;
-  description?: string;
-  authentication?: "none" | "bearer" | "api-key";
 }
 
 export interface Design {
@@ -368,10 +418,10 @@ export interface Task {
   // Time the task was dispatched, ISO-8601. Undefined for never-dispatched
   // tasks; used for the "started Xm ago" caption.
   dispatchedAt?: string;
-  // Execution model the task expects. Always "WORKER" (coding-agent) today —
-  // those dispatch through the batch path ("Execute all → Remote Agents").
-  // "SYSTEM" is dormant: nothing produces it and nothing reads it, reserved
-  // for the future database-provisioning rewrite.
+  // Execution model the task expects. "WORKER" (coding-agent) tasks dispatch
+  // through the batch path ("Execute all → Remote Agents"). "SYSTEM" tasks
+  // (config-collection, resource-provisioning) never get a GitHub issue and
+  // resolve in the architecture-page drawer instead.
   execType?: "SYSTEM" | "WORKER";
   // Component name this task targets — used by the Pending Deps column to
   // map this task back to the dep graph.
@@ -380,6 +430,21 @@ export interface Task {
   // The Pending Deps column renders "Waiting for: …" from this. Empty
   // for unblocked tasks.
   dependsOnComponents?: string[];
+  // The other gate kinds a component task waits on — platform-resource
+  // provisions, cross-project org-services, and external resources. The
+  // On Hold row explains the full reason (not just component gates) from these.
+  dependsOnExternalResources?: string[];
+  dependsOnOrgServices?: string[];
+  dependsOnResources?: string[];
+  // Task type: "component" (coding-agent), "config-collection", or
+  // "resource-provisioning". Routes the row's action — the last two are
+  // resolved in the architecture-page drawer, not the (no-op) exec endpoint.
+  type?: string;
+  // The dependency this SYSTEM task resolves (resource-provisioning →
+  // resourceName; config-collection → externalResourceName). Used to
+  // deep-link the architecture drawer (?dep=<name>).
+  externalResourceName?: string;
+  resourceName?: string;
   // Diagnostic surface for `failed` tasks. Shown so the operator can
   // decide whether to retry.
   errorMessage?: string;
@@ -392,6 +457,49 @@ export interface ProjectBoard {
   done: Task[];
   onHold: Task[];
   failed: Task[];
+}
+
+// -- External Resources (org-registered external dependency definitions) ----
+
+export interface ExternalResourceConsumer {
+  projectId: string;
+  componentName: string;
+}
+
+/** An org-registered external resource with its consuming components. */
+export interface ExternalResource {
+  name: string;
+  description?: string;
+  configKeys: ConfigKey[];
+  consumers: ExternalResourceConsumer[];
+}
+
+// -- Access Requests (cross-project org-service visibility) -----------------
+
+export type AccessRequestStatus =
+  | "requested"
+  | "in_progress"
+  | "granted"
+  | "rejected";
+
+/**
+ * A consumer's request for a provider to publish an org-service dependency
+ * cross-project. Created via `POST …/dependencies/{dep}/access-request`
+ * (dep-addressed — no orgServiceName body field; the org is implicit).
+ */
+export interface AccessRequest {
+  id: string;
+  consumerProjectId: string;
+  consumerComponentName: string;
+  orgServiceName: string;
+  providerProjectId: string;
+  providerComponentName: string;
+  providerTaskId: string;
+  providerIssueNumber: number;
+  providerIssueUrl: string;
+  status: AccessRequestStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // -- Component Config (Environment Variables) ---------------------------------
