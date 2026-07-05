@@ -118,7 +118,12 @@ func NewMCPHandler(er ExternalResourceReader, ep OrgEndpointLister, rt ResourceT
 		case "tools/list":
 			writeRPCResult(w, req.ID, map[string]any{"tools": mcpTools()})
 		case "tools/call":
-			handleToolCall(w, r, h, orgHandle, req)
+			// Tool executions act on the org's behalf with the BFF's own OC
+			// service identity. Without this marker the OC transport would see
+			// the request's MCP bearer (aud aep-api-mcp — OUR token, not an OC
+			// one) as a forwardable user JWT and every OC-backed lookup would
+			// 401, silently emptying the catalogs (caught live in E2E S3).
+			handleToolCall(w, r.WithContext(auth.WithServiceIdentity(r.Context())), h, orgHandle, req)
 		default:
 			writeRPCError(w, req.ID, -32601, "method not found: "+req.Method)
 		}

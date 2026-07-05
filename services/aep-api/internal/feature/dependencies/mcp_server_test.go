@@ -64,10 +64,16 @@ type fakeEndpointLister struct {
 	items   []openchoreo.WorkloadEndpointInfo
 	err     error
 	lastOrg string
+	// lastCtxServiceIdentity records whether the handler marked the tool-call
+	// context as service identity before hitting the port. Without the marker
+	// the OC transport treats the request's MCP bearer as a forwardable user
+	// JWT and OC 401s every catalog read (caught live in E2E S3).
+	lastCtxServiceIdentity bool
 }
 
-func (f *fakeEndpointLister) List(_ context.Context, orgHandle string) ([]openchoreo.WorkloadEndpointInfo, error) {
+func (f *fakeEndpointLister) List(ctx context.Context, orgHandle string) ([]openchoreo.WorkloadEndpointInfo, error) {
 	f.lastOrg = orgHandle
+	f.lastCtxServiceIdentity = auth.IsServiceIdentity(ctx)
 	return f.items, f.err
 }
 
@@ -383,6 +389,9 @@ func TestMCP_ListOrgEndpoints(t *testing.T) {
 	}
 	if ep.lastOrg != "org-1" {
 		t.Errorf("lister called with org %q, want org-1", ep.lastOrg)
+	}
+	if !ep.lastCtxServiceIdentity {
+		t.Errorf("tool-call context must be marked service identity — otherwise the OC transport forwards the MCP bearer as a user JWT and every catalog read 401s")
 	}
 }
 

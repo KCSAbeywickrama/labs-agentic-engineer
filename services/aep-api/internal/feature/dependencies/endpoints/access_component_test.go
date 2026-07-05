@@ -85,7 +85,9 @@ func (s *stubStore) ListByConsumerProject(_ context.Context, orgID, pid string) 
 }
 func (s *stubStore) UpdateStatus(context.Context, string, string) error { return nil }
 
-type stubDesign struct{ byProject map[string][]models.DesignComponent }
+type stubDesign struct {
+	byProject map[string][]models.DesignComponent
+}
 
 func (d *stubDesign) ReadDesignComponents(_ context.Context, _, pid string) ([]models.DesignComponent, error) {
 	return d.byProject[pid], nil
