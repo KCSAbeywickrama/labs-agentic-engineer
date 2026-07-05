@@ -42,6 +42,7 @@ import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversat
 import { registerTechLead } from "./agents/techlead/route.js";
 import { registerArchitect } from "./agents/architect/route.js";
 import { registerDocumentGeneration } from "./agents/document-generation/route.js";
+import { registerDslRender } from "./agents/dsl-render/route.js";
 import { config } from "./shared/config.js";
 
 export interface CreateAppDeps {
@@ -81,6 +82,11 @@ export function createApp(deps: CreateAppDeps): Express {
   // surface aep-api's StreamDocumentGeneration speaks. Legacy-contract
   // parity; see document-generation/route.ts.
   registerDocumentGeneration(app, { model: deps.model });
+
+  // Stateless DSL→Excalidraw render helper — the wire surface aep-api's
+  // RenderDsl speaks (client.go); org-less, plain JSON, no model. See
+  // dsl-render/route.ts.
+  registerDslRender(app);
 
   app.post("/conversations/:id/turns", async (req: Request, res: Response) => {
     const id = req.params.id as string;

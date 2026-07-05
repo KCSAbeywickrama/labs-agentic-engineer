@@ -56,7 +56,7 @@ flow
 Each \`screen\` block defines one UI screen. Children are indented two spaces. Element forms (children must be indented):
 
 - \`rect "<label>" <x>,<y> <width>x<height>\`   — generic UI region (input field, panel, etc.)
-- \`button "<label>" <x>,<y> <width>x<height>\` — call-to-action button (rendered green/rounded)
+- \`button "<label>" <x>,<y> <width>x<height>\` — call-to-action button (rendered as a rounded gray rectangle, per the shared grayscale palette)
 - \`ellipse "<label>" <x>,<y> <width>x<height>\` — circular control (avatar, status dot)
 - \`text "<content>" <x>,<y>\`                  — plain label text (no background)
 
@@ -66,7 +66,7 @@ The \`flow\` block is optional and lists screen-to-screen navigation as \`A -> B
 
 ## Layout guidance
 
-- Each screen is 360×540 px. Reserve ~36 px at the top for the screen header.
+- Each screen defaults to a 1280×800 px desktop canvas (not a phone screen). The screen name and its number badge render ABOVE the outline, not inside it — you don't need to reserve header space within the screen.
 - Stack controls vertically with ~16 px gaps. Typical input field: 280×32 px starting at x=20.
 - Group related fields visually (label \`text\` directly above its \`rect\`).
 - 4–10 elements per screen is plenty. Don't overcrowd.
