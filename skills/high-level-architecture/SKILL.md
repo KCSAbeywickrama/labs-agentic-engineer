@@ -85,8 +85,8 @@ components in kebab-case after their responsibility (`expense-api`,
 ## Per-component design.json
 
 Each component's structured facts live in ONE JSON document (no markdown, no
-frontmatter). Every field below is required; the platform validates each
-write against this schema and rejects violations:
+frontmatter). The platform validates each write against this schema and rejects
+violations:
 
 ```json
 {
@@ -98,26 +98,84 @@ write against this schema and rejects violations:
   "appPath": "expense-api",           // repo-relative source dir — the component name
   "entrypoint": "deployment/service", // deploy entry
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
-  "connections": [
-    { "to": "expense-webapp", "type": "http" },
-    { "to": "postgres", "type": "datastore" },
-    { "to": "email-gateway", "type": "connector", "onPlatform": false }
-  ],
+  "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do."
 }
 ```
 
-- `connections` mirrors the Interactions section of the top-level design.md:
-  every arrow there appears here as `{to, type, onPlatform}` and vice versa —
-  a mismatch is a defect. `type` is `http` (a sibling component), `datastore`,
-  or `connector` (external system → `"onPlatform": false`). This list drives
-  the platform's architecture diagram and dispatch.
-- To CHANGE a design.json, re-emit the whole corrected file (removeFile +
-  addFile) — never patch JSON with anchored edits. On INVALID_JSON or
-  SCHEMA_VIOLATION, fix what the message lists and re-emit.
+`name`, `type`, `version`, `language`, `buildpack`, `appPath`, `entrypoint`,
+`exposure`, `description`, and `dependencies` are required. To CHANGE a
+design.json, re-emit the whole corrected file (removeFile + addFile) — never
+patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
+the message lists and re-emit.
+
+Do NOT author `exposesAPI`, `callerIdentity`, `componentAgentInstructions`, or
+any dependency `status`/`reason` — those are PLATFORM-owned. If the platform has
+already written them into the file, preserve them verbatim.
+
+### dependencies — the unified dependency edges
+
+`dependencies` mirrors the Interactions section of the top-level design.md:
+every arrow there appears here and vice versa — a mismatch is a defect. Each
+entry has a `kind` (which selects the meaningful fields) and a `name`; pick the
+kind by WHAT the target is:
+
+- **`component`** — a SIBLING component in this same design (a `<name>/` under
+  `components/`). Just `{ "kind": "component", "name": "expense-webapp" }`.
+- **`org-service`** — a service owned by ANOTHER project in the org that
+  publishes its endpoint for cross-project use. `name` is the provider's
+  component name. `{ "kind": "org-service", "name": "identity-api" }`.
+- **`external`** — a system OUTSIDE the platform (a SaaS API, a legacy
+  service). Two shapes:
+  - *SDK-style SaaS* (Stripe, SendGrid, ...): no spec needed — the component
+    codes against the vendor SDK. Declare only the `config` keys it reads.
+  - *REST-with-spec*: when the component must call specific endpoints, set
+    `"needsSpec": true`. Point `specPath` at a stored contract
+    (`dependencies/<name>.openapi.yaml`) or give `specUrl` for the platform to
+    fetch. A `needsSpec` external with no spec yet is left UNRESOLVED for the
+    user to supply — that is expected, not an error to fix.
+- **`platform-resource`** — a backing resource the platform provisions (a
+  database, cache, object store). Set `resourceType` to a registered type and
+  `parameters` for provisioning:
+  `{ "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres", "parameters": { "size": "small" } }`.
+
+```json
+"dependencies": [
+  { "kind": "component", "name": "expense-webapp" },
+  { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
+  { "kind": "external", "name": "stripe",
+    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "credentialClass": "secret" } ] },
+  { "kind": "external", "name": "legacy-billing", "needsSpec": true,
+    "specUrl": "https://billing.example.com/openapi.yaml" }
+]
+```
+
+**Discover before you invent.** When the caller supplies the platform MCP
+tools, USE them before authoring an `external`, `org-service`, or
+`platform-resource` dependency — do not guess a name or a config schema:
+
+- `list_external_resources` / `get_external_resource_schema` — reuse an
+  already-registered external resource by its EXACT `name` and `config` schema
+  rather than inventing a parallel one.
+- `list_org_endpoints` — find the real provider component name for an
+  `org-service` before referencing it.
+- `list_platform_resource_types` — get a valid `resourceType` (and its
+  parameters) before declaring a `platform-resource`.
+
+**Config-key conventions.** `config` is the env-var schema the consuming
+component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials
+`"secret": true` (they route through the secret path); set `credentialClass`
+to `"secret"` for values the user supplies privately or `"publishable"` for
+non-sensitive config. Keep the keys minimal — only what the component reads.
+
+**Resolution is platform-computed.** A dependency's `status` (resolved /
+ambiguous / unresolved / blocked), its `reason`, and any `candidates` are
+computed by the platform at read time against the live catalog — you never
+author them. Declare the intent (kind + name + fields above) and let the
+platform resolve it.
 
 One component per directory. Every `service` gets an `openapi.yaml`
 (load `openapi-conventions` before writing it); every `webapp` gets a
 `wireframes.dsl` (load `excalidraw-wireframes` before writing it). Other
 kinds (scheduled tasks, workers, ...) carry no extra artifact yet — capture
-their behavior fully in `description` and `connections`.
+their behavior fully in `description` and `dependencies`.

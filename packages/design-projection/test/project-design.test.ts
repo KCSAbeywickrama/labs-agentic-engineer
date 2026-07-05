@@ -38,9 +38,9 @@ skillsApplied:
     appPath: "expense-api",
     entrypoint: "deployment/service",
     exposure: "internet",
-    connections: [
-      { to: "postgres", type: "datastore" },
-      { to: "email-gateway", type: "connector", onPlatform: false },
+    dependencies: [
+      { kind: "platform-resource", name: "postgres", resourceType: "postgres" },
+      { kind: "external", name: "email-gateway" },
     ],
     description: "The API service.",
   }),
@@ -54,7 +54,7 @@ skillsApplied:
     appPath: "expense-webapp",
     entrypoint: "deployment/webapp",
     exposure: "intranet",
-    connections: [{ to: "expense-api", type: "http" }],
+    dependencies: [{ kind: "component", name: "expense-api" }],
     description: "The webapp.",
   }),
   "specs/design/components/expense-webapp/wireframes.dsl": "screen A\n",
@@ -74,7 +74,7 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   assert.equal(api.services!["expense-api"]!.deploymentMetadata.gateways.internet.isExposed, true);
   assert.deepEqual(api.connections, [
     { id: "datastore://postgres", type: "datastore", onPlatform: true },
-    { id: "connector://email-gateway", type: "connector", onPlatform: false },
+    { id: "http://email-gateway", type: "http", onPlatform: false },
   ]);
   assert.equal(api.artifacts.openapi, "specs/design/components/expense-api/openapi.yaml");
 
@@ -103,7 +103,7 @@ test("a non-standard component type flows through the projection untouched", () 
       appPath: "report-worker",
       entrypoint: "deployment/task",
       exposure: "intranet",
-      connections: [],
+      dependencies: [],
       description: "Nightly report generation.",
     }),
   };
