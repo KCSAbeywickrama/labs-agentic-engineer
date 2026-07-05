@@ -39,6 +39,7 @@ import { SSE_DONE, type McpConfig, type Skill } from "./contracts/sse-events.js"
 import type { ConversationStore } from "./store/conversation-store.js";
 import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
+import { registerTechLead } from "./agents/techlead/route.js";
 import { config } from "./shared/config.js";
 
 export interface CreateAppDeps {
@@ -62,6 +63,10 @@ export function createApp(deps: CreateAppDeps): Express {
   const app = express();
   const guard = new TurnGuard(); // one in-flight guard per app (serializes turns per id)
   app.use(express.json({ limit: deps.bodyLimit ?? config.bodyLimit }));
+
+  // Tech-lead structured-output routes (plan + detail) — the S2S wire surface
+  // aep-api's task_stream speaks. Legacy-contract parity; see techlead/route.ts.
+  registerTechLead(app, { model: deps.model });
 
   app.post("/conversations/:id/turns", async (req: Request, res: Response) => {
     const id = req.params.id as string;

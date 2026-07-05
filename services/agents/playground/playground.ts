@@ -35,6 +35,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as clack from "@clack/prompts";
+import type { LanguageModel } from "ai";
 import type { Skill, TurnRequest } from "../src/contracts/sse-events.js";
 import { createApp } from "../src/server.js";
 import { createModel } from "../src/shared/model.js";
@@ -49,6 +50,7 @@ import { loadRepoSkills } from "../evals/skills.js";
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
+import { runTasksCommand } from "./tasks.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // pushed every turn (ADR-0002); the service still reads none.
@@ -59,6 +61,8 @@ interface ChatCtx {
   baseUrl: string;
   skills: Skill[];
   dryRun: boolean;
+  /** The in-process model — the /tasks command drives the tech-lead planner directly. */
+  model: LanguageModel;
   /** Caller-supplied MCP discovery endpoint (Task E2), from AEP_MCP_URL/AEP_MCP_TOKEN. */
   mcp?: TurnRequest["mcp"];
 }
@@ -130,8 +134,14 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   }
 }
 
+/** Run the tech-lead planner over the thread's current spec bundle (read-only). */
+async function runTasks(ctx: ChatCtx): Promise<void> {
+  const files = readSnapshot(ctx.thread);
+  await runTasksCommand(ctx.thread, files, ctx.skills, ctx.model);
+}
+
 function printHelp(): void {
-  output.write("  commands: /threads (switch), /quit, /help\n");
+  output.write("  commands: /tasks (plan tasks), /threads (switch), /quit, /help\n");
 }
 
 /** The per-thread readline loop. Returns when the user switches threads or quits. */
@@ -153,6 +163,10 @@ async function chatLoop(ctx: ChatCtx): Promise<"switch" | "quit"> {
       if (line === "") continue;
       if (line === "/quit") return "quit";
       if (line === "/threads") return "switch";
+      if (line === "/tasks") {
+        await runTasks(ctx);
+        continue;
+      }
       if (line === "/help") {
         printHelp();
         continue;
@@ -180,7 +194,8 @@ async function main(): Promise<void> {
 
   const skills = loadRepoSkills(SKILLS_DIR);
   const store = new InMemoryConversationStore();
-  const app = createApp({ store, model: createModel({ apiKey }) });
+  const model = createModel({ apiKey });
+  const app = createApp({ store, model });
   const { baseUrl, close } = await listen0(app.listen(0));
 
   // MCP discovery (Task E2): both env vars set → push { url, token } on every
@@ -209,7 +224,7 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun, ...(mcp ? { mcp } : {}) });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, model, ...(mcp ? { mcp } : {}) });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }
