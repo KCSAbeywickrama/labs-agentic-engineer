@@ -55,9 +55,12 @@ set -e
 CLIENT_ID="$1"
 CLIENT_SECRET="$2"
 
-# Source common.sh if available (provides thunder_api_call). Path varies by
-# Thunder version; probe a few known locations.
+# Source common.sh if available (provides the AUTHENTICATED thunder_api_call —
+# the fallback below is unauthenticated and 401s on Thunder images that gate
+# the admin API). Path varies by Thunder version; probe known locations.
+# /opt/thunder/bootstrap/ is where the image shipped with OC 1.1.1 keeps it.
 for candidate in \
+    /opt/thunder/bootstrap/common.sh \
     /home/wso2thunder/thunder/scripts/common.sh \
     /opt/thunder/scripts/common.sh \
     /thunder/scripts/common.sh; do
