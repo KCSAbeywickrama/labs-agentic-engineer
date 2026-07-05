@@ -30,6 +30,7 @@ import { runFixture, type EvalSuite } from "./harness.js";
 import type { Fixture } from "./fixture.js";
 import { SEED_FILES } from "../src/agents/main/prompt.js";
 import { mockModel } from "../src/shared/mock-model.js";
+import { startMockMcpServer } from "./mocks/mcp-server.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 const suite: EvalSuite = { agent: "main", fixturesDir: "", defaultSeed: SEED_FILES };
@@ -139,4 +140,31 @@ test("skills: agent loads a skill, applies an edit; toolsUsed scores, loadSkill 
 
   const result = await runFixture(suite, fixture, { model, samples: 1, skills });
   assert.equal(result.passed, 1, JSON.stringify(result.sampleResults[0]?.turns, null, 2));
+});
+
+test("mcp: the mock server's tool is discovered, called, and scores via toolsUsed (no tokens)", async () => {
+  const mock = await startMockMcpServer();
+  try {
+    const fixture: Fixture = {
+      name: "mcp-plumbing",
+      turns: [{ prompt: "what external resources does this org already have?" }],
+      expect: {
+        toolsUsed: ["list_external_resources"],
+        noToolErrors: true,
+      },
+    };
+    const model = mockModel([
+      { kind: "toolCall", toolCallId: "m1", toolName: "list_external_resources", input: {} },
+      { kind: "text", text: "openweather is registered." },
+    ]);
+
+    const result = await runFixture(suite, fixture, {
+      model,
+      samples: 1,
+      mcp: { url: mock.baseUrl, token: mock.token },
+    });
+    assert.equal(result.passed, 1, JSON.stringify(result.sampleResults[0]?.turns, null, 2));
+  } finally {
+    await mock.close();
+  }
 });

@@ -35,7 +35,7 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, type Skill } from "./contracts/sse-events.js";
+import { SSE_DONE, type McpConfig, type Skill } from "./contracts/sse-events.js";
 import type { ConversationStore } from "./store/conversation-store.js";
 import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
@@ -70,6 +70,7 @@ export function createApp(deps: CreateAppDeps): Express {
       files?: unknown;
       filesChangedExternally?: unknown;
       skills?: unknown;
+      mcp?: unknown;
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
@@ -112,6 +113,20 @@ export function createApp(deps: CreateAppDeps): Express {
       skills = body.skills;
     }
 
+    // mcp (optional, Task E2): the caller-resolved discovery endpoint for this
+    // turn (aep-api mints a short-lived, org-bound token per call). Reject a
+    // malformed payload pre-stream, same as skills.
+    let mcp: McpConfig | undefined;
+    if (body.mcp !== undefined) {
+      const m = body.mcp as Record<string, unknown> | null;
+      const valid = m !== null && typeof m === "object" && typeof m.url === "string" && typeof m.token === "string";
+      if (!valid) {
+        res.status(400).json({ error: "mcp must be { url, token } strings" });
+        return;
+      }
+      mcp = { url: m.url as string, token: m.token as string };
+    }
+
     // Abort the turn if the client disconnects mid-stream.
     const ac = new AbortController();
     res.on("close", () => ac.abort());
@@ -134,6 +149,7 @@ export function createApp(deps: CreateAppDeps): Express {
         files,
         filesChangedExternally: body.filesChangedExternally === true,
         ...(skills ? { skills } : {}),
+        ...(mcp ? { mcp } : {}),
         model: deps.model,
         store: deps.store,
         guard,

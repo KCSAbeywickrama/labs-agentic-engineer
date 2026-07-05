@@ -29,7 +29,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LanguageModel, ModelMessage } from "ai";
-import type { OpResult, Skill } from "../src/contracts/sse-events.js";
+import type { McpConfig, OpResult, Skill } from "../src/contracts/sse-events.js";
 import { createApp } from "../src/server.js";
 import { listen0 } from "../src/shared/listen.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
@@ -80,6 +80,8 @@ export interface RunOptions {
   writePreviewDir?: string;
   /** The whole skill library, pushed in every turn body (ADR-0002). */
   skills?: Skill[];
+  /** MCP discovery endpoint (Task E2), pushed in every turn body when set. */
+  mcp?: McpConfig;
   onLog?: (msg: string) => void;
 }
 
@@ -122,12 +124,14 @@ function turnBody(
   files: Record<string, string>,
   changed: boolean,
   skills?: Skill[],
+  mcp?: McpConfig,
 ): TurnRequest {
   return {
     instruction: prompt,
     files,
     ...(changed ? { filesChangedExternally: true } : {}),
     ...(skills && skills.length > 0 ? { skills } : {}),
+    ...(mcp ? { mcp } : {}),
   };
 }
 
@@ -163,7 +167,7 @@ async function runSample(
       const turn = fixture.turns[i]!;
       const files = turn.files ?? current;
 
-      const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, opts.skills);
+      const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, opts.skills, opts.mcp);
       const parts = await collectTurn(baseUrl, id, body);
 
       const toolCalls = parts.filter((p) => p.type === "tool-call");
@@ -237,6 +241,7 @@ export async function recordFixture(
   fixture: Fixture,
   model: LanguageModel,
   skills?: Skill[],
+  mcp?: McpConfig,
 ): Promise<ModelMessage[]> {
   const seed = fixture.seed ?? suite.defaultSeed;
   const { store, baseUrl, close } = await boot(model);
@@ -245,7 +250,7 @@ export async function recordFixture(
     let current = seed;
     for (const turn of fixture.turns) {
       const files = turn.files ?? current;
-      const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, skills);
+      const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, skills, mcp);
       const parts = await collectTurn(baseUrl, id, body);
       current = reconstruct(files, parts.filter((p) => p.type === "tool-call"));
     }

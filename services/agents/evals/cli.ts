@@ -35,6 +35,7 @@ import { loadDotenv } from "../src/shared/env.js";
 import { loadFixture, loadFixtures } from "./fixture.js";
 import { runSuite, recordFixture, writeResults, type RunOptions } from "./harness.js";
 import { loadRepoSkills } from "./skills.js";
+import { startMockMcpServer } from "./mocks/mcp-server.js";
 import { mainSuite } from "./main/main.eval.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -56,41 +57,56 @@ async function main(): Promise<void> {
     process.stdout.write(`eval: ${skills.length} skill(s) in catalog: ${skills.map((s) => s.name).join(", ")}\n`);
   }
 
-  // Record mode: run a fixture's turns and print the resulting messages (for
-  // authoring thread-2 captured-trace fixtures). Does not score.
-  if (process.env.EVAL_RECORD === "1") {
-    if (!nameFilter) {
-      process.stdout.write("EVAL_RECORD requires a fixture name: eval -- <fixture>\n");
+  // MCP discovery (Task E2): this repo doesn't run aep-api's real dependency-
+  // discovery server, so the eval stands one in — the deterministic mock in
+  // `evals/mocks/mcp-server.ts`, speaking the same JSON-RPC subset over a fixed
+  // catalog (openweather / employee-api / postgres-cnpg). Pushed on every turn,
+  // same as skills; closed in `finally` so the CLI process can exit.
+  const mcpServer = await startMockMcpServer();
+  process.stdout.write(`eval: mock mcp server at ${mcpServer.baseUrl}\n`);
+
+  try {
+    const mcp = { url: mcpServer.baseUrl, token: mcpServer.token };
+
+    // Record mode: run a fixture's turns and print the resulting messages (for
+    // authoring thread-2 captured-trace fixtures). Does not score.
+    if (process.env.EVAL_RECORD === "1") {
+      if (!nameFilter) {
+        process.stdout.write("EVAL_RECORD requires a fixture name: eval -- <fixture>\n");
+        return;
+      }
+      const fixture = loadFixture(join(mainSuite.fixturesDir, `${nameFilter}.json`));
+      const messages = await recordFixture(mainSuite, fixture, model, skills, mcp);
+      process.stdout.write(`${JSON.stringify(messages, null, 2)}\n`);
       return;
     }
-    const fixture = loadFixture(join(mainSuite.fixturesDir, `${nameFilter}.json`));
-    const messages = await recordFixture(mainSuite, fixture, model, skills);
-    process.stdout.write(`${JSON.stringify(messages, null, 2)}\n`);
-    return;
-  }
 
-  let fixtures = loadFixtures(mainSuite.fixturesDir);
-  if (nameFilter) fixtures = fixtures.filter((f) => f.name === nameFilter);
-  if (fixtures.length === 0) {
-    process.stdout.write(`eval: no fixtures${nameFilter ? ` matching "${nameFilter}"` : ""}.\n`);
-    return;
-  }
+    let fixtures = loadFixtures(mainSuite.fixturesDir);
+    if (nameFilter) fixtures = fixtures.filter((f) => f.name === nameFilter);
+    if (fixtures.length === 0) {
+      process.stdout.write(`eval: no fixtures${nameFilter ? ` matching "${nameFilter}"` : ""}.\n`);
+      return;
+    }
 
-  const samples = Math.max(1, Number(process.env.EVAL_SAMPLES ?? 3));
-  const opts: RunOptions = {
-    model,
-    samples,
-    ...(skills.length > 0 ? { skills } : {}),
-    onLog: (m) => process.stdout.write(`${m}\n`),
-    writePreviewDir: join(here, ".eval-preview"),
-  };
+    const samples = Math.max(1, Number(process.env.EVAL_SAMPLES ?? 3));
+    const opts: RunOptions = {
+      model,
+      samples,
+      ...(skills.length > 0 ? { skills } : {}),
+      mcp,
+      onLog: (m) => process.stdout.write(`${m}\n`),
+      writePreviewDir: join(here, ".eval-preview"),
+    };
 
-  const result = await runSuite(mainSuite, fixtures, opts);
-  writeResults(join(here, "eval-results", `${mainSuite.agent}.json`), result);
+    const result = await runSuite(mainSuite, fixtures, opts);
+    writeResults(join(here, "eval-results", `${mainSuite.agent}.json`), result);
 
-  process.stdout.write("\n=== eval summary (report-not-gate) ===\n");
-  for (const f of result.fixtures) {
-    process.stdout.write(`${f.name}: ${f.passed}/${f.samples} samples passed (${Math.round(f.passRate * 100)}%)\n`);
+    process.stdout.write("\n=== eval summary (report-not-gate) ===\n");
+    for (const f of result.fixtures) {
+      process.stdout.write(`${f.name}: ${f.passed}/${f.samples} samples passed (${Math.round(f.passRate * 100)}%)\n`);
+    }
+  } finally {
+    await mcpServer.close();
   }
 }
 

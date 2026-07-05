@@ -59,6 +59,8 @@ interface ChatCtx {
   baseUrl: string;
   skills: Skill[];
   dryRun: boolean;
+  /** Caller-supplied MCP discovery endpoint (Task E2), from AEP_MCP_URL/AEP_MCP_TOKEN. */
+  mcp?: TurnRequest["mcp"];
 }
 
 const NEW = "\0new";
@@ -96,6 +98,7 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
     instruction,
     files: before,
     ...(ctx.skills.length > 0 ? { skills: ctx.skills } : {}),
+    ...(ctx.mcp ? { mcp: ctx.mcp } : {}),
   };
 
   const toolCalls: StreamPart[] = [];
@@ -180,8 +183,16 @@ async function main(): Promise<void> {
   const app = createApp({ store, model: createModel({ apiKey }) });
   const { baseUrl, close } = await listen0(app.listen(0));
 
+  // MCP discovery (Task E2): both env vars set → push { url, token } on every
+  // turn (mirrors how the caller resolves skills). Either unset → no `mcp`
+  // field at all, same as a checkout with no dependency-discovery server.
+  const mcpUrl = process.env.AEP_MCP_URL;
+  const mcpToken = process.env.AEP_MCP_TOKEN;
+  const mcp = mcpUrl && mcpToken ? { url: mcpUrl, token: mcpToken } : undefined;
+
   clack.intro("AEP spec-agent playground");
   if (skills.length > 0) clack.log.info(`skills: ${skills.map((s) => s.name).join(", ")}`);
+  if (mcp) clack.log.info(`mcp discovery: ${mcp.url}`);
   if (dryRun) clack.log.warn("dry-run: changes are shown but NOT written to disk");
 
   try {
@@ -198,7 +209,7 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, ...(mcp ? { mcp } : {}) });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }

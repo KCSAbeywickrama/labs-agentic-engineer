@@ -18,11 +18,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./run-conversation-turn.js";
 import { InMemoryConversationStore } from "../store/memory-store.js";
 import { SEED_FILES } from "../agents/main/prompt.js";
 import type { StreamPart } from "../agents/main/stream-types.js";
 import { mockModel, type MockStep } from "../shared/mock-model.js";
+import { listen0 } from "../shared/listen.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 
@@ -160,6 +162,102 @@ test("skills: loadSkill is registered, executes server-side, and its body reache
   // The loaded body persists as a tool result in history (continuity across turns).
   const stored = await store.get("skilled");
   assert.match(JSON.stringify(stored!.messages), /specs\/design\/components/);
+});
+
+test("mcp omitted: no MCP fetch is attempted; tool set unchanged (byte-identical to today)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { onEvent } = collector();
+
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+    fetchCalls++;
+    return originalFetch(...args);
+  }) as typeof fetch;
+  try {
+    const conv = await runConversationTurn({
+      id: "no-mcp",
+      instruction: "rename the hello message",
+      files: SEED_FILES,
+      model: editModel(),
+      store,
+      guard,
+      onEvent,
+    });
+    assert.equal(conv.status, "done");
+    assert.equal(fetchCalls, 0, "an mcp-free turn never calls fetch — no discovery round trip");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("mcp: discovered tools merge into the turn's tool set and execute server-side", async () => {
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c: Buffer) => (raw += c));
+    req.on("end", () => {
+      const { id, method } = JSON.parse(raw || "{}") as { id: unknown; method: string };
+      res.writeHead(200, { "content-type": "application/json" });
+      if (method === "tools/list") {
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              tools: [
+                {
+                  name: "list_external_resources",
+                  description: "list registered external resources",
+                  inputSchema: { type: "object", properties: {} },
+                },
+              ],
+            },
+          }),
+        );
+      } else if (method === "tools/call") {
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: '{"externalResources":[{"name":"openweather"}]}' }] },
+          }),
+        );
+      } else {
+        res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "method not found" } }));
+      }
+    });
+  });
+  const { baseUrl, close } = await listen0(server.listen(0));
+
+  try {
+    const store = new InMemoryConversationStore();
+    const guard = new TurnGuard();
+    const { events, onEvent } = collector();
+
+    const model = mockModel([
+      { kind: "toolCall", toolCallId: "m1", toolName: "list_external_resources", input: {} },
+      { kind: "text", text: "done" },
+    ]);
+
+    const conv = await runConversationTurn({
+      id: "mcp-conv",
+      instruction: "what external resources exist?",
+      files: SEED_FILES,
+      mcp: { url: baseUrl, token: "tok-abc" },
+      model,
+      store,
+      guard,
+      onEvent,
+    });
+
+    assert.equal(conv.status, "done");
+    const result = events.find((e) => e.type === "tool-result" && e.toolName === "list_external_resources");
+    assert.ok(result, "the MCP-discovered tool executed server-side and streamed a result");
+    assert.match(JSON.stringify(result.output), /openweather/);
+  } finally {
+    await close();
+  }
 });
 
 test("a concurrent turn for the same id rejects with ConcurrentTurnError (409 source)", async () => {

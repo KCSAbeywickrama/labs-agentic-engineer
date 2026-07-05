@@ -28,14 +28,15 @@
  * preserved across turns.
  */
 
-import { isStepCount, type LanguageModel, type ModelMessage } from "ai";
-import type { Skill } from "../contracts/sse-events.js";
+import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import type { McpConfig, Skill } from "../contracts/sse-events.js";
 import { runTurn } from "../agents/main/run-turn.js";
 import { buildTools, ASK_QUESTION } from "../agents/main/tool.js";
 import { FileBundle } from "../agents/main/bundle.js";
 import { buildInstructions, buildPrompt } from "../agents/main/prompt.js";
 import type { StreamPart } from "../agents/main/stream-types.js";
 import { config } from "../shared/config.js";
+import { loadMcpTools } from "../shared/mcp-client.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
 
 /** Thrown when a second turn starts for an id whose turn is still in flight (→ HTTP 409). */
@@ -99,6 +100,12 @@ export interface RunConversationTurnInput {
    * pulls a body via `loadSkill`. Omitted/empty → no catalog, no `loadSkill`.
    */
   skills?: Skill[];
+  /**
+   * Caller-supplied MCP discovery endpoint for this turn (Task E2). Present →
+   * `tools/list` is fetched (best-effort) and merged into the tool set as
+   * dynamic tools. Omitted → no fetch, no merge (byte-identical to today).
+   */
+  mcp?: McpConfig;
   /** Injected at the composition root (createModel is called ONCE there, not per turn). */
   model: LanguageModel;
   store: ConversationStore;
@@ -119,7 +126,16 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 3. throwaway WorkingBundle from the passed snapshot; ask_question DISABLED.
     //    `loadSkill` is registered only when the caller pushed skills (ADR-0002).
     const bundle = new FileBundle(input.files);
-    const tools = buildTools(bundle, input.skills);
+    const baseTools = buildTools(bundle, input.skills);
+
+    // MCP discovery (Task E2): best-effort — a caller-supplied `mcp` merges the
+    // org's dependency-discovery tools (list_external_resources, etc.) into the
+    // tool set for this turn. `loadMcpTools` never throws (server down/401/
+    // malformed → `{}`, logged), so a turn with `mcp` never fails ON ITS
+    // ACCOUNT. Omitted `mcp`, or a failed/empty load, means `tools` IS
+    // `baseTools` (no wrapping object) — byte-identical to an mcp-free turn.
+    const mcpTools: ToolSet = input.mcp ? await loadMcpTools(input.mcp) : {};
+    const tools = Object.keys(mcpTools).length > 0 ? { ...baseTools, ...mcpTools } : baseTools;
 
     // 4. one generic turn. buildInstructions appends the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
