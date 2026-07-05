@@ -22,13 +22,13 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Link as MuiLink,
+  Divider,
   PageContent,
   PageTitle,
   Stack,
 } from "@wso2/oxygen-ui";
-import { GitHub } from "@wso2/oxygen-ui-icons-react";
-import { Outlet } from "@tanstack/react-router";
+import { Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
+import { Link, Outlet } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { useProject, useProjectStatus } from "../api/queries";
 
@@ -90,34 +90,45 @@ export function ProjectLayout({ projectName }: { projectName: string }) {
   }
 
   const chip = status.data ? phaseChip(status.data) : null;
+  const displayName = project.data.displayName ?? project.data.name;
+  const initial = (displayName.trim()[0] ?? "P").toUpperCase();
 
   return (
     <PageContent>
-      <PageTitle>
-        <PageTitle.Header>
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-            <span>{project.data.displayName ?? project.data.name}</span>
-            {chip && <Chip size="small" label={chip.label} color={chip.color} />}
-          </Stack>
-        </PageTitle.Header>
-        {project.data.description && (
-          <PageTitle.SubHeader>{project.data.description}</PageTitle.SubHeader>
-        )}
-      </PageTitle>
-
-      {status.data?.repoUrl && (
-        <Box sx={{ mt: -1, mb: 3 }}>
-          <MuiLink
-            href={status.data.repoUrl}
-            target="_blank"
-            rel="noreferrer"
-            variant="body2"
-            sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}
+      {/* Header per the oxygen-ui sample's ProjectOverview page: back
+          button, avatar with initial, name, description, repo link. */}
+      <Box sx={{ mb: 3 }}>
+        <PageTitle>
+          <PageTitle.BackButton component={<Link to="/" />} />
+          <PageTitle.Avatar
+            sx={{ bgcolor: "primary.main", color: "primary.contrastText" }}
           >
-            <GitHub size={16} /> {status.data.repoUrl.replace(/^https?:\/\//, "")}
-          </MuiLink>
-        </Box>
-      )}
+            {initial}
+          </PageTitle.Avatar>
+          <PageTitle.Header>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+              <span>{displayName}</span>
+              {chip && (
+                <Chip size="small" label={chip.label} color={chip.color} />
+              )}
+            </Stack>
+          </PageTitle.Header>
+          {project.data.description && (
+            <PageTitle.SubHeader>{project.data.description}</PageTitle.SubHeader>
+          )}
+          {status.data?.repoUrl && (
+            <PageTitle.Link
+              href={status.data.repoUrl}
+              target="_blank"
+              rel="noreferrer"
+              icon={<LinkIcon size={14} />}
+            >
+              {status.data.repoUrl.replace(/^https?:\/\/(www\.)?/, "")}
+            </PageTitle.Link>
+          )}
+        </PageTitle>
+        <Divider sx={{ mt: 2 }} />
+      </Box>
 
       {status.data?.phase === "repo-error" && (
         <Alert severity="error" sx={{ mb: 2 }}>
