@@ -382,9 +382,15 @@ export default function ProjectArchitecturePage() {
         return;
       }
 
-      // 2. Cut the design tag (hard semantic validation happens here).
+      // 2. Cut the design tag (hard semantic validation happens here) — pinned
+      // to the commit step 1 just created, so the server never re-reads the
+      // (lagging) heads/main ref. A 'clean' outcome has no new commit — the
+      // server tags HEAD.
       try {
-        await api.saveAndProceedDesign(projectId);
+        await api.saveAndProceedDesign(
+          projectId,
+          outcome.status === 'applied' ? outcome.commitSha : undefined,
+        );
       } catch (err) {
         // A 422 arrives with joined validation errors already in `.message`.
         setPublishError(

@@ -266,18 +266,18 @@ export const restApi = {
     }
   },
 
-  async saveRequirements(projectId: string): Promise<RequirementsBundle | undefined> {
-    try {
-      return await fetchJSON<RequirementsBundle>(
-        `${projectPrefix(projectId)}/requirements/save`,
-        { method: 'POST' },
-      );
-    } catch (err) {
-      // Diagnostic only (root-causing silent publish/tag failures): the swallow
-      // is a known bug — publish proceeds as if saved. Keep the evidence.
-      console.error('[publish] requirements save (tag) failed — publish will proceed anyway', err);
-      return undefined;
-    }
+  /**
+   * Cut the requirements version tag. `commitSha` pins the commit the publish's
+   * apply just created so the server never re-reads `heads/main` (whose reads
+   * lag writes — the silent-untagged-publish incident). Let ApiError bubble —
+   * Publish must stop (keep the draft, show the message) when the tag fails,
+   * not navigate on as if it succeeded.
+   */
+  async saveRequirements(projectId: string, commitSha?: string): Promise<RequirementsBundle> {
+    return fetchJSON<RequirementsBundle>(`${projectPrefix(projectId)}/requirements/save`, {
+      method: 'POST',
+      body: JSON.stringify(commitSha ? { commitSha } : {}),
+    });
   },
 
   async discardRequirements(projectId: string): Promise<RequirementsBundle | undefined> {
@@ -327,12 +327,14 @@ export const restApi = {
 
   // -- Designs (real backend) ------------------------------------------------
 
-  async saveAndProceedDesign(projectId: string): Promise<Design> {
+  /** `commitSha` pins the publish's just-applied commit — see saveRequirements. */
+  async saveAndProceedDesign(projectId: string, commitSha?: string): Promise<Design> {
     // Let ApiError bubble — Publish needs to surface the server's error
     // message (e.g. missing requirements baseline, save-via-API failures)
     // rather than collapsing every failure into a generic toast.
     return fetchJSON<Design>(`${projectPrefix(projectId)}/design/save`, {
       method: 'POST',
+      body: JSON.stringify(commitSha ? { commitSha } : {}),
     });
   },
 

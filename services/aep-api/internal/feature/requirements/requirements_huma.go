@@ -45,6 +45,28 @@ type reqVersionInput struct {
 	Tag         string `path:"tag" doc:"Version tag (e.g. v1)"`
 }
 
+// saveBody is the optional save request body. The publish flow pins the commit
+// its files-apply just created so the save never races a stale `heads/main`
+// read (GitHub ref reads lag writes by seconds).
+type saveBody struct {
+	CommitSHA string `json:"commitSha,omitempty" doc:"Commit to gate and tag (the publish's just-applied commit). Empty: resolve HEAD."`
+}
+
+// reqSaveInput is reqProjectInput plus the optional save body (pointer Body =
+// body itself optional; bare POSTs keep working).
+type reqSaveInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	Body        *saveBody
+}
+
+func (in *reqSaveInput) commitSHA() string {
+	if in.Body == nil {
+		return ""
+	}
+	return in.Body.CommitSHA
+}
+
 type requirementsBundleOutput struct{ Body *models.RequirementsBundle }
 type requirementsVersionsOutput struct{ Body []models.ArtifactVersion }
 
@@ -80,8 +102,8 @@ func RegisterRequirements(api huma.API, svc RequirementsService) {
 		Summary:     "Save the requirements bundle (cut a new version)",
 		Tags:        []string{"Requirements(Deprecated)"},
 		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *reqProjectInput) (*requirementsBundleOutput, error) {
-		out, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName)
+	}, func(ctx context.Context, in *reqSaveInput) (*requirementsBundleOutput, error) {
+		out, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName, in.commitSHA())
 		if err != nil {
 			slog.ErrorContext(ctx, "requirements save failed",
 				"project", in.ProjectName, "error", err)

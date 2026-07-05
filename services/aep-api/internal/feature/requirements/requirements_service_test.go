@@ -233,7 +233,7 @@ func TestSaveAndProceed(t *testing.T) {
 				return map[string]string{"requirements.md": "# R\n"}, nil
 			},
 		}
-		b, err := newReqSvc(fake).SaveAndProceed(context.Background(), "acme", "web")
+		b, err := newReqSvc(fake).SaveAndProceed(context.Background(), "acme", "web", "")
 		if err != nil {
 			t.Fatalf("save: %v", err)
 		}
@@ -249,14 +249,14 @@ func TestSaveAndProceed(t *testing.T) {
 				return nil, errors.New("git push rejected")
 			},
 		}
-		if _, err := newReqSvc(fake).SaveAndProceed(context.Background(), "acme", "web"); err == nil {
+		if _, err := newReqSvc(fake).SaveAndProceed(context.Background(), "acme", "web", ""); err == nil {
 			t.Fatal("a save failure must propagate")
 		}
 	})
 
 	t.Run("nil artifactSvc is git-client-not-configured", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewRequirementsService(nil, nil).SaveAndProceed(context.Background(), "acme", "web"); err == nil {
+		if _, err := NewRequirementsService(nil, nil).SaveAndProceed(context.Background(), "acme", "web", ""); err == nil {
 			t.Fatal("want an error when the git client is not configured")
 		}
 	})

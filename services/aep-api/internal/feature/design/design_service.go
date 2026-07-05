@@ -60,7 +60,10 @@ type DesignBundle struct {
 type DesignService interface {
 	GetDesignBundle(ctx context.Context, orgID, projectID string) (*DesignBundle, error)
 	GetDesignBundleAtTag(ctx context.Context, orgID, projectID, tag string) (*DesignBundle, error)
-	SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.Design, error)
+	// SaveAndProceed cuts the next `v<N>-<M>` tag. commitSHA, when non-empty, is
+	// the commit the caller's files-apply just created — the save reads, gates,
+	// and tags that exact commit instead of re-reading `heads/main`.
+	SaveAndProceed(ctx context.Context, orgID, projectID, commitSHA string) (*models.Design, error)
 	DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error)
 	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]models.ArtifactVersion, error)
 }
@@ -247,35 +250,46 @@ func (s *designService) GetDesignBundleAtTag(ctx context.Context, orgID, project
 	return &DesignBundle{Files: files, Design: d}, nil
 }
 
-// SaveAndProceed runs the hard save gate and cuts the next `v<N>-<M>` tag at
-// HEAD where N is the latest requirements version. Surfaces ErrSpecNotApproved
-// (409) when no requirements tag exists yet, and design reconciliation runs
-// afterwards so pending tasks for removed components auto-close.
-func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.Design, error) {
+// SaveAndProceed runs the hard save gate and cuts the next `v<N>-<M>` tag,
+// where N is the latest requirements version. commitSHA, when non-empty, pins
+// every read + the tag to the commit the caller's files-apply just created —
+// re-resolving HEAD here loses to GitHub's ref-read lag (a publish's save saw
+// the pre-apply tree seconds after the apply landed). Surfaces
+// ErrSpecNotApproved (409) when no requirements tag exists yet, and design
+// reconciliation runs afterwards so pending tasks for removed components
+// auto-close.
+func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, commitSHA string) (*models.Design, error) {
 	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
 
-	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	readDesign := func() (*artifacts.DesignFile, error) {
+		if commitSHA != "" {
+			return s.store.ReadDesignAt(ctx, orgID, projectID, commitSHA)
+		}
+		return s.store.ReadDesign(ctx, orgID, projectID)
+	}
+	designFile, err := readDesign()
 	if err != nil {
 		if artifacts.IsNotFound(err) {
-			slog.WarnContext(ctx, "design save: design not found at HEAD (pre-gate read) — 404",
-				"project", projectID, "error", err)
+			slog.WarnContext(ctx, "design save: design not found (pre-gate read) — 404",
+				"project", projectID, "commitSha", commitSHA, "error", err)
 			return nil, artifacts.ErrDesignNotFound
 		}
 		return nil, fmt.Errorf("read design: %w", err)
 	}
 	if designFile == nil {
-		// Right after a files-apply that wrote the design, an empty read here is
-		// a stale HEAD caught in the act — see the adjacent "bundle read at head"
-		// DEBUG line for the commit it resolved.
-		slog.WarnContext(ctx, "design save: no design at HEAD (empty or missing design.md) — 404",
-			"project", projectID)
+		// With no pinned commit, an empty read right after a files-apply that
+		// wrote the design is a stale HEAD caught in the act — see the adjacent
+		// "bundle read at head" DEBUG line for the commit it resolved.
+		slog.WarnContext(ctx, "design save: no design at read commit (empty or missing design.md) — 404",
+			"project", projectID, "commitSha", commitSHA)
 		return nil, artifacts.ErrDesignNotFound
 	}
 
 	res, err := s.artifactSvc.SaveDesign(ctx, orgID, projectID, artifacts.SaveRequest{
-		Message: "Update design",
+		Message:   "Update design",
+		CommitSHA: commitSHA,
 	})
 	if err != nil {
 		// Translate the "no requirements baseline" case into the design

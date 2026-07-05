@@ -299,8 +299,12 @@ export const PUBLISH_CONFLICT_MESSAGE =
 export type PublishDraftOutcome =
   /** Nothing to apply — the draft already matched the committed base. */
   | { status: 'clean' }
-  /** The apply landed; the session base advanced (`commitApplied`). */
-  | { status: 'applied' }
+  /**
+   * The apply landed; the session base advanced (`commitApplied`). The save
+   * that follows must pin `commitSha` (the just-created commit) — re-reading
+   * `heads/main` server-side loses to GitHub's ref-read lag.
+   */
+  | { status: 'applied'; commitSha: string }
   /**
    * 409 — a stale `baseSha`; NOTHING was applied. The draft was re-based onto
    * the latest server read (best effort — a failed re-read keeps the draft
@@ -334,5 +338,5 @@ export async function publishDraft(
     return { status: 'conflict' };
   }
   commitApplied(key, result);
-  return { status: 'applied' };
+  return { status: 'applied', commitSha: result.commitSha };
 }

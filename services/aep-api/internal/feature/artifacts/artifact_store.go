@@ -118,6 +118,17 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	return s.AssembleDesignFrom(files)
 }
 
+// ReadDesignAt is ReadDesign pinned to an exact commit — the publish flow's
+// save path reads the commit its apply just created instead of re-resolving
+// HEAD (ref reads lag writes on GitHub's side).
+func (s *ArtifactStore) ReadDesignAt(ctx context.Context, orgID, projectID, commitSHA string) (*DesignFile, error) {
+	files, err := s.artifactSvc.GetDesignAtCommit(ctx, orgID, projectID, commitSHA)
+	if err != nil {
+		return nil, err
+	}
+	return s.AssembleDesignFrom(files)
+}
+
 // AssembleDesignFrom assembles the flat DesignFile from an already-listed
 // design file map — the single-read path for callers that also need the raw
 // map (no second HEAD walk). Returns (nil, nil) when no design root exists.

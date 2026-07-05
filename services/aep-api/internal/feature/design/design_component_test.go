@@ -243,6 +243,40 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 	})
 }
 
+// The publish flow pins the commit its files-apply just created: the save's
+// pre-gate read must hit that exact commit (GetDesignAtCommit — never the
+// HEAD-resolving ListDesignFiles, whose ref read can lag the apply) and the
+// artifact save must receive the same sha to gate + tag.
+func TestDesignComponent_Save_CommitShaPinsReadAndTag(t *testing.T) {
+	t.Parallel()
+	const sha = "1362ed59a59033f2f066c5bb7720c9880fa35ec0"
+	var readAt, savedAt string
+	fake := &artifactstest.FakeArtifactService{
+		GetDesignAtCommitFunc: func(_ context.Context, _, _, commitSHA string) (map[string]string, error) {
+			readAt = commitSHA
+			return validDesignTree(), nil
+		},
+		SaveDesignFunc: func(_ context.Context, _, _ string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+			savedAt = req.CommitSHA
+			return &artifacts.DesignSaveResult{Status: "approved", Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}, nil
+		},
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			t.Error("save with commitSha must not resolve HEAD (ListDesignFiles called)")
+			return validDesignTree(), nil
+		},
+		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+			return nil, nil
+		},
+	}
+	resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", `{"commitSha":"`+sha+`"}`)
+	if resp.Code != 200 {
+		t.Fatalf("save with commitSha: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if readAt != sha || savedAt != sha {
+		t.Fatalf("pinned sha lost: pre-gate read at %q, artifact save got %q, want %q", readAt, savedAt, sha)
+	}
+}
+
 func TestDesignComponent_NoClaimsDeniedByEnforceGate(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, happyReads())

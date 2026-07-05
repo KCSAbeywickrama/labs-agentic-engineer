@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package agentsvc is the BFF client for the NEW file-mutation agents service
-// (services/agents). It is distinct from internal/clients/agents (the legacy
-// AI-SDK service that still serves task generation).
+// Package agentsvc is the BFF client for the file-mutation agents service
+// (services/agents) — the sole agents backend for all generation and task
+// planning flows.
 //
 // Contract (Phase 1, docs/design/agents-generation-migration.md §12.3):
 //   - POST /conversations/{id}/turns  body {instruction, files,

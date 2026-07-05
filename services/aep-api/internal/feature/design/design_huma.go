@@ -45,6 +45,28 @@ type designTagInput struct {
 	Tag         string `path:"tag" doc:"Design version tag (e.g. v1-2)"`
 }
 
+// designSaveBody is the optional save request body. The publish flow pins the
+// commit its files-apply just created so the save never races a stale
+// `heads/main` read (GitHub ref reads lag writes by seconds).
+type designSaveBody struct {
+	CommitSHA string `json:"commitSha,omitempty" doc:"Commit to read, gate and tag (the publish's just-applied commit). Empty: resolve HEAD."`
+}
+
+// designSaveInput is designProjectInput plus the optional save body (pointer
+// Body = body itself optional; bare POSTs keep working).
+type designSaveInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	Body        *designSaveBody
+}
+
+func (in *designSaveInput) commitSHA() string {
+	if in.Body == nil {
+		return ""
+	}
+	return in.Body.CommitSHA
+}
+
 type designOutput struct{ Body *models.Design }
 type designBundleOutput struct{ Body *DesignBundle }
 type designVersionsOutput struct{ Body []models.ArtifactVersion }
@@ -80,8 +102,8 @@ func RegisterDesign(api huma.API, svc DesignService) {
 		Summary:     "Save the design and proceed",
 		Tags:        []string{"Design(Deprecated)"},
 		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *designProjectInput) (*designOutput, error) {
-		design, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName)
+	}, func(ctx context.Context, in *designSaveInput) (*designOutput, error) {
+		design, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName, in.commitSHA())
 		if err != nil {
 			slog.ErrorContext(ctx, "design save failed",
 				"project", in.ProjectName, "error", err)

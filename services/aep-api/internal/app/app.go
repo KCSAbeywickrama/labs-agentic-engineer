@@ -348,10 +348,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	skillMutationSvc := skills.NewSkillMutationService(skillSvc)
 	skillImportSvc := skills.NewSkillImportService(skillSvc)
 
-	// NEW file-mutation agents service (services/agents) — the
-	// requirements/design/chat generation flows. Plain HS256 M2M bearer; the
+	// File-mutation agents service (services/agents) — the requirements/design/
+	// chat generation and task-planning flows. Plain HS256 M2M bearer; the
 	// per-org Anthropic key is resolved by genai pre-stream and forwarded as
-	// X-Anthropic-Key. Distinct from agentsClient (legacy, kept for tasks).
+	// X-Anthropic-Key.
 	agentsvcClient := agentsvc.New(agentsvc.Config{
 		BaseURL:  cfg.AgentsSvc.BaseURL,
 		Secret:   cfg.AgentsSvc.JWTSecret,

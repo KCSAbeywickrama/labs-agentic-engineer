@@ -45,6 +45,7 @@ type FakeArtifactService struct {
 	ListDesignVersionsFunc       func(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
 	GetRequirementsAtTagFunc     func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtTagFunc           func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
+	GetDesignAtCommitFunc        func(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error)
 }
 
 var _ artifacts.ArtifactService = (*FakeArtifactService)(nil)
@@ -117,4 +118,11 @@ func (f *FakeArtifactService) GetDesignAtTag(ctx context.Context, orgID, project
 		panic("artifactstest: GetDesignAtTag called but GetDesignAtTagFunc is not set")
 	}
 	return f.GetDesignAtTagFunc(ctx, orgID, projectID, tag)
+}
+
+func (f *FakeArtifactService) GetDesignAtCommit(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error) {
+	if f.GetDesignAtCommitFunc == nil {
+		panic("artifactstest: GetDesignAtCommit called but GetDesignAtCommitFunc is not set")
+	}
+	return f.GetDesignAtCommitFunc(ctx, orgID, projectID, commitSHA)
 }

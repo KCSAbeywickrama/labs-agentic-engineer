@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -150,6 +151,9 @@ type ArtifactService interface {
 	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]DesignVersionInfo, error)
 	GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
+	// GetDesignAtCommit reads the design bundle at an exact commit — the publish
+	// flow's pinned-commit read (no ref resolution involved).
+	GetDesignAtCommit(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error)
 }
 
 type artifactService struct {
@@ -224,6 +228,17 @@ func (s *artifactService) GetRequirementsAtTag(ctx context.Context, orgID, proje
 		return nil, err
 	}
 	return s.readBundleAtTag(ctx, rc, tag, requirementsPrefix, requirementsBundleFilter)
+}
+
+func (s *artifactService) GetDesignAtCommit(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error) {
+	if !commitSHAPattern.MatchString(commitSHA) {
+		return nil, fmt.Errorf("%w: %q is not a commit sha", ErrArtifactPathInvalid, commitSHA)
+	}
+	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.readBundleAtCommit(ctx, rc, commitSHA, designPrefix, designBundleFilter)
 }
 
 func (s *artifactService) GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error) {
@@ -343,17 +358,18 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 	if err != nil {
 		return nil, err
 	}
-	head, err := s.headCommit(ctx, rc)
+	head, err := s.resolveSaveCommit(ctx, rc, req)
 	if err != nil {
-		return nil, fmt.Errorf("get head ref: %w", err)
+		return nil, err
 	}
 	files, err := s.readBundleAtCommit(ctx, rc, head, designPrefix, designBundleFilter)
 	if err != nil {
 		return nil, err
 	}
-	// The HEAD this save is about to gate + tag (see the requirements twin).
+	// The commit this save gates + tags (see the requirements twin).
 	slog.InfoContext(ctx, "design save: head read",
-		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", head, "files", len(files))
+		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", head,
+		"pinned", req.CommitSHA != "", "files", len(files))
 	// Hard gate: nothing malformed may acquire a tag.
 	if err := validateDesignBundle(files); err != nil {
 		slog.WarnContext(ctx, "design save: hard gate failed",

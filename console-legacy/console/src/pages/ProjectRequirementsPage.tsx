@@ -508,7 +508,10 @@ export default function ProjectRequirementsPage() {
         setPublishing(false);
         return;
       }
-      await api.saveRequirements(projectId);
+      // Tag the exact commit the apply just created (a 'clean' outcome has no
+      // new commit — the server tags HEAD). A failed tag throws: the catch
+      // keeps the draft and stays on the page instead of navigating on.
+      await api.saveRequirements(projectId, outcome.status === 'applied' ? outcome.commitSha : undefined);
       // Clear + navigate in one synchronous block: an await between them lets
       // the empty draft paint as "No requirements generated yet." before leaving.
       clearSpecDraft(key);

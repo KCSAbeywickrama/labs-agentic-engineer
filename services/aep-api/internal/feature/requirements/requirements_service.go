@@ -38,7 +38,10 @@ import (
 type RequirementsService interface {
 	GetRequirements(ctx context.Context, orgID, projectID string) (*models.RequirementsBundle, error)
 	GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (*models.RequirementsBundle, error)
-	SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.RequirementsBundle, error)
+	// SaveAndProceed cuts the next `v<N>` tag. commitSHA, when non-empty, is the
+	// commit the caller's files-apply just created — the save gates and tags that
+	// exact commit instead of re-reading `heads/main` (whose reads lag writes).
+	SaveAndProceed(ctx context.Context, orgID, projectID, commitSHA string) (*models.RequirementsBundle, error)
 	DiscardChanges(ctx context.Context, orgID, projectID string) (*models.RequirementsBundle, error)
 	ListVersions(ctx context.Context, orgID, projectID string) ([]models.ArtifactVersion, error)
 }
@@ -118,15 +121,18 @@ func (s *requirementsService) GetRequirementsAtTag(ctx context.Context, orgID, p
 	}, nil
 }
 
-// SaveAndProceed cuts the next `v<N>` tag at HEAD after the hard save gate
-// passes (requirements.md must exist). No commit is created — the accepted
-// draft is already committed to `main` via the Files API.
-func (s *requirementsService) SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.RequirementsBundle, error) {
+// SaveAndProceed cuts the next `v<N>` tag after the hard save gate passes
+// (requirements.md must exist). No commit is created — the accepted draft is
+// already committed to `main` via the Files API. With commitSHA set the gate +
+// tag operate on that exact commit (the publish flow's just-applied commit);
+// otherwise on freshly-resolved HEAD.
+func (s *requirementsService) SaveAndProceed(ctx context.Context, orgID, projectID, commitSHA string) (*models.RequirementsBundle, error) {
 	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
 	}
 	res, err := s.artifactSvc.SaveRequirements(ctx, orgID, projectID, artifacts.SaveRequest{
-		Message: "Update requirements",
+		Message:   "Update requirements",
+		CommitSHA: commitSHA,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("save requirements: %w", err)

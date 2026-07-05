@@ -238,6 +238,38 @@ func TestReqComponent_SaveAndDiscard_Happy(t *testing.T) {
 	}
 }
 
+// The publish flow pins the commit its files-apply just created; the optional
+// `{commitSha}` body must reach the artifact save verbatim (and its absence —
+// a bare `{}` or no body at all — must mean "resolve HEAD", i.e. empty).
+func TestReqComponent_Save_CommitShaBodyPassesThrough(t *testing.T) {
+	t.Parallel()
+	var got []string
+	fake := &artifactstest.FakeArtifactService{
+		SaveRequirementsFunc: func(_ context.Context, _, _ string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {
+			got = append(got, req.CommitSHA)
+			return &artifacts.RequirementsSaveResult{Status: "approved", Tag: "v1", Version: 1}, nil
+		},
+		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return map[string]string{"requirements.md": "# R\n"}, nil
+		},
+		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
+			return nil, nil
+		},
+	}
+	h := newReqHarness(t, fake, nil)
+
+	if resp := h.AsOrg("acme").Post(reqPrefix+"/save", `{"commitSha":"c6659d085ea2217c7a8a633f360ab6deabb3cc71"}`); resp.Code != 200 {
+		t.Fatalf("save with commitSha: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := h.AsOrg("acme").Post(reqPrefix+"/save", "{}"); resp.Code != 200 {
+		t.Fatalf("save with empty body: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	want := []string{"c6659d085ea2217c7a8a633f360ab6deabb3cc71", ""}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("CommitSHA seen by artifact save = %v, want %v", got, want)
+	}
+}
+
 func TestReqComponent_Save_SpecNotFoundMapsTo404(t *testing.T) {
 	t.Parallel()
 	fake := &artifactstest.FakeArtifactService{

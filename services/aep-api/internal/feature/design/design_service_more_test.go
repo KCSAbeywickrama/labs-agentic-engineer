@@ -276,7 +276,7 @@ func TestGetDesignBundleAtTag_Happy(t *testing.T) {
 func TestSaveAndProceed_NilClientErrors(t *testing.T) {
 	t.Parallel()
 	s := &designService{artifactSvc: nil}
-	if _, err := s.SaveAndProceed(context.Background(), "acme", "web"); err == nil {
+	if _, err := s.SaveAndProceed(context.Background(), "acme", "web", ""); err == nil {
 		t.Fatal("nil artifact client must error")
 	}
 }
@@ -288,7 +288,7 @@ func TestSaveAndProceed_NoDesignIsNotFound(t *testing.T) {
 			return map[string]string{}, nil // nothing to save
 		},
 	}
-	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web")
+	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web", "")
 	if !errors.Is(err, artifacts.ErrDesignNotFound) {
 		t.Fatalf("want ErrDesignNotFound, got %v", err)
 	}
@@ -305,7 +305,7 @@ func TestSaveAndProceed_NoBaselineTranslatesToSpecNotApproved(t *testing.T) {
 			return nil, artifacts.ErrNoRequirementsBaseline
 		},
 	}
-	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web")
+	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web", "")
 	if !errors.Is(err, ErrSpecNotApproved) {
 		t.Fatalf("no-baseline must translate to ErrSpecNotApproved, got %v", err)
 	}
@@ -328,7 +328,7 @@ func TestSaveAndProceed_HappyReconcilesTasks(t *testing.T) {
 	svc := newService(fake)
 	svc.SetTaskService(task)
 
-	d, err := svc.SaveAndProceed(context.Background(), "acme", "web")
+	d, err := svc.SaveAndProceed(context.Background(), "acme", "web", "")
 	if err != nil {
 		t.Fatalf("SaveAndProceed: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestSaveAndProceed_NilTaskReconcilerDoesNotPanic(t *testing.T) {
 		},
 	}
 	svc := newService(fake) // no SetTaskService
-	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web"); err != nil {
+	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web", ""); err != nil {
 		t.Fatalf("nil task reconciler must be a no-op, got: %v", err)
 	}
 }
@@ -377,7 +377,7 @@ func TestSaveAndProceed_ReconcileFailureIsBestEffort(t *testing.T) {
 	svc := newService(fake)
 	svc.SetTaskService(task)
 	// The save succeeded; a reconcile failure is logged, never surfaced.
-	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web"); err != nil {
+	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web", ""); err != nil {
 		t.Fatalf("reconcile failure must not fail the save, got: %v", err)
 	}
 }
