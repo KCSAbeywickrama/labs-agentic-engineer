@@ -117,19 +117,21 @@ export interface Dependency {
   description?: string;
   // Read-time computed 4-state resolution (never authored, never persisted).
   status?: "resolved" | "ambiguous" | "unresolved" | "blocked";
-  // Why a dep is not yet resolved. `needs-spec` = external dep has no spec
-  // yet; `needs-input` = value entry required; `not-found` = no match found;
-  // `access-required` = org-service exists but is not accessible (requestable
-  // via access requests); `access-pending` = access request in flight;
-  // `unpublished` = org-service is project-only. `""` for resolved deps.
+  // Why a dep is not yet resolved. `""` for resolved deps. Canonical set per
+  // aep-api `models/design.go` (Dependency.Reason doc): `access-required` =
+  // org-service exists but is not accessible (requestable via access
+  // requests); `not-found` = no match found in the catalog; `needs-spec` =
+  // external dep has no spec yet. The remaining two are NOT server-computed:
+  // `access-pending` is client-derived here by reconciling `access-required`
+  // deps against in-flight AccessRequests (status requested/in_progress);
+  // `needs-input` is reserved for future value-entry-required deps.
   reason?:
     | ""
-    | "needs-spec"
-    | "needs-input"
-    | "not-found"
     | "access-required"
+    | "not-found"
+    | "needs-spec"
     | "access-pending"
-    | "unpublished";
+    | "needs-input";
   // external: whether the architect requires a spec file for this dep.
   needsSpec?: boolean;
   // external: path (relative to the component dir) where the spec lives.
@@ -492,11 +494,14 @@ export interface AccessRequest {
   consumerProjectId: string;
   consumerComponentName: string;
   orgServiceName: string;
-  providerProjectId: string;
-  providerComponentName: string;
-  providerTaskId: string;
-  providerIssueNumber: number;
-  providerIssueUrl: string;
+  // Provider side is resolved from the catalog at request time and carries
+  // `omitempty` Go tags (excluded from the contract's `required`) — absent
+  // until resolution completes.
+  providerProjectId?: string;
+  providerComponentName?: string;
+  providerTaskId?: string;
+  providerIssueNumber?: number;
+  providerIssueUrl?: string;
   status: AccessRequestStatus;
   createdAt: string;
   updatedAt: string;

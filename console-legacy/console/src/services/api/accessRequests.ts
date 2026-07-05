@@ -19,7 +19,7 @@
 /**
  * Typed client for the cross-project access-request flow. A consumer whose
  * design references an `org-service` dependency published only at project
- * visibility (dep status `unresolved`, reason `unpublished`) can request that
+ * visibility (dep status `blocked`, reason `access-required`) can request that
  * the provider publish it org-wide. The request is dep-addressed — no
  * `orgServiceName` body field; the dependency name in the path already
  * identifies the provider component. It creates a publish ComponentTask +

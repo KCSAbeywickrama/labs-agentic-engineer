@@ -19,16 +19,15 @@
 import type { Component, ComponentType, Connection, Project } from '@wso2/cell-diagram';
 
 /**
- * One external HTTP API a component depends on at runtime. The diagram
- * renders each entry as a chain-link node *outside* the cell on the east
- * side, connected to the consuming component. Mirrors the architect's
- * `DependentApi` zod schema and the BFF's `models.DependentAPI`.
+ * One entry of the console's unified, kind-discriminated `Dependency` (see
+ * the API type / the BFF's `models.Dependency`). Only `kind` + `name` are
+ * needed to place a diagram edge — this is intentionally the minimal shape;
+ * a later task adds dedicated `platform-resource` nodes and can widen it
+ * then.
  */
-export interface CellDiagramDependentApi {
+export interface CellDiagramDependency {
+  kind: string;
   name: string;
-  url: string;
-  description?: string;
-  authentication?: string;
 }
 
 /**
@@ -39,8 +38,7 @@ export interface CellDiagramComponent {
   name: string;
   componentType: string;
   language?: string;
-  dependsOn?: string[];
-  dependentApis?: CellDiagramDependentApi[];
+  dependencies?: CellDiagramDependency[];
 }
 
 const TYPE_MAP: Record<string, ComponentType> = {
@@ -49,36 +47,44 @@ const TYPE_MAP: Record<string, ComponentType> = {
 };
 
 const PROJECT_ID = 'project';
-// Synthetic "project" segment used in the dependent-API connection id. The
-// cell-diagram lib treats any Connection whose id's project segment differs
-// from the current project's id as external and lays it out on the east
-// bound. Keeping a fixed value here groups all external APIs under one
+// Synthetic "project" segment used in the external-dependency connection id.
+// The cell-diagram lib treats any Connection whose id's project segment
+// differs from the current project's id as external and lays it out on the
+// east bound. Keeping a fixed value here groups all external deps under one
 // virtual umbrella in the diagram.
-const EXTERNAL_API_PROJECT_SEGMENT = 'external-apis';
+const EXTERNAL_DEP_PROJECT_SEGMENT = 'external-apis';
 
-function dependentApiConnection(api: CellDiagramDependentApi): Connection {
-  const tooltipParts: string[] = [api.url];
-  if (api.description) tooltipParts.push(api.description);
-  if (api.authentication) tooltipParts.push(`auth: ${api.authentication}`);
+// In-cell sibling edges: only `component`-kind dependencies point at another
+// component within this same project.
+function siblingNames(comp: CellDiagramComponent): string[] {
+  return (comp.dependencies || []).filter((d) => d.kind === 'component').map((d) => d.name);
+}
+
+function externalDependencyConnection(dep: CellDiagramDependency): Connection {
   return {
-    id: `default:${EXTERNAL_API_PROJECT_SEGMENT}:${api.name}`,
-    label: api.name,
-    tooltip: tooltipParts.join(' — '),
+    id: `default:${EXTERNAL_DEP_PROJECT_SEGMENT}:${dep.name}`,
+    label: dep.name,
+    tooltip: dep.name,
   };
 }
 
 export function buildProjectModel(components: CellDiagramComponent[]): Project {
   const mapped: Component[] = components.map((comp) => {
-    const siblingConnections: Connection[] = (comp.dependsOn || []).map(
-      (depName) => ({
-        id: `default:${PROJECT_ID}:${depName}`,
-        label: depName,
-        onPlatform: true,
-      }),
-    );
-    const externalConnections: Connection[] = (comp.dependentApis || []).map(
-      dependentApiConnection,
-    );
+    const siblings = siblingNames(comp);
+    const siblingConnections: Connection[] = siblings.map((depName) => ({
+      id: `default:${PROJECT_ID}:${depName}`,
+      label: depName,
+      onPlatform: true,
+    }));
+    // External nodes: `external` (HTTP APIs the component calls out to) and
+    // `org-service` (another project's published component) dependencies both
+    // render as chain-link nodes outside the cell — this is what the legacy
+    // `dependentApis` list produced pre-unified-model. `platform-resource` is
+    // deliberately excluded here; it gets dedicated diagram nodes in a later
+    // task.
+    const externalConnections: Connection[] = (comp.dependencies || [])
+      .filter((d) => d.kind === 'external' || d.kind === 'org-service')
+      .map(externalDependencyConnection);
 
     return {
       id: comp.name,
@@ -93,7 +99,7 @@ export function buildProjectModel(components: CellDiagramComponent[]): Project {
                 id: `${comp.name}:web`,
                 label: 'WebApp',
                 type: 'HTTP',
-                dependencyIds: (comp.dependsOn || []).map((dep) => `${dep}:api`),
+                dependencyIds: siblings.map((dep) => `${dep}:api`),
                 deploymentMetadata: {
                   gateways: { internet: { isExposed: true }, intranet: { isExposed: false } },
                 },
@@ -105,7 +111,7 @@ export function buildProjectModel(components: CellDiagramComponent[]): Project {
                   id: `${comp.name}:api`,
                   label: 'API',
                   type: 'HTTP',
-                  dependencyIds: (comp.dependsOn || []).map((dep) => `${dep}:api`),
+                  dependencyIds: siblings.map((dep) => `${dep}:api`),
                   deploymentMetadata: {
                     gateways: { internet: { isExposed: false }, intranet: { isExposed: false } },
                   },
