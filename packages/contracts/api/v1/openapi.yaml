@@ -1422,6 +1422,44 @@ components:
         - contentSha
         - updatedAt
       type: object
+    SpecBundle:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SpecBundle.json
+          format: uri
+          readOnly: true
+          type: string
+        files:
+          items:
+            $ref: "#/components/schemas/SpecFile"
+          type: array
+      required:
+        - files
+      type: object
+    SpecFile:
+      additionalProperties: false
+      properties:
+        content:
+          description: Raw file content, inline.
+          type: string
+        group:
+          description: Which spec-view section the file belongs to.
+          enum:
+            - requirements
+            - designs
+            - validation
+          type: string
+        path:
+          description: File path within the project's spec tree (e.g. requirements/prd.md).
+          type: string
+      required:
+        - path
+        - group
+        - content
+      type: object
     TaskStatusResponse:
       additionalProperties: false
       properties:
@@ -3463,6 +3501,35 @@ paths:
       summary: Get the requirements bundle at a version tag
       tags:
         - Requirements(Deprecated)
+  /projects/{projectName}/spec:
+    get:
+      operationId: get-project-spec
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecBundle"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the project's spec bundle (requirement, design, and validation files)
+      tags:
+        - Spec
   /projects/{projectName}/status:
     get:
       operationId: get-project-status
