@@ -3,15 +3,18 @@ import type { components } from "../../generated/aep-api";
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
 type ProjectBoard = components["schemas"]["ProjectBoard"];
+type SpecBundle = components["schemas"]["SpecBundle"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
-// Scenario switch for the project overview (issue #77). Toggle in devtools:
+// Scenario switch for the project overview (#77) and spec view (#80).
+// Toggle in devtools:
 //   localStorage.setItem('aep:mock:project',
-//     'fresh' | 'spec' | 'building' | 'deployed' | 'deploy-failed' |
-//     'repo-error' | 'error')
+//     'fresh' | 'spec' | 'spec-failed' | 'building' | 'deployed' |
+//     'deploy-failed' | 'repo-error' | 'error')
 export type ProjectScenario =
   | "fresh"
   | "spec"
+  | "spec-failed"
   | "building"
   | "deployed"
   | "deploy-failed"
@@ -46,6 +49,17 @@ export const projectStatuses: Record<
     hasTasks: false,
     specStatus: "draft",
     designStatus: "in_progress",
+  },
+  // Spec derivation hit a problem; the seeded PRD is still there.
+  "spec-failed": {
+    phase: "spec",
+    repoStatus: "ready",
+    repoUrl: REPO_URL,
+    hasSpec: true,
+    hasDesign: false,
+    hasTasks: false,
+    specStatus: "failed",
+    designStatus: "failed",
   },
   // v1 published, agents building, nothing deployed yet.
   building: {
@@ -145,6 +159,7 @@ export const projectComponents: Record<
 > = {
   fresh: emptyComponents,
   spec: emptyComponents,
+  "spec-failed": emptyComponents,
   building: builtComponents,
   deployed: deployedComponents,
   "deploy-failed": builtComponents,
@@ -223,10 +238,120 @@ export const projectBoards: Record<
 > = {
   fresh: emptyBoard,
   spec: emptyBoard,
+  "spec-failed": emptyBoard,
   building: buildingBoard,
   deployed: doneBoard,
   "deploy-failed": doneBoard,
   "repo-error": emptyBoard,
+};
+
+// Spec bundle backing the spec view (#80). The backend seeds a PRD at repo
+// initialization, so requirements is never empty; designs/validation fill
+// in as the agents derive them.
+const seededPrd = `# Demo Shop — PRD
+
+## Goal
+
+A small storefront where customers browse the product catalog, add items
+to a cart, and check out.
+
+## Requirements
+
+- Browse products by category with search.
+- Cart persists across sessions.
+- Checkout with a mocked payment provider.
+- Order history per customer.
+`;
+
+const userStories = `# Demo Shop — User stories
+
+- As a shopper, I can search the catalog so that I find products quickly.
+- As a shopper, my cart survives a page reload so that I don't lose picks.
+- As a shopper, I can check out and see an order confirmation.
+- As a returning customer, I can see my past orders.
+`;
+
+const architectureMd = `# Demo Shop — Component architecture
+
+Three components behind the project cell:
+
+| Component | Type | Responsibility |
+|---|---|---|
+| storefront | webapp | Customer-facing UI |
+| catalog-api | service | Product catalog CRUD + search |
+| orders-api | service | Cart, checkout, order history |
+
+The storefront talks to both services; services share nothing.
+`;
+
+const architectureDiagram = `{
+  "type": "excalidraw-dsl",
+  "components": [
+    { "id": "storefront", "kind": "webapp" },
+    { "id": "catalog-api", "kind": "service" },
+    { "id": "orders-api", "kind": "service" }
+  ],
+  "edges": [
+    { "from": "storefront", "to": "catalog-api" },
+    { "from": "storefront", "to": "orders-api" }
+  ]
+}`;
+
+const validationPlan = `# Demo Shop — Validation plan
+
+- Catalog search returns seeded products by name and category.
+- Cart contents survive a browser restart.
+- Checkout produces an order visible in order history.
+- Each service exposes /healthz returning 200.
+`;
+
+const prdOnlySpec: SpecBundle = {
+  files: [{ path: "requirements/prd.md", group: "requirements", content: seededPrd }],
+};
+
+const collaborationSpec: SpecBundle = {
+  files: [
+    { path: "requirements/prd.md", group: "requirements", content: seededPrd },
+    {
+      path: "requirements/user-stories.md",
+      group: "requirements",
+      content: userStories,
+    },
+    {
+      path: "design/architecture.md",
+      group: "designs",
+      content: architectureMd,
+    },
+  ],
+};
+
+const fullSpec: SpecBundle = {
+  files: [
+    ...collaborationSpec.files,
+    {
+      path: "design/architecture.excalidraw",
+      group: "designs",
+      content: architectureDiagram,
+    },
+    {
+      path: "validation/validation-plan.md",
+      group: "validation",
+      content: validationPlan,
+    },
+  ],
+};
+
+export const projectSpecs: Record<
+  Exclude<ProjectScenario, "error">,
+  SpecBundle
+> = {
+  fresh: prdOnlySpec,
+  spec: collaborationSpec,
+  "spec-failed": prdOnlySpec,
+  building: fullSpec,
+  deployed: fullSpec,
+  "deploy-failed": fullSpec,
+  "repo-error": prdOnlySpec,
 };
 
 export const projectSectionError: ErrorModel = {

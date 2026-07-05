@@ -17,21 +17,16 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { FileText } from "@wso2/oxygen-ui-icons-react";
-import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
+import { SpecView } from "../features/spec/components/SpecView";
 
-export const Route = createFileRoute("/projects/$projectName/spec")({
-  component: SpecPlaceholderRoute,
+// `$projectName_` (trailing underscore) un-nests this route from the
+// /projects/$projectName layout: the spec view is a full-screen workspace
+// without the shared project header (#80).
+export const Route = createFileRoute("/projects/$projectName_/spec")({
+  component: SpecRoute,
 });
 
-function SpecPlaceholderRoute() {
+function SpecRoute() {
   const { projectName } = Route.useParams();
-  return (
-    <SectionPlaceholder
-      icon={<FileText size={48} />}
-      title="Spec is on its way"
-      description="This is where you and the agents work out what to build — the requirement and the design together, as one living spec. Its own feature issue will land it."
-      projectName={projectName}
-    />
-  );
+  return <SpecView projectName={projectName} />;
 }

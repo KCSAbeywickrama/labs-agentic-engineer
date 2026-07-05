@@ -3,6 +3,7 @@ import {
   projectBoards,
   projectComponents,
   projectSectionError,
+  projectSpecs,
   projectStatuses,
   type ProjectScenario,
 } from "../fixtures/project";
@@ -38,5 +39,8 @@ export const projectHandlers = [
   ),
   http.get("*/api/v1/projects/:projectName/board", () =>
     respond((s) => projectBoards[s]),
+  ),
+  http.get("*/api/v1/projects/:projectName/spec", () =>
+    respond((s) => projectSpecs[s]),
   ),
 ];
