@@ -117,13 +117,16 @@ func (p *OCNativeProvisioner) Provision(
 	// 1. Resource (one per project; references the discovered ClusterResourceType).
 	// NO EnsureResourceType — AEP never authors the type.
 	res := BuildPlatformResource(projectName, depName, resourceType, params)
-	if _, err := p.rc.ApplyResource(ctx, orgHandle, res); err != nil {
+	applied, err := p.rc.ApplyResource(ctx, orgHandle, res)
+	if err != nil {
 		return nil, fmt.Errorf("resources: apply resource: %w", err)
 	}
 
 	// 2. Wait for status.latestRelease (no AutoDeploy → BFF pins it). This is a
-	// fast poll for the release NAME, not a readiness wait.
-	latest, err := openchoreo.WaitForLatestRelease(ctx, p.rc, orgHandle, res.Metadata.Name, p.pollInterval, p.pollTimeout)
+	// fast poll for the release NAME, not a readiness wait. A reconcile carries
+	// the stale pre-reconcile release on `applied`, so wait for a CHANGE off it;
+	// a create leaves it empty (wait-for-nonempty).
+	latest, err := openchoreo.WaitForReleaseChange(ctx, p.rc, orgHandle, res.Metadata.Name, openchoreo.ReleaseName(applied), p.pollInterval, p.pollTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("resources: %w", err)
 	}

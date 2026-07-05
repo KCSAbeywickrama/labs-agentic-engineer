@@ -309,6 +309,12 @@ func RegisterDesign(api huma.API, svc DesignService) {
 		}
 		specPath, err := svc.CollectSpec(ctx, in.OrgHandle, in.ProjectName, in.ComponentName, in.DepName, []byte(rawSpec), specURL)
 		if err != nil {
+			if errors.Is(err, ErrDependencyNotFound) {
+				return nil, huma.Error404NotFound(err.Error())
+			}
+			if errors.Is(err, ErrDependencyWrongKind) {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
 			if errors.Is(err, ErrSpecFetchFailed) {
 				return nil, huma.Error502BadGateway("failed to fetch spec from URL", err)
 			}

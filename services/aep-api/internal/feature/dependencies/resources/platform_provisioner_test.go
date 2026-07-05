@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
@@ -165,6 +167,53 @@ func TestPlatformProvision_AuthorsResourceModelAsync(t *testing.T) {
 		t.Errorf("result resource name: %s", res.ResourceName)
 	}
 	if res.BindingByEnv["development"] != "shop-maindb-development" || res.BindingByEnv["production"] != "shop-maindb-production" {
+		t.Errorf("result bindings: %+v", res.BindingByEnv)
+	}
+}
+
+// TestPlatformProvision_ReconcileWaitsForNewRelease proves the wait-for-CHANGE
+// path: when ApplyResource reports a stale pre-reconcile release (an existing
+// Resource being reconciled), Provision must NOT pin the binding to that stale
+// release — it waits until the controller cuts a NEW one, then pins that.
+func TestPlatformProvision_ReconcileWaitsForNewRelease(t *testing.T) {
+	t.Parallel()
+
+	var polls int32
+	rc := &ocmocks.ResourceClientMock{
+		// Reconcile: the applied Resource already carries the stale release.
+		ApplyResourceFunc: func(_ context.Context, _ string, r *openchoreo.Resource) (*openchoreo.Resource, error) {
+			r.Status = &openchoreo.ResourceStatus{LatestRelease: &openchoreo.ResourceLatestRelease{Name: "shop-maindb-r1"}}
+			return r, nil
+		},
+		// First poll still reports the stale release; only later does the new one appear.
+		GetResourceFunc: func(_ context.Context, _, name string) (*openchoreo.Resource, error) {
+			rel := "shop-maindb-r1"
+			if atomic.AddInt32(&polls, 1) >= 2 {
+				rel = "shop-maindb-r2"
+			}
+			return &openchoreo.Resource{
+				Metadata: openchoreo.OCObjectMeta{Name: name},
+				Status:   &openchoreo.ResourceStatus{LatestRelease: &openchoreo.ResourceLatestRelease{Name: rel}},
+			}, nil
+		},
+		EnsureBindingFunc: func(_ context.Context, _ string, b *openchoreo.ResourceReleaseBinding) (*openchoreo.ResourceReleaseBinding, error) {
+			return b, nil
+		},
+	}
+	p := NewOCNativeProvisioner(rc)
+	p.pollInterval = time.Millisecond
+	p.pollTimeout = time.Second
+
+	res, err := p.Provision(context.Background(), "default", "shop", "maindb", "postgres-cnpg", nil, []string{"development"})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	for _, b := range rc.EnsureBindingCalls() {
+		if b.B.Spec.ResourceRelease != "shop-maindb-r2" {
+			t.Fatalf("binding must pin the NEW release, got %q", b.B.Spec.ResourceRelease)
+		}
+	}
+	if res.BindingByEnv["development"] != "shop-maindb-development" {
 		t.Errorf("result bindings: %+v", res.BindingByEnv)
 	}
 }

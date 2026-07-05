@@ -19,6 +19,8 @@ package resources
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,6 +235,42 @@ func TestDeprovision_DeletesBindingsThenResource(t *testing.T) {
 	dr := rc.DeleteResourceCalls()
 	if len(dr) != 1 || dr[0].Name != "proj-openweather" {
 		t.Fatalf("resource delete wrong: %+v", dr)
+	}
+}
+
+// TestDeprovision_CollectsErrorsAndDeletesResource proves the short-circuit fix:
+// a failed FIRST binding delete must not stop the second binding delete or the
+// Resource delete, and the error is joined and surfaced.
+func TestDeprovision_CollectsErrorsAndDeletesResource(t *testing.T) {
+	t.Parallel()
+
+	var deletedBindings, deletedResources []string
+	rc := &ocmocks.ResourceClientMock{
+		DeleteBindingFunc: func(_ context.Context, _, name string) error {
+			deletedBindings = append(deletedBindings, name)
+			if name == "proj-openweather-development" {
+				return errors.New("binding stuck")
+			}
+			return nil
+		},
+		DeleteResourceFunc: func(_ context.Context, _, name string) error {
+			deletedResources = append(deletedResources, name)
+			return nil
+		},
+	}
+	p := newTestProvisioner(nil, rc, &fakeSecretWriter{})
+	err := p.Deprovision(context.Background(), "default", "proj", "openweather", []string{"development", "production"})
+	if err == nil {
+		t.Fatal("want the joined binding error surfaced")
+	}
+	if !strings.Contains(err.Error(), "development") {
+		t.Errorf("error must name the failed env binding: %v", err)
+	}
+	if len(deletedBindings) != 2 {
+		t.Fatalf("second binding must still be deleted after the first fails, got %v", deletedBindings)
+	}
+	if len(deletedResources) != 1 || deletedResources[0] != "proj-openweather" {
+		t.Fatalf("Resource must be deleted despite the binding failure, got %v", deletedResources)
 	}
 }
 

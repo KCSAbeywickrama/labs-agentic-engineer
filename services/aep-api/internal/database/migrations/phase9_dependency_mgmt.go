@@ -129,6 +129,16 @@ func runPhase9AccessRequestsTable(ctx context.Context, db *gorm.DB) error {
 // runPhase9ComponentTaskColumns adds the typed-task-graph columns to
 // component_tasks. Guarded per-column via addColumnIfMissing (phase3_tech_lead.go)
 // so a partially-applied prior run is safe to retry.
+//
+// NOTE: on a FRESH database these six columns are already created by boot-time
+// AutoMigrate — cmd/aep-api/main.go's database.Open AutoMigrates the
+// models.ComponentTask struct, whose tags declare them, and that runs BEFORE
+// RunAll invokes this section. So on a fresh DB this function is effectively
+// documentation of the column shapes (each addColumnIfMissing is a no-op). It
+// still matters for an EXISTING DB upgraded before ComponentTask carried these
+// fields. The real fix — reorder AutoMigrate after RunAll, or drop ComponentTask
+// from the Open AutoMigrate set so the raw-SQL DDL here is authoritative — is a
+// tracked follow-up (PROGRESS.md "Open follow-ups"); no behavior change here.
 func runPhase9ComponentTaskColumns(ctx context.Context, db *gorm.DB) error {
 	scoped := db.WithContext(ctx)
 	adds := []struct {

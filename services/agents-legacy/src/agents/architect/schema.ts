@@ -73,7 +73,8 @@ export const DependencyCandidate = z.object({
 export type DependencyCandidate = z.infer<typeof DependencyCandidate>;
 
 // kind: component — a sibling component built by this same project. The
-// platform resolves its URL (deploy-gated) and wires an OC Connection.
+// platform resolves its URL (deploy-gated) and wires an OpenChoreo Connection
+// resource.
 const ComponentDependency = z.object({
   kind: z.literal("component"),
   name: z
@@ -84,7 +85,8 @@ const ComponentDependency = z.object({
 });
 
 // kind: org-service — a service deployed by ANOTHER project in the same org,
-// consumed via the org catalog + an OC Connection. Declare by name only.
+// consumed via the org catalog + an OpenChoreo Connection resource. Declare by
+// name only.
 const OrgServiceDependency = z.object({
   kind: z.literal("org-service"),
   name: z.string().describe("Catalog name of the org service this component calls."),

@@ -888,12 +888,31 @@ func (s *dispatchService) RetryTask(ctx context.Context, taskID string) (Dispatc
 	if s.projector == nil {
 		return DispatchResult{}, fmt.Errorf("retry: projector not configured")
 	}
+	// Load the task BEFORE the retry transition so the Type guard below can
+	// reject a system task WITHOUT mutating its status or errorMessage.
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return DispatchResult{}, fmt.Errorf("retry: load task: %w", err)
+	}
+	if task == nil {
+		return DispatchResult{}, fmt.Errorf("retry: task not found")
+	}
+	// Type guard. config-collection / resource-provisioning tasks carry no
+	// GitHub issue/PR and are completed by the value-save endpoint / resource
+	// provisioner + readiness watcher — never a coding-agent run (mirrors
+	// DispatchTasks's skip of these types). Re-dispatching one would mint a bogus
+	// agent run against a non-existent branch and corrupt its state; the drawer's
+	// re-provision action is the recovery path.
+	if task.Type == models.TaskTypeConfigCollection || task.Type == models.TaskTypeResourceProvisioning {
+		return DispatchResult{}, fmt.Errorf("retry: %w: task %q is type %q — re-provision from the dependency drawer instead",
+			contracts.ErrTaskNotRetriable, taskID, task.Type)
+	}
 	if err := s.projector.ApplyBuildResult(ctx, taskID, contracts.TaskEventRetry, ""); err != nil {
 		return DispatchResult{}, fmt.Errorf("apply retry: %w", err)
 	}
-	// Load fresh and clear the dispatch idempotency fields so the next
-	// trigger creates a new WorkflowRun.
-	task, err := s.taskRepo.GetByID(ctx, taskID)
+	// Re-load fresh (the transition above wrote Status=in_progress) and clear the
+	// dispatch idempotency fields so the next trigger creates a new WorkflowRun.
+	task, err = s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return DispatchResult{}, fmt.Errorf("retry: load task: %w", err)
 	}

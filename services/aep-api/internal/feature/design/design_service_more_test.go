@@ -1361,9 +1361,10 @@ func TestCollectSpec_BothRawSpecAndURLErrors(t *testing.T) {
 
 func TestCollectSpec_URLFetchFailureWrapsErrSpecFetchFailed(t *testing.T) {
 	t.Parallel()
-	svc := newService(&artifactstest.FakeArtifactService{}, nil)
-	// A non-https scheme fails FetchSpecFromURL's validation synchronously —
-	// no network access needed to exercise the fetch-failure wrapping.
+	// The dep target must resolve (external + present) so validation passes and
+	// the fetch runs. A non-https scheme fails FetchSpecFromURL's validation
+	// synchronously — no network access needed to exercise the fetch-failure wrap.
+	svc := newService(mutableDesignFake(designFilesWithExternalDep(true, "", "")), nil)
 	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api", nil, "http://insecure.example.com/openapi.yaml")
 	if !errors.Is(err, ErrSpecFetchFailed) {
 		t.Fatalf("want ErrSpecFetchFailed, got %v", err)
@@ -1372,10 +1373,54 @@ func TestCollectSpec_URLFetchFailureWrapsErrSpecFetchFailed(t *testing.T) {
 
 func TestCollectSpec_InvalidSpecWrapsErrInvalidSpec(t *testing.T) {
 	t.Parallel()
-	svc := newService(&artifactstest.FakeArtifactService{}, nil)
+	svc := newService(mutableDesignFake(designFilesWithExternalDep(true, "", "")), nil)
 	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api", []byte("not an openapi doc"), "")
 	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("want ErrInvalidSpec, got %v", err)
+	}
+}
+
+// TestCollectSpec_UnknownDepIsNotFound proves the pre-store validation: an
+// unknown component/dep returns ErrDependencyNotFound and stores nothing.
+func TestCollectSpec_UnknownDepIsNotFound(t *testing.T) {
+	t.Parallel()
+	files := designFilesWithExternalDep(true, "", "")
+	svc := newService(mutableDesignFake(files), nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ghost", []byte(sampleOpenAPISpecB4), "")
+	if !errors.Is(err, ErrDependencyNotFound) {
+		t.Fatalf("want ErrDependencyNotFound, got %v", err)
+	}
+	if _, ok := files["components/hello-api/dependencies/ghost.openapi.yaml"]; ok {
+		t.Fatal("unknown dep must not store an orphan spec blob")
+	}
+}
+
+// TestCollectSpec_WrongKindIsWrongKind proves a non-external dep is rejected
+// with ErrDependencyWrongKind naming both kinds, and stores nothing.
+func TestCollectSpec_WrongKindIsWrongKind(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
+		"components/hello-api/design.json": `{
+  "name": "hello-api",
+  "type": "service",
+  "language": "Go",
+  "description": "Build it.",
+  "dependencies": [
+    {"kind": "platform-resource", "name": "maindb", "resourceType": "postgres-cnpg"}
+  ]
+}
+`,
+	}
+	svc := newService(mutableDesignFake(files), nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "maindb", []byte(sampleOpenAPISpecB4), "")
+	if !errors.Is(err, ErrDependencyWrongKind) {
+		t.Fatalf("want ErrDependencyWrongKind, got %v", err)
+	}
+	for _, want := range []string{models.DependencyKindExternal, models.DependencyKindPlatformResource} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must name kind %q: %v", want, err)
+		}
 	}
 }
 

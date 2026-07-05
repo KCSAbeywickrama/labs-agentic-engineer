@@ -18,6 +18,7 @@ package codingagent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -50,8 +51,11 @@ import (
 // A real database (postgres-cnpg, Redis, …) can take several minutes to stand
 // up. The watcher MUST NOT block the provision request path on readiness. It
 // polls at the same 10s cadence as the build watcher and uses a bounded-age
-// guard (staleAfter, 10 min) to log + leave a stuck task rather than failing it
-// spuriously.
+// guard (staleAfter, 30 min). Crossing it is TERMINAL: the task is failed via
+// contracts.TaskEventProvisionFailed ("provisioning timed out … (stale)") rather
+// than left in `building` forever — a stuck provision that never reaches Ready
+// must surface. Recovery is a drawer re-provision (the RetryTask Type guard
+// blocks the corrupting operator retry of a system task).
 //
 // Cascade: no explicit redispatch closure. TaskEventResourceReady lands the task
 // in `deployed`, and the projector fires its OnTaskDeployed hook
@@ -86,7 +90,7 @@ func NewResourceWatcher(
 		projector:         projector,
 		asServiceIdentity: asServiceIdentity,
 		tick:              10 * time.Second,
-		staleAfter:        10 * time.Minute,
+		staleAfter:        30 * time.Minute,
 	}
 }
 
@@ -164,12 +168,20 @@ func (w *ResourceWatcher) sweep(ctx context.Context) {
 }
 
 func (w *ResourceWatcher) handleTask(ctx context.Context, t *models.ComponentTask) {
-	// Bounded-age guard: a stuck provision logs + leaves rather than failing
-	// spuriously. A real DB should not take more than staleAfter to reach Ready.
+	// Bounded-age guard: crossing staleAfter is TERMINAL. A real DB should reach
+	// Ready well within staleAfter, so an older still-`building` task is stuck —
+	// fail it (no GetBinding poll) so it surfaces instead of sitting forever.
+	// Recovery is a drawer re-provision (the RetryTask Type guard blocks the
+	// corrupting operator retry).
 	if t.LastEventAt != nil && time.Since(*t.LastEventAt) > w.staleAfter {
-		slog.WarnContext(ctx, "resource watcher: task stale, skipping",
-			"task", t.ID, "resource", t.ResourceName,
-			"age", time.Since(*t.LastEventAt).Round(time.Second))
+		age := time.Since(*t.LastEventAt).Round(time.Second)
+		reason := fmt.Sprintf("provisioning timed out after %s (stale)", w.staleAfter)
+		slog.WarnContext(ctx, "resource watcher: task stale, failing",
+			"task", t.ID, "resource", t.ResourceName, "age", age)
+		if err := w.projector.ApplyBuildResult(ctx, t.ID, contracts.TaskEventProvisionFailed, reason); err != nil {
+			slog.ErrorContext(ctx, "resource watcher: apply stale-timeout failed",
+				"task", t.ID, "error", err)
+		}
 		return
 	}
 

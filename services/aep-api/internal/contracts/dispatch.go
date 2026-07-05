@@ -16,6 +16,15 @@
 
 package contracts
 
+import "errors"
+
+// ErrTaskNotRetriable signals that an operator retry was attempted on a SYSTEM
+// task (config-collection / resource-provisioning) that has no coding-agent run
+// to re-trigger. Hosted on the leaf so dispatch can RETURN it and task's HTTP
+// edge can map it to a 400 without importing the codingagent feature (§4 cycle
+// invariant). The dependency drawer's re-provision action is the recovery path.
+var ErrTaskNotRetriable = errors.New("task type is not retriable")
+
 // DispatchResult represents the outcome of dispatching a single task.
 // BranchName / PullRequestURL are populated later by the
 // pull_request.opened webhook handler when the agent opens its PR — they are

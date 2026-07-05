@@ -62,6 +62,17 @@ var ErrSpecFetchFailed = errors.New("failed to fetch spec from URL")
 // the handler can distinguish them and return 500.
 var ErrInvalidSpec = errors.New("invalid OpenAPI spec")
 
+// ErrDependencyNotFound is the design-domain sentinel surfaced (as 404 by the
+// HTTP handler) when CollectSpec targets a component/dependency that does not
+// exist in the current design — so an unknown dep never orphans a stored spec
+// blob.
+var ErrDependencyNotFound = errors.New("dependency not found in design")
+
+// ErrDependencyWrongKind is the design-domain sentinel surfaced (as 400 by the
+// HTTP handler) when CollectSpec targets a dependency whose kind is not
+// `external` — spec collection applies only to external dependencies.
+var ErrDependencyWrongKind = errors.New("dependency is not an external dependency")
+
 // toK8sName is a thin in-package shim over k8sname.ToK8sName.
 func toK8sName(name string) string { return k8sname.ToK8sName(name) }
 
@@ -806,6 +817,12 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 	if len(rawSpec) != 0 && specURL != "" {
 		return "", fmt.Errorf("provide only one of rawSpec or specUrl")
 	}
+	// Resolve the target component + dependency from the current design BEFORE
+	// storing anything, so an unknown dep (404) or a non-external dep (400) never
+	// leaves an orphan spec blob behind.
+	if err := s.validateExternalDepTarget(ctx, orgID, projectID, component, depName); err != nil {
+		return "", err
+	}
 	if len(rawSpec) == 0 {
 		fetched, err := artifacts.FetchSpecFromURL(ctx, specURL)
 		if err != nil {
@@ -829,6 +846,41 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 		return "", err
 	}
 	return specPath, nil
+}
+
+// validateExternalDepTarget resolves (component, depName) against the current
+// design and enforces the CollectSpec kind policy: unknown component/dep →
+// ErrDependencyNotFound (404), a dep of a kind other than `external` →
+// ErrDependencyWrongKind (400, naming both kinds). Runs BEFORE any spec store so
+// a rejected target never orphans a blob.
+func (s *designService) validateExternalDepTarget(ctx context.Context, orgID, projectID, component, depName string) error {
+	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		if artifacts.IsNotFound(err) {
+			return fmt.Errorf("%w: no design for project %q", ErrDependencyNotFound, projectID)
+		}
+		return fmt.Errorf("read design: %w", err)
+	}
+	if designFile == nil {
+		return fmt.Errorf("%w: no design for project %q", ErrDependencyNotFound, projectID)
+	}
+	for _, c := range designFile.Components {
+		if c.Name != component {
+			continue
+		}
+		for _, dep := range c.Dependencies {
+			if dep.Name != depName {
+				continue
+			}
+			if dep.Kind != models.DependencyKindExternal {
+				return fmt.Errorf("%w: dependency %q on component %q has kind %q; spec collection applies only to kind %q",
+					ErrDependencyWrongKind, depName, component, dep.Kind, models.DependencyKindExternal)
+			}
+			return nil
+		}
+		return fmt.Errorf("%w: dependency %q not found on component %q", ErrDependencyNotFound, depName, component)
+	}
+	return fmt.Errorf("%w: component %q not found in design", ErrDependencyNotFound, component)
 }
 
 // extractWireframeDsls picks `.dsl` files from the requirements bundle and

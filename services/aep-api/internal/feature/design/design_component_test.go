@@ -49,6 +49,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 const goldenDir = "../../../testdata/harvest/golden"
@@ -406,7 +407,13 @@ func TestDesignComponent_CollectDependencySpec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal body: %v", err)
 		}
-		resp := newHarness(t, &artifactstest.FakeArtifactService{}).AsOrg("acme").Post(path, string(body))
+		// The dep target must resolve so validation passes and the fetch runs.
+		fake := &artifactstest.FakeArtifactService{
+			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+				return designTreeWithUnresolvedDep(), nil
+			},
+		}
+		resp := newHarness(t, fake).AsOrg("acme").Post(path, string(body))
 		if resp.Code != 502 {
 			t.Fatalf("want 502, got %d body=%s", resp.Code, resp.Body.String())
 		}
@@ -443,6 +450,70 @@ func TestDesignComponent_CollectDependencySpec(t *testing.T) {
 		}
 		if len(written) == 0 {
 			t.Fatal("expected the spec blob + updated design.json to be written")
+		}
+	})
+
+	t.Run("unknown dep is 404 and stores nothing", func(t *testing.T) {
+		t.Parallel()
+		putCalled := false
+		fake := &artifactstest.FakeArtifactService{
+			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+				return designTreeWithUnresolvedDep(), nil // only ext-api exists
+			},
+			PutFileFunc: func(_ context.Context, _, _, _, _, _ string) (*artifacts.PutResult, error) {
+				putCalled = true
+				return &artifacts.PutResult{SHA: "sha"}, nil
+			},
+		}
+		body, _ := json.Marshal(map[string]string{"rawSpec": sampleOpenAPISpecComponentTest})
+		resp := newHarness(t, fake).AsOrg("acme").
+			Post("/api/v1/projects/web/components/hello-api/dependencies/ghost/spec", string(body))
+		if resp.Code != 404 {
+			t.Fatalf("want 404, got %d body=%s", resp.Code, resp.Body.String())
+		}
+		if putCalled {
+			t.Fatal("unknown dep must not store an orphan spec blob")
+		}
+	})
+
+	t.Run("wrong-kind dep is 400 naming both kinds and stores nothing", func(t *testing.T) {
+		t.Parallel()
+		putCalled := false
+		fake := &artifactstest.FakeArtifactService{
+			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+				return map[string]string{
+					artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
+					"components/hello-api/design.json": `{
+  "name": "hello-api",
+  "type": "service",
+  "language": "Go",
+  "description": "Build it.",
+  "dependencies": [
+    {"kind": "platform-resource", "name": "maindb", "resourceType": "postgres-cnpg"}
+  ]
+}
+`,
+				}, nil
+			},
+			PutFileFunc: func(_ context.Context, _, _, _, _, _ string) (*artifacts.PutResult, error) {
+				putCalled = true
+				return &artifacts.PutResult{SHA: "sha"}, nil
+			},
+		}
+		body, _ := json.Marshal(map[string]string{"rawSpec": sampleOpenAPISpecComponentTest})
+		resp := newHarness(t, fake).AsOrg("acme").
+			Post("/api/v1/projects/web/components/hello-api/dependencies/maindb/spec", string(body))
+		if resp.Code != 400 {
+			t.Fatalf("want 400, got %d body=%s", resp.Code, resp.Body.String())
+		}
+		p := componenttest.DecodeProblem(t, resp.Body.String())
+		for _, want := range []string{models.DependencyKindExternal, models.DependencyKindPlatformResource} {
+			if !strings.Contains(p.Detail, want) {
+				t.Errorf("400 detail must name kind %q: %q", want, p.Detail)
+			}
+		}
+		if putCalled {
+			t.Fatal("wrong-kind dep must not store an orphan spec blob")
 		}
 	})
 }

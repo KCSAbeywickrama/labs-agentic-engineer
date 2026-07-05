@@ -19,6 +19,7 @@ package resources
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -102,12 +103,16 @@ func (p *ExternalResourceProvisioner) Provision(
 
 	// 2. Resource (one per project; controller cuts the ResourceRelease).
 	res := buildExternalResource(projectName, er, rtName)
-	if _, err := p.rc.ApplyResource(ctx, orgHandle, res); err != nil {
+	applied, err := p.rc.ApplyResource(ctx, orgHandle, res)
+	if err != nil {
 		return nil, fmt.Errorf("external resources: apply resource: %w", err)
 	}
 
-	// 3. Wait for status.latestRelease (no AutoDeploy → BFF pins it).
-	latest, err := openchoreo.WaitForLatestRelease(ctx, p.rc, orgHandle, res.Metadata.Name, p.pollInterval, p.pollTimeout)
+	// 3. Wait for status.latestRelease (no AutoDeploy → BFF pins it). On a
+	// reconcile of an existing Resource `applied` already carries the stale
+	// pre-reconcile release, so wait for a CHANGE off it; on a create it is
+	// empty and this degrades to wait-for-nonempty.
+	latest, err := openchoreo.WaitForReleaseChange(ctx, p.rc, orgHandle, res.Metadata.Name, openchoreo.ReleaseName(applied), p.pollInterval, p.pollTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("external resources: %w", err)
 	}
@@ -145,13 +150,20 @@ func (p *ExternalResourceProvisioner) Provision(
 // deleted.
 func (p *ExternalResourceProvisioner) Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error {
 	resourceName := ExternalResourceName(projectName, name)
+	// Collect binding-delete errors and continue (mirror the platform twin):
+	// one failed env must not short-circuit and leave the Resource behind.
+	var errs []error
 	for _, env := range envs {
-		if err := p.rc.DeleteBinding(ctx, orgHandle, resourceName+"-"+env); err != nil {
-			return fmt.Errorf("external resources: delete binding (%s/%s): %w", name, env, err)
+		if err := p.rc.DeleteBinding(ctx, orgHandle, ExternalResourceBindingName(projectName, name, env)); err != nil {
+			errs = append(errs, fmt.Errorf("delete binding (%s/%s): %w", name, env, err))
 		}
 	}
+	// Delete the Resource regardless of per-env binding failures.
 	if err := p.rc.DeleteResource(ctx, orgHandle, resourceName); err != nil {
-		return fmt.Errorf("external resources: delete resource (%s): %w", name, err)
+		errs = append(errs, fmt.Errorf("delete resource (%s): %w", name, err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("external resources: %w", errors.Join(errs...))
 	}
 	return nil
 }

@@ -168,11 +168,14 @@ component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials
 to `"secret"` for values the user supplies privately or `"publishable"` for
 non-sensitive config. Keep the keys minimal — only what the component reads.
 
-**Resolution is platform-computed.** A dependency's `status` (resolved /
-ambiguous / unresolved / blocked), its `reason`, and any `candidates` are
-computed by the platform at read time against the live catalog — you never
-author them. Declare the intent (kind + name + fields above) and let the
-platform resolve it.
+**Resolution status is platform-computed.** A dependency's `status` (resolved /
+ambiguous / unresolved / blocked) and its `reason` are computed by the platform
+at read time against the live catalog — you never author those. `candidates`, by
+contrast, ARE authorable: emit them with the URLs you find during discovery or
+web research (the API homepage, a docs page, a spec URL) so the user can verify
+the sources. Declare the intent (kind + name + fields above) and let the
+platform resolve it. An `external` dependency should almost always carry at
+least one `config` key — the value-collection gate needs something to collect.
 
 One component per directory. Every `service` gets an `openapi.yaml`
 (load `openapi-conventions` before writing it); every `webapp` gets a

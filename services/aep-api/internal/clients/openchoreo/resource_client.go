@@ -62,9 +62,14 @@ type ResourceClient interface {
 	// as immutable — a changed schema must use a new name (suffix), never an edit.
 	EnsureResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error)
 
-	// ApplyResource creates (or returns existing on 409) a Resource. The
-	// controller asynchronously cuts a ResourceRelease; call GetResource (or
-	// WaitForLatestRelease) to read status.latestRelease once it settles.
+	// ApplyResource creates a Resource, or on 409 reconciles the existing one
+	// via PUT so RT-version bumps and spec.parameters changes propagate. A 409
+	// whose existing spec.type differs from the desired one is a HARD error
+	// (cross-kind name collision) — never a silent overwrite. The returned
+	// Resource carries the release known AT APPLY TIME in status.latestRelease
+	// (empty on create, the pre-reconcile release on a 409 PUT); read it with
+	// ReleaseName and pass it to WaitForReleaseChange so a reconcile waits for a
+	// NEW release rather than re-pinning the stale one.
 	ApplyResource(ctx context.Context, namespace string, r *Resource) (*Resource, error)
 
 	// GetResource reads a Resource (incl. status.latestRelease).
@@ -396,12 +401,78 @@ func (c *resourceClient) ApplyResource(ctx context.Context, namespace string, r 
 	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resources", r, out)
 	switch {
 	case err == nil:
+		// Freshly created — status.latestRelease is not cut yet, so callers see
+		// an empty ReleaseName and wait-for-nonempty.
 		return out, nil
 	case code == http.StatusConflict:
-		return c.GetResource(ctx, namespace, r.Metadata.Name)
+		// Exists — reconcile via PUT so RT-version bumps and spec.parameters
+		// changes propagate (mirrors EnsureBinding's 409→PUT), instead of the old
+		// GetResource-and-return which silently dropped the new desired spec.
+		//
+		// Guard first: GET the existing Resource and REFUSE to overwrite it when
+		// its spec.type differs from the desired one. Dependency names are unique
+		// per project across kinds (external + platform-resource share ONE OC
+		// Resource namespace per project, matched project-wide), so a differing
+		// type means two different deps collided on one name — a blind PUT would
+		// cross-wire them. Fail loud, naming both types.
+		existing, gerr := c.GetResource(ctx, namespace, r.Metadata.Name)
+		if gerr != nil {
+			return nil, fmt.Errorf("apply resource %q: conflict but refetch failed: %w", r.Metadata.Name, gerr)
+		}
+		// Guard on the type KIND only. A differing Kind (ResourceType vs
+		// ClusterResourceType) is the cross-wire hazard — an `external` dep and a
+		// `platform-resource` dep collided on one project-scoped Resource name. A
+		// differing Name at the SAME Kind is a legitimate reconcile (an external
+		// RT version bump re-points the Resource at the freshly authored,
+		// version-suffixed ResourceType), which the PUT below must propagate.
+		if resourceTypeRefKind(existing.Spec.Type.Kind) != resourceTypeRefKind(r.Spec.Type.Kind) {
+			return nil, fmt.Errorf(
+				"apply resource %q: existing spec.type %s conflicts with desired %s — "+
+					"dependency names must be unique per project across kinds; a differing kind means two deps collided on one name",
+				r.Metadata.Name, formatTypeRef(existing.Spec.Type), formatTypeRef(r.Spec.Type))
+		}
+		put := &Resource{}
+		if _, perr := c.do(ctx, http.MethodPut, nsBase(namespace)+"/resources/"+r.Metadata.Name, r, put); perr != nil {
+			return nil, fmt.Errorf("apply resource %q: conflict but update failed: %w", r.Metadata.Name, perr)
+		}
+		// Carry the PRE-reconcile status.latestRelease forward so callers can wait
+		// for the controller to cut a NEW release for the changed spec rather than
+		// re-pinning the stale one. A PUT to spec does not reset status, so the
+		// response usually still reports it; if the server omitted it, fall back
+		// to the pre-apply GET.
+		if ReleaseName(put) == "" && ReleaseName(existing) != "" {
+			put.Status = existing.Status
+		}
+		return put, nil
 	default:
 		return nil, fmt.Errorf("apply resource %q: %w", r.Metadata.Name, err)
 	}
+}
+
+// resourceTypeRefKind normalises an empty Kind to its OC default ("ResourceType")
+// so a Resource authored with an implicit kind compares equal to one that spells
+// it out.
+func resourceTypeRefKind(kind string) string {
+	if kind == "" {
+		return "ResourceType"
+	}
+	return kind
+}
+
+// formatTypeRef renders a spec.type ref as "Kind/Name" for error messages.
+func formatTypeRef(t ResourceTypeRef) string {
+	return resourceTypeRefKind(t.Kind) + "/" + t.Name
+}
+
+// ReleaseName returns a Resource's status.latestRelease name, or "" when no
+// release has been cut yet (or r/its status is nil). Provisioners read it off
+// ApplyResource's result to decide whether to wait-for-CHANGE (reconcile: a
+// stale release is already present) or wait-for-nonempty (create).
+func ReleaseName(r *Resource) string {
+	if r != nil && r.Status != nil && r.Status.LatestRelease != nil {
+		return r.Status.LatestRelease.Name
+	}
+	return ""
 }
 
 func (c *resourceClient) GetResource(ctx context.Context, namespace, name string) (*Resource, error) {
@@ -523,27 +594,35 @@ func (c *resourceClient) ListWorkloadEndpoints(ctx context.Context, orgHandle st
 	return infos, nil
 }
 
-// WaitForLatestRelease polls GetResource until status.latestRelease.Name is
-// non-empty or timeout elapses, returning the release name the caller pins a
-// ResourceReleaseBinding to. It bounds ONLY the (fast) release-cut — the OC
-// controller hashing spec.parameters into an immutable ResourceRelease —
-// never the readiness of the backing infra that release eventually
-// provisions (a real database can take minutes; callers must poll
-// GetBinding/IsReady separately for that). Dedupes the two copies of this
-// polling loop the source repo carried (its external-dependency and
+// WaitForReleaseChange polls GetResource until status.latestRelease.Name is
+// non-empty AND differs from prior, returning the release name the caller pins
+// a ResourceReleaseBinding to. `prior` is the release observed at apply time
+// (ReleaseName on ApplyResource's result):
+//
+//   - "" when the Resource was freshly created — any non-empty release
+//     satisfies the wait (the wait-for-nonempty case; see WaitForLatestRelease);
+//   - the stale release when an EXISTING Resource was reconciled — the wait then
+//     holds until the OC controller cuts the NEW release for the changed spec,
+//     so a reconcile never pins the binding to the pre-reconcile release.
+//
+// It bounds ONLY the (fast) release-cut — the controller hashing spec.parameters
+// into an immutable ResourceRelease — never the readiness of the backing infra
+// that release eventually provisions (a real database can take minutes; callers
+// must poll GetBinding/IsReady separately for that). Dedupes the two copies of
+// this polling loop the source repo carried (its external-dependency and
 // platform-resource provisioners each had their own).
-func WaitForLatestRelease(ctx context.Context, rc ResourceClient, namespace, resourceName string, interval, timeout time.Duration) (string, error) {
+func WaitForReleaseChange(ctx context.Context, rc ResourceClient, namespace, resourceName, prior string, interval, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		got, err := rc.GetResource(ctx, namespace, resourceName)
 		if err != nil {
 			return "", fmt.Errorf("poll resource %q: %w", resourceName, err)
 		}
-		if got.Status != nil && got.Status.LatestRelease != nil && got.Status.LatestRelease.Name != "" {
-			return got.Status.LatestRelease.Name, nil
+		if name := ReleaseName(got); name != "" && name != prior {
+			return name, nil
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("resource %q produced no ResourceRelease within %s", resourceName, timeout)
+			return "", fmt.Errorf("resource %q produced no new ResourceRelease within %s", resourceName, timeout)
 		}
 		select {
 		case <-ctx.Done():
@@ -551,4 +630,11 @@ func WaitForLatestRelease(ctx context.Context, rc ResourceClient, namespace, res
 		case <-time.After(interval):
 		}
 	}
+}
+
+// WaitForLatestRelease is the prior=="" special case of WaitForReleaseChange:
+// wait until any non-empty release appears. Used on the create path where no
+// stale release exists yet.
+func WaitForLatestRelease(ctx context.Context, rc ResourceClient, namespace, resourceName string, interval, timeout time.Duration) (string, error) {
+	return WaitForReleaseChange(ctx, rc, namespace, resourceName, "", interval, timeout)
 }

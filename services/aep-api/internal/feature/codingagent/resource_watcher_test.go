@@ -18,6 +18,7 @@ package codingagent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,10 +234,11 @@ func TestResourceWatcher_HandleTask_GetBindingError_LeavesTask(t *testing.T) {
 	}
 }
 
-// TestResourceWatcher_HandleTask_StaleTask_Skips proves the bounded-age guard:
-// a task whose LastEventAt is older than staleAfter is logged + left — GetBinding
-// is never called and no event is applied.
-func TestResourceWatcher_HandleTask_StaleTask_Skips(t *testing.T) {
+// TestResourceWatcher_HandleTask_StaleTask_FailsTerminal proves the bounded-age
+// guard is TERMINAL: a task whose LastEventAt is older than staleAfter is failed
+// via TaskEventProvisionFailed (with a "timed out … (stale)" reason) WITHOUT any
+// GetBinding poll — never left in `building` forever.
+func TestResourceWatcher_HandleTask_StaleTask_FailsTerminal(t *testing.T) {
 	proj := &fakeProjector{}
 	getBindingCalled := 0
 	rc := &ocmocks.ResourceClientMock{
@@ -257,8 +259,15 @@ func TestResourceWatcher_HandleTask_StaleTask_Skips(t *testing.T) {
 	if getBindingCalled != 0 {
 		t.Fatalf("stale task must not poll GetBinding, got %d calls", getBindingCalled)
 	}
-	if calls := proj.snapshot(); len(calls) != 0 {
-		t.Fatalf("stale task must not apply any event, got %v", calls)
+	calls := proj.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("stale task must apply exactly one terminal event, got %v", calls)
+	}
+	if calls[0].event != contracts.TaskEventProvisionFailed {
+		t.Fatalf("stale task must fail via provision_failed, got %q", calls[0].event)
+	}
+	if !strings.Contains(calls[0].errMsg, "stale") || !strings.Contains(calls[0].errMsg, "timed out") {
+		t.Errorf("stale failure errMsg must explain the timeout, got %q", calls[0].errMsg)
 	}
 }
 

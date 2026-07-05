@@ -28,4 +28,11 @@
 // exists so the two families share one addressable umbrella in the feature
 // tree. An MCP discovery surface that lets agents query the graph at build
 // time arrives in a later task.
+//
+// Invariant (F3): dependency names — external AND platform-resource — share ONE
+// OpenChoreo Resource namespace per project and are matched project-wide (the
+// per-project Resource metadata.name is `<project>-<depName>`, not scoped by
+// component or kind), so a name must be UNIQUE per project across kinds. Two
+// deps of different kinds colliding on one name is rejected loudly at the
+// authoring choke point (openchoreo.ApplyResource's 409 spec.type-kind guard).
 package dependencies

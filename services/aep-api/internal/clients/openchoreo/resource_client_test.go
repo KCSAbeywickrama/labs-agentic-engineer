@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -148,19 +149,34 @@ func TestApplyResource_Create(t *testing.T) {
 	}
 }
 
-func TestApplyResource_ConflictReturnsExisting(t *testing.T) {
+// TestApplyResource_ConflictReconcilesViaPUT proves the 409 path GET-checks the
+// existing spec.type (matching here), then PUTs the DESIRED spec so an
+// RT-version bump propagates — the PUT body must carry the NEW RT name, not the
+// stale one. The pre-reconcile release rides back on status.latestRelease so the
+// caller can wait-for-change.
+func TestApplyResource_ConflictReconcilesViaPUT(t *testing.T) {
+	var putBody Resource
+	var puts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
 		case http.MethodGet:
-			if r.URL.Path != "/api/v1/namespaces/wc-abc/resources/proj-conn1" {
-				t.Fatalf("unexpected GET path: %s", r.URL.Path)
-			}
+			// Existing resource: SAME kind, OLD RT name, a stale release cut.
 			writeJSON(t, w, http.StatusOK, Resource{
 				Metadata: OCObjectMeta{Name: "proj-conn1"},
+				Spec:     ResourceSpec{Type: ResourceTypeRef{Kind: "ResourceType", Name: "conn-postgres-v1"}},
 				Status:   &ResourceStatus{LatestRelease: &ResourceLatestRelease{Name: "proj-conn1-rel1"}},
 			})
+		case http.MethodPut:
+			atomic.AddInt32(&puts, 1)
+			if r.URL.Path != "/api/v1/namespaces/wc-abc/resources/proj-conn1" {
+				t.Fatalf("unexpected PUT path: %s", r.URL.Path)
+			}
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			// The server keeps the (still stale) status on a spec PUT.
+			putBody.Status = &ResourceStatus{LatestRelease: &ResourceLatestRelease{Name: "proj-conn1-rel1"}}
+			writeJSON(t, w, http.StatusOK, putBody)
 		default:
 			t.Fatalf("unexpected method %s", r.Method)
 		}
@@ -168,12 +184,68 @@ func TestApplyResource_ConflictReturnsExisting(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestResourceClient(t, srv)
-	got, err := c.ApplyResource(context.Background(), "wc-abc", &Resource{Metadata: OCObjectMeta{Name: "proj-conn1"}})
+	// Desired: SAME kind, NEW RT name (a version bump).
+	desired := &Resource{
+		Metadata: OCObjectMeta{Name: "proj-conn1"},
+		Spec:     ResourceSpec{Type: ResourceTypeRef{Kind: "ResourceType", Name: "conn-postgres-v2"}},
+	}
+	got, err := c.ApplyResource(context.Background(), "wc-abc", desired)
 	if err != nil {
 		t.Fatalf("ApplyResource: %v", err)
 	}
-	if got.Status == nil || got.Status.LatestRelease == nil || got.Status.LatestRelease.Name != "proj-conn1-rel1" {
-		t.Errorf("expected existing resource with latestRelease, got %+v", got)
+	if puts != 1 {
+		t.Fatalf("expected exactly 1 PUT reconcile, got %d", puts)
+	}
+	if putBody.Spec.Type.Name != "conn-postgres-v2" {
+		t.Errorf("PUT body must carry the NEW RT name, got %q", putBody.Spec.Type.Name)
+	}
+	// The pre-reconcile release rides back so the caller waits for a NEW one.
+	if ReleaseName(got) != "proj-conn1-rel1" {
+		t.Errorf("expected pre-reconcile release to ride back, got %q", ReleaseName(got))
+	}
+}
+
+// TestApplyResource_ConflictMismatchedTypeErrors proves the cross-kind
+// collision guard: a 409 whose existing spec.type differs from the desired one
+// is a HARD error naming both types — never a silent overwrite (no PUT issued).
+func TestApplyResource_ConflictMismatchedTypeErrors(t *testing.T) {
+	var puts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
+		case http.MethodGet:
+			// Existing is a ClusterResourceType (platform-resource) named "postgres-cnpg".
+			writeJSON(t, w, http.StatusOK, Resource{
+				Metadata: OCObjectMeta{Name: "proj-conn1"},
+				Spec:     ResourceSpec{Type: ResourceTypeRef{Kind: "ClusterResourceType", Name: "postgres-cnpg"}},
+			})
+		case http.MethodPut:
+			atomic.AddInt32(&puts, 1)
+			writeJSON(t, w, http.StatusOK, nil)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestResourceClient(t, srv)
+	// Desired is an external ResourceType named "conn-postgres-v1" — a different kind.
+	desired := &Resource{
+		Metadata: OCObjectMeta{Name: "proj-conn1"},
+		Spec:     ResourceSpec{Type: ResourceTypeRef{Kind: "ResourceType", Name: "conn-postgres-v1"}},
+	}
+	_, err := c.ApplyResource(context.Background(), "wc-abc", desired)
+	if err == nil {
+		t.Fatal("expected a hard error on mismatched spec.type")
+	}
+	if puts != 0 {
+		t.Errorf("must NOT PUT on a type mismatch, got %d PUTs", puts)
+	}
+	for _, want := range []string{"ClusterResourceType/postgres-cnpg", "ResourceType/conn-postgres-v1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must name both types, missing %q: %v", want, err)
+		}
 	}
 }
 
