@@ -283,6 +283,11 @@ export function markTurnUndone(key: ProjectKey, turnId: string): void {
 
 const turnSnapshots = new Map<string, Map<string, Record<string, string>>>();
 
+// Each snapshot is a whole draft copy and Undo only reaches back to recent
+// turns, so cap the held snapshots per project (like MAX_MESSAGES_PER_PROJECT
+// caps the log) instead of accumulating one per turn for the session's life.
+const MAX_TURN_SNAPSHOTS_PER_PROJECT = 8;
+
 /** Record the draft as it was BEFORE `turnId` so Undo can restore it. */
 export function saveTurnSnapshot(key: ProjectKey, turnId: string, draft: Record<string, string>): void {
   const ck = cacheKey(key.orgId, key.projectId);
@@ -292,6 +297,11 @@ export function saveTurnSnapshot(key: ProjectKey, turnId: string, draft: Record<
     turnSnapshots.set(ck, byTurn);
   }
   byTurn.set(turnId, { ...draft });
+  // Prune oldest-first (Map preserves insertion order) down to the cap.
+  for (const oldest of byTurn.keys()) {
+    if (byTurn.size <= MAX_TURN_SNAPSHOTS_PER_PROJECT) break;
+    byTurn.delete(oldest);
+  }
 }
 
 /** The pre-turn draft for `turnId`, if still held this session. */

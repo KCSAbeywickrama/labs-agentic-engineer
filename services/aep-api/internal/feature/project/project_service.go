@@ -54,7 +54,7 @@ type projectService struct {
 	webhookSvc  gitrepo.WebhookService
 	artifactSvc artifacts.ArtifactService
 	store       *artifacts.ArtifactStore
-	taskRepo    repositories.TaskRepository
+	execs       repositories.ExecutionRepository
 	skillsProv  skillsProvisioner
 }
 
@@ -73,7 +73,7 @@ func NewProjectService(
 	webhookSvc gitrepo.WebhookService,
 	artifactSvc artifacts.ArtifactService,
 	store *artifacts.ArtifactStore,
-	taskRepo repositories.TaskRepository,
+	execs repositories.ExecutionRepository,
 ) *projectService {
 	return &projectService{
 		client:      client,
@@ -81,7 +81,7 @@ func NewProjectService(
 		webhookSvc:  webhookSvc,
 		artifactSvc: artifactSvc,
 		store:       store,
-		taskRepo:    taskRepo,
+		execs:       execs,
 	}
 }
 
@@ -163,14 +163,13 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 		}
 	}
 
-	// Clean up the project's task rows. Without this, deleted projects leave
-	// orphaned component_tasks behind that the trait_sync watcher keeps
-	// re-reconciling forever (observed as reconcile churn after every demo
-	// teardown). Best-effort like the repo cleanup — the project itself is
-	// already gone upstream.
-	if s.taskRepo != nil {
-		if err := s.taskRepo.DeleteByProjectID(ctx, orgName, projectName); err != nil {
-			slog.ErrorContext(ctx, "failed to delete task rows for project", "org", orgName, "project", projectName, "error", err)
+	// Tasks are GitHub issues (deleted with the repo). The platform-owned
+	// executions rows for the project ARE purged here — they are keyed to the
+	// project and would otherwise orphan (no FK to cascade). Best-effort, like
+	// the repo cleanup.
+	if s.execs != nil {
+		if err := s.execs.DeleteByProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to purge executions for project", "org", orgName, "project", projectName, "error", err)
 		}
 	}
 
@@ -239,19 +238,11 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 		return status, nil
 	}
 
-	// Check tasks.
-	tasks, err := s.taskRepo.ListByProjectID(ctx, orgName, projectName)
-	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
-	}
-	status.HasTasks = len(tasks) > 0
-
-	if !status.HasTasks {
-		status.Phase = "tasks"
-		return status, nil
-	}
-
-	status.Phase = "components"
+	// Tasks are GitHub issues now (no component_tasks table). The status phase
+	// stops at "tasks" once a design exists; the console derives per-Task detail
+	// live from the tasks API (§8). HasTasks is left false here — a live GitHub
+	// count on every status poll is not worth the request.
+	status.Phase = "tasks"
 	return status, nil
 }
 

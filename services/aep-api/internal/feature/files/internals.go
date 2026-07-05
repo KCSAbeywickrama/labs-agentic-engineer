@@ -17,8 +17,6 @@
 package files
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -68,10 +66,18 @@ func validatePath(p string) error {
 //
 // Keyed by "orgID/projectID". Each read revalidates HEAD (one GetRef) and
 // reuses the cached blob map when HEAD is unchanged, rebuilding only on a move.
+// Bounded to maxTreeCacheEntries projects: on overflow the least-recently-used
+// entry is dropped (a miss only costs one GetRef + tree fetch, so a simple
+// cap-and-scan beats a real LRU here).
+
+// maxTreeCacheEntries caps the cache at a modest number of (org, project)
+// entries so a long-lived process browsing many projects can't grow unbounded.
+const maxTreeCacheEntries = 64
 
 type treeEntry struct {
-	headSHA string
-	blobs   map[string]gitrepo.TreeEntryResult
+	headSHA  string
+	blobs    map[string]gitrepo.TreeEntryResult
+	lastUsed time.Time
 }
 
 type treeCache struct {
@@ -85,6 +91,8 @@ func (c *treeCache) matching(key, headSHA string) (map[string]gitrepo.TreeEntryR
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if e, ok := c.entries[key]; ok && e.headSHA == headSHA {
+		e.lastUsed = time.Now()
+		c.entries[key] = e
 		return e.blobs, true
 	}
 	return nil, false
@@ -93,36 +101,28 @@ func (c *treeCache) matching(key, headSHA string) (map[string]gitrepo.TreeEntryR
 func (c *treeCache) put(key, headSHA string, blobs map[string]gitrepo.TreeEntryResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = treeEntry{headSHA: headSHA, blobs: blobs}
+	if _, exists := c.entries[key]; !exists && len(c.entries) >= maxTreeCacheEntries {
+		c.evictOldestLocked()
+	}
+	c.entries[key] = treeEntry{headSHA: headSHA, blobs: blobs, lastUsed: time.Now()}
+}
+
+// evictOldestLocked drops the least-recently-used entry. Caller holds mu.
+func (c *treeCache) evictOldestLocked() {
+	oldestKey := ""
+	var oldest time.Time
+	for k, e := range c.entries {
+		if oldestKey == "" || e.lastUsed.Before(oldest) {
+			oldestKey, oldest = k, e.lastUsed
+		}
+	}
+	if oldestKey != "" {
+		delete(c.entries, oldestKey)
+	}
 }
 
 func (c *treeCache) evict(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
-}
-
-// retryCAS re-runs fn on a non-fast-forward ref update (a concurrent writer),
-// re-reading HEAD each attempt so the base tree stays fresh. Any other error
-// (including the conflict sentinel) aborts immediately.
-func retryCAS(ctx context.Context, attempts int, fn func() error) error {
-	var err error
-	for i := 0; i < attempts; i++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		if !isRefNotFastForward(err) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(50*(i+1)) * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("files apply: %w (after %d attempts)", err, attempts)
-}
-
-func isRefNotFastForward(err error) bool {
-	return errors.Is(err, gitrepo.ErrRefNotFastForward)
 }

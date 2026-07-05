@@ -25,17 +25,39 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { componentDesignJsonSchema } from "../src/json-schema.js";
-import { COMPONENT_DESIGN_SCHEMA_ARTIFACT } from "../scripts/artifact-path.js";
+import {
+  componentDesignJsonSchema,
+  planTaskJsonSchema,
+  updateTaskJsonSchema,
+} from "../src/json-schema.js";
+import {
+  COMPONENT_DESIGN_SCHEMA_ARTIFACT,
+  PLAN_TASK_SCHEMA_ARTIFACT,
+  UPDATE_TASK_SCHEMA_ARTIFACT,
+} from "../scripts/artifact-path.js";
 
-test("checked-in component-design.schema.json matches a fresh generation", () => {
-  const onDisk = readFileSync(COMPONENT_DESIGN_SCHEMA_ARTIFACT, "utf8");
-  const fresh = `${JSON.stringify(componentDesignJsonSchema(), null, 2)}\n`;
-  assert.equal(
-    onDisk,
-    fresh,
-    "component-design.schema.json is stale — run `pnpm --filter @aep/agent-stream gen`",
-  );
+// Every published artifact must equal a fresh render of its Zod schema; a stale
+// one means the schema changed without `pnpm --filter @aep/agent-stream gen`.
+const artifacts: [string, string, () => Record<string, unknown>][] = [
+  ["component-design.schema.json", COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema],
+  ["plan-task.schema.json", PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema],
+  ["update-task.schema.json", UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema],
+];
+
+for (const [name, path, render] of artifacts) {
+  test(`checked-in ${name} matches a fresh generation`, () => {
+    const onDisk = readFileSync(path, "utf8");
+    const fresh = `${JSON.stringify(render(), null, 2)}\n`;
+    assert.equal(onDisk, fresh, `${name} is stale — run \`pnpm --filter @aep/agent-stream gen\``);
+  });
+}
+
+test("plan-task/update-task schemas expose their routable fields first (streaming order)", () => {
+  const plan = planTaskJsonSchema() as { properties?: Record<string, unknown> };
+  assert.deepEqual(Object.keys(plan.properties ?? {}), ["component", "title", "dependsOn", "origin", "rationale"]);
+  const update = updateTaskJsonSchema() as { properties?: { set?: { properties?: Record<string, unknown> } } };
+  // `body` (the long free-text field) streams last within `set`.
+  assert.deepEqual(Object.keys(update.properties?.set?.properties ?? {}), ["title", "dependsOn", "rationale", "body"]);
 });
 
 test("the schema is a strict object exposing the ComponentDesign fields", () => {

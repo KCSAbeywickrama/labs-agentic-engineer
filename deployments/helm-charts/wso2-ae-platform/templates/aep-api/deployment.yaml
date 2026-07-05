@@ -56,16 +56,29 @@ spec:
             - name: PLATFORM_API_SERVICE_HOST
               value: {{ .Values.openchoreo.apiGatewayHost | quote }}
 
-            # ── Sister services ───────────────────────────────────────────────
-            - name: AGENTS_SERVICE_BASE_URL
-              value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
-            - name: AGENTS_SERVICE_URL
-              value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
+            # ── File-mutation agents service (services/agents) ────────────────
+            # BFF→agents M2M: an HS256 bearer signed with the shared secret the
+            # agents deployment verifies (AGENT_JWT_SECRET). Reached by Service
+            # DNS, independent of the gateway HTTPRoute split.
+            - name: AGENTS_SVC_BASE_URL
+              value: "http://agents.{{ .Release.Namespace }}:{{ .Values.agents.port }}"
+            - name: AGENTS_SVC_JWT_SECRET
+              value: {{ .Values.agents.m2mSecret | quote }}
+            - name: AGENTS_SVC_JWT_AUDIENCE
+              value: {{ .Values.agents.jwtAudience | quote }}
+            - name: AGENTS_SVC_JWT_ISSUER
+              value: {{ .Values.agents.jwtIssuer | quote }}
             # The runner's /internal callback base. Points at the dedicated
             # internal host when bff.internalURL is set (pairs with the
             # aepApi.internalHostname HTTPRoute split); otherwise the public URL.
             - name: AGENT_PLATFORM_URL
               value: {{ .Values.bff.internalURL | default .Values.bff.publicURL | quote }}
+            # ESO ClusterSecretStore backing the proxy-dispatched runners' per-run
+            # ExternalSecrets. Empty → BFF default ("default", local k3d); a real
+            # dataplane must set it to the DP app-secrets store or private-repo
+            # build clones + agent creds silently resolve nothing.
+            - name: AGENT_CLUSTER_SECRET_STORE
+              value: {{ .Values.aepApi.agentClusterSecretStore | default "" | quote }}
 
             # ── Identity Provider (OC Thunder) ────────────────────────────────
             - name: JWKS_URL
@@ -107,14 +120,6 @@ spec:
             - name: SERVICE_AUTH_GIT_CLIENT_SECRET
               value: "aep-bff-to-git-service-secret"
             - name: SERVICE_AUTH_GIT_HOST_HEADER
-              value: ""
-            - name: SERVICE_AUTH_AGENTS_TOKEN_URL
-              value: {{ .Values.idp.tokenURL | quote }}
-            - name: SERVICE_AUTH_AGENTS_CLIENT_ID
-              value: {{ .Values.aepApi.agentsJwt.clientId | quote }}
-            - name: SERVICE_AUTH_AGENTS_CLIENT_SECRET
-              value: {{ .Values.aepApi.agentsJwt.clientSecret | quote }}
-            - name: SERVICE_AUTH_AGENTS_HOST_HEADER
               value: ""
 
             # ── Task JWT ──────────────────────────────────────────────────────

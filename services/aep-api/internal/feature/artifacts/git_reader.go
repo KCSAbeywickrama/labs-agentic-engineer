@@ -27,7 +27,10 @@ package artifacts
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -65,48 +68,39 @@ func designBundleFilter(rel string) bool {
 	return hasAllowedDesignExt(rel)
 }
 
-// repoCoords is the resolved GitHub coordinates + credential for one project.
-type repoCoords struct {
-	owner  string
-	name   string
-	branch string
-	cred   credentials.Credential
-}
+// repoCoords is the resolved GitHub coordinates + credential for one project —
+// the shared gitrepo resolution (owner/name from URL, org credential, "main"
+// fallback).
+type repoCoords = gitrepo.RepoCoords
 
 func (s *artifactService) resolveCoords(ctx context.Context, repo *models.GitRepository) (repoCoords, error) {
-	owner, name := models.OwnerRepoFromURL(repo.RepoURL)
-	if owner == "" || name == "" {
-		return repoCoords{}, fmt.Errorf("cannot derive owner/repo from %q", repo.RepoURL)
-	}
-	cred, err := s.git.Resolver().Resolve(ctx, repo.OrgID)
-	if err != nil {
-		return repoCoords{}, fmt.Errorf("resolve credential: %w", err)
-	}
-	branch := repo.DefaultBranch
-	if branch == "" {
-		branch = "main"
-	}
-	return repoCoords{owner: owner, name: name, branch: branch, cred: cred}, nil
+	return gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), repo.OrgID, repo)
 }
 
 // headCommit returns the tip commit SHA of the default branch.
 func (s *artifactService) headCommit(ctx context.Context, rc repoCoords) (string, error) {
-	return s.git.GitData().GetRef(ctx, rc.owner, rc.name, rc.cred, "heads/"+rc.branch)
+	return s.git.GitData().GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
 }
 
+// blobFetchConcurrency bounds the parallel GetBlob fan-out per bundle read.
+const blobFetchConcurrency = 8
+
 // readBundleAtCommit reads every blob under prefix at the given commit,
-// returning path→content keyed RELATIVE to prefix, filtered by keep.
+// returning path→content keyed RELATIVE to prefix, filtered by keep. Blobs are
+// fetched with a bounded concurrent fan-out; assembly stays deterministic (the
+// result is keyed by path, and any fetch error fails the whole read).
 func (s *artifactService) readBundleAtCommit(ctx context.Context, rc repoCoords, commitSHA, prefix string, keep bundleFilter) (map[string]string, error) {
 	gh := s.git.GitData()
-	commit, err := gh.GetCommit(ctx, rc.owner, rc.name, rc.cred, commitSHA)
+	commit, err := gh.GetCommit(ctx, rc.Owner, rc.Name, rc.Cred, commitSHA)
 	if err != nil {
 		return nil, fmt.Errorf("get commit %s: %w", commitSHA, err)
 	}
-	tree, err := gh.GetTree(ctx, rc.owner, rc.name, rc.cred, commit.TreeSHA, true)
+	tree, err := gh.GetTree(ctx, rc.Owner, rc.Name, rc.Cred, commit.TreeSHA, true)
 	if err != nil {
 		return nil, fmt.Errorf("get tree %s: %w", commit.TreeSHA, err)
 	}
-	out := map[string]string{}
+	var targets []gitrepo.TreeEntryResult
+	var rels []string
 	for _, e := range tree.Entries {
 		if e.Type != "blob" || !strings.HasPrefix(e.Path, prefix) {
 			continue
@@ -115,11 +109,28 @@ func (s *artifactService) readBundleAtCommit(ctx context.Context, rc repoCoords,
 		if rel == "" || !keep(rel) {
 			continue
 		}
-		data, err := gh.GetBlob(ctx, rc.owner, rc.name, rc.cred, e.SHA)
-		if err != nil {
-			return nil, fmt.Errorf("get blob %s: %w", e.Path, err)
-		}
-		out[rel] = string(data)
+		targets = append(targets, e)
+		rels = append(rels, rel)
+	}
+	contents := make([]string, len(targets))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(blobFetchConcurrency)
+	for i, e := range targets {
+		g.Go(func() error {
+			data, err := gh.GetBlob(gctx, rc.Owner, rc.Name, rc.Cred, e.SHA)
+			if err != nil {
+				return fmt.Errorf("get blob %s: %w", e.Path, err)
+			}
+			contents[i] = string(data)
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for i, rel := range rels {
+		out[rel] = contents[i]
 	}
 	return out, nil
 }
@@ -130,7 +141,16 @@ func (s *artifactService) readBundleAtHead(ctx context.Context, rc repoCoords, p
 	if err != nil {
 		return nil, fmt.Errorf("get head ref: %w", err)
 	}
-	return s.readBundleAtCommit(ctx, rc, head, prefix, keep)
+	files, err := s.readBundleAtCommit(ctx, rc, head, prefix, keep)
+	if err != nil {
+		return nil, err
+	}
+	// The HEAD each at-HEAD read resolved. A read that lands right after a
+	// files-apply but logs the PRE-apply commit is a stale GetRef caught in the
+	// act (compare with the apply's "files apply committed" line).
+	slog.DebugContext(ctx, "bundle read at head",
+		"repo", rc.Owner+"/"+rc.Name, "prefix", prefix, "commit", head, "files", len(files))
+	return files, nil
 }
 
 // readBundleAtTag reads the artifact bundle at a `v*` tag. The tag ref's object
@@ -149,25 +169,21 @@ func (s *artifactService) readBundleAtTag(ctx context.Context, rc repoCoords, ta
 // ErrArtifactNotFound when the ref is absent.
 func (s *artifactService) tagCommit(ctx context.Context, rc repoCoords, tag string) (string, error) {
 	gh := s.git.GitData()
-	tagSHA, err := gh.GetRef(ctx, rc.owner, rc.name, rc.cred, "tags/"+tag)
+	tagSHA, err := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "tags/"+tag)
 	if err != nil {
 		if gitrepo.IsHTTPStatus(err, 404) {
 			return "", ErrArtifactNotFound
 		}
 		return "", fmt.Errorf("get tag ref %s: %w", tag, err)
 	}
-	commitSHA, perr := gh.GetTagObject(ctx, rc.owner, rc.name, rc.cred, tagSHA)
-	if perr != nil {
-		return tagSHA, nil // lightweight tag: ref already points at the commit
-	}
-	return commitSHA, nil
+	return gitrepo.PeelTagToCommit(ctx, gh, rc.Owner, rc.Name, rc.Cred, tagSHA), nil
 }
 
 // listVersionTags returns every `v*` tag with its Name + resolved commit SHA
 // (the annotated tag object peeled to its commit). Message is not exposed by the
 // Git Data refs API, so it is left empty — the version list is name + commit.
 func (s *artifactService) listVersionTags(ctx context.Context, rc repoCoords) ([]gitrepo.TagInfo, error) {
-	refs, err := s.git.GitData().ListMatchingRefs(ctx, rc.owner, rc.name, rc.cred, "tags/v")
+	refs, err := s.git.GitData().ListMatchingRefs(ctx, rc.Owner, rc.Name, rc.Cred, "tags/v")
 	if err != nil {
 		return nil, err
 	}
@@ -177,10 +193,7 @@ func (s *artifactService) listVersionTags(ctx context.Context, rc repoCoords) ([
 		if name == "" || name == r.Ref {
 			continue
 		}
-		commit := r.SHA
-		if peeled, perr := s.git.GitData().GetTagObject(ctx, rc.owner, rc.name, rc.cred, r.SHA); perr == nil {
-			commit = peeled
-		}
+		commit := gitrepo.PeelTagToCommit(ctx, s.git.GitData(), rc.Owner, rc.Name, rc.Cred, r.SHA)
 		out = append(out, gitrepo.TagInfo{Name: name, CommitHash: commit})
 	}
 	return out, nil

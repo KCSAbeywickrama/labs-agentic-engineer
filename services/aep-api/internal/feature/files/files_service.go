@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -153,13 +154,9 @@ func NewService(repos RepoResolver, git GitGateway) FilesService {
 	return &service{repos: repos, git: git, cache: newTreeCache()}
 }
 
-// repoContext bundles the resolved GitHub coordinates for one project.
-type repoContext struct {
-	owner  string
-	name   string
-	branch string
-	cred   credentials.Credential
-}
+// repoContext is the resolved GitHub coordinates for one project — the shared
+// gitrepo resolution (owner/name from URL, org credential, "main" fallback).
+type repoContext = gitrepo.RepoCoords
 
 func (s *service) resolve(ctx context.Context, orgID, projectID string) (*repoContext, error) {
 	if s == nil || s.repos == nil || s.git == nil {
@@ -175,19 +172,11 @@ func (s *service) resolve(ctx context.Context, orgID, projectID string) (*repoCo
 	if repo == nil {
 		return nil, ErrProjectRepoNotFound
 	}
-	owner, name := models.OwnerRepoFromURL(repo.RepoURL)
-	if owner == "" || name == "" {
-		return nil, fmt.Errorf("cannot derive owner/repo from %q", repo.RepoURL)
-	}
-	cred, err := s.git.Resolver().Resolve(ctx, orgID)
+	rc, err := gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
-		return nil, fmt.Errorf("resolve credential: %w", err)
+		return nil, err
 	}
-	branch := "main"
-	if repo.DefaultBranch != "" {
-		branch = repo.DefaultBranch
-	}
-	return &repoContext{owner: owner, name: name, branch: branch, cred: cred}, nil
+	return &rc, nil
 }
 
 // List returns every blob at HEAD, filtered to those whose path has the given
@@ -229,7 +218,7 @@ func (s *service) Read(ctx context.Context, orgID, projectID, path string) (*Fil
 	if !ok {
 		return nil, ErrFileNotFound
 	}
-	data, err := s.git.GitData().GetBlob(ctx, rc.owner, rc.name, rc.cred, entry.SHA)
+	data, err := s.git.GitData().GetBlob(ctx, rc.Owner, rc.Name, rc.Cred, entry.SHA)
 	if err != nil {
 		return nil, fmt.Errorf("get blob %s: %w", path, err)
 	}
@@ -240,7 +229,7 @@ func (s *service) Read(ctx context.Context, orgID, projectID, path string) (*Fil
 // tree when HEAD is unchanged (HEAD-SHA-revalidated, one GetRef per read).
 func (s *service) blobsAtHead(ctx context.Context, orgID, projectID string, rc *repoContext) (map[string]gitrepo.TreeEntryResult, error) {
 	gh := s.git.GitData()
-	headSHA, err := gh.GetRef(ctx, rc.owner, rc.name, rc.cred, "heads/"+rc.branch)
+	headSHA, err := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
 	if err != nil {
 		return nil, fmt.Errorf("get head ref: %w", err)
 	}
@@ -248,13 +237,9 @@ func (s *service) blobsAtHead(ctx context.Context, orgID, projectID string, rc *
 	if blobs, ok := s.cache.matching(key, headSHA); ok {
 		return blobs, nil
 	}
-	commit, err := gh.GetCommit(ctx, rc.owner, rc.name, rc.cred, headSHA)
+	tree, _, err := s.treeAtHead(ctx, rc, headSHA)
 	if err != nil {
-		return nil, fmt.Errorf("get head commit: %w", err)
-	}
-	tree, err := gh.GetTree(ctx, rc.owner, rc.name, rc.cred, commit.TreeSHA, true)
-	if err != nil {
-		return nil, fmt.Errorf("get head tree: %w", err)
+		return nil, err
 	}
 	blobs := map[string]gitrepo.TreeEntryResult{}
 	for _, e := range tree.Entries {
@@ -264,6 +249,23 @@ func (s *service) blobsAtHead(ctx context.Context, orgID, projectID string, rc *
 	}
 	s.cache.put(key, headSHA, blobs)
 	return blobs, nil
+}
+
+// treeAtHead downloads the commit + full recursive tree for an already-resolved
+// HEAD SHA — the shared second step of blobsAtHead's cache miss and the Apply
+// CAS loop (each does its own GetRef; the fresh ref read is the point). Returns
+// the tree and the commit's base tree SHA.
+func (s *service) treeAtHead(ctx context.Context, rc *repoContext, headSHA string) (*gitrepo.TreeObject, string, error) {
+	gh := s.git.GitData()
+	commit, err := gh.GetCommit(ctx, rc.Owner, rc.Name, rc.Cred, headSHA)
+	if err != nil {
+		return nil, "", fmt.Errorf("get head commit: %w", err)
+	}
+	tree, err := gh.GetTree(ctx, rc.Owner, rc.Name, rc.Cred, commit.TreeSHA, true)
+	if err != nil {
+		return nil, "", fmt.Errorf("get head tree: %w", err)
+	}
+	return tree, commit.TreeSHA, nil
 }
 
 // Apply validates + commits a batch atomically. On a baseSha precondition
@@ -304,19 +306,15 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 
 	var result *ApplyResult
 	var conflicts []Conflict
-	err = retryCAS(ctx, casAttempts, func() error {
+	err = gitrepo.RetryCAS(ctx, "files apply", casAttempts, func() error {
 		gh := s.git.GitData()
-		headSHA, ferr := gh.GetRef(ctx, rc.owner, rc.name, rc.cred, "heads/"+rc.branch)
+		headSHA, ferr := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
 		if ferr != nil {
 			return fmt.Errorf("get ref: %w", ferr)
 		}
-		commit, ferr := gh.GetCommit(ctx, rc.owner, rc.name, rc.cred, headSHA)
+		tree, baseTreeSHA, ferr := s.treeAtHead(ctx, rc, headSHA)
 		if ferr != nil {
-			return fmt.Errorf("get commit: %w", ferr)
-		}
-		tree, ferr := gh.GetTree(ctx, rc.owner, rc.name, rc.cred, commit.TreeSHA, true)
-		if ferr != nil {
-			return fmt.Errorf("get tree: %w", ferr)
+			return ferr
 		}
 		current := map[string]string{}
 		for _, e := range tree.Entries {
@@ -334,7 +332,7 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		var files []FileMeta
 		var warnings []Warning
 		for _, w := range req.Writes {
-			blobSHA, berr := gh.CreateBlob(ctx, rc.owner, rc.name, rc.cred, []byte(w.Content))
+			blobSHA, berr := gh.CreateBlob(ctx, rc.Owner, rc.Name, rc.Cred, []byte(w.Content))
 			if berr != nil {
 				return fmt.Errorf("create blob %s: %w", w.Path, berr)
 			}
@@ -347,12 +345,12 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 			entries = append(entries, gitrepo.TreeEntry{Path: d.Path, Mode: "100644", Type: "blob"})
 		}
 
-		treeSHA, terr := gh.CreateTree(ctx, rc.owner, rc.name, rc.cred, commit.TreeSHA, entries)
+		treeSHA, terr := gh.CreateTree(ctx, rc.Owner, rc.Name, rc.Cred, baseTreeSHA, entries)
 		if terr != nil {
 			return fmt.Errorf("create tree: %w", terr)
 		}
-		author, committer := s.git.ResolveSaveIdentities(rc.cred)
-		newSHA, cerr := gh.CreateCommit(ctx, rc.owner, rc.name, rc.cred, gitrepo.CreateCommitRequest{
+		author, committer := s.git.ResolveSaveIdentities(rc.Cred)
+		newSHA, cerr := gh.CreateCommit(ctx, rc.Owner, rc.Name, rc.Cred, gitrepo.CreateCommitRequest{
 			Message:   applyMessage(req.Message),
 			TreeSHA:   treeSHA,
 			Parents:   []string{headSHA},
@@ -362,19 +360,26 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		if cerr != nil {
 			return fmt.Errorf("create commit: %w", cerr)
 		}
-		if uerr := gh.UpdateRef(ctx, rc.owner, rc.name, rc.cred, "heads/"+rc.branch, newSHA, false); uerr != nil {
+		if uerr := gh.UpdateRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch, newSHA, false); uerr != nil {
 			return uerr
 		}
 		result = &ApplyResult{CommitSHA: newSHA, Files: files, Warnings: warnings}
 		return nil
 	})
 	if errors.Is(err, errConflictSentinel) {
+		slog.InfoContext(ctx, "files apply conflict — nothing applied",
+			"project", projectID, "conflicts", len(conflicts))
 		return nil, conflicts, ErrApplyConflict
 	}
 	if err != nil {
+		slog.ErrorContext(ctx, "files apply failed",
+			"project", projectID, "writes", len(req.Writes), "deletes", len(req.Deletes), "error", err)
 		return nil, nil, err
 	}
 	s.cache.evict(orgID + "/" + projectID)
+	slog.InfoContext(ctx, "files apply committed",
+		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", result.CommitSHA,
+		"writes", len(req.Writes), "deletes", len(req.Deletes))
 	return result, nil, nil
 }
 

@@ -39,6 +39,9 @@ import (
 //
 // Idempotent — re-running is a no-op once the column / indices exist.
 func RunPhase4CodingAgent(db *gorm.DB) error {
+	if !tableExists(db, "component_tasks") {
+		return nil // component_tasks dropped (tasks-github-native) — nothing to migrate
+	}
 	const check = `SELECT EXISTS (
 		SELECT 1 FROM information_schema.columns
 		WHERE table_schema='public' AND table_name='component_tasks' AND column_name='last_coding_agent_run_name'

@@ -20,7 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ModelMessage } from "ai";
 import { runTurn } from "./run-turn.js";
-import { buildTools } from "./tool.js";
+import { buildFileTools } from "./tools/files.js";
 import { FileBundle, type StreamPart } from "@aep/agent-stream";
 import { SEED_FILES } from "./prompt.js";
 import { mockModel } from "../../shared/mock-model.js";
@@ -29,7 +29,7 @@ const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 
 test("runTurn streams events, runs server-side execute, appends messages, returns usage", async () => {
   const bundle = new FileBundle(SEED_FILES);
-  const tools = buildTools(bundle);
+  const tools = buildFileTools(bundle);
   const model = mockModel([
     {
       kind: "toolCall",
@@ -77,7 +77,7 @@ test("runTurn appends only (history grows across turns)", async () => {
   await runTurn({
     model: mockModel([{ kind: "text", text: "first" }]),
     instructions: "t",
-    tools: buildTools(bundle),
+    tools: buildFileTools(bundle),
     messages,
     prompt: "turn one",
   });
@@ -87,7 +87,7 @@ test("runTurn appends only (history grows across turns)", async () => {
   await runTurn({
     model: mockModel([{ kind: "text", text: "second" }]),
     instructions: "t",
-    tools: buildTools(bundle),
+    tools: buildFileTools(bundle),
     messages,
     prompt: "turn two",
   });

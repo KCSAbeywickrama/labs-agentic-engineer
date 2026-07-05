@@ -689,6 +689,15 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
                 color: input.trim() && !isSending ? (theme.vars?.palette.primary.contrastText ?? '#fff') : undefined,
                 width: 36,
                 height: 36,
+                // Never let the fullWidth input squeeze the button below its
+                // 36px hit target next to the multiline field.
+                flexShrink: 0,
+                // Lift the button in its own stacking context so it always wins
+                // the hit-test at its coordinates (MUI ButtonBase is already
+                // position:relative, so zIndex applies without changing layout —
+                // unlike putting position on the panel wrapper, which shifted it).
+                position: 'relative',
+                zIndex: 1,
                 '&:hover': input.trim() && !isSending ? { bgcolor: theme.vars?.palette.primary.dark ?? 'primary.dark' } : {},
               }}
             >

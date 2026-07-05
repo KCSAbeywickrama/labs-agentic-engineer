@@ -1,0 +1,124 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { parseSseStream, type SseStreamEnd } from "../src/sse-client.js";
+import type { StreamPart } from "../src/stream-types.js";
+
+function byteStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let i = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (i < chunks.length) controller.enqueue(encoder.encode(chunks[i++]));
+      else controller.close();
+    },
+  });
+}
+
+async function collect(
+  body: ReadableStream<Uint8Array>,
+): Promise<{ parts: StreamPart[]; end: SseStreamEnd }> {
+  const it = parseSseStream(body)[Symbol.asyncIterator]();
+  const parts: StreamPart[] = [];
+  while (true) {
+    const r = await it.next();
+    if (r.done) return { parts, end: r.value };
+    parts.push(r.value);
+  }
+}
+
+test("returns 'done' when the [DONE] sentinel arrives", async () => {
+  const { parts, end } = await collect(
+    byteStream(['data: {"type":"text-delta","text":"hi"}\n\n', "data: [DONE]\n\n"]),
+  );
+  assert.equal(end, "done");
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0]?.type, "text-delta");
+});
+
+test("returns 'eof' when the stream ends without [DONE]", async () => {
+  const { parts, end } = await collect(
+    byteStream([
+      'data: {"type":"text-delta","text":"hi"}\n\n',
+      'data: {"type":"tool-input-delta","id":"t1","delta":"{"}\n\n',
+      // …connection dies mid-turn: no error frame, no [DONE].
+    ]),
+  );
+  assert.equal(end, "eof");
+  assert.equal(parts.length, 2);
+});
+
+test("frames split across chunk boundaries still parse; keep-alives are skipped", async () => {
+  const { parts, end } = await collect(
+    byteStream([
+      'data: {"type":"text-',
+      'delta","text":"a"}\n',
+      "\n: keep-alive\n\ndata: [DO",
+      "NE]\n\n",
+    ]),
+  );
+  assert.equal(end, "done");
+  assert.deepEqual(parts, [{ type: "text-delta", text: "a" }]);
+});
+
+test("a truncated frame terminated by an injected blank line is skipped, not thrown", async () => {
+  // The BFF's upstream-failure path: a frame cut mid-JSON, then a blank line,
+  // then a synthetic error frame + [DONE]. The remnant must not crash the fold.
+  const { parts, end } = await collect(
+    byteStream([
+      'data: {"type":"text-delta","text":"a"}\n\n',
+      'data: {"type":"tool-inp', // upstream died mid-frame…
+      '\n\ndata: {"type":"error","error":"upstream stream failed"}\n\ndata: [DONE]\n\n',
+    ]),
+  );
+  assert.equal(end, "done");
+  assert.deepEqual(
+    parts.map((p) => p.type),
+    ["text-delta", "error"],
+  );
+});
+
+test("the BFF's upstream-failure marker (comment, no [DONE]) reads as a truncated stream", async () => {
+  // genai_huma.go passThrough: partial frame → blank line + `: upstream-error`
+  // comment, then the response ends. The remnant is skipped, the comment is
+  // invisible, and the missing [DONE] surfaces as "eof" — the truncation signal.
+  const { parts, end } = await collect(
+    byteStream([
+      'data: {"type":"text-delta","text":"a"}\n\n',
+      'data: {"type":"tool-inp', // upstream died mid-frame…
+      "\n\n: upstream-error\n\n",
+    ]),
+  );
+  assert.equal(end, "eof");
+  assert.deepEqual(
+    parts.map((p) => p.type),
+    ["text-delta"],
+  );
+});
+
+test("for-await consumers are unaffected by the return value", async () => {
+  const parts: StreamPart[] = [];
+  for await (const part of parseSseStream(
+    byteStream(['data: {"type":"finish","finishReason":"stop"}\n\n', "data: [DONE]\n\n"]),
+  )) {
+    parts.push(part);
+  }
+  assert.equal(parts.length, 1);
+});

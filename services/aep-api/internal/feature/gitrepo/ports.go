@@ -98,6 +98,13 @@ type GitData interface {
 	// — a tag ref's object.sha is the tag object, which must be peeled to the
 	// commit before GetCommit/GetTree can walk the tree.
 	GetTagObject(ctx context.Context, owner, repo string, cred credentials.Credential, tagSHA string) (string, error)
+
+	// CompareRefs returns the file-level diff between two refs (branches, tags,
+	// or SHAs) via GET /compare/{base}...{head}. The plan-turn context assembler
+	// (docs/design/tasks-github-native.md §6) uses it to feed the planner the
+	// spec/design delta between a Task's lineage tag and the current tag —
+	// replacing the deleted DB diff machinery.
+	CompareRefs(ctx context.Context, owner, repo string, cred credentials.Credential, base, head string) (*CompareResult, error)
 }
 
 // RepoAdmin is the repository-lifecycle surface. Consumed by repoService
@@ -126,6 +133,24 @@ type IssueOps interface {
 	// Used by the tech-lead detail phase to write the LLM-authored body
 	// after the placeholder issue was created.
 	EditIssueBody(ctx context.Context, owner, repo string, cred credentials.Credential, number int, body string) error
+	// EditIssueTitle replaces the issue title via PATCH /issues/{number}.
+	// Used by the plan tap when a planned Task is renamed (updateTask).
+	EditIssueTitle(ctx context.Context, owner, repo string, cred credentials.Credential, number int, title string) error
+	// AddIssueLabels adds labels to an existing issue (merges with current;
+	// adding a present label is a no-op). Used to stamp aep:status/* projection
+	// and aep:attention flags.
+	AddIssueLabels(ctx context.Context, owner, repo string, cred credentials.Credential, number int, labels []string) error
+	// RemoveIssueLabel removes one label from an issue. A 404 (already absent)
+	// is treated as success. Used to consume the aep:execute command label and
+	// clear stale aep:status/* projections.
+	RemoveIssueLabel(ctx context.Context, owner, repo string, cred credentials.Credential, number int, label string) error
+	// SetIssueLabels replaces the issue's entire label set (labels absent from
+	// the slice are removed). Used by block-repair projection when the full set
+	// must be authoritative.
+	SetIssueLabels(ctx context.Context, owner, repo string, cred credentials.Credential, number int, labels []string) error
+	// GetPullRequest returns a pull request's live state (open/closed + merged +
+	// merge SHA) for the sweep's PR-state reconciliation (§5).
+	GetPullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) (*PullRequestState, error)
 }
 
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.
@@ -133,23 +158,12 @@ type WebhookOps interface {
 	// RegisterWebhook installs a repository webhook delivering to deliveryURL,
 	// signed with hmacSecret. Returns the host-assigned hook ID.
 	RegisterWebhook(ctx context.Context, owner, repo string, cred credentials.Credential, deliveryURL, hmacSecret string, events []string) (hookID int64, err error)
-}
-
-// BoardOps is the project-board surface (GitHub Projects v2). On GitHub this is
-// GraphQL, folded inside the same client as an implementation detail — the
-// REST-vs-GraphQL split does not leak past this port. Consumed by issueService
-// (lazy board create + add issue) and repoBoardService (read + move).
-//
-// The `pat` string signatures are preserved from the original v2 client
-// (behavior-preserving); the caller mints the token and passes it through.
-type BoardOps interface {
-	// GetOrgID returns the node ID for a GitHub organization (required for project mutations).
-	GetOrgID(ctx context.Context, org, pat string) (nodeID string, err error)
-	CreateGitHubV2Project(ctx context.Context, orgID, pat, title string) (projectID string, err error)
-	LinkProjectToRepository(ctx context.Context, githubProjectID, owner, repo, pat string) error
-	GetProjectBoard(ctx context.Context, githubProjectID, pat string) (*ProjectBoardResult, error)
-	AddIssueToProject(ctx context.Context, githubProjectID, issueNodeID, pat string) error
-	MoveProjectItemToStatus(ctx context.Context, githubProjectID, issueURL, targetStatus, pat string) error
+	// UpdateWebhookEvents replaces the subscribed-event list of an existing repo
+	// webhook (PATCH /hooks/{id}). RegisterWebhook's already-exists path returns
+	// a pre-existing hook without touching its events, so a hook created before
+	// "issues" joined the subscription must be PATCHed to add it
+	// (docs/design/tasks-github-native.md §9.2 cutover).
+	UpdateWebhookEvents(ctx context.Context, owner, repo string, cred credentials.Credential, hookID int64, events []string) error
 }
 
 // AppInstallOps is the GitHub-App installation lifecycle + credential-account
@@ -207,6 +221,5 @@ type Host interface {
 	RepoAdmin
 	IssueOps
 	WebhookOps
-	BoardOps
 	AppInstallOps
 }

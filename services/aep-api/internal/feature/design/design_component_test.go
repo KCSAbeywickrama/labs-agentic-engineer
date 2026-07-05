@@ -109,26 +109,6 @@ func assertFieldSetMatchesGolden(t *testing.T, body, goldenName string) {
 	}
 }
 
-func TestDesignComponent_GetMatchesGoldenFieldSet(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, happyReads())
-
-	resp := h.AsOrg("acme").Get("/api/v1/projects/hello-world-api/design")
-	if resp.Code != 200 {
-		t.Fatalf("get design: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	assertFieldSetMatchesGolden(t, resp.Body.String(), "get_design.json")
-
-	// Semantics: an approved, tagged design with no unsaved drift.
-	var got map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got["status"] != "approved" || got["sourceSpec"] != "v1" || got["hasUnsavedChanges"] != false {
-		t.Fatalf("get design semantics drifted: %s", resp.Body.String())
-	}
-}
-
 func TestDesignComponent_BundleMatchesGoldenFieldSet(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, happyReads())
@@ -199,7 +179,7 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 				return nil, errors.New("pg: connection refused")
 			},
 		}
-		resp := newHarness(t, fake).AsOrg("acme").Get("/api/v1/projects/web/design")
+		resp := newHarness(t, fake).AsOrg("acme").Get("/api/v1/projects/web/design/bundle")
 		if resp.Code != 500 {
 			t.Fatalf("want 500, got %d body=%s", resp.Code, resp.Body.String())
 		}
@@ -267,7 +247,7 @@ func TestDesignComponent_NoClaimsDeniedByEnforceGate(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, happyReads())
 
-	resp := h.NoAuth().Get("/api/v1/projects/hello-world-api/design")
+	resp := h.NoAuth().Get("/api/v1/projects/hello-world-api/design/bundle")
 	if resp.Code != 401 {
 		t.Fatalf("no-claims: want the gate's ENFORCE 401, got %d body=%s", resp.Code, resp.Body.String())
 	}

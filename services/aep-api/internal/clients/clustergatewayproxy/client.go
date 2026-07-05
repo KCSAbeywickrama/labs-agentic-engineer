@@ -479,9 +479,13 @@ func (c *Client) post(ctx context.Context, path string, body any, opts postOpts)
 		path, resp.StatusCode, string(respBody))
 }
 
-// upsert POSTs the manifest; if 409, it PUTs at itemPath instead. The
-// resourceVersion is left to the proxy to inject — typed ApplyJob calls
-// don't go through upsert because Jobs are immutable.
+// upsert POSTs the manifest; if the object already exists (409), it PUTs at
+// itemPath with the LIVE resourceVersion injected. Kubernetes rejects an update
+// without metadata.resourceVersion ("must be specified for an update", a 422),
+// and the proxy does NOT inject it — so a bare PUT after a 409 fails. We GET the
+// live object, copy its resourceVersion onto the desired manifest, and PUT that.
+// This makes a queued-then-dispatched re-apply (the per-run ExternalSecret from a
+// prior attempt in the same run-name minute bucket) converge instead of 422ing.
 func (c *Client) upsert(ctx context.Context, listPath, itemPath string, body any) error {
 	resp, respBody, err := c.do(ctx, http.MethodPost, listPath, body)
 	if err != nil {
@@ -491,7 +495,11 @@ func (c *Client) upsert(ctx context.Context, listPath, itemPath string, body any
 		return nil
 	}
 	if resp.StatusCode == http.StatusConflict {
-		putResp, putBody, putErr := c.do(ctx, http.MethodPut, itemPath, body)
+		rv, gerr := c.resourceVersion(ctx, itemPath)
+		if gerr != nil {
+			return fmt.Errorf("clustergatewayproxy: 409 on POST %s, fetch resourceVersion: %w", listPath, gerr)
+		}
+		putResp, putBody, putErr := c.do(ctx, http.MethodPut, itemPath, withResourceVersion(body, rv))
 		if putErr != nil {
 			return putErr
 		}
@@ -503,6 +511,54 @@ func (c *Client) upsert(ctx context.Context, listPath, itemPath string, body any
 	}
 	return fmt.Errorf("clustergatewayproxy: POST %s status %d: %s",
 		listPath, resp.StatusCode, string(respBody))
+}
+
+// resourceVersion GETs itemPath and returns metadata.resourceVersion — the value
+// k8s requires on an update. A non-2xx GET or a missing resourceVersion is an
+// error (a PUT would 422 anyway).
+func (c *Client) resourceVersion(ctx context.Context, itemPath string) (string, error) {
+	resp, body, err := c.do(ctx, http.MethodGet, itemPath, nil)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("GET %s status %d: %s", itemPath, resp.StatusCode, string(body))
+	}
+	var obj struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return "", fmt.Errorf("decode GET %s: %w", itemPath, err)
+	}
+	if obj.Metadata.ResourceVersion == "" {
+		return "", fmt.Errorf("GET %s: no metadata.resourceVersion", itemPath)
+	}
+	return obj.Metadata.ResourceVersion, nil
+}
+
+// withResourceVersion returns a shallow copy of a manifest map with
+// metadata.resourceVersion set to rv (leaving the caller's map untouched). A
+// non-map body is returned unchanged.
+func withResourceVersion(body any, rv string) any {
+	m, ok := body.(map[string]any)
+	if !ok {
+		return body
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	meta := map[string]any{}
+	if existing, ok := m["metadata"].(map[string]any); ok {
+		for k, v := range existing {
+			meta[k] = v
+		}
+	}
+	meta["resourceVersion"] = rv
+	out["metadata"] = meta
+	return out
 }
 
 // do performs a single proxy request. The body is JSON-marshalled when

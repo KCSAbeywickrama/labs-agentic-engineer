@@ -19,6 +19,7 @@ package genai
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -42,14 +43,11 @@ var requirementsTagPattern = regexp.MustCompile(`^v(\d+)$`)
 // when no requirements tag exists. The FE never owns this context, so it is
 // pulled at the tag (not HEAD) to pin the approved version.
 func (s *service) mergeApprovedRequirements(ctx context.Context, orgID string, repo *models.GitRepository, snapshot map[string]string) (map[string]string, error) {
-	owner, name := models.OwnerRepoFromURL(repo.RepoURL)
-	if owner == "" || name == "" {
-		return nil, fmt.Errorf("cannot derive owner/repo from %q", repo.RepoURL)
-	}
-	cred, err := s.git.Resolver().Resolve(ctx, orgID)
+	rc, err := gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
-		return nil, fmt.Errorf("resolve credential: %w", err)
+		return nil, err
 	}
+	owner, name, cred := rc.Owner, rc.Name, rc.Cred
 	gh := s.git.GitData()
 
 	refs, err := gh.ListMatchingRefs(ctx, owner, name, cred, "tags/v")
@@ -58,15 +56,16 @@ func (s *service) mergeApprovedRequirements(ctx context.Context, orgID string, r
 	}
 	tagSHA, ok := latestRequirementsTag(refs)
 	if !ok {
+		slog.WarnContext(ctx, "design gate: no approved requirements tag — rejecting turn",
+			"repo", owner+"/"+name, "matchingRefs", len(refs))
 		return nil, ErrRequirementsNotApproved
 	}
+	slog.InfoContext(ctx, "design gate: pinned requirements tag",
+		"repo", owner+"/"+name, "tagSha", tagSHA)
 
 	// Peel the annotated tag object to its commit (a lightweight tag ref already
-	// points at a commit — fall back to the ref sha if the peel 404s).
-	commitSHA, perr := gh.GetTagObject(ctx, owner, name, cred, tagSHA)
-	if perr != nil {
-		commitSHA = tagSHA
-	}
+	// points at a commit — the peel helper falls back to the ref sha on a 404).
+	commitSHA := gitrepo.PeelTagToCommit(ctx, gh, owner, name, cred, tagSHA)
 	commit, err := gh.GetCommit(ctx, owner, name, cred, commitSHA)
 	if err != nil {
 		return nil, fmt.Errorf("get requirements tag commit: %w", err)

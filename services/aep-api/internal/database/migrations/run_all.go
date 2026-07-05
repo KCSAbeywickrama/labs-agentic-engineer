@@ -80,6 +80,14 @@ func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
 		ctxStep("git_repositories_composite_unique", RunGitRepoCompositeUnique),
 		dbStep("phase7_skills", RunPhase7Skills),
 		ctxStep("phase8_idp_sm_api_columns", RunPhase8IDPSMAPIColumns),
+		// Executions table (AutoMigrated from the model) gains its partial
+		// admission-mutex unique index, which AutoMigrate cannot express.
+		ctxStep("executions", RunExecutions),
+		// tasks-github-native cutover: drop component_tasks + the
+		// git_repositories.github_project_id cache column (both AutoMigrate-only,
+		// now gone). Runs LAST — after every legacy component_tasks migration and
+		// the git_repositories AutoMigrate. Idempotent (IF EXISTS).
+		dbStep("tasks_github_native", RunTasksGitHubNative),
 	}
 
 	for _, s := range steps {

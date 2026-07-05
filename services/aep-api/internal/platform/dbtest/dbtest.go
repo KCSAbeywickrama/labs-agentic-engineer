@@ -93,7 +93,7 @@ const (
 	// per process), so a stale template can never outlive a run — this only
 	// needs to be stable within a run. Bump it when database/migrations or the
 	// base-model set below changes, purely as documentation of intent.
-	schemaVersion = "1"
+	schemaVersion = "3"
 )
 
 // container holds the process-wide testcontainers Postgres, started once by
@@ -207,11 +207,11 @@ type runAllMigrator struct{}
 // database.Open before RunAll — the tables RunAll's ALTERs assume already exist.
 // Keep it in sync with main.go's database.Open(...) call.
 var baseModels = []any{
-	&models.ComponentTask{},
 	&models.ComponentConfig{},
 	&models.WebhookDelivery{},
 	&models.WebhookPayload{},
 	&models.Organization{},
+	&models.Execution{},
 }
 
 // Migrate provisions the template exactly as the app provisions a fresh DB at

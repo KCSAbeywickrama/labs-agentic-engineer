@@ -34,8 +34,8 @@ import (
 //	───────────────────────────────────────────────────────────────────────────────────────────────────
 //	public         /api/v1              Thunder user JWT + org gate                *_huma.go · humakit.OrgScopedInput
 //	               (jwt → orgensure)    (org from the verified token, never input)  → api/openapi.yaml
-//	internal S2S   /internal/v1/tasks/  BFF Task-JWT or publisher-cc               internal.go · auth.RunnerScopedInput
-//	               (per-op resolver)    (dual-token verify + INT-6 fence)           → api/internal-openapi.yaml (non-public)
+//	internal S2S   /internal/v1/executions/  BFF Task-JWT or publisher-cc          internal.go · auth.ExecutionScopedInput
+//	               (per-op resolver)         (dual-token verify + INT-6 fence)      → api/internal-openapi.yaml (non-public)
 //	external       /api/v1/webhooks,    per-route bespoke: GitHub HMAC /           webhook_routes.go · org_github_routes.go
 //	               .../github/connect    signed connect-state (org from payload)    (no generated spec; paths kept — Q4)
 //	dev/test       /_dev/v1             none — registration-gated to dev tier      dev.go · RegisterAllDev
@@ -108,17 +108,17 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 		registerConnectCallbackRoute(mux, params.OrgGitHubController)
 	}
 
-	// ── internal S2S surface (/internal/v1/tasks/) ───────────────────────────
+	// ── internal S2S surface ─────────────────────────────────────────────────
 	// Its own Huma API on its own mux, NOT wrapped by the /api/ user-JWT
 	// middleware. Each operation authenticates by construction via
-	// auth.RunnerScopedInput (BFF Task-JWT or publisher-cc) and is never
-	// gateway-advertised. Mounted at /internal/v1/tasks/ so it owns the whole
-	// runner-callback subtree (skills + credentials refresh). See
+	// auth.ExecutionScopedInput (BFF Task-JWT or publisher-cc) and is never
+	// gateway-advertised. All runner callbacks (skills, credentials refresh)
+	// are keyed to the execution id — tasks-github-native §9.2. See
 	// docs/design/internal-s2s-api.md §3.
 	internalMux := http.NewServeMux()
 	internalAPI := newInternalAPI(internalMux)
 	RegisterAllInternal(internalAPI, params.InternalDeps)
-	mux.Handle(internalV1+"/tasks/", internalMux)
+	mux.Handle(internalV1+"/executions/", internalMux)
 
 	// ── /api/ user-JWT wrapper ───────────────────────────────────────────────
 	// JIT org-onboarding sits between JWT verification and the org-aware route

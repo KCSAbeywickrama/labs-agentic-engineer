@@ -39,6 +39,9 @@ import (
 //
 // Idempotent — re-running is a no-op once the rename has taken effect.
 func RunPhase5DeployGating(db *gorm.DB) error {
+	if !tableExists(db, "component_tasks") {
+		return nil // component_tasks dropped (tasks-github-native) — nothing to migrate
+	}
 	hasOld := hasColumn(db, "component_tasks", "task_depends_on")
 	hasNew := hasColumn(db, "component_tasks", "depends_on_components")
 	switch {

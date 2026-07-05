@@ -44,18 +44,17 @@ import type { CollabConfig } from '@aep/md-editor';
 import { Explorer, type ExplorerRef, type AddFileMenuItem } from '@aep/explorer';
 import { api, ApiError } from '../services/api';
 import type { ArtifactVersion } from '../services/api';
-import { readTree, applyFiles } from '../services/api/files';
+import { readTree } from '../services/api/files';
 import { runTurn, newConversationId, turnErrorMessage } from '../services/api/turns';
 import { computeDerivedArtifacts, derivedPathsFor } from '../lib/derivedArtifacts';
 import {
-  buildApplyRequest,
   clearSpecDraft,
-  commitApplied,
   deleteDraftFile,
   getSpecDraft,
   hasDraftChanges,
   patchDraftFile,
-  rebaseToServer,
+  publishDraft,
+  PUBLISH_CONFLICT_MESSAGE,
   setDraftFiles,
   subscribeSpecDraft,
   syncBase,
@@ -64,6 +63,7 @@ import {
 import { projectArchitecturePath } from '../lib/paths';
 import { useCollabEditor } from '../hooks/useCollabEditor';
 import CollabAwarenessBar from '../components/CollabAwarenessBar';
+import { env } from '../config/env';
 import VersionSelector from '../components/VersionSelector';
 import { subscribeTurnActivity } from '../services/chatStore';
 import {
@@ -140,8 +140,10 @@ export default function ProjectRequirementsPage() {
   const [chatTurnInFlight, setChatTurnInFlight] = useState(false);
 
   const editorRef = useRef<ExplorerRef>(null);
-  const startedRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // The create-flow prompt, captured ONCE at first render: the router state is
+  // cleared (navigate-replace) as soon as the bootstrap starts, and reading it
+  // live would re-run — and therefore abort — the in-flight bootstrap effect.
+  const [initialPrompt] = useState(() => streamPrompt);
   // Serializes generation turns: they all seed from and replace the shared draft,
   // so two in flight at once (each on its own conversation id, so the server's
   // per-conversation guard never fires) would race and clobber each other.
@@ -198,7 +200,9 @@ export default function ProjectRequirementsPage() {
     const [tree, bundle, session] = await Promise.all([
       readTree(projectId, REQ_PREFIX).catch(() => ({ files: {}, shas: {} })),
       api.getRequirements(projectId),
-      api.getCollabSession(projectId),
+      // Skip the collab-session pre-flight while collab is disabled — no roomId
+      // is set, so no WebSocket is opened and the awareness bar stays hidden.
+      env.VITE_COLLAB_ENABLED ? api.getCollabSession(projectId) : Promise.resolve(undefined),
     ]);
     syncBase(key, tree);
     if (bundle) {
@@ -211,14 +215,23 @@ export default function ProjectRequirementsPage() {
   }, [key, projectId]);
 
   // -- Initial load + streaming bootstrap ----------------------------------
+  //
+  // The bootstrap effect follows the standard start-on-mount / abort-on-cleanup
+  // contract so it survives StrictMode's dev-mode mount→unmount→remount: the
+  // first (throwaway) attempt is aborted before its POST is sent and the
+  // remount starts a fresh one. A one-shot ref here previously left the page
+  // wedged on "Generating…" forever in dev — the only attempt was aborted, no
+  // retry, and no error surfaced.
   useEffect(() => {
     if (!projectId) return;
 
-    if (streamPrompt && !startedRef.current) {
-      startedRef.current = true;
+    if (initialPrompt) {
+      // Clear the router state so a refresh doesn't re-trigger a generation
+      // (the captured `initialPrompt` keeps this effect's input stable).
       navigate(location.pathname, { replace: true });
-      void bootstrapFromPrompt(streamPrompt);
-      return;
+      const controller = new AbortController();
+      void bootstrapFromPrompt(initialPrompt, controller);
+      return () => controller.abort();
     }
 
     (async () => {
@@ -226,9 +239,7 @@ export default function ProjectRequirementsPage() {
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamPrompt, projectId]);
-
-  useEffect(() => () => abortRef.current?.abort(), []);
+  }, [initialPrompt, projectId]);
 
   // Default the active file to requirements.md (or the first available).
   // Streamed liveFiles count as available: while a generate turn runs the draft
@@ -313,40 +324,65 @@ export default function ProjectRequirementsPage() {
   );
 
   const bootstrapFromPrompt = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, controller: AbortController) => {
       if (!projectId) return;
       setStreamError(null);
       setStreamingMain(true);
       setActivePath(REQUIREMENTS_MAIN_FILE);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      // Seed base (empty on a fresh project) so the draft starts clean.
-      await refreshServer();
-      const seed = getSpecDraft(key).draft;
-      const result = await runTurn(
-        projectId,
-        newConversationId(),
-        { useCase: 'requirements-generate', instruction: prompt, files: seed },
-        {
-          onText: () => {},
-          onSnapshot: (files) => {
-            setLiveFiles(files);
-            const md = files[toFull(REQUIREMENTS_MAIN_FILE)];
-            if (md !== undefined) editorRef.current?.setActiveMarkdown(md);
+      try {
+        // Seed base (empty on a fresh project) so the draft starts clean.
+        await refreshServer();
+        const seed = getSpecDraft(key).draft;
+        const result = await runTurn(
+          projectId,
+          newConversationId(),
+          { useCase: 'requirements-generate', instruction: prompt, files: seed },
+          {
+            onText: () => {},
+            onSnapshot: (files) => {
+              setLiveFiles(files);
+              const md = files[toFull(REQUIREMENTS_MAIN_FILE)];
+              if (md !== undefined) editorRef.current?.setActiveMarkdown(md);
+            },
           },
-        },
-        controller.signal,
-      );
-      setStreamingMain(false);
-      setLiveFiles(null);
-      setLoading(false);
-      if (result.ok) {
-        commitTurnResult(result.files);
-        if (result.truncated) setStreamError(TRUNCATED_MESSAGE);
-      } else setStreamError(turnErrorMessage(result));
+          controller.signal,
+        );
+        if (controller.signal.aborted) return; // superseded/unmounted — not ours to report
+        if (result.ok) {
+          commitTurnResult(result.files);
+          if (result.truncated) setStreamError(TRUNCATED_MESSAGE);
+        } else setStreamError(turnErrorMessage(result));
+      } catch (err) {
+        // An abort (unmount, StrictMode's throwaway first mount) is not an
+        // error; anything else must SURFACE — swallowing it wedges the page
+        // on the generating state with no way out.
+        if (controller.signal.aborted) return;
+        setStreamError(
+          err instanceof Error && err.message ? err.message : 'Requirements generation failed.',
+        );
+      } finally {
+        // A superseded attempt must not clobber the live attempt's UI state.
+        if (!controller.signal.aborted) {
+          setStreamingMain(false);
+          setLiveFiles(null);
+          setLoading(false);
+        }
+      }
     },
     [key, projectId, refreshServer, commitTurnResult],
   );
+
+  // Retry a failed cold-start bootstrap. `initialPrompt` is retained across the
+  // router-state clear, so the same prompt can be re-run without leaving the page.
+  const retryCtrlRef = useRef<AbortController | null>(null);
+  useEffect(() => () => retryCtrlRef.current?.abort(), []);
+  const retryBootstrap = useCallback(() => {
+    if (!initialPrompt) return;
+    retryCtrlRef.current?.abort();
+    const controller = new AbortController();
+    retryCtrlRef.current = controller;
+    void bootstrapFromPrompt(initialPrompt, controller);
+  }, [initialPrompt, bootstrapFromPrompt]);
 
   const generateFor = useCallback(
     async (filename: string, docType: DocumentType) => {
@@ -461,28 +497,22 @@ export default function ProjectRequirementsPage() {
     setPublishing(true);
     setPublishError(null);
     try {
-      if (hasDraftChanges(key)) {
-        const applied = await applyFiles(projectId, buildApplyRequest(key, 'Update requirements'));
-        if (!applied.ok) {
-          // Conflict: nothing applied. Re-base the draft onto the latest server
-          // state (keeps your edits) so a re-publish overwrites; no merge UI.
-          const tree = await readTree(projectId, REQ_PREFIX).catch(() => ({ files: {}, shas: {} }));
-          rebaseToServer(key, tree);
-          setPublishError(
-            'Your draft was based on an older version — it has been re-based onto the latest. Review and Publish again to overwrite the conflicting files.',
-          );
-          setPublishing(false);
-          return;
-        }
-        commitApplied(key, applied);
+      const outcome = await publishDraft(
+        projectId,
+        key,
+        () => readTree(projectId, REQ_PREFIX).catch(() => ({ files: {}, shas: {} })),
+        'Update requirements',
+      );
+      if (outcome.status === 'conflict') {
+        setPublishError(PUBLISH_CONFLICT_MESSAGE);
+        setPublishing(false);
+        return;
       }
       await api.saveRequirements(projectId);
+      // Clear + navigate in one synchronous block: an await between them lets
+      // the empty draft paint as "No requirements generated yet." before leaving.
       clearSpecDraft(key);
-      const existingDesign = await api.getDesign(projectId);
-      const regenerate = !!existingDesign && existingDesign.status !== 'none';
-      navigate(projectArchitecturePath(routeOrgId, projectId), {
-        state: { fromRequirements: true, regenerate },
-      });
+      navigate(projectArchitecturePath(routeOrgId, projectId));
     } catch (err) {
       setPublishError(err instanceof ApiError ? err.message : 'Failed to publish. Please try again.');
       setPublishing(false);
@@ -497,6 +527,18 @@ export default function ProjectRequirementsPage() {
       await api.discardRequirements(projectId);
       clearSpecDraft(key);
       await refreshServer();
+      // `refreshServer`'s `syncBase` only re-seeds the draft from the reverted
+      // tree when the draft is empty; if that still leaves it empty, the page
+      // renders "No requirements generated yet" even though the published
+      // content is intact server-side (a reload otherwise fixes it). Re-seed the
+      // draft explicitly from the published requirements so the reverted content
+      // shows immediately.
+      if (Object.keys(getSpecDraft(key).draft).length === 0) {
+        const bundle = await api.getRequirements(projectId);
+        if (bundle?.files && Object.keys(bundle.files).length > 0) {
+          setDraftFiles(key, bundle.files);
+        }
+      }
     } finally {
       setIsDiscarding(false);
     }
@@ -567,13 +609,28 @@ export default function ProjectRequirementsPage() {
   }
 
   if (Object.keys(explorerFiles).length === 0 && !streamingMain && !connected) {
+    // A failed cold-start bootstrap lands here (empty draft, not streaming).
+    // Surface the error inline with a Retry instead of the bare empty state, so
+    // a transient pre-flight failure isn't a dead end.
     return (
       <PageContent>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 12 }}>
-          <Typography variant="h6" color="text.secondary">No requirements generated yet.</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Go to the prompt page to generate requirements from a description.
-          </Typography>
+          {streamError && initialPrompt ? (
+            <>
+              <Typography variant="h6" color="error">Couldn't start generation.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, maxWidth: 480, textAlign: 'center' }}>
+                {streamError}
+              </Typography>
+              <Button variant="contained" onClick={retryBootstrap}>Retry</Button>
+            </>
+          ) : (
+            <>
+              <Typography variant="h6" color="text.secondary">No requirements generated yet.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Go to the prompt page to generate requirements from a description.
+              </Typography>
+            </>
+          )}
         </Box>
       </PageContent>
     );

@@ -29,11 +29,8 @@ import { fileURLToPath } from "node:url";
 // scripts/ → packages/agent-stream → packages → contracts/schemas/…
 const here = dirname(fileURLToPath(import.meta.url));
 
-export const COMPONENT_DESIGN_SCHEMA_ARTIFACT = join(
-  here,
-  "..",
-  "..",
-  "contracts",
-  "schemas",
-  "component-design.schema.json",
-);
+const schemasDir = join(here, "..", "..", "contracts", "schemas");
+
+export const COMPONENT_DESIGN_SCHEMA_ARTIFACT = join(schemasDir, "component-design.schema.json");
+export const PLAN_TASK_SCHEMA_ARTIFACT = join(schemasDir, "plan-task.schema.json");
+export const UPDATE_TASK_SCHEMA_ARTIFACT = join(schemasDir, "update-task.schema.json");

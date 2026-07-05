@@ -26,6 +26,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -51,11 +52,11 @@ type HumaDeps struct {
 	RequirementsSvc   requirements.RequirementsService
 	CollabRepo        gitrepo.RepoService
 	DesignSvc         design.DesignService
-	TaskSvc           task.TaskService
-	TaskDispatcher    task.TaskDispatcher
-	TaskProgress      task.ProgressReader
+	TaskReads         *task.Reads
+	TaskCommands      *task.Commands
+	TaskPlan          *task.PlanService
+	ExecProgress      *execution.ProgressService
 	ComponentClient   openchoreo.ComponentClient
-	BoardSvc          task.BoardService
 	IDPSvc            idp.IDPService
 	CredentialSvc     *orgcreds.CredentialService
 	DisconnectSvc     *orgcreds.OrgDisconnectService
@@ -83,8 +84,8 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	requirements.RegisterRequirements(api, d.RequirementsSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
 	design.RegisterDesign(api, d.DesignSvc)
-	task.RegisterTask(api, d.TaskSvc, d.TaskDispatcher, d.TaskProgress, d.ComponentClient)
-	task.RegisterBoard(api, d.BoardSvc)
+	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
+	execution.RegisterProgress(api, d.ExecProgress)
 	idp.RegisterIDP(api, d.IDPSvc)
 	orgcreds.RegisterOrgGitHub(api, d.CredentialSvc, d.DisconnectSvc, d.BearerSvc, d.GitHubAppSlug, d.BFFPublicURL, d.GitHubAppClientID)
 	orgcreds.RegisterOrgAnthropic(api, d.AnthropicSvc)

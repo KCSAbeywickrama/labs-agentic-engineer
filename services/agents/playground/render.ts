@@ -32,10 +32,11 @@ const dim = color("2");
 const green = color("32");
 const red = color("31");
 
-/** The path/name a tool acted on (file tools carry `path`; loadSkill carries `name`). */
+/** The path/name a tool acted on (file tools carry `path`; loadSkill carries `names`). */
 function inputLabel(input: unknown): string {
   const v = (input ?? {}) as Record<string, unknown>;
   if (typeof v.path === "string") return v.path;
+  if (Array.isArray(v.names)) return v.names.filter((n) => typeof n === "string").join(", ");
   if (typeof v.name === "string") return v.name;
   return "";
 }

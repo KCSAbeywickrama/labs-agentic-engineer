@@ -19,7 +19,7 @@
 /**
  * The M2M gate over its shared-secret (HS256) path — the path the evals and
  * playground use. The JWKS (RS256) path is the same jose call with a remote key
- * set; the legacy service covers it (`services/agents-legacy/.../jwt.test.ts`).
+ * set and is exercised only against a live IDP; it has no unit coverage here.
  */
 
 import { test } from "node:test";

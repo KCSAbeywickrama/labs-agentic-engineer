@@ -203,70 +203,70 @@ export interface BuildLogs {
   totalCount: number;
 }
 
-// -- Implementation Tasks (dispatched to agents) ------------------------------
+// -- Tasks & Executions (tasks-github-native) --------------------------------
+//
+// A Task is a GitHub issue carrying a machine block; its status is DERIVED
+// server-side (§4 of docs/design/tasks-github-native.md) from live GitHub facts
+// ⋈ the latest Execution per kind — it is never stored. An Execution is one
+// attempt of one kind (coding | build | ops), recorded in Postgres.
 
-// Phase 0 single-status lifecycle. Webhooks (and the build watcher polling
-// OC) drive transitions; see aep-service/services/task_state.go for the
-// transition table.
+/** Derived task status — computed by the BFF per §4, never persisted. */
 export type TaskStatus =
   | "pending"
-  | "on_hold"
   | "in_progress"
   | "ready_for_review"
   | "merged"
   | "building"
   | "deployed"
   | "rejected"
+  | "abandoned"
   | "failed"
-  | "abandoned";
+  | "on_hold";
 
-export interface ComponentTask {
+/** The spec/design tags a Task was planned against (its lineage snapshot). */
+export interface Lineage {
+  specTag?: string;
+  designTag?: string;
+}
+
+/**
+ * One recorded attempt of one kind. A TaskView carries the latest per kind; a
+ * TaskDetail additionally carries the full `executionHistory`.
+ */
+export interface ExecutionView {
   id: string;
-  projectId: string;
-  componentName: string;
-  order: number;
-  status: TaskStatus;
-  workspacePath: string;
-
-  // Tech-lead agent revamp — task-level data lives on the row; component
-  // shape (OpenAPI, language, appPath, etc.) is read fresh from
-  // specs/design.json on every dispatch.
-  title?: string;
-  rationale?: string;
-  body?: string;
-  taskDependsOn?: string[];
-
-  // Lineage — set at generation time, immutable thereafter.
-  batchId?: string;
-  sourceDesignVersion?: string;
-  sourceSpecVersion?: string;
-
-  // GitHub artifacts (1:1:1:1 with this task) — set at dispatch.
-  issueUrl?: string;
-  issueNumber?: number;
-  branchName?: string;
-  pullRequestNumber?: number;
-  pullRequestUrl?: string;
-
-  // State derived from webhooks.
-  mergeCommitSha?: string;
-  lastEventAt?: string;
-  lastBuildRunName?: string;
-  lastBuildSha?: string;
-  lastCodingAgentRunName?: string;
-
-  // GitHub issue labels (for Kanban board)
-  labels?: string[];
-
-  // Set when a GH issue body edit failed after retries; reconciler will retry.
-  bodySyncPending?: boolean;
-
-  // Error tracking
-  errorMessage?: string;
-
-  dispatchedAt?: string;
+  kind: string;              // coding | build | ops
+  status: string;            // queued | running | succeeded | failed | canceled
+  runName?: string;
+  reason?: string;           // queued-gating reason / error
   createdAt: string;
-  updatedAt: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+/** A Task as listed on the tasks page (GET /projects/{p}/tasks). */
+export interface TaskView {
+  issueNumber: number;
+  title: string;
+  issueUrl: string;
+  executorClass?: string;    // coding | ops
+  origin?: string;           // spec-plan | incident | manual
+  component?: string;        // set on coding tasks
+  operation?: string;        // set on ops tasks
+  dependsOn: string[];
+  rationale?: string;        // planner rationale line from the issue body
+  body?: string;             // human markdown scope (machine block stripped)
+  lineage: Lineage;
+  derivedStatus: TaskStatus;
+  hold: boolean;
+  attention: string[];       // standing flags; [] when clean
+  /** Latest Execution per kind, keyed by kind. */
+  executions: Record<string, ExecutionView>;
+}
+
+/** A Task with its full Execution history (GET /projects/{p}/tasks/{issueNumber}). */
+export interface TaskDetail extends TaskView {
+  executionHistory: ExecutionView[];
 }
 
 // -- Task progress (live execution feed) -------------------------------------
@@ -315,83 +315,6 @@ export interface TaskProgressResponse {
   phase?: string;
   truncated?: boolean;
   final: boolean;
-}
-
-export interface BuildStep {
-  name: string;
-  phase?: string;
-  message?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-export interface TaskStatusResponse {
-  task: ComponentTask;
-  buildSteps?: BuildStep[];
-}
-
-// -- Generated Tasks ----------------------------------------------------------
-// Returned by GET /tasks/generated — enriches live GitHub issues with DB state.
-
-export interface Tasks {
-  projectId: string;
-  tasks: ComponentTask[];
-  status: "approved";
-}
-
-// -- Project Board (sourced from GitHub Project Board) -----------------------
-
-export interface LabelInfo {
-  name: string;
-  color: string; // hex without #, e.g. "0075ca"
-}
-
-export type TaskLifecycleStatus =
-  | "gh_issue_waiting"
-  | "gh_issue_syncing"
-  | "gh_issue_created"
-  | "gh_issue_failed";
-
-export interface Task {
-  id: string;
-  title: string;
-  url: string;
-  description?: string;
-  assignee?: string;
-  componentTaskId?: string;
-  labels?: LabelInfo[];
-  lifecycleStatus?: TaskLifecycleStatus;
-  // Execution status (mirrors ComponentTask.status). Empty/undefined for
-  // rows with no backing ComponentTask. Drives the inline status pill +
-  // Live progress button on TaskRow.
-  status?: TaskStatus;
-  // Time the task was dispatched, ISO-8601. Undefined for never-dispatched
-  // tasks; used for the "started Xm ago" caption.
-  dispatchedAt?: string;
-  // Execution model the task expects. Always "WORKER" (coding-agent) today —
-  // those dispatch through the batch path ("Execute all → Remote Agents").
-  // "SYSTEM" is dormant: nothing produces it and nothing reads it, reserved
-  // for the future database-provisioning rewrite.
-  execType?: "SYSTEM" | "WORKER";
-  // Component name this task targets — used by the Pending Deps column to
-  // map this task back to the dep graph.
-  componentName?: string;
-  // F4 — list of component names this task is waiting to be deployed.
-  // The Pending Deps column renders "Waiting for: …" from this. Empty
-  // for unblocked tasks.
-  dependsOnComponents?: string[];
-  // Diagnostic surface for `failed` tasks. Shown so the operator can
-  // decide whether to retry.
-  errorMessage?: string;
-}
-
-export interface ProjectBoard {
-  url: string;
-  todo: Task[];
-  inProgress: Task[];
-  done: Task[];
-  onHold: Task[];
-  failed: Task[];
 }
 
 // -- Component Config (Environment Variables) ---------------------------------

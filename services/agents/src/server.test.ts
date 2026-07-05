@@ -194,7 +194,7 @@ test("400 when instruction or files is missing", async () => {
 test("accepts a skills payload; the agent can loadSkill over the route", async () => {
   const { baseUrl, close } = await boot(
     mockModel([
-      { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { name: "component-architecture" } },
+      { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { names: ["component-architecture"] } },
       { kind: "text", text: "loaded." },
     ]),
   );
@@ -233,6 +233,47 @@ test("400 when the skills payload is malformed", async () => {
       turnPost({ instruction: "x", files: SEED_FILES, skills: [{ name: "a", description: "b" }] }, { token }), // missing content
     );
     assert.equal(badItem.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("400 on an unknown toolset value", async () => {
+  const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "ok" }]));
+  try {
+    const token = await mintToken();
+    const res = await fetch(`${baseUrl}/conversations/c/turns`, turnPost({ instruction: "x", files: SEED_FILES, toolset: "nope" }, { token }));
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as { error: string }).error, /toolset/);
+  } finally {
+    await close();
+  }
+});
+
+test('toolset "task-plan" registers the task tools; a planTask streams a tool-result, no file tools', async () => {
+  const { baseUrl, close } = await boot(
+    mockModel([
+      {
+        kind: "toolCall",
+        toolCallId: "p1",
+        toolName: "planTask",
+        input: { component: "hello-api", title: "Build hello-api", dependsOn: [], rationale: "the core service." },
+      },
+      { kind: "text", text: "planned." },
+    ]),
+  );
+  try {
+    const token = await mintToken();
+    // The read-only context: the seed design (hello-api is a known component).
+    const res = await fetch(
+      `${baseUrl}/conversations/c/turns`,
+      turnPost({ instruction: "plan the tasks", files: SEED_FILES, toolset: "task-plan" }, { token }),
+    );
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.match(text, /"toolName":"planTask"/);
+    assert.match(text, /"ok":true/); // the accumulator validated it server-side
+    assert.doesNotMatch(text, /"toolName":"addFile"/); // no file tools in this set
   } finally {
     await close();
   }

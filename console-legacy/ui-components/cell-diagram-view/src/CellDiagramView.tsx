@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { lazy, memo, Suspense, useMemo } from 'react';
+import { lazy, memo, Suspense, useMemo, useRef } from 'react';
 import type { Project } from '@wso2/cell-diagram';
 import { Box, CircularProgress, Typography } from '@wso2/oxygen-ui';
 import { buildProjectModel, type CellDiagramComponent } from './buildProjectModel.js';
@@ -50,6 +50,22 @@ export const CellDiagramView = memo(function CellDiagramView({
     () => project ?? buildProjectModel(components ?? []),
     [project, components],
   );
+
+  // Debug tap: EVERY render of this component redraws the diagram — the lib's
+  // ProjectDiagram runs drawDiagram() + zoom-to-fit in a useEffect keyed on its
+  // props OBJECT (new per render). So one line here = one visible refresh.
+  // "same-model" renders are pure waste (a memo break upstream), "NEW model"
+  // renders are the data reloads that also print `[live-design] reload #N`.
+  const renders = useRef(0);
+  const prevModel = useRef<Project | null>(null);
+  renders.current += 1;
+  // eslint-disable-next-line no-console
+  console.log(
+    `[live-design] CellDiagramView render #${renders.current} (${
+      model === prevModel.current ? 'same-model — memo break upstream' : 'NEW model'
+    }, ${model.components.length} components)`,
+  );
+  prevModel.current = model;
 
   if (model.components.length === 0) {
     return (

@@ -42,16 +42,28 @@ export async function authHeaders(
   return headers;
 }
 
+/** The fields the console cares about from a non-2xx response body. */
+export interface ErrorEnvelope {
+  status: number;
+  /** Machine code from the envelope (e.g. `plan_in_progress`), when present. */
+  code?: string;
+  /** Best human-readable text; the raw body when it isn't JSON ('' when empty). */
+  message: string;
+}
+
 /**
- * Turn a non-2xx response into an `ApiError` with the most human-readable
- * message available. Mirrors `rest.ts`'s dual-envelope handling: RFC 9457
- * problem+json (Huma routes) and the legacy `{error,message}` envelope.
+ * Parse a non-2xx response body into `{status, code?, message}` with the most
+ * human-readable message available. Mirrors `rest.ts`'s dual-envelope
+ * handling: RFC 9457 problem+json (Huma routes) and the legacy
+ * `{error,message}` envelope.
  */
-export async function toApiError(res: Response): Promise<ApiError> {
+export async function parseErrorEnvelope(res: Response): Promise<ErrorEnvelope> {
   const body = await res.text().catch(() => '');
   let message = body;
+  let code: string | undefined;
   try {
     const parsed = JSON.parse(body);
+    if (typeof parsed.code === 'string') code = parsed.code;
     message = parsed.detail || parsed.message || parsed.title || parsed.error || body;
     if (Array.isArray(parsed.errors) && parsed.errors.length > 0) {
       const details = parsed.errors
@@ -65,5 +77,11 @@ export async function toApiError(res: Response): Promise<ApiError> {
   } catch {
     /* use raw body */
   }
-  return new ApiError(res.status, message);
+  return code !== undefined ? { status: res.status, code, message } : { status: res.status, message };
+}
+
+/** Turn a non-2xx response into an `ApiError` (parsed via `parseErrorEnvelope`). */
+export async function toApiError(res: Response): Promise<ApiError> {
+  const { code, message } = await parseErrorEnvelope(res);
+  return new ApiError(res.status, message, code);
 }

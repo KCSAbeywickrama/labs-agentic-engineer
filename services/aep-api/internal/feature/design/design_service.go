@@ -58,9 +58,7 @@ type DesignBundle struct {
 // (hard gate → tag at HEAD, then task reconciliation), discard (revert to last
 // tag), and version reads.
 type DesignService interface {
-	GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error)
 	GetDesignBundle(ctx context.Context, orgID, projectID string) (*DesignBundle, error)
-	GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (*models.Design, error)
 	GetDesignBundleAtTag(ctx context.Context, orgID, projectID, tag string) (*DesignBundle, error)
 	SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.Design, error)
 	DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error)
@@ -97,11 +95,23 @@ func (s *designService) SetTaskService(taskSvc taskReconciler) {
 }
 
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {
-	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	files, err := s.store.ListDesignFiles(ctx, orgID, projectID)
 	if err != nil {
 		if artifacts.IsNotFound(err) {
 			return nil, nil
 		}
+		return nil, fmt.Errorf("read design: %w", err)
+	}
+	return s.designFromFiles(ctx, orgID, projectID, files)
+}
+
+// designFromFiles assembles the models.Design view from an already-listed HEAD
+// design file map — the bundle is read from GitHub exactly once per request
+// (assembly and the has-unsaved-changes compare reuse the same map). Returns
+// (nil, nil) when no design exists yet.
+func (s *designService) designFromFiles(ctx context.Context, orgID, projectID string, files map[string]string) (*models.Design, error) {
+	designFile, err := s.store.AssembleDesignFrom(files)
+	if err != nil {
 		return nil, fmt.Errorf("read design: %w", err)
 	}
 	if designFile == nil {
@@ -136,12 +146,9 @@ func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) 
 	if tag == "" {
 		unsaved = true
 	} else if s.artifactSvc != nil {
-		current, err := s.store.ListDesignFiles(ctx, orgID, projectID)
-		if err == nil {
-			tagged, err := s.artifactSvc.GetDesignAtTag(ctx, orgID, projectID, tag)
-			if err == nil && !artifacts.DesignFilesEqual(current, tagged) {
-				unsaved = true
-			}
+		tagged, err := s.artifactSvc.GetDesignAtTag(ctx, orgID, projectID, tag)
+		if err == nil && !artifacts.DesignFilesEqual(files, tagged) {
+			unsaved = true
 		}
 	}
 
@@ -208,7 +215,7 @@ func (s *designService) GetDesignBundle(ctx context.Context, orgID, projectID st
 	if files == nil {
 		files = map[string]string{}
 	}
-	d, err := s.GetDesign(ctx, orgID, projectID)
+	d, err := s.designFromFiles(ctx, orgID, projectID, files)
 	if err != nil {
 		// If there's no design yet, return an empty bundle (not an error) so
 		// the page can render a "no design" state.
@@ -252,11 +259,18 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID str
 	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
 		if artifacts.IsNotFound(err) {
+			slog.WarnContext(ctx, "design save: design not found at HEAD (pre-gate read) — 404",
+				"project", projectID, "error", err)
 			return nil, artifacts.ErrDesignNotFound
 		}
 		return nil, fmt.Errorf("read design: %w", err)
 	}
 	if designFile == nil {
+		// Right after a files-apply that wrote the design, an empty read here is
+		// a stale HEAD caught in the act — see the adjacent "bundle read at head"
+		// DEBUG line for the commit it resolved.
+		slog.WarnContext(ctx, "design save: no design at HEAD (empty or missing design.md) — 404",
+			"project", projectID)
 		return nil, artifacts.ErrDesignNotFound
 	}
 

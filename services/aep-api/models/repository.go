@@ -50,10 +50,12 @@ type GitRepository struct {
 	// for OpenBao path keying (`secret/aep/{ocOrgId}/git/{repoSlug}`) and
 	// the OC SecretReference CR name (`git-{ocOrgId}-{repoSlug}`). Nullable;
 	// the dispatch path lazy-backfills from RepoURL.
-	RepoSlug        string    `gorm:"column:repo_slug;index" json:"repoSlug,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	GithubProjectID string    `gorm:"type:text" json:"githubProjectId,omitempty"`
+	RepoSlug  string    `gorm:"column:repo_slug;index" json:"repoSlug,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	// GitHub Projects v2 is dropped (tasks-github-native §4) — the
+	// github_project_id cache column is removed by the tasks_github_native
+	// migration and no longer modeled.
 }
 
 // repoURLPattern extracts `<owner>/<repo>` from a GitHub HTTPS URL.

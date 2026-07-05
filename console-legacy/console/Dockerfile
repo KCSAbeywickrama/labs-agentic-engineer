@@ -32,9 +32,10 @@ WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
 COPY packages ./packages
 
-RUN pnpm install --frozen-lockfile --filter @aep/agent-stream... --filter @aep/design-projection...
+RUN pnpm install --frozen-lockfile --filter @aep/agent-stream... --filter @aep/design-projection... --filter @aep/sse-cassette...
 RUN pnpm --filter @aep/agent-stream build
 RUN pnpm --filter @aep/design-projection build
+RUN pnpm --filter @aep/sse-cassette build
 
 # Stage 1: Build the React application, inside console-legacy's own pnpm
 # workspace (console + ui-components/*) — separate from the root workspace
@@ -53,6 +54,7 @@ WORKDIR /repo
 
 COPY --from=pkg-builder /repo/packages/agent-stream ./packages/agent-stream
 COPY --from=pkg-builder /repo/packages/design-projection ./packages/design-projection
+COPY --from=pkg-builder /repo/packages/sse-cassette ./packages/sse-cassette
 
 WORKDIR /repo/console-legacy
 

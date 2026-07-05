@@ -89,9 +89,6 @@ func Load() (Config, error) {
 			ClientSecret: r.readOptionalString("OBSERVER_OAUTH_CLIENT_SECRET", ""),
 			HostHeader:   r.readOptionalString("OBSERVER_OAUTH_HOST_HEADER", ""),
 		},
-		AgentsService: AgentsServiceConfig{
-			BaseURL: r.readOptionalString("AGENTS_SERVICE_BASE_URL", ""),
-		},
 		AgentsSvc: AgentsSvcConfig{
 			BaseURL:     r.readOptionalString("AGENTS_SVC_BASE_URL", ""),
 			JWTSecret:   r.readOptionalString("AGENTS_SVC_JWT_SECRET", ""),

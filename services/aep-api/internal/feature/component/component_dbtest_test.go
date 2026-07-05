@@ -32,9 +32,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
-	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -142,78 +140,4 @@ func multiComponentDesign(names ...string) map[string]string {
 		files["components/"+n+"/design.md"] = "---\ntype: service\n---\n\nbody\n"
 	}
 	return files
-}
-
-func TestTraitSyncWatcher_TupleSelection_DB(t *testing.T) {
-	t.Parallel()
-	db := dbtest.New(t)
-	ctx := context.Background()
-	taskRepo := repositories.NewTaskRepository(db)
-
-	// Seed component_tasks: the distinct set plus a duplicate and three
-	// empty-field rows the WHERE clause must exclude. component_name "Svc Mixed"
-	// exercises the k8s-name transform (→ "svc-mixed").
-	seed := func(org, proj, comp string) {
-		t.Helper()
-		if err := taskRepo.Create(ctx, &models.ComponentTask{
-			OrgID: org, ProjectID: proj, ComponentName: comp,
-			Status: string(models.TaskStatusPending),
-		}); err != nil {
-			t.Fatalf("seed task (%q/%q/%q): %v", org, proj, comp, err)
-		}
-	}
-	seed("o1", "p1", "svc-a")
-	seed("o1", "p1", "svc-a") // exact duplicate — DISTINCT must collapse it
-	seed("o1", "p1", "svc-b")
-	seed("o1", "p2", "svc-a")
-	seed("o2", "p1", "svc-a")
-	seed("o1", "p1", "Svc Mixed") // → k8s "svc-mixed"
-	seed("", "p1", "svc-a")       // empty org — excluded
-	seed("o1", "", "svc-a")       // empty project — excluded
-	seed("o1", "p1", "")          // empty component — excluded
-
-	// Record the (org, project, componentName) the reconcile fans out to. Both OC
-	// trait writes fire per reconcile, so program both to avoid the moq nil-panic.
-	type tuple struct{ org, proj, comp string }
-	seen := map[tuple]int{}
-	oc := &mocks.ComponentClientMock{
-		UpdateComponentTraitsFunc: func(_ context.Context, org, proj, comp string, _ []models.ComponentTrait) error {
-			seen[tuple{org, proj, comp}]++
-			return nil
-		},
-		UpdateComponentTraitEnvironmentConfigsFunc: func(context.Context, string, string, string, map[string]map[string]interface{}) error {
-			return nil
-		},
-	}
-	store := artifacts.NewArtifactStore(&artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return multiComponentDesign("svc-a", "svc-b", "svc-mixed"), nil
-		},
-	})
-	ts := NewTraitSyncService(oc, store)
-	w := NewTraitSyncWatcher(db, ts, nil)
-
-	w.sweep(ctx)
-
-	want := map[tuple]int{
-		{"o1", "p1", "svc-a"}:     1, // duplicate collapsed
-		{"o1", "p1", "svc-b"}:     1,
-		{"o1", "p2", "svc-a"}:     1,
-		{"o2", "p1", "svc-a"}:     1,
-		{"o1", "p1", "svc-mixed"}: 1, // k8s-normalized from "Svc Mixed"
-	}
-	if len(seen) != len(want) {
-		t.Fatalf("distinct tuple count: got %d %v, want %d %v", len(seen), seen, len(want), want)
-	}
-	for tp, n := range want {
-		if seen[tp] != n {
-			t.Fatalf("tuple %+v: reconciled %d times, want %d (full set: %v)", tp, seen[tp], n, seen)
-		}
-	}
-	// Belt-and-braces: no empty-field tuple leaked through.
-	for tp := range seen {
-		if tp.org == "" || tp.proj == "" || tp.comp == "" {
-			t.Fatalf("empty-field tuple was not excluded by the sweep: %+v", tp)
-		}
-	}
 }

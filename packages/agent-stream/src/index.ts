@@ -40,17 +40,43 @@ export type {
   Skill,
   LoadSkillInput,
   LoadSkillResult,
+  LoadedSkill,
   LoadSkillReferenceInput,
   LoadSkillReferenceResult,
   Change,
   TurnRequest,
+  Toolset,
   AgentSseEventType,
 } from "./contracts/sse-events.js";
-export { AGENT_SSE_EVENT_TYPES, SSE_DONE } from "./contracts/sse-events.js";
+export { AGENT_SSE_EVENT_TYPES, SSE_DONE, TOOLSETS, isToolset } from "./contracts/sse-events.js";
 export type { ComponentDesign, ComponentConnection } from "./contracts/component-design.js";
+
+// --- Task-plan tool contract (tasks-github-native §9.3/§10.3) ----------------
+export { PLAN_TASK, UPDATE_TASK } from "./contracts/task-tools.js";
+export type {
+  TaskOrigin,
+  TaskOp,
+  TaskToolErrCode,
+  PlanTaskInput,
+  UpdateTaskInput,
+  UpdateTaskSet,
+  TaskRef,
+  PlanTaskOk,
+  UpdateTaskOk,
+  TaskToolErr,
+  AddressableRefs,
+  PlanTaskResult,
+  UpdateTaskResult,
+  TaskContextFile,
+} from "./contracts/task-tools.js";
+export { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
+export { parseKnownComponents, parseTaskContextFile, TASK_CONTEXT_FILE_RE } from "./task-context.js";
 
 // --- The stream-part seam ----------------------------------------------------
 export type { StreamPart } from "./stream-types.js";
+
+// --- The compile-time drift-guard primitive (schema ⇄ wire-type checks) ------
+export type { Equal } from "./type-equal.js";
 
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
@@ -64,12 +90,12 @@ export {
 } from "./component-design-schema.js";
 export type { ComponentDesignProblem } from "./component-design-schema.js";
 
-// --- JSON Schema publication (BFF save-gate validates the same definition) ----
-export { componentDesignJsonSchema } from "./json-schema.js";
+// --- JSON Schema publication (the BFF validates the same definitions) --------
+export { componentDesignJsonSchema, planTaskJsonSchema, updateTaskJsonSchema } from "./json-schema.js";
 
 // --- The reference SSE reader ------------------------------------------------
 // `streamTurn` = fetch + parse (server-side callers: evals, playground).
 // `parseSseStream` = parse only, for a caller that owns its own fetch (the
 // console adds auth + a `{useCase,...}` body + pre-stream status mapping).
 export { streamTurn, parseSseStream } from "./sse-client.js";
-export type { StreamTurnOptions } from "./sse-client.js";
+export type { SseStreamEnd, StreamTurnOptions } from "./sse-client.js";

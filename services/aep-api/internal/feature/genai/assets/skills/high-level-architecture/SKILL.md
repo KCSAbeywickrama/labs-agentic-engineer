@@ -9,39 +9,30 @@ Derive the design tree from `requirements.md`. The design lives under
 `specs/design/` — never at the bundle root.
 
 ```
-specs/design/design.md                        # the top-level design (this skill)
-specs/design/components/<name>/design.json    # one per component (structured facts)
-specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
+specs/design/design.md                         # top-level summary (3–5 lines, this skill)
+specs/design/components/<name>/design.json     # one per component (structured facts — the source of truth)
 specs/design/components/<name>/wireframes.dsl  # webapps only (excalidraw-wireframes skill)
+specs/design/components/<name>/openapi.yaml    # services only (openapi-conventions skill)
 ```
+
+## Output order — emit files in EXACTLY this order
+
+The platform renders the architecture diagram live from `design.json` files
+as they stream, so they come first:
+
+1. `specs/design/design.md` — concise (3–5 lines).
+2. **Every** component's `design.json`, back to back — before any other artifact.
+3. `wireframes.dsl` per webapp.
+4. `openapi.yaml` per service, LAST.
 
 ## The top-level design.md
 
-YAML frontmatter first, then these sections. Depth rule: **every requirement
-must have a home** in a capability, entity, role, or screen below — a
-requirement you can't point to in this document is a defect, not an editing
-choice.
-
-1. **Overview** — what the system is, in one paragraph.
-2. **Components** — a bullet per component: name, `type`, one-line
-   responsibility.
-3. **Capabilities** — per component, the exhaustive feature list the
-   requirements imply, each with 1–2 sentences of responsibility. Group by
-   module when the requirements do (e.g. "Risk register", "Audit evidence").
-   This list drives the component's API resources and screens — anything
-   missing here silently disappears downstream.
-4. **Data model** — the core entities, their key fields, and relationships.
-   These become the API's `components/schemas`.
-5. **Roles & access** — the actors from the requirements and what each may
-   see/do. Drives auth design and per-role screens.
-6. **Interactions** — who calls whom and for what: component-to-component
-   plus external integrations (email, AI/LLM, object storage, ...).
-7. **Data flow** — the main lifecycles end to end (one numbered walkthrough
-   per core workflow).
-
-Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
-sections, no generic performance targets, no "future enhancements" — unless
-the requirements state them.
+YAML frontmatter, then **3–5 lines maximum**: one sentence on what the system
+is, then one line per component — `name` (`type`) — one-line responsibility.
+Nothing else: no capability lists, no data model, no roles, no boilerplate.
+The structured facts live in each component's `design.json`; API details live
+in `openapi.yaml`. Depth rule unchanged: every requirement must trace to a
+component's artifacts — cover them there, not here.
 
 After emitting or changing the design, record the skills you actually applied:
 use `setFrontmatterField` on `specs/design/design.md` with key `skillsApplied`
@@ -103,15 +94,16 @@ write against this schema and rejects violations:
     { "to": "postgres", "type": "datastore" },
     { "to": "email-gateway", "type": "connector", "onPlatform": false }
   ],
-  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do."
+  "description": "1–2 sentences: the single responsibility and what it explicitly does NOT do. No endpoint, resource, or schema detail — openapi.yaml carries that."
 }
 ```
 
-- `connections` mirrors the Interactions section of the top-level design.md:
-  every arrow there appears here as `{to, type, onPlatform}` and vice versa —
-  a mismatch is a defect. `type` is `http` (a sibling component), `datastore`,
-  or `connector` (external system → `"onPlatform": false`). This list drives
-  the platform's architecture diagram and dispatch.
+- `connections` captures every interaction the requirements imply: who calls
+  whom, datastores, and external integrations, each as `{to, type, onPlatform}`.
+  `type` is `http` (a sibling component), `datastore`, or `connector`
+  (external system → `"onPlatform": false`). This list drives the platform's
+  architecture diagram and dispatch — an interaction missing here is invisible
+  to both.
 - To CHANGE a design.json, re-emit the whole corrected file (removeFile +
   addFile) — never patch JSON with anchored edits. On INVALID_JSON or
   SCHEMA_VIOLATION, fix what the message lists and re-emit.

@@ -57,11 +57,18 @@ type Skill struct {
 // TurnRequest is the body POSTed to the turn endpoint. `Files` is the full
 // current snapshot every turn (the caller re-inlines it as CURRENT STATE);
 // FilesChangedExternally flags a user hand-edit since the last turn.
+//
+// Toolset selects the per-turn tool registration on the agents service
+// (docs/design/tasks-github-native.md §9.3): "" / "files" (default) registers
+// today's file tools — byte-identical to before — while "task-plan" registers
+// planTask/updateTask with no file tools (the plan turn). It is omitempty so a
+// files turn serializes exactly as it did before the field existed.
 type TurnRequest struct {
 	Instruction            string            `json:"instruction"`
 	Files                  map[string]string `json:"files"`
 	FilesChangedExternally bool              `json:"filesChangedExternally,omitempty"`
 	Skills                 []Skill           `json:"skills,omitempty"`
+	Toolset                string            `json:"toolset,omitempty"`
 }
 
 // UpstreamError is a non-2xx pre-stream response from the agents service. The

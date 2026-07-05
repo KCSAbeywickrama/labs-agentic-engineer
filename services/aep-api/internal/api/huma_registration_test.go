@@ -35,7 +35,10 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 
 	wantOps := []string{
 		"list-projects", "list-organizations", "list-components", "get-component-config",
-		"get-requirements", "get-collab-session", "get-design", "list-tasks", "get-board",
+		"get-requirements", "get-collab-session", "get-design-bundle",
+		// Tasks-github-native surface (§9.1): the board/dispatch/retry ops are gone.
+		"list-tasks", "get-task", "plan-tasks", "execute-task", "hold-task", "unhold-task",
+		"get-execution-progress",
 		"get-idp-profile", "get-github-status", "get-anthropic-status",
 	}
 	for _, op := range wantOps {

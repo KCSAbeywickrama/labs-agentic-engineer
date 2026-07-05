@@ -17,20 +17,35 @@
  */
 
 /**
- * Regenerate the checked-in `component-design.schema.json` artifact from the Zod
- * schema. Wired into this package's `gen` script (turbo `build` runs `gen`
- * first), so the artifact cannot silently drift from `componentDesignSchema`;
- * `test/json-schema.test.ts` fails the build if it does.
+ * Regenerate the checked-in JSON Schema artifacts from the Zod schemas. Wired
+ * into this package's `gen` script (turbo `build` runs `gen` first), so the
+ * artifacts cannot silently drift from their schemas; `test/json-schema.test.ts`
+ * fails the build if any does.
  *
  *   pnpm --filter @aep/agent-stream gen
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { componentDesignJsonSchema } from "../src/json-schema.js";
-import { COMPONENT_DESIGN_SCHEMA_ARTIFACT } from "./artifact-path.js";
+import {
+  componentDesignJsonSchema,
+  planTaskJsonSchema,
+  updateTaskJsonSchema,
+} from "../src/json-schema.js";
+import {
+  COMPONENT_DESIGN_SCHEMA_ARTIFACT,
+  PLAN_TASK_SCHEMA_ARTIFACT,
+  UPDATE_TASK_SCHEMA_ARTIFACT,
+} from "./artifact-path.js";
 
-const json = `${JSON.stringify(componentDesignJsonSchema(), null, 2)}\n`;
-mkdirSync(dirname(COMPONENT_DESIGN_SCHEMA_ARTIFACT), { recursive: true });
-writeFileSync(COMPONENT_DESIGN_SCHEMA_ARTIFACT, json, "utf8");
-process.stdout.write(`wrote ${COMPONENT_DESIGN_SCHEMA_ARTIFACT}\n`);
+const artifacts: [string, Record<string, unknown>][] = [
+  [COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema()],
+  [PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema()],
+  [UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema()],
+];
+
+for (const [path, schema] of artifacts) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(schema, null, 2)}\n`, "utf8");
+  process.stdout.write(`wrote ${path}\n`);
+}

@@ -19,6 +19,7 @@ package design
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -54,25 +55,9 @@ type designVersionsOutput struct{ Body []models.ArtifactVersion }
 // component delete, and the architect generate stream are gone — edits are
 // frontend drafts committed via the Files API, and generation is the unified
 // genai turn endpoint. What remains is the read + version surface: get the
-// assembled design / bundle at HEAD or at a tag, save (hard gate → tag at
-// HEAD), discard (revert to last tag), and list versions.
+// design bundle at HEAD or at a tag, save (hard gate → tag at HEAD), discard
+// (revert to last tag), and list versions.
 func RegisterDesign(api huma.API, svc DesignService) {
-	huma.Register(api, huma.Operation{
-		OperationID: "get-design",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/design",
-		Summary:     "Get the assembled design",
-		Tags:        []string{"Design(Deprecated)"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *designProjectInput) (*designOutput, error) {
-		design, err := svc.GetDesign(ctx, in.OrgHandle, in.ProjectName)
-		if err != nil {
-			return nil, mapDesignError(err)
-		}
-		// A missing design is a 200 with a nil body (mirrors the controller).
-		return &designOutput{Body: design}, nil
-	})
-
 	huma.Register(api, huma.Operation{
 		OperationID: "get-design-bundle",
 		Method:      http.MethodGet,
@@ -98,6 +83,8 @@ func RegisterDesign(api huma.API, svc DesignService) {
 	}, func(ctx context.Context, in *designProjectInput) (*designOutput, error) {
 		design, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName)
 		if err != nil {
+			slog.ErrorContext(ctx, "design save failed",
+				"project", in.ProjectName, "error", err)
 			if errors.Is(err, artifacts.ErrDesignNotFound) {
 				return nil, huma.Error404NotFound("design not found")
 			}

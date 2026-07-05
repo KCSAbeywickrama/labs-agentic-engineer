@@ -35,8 +35,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      agents-service:
-        condition: service_started
       agents:
         condition: service_started
     environment:
@@ -61,10 +59,9 @@ services:
       PLATFORM_API_SERVICE_HOST: "${PLATFORM_API_SERVICE_HOST:-api.openchoreo.localhost}"
 
       # ── Sister services on the aep compose network
-      AGENTS_SERVICE_BASE_URL: "http://agents-service:3400"
-      # NEW file-mutation agents service (services/agents) — requirements/design/
-      # chat generation. Plain HS256 M2M bearer; the secret must match the
-      # service's AGENT_JWT_SECRET below.
+      # File-mutation agents service (services/agents) — requirements/design/
+      # chat generation + task planning. Plain HS256 M2M bearer; the secret must
+      # match the service's AGENT_JWT_SECRET below.
       AGENTS_SVC_BASE_URL: "http://agents:4000"
       AGENTS_SVC_JWT_SECRET: "${AGENTS_M2M_SECRET:-dev-agents-m2m-secret}"
       AGENTS_SVC_JWT_AUDIENCE: "agents-service"
@@ -112,9 +109,10 @@ services:
       USER_APPS_OIDC_SCOPES: "openid profile"
 
       # ── Outbound Service JWTs — one client_credentials principal per
-      # target audience (git-service, agents-service). The remote-worker
-      # audience is gone — coding-agent runs as a ClusterWorkflow pod
-      # and authenticates back to git-service with a per-task Task JWT.
+      # target audience (git-service). The agents service is reached with a
+      # plain HS256 M2M bearer (AGENTS_SVC_* above), not a Thunder client. The
+      # remote-worker audience is gone — coding-agent runs as a ClusterWorkflow
+      # pod and authenticates back to git-service with a per-task Task JWT.
       SERVICE_AUTH_TOKEN_URL: "http://k3d-openchoreo-serverlb:8080/oauth2/token"
       SERVICE_AUTH_CLIENT_ID: "aep-api-client"
       SERVICE_AUTH_CLIENT_SECRET: "aep-api-client-secret"
@@ -143,12 +141,16 @@ services:
       GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
       GITHUB_APP_PRIVATE_KEY_PATH: "${GITHUB_APP_PRIVATE_KEY_PATH:-/etc/github-app/private-key.pem}"
-      AGENTS_SERVICE_URL: "http://agents-service:3400"
 
       # ── Phase 1 — sm-api + cluster-gateway-proxy. Compose-only stubs
       # of the cloud services; same client surface in both build configs.
       SECRET_MANAGER_API_URL: "http://secret-manager-api:8082"
       CLUSTER_GATEWAY_PROXY_URL: "http://local-cluster-gateway-proxy:8085"
+      # Empty ⇒ the loader's Docker-Hub default. Set to a k3d-imported local
+      # tag (e.g. aep-coding-agent-runner:dev — never :latest, which flips
+      # imagePullPolicy to Always and forces a registry pull) to run a
+      # locally-built runner.
+      AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-}"
       # Required for mint-build (per-org build Secret SSA into
       # workflows-<orgID>) and apply-wp-secret (per-org Anthropic Secret
       # SSA). Without it the binary degrades: builds fail at clone,
@@ -185,43 +187,12 @@ services:
       - "observer.openchoreo.localhost:host-gateway"
 
   # ---------------------------------------------------------------------------
-  # agents-service — AI BA/Architect/TaskGen/Wireframe agents (Vercel AI SDK).
-  # No ANTHROPIC_API_KEY env: the key is resolved per-call via git-service
-  # (the org's own key, or 503 when the org hasn't connected one — there is
-  # no platform fallback). See docs/design/anthropic-key-dual-token.md §6.4.
-  # ---------------------------------------------------------------------------
-  agents-service:
-    build:
-      context: ../services/agents-legacy
-    container_name: aep-agents-service
-    ports:
-      - "3400:3400"
-    environment:
-      PORT: "3400"
-      LOG_LEVEL: "debug"
-      AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-5}"
-      # Inbound identity verification — BFF-signed JWT. agents verifies against
-      # the BFF JWKS (not Thunder) and reads org from the verified ocOrgId
-      # claim; the BFF is the single issuer for S2S identity tokens.
-      JWKS_URL: "http://aep-api:9090/auth/external/jwks.json"
-      JWT_ISSUER: "aep-bff"
-      JWT_AUDIENCE: "agents-service"
-      # Resolve the per-org Anthropic key (or platform fallback) on each call.
-      # Points at the merged aep-api which serves the former
-      # /internal/credentials/orgs/{ocOrgId}/anthropic surface.
-      AEP_API_URL: "http://aep-api:9090"
-    networks:
-      - aep
-    extra_hosts:
-      - "thunder.openchoreo.localhost:host-gateway"
-
-  # ---------------------------------------------------------------------------
-  # agents — NEW file-mutation agents service (services/agents). Serves the
-  # requirements/design/chat generation turns migrated off agents-legacy. The
-  # BFF (aep-api/internal/feature/genai) is its only caller. Tenancy-blind: the
-  # acting org rides the log-only X-Org-Id header; the per-org Anthropic key
-  # arrives per-turn in X-Anthropic-Key (no boot-time key). agents-legacy stays
-  # composed for task generation. See docs/design/agents-generation-migration.md.
+  # agents — file-mutation agents service (services/agents). Serves the
+  # requirements/design/chat generation turns AND task planning. The BFF
+  # (aep-api/internal/feature/{genai,task}) is its only caller. Tenancy-blind:
+  # the acting org rides the log-only X-Org-Id header; the per-org Anthropic key
+  # arrives per-turn in X-Anthropic-Key (no boot-time key).
+  # See docs/design/agents-generation-migration.md.
   # Built from the repo root so pnpm resolves the workspace:* deps
   # (@aep/agent-stream, @aep/excalidraw-dsl, @aep/design-projection).
   # ---------------------------------------------------------------------------
@@ -239,6 +210,8 @@ services:
       PORT: "4000"
       LOG_LEVEL: "${LOG_LEVEL:-debug}"
       AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-5}"
+      # Anthropic reasoning effort per turn (low|medium|high|xhigh|max).
+      AGENT_REASONING_EFFORT: "${AGENT_REASONING_EFFORT:-medium}"
       # Shared postgres — the service owns its own `conversations` table (TTL-swept).
       DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
       # M2M inbound auth — HS256 shared secret; the BFF mints a matching bearer

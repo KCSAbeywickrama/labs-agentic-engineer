@@ -24,8 +24,22 @@ loadDotenv();
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Anthropic `effort` levels (adaptive thinking depth + output spend). */
+const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+function effortEnv(value: string | undefined, fallback: ReasoningEffort): ReasoningEffort {
+  return (REASONING_EFFORTS as readonly string[]).includes(value ?? "")
+    ? (value as ReasoningEffort)
+    : fallback;
+}
+
 export const config = {
   model: process.env.AGENT_MODEL || "claude-sonnet-5",
+  // Reasoning effort for every turn. The provider default is `high`; the spec
+  // flows favor `medium` — faster time-to-first-artifact for the same quality
+  // on well-specified generation prompts. effortEnv guards a bad override.
+  reasoningEffort: effortEnv(process.env.AGENT_REASONING_EFFORT, "medium"),
   // A fresh "write an app" generation needs 10–15 file calls; steps batch
   // parallel tool calls, so the loop budget is higher than the call count.
   // intEnv guards a non-numeric value (which would NaN out the step cap).

@@ -95,7 +95,6 @@ type Config struct {
 	PlatformIDP PlatformIDPDefaults
 
 	Observability ObservabilityConfig
-	AgentsService AgentsServiceConfig
 	AgentsSvc     AgentsSvcConfig
 	ServiceAuth   ServiceAuthConfig
 
@@ -226,18 +225,12 @@ type ServiceAuthConfig struct {
 	HostHeader   string // Thunder Host header for k3d routing
 }
 
-// AgentsServiceConfig holds connection settings for the aep-agents-service
-// (AI SDK v6-based; kept for tech-lead task generation — the requirements/
-// design/chat flows moved to AgentsSvcConfig below).
-type AgentsServiceConfig struct {
-	BaseURL string
-}
-
-// AgentsSvcConfig holds connection + M2M settings for the NEW file-mutation
-// agents service (services/agents) — the requirements/design/chat generation
-// flows. Distinct from AgentsService (the legacy AI-SDK service kept for task
-// generation). The BFF mints a per-call HS256 M2M bearer from JWTSecret with
-// aud=JWTAudience (the service's AGENT_JWT_SECRET / AGENT_JWT_AUDIENCE).
+// AgentsSvcConfig holds connection + M2M settings for the file-mutation agents
+// service (services/agents) — the requirements/design/chat generation flows AND
+// the tasks-github-native plan turns (toolset:"task-plan"). The legacy AI-SDK
+// agents service and its config are gone. The BFF mints a per-call HS256 M2M
+// bearer from JWTSecret with aud=JWTAudience (the service's AGENT_JWT_SECRET /
+// AGENT_JWT_AUDIENCE).
 type AgentsSvcConfig struct {
 	BaseURL     string
 	JWTSecret   string

@@ -14,565 +14,360 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// COMPONENT tier (bff-component-testing.md §4): the REAL task + board services
-// behind the REAL production handler chain — global middleware → faked auth at
-// the jwt.WithClaims seam → orgensure → Huma parsing/validation → the tenant
-// gate in ENFORCE → each handler's inline error mapping — driven in-process via
-// the componenttest harness. Only out-of-process seams are mocked: the task
-// repository, the coding-agent dispatch/progress ports, the GitHub board/issue
-// services, and the OpenChoreo client.
-//
-// ORG SCOPE: the active org is derived SOLELY from the token (no {orgHandle}
-// path param), so the only runtime auth assertion this tier adds is the gate's
-// no-claims 401 on an org-scoped op (proven once). The by-UUID cross-org IDOR is
-// proven at the store tier (GetByIDScoped, repositories/task_repository_dbtest_test.go)
-// and re-exercised through the real projector in task_dbtest_test.go.
-//
-// GOLDEN FIELD SETS: the harvested goldens carry a Huma `$schema` link the
-// current handler no longer emits, so field sets are compared with $schema
-// excluded from both sides.
-//
-// The internal S2S surface (task_internal_huma.go, runner-skills) is NOT driven
-// here: its RunnerScopedInput resolves via the process-global
-// auth.SetRunnerAuthorizer the harness never sets (and must not, from parallel
-// tests), so that HTTP surface is integration-owned — its service logic is unit-
-// proven in task_skills_service_test.go.
-//
-// External test package: the harness imports api, which imports task — an
-// in-package test file would be an import cycle.
+// Component tier for the tasks-github-native surface: the REAL Huma handler
+// (via componenttest, tenant gate in ENFORCE) over the new task routes, with
+// only the out-of-process edges faked (GitHub issues, executions rows, the
+// funnel dispatcher, the agents-service turn client). Proves the HTTP contract
+// end to end — derived-status shapes, the 202/409/400 status codes, the label
+// stamps, and the no-claims 401 the API-surface guard exists for.
 package task_test
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
-	"reflect"
-	"sort"
+	"io"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/api"
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
-	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
-const taskPrefix = "/api/v1/projects/web/tasks"
+const (
+	org   = "acme"
+	proj  = "widgets"
+	tasks = "/api/v1/projects/" + proj + "/tasks"
+)
 
-// --- harness + fakes ---------------------------------------------------------
+// ---- faked edges -----------------------------------------------------------
 
-type taskFakes struct {
-	repo   repositories.TaskRepository
-	disp   task.TaskDispatcher
-	prog   task.ProgressReader
-	board  gitrepo.RepoBoardService
-	issues gitrepo.IssueService
-	oc     openchoreo.ComponentClient
+type fakeIssues struct {
+	mu     sync.Mutex
+	byNum  map[int]*gitrepo.IssueInfo
+	labels map[int][]string // recorded label adds
 }
 
-// newHarness assembles the real chain around the REAL task + board services,
-// with only the supplied out-of-process seams programmed.
-func newHarness(t *testing.T, f taskFakes) *componenttest.Harness {
-	t.Helper()
-	svc := task.NewTaskService(nil, f.repo, nil, f.issues, nil, nil, nil)
-	boardSvc := task.NewBoardService(f.board, f.repo)
-	return componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{
-		TaskSvc:         svc,
-		TaskDispatcher:  f.disp,
-		TaskProgress:    f.prog,
-		ComponentClient: f.oc,
-		BoardSvc:        boardSvc,
-	}})
+func newIssues(seed ...gitrepo.IssueInfo) *fakeIssues {
+	f := &fakeIssues{byNum: map[int]*gitrepo.IssueInfo{}, labels: map[int][]string{}}
+	for i := range seed {
+		cp := seed[i]
+		f.byNum[cp.Number] = &cp
+	}
+	return f
 }
-
-func goldenPath(name string) string {
-	return filepath.Join("..", "..", "..", "testdata", "harvest", "golden", name)
+func (f *fakeIssues) CreateIssue(context.Context, string, string, gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error) {
+	return &gitrepo.IssueResult{Number: 999, URL: "u"}, nil
 }
-
-// sansSchema drops the Huma `$schema` link key so a golden's field set (which
-// still carries it) compares against the current handler's (which omits it).
-func sansSchema(keys []string) []string {
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if k != "$schema" {
-			out = append(out, k)
+func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, want []string) ([]gitrepo.IssueInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []gitrepo.IssueInfo
+	for _, i := range f.byNum {
+		if hasAll(i.Labels, want) {
+			out = append(out, *i)
 		}
 	}
-	return out
+	return out, nil
+}
+func (f *fakeIssues) CommentIssue(context.Context, string, string, int, string) error { return nil }
+func (f *fakeIssues) EditIssueBody(context.Context, string, string, int, string) error {
+	return nil
+}
+func (f *fakeIssues) EditIssueTitle(context.Context, string, string, int, string) error { return nil }
+func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, n int, labels []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.labels[n] = append(f.labels[n], labels...)
+	if i := f.byNum[n]; i != nil {
+		i.Labels = append(i.Labels, labels...)
+	}
+	return nil
+}
+func (f *fakeIssues) RemoveLabel(context.Context, string, string, int, string) error { return nil }
+func (f *fakeIssues) addedTo(n int) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.labels[n]...)
 }
 
-func readGolden(t *testing.T, name string) []byte {
+type fakeRepos struct{}
+
+func (fakeRepos) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
+	return &models.GitRepository{OrgID: org, ProjectID: proj, RepoURL: "https://github.com/acme/widgets"}, nil
+}
+
+type fakeExecs struct {
+	latest  map[int]map[string]*models.Execution
+	history map[int][]models.Execution
+}
+
+func (f fakeExecs) LatestPerKindScoped(_ context.Context, _, _ string, n int) (map[string]*models.Execution, error) {
+	if m := f.latest[n]; m != nil {
+		return m, nil
+	}
+	return map[string]*models.Execution{}, nil
+}
+func (f fakeExecs) LatestPerKindForRepoScoped(_ context.Context, _, _ string) (map[int]map[string]*models.Execution, error) {
+	if f.latest != nil {
+		return f.latest, nil
+	}
+	return map[int]map[string]*models.Execution{}, nil
+}
+func (f fakeExecs) ListByIssueScoped(_ context.Context, _, _ string, n int) ([]models.Execution, error) {
+	return f.history[n], nil
+}
+
+type fakeDispatcher struct {
+	mu      sync.Mutex
+	execute []int
+	signal  chan struct{}
+}
+
+func (f *fakeDispatcher) OnExecuteIntent(_ context.Context, _ string, n int) error {
+	f.mu.Lock()
+	f.execute = append(f.execute, n)
+	f.mu.Unlock()
+	select {
+	case f.signal <- struct{}{}:
+	default:
+	}
+	return nil
+}
+func (f *fakeDispatcher) Reevaluate(context.Context) error { return nil }
+
+// fakeVersions drives the plan approved-design gate.
+type fakeVersions struct{ design, req []artifacts.DesignVersionInfo }
+
+func (f fakeVersions) ListRequirementsVersions(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
+	return nil, nil
+}
+func (f fakeVersions) ListDesignVersions(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+	return f.design, nil
+}
+func (f fakeVersions) GetRequirementsAtTag(context.Context, string, string, string) (map[string]string, error) {
+	return nil, nil
+}
+func (f fakeVersions) GetDesignAtTag(context.Context, string, string, string) (map[string]string, error) {
+	return nil, nil
+}
+
+func hasAll(have, want []string) bool {
+	set := map[string]bool{}
+	for _, l := range have {
+		set[l] = true
+	}
+	for _, w := range want {
+		if !set[w] {
+			return false
+		}
+	}
+	return true
+}
+
+func taskIssue(number int, component, state string, extra ...string) gitrepo.IssueInfo {
+	block := taskmeta.Block{Component: component, Origin: taskmeta.OriginSpecPlan, SpecTag: "req-v1", DesignTag: "design-v1"}
+	body := taskmeta.ComposeBody(block, taskmeta.Human{Rationale: "r", Body: "## Scope"})
+	labels := append(taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginSpecPlan), extra...)
+	return gitrepo.IssueInfo{Number: number, Title: "Implement " + component, Body: body, State: state, URL: "https://github.com/acme/widgets/issues/1", Labels: labels}
+}
+
+// ---- harness ---------------------------------------------------------------
+
+type rig struct {
+	h    *componenttest.Harness
+	iss  *fakeIssues
+	disp *fakeDispatcher
+}
+
+func newRig(t *testing.T, iss *fakeIssues, execs fakeExecs, designVersions []artifacts.DesignVersionInfo) *rig {
 	t.Helper()
-	b, err := os.ReadFile(goldenPath(name))
-	if err != nil {
-		t.Fatalf("read golden %s: %v", name, err)
-	}
-	return b
-}
-
-// firstElementKeys returns element[0]'s sorted keys of a JSON array of objects.
-func firstElementKeys(t *testing.T, raw []byte) []string {
-	t.Helper()
-	var arr []map[string]any
-	if err := json.Unmarshal(raw, &arr); err != nil {
-		t.Fatalf("not a JSON array of objects: %v\n%s", err, string(raw))
-	}
-	if len(arr) == 0 {
-		t.Fatalf("expected a non-empty array: %s", string(raw))
-	}
-	return sortedKeys(arr[0])
-}
-
-// nestedElementKeys returns element[0]'s sorted keys of the array under the
-// given object field (e.g. the `tasks` array inside the generated-tasks object).
-func nestedElementKeys(t *testing.T, raw []byte, field string) []string {
-	t.Helper()
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("not a JSON object: %v\n%s", err, string(raw))
-	}
-	return firstElementKeys(t, obj[field])
-}
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// goldenShapedTask mirrors testdata/harvest/golden/get_task.json's populated
-// field set so a real handler response compares field-for-field (sans $schema).
-// The omitempty fields the golden omits (dependsOnComponents, labels,
-// buildAuthRetryCount, dispatchDeferredAt, bodySyncPending) are left zero.
-func goldenShapedTask() *models.ComponentTask {
-	now := time.Date(2026, 7, 1, 6, 31, 29, 0, time.UTC)
-	dispatched := time.Date(2026, 7, 1, 6, 13, 28, 0, time.UTC)
-	batch := "163fb872-3c61-4882-9ef7-9879c3dd0e0a"
-	cause := "build.deployed"
-	return &models.ComponentTask{
-		ID:                     "26de64b5-beb8-445d-9acf-de0811552744",
-		ProjectID:              "web",
-		OrgID:                  "acme",
-		ComponentName:          "hello-api",
-		Title:                  "Implement hello-api Go service with greeting endpoint",
-		Rationale:              "Provide a single Go service.",
-		Body:                   "## Overview\n\nBuild hello-api.",
-		BatchID:                &batch,
-		SourceDesignVersion:    "v1-1",
-		SourceSpecVersion:      "v1",
-		Order:                  1,
-		Status:                 string(models.TaskStatusDeployed),
-		ExecType:               "WORKER",
-		IssueURL:               "https://github.com/o/r/issues/1",
-		IssueNumber:            1,
-		LifecycleStatus:        string(models.TaskLifecycleGhIssueCreated),
-		BranchName:             "feature/hello-api",
-		PullRequestNumber:      2,
-		PullRequestURL:         "https://github.com/o/r/pull/2",
-		MergeCommitSHA:         "1a57ed0877582f3ddfb065cb06334632d515dbde",
-		LastEventAt:            &now,
-		LastBuildRunName:       "hello-world-api-hello-api-1782887236864",
-		LastBuildSHA:           "1a57ed0877582f3ddfb065cb06334632d515dbde",
-		LastCodingAgentRunName: "ca-26de64b5-2607010613",
-		Cause:                  &cause,
-		DispatchedAt:           &dispatched,
-		CreatedAt:              now,
-		UpdatedAt:              now,
-	}
-}
-
-// --- list-tasks ---------------------------------------------------------------
-
-func TestTaskComponent_ListTasks_MatchesGoldenElementShape(t *testing.T) {
-	t.Parallel()
-	var sawOrg, sawProject string
-	h := newHarness(t, taskFakes{repo: &compRepo{
-		ListByProjectIDFunc: func(_ context.Context, org, proj string) ([]models.ComponentTask, error) {
-			sawOrg, sawProject = org, proj
-			return []models.ComponentTask{*goldenShapedTask()}, nil
-		},
+	disp := &fakeDispatcher{signal: make(chan struct{}, 8)}
+	reads := task.NewReads(iss, fakeRepos{}, execs, nil)
+	commands := task.NewCommands(iss, fakeRepos{}, disp)
+	plan := task.NewPlanService(fakeRepos{}, nil, fakeVersions{design: designVersions}, nil,
+		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, nil, iss)
+	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{
+		TaskReads: reads, TaskCommands: commands, TaskPlan: plan,
 	}})
-
-	resp := h.AsOrg("acme").Get(taskPrefix)
-	if resp.Code != 200 {
-		t.Fatalf("list: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	got := firstElementKeys(t, resp.Body.Bytes())
-	want := firstElementKeys(t, readGolden(t, "get_tasks.json"))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("list element shape drifted from golden:\n got %v\nwant %v", got, want)
-	}
-	// The org the service saw MUST be the token org, bound by the gate from claims.
-	if sawOrg != "acme" || sawProject != "web" {
-		t.Fatalf("service scope: got (%q,%q), want (acme,web)", sawOrg, sawProject)
-	}
+	return &rig{h: h, iss: iss, disp: disp}
 }
 
-func TestTaskComponent_ListTasks_OpaqueErrorIs500(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{repo: &compRepo{
-		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
-			return nil, errors.New("pg: connection refused")
-		},
-	}})
-	resp := h.AsOrg("acme").Get(taskPrefix)
-	if resp.Code != 500 {
-		t.Fatalf("opaque error: want 500, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if strings.Contains(resp.Body.String(), "connection refused") {
-		t.Fatalf("500 body leaks internals: %s", resp.Body.String())
-	}
-}
+// ---- tests -----------------------------------------------------------------
 
-// --- get-task -----------------------------------------------------------------
-
-func TestTaskComponent_GetTask_MatchesGoldenFieldSet(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{repo: &compRepo{
-		GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) {
-			return goldenShapedTask(), nil
-		},
-	}})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/26de64b5-beb8-445d-9acf-de0811552744")
-	if resp.Code != 200 {
-		t.Fatalf("get: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	got := sansSchema(componenttest.FieldSet(t, resp.Body.String()))
-	want := sansSchema(componenttest.GoldenFieldSet(t, goldenPath("get_task.json")))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("get-task field set drifted from golden:\n got %v\nwant %v", got, want)
-	}
-}
-
-func TestTaskComponent_GetTask_NotFoundAndError(t *testing.T) {
-	t.Parallel()
-	// (nil,nil) → ErrTaskNotFound → 404 (same body for missing OR cross-org).
-	h := newHarness(t, taskFakes{repo: &compRepo{
-		GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) { return nil, nil },
-	}})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/nope")
-	if resp.Code != 404 {
-		t.Fatalf("missing task: want 404, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if p := componenttest.DecodeProblem(t, resp.Body.String()); p.Detail != "task not found" {
-		t.Fatalf("404 detail: got %q", p.Detail)
-	}
-
-	h = newHarness(t, taskFakes{repo: &compRepo{
-		GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) {
-			return nil, errors.New("boom")
-		},
-	}})
-	if resp := h.AsOrg("acme").Get(taskPrefix + "/x"); resp.Code != 500 {
-		t.Fatalf("load error: want 500, got %d body=%s", resp.Code, resp.Body.String())
-	}
-}
-
-// --- get-generated-tasks ------------------------------------------------------
-
-func TestTaskComponent_GetGeneratedTasks_MatchesGolden(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{
-		repo: &compRepo{ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
-			return []models.ComponentTask{*goldenShapedTask()}, nil
-		}},
-		// GetTasks enriches from open issues; an empty list keeps the DB shape.
-		issues: &compIssues{ListIssuesFunc: func(context.Context, string, string, []string) ([]gitrepo.IssueInfo, error) {
-			return nil, nil
-		}},
-	})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/generated")
-	if resp.Code != 200 {
-		t.Fatalf("generated: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	got := sansSchema(componenttest.FieldSet(t, resp.Body.String()))
-	want := sansSchema(componenttest.GoldenFieldSet(t, goldenPath("get_tasks_generated.json")))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("generated envelope drifted from golden:\n got %v\nwant %v", got, want)
-	}
-	gotEl := nestedElementKeys(t, resp.Body.Bytes(), "tasks")
-	wantEl := nestedElementKeys(t, readGolden(t, "get_tasks_generated.json"), "tasks")
-	if !reflect.DeepEqual(gotEl, wantEl) {
-		t.Fatalf("generated tasks[0] shape drifted from golden:\n got %v\nwant %v", gotEl, wantEl)
-	}
-}
-
-// --- get-task-status ----------------------------------------------------------
-
-func TestTaskComponent_GetTaskStatus_MatchesGoldenFieldSet(t *testing.T) {
-	t.Parallel()
-	// A deployed (non-building) task → build steps are frozen; the OC client is
-	// never called, so buildSteps is absent → the golden's {task} field set.
-	h := newHarness(t, taskFakes{repo: &compRepo{
-		GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) {
-			return goldenShapedTask(), nil
-		},
-	}})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/26de64b5/status")
-	if resp.Code != 200 {
-		t.Fatalf("status: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	got := sansSchema(componenttest.FieldSet(t, resp.Body.String()))
-	want := sansSchema(componenttest.GoldenFieldSet(t, goldenPath("get_task_status.json")))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("status field set drifted from golden:\n got %v\nwant %v", got, want)
-	}
-}
-
-func TestTaskComponent_GetTaskStatus_BuildingFetchesSteps(t *testing.T) {
-	t.Parallel()
-	var ocOrg, ocRun string
-	oc := &ocmocks.ComponentClientMock{GetWorkflowRunFunc: func(_ context.Context, org, run string) (*models.WorkflowRun, error) {
-		ocOrg, ocRun = org, run
-		return &models.WorkflowRun{Tasks: []models.WorkflowRunTask{{Name: "build-image", Phase: "Succeeded"}}}, nil
+func TestList_DerivesStatusShapes(t *testing.T) {
+	iss := newIssues(
+		taskIssue(1, "user-service", "open"),
+		taskIssue(2, "order-service", "open"),
+	)
+	execs := fakeExecs{latest: map[int]map[string]*models.Execution{
+		1: {string(taskmeta.KindCoding): row("c1", taskmeta.KindCoding, taskmeta.ExecSucceeded, "", -2), string(taskmeta.KindBuild): row("b1", taskmeta.KindBuild, taskmeta.ExecSucceeded, "", -1)},
+		2: {string(taskmeta.KindCoding): row("c2", taskmeta.KindCoding, taskmeta.ExecRunning, "", 0)},
 	}}
-	h := newHarness(t, taskFakes{
-		oc: oc,
-		repo: &compRepo{GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) {
-			return &models.ComponentTask{
-				ID: "t1", OrgID: "acme-ouid", Status: string(models.TaskStatusBuilding), LastBuildRunName: "run-1",
-			}, nil
-		}},
-	})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/t1/status")
-	if resp.Code != 200 {
-		t.Fatalf("status building: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	r := newRig(t, iss, execs, nil)
+
+	rec := r.h.AsOrg(org).Get(tasks + "?state=open")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: code %d (%s)", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "buildSteps") || !strings.Contains(resp.Body.String(), "build-image") {
-		t.Fatalf("building status must include the run's steps: %s", resp.Body.String())
+	var views []task.TaskView
+	_ = json.Unmarshal(rec.Body.Bytes(), &views)
+	byNum := map[int]task.TaskView{}
+	for _, v := range views {
+		byNum[v.IssueNumber] = v
 	}
-	// Build-run steps are fetched by the task's OrgID + LastBuildRunName.
-	if ocOrg != "acme-ouid" || ocRun != "run-1" {
-		t.Fatalf("OC GetWorkflowRun args: got (%q,%q)", ocOrg, ocRun)
+	if byNum[1].DerivedStatus != string(taskmeta.StatusDeployed) {
+		t.Errorf("task 1 = %q, want deployed", byNum[1].DerivedStatus)
+	}
+	if byNum[2].DerivedStatus != string(taskmeta.StatusInProgress) {
+		t.Errorf("task 2 = %q, want in_progress", byNum[2].DerivedStatus)
+	}
+	if byNum[1].Component != "user-service" || byNum[1].ExecutorClass != "coding" {
+		t.Errorf("task 1 shape wrong: %+v", byNum[1])
 	}
 }
 
-// --- board --------------------------------------------------------------------
+func TestGet_IncludesHistory(t *testing.T) {
+	iss := newIssues(taskIssue(5, "order-service", "open"))
+	execs := fakeExecs{
+		latest:  map[int]map[string]*models.Execution{5: {string(taskmeta.KindCoding): row("b", taskmeta.KindCoding, taskmeta.ExecSucceeded, "", 0)}},
+		history: map[int][]models.Execution{5: {*row("a", taskmeta.KindCoding, taskmeta.ExecFailed, "", -1), *row("b", taskmeta.KindCoding, taskmeta.ExecSucceeded, "", 0)}},
+	}
+	r := newRig(t, iss, execs, nil)
 
-func TestTaskComponent_Board_MatchesGoldenFieldSet(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{
-		board: &compBoard{GetBoardFunc: func(context.Context, string, string) (*gitrepo.ProjectBoardResult, error) {
-			return &gitrepo.ProjectBoardResult{
-				URL:   "https://github.com/orgs/x/projects/1",
-				Items: []gitrepo.BoardItem{{ID: "i1", URL: "https://gh/1", Status: "Done"}},
-			}, nil
-		}},
-		repo: &compRepo{ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
-			return []models.ComponentTask{{ID: "t1", IssueURL: "https://gh/1", Status: "deployed"}}, nil
-		}},
-	})
-	resp := h.AsOrg("acme").Get("/api/v1/projects/web/board")
-	if resp.Code != 200 {
-		t.Fatalf("board: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	rec := r.h.AsOrg(org).Get(tasks + "/5")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: code %d (%s)", rec.Code, rec.Body.String())
 	}
-	got := sansSchema(componenttest.FieldSet(t, resp.Body.String()))
-	want := sansSchema(componenttest.GoldenFieldSet(t, goldenPath("get_board.json")))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("board field set drifted from golden:\n got %v\nwant %v", got, want)
+	var d task.TaskDetail
+	_ = json.Unmarshal(rec.Body.Bytes(), &d)
+	if len(d.ExecutionHistory) != 2 || d.DerivedStatus != string(taskmeta.StatusReadyForReview) {
+		t.Fatalf("get shape wrong: status=%q history=%d", d.DerivedStatus, len(d.ExecutionHistory))
 	}
-	// The item routes to Done (GitHub column) and carries its backing task id.
-	var board task.ProjectBoard
-	if err := json.Unmarshal(resp.Body.Bytes(), &board); err != nil {
-		t.Fatalf("board body: %v", err)
-	}
-	if len(board.Done) != 1 || board.Done[0].ComponentTaskID != "t1" {
-		t.Fatalf("board Done column: %+v", board.Done)
+
+	if miss := r.h.AsOrg(org).Get(tasks + "/404"); miss.Code != http.StatusNotFound {
+		t.Errorf("missing task: code %d, want 404", miss.Code)
 	}
 }
 
-func TestTaskComponent_Board_OpaqueErrorIs500(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{
-		board: &compBoard{GetBoardFunc: func(context.Context, string, string) (*gitrepo.ProjectBoardResult, error) {
-			return nil, errors.New("graphql down")
-		}},
-		repo: &compRepo{},
-	})
-	if resp := h.AsOrg("acme").Get("/api/v1/projects/web/board"); resp.Code != 500 {
-		t.Fatalf("board error: want 500, got %d body=%s", resp.Code, resp.Body.String())
+func TestExecute_202StampsLabel_And409Closed(t *testing.T) {
+	iss := newIssues(taskIssue(7, "order-service", "open"), taskIssue(8, "order-service", "closed"))
+	r := newRig(t, iss, fakeExecs{}, nil)
+
+	rec := r.h.AsOrg(org).Post(tasks+"/7/execute", "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("execute open: code %d, want 202 (%s)", rec.Code, rec.Body.String())
+	}
+	if !hasAll(iss.addedTo(7), []string{taskmeta.LabelExecute}) {
+		t.Errorf("execute must stamp aep:execute, got %v", iss.addedTo(7))
+	}
+	select {
+	case <-r.disp.signal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("execute did not dispatch through the funnel")
+	}
+
+	if closed := r.h.AsOrg(org).Post(tasks+"/8/execute", ""); closed.Code != http.StatusConflict {
+		t.Errorf("execute closed: code %d, want 409", closed.Code)
 	}
 }
 
-// --- dispatch -----------------------------------------------------------------
+func TestHoldUnhold_204(t *testing.T) {
+	iss := newIssues(taskIssue(9, "order-service", "open"))
+	r := newRig(t, iss, fakeExecs{}, nil)
 
-func TestTaskComponent_Dispatch_HappyUnavailableAndError(t *testing.T) {
-	t.Parallel()
-	// Happy — dispatcher returns results.
-	h := newHarness(t, taskFakes{repo: &compRepo{}, disp: &compDispatcher{
-		DispatchTasksFunc: func(context.Context, string, string) ([]contracts.DispatchResult, error) {
-			return []contracts.DispatchResult{{TaskID: "t1", Status: "in_progress"}}, nil
-		},
-	}})
-	if resp := h.AsOrg("acme").Post(taskPrefix+"/dispatch", ""); resp.Code != 200 {
-		t.Fatalf("dispatch happy: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	if rec := r.h.AsOrg(org).Post(tasks+"/9/hold", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("hold: code %d, want 204", rec.Code)
 	}
-
-	// nil dispatcher → 503 (service not configured).
-	h = newHarness(t, taskFakes{repo: &compRepo{}})
-	if resp := h.AsOrg("acme").Post(taskPrefix+"/dispatch", ""); resp.Code != 503 {
-		t.Fatalf("dispatch nil svc: want 503, got %d body=%s", resp.Code, resp.Body.String())
+	if !hasAll(iss.addedTo(9), []string{taskmeta.LabelHold}) {
+		t.Errorf("hold must stamp aep:hold, got %v", iss.addedTo(9))
 	}
-
-	// dispatcher error → 500.
-	h = newHarness(t, taskFakes{repo: &compRepo{}, disp: &compDispatcher{
-		DispatchTasksFunc: func(context.Context, string, string) ([]contracts.DispatchResult, error) {
-			return nil, errors.New("oc unavailable")
-		},
-	}})
-	if resp := h.AsOrg("acme").Post(taskPrefix+"/dispatch", ""); resp.Code != 500 {
-		t.Fatalf("dispatch error: want 500, got %d body=%s", resp.Code, resp.Body.String())
+	if rec := r.h.AsOrg(org).Delete(tasks + "/9/hold"); rec.Code != http.StatusNoContent {
+		t.Errorf("unhold: code %d, want 204", rec.Code)
 	}
 }
 
-// --- retry --------------------------------------------------------------------
-
-func TestTaskComponent_Retry_HappyNotFoundAndUnavailable(t *testing.T) {
-	t.Parallel()
-	// Happy — the org pre-check passes then the dispatcher retries.
-	h := newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) {
-			return &models.ComponentTask{ID: "t1", OrgID: "acme"}, nil
-		}},
-		disp: &compDispatcher{RetryTaskFunc: func(context.Context, string) (contracts.DispatchResult, error) {
-			return contracts.DispatchResult{TaskID: "t1", Status: "in_progress"}, nil
-		}},
-	})
-	if resp := h.AsOrg("acme").Post(taskPrefix+"/t1/retry", ""); resp.Code != 200 {
-		t.Fatalf("retry happy: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-
-	// The org pre-check 404s a cross-org/unknown task BEFORE any dispatch work.
-	h = newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) {
-			return nil, nil
-		}},
-		disp: &compDispatcher{RetryTaskFunc: func(context.Context, string) (contracts.DispatchResult, error) {
-			t.Error("RetryTask must not run when the org pre-check fails")
-			return contracts.DispatchResult{}, nil
-		}},
-	})
-	if resp := h.AsOrg("acme").Post(taskPrefix+"/ghost/retry", ""); resp.Code != 404 {
-		t.Fatalf("retry cross-org/unknown: want 404, got %d body=%s", resp.Code, resp.Body.String())
-	}
-
-	// nil dispatcher → 503 (checked before the pre-check).
-	h = newHarness(t, taskFakes{repo: &compRepo{}})
-	if resp := h.AsOrg("acme").Post(taskPrefix+"/t1/retry", ""); resp.Code != 503 {
-		t.Fatalf("retry nil svc: want 503, got %d body=%s", resp.Code, resp.Body.String())
+func TestPlan_NoApprovedDesign_400(t *testing.T) {
+	r := newRig(t, newIssues(), fakeExecs{}, nil) // empty design versions
+	rec := r.h.AsOrg(org).Post(tasks+"/plan", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("plan without approved design: code %d, want 400 (%s)", rec.Code, rec.Body.String())
 	}
 }
 
-// --- progress -----------------------------------------------------------------
+func TestPlan_InProgress_409(t *testing.T) {
+	// The one-active-plan-turn invariant (§6): while a plan turn holds the
+	// per-project in-flight lock (blocked in the upstream Turn), a second
+	// StartPlan for the same project must be rejected with ErrPlanInProgress
+	// (which the HTTP layer maps to 409 {code:"plan_in_progress"}).
+	iss := newIssues()
+	bt := &blockingTurn{started: make(chan struct{}), release: make(chan struct{})}
+	plan := task.NewPlanService(fakeRepos{}, fakeDesign{},
+		fakeVersions{design: []artifacts.DesignVersionInfo{{Tag: "v1-1"}}}, nil,
+		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, bt, iss)
 
-func okTask(context.Context, string, string) (*models.ComponentTask, error) {
-	return &models.ComponentTask{ID: "t1", OrgID: "acme"}, nil
+	go func() { _, _ = plan.StartPlan(context.Background(), org, proj) }()
+	<-bt.started // the first turn now holds the in-flight lock
+
+	if _, err := plan.StartPlan(context.Background(), org, proj); !errors.Is(err, task.ErrPlanInProgress) {
+		t.Fatalf("second concurrent plan: err = %v, want ErrPlanInProgress", err)
+	}
+	close(bt.release)
 }
 
-func TestTaskComponent_AgentProgress_MatchesGoldenAndErrorMapping(t *testing.T) {
-	t.Parallel()
-	// Happy — plain JSON read maps to the golden field set (sans $schema).
-	h := newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: okTask},
-		prog: &compProgress{GetAgentProgressFunc: func(context.Context, string, int64, int) (*contracts.ProgressResponse, error) {
-			return &contracts.ProgressResponse{SchemaVersion: 1, Lines: []contracts.ProgressEvent{{SchemaVersion: 1, Kind: "log", Summary: "hi"}}, CursorMillis: 42}, nil
-		}},
-	})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/t1/progress/agent")
-	if resp.Code != 200 {
-		t.Fatalf("agent progress: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	got := sansSchema(componenttest.FieldSet(t, resp.Body.String()))
-	want := sansSchema(componenttest.GoldenFieldSet(t, goldenPath("get_task_progress_agent.json")))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("agent progress field set drifted from golden:\n got %v\nwant %v", got, want)
-	}
+type fakeDesign struct{}
 
-	// nil progress svc → 503.
-	h = newHarness(t, taskFakes{repo: &compRepo{GetByIDScopedFunc: okTask}})
-	if resp := h.AsOrg("acme").Get(taskPrefix + "/t1/progress/agent"); resp.Code != 503 {
-		t.Fatalf("nil progress: want 503, got %d body=%s", resp.Code, resp.Body.String())
-	}
+func (fakeDesign) ReadDesign(context.Context, string, string) (*artifacts.DesignFile, error) {
+	return &artifacts.DesignFile{}, nil
+}
+func (fakeDesign) ListRequirements(context.Context, string, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (fakeDesign) ListDesignFiles(context.Context, string, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
 
-	// Observer down (ErrProgressUnavailable) → 503 via mapProgressError.
-	h = newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: okTask},
-		prog: &compProgress{GetAgentProgressFunc: func(context.Context, string, int64, int) (*contracts.ProgressResponse, error) {
-			return nil, contracts.ErrProgressUnavailable
-		}},
-	})
-	if resp := h.AsOrg("acme").Get(taskPrefix + "/t1/progress/agent"); resp.Code != 503 {
-		t.Fatalf("observer down: want 503, got %d body=%s", resp.Code, resp.Body.String())
-	}
+// blockingTurn holds the in-flight lock by blocking inside Turn until released.
+type blockingTurn struct {
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
 
-	// Opaque progress error → 500 via mapProgressError.
-	h = newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: okTask},
-		prog: &compProgress{GetAgentProgressFunc: func(context.Context, string, int64, int) (*contracts.ProgressResponse, error) {
-			return nil, errors.New("boom")
-		}},
-	})
-	if resp := h.AsOrg("acme").Get(taskPrefix + "/t1/progress/agent"); resp.Code != 500 {
-		t.Fatalf("opaque progress error: want 500, got %d body=%s", resp.Code, resp.Body.String())
-	}
+func (b *blockingTurn) Turn(_ context.Context, _, _, _ string, _ agentsvc.TurnRequest) (io.ReadCloser, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return io.NopCloser(strings.NewReader("data: [DONE]\n\n")), nil
+}
 
-	// Cross-org/unknown task → the pre-check 404s before reading progress.
-	h = newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: func(context.Context, string, string) (*models.ComponentTask, error) { return nil, nil }},
-		prog: &compProgress{GetAgentProgressFunc: func(context.Context, string, int64, int) (*contracts.ProgressResponse, error) {
-			t.Error("progress must not be read for a cross-org/unknown task")
-			return nil, nil
-		}},
-	})
-	if resp := h.AsOrg("acme").Get(taskPrefix + "/ghost/progress/agent"); resp.Code != 404 {
-		t.Fatalf("progress pre-check: want 404, got %d body=%s", resp.Code, resp.Body.String())
+func TestTasks_NoAuth_401(t *testing.T) {
+	r := newRig(t, newIssues(), fakeExecs{}, nil)
+	if rec := r.h.NoAuth().Get(tasks); rec.Code != http.StatusUnauthorized {
+		t.Errorf("no-auth list: code %d, want 401", rec.Code)
 	}
 }
 
-func TestTaskComponent_BuildProgress_MatchesGolden(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{
-		repo: &compRepo{GetByIDScopedFunc: okTask},
-		prog: &compProgress{GetBuildProgressFunc: func(context.Context, string, int64) (*contracts.ProgressResponse, error) {
-			return &contracts.ProgressResponse{SchemaVersion: 1, Lines: []contracts.ProgressEvent{{SchemaVersion: 1, Kind: "build_step", Step: "build-image"}}, CursorMillis: 7, Final: true}, nil
-		}},
-	})
-	resp := h.AsOrg("acme").Get(taskPrefix + "/t1/progress/build")
-	if resp.Code != 200 {
-		t.Fatalf("build progress: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	got := sansSchema(componenttest.FieldSet(t, resp.Body.String()))
-	want := sansSchema(componenttest.GoldenFieldSet(t, goldenPath("get_task_progress_build.json")))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("build progress field set drifted from golden:\n got %v\nwant %v", got, want)
+// row builds a seeded execution with a creation-time offset (hours).
+func row(id string, kind taskmeta.ExecutionKind, status taskmeta.ExecutionStatus, reason string, hours int) *models.Execution {
+	return &models.Execution{
+		ID: id, Kind: string(kind), Status: string(status), Reason: reason,
+		CreatedAt: time.Now().Add(time.Duration(hours) * time.Hour),
 	}
 }
 
-// --- auth ---------------------------------------------------------------------
-
-func TestTaskComponent_NoClaimsDeniedByEnforceGate(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, taskFakes{repo: &compRepo{}})
-	resp := h.NoAuth().Get(taskPrefix)
-	if resp.Code != 401 {
-		t.Fatalf("no-claims: want the gate's ENFORCE 401, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	// The gate aggregates its resolver error into one RFC-9457 problem carrying
-	// "authentication required" — NOT the JWT middleware's pre-gate rejection
-	// (that path is integration-owned, see §3).
-	p := componenttest.DecodeProblem(t, resp.Body.String())
-	if p.Status != 401 || len(p.Errors) == 0 || !strings.Contains(p.Errors[0].Message, "authentication required") {
-		t.Fatalf("gate 401 problem shape: got %s", resp.Body.String())
-	}
-}
+// Ensure the execution package's progress service compiles into this test's
+// import set (the progress route is covered by execution's own tests + the
+// GetByIDScoped org fence; the internal S2S surface is not mounted by the
+// componenttest harness, so the skills route's cross-tenant fence is asserted
+// directly in the execution package).
+var _ = execution.NewProgressService

@@ -36,6 +36,7 @@
  * load, never persisted.
  */
 
+import { applyFiles } from './api/files';
 import type { ApplyOk, ApplyRequest } from './api/files';
 
 export type SpecKind = 'requirements' | 'design';
@@ -289,4 +290,49 @@ export function clearSpecDraft(key: SpecDraftKey): void {
   const s = storage();
   if (s) s.removeItem(storageKey(key));
   set(key, emptyState(), false);
+}
+
+/** The one banner both publish flows show after a CAS conflict re-base. */
+export const PUBLISH_CONFLICT_MESSAGE =
+  'Your draft was based on an older version — it has been re-based onto the latest. Review and Publish again to overwrite the conflicting files.';
+
+export type PublishDraftOutcome =
+  /** Nothing to apply — the draft already matched the committed base. */
+  | { status: 'clean' }
+  /** The apply landed; the session base advanced (`commitApplied`). */
+  | { status: 'applied' }
+  /**
+   * 409 — a stale `baseSha`; NOTHING was applied. The draft was re-based onto
+   * the latest server read (best effort — a failed re-read keeps the draft
+   * as-is), so a re-publish overwrites. Caller shows `PUBLISH_CONFLICT_MESSAGE`.
+   */
+  | { status: 'conflict' };
+
+/**
+ * Publish the draft delta: apply → on conflict re-read + re-base → on success
+ * fold the apply back into the session. The shared core of both spec pages'
+ * Publish flows; page-specific bits (editor flush, derived-artifact recompute,
+ * the tag call, navigation) stay with the pages. Non-409 apply failures
+ * (400 path/size, 404 project, 5xx) throw `ApiError` — the caller's concern.
+ */
+export async function publishDraft(
+  projectName: string,
+  key: SpecDraftKey,
+  readServer: () => Promise<{ files: Record<string, string>; shas: Record<string, string> }>,
+  message?: string,
+): Promise<PublishDraftOutcome> {
+  if (!hasDraftChanges(key)) return { status: 'clean' };
+  const result = await applyFiles(projectName, buildApplyRequest(key, message));
+  if (!result.ok) {
+    // Conflict: nothing applied. Re-base the draft onto the latest server
+    // state (keeps the user's edits) so a re-publish overwrites; no merge UI.
+    try {
+      rebaseToServer(key, await readServer());
+    } catch {
+      /* leave the draft as-is; the caller's banner tells the user */
+    }
+    return { status: 'conflict' };
+  }
+  commitApplied(key, result);
+  return { status: 'applied' };
 }

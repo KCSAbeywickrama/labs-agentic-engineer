@@ -53,10 +53,19 @@ const mod = "github.com/wso2/aep/aep-api"
 // decision: extend this list in the same PR and say why, or (usually better)
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
-	"artifacts":     {"gitrepo"},
-	"codingagent":   {"artifacts", "component", "gitrepo", "orgcreds"},
-	"component":     {"artifacts", "gitrepo"},
-	"design":        {"artifacts"},
+	"artifacts": {"gitrepo"},
+	// codingagent is the funnel's one registered executor: it implements the
+	// execution.Executor port (hence the execution edge) and reaches every other
+	// service — identities, anthropic, repos, OC — through consumer ports wired
+	// at the composition root, so it holds no other feature edge.
+	"codingagent": {"execution"},
+	"component":   {"artifacts", "gitrepo"},
+	"design":      {"artifacts"},
+	// execution is the platform-owned half of the Task/Execution split: it reads
+	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
+	// (artifacts). It NEVER imports feature/task — the §1 split is a package
+	// boundary (enforced by the absence of "task" here and below).
+	"execution":     {"artifacts", "gitrepo"},
 	"files":         {"gitrepo"},
 	"genai":         {"gitrepo"},
 	"gitrepo":       {},
@@ -67,8 +76,10 @@ var featureEdgeAllowlist = map[string][]string{
 	"requirements":  {"artifacts"},
 	"runtimeconfig": {"artifacts"},
 	"skills":        {"artifacts", "gitrepo"},
-	"task":          {"artifacts", "gitrepo"},
-	"webhook":       {"gitrepo", "orgcreds"},
+	// task is the GitHub-facing half: it never imports feature/execution (the §1
+	// split) — the funnel is reached through the task.Dispatcher consumer port.
+	"task":    {"artifacts", "gitrepo"},
+	"webhook": {"gitrepo", "orgcreds"},
 }
 
 // depCache memoizes each package's transitive import set so the boundary
@@ -220,6 +231,25 @@ func TestFeatureEdgeAllowlist(t *testing.T) {
 	}
 }
 
+// TestTaskExecutionSplit asserts the §1 Task/Execution split is a package
+// boundary (docs/design/tasks-github-native.md §10): feature/task (the
+// GitHub-facing half) and feature/execution (the platform-owned half) never
+// import each other — they communicate only through the pure taskmeta encoding
+// and the executions rows (the shared kernel). task reaches the funnel through
+// the task.Dispatcher consumer port; execution never needs task at all. This
+// is subsumed by TestFeatureEdgeAllowlist but stated explicitly because the
+// split is the design's load-bearing invariant.
+func TestTaskExecutionSplit(t *testing.T) {
+	const task = mod + "/internal/feature/task"
+	const execution = mod + "/internal/feature/execution"
+	if imports(t, task, execution) {
+		t.Error("feature/task imports feature/execution — the Task/Execution split is a package boundary; reach the funnel through the task.Dispatcher port")
+	}
+	if imports(t, execution, task) {
+		t.Error("feature/execution imports feature/task — the Task/Execution split is a package boundary")
+	}
+}
+
 // TestPlatformAndContractsAreFeatureFree asserts every internal/platform/*
 // package and internal/contracts imports no feature (and none of the flat
 // layers). componenttest is the one deliberate exception: it assembles the
@@ -254,6 +284,41 @@ func TestContractsIsLeaf(t *testing.T) {
 		}
 		if d != mod+"/internal/contracts" {
 			t.Errorf("contracts imports %s — contracts must import nothing module-internal", d)
+		}
+	}
+}
+
+// TestTaskmetaIsPure asserts internal/contracts/taskmeta is a pure domain leaf
+// (docs/design/tasks-github-native.md §10): the machine-block codec, label
+// vocabulary, and derived-status algebra that both halves of the Task/Execution
+// split import. Modeled on TestContractsIsLeaf but for the subpackage:
+//
+//   - it imports NOTHING module-internal (features import taskmeta, never the
+//     reverse — the encoding is shared truth, re-implemented nowhere);
+//   - no ORM or network stack anywhere in its transitive closure (gorm / net/http);
+//   - no direct filesystem/process import (os).
+//
+// The os / gorm / net-http bans are meaningful here because taskmeta performs
+// no IO. os is checked at the DIRECT-import granularity, not transitively: fmt
+// and crypto/sha256 both pull os into any package's closure, so a transitive os
+// ban is impossible — the intent is "taskmeta never touches the filesystem
+// itself", which a direct-import check captures exactly.
+func TestTaskmetaIsPure(t *testing.T) {
+	const pkg = mod + "/internal/contracts/taskmeta"
+	for d := range deps(t, pkg) {
+		if strings.HasPrefix(d, mod) && d != pkg {
+			t.Errorf("taskmeta imports module-internal %s — it must stay a pure domain leaf (features import it, never the reverse)", d)
+		}
+		if strings.Contains(d, "gorm.io/") {
+			t.Errorf("taskmeta pulls in %s — the machine-block/label/derive domain must not depend on gorm", d)
+		}
+		if d == "net/http" {
+			t.Errorf("taskmeta pulls in net/http — the domain layer performs no IO")
+		}
+	}
+	for _, imp := range directImports(t, pkg) {
+		if imp == "os" {
+			t.Errorf("taskmeta directly imports os — the domain layer touches no filesystem")
 		}
 	}
 }

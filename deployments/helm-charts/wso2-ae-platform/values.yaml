@@ -125,12 +125,14 @@ aepApi:
     clientId: "aep-api-client"
     clientSecret: "aep-api-client-secret"
     tokenURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
-  # JWT for BFF → agents-service calls
-  agentsJwt:
-    clientId: "aep-bff-to-agents-service"
-    clientSecret: "aep-bff-to-agents-service-secret"
   smApiURL: ""
   clusterGatewayProxyURL: ""
+  # ESO ClusterSecretStore the proxy-dispatched coding-agent + build runners read
+  # their per-run ExternalSecrets from. Empty → the BFF default ("default",
+  # correct for local k3d). On a real dataplane this MUST be the DP's app-secrets
+  # store (e.g. "application-secrets-read") or the ExternalSecrets silently
+  # resolve nothing and private-repo clones / agent creds never materialise.
+  agentClusterSecretStore: ""
   resources:
     requests:
       cpu: "100m"
@@ -139,19 +141,34 @@ aepApi:
       cpu: "1"
       memory: "512Mi"
 
-# ── agents-service ────────────────────────────────────────────────────────────
-agentsService:
+# ── agents (file-mutation agents service — services/agents) ───────────────────
+# Requirements/design/chat generation + task planning. Tenancy-blind; the per-org
+# Anthropic key arrives per-turn (no boot-time key). Owns its own `conversations`
+# table in the shared postgres (TTL-swept).
+agents:
   image:
-    repository: ghcr.io/wso2/agents-service
+    repository: ghcr.io/wso2/aep-agents
     tag: 0.0.0-dev
     pullPolicy: Always
-  port: 3400
+  port: 4000
   logLevel: info
   model: "claude-sonnet-5"
-  jwt:
-    # Audience the BFF stamps on outbound agents identity tokens and agents
-    # verifies (matches IssueServiceToken). Was the Thunder M2M client id.
-    audience: "agents-service"
+  # Per-step output-token ceiling (services/agents shared/config.ts).
+  maxOutputTokens: 64000
+  # SSE keep-alive cadence (ms) so long generations survive an idle-timeout ingress.
+  keepAliveMs: 15000
+  conversations:
+    # TTL sweep on the `conversations` table (ms). Default 7 days.
+    ttlMs: 604800000
+    # Sweep interval (ms). Default 1 hour.
+    sweepMs: 3600000
+  # BFF→agents M2M shared secret (HS256). The BFF signs outbound bearers with
+  # this same value (aep-api env AGENTS_SVC_JWT_SECRET) and agents verifies it
+  # (AGENT_JWT_SECRET). WARNING: override for production.
+  m2mSecret: "dev-agents-m2m-secret"
+  # Must match the BFF's AGENTS_SVC_JWT_AUDIENCE / AGENTS_SVC_JWT_ISSUER.
+  jwtAudience: "agents-service"
+  jwtIssuer: "aep-bff"
   resources:
     requests:
       cpu: "100m"

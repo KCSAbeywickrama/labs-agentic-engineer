@@ -129,7 +129,7 @@ test("skills: loadSkill is registered, executes server-side, and its body reache
   const { events, onEvent } = collector();
 
   const model = mockModel([
-    { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { name: "component-architecture" } },
+    { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { names: ["component-architecture"] } },
     {
       kind: "toolCall",
       toolCallId: "c1",
@@ -160,6 +160,36 @@ test("skills: loadSkill is registered, executes server-side, and its body reache
   // The loaded body persists as a tool result in history (continuity across turns).
   const stored = await store.get("skilled");
   assert.match(JSON.stringify(stored!.messages), /specs\/design\/components/);
+});
+
+test("toolset task-plan runs planTask over the read-only snapshot (no file mutation)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  // hello-api is a known component in SEED_FILES; the accumulator validates it.
+  const model = mockModel([
+    { kind: "toolCall", toolCallId: "p1", toolName: "planTask", input: { component: "hello-api", title: "Build hello-api", dependsOn: [], rationale: "core." } },
+    { kind: "text", text: "planned" },
+  ]);
+
+  const conv = await runConversationTurn({
+    id: "plan1",
+    instruction: "plan the tasks",
+    files: SEED_FILES,
+    toolset: "task-plan",
+    model,
+    store,
+    guard,
+    onEvent,
+  });
+
+  assert.equal(conv.status, "done");
+  const planned = events.find((e) => e.type === "tool-result" && e.toolName === "planTask");
+  assert.ok(planned, "planTask executed server-side and streamed a result");
+  assert.match(JSON.stringify(planned.output), /"ok":true/);
+  // No file mutation tool ever ran.
+  assert.equal(events.some((e) => e.toolName === "addFile" || e.toolName === "editFile"), false);
 });
 
 test("a concurrent turn for the same id rejects with ConcurrentTurnError (409 source)", async () => {

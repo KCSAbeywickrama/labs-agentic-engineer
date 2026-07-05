@@ -24,6 +24,20 @@ the end of the system prompt, and the agent pulls a body on demand via the
 repo-root `skills/`); no skills in the payload → no catalog, behaves as today. See
 ADR-0002.
 
+**Tool sets** (`TurnRequest.toolset`, tasks-github-native §9.3): the turn selects
+which domain tools the generic loop registers. `files` (default, and identical to
+an absent value) is the file-mutation set (`src/agents/main/tools/files.ts`) over a
+`FileBundle` — nothing changes for the generation flows. `task-plan`
+(`tools/task-plan.ts`) registers `planTask`/`updateTask` over a per-turn `TaskPlan`
+accumulator (`task-plan-accumulator.ts`) and NO file tools; `files` then carries
+READ-ONLY context (the spec/design bundle + one `tasks/<issueNumber>.md` rendering
+per existing open Task) and nothing mutates it. Selection lives in
+`run-conversation-turn.ts` (the loop stays generic); the shared skill loaders
+(`tools/skill-tools.ts`) attach to either set. `execute()` validates + accumulates
+only — the service never touches GitHub; the BFF plan tap performs the issue writes
+off the stream. The plan tool contract (inputs, results, error codes, the
+`tasks/<n>.md` convention) and the published JSON Schemas live in `@aep/agent-stream`.
+
 ## Run
 
 - `pnpm --filter @aep/agents dev` — SSE server, watch/reload. `start` — run once.

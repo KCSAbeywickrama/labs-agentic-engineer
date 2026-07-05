@@ -93,6 +93,93 @@ func TestSaveRequirements_GateMissingMain(t *testing.T) {
 	}
 }
 
+// ----- Save at a caller-provided commit (the publish flow's apply→save) -----
+//
+// A publish is `files/apply` (commit to main) followed by save (tag). Re-reading
+// `heads/main` between the two loses to GitHub's read-after-write lag — the ref
+// read can return the pre-apply commit seconds after the apply succeeded (seen
+// live 2026-07-05: apply c6659d08 at 14:29:59, save's ref read a882aba2 at
+// 14:30:00). The contract: when the caller names the commit it just applied,
+// the save gates AND tags at that exact commit — HEAD is never consulted.
+
+func TestSaveRequirements_AtProvidedCommit_TagsThatCommit(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "published body\n"})
+	applied := r.headSHA()
+	// main moves on after the apply (another writer, or a stale ref would
+	// resolve elsewhere) — the save must still pin the caller's commit.
+	r.seed(map[string]string{"specs/requirements/requirements.md": "newer draft\n"}, "later edit")
+
+	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: applied})
+	if err != nil {
+		t.Fatalf("SaveRequirements: %v", err)
+	}
+	if res.Status != "approved" || res.Tag != "v1" {
+		t.Fatalf("result = %+v, want approved/v1", res)
+	}
+	if res.CommitHash != applied {
+		t.Errorf("tag points at %s, want the provided commit %s (not HEAD %s)",
+			res.CommitHash, applied, r.headSHA())
+	}
+}
+
+func TestSaveRequirements_AtProvidedCommit_GateReadsThatCommit(t *testing.T) {
+	t.Parallel()
+	// The provided commit has NO requirements.md; HEAD does. The gate must fail —
+	// proving both gate and tag operate on the provided commit, not on any ref
+	// read that could race.
+	r := newRig(t, map[string]string{"specs/requirements/functional.md": "no main doc\n"})
+	early := r.headSHA()
+	r.seed(map[string]string{"specs/requirements/requirements.md": "arrived later\n"}, "add main doc")
+
+	_, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: early})
+	if !errors.Is(err, ErrArtifactPathInvalid) {
+		t.Fatalf("err = %v, want ErrArtifactPathInvalid (gate at the provided commit)", err)
+	}
+	if got := r.tags(); len(got) != 0 {
+		t.Errorf("tags = %v, want none", got)
+	}
+}
+
+func TestSaveRequirements_InvalidCommitSHA(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	_, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{CommitSHA: "not-a-sha!"})
+	if !errors.Is(err, ErrArtifactPathInvalid) {
+		t.Fatalf("err = %v, want ErrArtifactPathInvalid (malformed commit sha)", err)
+	}
+	if got := r.tags(); len(got) != 0 {
+		t.Errorf("tags = %v, want none", got)
+	}
+}
+
+func TestSaveDesign_AtProvidedCommit_TagsThatCommit(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "spec\n"})
+	ctx := context.Background()
+	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save requirements: %v", err)
+	}
+	applied := r.seed(map[string]string{
+		"specs/design/design.md":                  "# System\n",
+		"specs/design/components/svc/design.md":   "---\ntype: service\n---\n# svc\n",
+		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"),
+	}, "apply design")
+	// main moves on; the save must pin the applied commit regardless.
+	r.seed(map[string]string{"specs/requirements/notes.md": "unrelated\n"}, "later edit")
+
+	res, err := r.svc.SaveDesign(ctx, r.org, r.proj, SaveRequest{CommitSHA: applied})
+	if err != nil {
+		t.Fatalf("SaveDesign: %v", err)
+	}
+	if res.Status != "approved" || res.Tag != "v1-1" {
+		t.Fatalf("result = %+v, want approved/v1-1", res)
+	}
+	if res.CommitHash != applied {
+		t.Errorf("tag points at %s, want the provided commit %s", res.CommitHash, applied)
+	}
+}
+
 func TestSaveRequirements_TagCollision_RecomputesToNextName(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})

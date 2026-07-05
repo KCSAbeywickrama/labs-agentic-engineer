@@ -115,6 +115,13 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	if err != nil {
 		return nil, err
 	}
+	return s.AssembleDesignFrom(files)
+}
+
+// AssembleDesignFrom assembles the flat DesignFile from an already-listed
+// design file map — the single-read path for callers that also need the raw
+// map (no second HEAD walk). Returns (nil, nil) when no design root exists.
+func (s *ArtifactStore) AssembleDesignFrom(files map[string]string) (*DesignFile, error) {
 	if len(files) == 0 || strings.TrimSpace(files[DesignRootFile]) == "" {
 		return nil, nil
 	}

@@ -34,23 +34,24 @@ import {
   CellDiagramView,
   type CellDiagramViewProps,
 } from '@aep/cell-diagram-view';
+import { COMPONENT_DESIGN_JSON_RE } from '@aep/agent-stream';
 import { buildProjectDesign, toCellDiagramProject } from '@aep/design-projection';
+import { createLiveDesignState, projectLiveDesign } from '../lib/liveDesignOverlay';
 import { MdEditor } from '@aep/md-editor';
 import { OpenApiView } from '@aep/openapi-view';
 import { api } from '../services/api';
 import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
 import { newConversationId, runTurn } from '../services/api/turns';
 import type { TurnFailure } from '../services/api/turns';
-import { applyFiles, readTree } from '../services/api/files';
+import { readTree } from '../services/api/files';
 import {
-  buildApplyRequest,
   clearSpecDraft,
-  commitApplied,
   deleteDraftFile,
   getSpecDraft,
   hasDraftChanges,
   patchDraftFile,
-  rebaseToServer,
+  publishDraft,
+  PUBLISH_CONFLICT_MESSAGE,
   setDraftFiles,
   subscribeSpecDraft,
   syncBase,
@@ -66,6 +67,10 @@ import {
 } from '../lib/designDocumentTypes';
 
 const DESIGN_ROOT_FILE = 'design.md';
+
+// Identity-stable empty fallback for the cell diagram's components prop — see
+// the effectiveComponents note below.
+const NO_COMPONENTS: DesignComponent[] = [];
 
 /** Shown when a generate turn hits the output-token limit; partial content kept. */
 const TRUNCATED_MESSAGE =
@@ -201,6 +206,8 @@ export default function ProjectArchitecturePage() {
   const [pendingArtifacts, setPendingArtifacts] = useState<Set<string>>(() => new Set());
 
   const editorRef = useRef<ExplorerRef>(null);
+  // Live-stream diagram projection memory (reset at each Generate).
+  const liveDesignRef = useRef(createLiveDesignState());
 
   // Refresh only the bundle-derived projection (cell-diagram components,
   // versions, unsaved flag). The draft/base are never touched here.
@@ -297,6 +304,9 @@ export default function ProjectArchitecturePage() {
     setGenerating(true);
     setPublishError(null);
     setPendingArtifacts(new Set());
+    // Fresh per-generation projection memory (last-good design.json contents +
+    // last stable diagram) — see liveDesignOverlay.ts.
+    liveDesignRef.current = createLiveDesignState();
     // Seed the live preview with the current draft so the tree/editor stay put
     // until the first folded snapshot arrives. Pull the user onto the cell
     // diagram so the design lands in front of them.
@@ -355,31 +365,21 @@ export default function ProjectArchitecturePage() {
       setDraftFiles(key, withDerivedArtifacts(projectId, getSpecDraft(key).draft));
 
       // 1. Commit the draft delta to `main` (atomic; all-or-nothing).
-      if (hasDraftChanges(key)) {
-        let result;
-        try {
-          result = await applyFiles(projectId, buildApplyRequest(key));
-        } catch (err) {
-          // 400 path/size, 404 project, 5xx — surface the server message.
-          setPublishError(
-            err instanceof Error && err.message ? err.message : 'Failed to apply design changes.',
-          );
-          return;
-        }
-        if (!result.ok) {
-          // 409 — a stale baseSha; nothing was applied. Re-base the draft onto
-          // HEAD (keeps your edits) so a re-publish overwrites; no merge UI.
-          setPublishError(
-            'Your draft was based on an older version — it has been re-based onto the latest. Review and Publish again to overwrite the conflicting files.',
-          );
-          try {
-            rebaseToServer(key, await readTree(projectId, DESIGN_PREFIX));
-          } catch {
-            /* leave the draft as-is; the banner already told the user */
-          }
-          return;
-        }
-        commitApplied(key, result);
+      let outcome;
+      try {
+        outcome = await publishDraft(projectId, key, () => readTree(projectId, DESIGN_PREFIX));
+      } catch (err) {
+        // 400 path/size, 404 project, 5xx — surface the server message.
+        setPublishError(
+          err instanceof Error && err.message ? err.message : 'Failed to apply design changes.',
+        );
+        return;
+      }
+      if (outcome.status === 'conflict') {
+        // 409 — a stale baseSha; nothing was applied. The draft was re-based
+        // onto HEAD (keeps your edits) so a re-publish overwrites; no merge UI.
+        setPublishError(PUBLISH_CONFLICT_MESSAGE);
+        return;
       }
 
       // 2. Cut the design tag (hard semantic validation happens here).
@@ -423,28 +423,72 @@ export default function ProjectArchitecturePage() {
   }, [viewingHistorical, historical, generating, livePreview, draft]);
 
   // The cell diagram reads projected components: the historical snapshot when
-  // viewing history, otherwise the current bundle projection.
+  // viewing history, otherwise the current bundle projection. The fallback must
+  // be identity-STABLE: `?? []` would mint a fresh array per render, defeating
+  // CellDiagramView's memo — and the diagram lib fully redraws (zoom-to-fit
+  // included) on every re-render, so a broken memo means a visible diagram
+  // refresh on every stream snapshot.
   const effectiveComponents =
-    viewingHistorical && historical ? historical.components : design?.components ?? [];
+    viewingHistorical && historical ? historical.components : design?.components ?? NO_COMPONENTS;
 
   // Project the cell diagram from the SAME files the tree shows (historical
   // snapshot, live stream preview, or the working draft) through the exact
   // pipeline that derives the committed `cell-diagram.gen.json`. Without this the
   // diagram would render only `design.components` (the committed-HEAD bundle),
   // so it stayed empty all through a generate and until Publish — the design
-  // page's "nothing streaming" symptom. A partial design.json mid-stream simply
-  // projects to a default box until its content closes.
-  const liveProject = useMemo<NonNullable<CellDiagramViewProps['project']> | null>(() => {
+  // page's "nothing streaming" symptom.
+  //
+  // The strict projection is a pure function of the component design.json
+  // files (buildProjectDesign lists components off them, and
+  // toCellDiagramProject consumes only fields sourced from them), so the memo
+  // below keys on that subset with identity stabilised across re-renders:
+  // a keystroke in design.md or openapi.yaml mints a new draft object but no
+  // new design.json string, and must NOT re-project (a new project object
+  // means a full diagram re-layout).
+  const strictDesignSourceRef = useRef<Record<string, string> | null>(null);
+  const strictDesignSource = useMemo<Record<string, string>>(() => {
     const sourceFull: Record<string, string> =
       viewingHistorical && historical
         ? Object.fromEntries(
             Object.entries(historical.files).map(([rel, c]) => [toFullPath(rel), c]),
           )
-        : generating && livePreview
-          ? livePreview
-          : draft;
+        : draft;
+    const subset: Record<string, string> = {};
+    for (const [path, content] of Object.entries(sourceFull)) {
+      if (COMPONENT_DESIGN_JSON_RE.test(path)) subset[path] = content;
+    }
+    const prev = strictDesignSourceRef.current;
+    if (prev) {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(subset);
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every((p) => prev[p] === subset[p])
+      ) {
+        return prev;
+      }
+    }
+    strictDesignSourceRef.current = subset;
+    return subset;
+  }, [viewingHistorical, historical, draft]);
+
+  // While a generate STREAMS, the snapshot contains one design.json that is
+  // mid-write, so the strict projection is wrong for it: it degraded streaming
+  // components to default boxes and re-projected a brand-new object per
+  // snapshot (a full diagram re-layout up to ~12×/s — the flicker). The live
+  // branch therefore goes through `projectLiveDesign` (tolerant partial-JSON
+  // repair + last-good + identity-stable output); the draft/historical
+  // branches keep the strict truth-telling projection.
+  const liveProject = useMemo<NonNullable<CellDiagramViewProps['project']> | null>(() => {
+    if (generating && livePreview) {
+      return projectLiveDesign(
+        projectId ?? '',
+        livePreview,
+        liveDesignRef.current,
+      ) as unknown as NonNullable<CellDiagramViewProps['project']> | null;
+    }
     try {
-      const proj = toCellDiagramProject(buildProjectDesign(projectId ?? '', sourceFull));
+      const proj = toCellDiagramProject(buildProjectDesign(projectId ?? '', strictDesignSource));
       // `CellDiagramProject` (design-projection) is a structural mirror of the
       // @wso2/cell-diagram `Project`; the only divergence is `type: string` vs
       // the lib's `ComponentType` enum, which the diagram accepts.
@@ -454,7 +498,7 @@ export default function ProjectArchitecturePage() {
     } catch {
       return null;
     }
-  }, [viewingHistorical, historical, generating, livePreview, draft, projectId]);
+  }, [generating, livePreview, strictDesignSource, projectId]);
 
   const designMdContent = displayFilesRel[DESIGN_ROOT_FILE] ?? '';
   const designReadOnly = viewingHistorical || generating;

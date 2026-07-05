@@ -53,7 +53,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 const base = "/api/v1/org/credentials/github"
@@ -120,12 +119,9 @@ func newHarness(t *testing.T) (*componenttest.Harness, *gorm.DB, *fakeGH) {
 		t.Fatalf("NewAppTokenMinter: %v", err)
 	}
 	credSvc := orgcreds.NewCredentialService(db, store, minter, componentEnvSecret, "", "", nil).WithGitHubAPIBase(gh.URL)
-	// The disconnect cascade needs a real task repo; issueSvc is nil (no tasks
-	// exist in these cases, so the Phase-B comment loop never dereferences it).
-	disconnectSvc := orgcreds.NewOrgDisconnectService(
-		repositories.NewTaskRepository(db), db, credSvc, nil,
-		func(models.TaskStatus) (models.TaskStatus, error) { return models.TaskStatusAbandoned, nil },
-	)
+	// Tasks are GitHub issues now (no task cascade on disconnect); the service
+	// just finalizes the credential.
+	disconnectSvc := orgcreds.NewOrgDisconnectService(db, credSvc, nil)
 	bearerSvc := orgcreds.NewBearerService("state-key", time.Minute)
 
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{

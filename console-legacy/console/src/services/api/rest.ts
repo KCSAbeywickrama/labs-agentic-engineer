@@ -34,15 +34,13 @@ import type {
   Build,
   BuildLogs,
   Deployment,
-  ComponentTask,
   ComponentConfig,
   EnvVar,
   ProjectStatus,
   ArtifactVersion,
-  Tasks,
   Organization,
-  ProjectBoard,
-  TaskStatusResponse,
+  TaskView,
+  TaskDetail,
   TaskProgressResponse,
 } from './types';
 
@@ -52,9 +50,12 @@ const BASE = env.VITE_CORE_API_BASE_URL;
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Machine error code from the response envelope (e.g. `plan_in_progress`), when present. */
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    if (code !== undefined) this.code = code;
   }
 }
 
@@ -106,7 +107,8 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
     } catch { /* use raw body */ }
     throw new ApiError(res.status, message);
   }
-  if (res.status === 204) return undefined as T;
+  // 204 (hold/unhold) and 202 (execute — async accept) carry no body.
+  if (res.status === 204 || res.status === 202) return undefined as T;
   return res.json();
 }
 
@@ -156,6 +158,17 @@ function slugify(input: string): string {
     .replace(/[^a-z0-9-]/g, '')   // strip non-RFC-1123 chars
     .replace(/-+/g, '-')          // collapse consecutive hyphens
     .replace(/^-|-$/g, '');       // trim leading/trailing hyphens
+}
+
+// The contract types `dependsOn`/`attention`/`executions` as nullable; coerce
+// to the always-present shapes the UI reads so callers never null-guard them.
+function normalizeTaskView<T extends TaskView>(raw: T): T {
+  return {
+    ...raw,
+    dependsOn: raw.dependsOn ?? [],
+    attention: raw.attention ?? [],
+    executions: raw.executions ?? {},
+  };
 }
 
 export const restApi = {
@@ -259,7 +272,10 @@ export const restApi = {
         `${projectPrefix(projectId)}/requirements/save`,
         { method: 'POST' },
       );
-    } catch {
+    } catch (err) {
+      // Diagnostic only (root-causing silent publish/tag failures): the swallow
+      // is a known bug — publish proceeds as if saved. Keep the evidence.
+      console.error('[publish] requirements save (tag) failed — publish will proceed anyway', err);
       return undefined;
     }
   },
@@ -310,15 +326,6 @@ export const restApi = {
   },
 
   // -- Designs (real backend) ------------------------------------------------
-
-  async getDesign(projectId: string): Promise<Design | undefined> {
-    try {
-      const data = await fetchJSON<Design | null>(`${projectPrefix(projectId)}/design`);
-      return data ?? undefined;
-    } catch {
-      return undefined;
-    }
-  },
 
   async saveAndProceedDesign(projectId: string): Promise<Design> {
     // Let ApiError bubble — Publish needs to surface the server's error
@@ -442,263 +449,63 @@ export const restApi = {
     }
   },
 
-  // -- Tasks (implementation agents) -------------------------------------------
+  // -- Tasks (GitHub-native issues ⋈ executions) -------------------------------
+  //
+  // Plan generation is a raw-StreamPart SSE handled in `./plan.ts` (the BFF taps
+  // the stream to create/update issues; the FE renders the tool frames live).
+  // Reads here are live GitHub ⋈ executions — no cache, no board.
 
-  async dispatchTasks(projectId: string): Promise<any[]> {
-    return await fetchJSON<any[]>(`${projectPrefix(projectId)}/tasks/dispatch`, {
-      method: 'POST',
-    });
-  },
-
-  /**
-   * Streams task generation as SSE. The two-phase tech-lead agent emits:
-   *   data-plan-item            — { tempId, componentName, title, rationale, dependsOn }
-   *   data-plan-complete        — { items[] }
-   *   data-task-issued          — { tempId, taskId, issueUrl, issueNumber }
-   *   data-task-issue-failed    — { tempId, errorText }
-   *   data-task-body-delta      — { taskId, delta }
-   *   data-task-body-complete   — { taskId, body }
-   *   data-task-rejected        — { taskId, reason }
-   *   data-finish               — { batchId, taskCount }
-   *   error                     — { scope: 'plan'|'detail', errorText, taskId?, tempId?, issues? }
-   *
-   * Resolves to true when the stream completed successfully (no error frames).
-   */
-  async streamGenerateTasks(
-    projectId: string,
-    handlers: {
-      onPlanItem?: (item: {
-        tempId: string;
-        componentName: string;
-        title: string;
-        rationale: string;
-        dependsOn: string[];
-      }) => void;
-      onPlanComplete?: (items: unknown[]) => void;
-      onTaskIssued?: (e: {
-        tempId: string;
-        taskId: string;
-        issueUrl: string;
-        issueNumber: number;
-      }) => void;
-      onTaskIssueFailed?: (e: { tempId: string; errorText: string }) => void;
-      onTaskBodyDelta?: (e: { taskId: string; delta: string }) => void;
-      onTaskBodyComplete?: (e: { taskId: string; body: string }) => void;
-      onTaskRejected?: (e: { taskId: string; reason: string }) => void;
-      onError?: (e: {
-        scope?: string;
-        errorText?: string;
-        tempId?: string;
-        taskId?: string;
-        issues?: unknown;
-      }) => void;
-      onFinish?: (e: { batchId?: string; taskCount?: number }) => void;
-    },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/tasks/generate`,
-      { method: 'POST', headers, body: '{}', signal },
-    );
-    if (!res.ok || !res.body) return false;
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let errored = false;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const chunk = JSON.parse(payload);
-            const data = chunk.data ?? {};
-            switch (chunk.type) {
-              case 'data-plan-item':
-                handlers.onPlanItem?.(data);
-                break;
-              case 'data-plan-complete':
-                handlers.onPlanComplete?.(data.items ?? []);
-                break;
-              case 'data-task-issued':
-                handlers.onTaskIssued?.(data);
-                break;
-              case 'data-task-issue-failed':
-                handlers.onTaskIssueFailed?.(data);
-                break;
-              case 'data-task-body-delta':
-                handlers.onTaskBodyDelta?.(data);
-                break;
-              case 'data-task-body-complete':
-                handlers.onTaskBodyComplete?.(data);
-                break;
-              case 'data-task-rejected':
-                handlers.onTaskRejected?.(data);
-                break;
-              case 'data-finish':
-                handlers.onFinish?.(data);
-                break;
-              case 'error':
-                errored = true;
-                handlers.onError?.(data);
-                break;
-            }
-          } catch {
-            // ignore non-JSON data line
-          }
-        }
-      }
-    }
-    return !errored;
-  },
-
-  async regenerateTaskBody(
-    projectId: string,
-    taskId: string,
-    handlers: {
-      onTaskBodyDelta?: (e: { taskId: string; delta: string }) => void;
-      onTaskBodyComplete?: (e: { taskId: string; body: string }) => void;
-      onError?: (e: { errorText?: string }) => void;
-      onFinish?: () => void;
-    },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/tasks/${taskId}/regenerate-body`,
-      { method: 'POST', headers, body: '{}', signal },
-    );
-    if (!res.ok || !res.body) return false;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let errored = false;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const chunk = JSON.parse(payload);
-            const data = chunk.data ?? {};
-            switch (chunk.type) {
-              case 'data-task-body-delta':
-                handlers.onTaskBodyDelta?.(data);
-                break;
-              case 'data-task-body-complete':
-                handlers.onTaskBodyComplete?.(data);
-                break;
-              case 'data-finish':
-                handlers.onFinish?.();
-                break;
-              case 'error':
-                errored = true;
-                handlers.onError?.(data);
-                break;
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-    return !errored;
-  },
-
-  async getTasks(projectId: string): Promise<Tasks | undefined> {
+  /** List a project's Tasks. `state` filters open/closed/all (default open). */
+  async listTasks(projectId: string, state?: 'open' | 'closed' | 'all'): Promise<TaskView[]> {
+    const q = state ? `?state=${state}` : '';
     try {
-      const data = await fetchJSON<Tasks | null>(`${projectPrefix(projectId)}/tasks/generated`);
-      return data ?? undefined;
-    } catch {
-      return undefined;
-    }
-  },
-
-  async getProjectBoard(projectId: string): Promise<ProjectBoard> {
-    const empty: ProjectBoard = { todo: [], inProgress: [], done: [], onHold: [], failed: [], url: '' };
-    try {
-      const data = await fetchJSON<ProjectBoard>(`${projectPrefix(projectId)}/board`);
-      return data ?? empty;
-    } catch {
-      return empty;
-    }
-  },
-
-  async listTasks(projectId: string): Promise<ComponentTask[]> {
-    try {
-      return await fetchJSON<ComponentTask[]>(`${projectPrefix(projectId)}/tasks`);
+      const data = await fetchJSON<TaskView[] | null>(`${projectPrefix(projectId)}/tasks${q}`);
+      return (data ?? []).map(normalizeTaskView);
     } catch {
       return [];
     }
   },
 
-  // Operator-driven retry for a `failed` task. Re-dispatches a fresh
-  // WorkflowRun against the same component / issue / branch with a newly
-  // minted per-task bearer.
-  async retryTask(projectId: string, taskId: string): Promise<void> {
-    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${taskId}/retry`, {
+  /** One Task with its full Execution history, keyed by GitHub issue number. */
+  async getTask(projectId: string, issueNumber: number): Promise<TaskDetail> {
+    const data = await fetchJSON<TaskDetail>(`${projectPrefix(projectId)}/tasks/${issueNumber}`);
+    return {
+      ...normalizeTaskView(data),
+      executionHistory: data.executionHistory ?? [],
+    };
+  },
+
+  // Execute stamps `aep:execute`; the funnel does the rest (doubles as retry).
+  // 202 on success. Lets ApiError bubble so callers can surface the server's
+  // message for a 409 (issue closed) or an already-active no-op.
+  async executeTask(projectId: string, issueNumber: number): Promise<void> {
+    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${issueNumber}/execute`, {
       method: 'POST',
     });
   },
 
-  async getTask(projectId: string, taskId: string): Promise<ComponentTask> {
-    return fetchJSON<ComponentTask>(`${projectPrefix(projectId)}/tasks/${taskId}`);
+  // Hold / unhold toggle the level-triggered `aep:hold` label (idempotent, 204).
+  async holdTask(projectId: string, issueNumber: number): Promise<void> {
+    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${issueNumber}/hold`, {
+      method: 'POST',
+    });
   },
 
-  async getTaskStatus(projectId: string, taskId: string): Promise<TaskStatusResponse> {
-    return fetchJSON<TaskStatusResponse>(`${projectPrefix(projectId)}/tasks/${taskId}/status`);
+  async unholdTask(projectId: string, issueNumber: number): Promise<void> {
+    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${issueNumber}/hold`, {
+      method: 'DELETE',
+    });
   },
 
-  async getTaskAgentProgress(
-    projectId: string, taskId: string,
-    sinceMillis: number, limit?: number,
-  ): Promise<TaskProgressResponse> {
-    const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
-    if (limit) q.set('limit', String(limit));
-    return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/tasks/${taskId}/progress/agent?${q.toString()}`,
-    );
-  },
-
-  async getTaskBuildProgress(
-    projectId: string, taskId: string,
-    sinceMillis: number,
+  // Unified execution progress feed keyed by execution id (kind selects the
+  // source server-side). Same cursor/NDJSON contract as the legacy per-task
+  // progress endpoints, so `useCursorPolling` drives it unchanged.
+  async getExecutionProgress(
+    projectId: string, executionId: string, sinceMillis: number,
   ): Promise<TaskProgressResponse> {
     const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
     return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/tasks/${taskId}/progress/build?${q.toString()}`,
+      `${projectPrefix(projectId)}/executions/${executionId}/progress?${q.toString()}`,
     );
   },
 

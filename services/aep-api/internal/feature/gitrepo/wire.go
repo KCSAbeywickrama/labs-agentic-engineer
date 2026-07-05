@@ -65,6 +65,35 @@ type IssueInfo struct {
 	Labels []string
 }
 
+// CompareResult is the subset of GET /repos/{o}/{r}/compare/{base}...{head} the
+// lineage diff consumes (§6): the per-file change summary between two refs (tags
+// in the plan-turn incremental case). Used to feed the planner the actual
+// spec/design delta between a Task's lineage tag and the current tag.
+type CompareResult struct {
+	// Status is GitHub's overall relationship: "ahead", "behind", "identical",
+	// or "diverged".
+	Status       string
+	AheadBy      int
+	BehindBy     int
+	TotalCommits int
+	Files        []ChangedFile
+	// Truncated is true when GitHub capped the files list (the compare endpoint
+	// returns at most 300 files and does not page them), so Files is a partial
+	// view of the diff. The lineage-diff consumer (§6) must not treat an absent
+	// file as unchanged when this is set.
+	Truncated bool
+}
+
+// ChangedFile is one entry of a compare's files[] list.
+type ChangedFile struct {
+	Filename  string // current path
+	Status    string // added | removed | modified | renamed | copied | changed | unchanged
+	Additions int
+	Deletions int
+	Changes   int
+	Patch     string // unified diff hunk; empty for binary or very large files
+}
+
 // ----- Account / App installation -----
 
 // GitHubUser is the subset of GET /user we consume.
@@ -166,29 +195,12 @@ type MatchingRef struct {
 	SHA string // pulled out of the nested .object.sha
 }
 
-// ----- Project board -----
-
-// LabelInfo holds a label's name and hex color (without the leading #).
-type LabelInfo struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
-}
-
-// BoardItem is a single item on a project board.
-type BoardItem struct {
-	ID       string
-	Title    string
-	URL      string
-	Body     string
-	Assignee string
-	Labels   []LabelInfo
-	Status   string
-}
-
-// ProjectBoardResult holds all items fetched from a project board.
-type ProjectBoardResult struct {
-	URL   string
-	Items []BoardItem
+// PullRequestState is the subset of a pull request the sweep's PR-state
+// reconciliation reads (§5): open/closed + merged + the merge commit SHA.
+type PullRequestState struct {
+	State          string // "open" | "closed"
+	Merged         bool
+	MergeCommitSHA string
 }
 
 // ----- Status errors -----

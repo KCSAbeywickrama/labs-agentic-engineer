@@ -18,29 +18,101 @@ package task
 
 import (
 	"context"
+	"io"
 
-	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/models"
 )
 
-// Consumer ports for task's HTTP edge (task_controller). §4 rule 1: the
-// consumer declares the narrow interface it calls. codingagent's
-// DispatchService / ProgressService structurally satisfy these (their DTOs
-// were hoisted to contracts), so the task feature drives coding-agent dispatch
-// and progress WITHOUT importing codingagent concretely — which is what keeps
-// the task↔codingagent cycle cut (arch_test.TestTaskCodingagentCycleBroken).
-// The compile-time `var _` satisfaction assertion lives at the composition
-// root, not here, so this package never imports codingagent.
+// The consumer ports the Task surface drives. Each is the narrow slice a service
+// actually uses (the house pattern), so the composition root wires concrete
+// providers and tests supply fakes.
 
-// TaskDispatcher is the coding-agent dispatch surface the task controller
-// invokes (dispatch, operator retry).
-type TaskDispatcher interface {
-	DispatchTasks(ctx context.Context, orgID, projectID string) ([]contracts.DispatchResult, error)
-	RetryTask(ctx context.Context, taskID string) (contracts.DispatchResult, error)
+// IssueClient is the GitHub issue surface: create/list/comment/edit and the
+// label stamping the command + projection paths need. gitrepo.IssueService
+// satisfies it.
+type IssueClient interface {
+	CreateIssue(ctx context.Context, orgID, projectID string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error)
+	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]gitrepo.IssueInfo, error)
+	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
+	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
+	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
+	AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error
+	RemoveLabel(ctx context.Context, orgID, projectID string, number int, label string) error
 }
 
-// ProgressReader is the /progress/* read surface the task controller invokes.
-// Errors surface as contracts.ErrProgressUnavailable when Observer is down.
-type ProgressReader interface {
-	GetAgentProgress(ctx context.Context, taskID string, sinceMillis int64, limit int) (*contracts.ProgressResponse, error)
-	GetBuildProgress(ctx context.Context, taskID string, sinceMillis int64) (*contracts.ProgressResponse, error)
+// RepoResolver looks up the project's git repo row (its RepoURL yields the
+// owner/name and repo full name the funnel/dispatcher key on).
+type RepoResolver interface {
+	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+}
+
+// DesignReader reads the project's design + requirements at HEAD (the plan-turn
+// context is HEAD content; approved tags are provenance/lineage stamps — §6).
+type DesignReader interface {
+	ReadDesign(ctx context.Context, orgID, projectID string) (*artifacts.DesignFile, error)
+	ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error)
+	ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
+}
+
+// VersionReader lists approved (tagged) spec/design versions and reads a bundle
+// at a tag — the lineage stamps and the incremental-plan baseline diff (§6).
+type VersionReader interface {
+	ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
+	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
+	GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
+	GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
+}
+
+// GitReader is the read-only git-object surface + credential resolver used for
+// the plan-turn lineage diff (CompareRefs between a Task's lineage tag and the
+// current tag, §6). gitOpsService satisfies it (GitData + Resolver).
+type GitReader interface {
+	GitData() gitrepo.GitData
+	Resolver() credentials.Resolver
+}
+
+// ExecutionReader is the read side of the executions rows (the platform-owned
+// half), consumed org-scoped by the read path to fuse derived status. It is the
+// repositories.ExecutionRepository scoped methods — the shared kernel, not the
+// execution feature, so the §1 package boundary holds.
+type ExecutionReader interface {
+	LatestPerKindScoped(ctx context.Context, orgID, repo string, issueNumber int) (map[string]*models.Execution, error)
+	LatestPerKindForRepoScoped(ctx context.Context, orgID, repo string) (map[int]map[string]*models.Execution, error)
+	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]models.Execution, error)
+}
+
+// AnthropicKeyResolver resolves the org's effective Anthropic key. Empty key +
+// nil error means "org has none" → the plan turn raises ErrNoAnthropicKey.
+type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error)
+
+// OrgSkillSource returns the org's auxiliary (non-core) skills to ride along in
+// the plan turn (nil allowed).
+type OrgSkillSource func(ctx context.Context, orgID string) ([]agentsvc.Skill, error)
+
+// TurnClient is the agents-service turn client — the plan turn POSTs a
+// toolset:"task-plan" turn and streams raw StreamPart frames back for the tap.
+type TurnClient interface {
+	Turn(ctx context.Context, conversationID, orgID, anthropicKey string, req agentsvc.TurnRequest) (io.ReadCloser, error)
+}
+
+// RepoLocator resolves a GitHub "owner/name" to the owning org + project — the
+// issues.* webhook delivers a repo full name; the handlers need org+project to
+// drive the org-scoped issue ops. Wired from repositories at the composition
+// root (the same lookup feature/execution uses).
+type RepoLocator interface {
+	ByFullName(ctx context.Context, fullName string) (orgID, projectID string, err error)
+}
+
+// Dispatcher is the funnel's entry surface (the platform-owned half). The
+// execute endpoint and the hold-release path call INTO it — the design's "no
+// sibling entry points" rule (§5, §10.1). This is a consumer-side port so the
+// Task package imports NOTHING from feature/execution; the funnel satisfies it
+// structurally and is wired at the composition root (task↛execution arch-lock).
+type Dispatcher interface {
+	OnExecuteIntent(ctx context.Context, repoFullName string, issueNumber int) error
+	Reevaluate(ctx context.Context) error
 }

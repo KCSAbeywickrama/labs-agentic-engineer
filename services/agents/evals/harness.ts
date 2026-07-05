@@ -95,13 +95,13 @@ export interface RunOptions {
   onLog?: (msg: string) => void;
 }
 
-interface Booted {
+export interface Booted {
   store: InMemoryConversationStore;
   baseUrl: string;
   close: () => Promise<void>;
 }
 
-async function boot(model: LanguageModel): Promise<Booted> {
+export async function boot(model: LanguageModel): Promise<Booted> {
   const store = new InMemoryConversationStore();
   // The in-process server injects the (mock or real) model directly; the M2M gate
   // still runs on the shared-secret path, so turns carry an eval-minted token.
@@ -150,7 +150,7 @@ function turnBody(
 }
 
 /** Drive one turn over HTTP and collect every raw StreamPart frame. */
-async function collectTurn(
+export async function collectTurn(
   baseUrl: string,
   id: string,
   body: TurnRequest,
@@ -222,10 +222,32 @@ async function runSample(
   }
 }
 
-export async function runFixture(suite: EvalSuite, fixture: Fixture, opts: RunOptions): Promise<FixtureResult> {
+/** The fixture metadata the generic sampler copies into a `FixtureResult`. */
+export interface FixtureMeta {
+  name: string;
+  description?: string;
+  difficulty?: string;
+}
+
+/** What the generic K-sampling drivers need from any suite's `RunOptions`. */
+export interface SamplerOptions {
+  samples: number;
+  onLog?: (msg: string) => void;
+}
+
+/**
+ * The generic K-sampling driver: run `runSample` K times over one fixture and
+ * aggregate the pass rate. Shared by every eval harness (the task-plan harness
+ * consumes it too) — only the per-sample runner differs.
+ */
+export async function sampleFixture<F extends FixtureMeta>(
+  fixture: F,
+  opts: SamplerOptions,
+  runSample: (fixture: F, k: number) => Promise<SampleResult>,
+): Promise<FixtureResult> {
   const sampleResults: SampleResult[] = [];
   for (let k = 0; k < opts.samples; k++) {
-    const result = await runSample(suite, fixture, opts, k);
+    const result = await runSample(fixture, k);
     sampleResults.push(result);
     opts.onLog?.(`  ${fixture.name} [sample ${k + 1}/${opts.samples}] ${result.pass ? "PASS" : "FAIL"}`);
   }
@@ -242,13 +264,27 @@ export async function runFixture(suite: EvalSuite, fixture: Fixture, opts: RunOp
   return result;
 }
 
-export async function runSuite(suite: EvalSuite, fixtures: Fixture[], opts: RunOptions): Promise<SuiteResult> {
+/** `sampleFixture` over a whole suite. */
+export async function sampleSuite<F extends FixtureMeta>(
+  agent: string,
+  fixtures: F[],
+  opts: SamplerOptions,
+  runSample: (fixture: F, k: number) => Promise<SampleResult>,
+): Promise<SuiteResult> {
   const results: FixtureResult[] = [];
   for (const fixture of fixtures) {
     opts.onLog?.(`▶ ${fixture.name}`);
-    results.push(await runFixture(suite, fixture, opts));
+    results.push(await sampleFixture(fixture, opts, runSample));
   }
-  return { agent: suite.agent, fixtures: results };
+  return { agent, fixtures: results };
+}
+
+export async function runFixture(suite: EvalSuite, fixture: Fixture, opts: RunOptions): Promise<FixtureResult> {
+  return sampleFixture(fixture, opts, (f, k) => runSample(suite, f, opts, k));
+}
+
+export async function runSuite(suite: EvalSuite, fixtures: Fixture[], opts: RunOptions): Promise<SuiteResult> {
+  return sampleSuite(suite.agent, fixtures, opts, (f, k) => runSample(suite, f, opts, k));
 }
 
 /**

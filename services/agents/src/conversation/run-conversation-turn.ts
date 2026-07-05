@@ -28,12 +28,15 @@
  * preserved across turns.
  */
 
-import { isStepCount, type LanguageModel, type ModelMessage } from "ai";
-import { FileBundle, type Skill, type StreamPart } from "@aep/agent-stream";
+import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { FileBundle, type Skill, type StreamPart, type Toolset } from "@aep/agent-stream";
 import { runTurn } from "../agents/main/run-turn.js";
-import { buildTools, ASK_QUESTION } from "../agents/main/tool.js";
-import { buildInstructions, buildPrompt } from "../agents/main/prompt.js";
+import { buildFileTools, ASK_QUESTION } from "../agents/main/tools/files.js";
+import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
+import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
+import { buildInstructions, buildTaskPlanInstructions, buildPrompt } from "../agents/main/prompt.js";
 import { config } from "../shared/config.js";
+import { modelProviderOptions } from "../shared/model.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
 
 /** Thrown when a second turn starts for an id whose turn is still in flight (→ HTTP 409). */
@@ -97,6 +100,12 @@ export interface RunConversationTurnInput {
    * pulls a body via `loadSkill`. Omitted/empty → no catalog, no `loadSkill`.
    */
   skills?: Skill[];
+  /**
+   * Which tool set to register (tasks-github-native §9.3). Default/absent →
+   * `files` (today's file-mutation tools, byte-identical). `task-plan` →
+   * `planTask`/`updateTask` over a read-only snapshot, no file tools.
+   */
+  toolset?: Toolset;
   /** Injected at the composition root (createModel is called ONCE there, not per turn). */
   model: LanguageModel;
   store: ConversationStore;
@@ -114,24 +123,37 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 2. mark active (in memory; not saved mid-turn — the guard handles concurrency)
     conv.status = "active";
 
-    // 3. throwaway WorkingBundle from the passed snapshot; ask_question DISABLED.
-    //    `loadSkill` is registered only when the caller pushed skills (ADR-0002).
-    const bundle = new FileBundle(input.files);
-    const tools = buildTools(bundle, input.skills);
+    // 3. select the tool set from `toolset` (default `files`). Both build a
+    //    throwaway per-turn accumulator from the passed snapshot; the skill
+    //    catalog + `loadSkill` are registered identically (only when skills were
+    //    pushed, ADR-0002); ask_question stays DISABLED.
+    const toolset: Toolset = input.toolset ?? "files";
+    let tools: ToolSet;
+    let instructions: string;
+    if (toolset === "task-plan") {
+      // Read-only context: `files` mutates nothing; the accumulator validates
+      // planTask/updateTask against it (known components + existing Tasks).
+      tools = buildTaskPlanTools(new TaskPlan(input.files), input.skills);
+      instructions = buildTaskPlanInstructions(input.skills);
+    } else {
+      tools = buildFileTools(new FileBundle(input.files), input.skills);
+      instructions = buildInstructions(input.skills);
+    }
 
-    // 4. one generic turn. buildInstructions appends the skill catalog at the END
+    // 4. one generic turn. The instructions append the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
     //    divergence note ONLY when the FE flagged an external edit (append-only).
     const note = input.filesChangedExternally ? DIVERGENCE_NOTE : "";
     const startLen = conv.messages.length;
     const res = await runTurn({
       model: input.model,
-      instructions: buildInstructions(input.skills),
+      instructions,
       prompt: note + buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
       tools,
       stopWhen: [isStepCount(config.maxSteps) /*, hasToolCall("ask_question") */],
       maxOutputTokens: config.maxOutputTokens,
+      providerOptions: modelProviderOptions(),
       onEvent: input.onEvent,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     });

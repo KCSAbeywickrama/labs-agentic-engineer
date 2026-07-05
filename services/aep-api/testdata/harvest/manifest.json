@@ -104,62 +104,6 @@
     "notes": "get-design-bundle-at-tag tag=v1-1 (discovered)"
   },
   {
-    "name": "get_tasks",
-    "method": "GET",
-    "path": "/projects/hello-world-api/tasks",
-    "status": 200,
-    "golden_file": "get_tasks.json",
-    "notes": "list-tasks"
-  },
-  {
-    "name": "get_tasks_generated",
-    "method": "GET",
-    "path": "/projects/hello-world-api/tasks/generated",
-    "status": 200,
-    "golden_file": "get_tasks_generated.json",
-    "notes": "get-generated-tasks (draft/generated set)"
-  },
-  {
-    "name": "get_task",
-    "method": "GET",
-    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744",
-    "status": 200,
-    "golden_file": "get_task.json",
-    "notes": "get-task taskId=26de64b5-beb8-445d-9acf-de0811552744 (discovered)"
-  },
-  {
-    "name": "get_task_status",
-    "method": "GET",
-    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744/status",
-    "status": 200,
-    "golden_file": "get_task_status.json",
-    "notes": "get-task-status"
-  },
-  {
-    "name": "get_task_progress_agent",
-    "method": "GET",
-    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744/progress/agent",
-    "status": 200,
-    "golden_file": "get_task_progress_agent.json",
-    "notes": "get-task-agent-progress"
-  },
-  {
-    "name": "get_task_progress_build",
-    "method": "GET",
-    "path": "/projects/hello-world-api/tasks/26de64b5-beb8-445d-9acf-de0811552744/progress/build",
-    "status": 200,
-    "golden_file": "get_task_progress_build.json",
-    "notes": "get-task-build-progress"
-  },
-  {
-    "name": "get_board",
-    "method": "GET",
-    "path": "/projects/hello-world-api/board",
-    "status": 200,
-    "golden_file": "get_board.json",
-    "notes": "get-board"
-  },
-  {
     "name": "get_components",
     "method": "GET",
     "path": "/projects/hello-world-api/components",

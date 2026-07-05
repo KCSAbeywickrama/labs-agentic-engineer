@@ -29,7 +29,6 @@ package skills
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -208,18 +207,14 @@ func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *mode
 		}
 	}
 
-	owner, name := models.OwnerRepoFromURL(repo.RepoURL)
-	if owner == "" || name == "" {
-		return nil, fmt.Errorf("cannot derive owner/repo from %q", repo.RepoURL)
-	}
-	cred, err := s.git.Resolver().Resolve(ctx, orgID)
+	rc, err := gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
-		return nil, fmt.Errorf("resolve credential: %w", err)
+		return nil, err
 	}
+	owner, name, cred := rc.Owner, rc.Name, rc.Cred
 	gh := s.git.GitData()
-	branch := defaultBranch(repo)
 
-	headSHA, err := gh.GetRef(ctx, owner, name, cred, "heads/"+branch)
+	headSHA, err := gh.GetRef(ctx, owner, name, cred, "heads/"+rc.Branch)
 	if err != nil {
 		return nil, fmt.Errorf("get head ref: %w", err)
 	}
@@ -331,20 +326,16 @@ func (s *SkillService) parseTree(ctx context.Context, owner, repo string, cred c
 // default branch in a single commit, under a bounded fast-forward CAS retry.
 // On success the org's catalog cache is evicted so the next read rebuilds. §9.
 func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *models.GitRepository, message string, writes map[string][]byte, deletePrefixes []string) (string, error) {
-	owner, name := models.OwnerRepoFromURL(repo.RepoURL)
-	if owner == "" || name == "" {
-		return "", fmt.Errorf("cannot derive owner/repo from %q", repo.RepoURL)
-	}
-	cred, err := s.git.Resolver().Resolve(ctx, orgID)
+	rc, err := gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
-		return "", fmt.Errorf("resolve credential: %w", err)
+		return "", err
 	}
+	owner, name, cred, branch := rc.Owner, rc.Name, rc.Cred, rc.Branch
 	gh := s.git.GitData()
 	author, committer := s.git.ResolveSaveIdentities(cred)
-	branch := defaultBranch(repo)
 
 	var commitSHA string
-	err = retryCAS(ctx, casAttempts, func() error {
+	err = gitrepo.RetryCAS(ctx, "skills commit", casAttempts, func() error {
 		headSHA, ferr := gh.GetRef(ctx, owner, name, cred, "heads/"+branch)
 		if ferr != nil {
 			return fmt.Errorf("get ref: %w", ferr)
@@ -455,13 +446,6 @@ func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, kind, name, me
 
 // ---- helpers ---------------------------------------------------------------
 
-func defaultBranch(repo *models.GitRepository) string {
-	if repo != nil && repo.DefaultBranch != "" {
-		return repo.DefaultBranch
-	}
-	return "main"
-}
-
 // kindRank orders builtin < custom < imported (matches the prior `ORDER BY kind`).
 func kindRank(kind string) int {
 	switch kind {
@@ -490,27 +474,6 @@ func skillRepoPath(kind, name string) string {
 // skillRefPath maps a "references/foo.md" key to its repo path.
 func skillRefPath(kind, name, refKey string) string {
 	return skillRepoDir(kind, name) + "/" + refKey
-}
-
-// retryCAS retries fn on a non-fast-forward ref update (concurrent writer),
-// re-running the whole read-modify-write so base_tree is fresh. Other errors
-// abort immediately. §9.
-func retryCAS(ctx context.Context, attempts int, fn func() error) error {
-	var err error
-	for i := 0; i < attempts; i++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		if !errors.Is(err, gitrepo.ErrRefNotFastForward) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(50*(i+1)) * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("skills commit: %w (after %d attempts)", err, attempts)
 }
 
 // ---- catalog cache ---------------------------------------------------------

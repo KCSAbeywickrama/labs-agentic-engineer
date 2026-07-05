@@ -22,15 +22,15 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
-	"github.com/wso2/aep/aep-api/internal/feature/task"
 )
 
 // newInternalAPI creates the Huma API for the internal service-to-service
 // surface over internalMux. It is the sibling of newHumaAPI (the public edge),
 // with three deliberate differences: (1) it is NOT wrapped by the user-JWT
 // middleware — each operation authenticates by construction via
-// auth.RunnerScopedInput (BFF Task-JWT / publisher-cc); (2) its security
+// auth.ExecutionScopedInput (BFF Task-JWT / publisher-cc); (2) its security
 // schemes are the S2S ones, not userJWT; (3) its spec is non-public — it is
 // generated to a checked-in file and is never advertised on the gateway. See
 // docs/design/internal-s2s-api.md §3.
@@ -54,7 +54,7 @@ func newInternalAPI(internalMux *http.ServeMux) huma.API {
 // fills it with real services; GenerateInternalOpenAPIYAML passes the zero
 // value (nil deps — registration never invokes them).
 type InternalDeps struct {
-	TaskSkills   *task.TaskSkillsService
+	ExecSkills   *execution.SkillsService
 	CredsRefresh orgcreds.CredentialsRefreshService
 }
 
@@ -62,7 +62,7 @@ type InternalDeps struct {
 // The single canonical list — used by NewHandler (real deps) and the internal
 // spec generator (zero deps).
 func RegisterAllInternal(api huma.API, d InternalDeps) {
-	task.RegisterInternalTask(api, d.TaskSkills)
+	execution.RegisterInternalSkills(api, d.ExecSkills)
 	orgcreds.RegisterInternalCredentials(api, d.CredsRefresh)
 }
 

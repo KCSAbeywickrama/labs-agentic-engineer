@@ -91,13 +91,6 @@ type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error
 // every turn. Wired from the org-skills store; nil is allowed (no aux skills).
 type OrgSkillSource func(ctx context.Context, orgID string) ([]agentsvc.Skill, error)
 
-// TurnClient is the agents-service turn/rehydrate client. *agentsvc.client
-// satisfies it.
-type TurnClient interface {
-	Turn(ctx context.Context, conversationID, orgID, anthropicKey string, req agentsvc.TurnRequest) (io.ReadCloser, error)
-	GetConversation(ctx context.Context, conversationID, orgID string) (json.RawMessage, error)
-}
-
 // ---- input -----------------------------------------------------------------
 
 // TurnInput is the assembled turn request (conversationId from the path, the
@@ -128,12 +121,12 @@ type service struct {
 	git       GitReader
 	keys      AnthropicKeyResolver
 	orgSkills OrgSkillSource
-	client    TurnClient
+	client    agentsvc.Client
 }
 
 // NewService wires the genai service. orgSkills may be nil (no auxiliary org
 // skills); the rest are required for a functioning turn.
-func NewService(repos RepoResolver, git GitReader, keys AnthropicKeyResolver, orgSkills OrgSkillSource, client TurnClient) GenAIService {
+func NewService(repos RepoResolver, git GitReader, keys AnthropicKeyResolver, orgSkills OrgSkillSource, client agentsvc.Client) GenAIService {
 	return &service{repos: repos, git: git, keys: keys, orgSkills: orgSkills, client: client}
 }
 
@@ -268,12 +261,12 @@ func validConversationID(id string) bool {
 	return conversationIDPattern.MatchString(id) && !strings.Contains(id, "--")
 }
 
-// namespacedID weaves the authenticated tenant scope + use case into the
-// service-side id: org_{orgId}--proj_{projectId}--{useCase}--{uuid}. The FE
-// never sees this; a turn/rehydrate outside the scope maps to a different id
-// (isolated by construction).
+// namespacedID scopes the FE-supplied conversation uuid to the authenticated
+// tenant + use case via the shared agentsvc encoding. The FE never sees the
+// namespaced id; validConversationID rejects "--" so the uuid cannot forge
+// extra segments.
 func namespacedID(repo *models.GitRepository, useCase, uuid string) string {
-	return "org_" + repo.OrgID + "--proj_" + repo.ProjectID + "--" + useCase + "--" + uuid
+	return agentsvc.ConversationID(repo.OrgID, repo.ProjectID, useCase, uuid)
 }
 
 // filterSnapshot keeps only agent-authored file types — markdown, DSL sources,

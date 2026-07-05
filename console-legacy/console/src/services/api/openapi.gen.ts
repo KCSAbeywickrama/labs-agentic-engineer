@@ -457,23 +457,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/design": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the assembled design */
-        get: operations["get-design"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{projectName}/design/bundle": {
         parameters: {
             query?: never;
@@ -1133,6 +1116,8 @@ export interface components {
             description?: string;
             displayName?: string;
             name: string;
+            /** @description The user's initial requirement — what they want built. Persisted as the project's requirement and triggers spec derivation for the new project. */
+            prompt?: string;
         };
         CreateSkillInput: {
             /**
@@ -1468,6 +1453,8 @@ export interface components {
              */
             readonly $schema?: string;
             items: components["schemas"]["Project"][] | null;
+            /** @description Cursor for the next page; absent on the last page. */
+            nextCursor?: string;
         };
         ProjectStatus: {
             /**
@@ -2372,6 +2359,8 @@ export interface operations {
             query?: {
                 /** @description Opaque pagination cursor */
                 cursor?: string;
+                /** @description Case-insensitive substring match on name and displayName */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -2894,38 +2883,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-design": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Design"];
-                };
             };
             /** @description Error */
             default: {

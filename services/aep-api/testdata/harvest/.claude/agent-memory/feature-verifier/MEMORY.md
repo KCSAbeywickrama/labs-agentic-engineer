@@ -1,0 +1,3 @@
+- [aep-rewrite Pilot A full demo — PASS](aep_rewrite_pilot_a_full_demo.md) — reference trace, entry points, timings, UI gotchas for the create->deploy spine, 2026-07-02
+- [Status field lag gotcha](aep_rewrite_status_lag_gotcha.md) — /tasks status lags behind /builds and /deployments during build/deploy; cross-check sub-resources or kubectl before calling it stuck
+- [Collab websocket 502 — non-blocking](aep_rewrite_collab_websocket_gap.md) — collab-server not in this compose stack, causes noisy but cosmetic 502s on requirements/design editor

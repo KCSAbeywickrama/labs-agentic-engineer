@@ -20,351 +20,210 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
-	"github.com/wso2/aep/aep-api/models"
 )
 
-// --- Inputs / Outputs ------------------------------------------------------
-// Inputs embed humakit.OrgScopedInput, whose Resolve binds the active org from the verified token (no {orgHandle} path param) and applies
-// the tenant gate (the IDOR fence) by construction. Extra path params
-// (projectName, taskId) are sibling fields; query params via `query:"…"`.
+// planInProgressError renders the 409 body as {"code":"plan_in_progress"} (§9.1).
+type planInProgressError struct {
+	Code string `json:"code"`
+}
 
-type listTasksInput struct {
+func (e *planInProgressError) Error() string {
+	return "a plan turn is already running for this project"
+}
+func (e *planInProgressError) GetStatus() int { return http.StatusConflict }
+
+// --- inputs / outputs -------------------------------------------------------
+
+type planInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
 }
 
-type taskByIDInput struct {
+type listInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
-	TaskID      string `path:"taskId" doc:"ComponentTask UUID"`
+	State       string `query:"state" enum:"open,closed,all" doc:"Which Tasks to return (default open)"`
 }
 
-type taskProgressInput struct {
+type listOutput struct {
+	Body []TaskView
+}
+
+type getInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
-	TaskID      string `path:"taskId" doc:"ComponentTask UUID"`
-	// SinceMillis/Limit mirror the controller's lenient cursor parsing: taken
-	// as strings and parsed with strconv (a non-numeric value degrades to 0,
-	// matching the legacy handler rather than 422-ing).
-	SinceMillis string `query:"sinceMillis" doc:"Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"`
-	Limit       string `query:"limit" doc:"Max lines to return (0 ⇒ server default)"`
+	IssueNumber int    `path:"issueNumber" doc:"GitHub issue number of the Task"`
 }
 
-type generateTasksInput struct {
+type getOutput struct {
+	Body *TaskDetail
+}
+
+type issueActionInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	IssueNumber int    `path:"issueNumber" doc:"GitHub issue number of the Task"`
 }
 
-type regenerateTaskBodyInput struct {
-	humakit.OrgScopedInput
-	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
-	TaskID      string `path:"taskId" doc:"ComponentTask UUID"`
-}
+type emptyOutput struct{}
 
-type taskListOutput struct{ Body []models.ComponentTask }
-type taskOutput struct{ Body *models.ComponentTask }
-type tasksOutput struct{ Body *models.Tasks }
-type taskStatusOutput struct{ Body *TaskStatusResponse }
-type dispatchResultsOutput struct{ Body []contracts.DispatchResult }
-type dispatchResultOutput struct{ Body contracts.DispatchResult }
-type progressOutput struct{ Body *contracts.ProgressResponse }
+// RegisterTask registers the Task surface (plan / list / get / execute / hold)
+// on the code-first Huma API. Org is derived from the verified token
+// (humakit.OrgScopedInput) — a cross-org request is unrepresentable.
+func RegisterTask(api huma.API, reads *Reads, commands *Commands, plan *PlanService) {
+	huma.Register(api, huma.Operation{
+		OperationID: "plan-tasks",
+		Method:      http.MethodPost,
+		Path:        "/projects/{projectName}/tasks/plan",
+		Summary:     "Plan implementation Tasks (SSE — raw StreamPart frames + [DONE])",
+		Tags:        []string{"Tasks"},
+		Security:    humakit.SecurityUserJWT,
+	}, func(ctx context.Context, in *planInput) (*huma.StreamResponse, error) {
+		if plan == nil {
+			return nil, huma.Error503ServiceUnavailable("planning not configured")
+		}
+		session, err := plan.StartPlan(ctx, in.OrgHandle, in.ProjectName)
+		if err != nil {
+			return nil, mapPlanError(err)
+		}
+		return &huma.StreamResponse{Body: humakit.SSEBody(session.Stream)}, nil
+	})
 
-// TaskStatusResponse extends the per-task GET payload with the build run's
-// per-step task list, so the console's pipeline strip can render without an
-// extra round-trip. The task fields are inlined alongside a separate buildSteps
-// slice — design §5.2.
-type TaskStatusResponse struct {
-	Task       *models.ComponentTask    `json:"task"`
-	BuildSteps []models.WorkflowRunTask `json:"buildSteps,omitempty"`
-}
-
-// RegisterTask registers the task feature's org-scoped, non-streaming HTTP
-// operations on the Huma API. It is the code-first replacement for the
-// org-scoped half of registerTaskRoutes (api/task_routes.go): same paths,
-// methods, params, and auth posture, with the spec generated from the typed
-// inputs/outputs.
-//
-// Deps mirror exactly what these handlers call (read from task_controller.go):
-//   - svc         TaskService            — list/get/status/exec
-//   - dispatchSvc TaskDispatcher         — dispatch + retry
-//   - progressSvc ProgressReader         — agent/build progress polling
-//   - ocClient    openchoreo.ComponentClient — build-run steps for GetTaskStatus
-//
-// Registered here INCLUDING the SSE streams: generate-tasks +
-// regenerate-task-body use huma.StreamResponse (raw huma.Context writer for
-// text/event-stream).
-//
-// SKIPPED here (not registered by this func):
-//   - the runner-facing Task-JWT routes (skills, credentials/refresh) —
-//     registered on the outer mux in api/app.go, not org-scoped, handled
-//     separately.
-func RegisterTask(
-	api huma.API,
-	svc TaskService,
-	dispatchSvc TaskDispatcher,
-	progressSvc ProgressReader,
-	ocClient openchoreo.ComponentClient,
-) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-tasks",
 		Method:      http.MethodGet,
 		Path:        "/projects/{projectName}/tasks",
-		Summary:     "List a project's tasks",
+		Summary:     "List a project's Tasks (live GitHub ⋈ executions → derived status)",
 		Tags:        []string{"Tasks"},
 		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *listTasksInput) (*taskListOutput, error) {
-		tasks, err := svc.ListTasks(ctx, in.OrgHandle, in.ProjectName)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to list tasks")
+	}, func(ctx context.Context, in *listInput) (*listOutput, error) {
+		if reads == nil {
+			return nil, huma.Error503ServiceUnavailable("tasks not configured")
 		}
-		return &taskListOutput{Body: tasks}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-generated-tasks",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/tasks/generated",
-		Summary:     "Get a project's generated tasks",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *listTasksInput) (*tasksOutput, error) {
-		tasks, err := svc.GetTasks(ctx, in.OrgHandle, in.ProjectName)
+		views, err := reads.List(ctx, in.OrgHandle, in.ProjectName, in.State)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to get tasks")
+			return nil, mapReadError(err)
 		}
-		// nil → serialized as null, mirroring the legacy nil-body 200.
-		return &tasksOutput{Body: tasks}, nil
+		return &listOutput{Body: views}, nil
 	})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "get-task",
 		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/tasks/{taskId}",
-		Summary:     "Get a task",
+		Path:        "/projects/{projectName}/tasks/{issueNumber}",
+		Summary:     "Get one Task with its full Execution history",
 		Tags:        []string{"Tasks"},
 		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *taskByIDInput) (*taskOutput, error) {
-		task, err := svc.GetTaskScoped(ctx, in.OrgHandle, in.TaskID)
+	}, func(ctx context.Context, in *getInput) (*getOutput, error) {
+		if reads == nil {
+			return nil, huma.Error503ServiceUnavailable("tasks not configured")
+		}
+		detail, err := reads.Get(ctx, in.OrgHandle, in.ProjectName, in.IssueNumber)
 		if err != nil {
-			if errors.Is(err, ErrTaskNotFound) {
-				return nil, huma.Error404NotFound("task not found")
-			}
-			return nil, huma.Error500InternalServerError("failed to get task")
+			return nil, mapReadError(err)
 		}
-		return &taskOutput{Body: task}, nil
+		return &getOutput{Body: detail}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "get-task-status",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/tasks/{taskId}/status",
-		Summary:     "Get a task's status with build-run steps",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *taskByIDInput) (*taskStatusOutput, error) {
-		task, err := svc.GetTaskScoped(ctx, in.OrgHandle, in.TaskID)
-		if err != nil {
-			if errors.Is(err, ErrTaskNotFound) {
-				return nil, huma.Error404NotFound("task not found")
-			}
-			return nil, huma.Error500InternalServerError("failed to get task")
+		OperationID:   "execute-task",
+		Method:        http.MethodPost,
+		Path:          "/projects/{projectName}/tasks/{issueNumber}/execute",
+		Summary:       "Stamp aep:execute and dispatch through the funnel (async)",
+		Tags:          []string{"Tasks"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusAccepted,
+	}, func(ctx context.Context, in *issueActionInput) (*emptyOutput, error) {
+		if commands == nil {
+			return nil, huma.Error503ServiceUnavailable("tasks not configured")
 		}
-		resp := TaskStatusResponse{Task: task}
-		// Only fetch build steps while the task is actively building; once the
-		// run is terminal the steps are frozen.
-		if task.Status == string(models.TaskStatusBuilding) && task.LastBuildRunName != "" && ocClient != nil {
-			if run, rerr := ocClient.GetWorkflowRun(ctx, task.OrgID, task.LastBuildRunName); rerr == nil && run != nil {
-				resp.BuildSteps = run.Tasks
-			}
+		if err := commands.Execute(ctx, in.OrgHandle, in.ProjectName, in.IssueNumber); err != nil {
+			return nil, mapCommandError(err)
 		}
-		return &taskStatusOutput{Body: &resp}, nil
+		return &emptyOutput{}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "dispatch-tasks",
-		Method:      http.MethodPost,
-		Path:        "/projects/{projectName}/tasks/dispatch",
-		Summary:     "Dispatch a project's tasks to the coding agent",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *listTasksInput) (*dispatchResultsOutput, error) {
-		if dispatchSvc == nil {
-			return nil, huma.Error503ServiceUnavailable("dispatch service not configured")
+		OperationID:   "hold-task",
+		Method:        http.MethodPost,
+		Path:          "/projects/{projectName}/tasks/{issueNumber}/hold",
+		Summary:       "Set the aep:hold label (level-triggered; idempotent)",
+		Tags:          []string{"Tasks"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusNoContent,
+	}, func(ctx context.Context, in *issueActionInput) (*emptyOutput, error) {
+		if commands == nil {
+			return nil, huma.Error503ServiceUnavailable("tasks not configured")
 		}
-		results, err := dispatchSvc.DispatchTasks(ctx, in.OrgHandle, in.ProjectName)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to dispatch tasks")
+		if err := commands.Hold(ctx, in.OrgHandle, in.ProjectName, in.IssueNumber); err != nil {
+			return nil, mapCommandError(err)
 		}
-		return &dispatchResultsOutput{Body: results}, nil
+		return &emptyOutput{}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "retry-task",
-		Method:      http.MethodPost,
-		Path:        "/projects/{projectName}/tasks/{taskId}/retry",
-		Summary:     "Retry a failed task",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *taskByIDInput) (*dispatchResultOutput, error) {
-		if dispatchSvc == nil {
-			return nil, huma.Error503ServiceUnavailable("dispatch service not configured")
+		OperationID:   "unhold-task",
+		Method:        http.MethodDelete,
+		Path:          "/projects/{projectName}/tasks/{issueNumber}/hold",
+		Summary:       "Remove the aep:hold label and re-evaluate (idempotent)",
+		Tags:          []string{"Tasks"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusNoContent,
+	}, func(ctx context.Context, in *issueActionInput) (*emptyOutput, error) {
+		if commands == nil {
+			return nil, huma.Error503ServiceUnavailable("tasks not configured")
 		}
-		// Org-scoped pre-check 404s on a cross-org/unknown {taskId} before work.
-		if _, err := svc.GetTaskScoped(ctx, in.OrgHandle, in.TaskID); err != nil {
-			if errors.Is(err, ErrTaskNotFound) {
-				return nil, huma.Error404NotFound("task not found")
-			}
-			return nil, huma.Error500InternalServerError("failed to get task")
+		if err := commands.Unhold(ctx, in.OrgHandle, in.ProjectName, in.IssueNumber); err != nil {
+			return nil, mapCommandError(err)
 		}
-		res, err := dispatchSvc.RetryTask(ctx, in.TaskID)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to retry task")
-		}
-		return &dispatchResultOutput{Body: res}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-task-agent-progress",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/tasks/{taskId}/progress/agent",
-		Summary:     "Poll a task's coding-agent progress",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *taskProgressInput) (*progressOutput, error) {
-		if progressSvc == nil {
-			return nil, huma.Error503ServiceUnavailable("progress_unavailable")
-		}
-		// Org-scoped pre-check 404s on a cross-org/unknown {taskId} before
-		// reading another org's coding-agent progress.
-		if err := assertTaskInOrgHuma(ctx, svc, in.OrgHandle, in.TaskID); err != nil {
-			return nil, err
-		}
-		sinceMillis, _ := strconv.ParseInt(in.SinceMillis, 10, 64)
-		limit, _ := strconv.Atoi(in.Limit)
-		resp, err := progressSvc.GetAgentProgress(ctx, in.TaskID, sinceMillis, limit)
-		if err != nil {
-			return nil, mapProgressError(err)
-		}
-		return &progressOutput{Body: resp}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-task-build-progress",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/tasks/{taskId}/progress/build",
-		Summary:     "Poll a task's build progress",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *taskProgressInput) (*progressOutput, error) {
-		if progressSvc == nil {
-			return nil, huma.Error503ServiceUnavailable("progress_unavailable")
-		}
-		if err := assertTaskInOrgHuma(ctx, svc, in.OrgHandle, in.TaskID); err != nil {
-			return nil, err
-		}
-		sinceMillis, _ := strconv.ParseInt(in.SinceMillis, 10, 64)
-		resp, err := progressSvc.GetBuildProgress(ctx, in.TaskID, sinceMillis)
-		if err != nil {
-			return nil, mapProgressError(err)
-		}
-		return &progressOutput{Body: resp}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "generate-tasks",
-		Method:      http.MethodPost,
-		Path:        "/projects/{projectName}/tasks/generate",
-		Summary:     "Generate a project's tasks (tech-lead agent, SSE stream)",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *generateTasksInput) (*huma.StreamResponse, error) {
-		return &huma.StreamResponse{Body: func(hctx huma.Context) {
-			hctx.SetHeader("Content-Type", "text/event-stream")
-			hctx.SetHeader("Cache-Control", "no-cache")
-			hctx.SetHeader("Connection", "keep-alive")
-			hctx.SetHeader("X-Accel-Buffering", "no")
-			hctx.SetHeader("x-vercel-ai-ui-message-stream", "v1")
-			hctx.SetStatus(http.StatusOK)
-			w := hctx.BodyWriter()
-			flush := func() {
-				if f, ok := w.(http.Flusher); ok {
-					f.Flush()
-				}
-			}
-			flush()
-			// Stream errors are surfaced as UI message-stream error frames by the
-			// service after headers are sent; the HTTP status cannot change here.
-			_ = svc.StreamGenerateTasks(hctx.Context(), in.OrgHandle, in.ProjectName, w, flush)
-		}}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "regenerate-task-body",
-		Method:      http.MethodPost,
-		Path:        "/projects/{projectName}/tasks/{taskId}/regenerate-body",
-		Summary:     "Regenerate a single task's body (Phase 2 detail, SSE stream)",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *regenerateTaskBodyInput) (*huma.StreamResponse, error) {
-		// Org-scoped pre-check 404s on a cross-org/unknown {taskId} before any
-		// stream is started (closes the by-UUID IDOR on this operator route).
-		if _, err := svc.GetTaskScoped(ctx, in.OrgHandle, in.TaskID); err != nil {
-			if errors.Is(err, ErrTaskNotFound) {
-				return nil, huma.Error404NotFound("task not found")
-			}
-			return nil, huma.Error500InternalServerError("failed to get task")
-		}
-		return &huma.StreamResponse{Body: func(hctx huma.Context) {
-			hctx.SetHeader("Content-Type", "text/event-stream")
-			hctx.SetHeader("Cache-Control", "no-cache")
-			hctx.SetHeader("Connection", "keep-alive")
-			hctx.SetHeader("X-Accel-Buffering", "no")
-			hctx.SetHeader("x-vercel-ai-ui-message-stream", "v1")
-			hctx.SetStatus(http.StatusOK)
-			w := hctx.BodyWriter()
-			flush := func() {
-				if f, ok := w.(http.Flusher); ok {
-					f.Flush()
-				}
-			}
-			flush()
-			// Stream errors are surfaced as UI message-stream error frames by the
-			// service after headers are sent; the HTTP status cannot change here.
-			_ = svc.RegenerateTaskBody(hctx.Context(), in.TaskID, w, flush)
-		}}, nil
+		return &emptyOutput{}, nil
 	})
 }
 
-// assertTaskInOrgHuma verifies the caller's token org actually owns
-// {taskId} before a progress handler reads it by bare UUID — the Huma
-// counterpart of (*taskController).assertTaskInOrg. Returns nil to proceed; a
-// 404 on a cross-org/unknown task (no existence leak), a 500 on a load error.
-func assertTaskInOrgHuma(ctx context.Context, svc TaskService, orgHandle, taskID string) error {
-	if _, err := svc.GetTaskScoped(ctx, orgHandle, taskID); err != nil {
-		if errors.Is(err, ErrTaskNotFound) {
-			return huma.Error404NotFound("task not found")
-		}
-		return huma.Error500InternalServerError("failed to get task")
+func mapPlanError(err error) error {
+	if mapped, ok := humakit.MapAgentsUpstreamError(err, map[int]error{
+		http.StatusConflict: &planInProgressError{Code: "plan_in_progress"},
+	}); ok {
+		return mapped
 	}
-	return nil
+	switch {
+	case errors.Is(err, ErrPlanInProgress):
+		return &planInProgressError{Code: "plan_in_progress"}
+	case errors.Is(err, ErrNoApprovedDesign):
+		return huma.Error400BadRequest(ErrNoApprovedDesign.Error())
+	case errors.Is(err, ErrNoAnthropicKey):
+		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
+	case errors.Is(err, ErrProjectRepoNotFound):
+		return huma.Error404NotFound(ErrProjectRepoNotFound.Error())
+	default:
+		return huma.Error500InternalServerError("internal error")
+	}
 }
 
-// mapProgressError mirrors writeProgressError: ErrTaskNotFound → 404,
-// contracts.ErrProgressUnavailable → 503, anything else → 500.
-func mapProgressError(err error) error {
+func mapReadError(err error) error {
 	switch {
 	case errors.Is(err, ErrTaskNotFound):
 		return huma.Error404NotFound("task not found")
-	case errors.Is(err, contracts.ErrProgressUnavailable):
-		return huma.Error503ServiceUnavailable("progress_unavailable")
+	case errors.Is(err, ErrProjectRepoNotFound):
+		return huma.Error404NotFound(ErrProjectRepoNotFound.Error())
 	default:
-		return huma.Error500InternalServerError("progress failed")
+		return huma.Error500InternalServerError("internal error")
+	}
+}
+
+func mapCommandError(err error) error {
+	switch {
+	case errors.Is(err, ErrTaskNotFound):
+		return huma.Error404NotFound("task not found")
+	case errors.Is(err, ErrProjectRepoNotFound):
+		return huma.Error404NotFound(ErrProjectRepoNotFound.Error())
+	case errors.Is(err, ErrIssueClosed):
+		return huma.Error409Conflict("issue is closed")
+	default:
+		return huma.Error500InternalServerError("internal error")
 	}
 }

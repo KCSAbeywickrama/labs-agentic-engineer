@@ -127,7 +127,7 @@ test("skills: agent loads a skill, applies an edit; toolsUsed scores, loadSkill 
     },
   };
   const model = mockModel([
-    { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { name: "component-architecture" } },
+    { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { names: ["component-architecture"] } },
     {
       kind: "toolCall",
       toolCallId: "c1",

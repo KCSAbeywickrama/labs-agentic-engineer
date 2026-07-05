@@ -41,22 +41,40 @@ export interface StreamTurnOptions {
 }
 
 /**
+ * How a parsed stream ended: `"done"` — the server's `[DONE]` sentinel arrived
+ * (a complete stream); `"eof"` — the byte stream ended WITHOUT `[DONE]` (the
+ * connection died mid-turn; whatever was folded so far is incomplete).
+ */
+export type SseStreamEnd = "done" | "eof";
+
+/**
  * The raw frame parser, extracted so a caller that owns its own `fetch` (e.g. a
  * browser that must add auth headers, a custom request body shape, and its own
  * pre-stream HTTP-status error mapping) folds the SAME wire through ONE
  * definition instead of reimplementing the buffered `data:`/`[DONE]` loop.
  * Yields each `StreamPart` until `[DONE]`; skips keep-alive comment frames.
+ *
+ * The generator's RETURN value reports how the stream ended (`SseStreamEnd`).
+ * `for await` consumers ignore it — a caller that must distinguish a complete
+ * stream from a mid-turn disconnect iterates manually:
+ *
+ *   const it = parseSseStream(body)[Symbol.asyncIterator]();
+ *   while (true) {
+ *     const r = await it.next();
+ *     if (r.done) { const end = r.value; break; }  // "done" | "eof"
+ *     fold(r.value);
+ *   }
  */
 export async function* parseSseStream(
   body: ReadableStream<Uint8Array>,
-): AsyncIterable<StreamPart> {
+): AsyncGenerator<StreamPart, SseStreamEnd> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) return "eof";
     buffer += decoder.decode(value, { stream: true });
 
     // Frames are delimited by a blank line.
@@ -66,8 +84,19 @@ export async function* parseSseStream(
       buffer = buffer.slice(sep + 2);
       if (!frame.startsWith("data:")) continue;
       const data = frame.slice("data:".length).trim();
-      if (data === SSE_DONE) return;
-      yield JSON.parse(data) as StreamPart;
+      if (data === SSE_DONE) return "done";
+      // A frame that doesn't parse is a truncation remnant (the BFF closes a
+      // partial in-flight frame with a blank line before its synthetic error
+      // frame when the upstream dies). Wire frames are single-line JSON, so
+      // nothing legitimate is skipped — and the error/[DONE] frames that
+      // follow (or the "eof" return) carry the failure signal.
+      let part: StreamPart;
+      try {
+        part = JSON.parse(data) as StreamPart;
+      } catch {
+        continue;
+      }
+      yield part;
     }
   }
 }

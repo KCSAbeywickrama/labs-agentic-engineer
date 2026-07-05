@@ -8,12 +8,18 @@ description: Use when creating or editing an openapi.yaml for a service componen
 Every `service` component gets one spec at
 `specs/design/components/<name>/openapi.yaml`, authored as **OpenAPI 3.0.3**.
 
-Coverage is checklist-driven, not vibes: walk the component's **Capabilities**
-and **Data model** sections in `specs/design/design.md` and give every
-capability its resource(s) and every entity its schema. A capability with no
-endpoint is a defect. Commonly dropped when consolidating services: audit
-trail/logs, user & role management, notification preferences, reporting/
-analytics — check for each explicitly before finishing.
+Coverage is checklist-driven, not vibes: walk `requirements.md` against the
+component's `design.json` responsibility, and give every capability the
+requirements assign to THIS component its resource(s) and every core entity
+its schema. A capability with no endpoint is a defect. Commonly dropped when
+consolidating services: audit trail/logs, user & role management, notification
+preferences, reporting/analytics — check for each explicitly before finishing.
+
+**Keep the spec COMPACT.** Complete coverage, minimal prose: a short `summary`
+per operation and a one-line `description` per response — no multi-sentence
+descriptions, no `example`/`examples` blocks, no speculative endpoints the
+requirements don't imply. Schemas carry the required fields plus the few core
+properties that define the entity — not every conceivable attribute.
 
 For resource taxonomy (collection/atomic/controller), URI grammar, HTTP-method
 semantics, and a full worked example, read

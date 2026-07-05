@@ -29,6 +29,7 @@
 
 import { z } from "zod";
 import type { ComponentDesign } from "./contracts/component-design.js";
+import type { Equal } from "./type-equal.js";
 
 const componentConnectionSchema = z.object({
   to: z.string().min(1),
@@ -50,8 +51,6 @@ export const componentDesignSchema = z.strictObject({
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).
-type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const _drift: Equal<z.infer<typeof componentDesignSchema>, ComponentDesign> = true;
 void _drift;
 

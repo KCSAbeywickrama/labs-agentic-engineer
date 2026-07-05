@@ -36,7 +36,7 @@ import (
 // consume them. Only Name is meaningful here (tag naming keys off it); the SHA
 // is the annotated tag object, unused by the naming logic.
 func (s *artifactService) fetchTagNames(ctx context.Context, rc repoCoords) ([]gitrepo.TagInfo, error) {
-	refs, err := s.git.GitData().ListMatchingRefs(ctx, rc.owner, rc.name, rc.cred, "tags/v")
+	refs, err := s.git.GitData().ListMatchingRefs(ctx, rc.Owner, rc.Name, rc.Cred, "tags/v")
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (s *artifactService) createAnnotatedTagViaAPI(
 	parentN int,
 	kind string,
 ) error {
-	author, _ := s.git.ResolveSaveIdentities(rc.cred)
+	author, _ := s.git.ResolveSaveIdentities(rc.Cred)
 	gh := s.git.GitData()
 	return retryOnTagCollision(ctx, func() error {
 		// Recompute the target name on each attempt so collisions push us forward.
@@ -83,7 +83,7 @@ func (s *artifactService) createAnnotatedTagViaAPI(
 			ver, name := nextRequirementsTag(*tags)
 			*nextN, *tagName = ver, name
 		}
-		tagObjSHA, err := gh.CreateTagObject(ctx, rc.owner, rc.name, rc.cred, gitrepo.CreateTagObjectRequest{
+		tagObjSHA, err := gh.CreateTagObject(ctx, rc.Owner, rc.Name, rc.Cred, gitrepo.CreateTagObjectRequest{
 			Tag:     *tagName,
 			Message: tagBody,
 			Object:  commitSHA,
@@ -93,7 +93,7 @@ func (s *artifactService) createAnnotatedTagViaAPI(
 		if err != nil {
 			return fmt.Errorf("create tag object: %w", err)
 		}
-		if err := gh.CreateTagRef(ctx, rc.owner, rc.name, rc.cred, *tagName, tagObjSHA); err != nil {
+		if err := gh.CreateTagRef(ctx, rc.Owner, rc.Name, rc.Cred, *tagName, tagObjSHA); err != nil {
 			return err // may be wrapped ErrTagAlreadyExists — retried
 		}
 		return nil
@@ -123,11 +123,11 @@ func (s *artifactService) revertSubtreeToTag(
 		if err != nil {
 			return nil, fmt.Errorf("resolve tag %s: %w", tag, err)
 		}
-		tcommit, err := gh.GetCommit(ctx, rc.owner, rc.name, rc.cred, commitSHA)
+		tcommit, err := gh.GetCommit(ctx, rc.Owner, rc.Name, rc.Cred, commitSHA)
 		if err != nil {
 			return nil, fmt.Errorf("get tag commit: %w", err)
 		}
-		ttree, err := gh.GetTree(ctx, rc.owner, rc.name, rc.cred, tcommit.TreeSHA, true)
+		ttree, err := gh.GetTree(ctx, rc.Owner, rc.Name, rc.Cred, tcommit.TreeSHA, true)
 		if err != nil {
 			return nil, fmt.Errorf("get tag tree: %w", err)
 		}
@@ -138,19 +138,19 @@ func (s *artifactService) revertSubtreeToTag(
 		}
 	}
 
-	author, committer := s.git.ResolveSaveIdentities(rc.cred)
+	author, committer := s.git.ResolveSaveIdentities(rc.Cred)
 	bucketKey := repo.OrgID + ":" + repo.ProjectID
 
 	err := retryOnCASConflict(ctx, bucketKey, func() error {
-		head, ferr := gh.GetRef(ctx, rc.owner, rc.name, rc.cred, "heads/"+rc.branch)
+		head, ferr := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
 		if ferr != nil {
 			return fmt.Errorf("get ref: %w", ferr)
 		}
-		hcommit, ferr := gh.GetCommit(ctx, rc.owner, rc.name, rc.cred, head)
+		hcommit, ferr := gh.GetCommit(ctx, rc.Owner, rc.Name, rc.Cred, head)
 		if ferr != nil {
 			return fmt.Errorf("get commit: %w", ferr)
 		}
-		htree, ferr := gh.GetTree(ctx, rc.owner, rc.name, rc.cred, hcommit.TreeSHA, true)
+		htree, ferr := gh.GetTree(ctx, rc.Owner, rc.Name, rc.Cred, hcommit.TreeSHA, true)
 		if ferr != nil {
 			return fmt.Errorf("get tree: %w", ferr)
 		}
@@ -177,11 +177,11 @@ func (s *artifactService) revertSubtreeToTag(
 			return nil // already at the target — no commit needed
 		}
 
-		newTree, ferr := gh.CreateTree(ctx, rc.owner, rc.name, rc.cred, hcommit.TreeSHA, entries)
+		newTree, ferr := gh.CreateTree(ctx, rc.Owner, rc.Name, rc.Cred, hcommit.TreeSHA, entries)
 		if ferr != nil {
 			return fmt.Errorf("create tree: %w", ferr)
 		}
-		newCommit, ferr := gh.CreateCommit(ctx, rc.owner, rc.name, rc.cred, gitrepo.CreateCommitRequest{
+		newCommit, ferr := gh.CreateCommit(ctx, rc.Owner, rc.Name, rc.Cred, gitrepo.CreateCommitRequest{
 			Message:   message,
 			TreeSHA:   newTree,
 			Parents:   []string{head},
@@ -191,7 +191,7 @@ func (s *artifactService) revertSubtreeToTag(
 		if ferr != nil {
 			return fmt.Errorf("create commit: %w", ferr)
 		}
-		return gh.UpdateRef(ctx, rc.owner, rc.name, rc.cred, "heads/"+rc.branch, newCommit, false)
+		return gh.UpdateRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch, newCommit, false)
 	})
 	if err != nil {
 		if errors.Is(err, ErrConflictBudgetExhausted) {

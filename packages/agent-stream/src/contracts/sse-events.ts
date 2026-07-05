@@ -144,20 +144,32 @@ export interface Skill {
   references?: Record<string, string>;
 }
 
-/** The `loadSkill` tool input. WIRE source of truth; drift-guarded in `tool.ts`. */
+/**
+ * The `loadSkill` tool input. WIRE source of truth; drift-guarded in `tool.ts`.
+ * Takes ALL the skills a turn needs in one call — batching keeps skill loading
+ * to a single agent step instead of one step per skill.
+ */
 export interface LoadSkillInput {
+  names: string[];
+}
+
+/** One resolved skill body inside a `loadSkill` result. */
+export interface LoadedSkill {
   name: string;
+  content: string;
+  /** Reference paths for `loadSkillReference` — the body says when each is worth reading. */
+  references?: string[];
 }
 
 /**
- * The `loadSkill` tool result. Success carries the body; a miss carries the
- * available names so the model self-corrects in one round-trip (cf. NOT_FOUND).
- * `references` (when present) lists the skill's reference paths for
- * `loadSkillReference` — the body tells the agent when each is worth reading.
+ * The `loadSkill` tool result. `ok: false` still carries every skill that DID
+ * resolve plus the missing names and the available catalog, so the model
+ * self-corrects in one round-trip (cf. NOT_FOUND) by re-calling for the
+ * corrected missing names only.
  */
 export type LoadSkillResult =
-  | { ok: true; name: string; content: string; references?: string[] }
-  | { ok: false; name: string; error: string; available: string[] };
+  | { ok: true; skills: LoadedSkill[] }
+  | { ok: false; error: string; skills: LoadedSkill[]; missing: string[]; available: string[] };
 
 /** The `loadSkillReference` tool input. WIRE source of truth; drift-guarded in `tool.ts`. */
 export interface LoadSkillReferenceInput {
@@ -217,6 +229,25 @@ export interface TurnRequest {
    * no catalog and no `loadSkill` tool (byte-identical to a skill-free turn).
    */
   skills?: Skill[];
+  /**
+   * Which domain tool set to register (tasks-github-native §9.3). `files`
+   * (default, and identical to an absent value) registers the file-mutation
+   * tools — nothing changes for the generation flows. `task-plan` registers the
+   * `planTask`/`updateTask` tools instead (no file tools); `files` then carries
+   * READ-ONLY context (spec/design bundle + existing-Task renderings), nothing
+   * mutates it. See `contracts/task-tools.ts`.
+   */
+  toolset?: Toolset;
+}
+
+/** The registrable tool sets a turn may request (`TurnRequest.toolset`). */
+export const TOOLSETS = ["files", "task-plan"] as const;
+
+export type Toolset = (typeof TOOLSETS)[number];
+
+/** Runtime guard for an untrusted `toolset` value (the server's pre-stream 400 check). */
+export function isToolset(v: unknown): v is Toolset {
+  return (TOOLSETS as readonly unknown[]).includes(v);
 }
 
 // --- The emitted event catalog ----------------------------------------------

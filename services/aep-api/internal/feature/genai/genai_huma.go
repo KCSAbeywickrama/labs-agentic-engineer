@@ -25,7 +25,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
@@ -106,24 +105,12 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 		if err != nil {
 			return nil, mapTurnError(err)
 		}
-		return &huma.StreamResponse{Body: func(hctx huma.Context) {
-			hctx.SetHeader("Content-Type", "text/event-stream")
-			hctx.SetHeader("Cache-Control", "no-cache")
-			hctx.SetHeader("Connection", "keep-alive")
-			hctx.SetHeader("X-Accel-Buffering", "no")
-			hctx.SetStatus(http.StatusOK)
-			w := hctx.BodyWriter()
-			flush := func() {
-				if f, ok := w.(http.Flusher); ok {
-					f.Flush()
-				}
-			}
-			flush()
+		return &huma.StreamResponse{Body: humakit.SSEBody(func(w io.Writer, flush func()) {
 			defer body.Close()
 			// Verbatim passthrough — frames, `: keep-alive` comments and [DONE]
 			// flow through unchanged; the BFF injects and folds nothing.
 			passThrough(w, body, flush)
-		}}, nil
+		})}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -144,6 +131,16 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 
 // passThrough copies the upstream SSE body to the client writer, flushing after
 // every chunk so frames and keep-alives are not buffered behind ingress.
+//
+// A clean upstream EOF passes through verbatim. Either way the response ends
+// WITHOUT the [DONE] sentinel when the upstream died mid-turn — that missing
+// sentinel is how the client's fold detects truncation (and salvages the
+// partial). A mid-stream READ failure additionally appends a blank line (it
+// terminates the possibly-partial in-flight frame so clients skip the
+// unparseable remnant) and an SSE comment naming the cause — visible in
+// captures/logs, invisible to parsers. Deliberately NOT a synthetic error
+// frame: an in-band `error` means "the agent failed" and makes the client
+// discard the fold as a hard failure, which would throw away salvageable work.
 func passThrough(w io.Writer, r io.Reader, flush func()) {
 	buf := make([]byte, 16*1024)
 	for {
@@ -155,6 +152,10 @@ func passThrough(w io.Writer, r io.Reader, flush func()) {
 			flush()
 		}
 		if rerr != nil {
+			if rerr != io.EOF {
+				_, _ = io.WriteString(w, "\n\n: upstream-error\n\n")
+				flush()
+			}
 			return
 		}
 	}
@@ -163,16 +164,11 @@ func passThrough(w io.Writer, r io.Reader, flush func()) {
 // mapTurnError maps pre-stream failures to a BFF status. Upstream statuses map
 // per §12.2: 409 → 409 turn_in_progress, 413 → 413, 400/500 → 502.
 func mapTurnError(err error) error {
-	var ue *agentsvc.UpstreamError
-	if errors.As(err, &ue) {
-		switch ue.StatusCode {
-		case http.StatusConflict:
-			return &turnInProgressError{Code: "turn_in_progress"}
-		case http.StatusRequestEntityTooLarge:
-			return &statusError{status: http.StatusRequestEntityTooLarge, Message: "request too large"}
-		default:
-			return huma.Error502BadGateway("agents service error")
-		}
+	if mapped, ok := humakit.MapAgentsUpstreamError(err, map[int]error{
+		http.StatusConflict:              &turnInProgressError{Code: "turn_in_progress"},
+		http.StatusRequestEntityTooLarge: &statusError{status: http.StatusRequestEntityTooLarge, Message: "request too large"},
+	}); ok {
+		return mapped
 	}
 	switch {
 	case errors.Is(err, ErrProjectRepoNotFound):
@@ -199,9 +195,8 @@ func mapRehydrateError(err error) error {
 	case errors.Is(err, ErrInvalidConversationID):
 		return huma.Error400BadRequest("invalid conversation id")
 	default:
-		var ue *agentsvc.UpstreamError
-		if errors.As(err, &ue) {
-			return huma.Error502BadGateway("agents service error")
+		if mapped, ok := humakit.MapAgentsUpstreamError(err, nil); ok {
+			return mapped
 		}
 		return huma.Error500InternalServerError("internal error")
 	}

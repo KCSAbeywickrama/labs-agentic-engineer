@@ -5,3 +5,6 @@
 # The PUBLIC spec is committed at packages/contracts/api/v1/openapi.yaml.
 # root .gitignore already ignores build/; kept here to self-document.
 /build/
+
+# Coverage profile from `make cover` — local artifact, not committed.
+/coverage.out

@@ -16,11 +16,10 @@
 
 // Package github is the GitHub implementation of gitrepo's provider ports.
 //
-// A single *Client satisfies gitrepo.Host — the REST surface (repo/issue/
-// webhook/git-data/app-installation) here in client.go + artifacts.go, and the
-// Projects-v2 GraphQL surface (gitrepo.BoardOps) folded inside as an
-// implementation detail (projects_v2.go). REST-vs-GraphQL therefore never leaks
-// past the port; wiring holds one gitrepo.Host, not two clients.
+// A single *Client satisfies gitrepo.Host — the REST surface (repo / issue /
+// pull-request / webhook / git-data / app-installation) in client.go +
+// artifacts.go. GitHub Projects v2 is dropped (tasks-github-native §4): Tasks
+// are plain GitHub issues, so there is no GraphQL board surface.
 //
 // This is the only place in the codebase that builds Authorization: Bearer
 // headers (authHeaders / the App-JWT and pat paths). Selected by GIT_PROVIDER
@@ -35,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	urlpkg "net/url"
 	"strings"
 	"time"
 
@@ -42,19 +42,13 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
-// Client is the GitHub host client. It merges the REST client and the
-// Projects-v2 GraphQL client onto one value (one http.Client, one auth path) so
-// gitrepo.Host is served by a single implementation. Stateless; concurrent
-// calls are safe.
+// Client is the GitHub host client — one http.Client, one auth path, serving
+// gitrepo.Host as a single implementation. Stateless; concurrent calls are safe.
 type Client struct {
 	httpClient *http.Client
 	// apiBase is the GitHub REST API root, default "https://api.github.com".
 	// Overridable only via WithAPIBase (a test seam).
 	apiBase string
-	// graphqlEndpoint is the Projects-v2 GraphQL URL, default
-	// githubGraphQLEndpoint. Overridable only via WithGraphQLEndpoint (a test
-	// seam mirroring WithAPIBase on the REST surface).
-	graphqlEndpoint string
 }
 
 // Option configures the client at construction. Production wiring passes no
@@ -68,18 +62,11 @@ func WithAPIBase(base string) Option {
 	return func(c *Client) { c.apiBase = strings.TrimRight(base, "/") }
 }
 
-// WithGraphQLEndpoint overrides the GraphQL endpoint. TEST SEAM only — lets
-// tests point the real client at an httptest fake. Not wired in production.
-func WithGraphQLEndpoint(url string) Option {
-	return func(c *Client) { c.graphqlEndpoint = url }
-}
-
 // NewClient builds the GitHub host client. Production wiring passes no options.
 func NewClient(opts ...Option) gitrepo.Host {
 	c := &Client{
-		httpClient:      &http.Client{Timeout: 30 * time.Second},
-		apiBase:         "https://api.github.com",
-		graphqlEndpoint: githubGraphQLEndpoint,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		apiBase:    "https://api.github.com",
 	}
 	for _, o := range opts {
 		o(c)
@@ -102,6 +89,81 @@ func authHeaders(ctx context.Context, req *http.Request, cred credentials.Creden
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	return nil
+}
+
+// doJSON owns the request loop shared by the JSON verb methods: marshal the
+// payload (nil ⇒ no body), build the request, attach auth headers, execute,
+// and enforce okStatuses. A disallowed status returns
+// "github <label> failed (status %d): <body>"; when out is non-nil the OK
+// response body is unmarshalled into it.
+func (c *Client) doJSON(ctx context.Context, method, url, label string, cred credentials.Credential, payload, out any, okStatuses ...int) error {
+	var reqBody io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(b)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	if err := authHeaders(ctx, httpReq, cred); err != nil {
+		return err
+	}
+	if payload != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("github API request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	ok := false
+	for _, s := range okStatuses {
+		if resp.StatusCode == s {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("github %s failed (status %d): %s", label, resp.StatusCode, string(respBody))
+	}
+	if out != nil {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+	}
+	return nil
+}
+
+// getJSON performs an authenticated GET, requires 200, and decodes the body
+// into out. Any other status returns *gitrepo.HTTPStatusError so callers can
+// branch on the code (404 vs 5xx).
+func (c *Client) getJSON(ctx context.Context, url string, cred credentials.Credential, out any) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	if err := authHeaders(ctx, httpReq, cred); err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("github API request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return &gitrepo.HTTPStatusError{StatusCode: resp.StatusCode, Body: string(respBody), URL: url}
+	}
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
 	return nil
 }
 
@@ -309,32 +371,31 @@ func (c *Client) CloseIssue(ctx context.Context, owner, repo string, cred creden
 }
 
 func (c *Client) EditIssueBody(ctx context.Context, owner, repo string, cred credentials.Credential, number int, body string) error {
-	payload := map[string]string{"body": body}
-	reqBody, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	if err := authHeaders(ctx, httpReq, cred); err != nil {
-		return err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	return c.doJSON(ctx, http.MethodPatch, url, "issue edit", cred, map[string]string{"body": body}, nil, http.StatusOK)
+}
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("github API request: %w", err)
+// EditIssueTitle replaces the issue title via PATCH /issues/{number}. Used by
+// the plan tap's updateTask handler when a planned Task is renamed.
+func (c *Client) EditIssueTitle(ctx context.Context, owner, repo string, cred credentials.Credential, number int, title string) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPatch, url, "issue title edit", cred, map[string]string{"title": title}, nil, http.StatusOK)
+}
+
+// GetPullRequest returns the live state of a pull request (GET /pulls/{n}) — the
+// sweep's PR-state reconciliation input (docs/design/tasks-github-native.md §5:
+// PR state is native GitHub truth healed by the sweep when a webhook is missed).
+func (c *Client) GetPullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) (*gitrepo.PullRequestState, error) {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/pulls/%d", owner, repo, number)
+	var raw struct {
+		State          string `json:"state"` // "open" | "closed"
+		Merged         bool   `json:"merged"`
+		MergeCommitSHA string `json:"merge_commit_sha"`
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		return nil
+	if err := c.getJSON(ctx, url, cred, &raw); err != nil {
+		return nil, err
 	}
-	respBody, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("github issue edit failed (status %d): %s", resp.StatusCode, string(respBody))
+	return &gitrepo.PullRequestState{State: raw.State, Merged: raw.Merged, MergeCommitSHA: raw.MergeCommitSHA}, nil
 }
 
 func (c *Client) CommentIssue(ctx context.Context, owner, repo string, cred credentials.Credential, number int, body string) error {
@@ -426,6 +487,93 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo string, cred creden
 	return issues, nil
 }
 
+// AddIssueLabels adds labels to an existing issue via POST
+// /repos/{owner}/{repo}/issues/{number}/labels. GitHub merges them with the
+// issue's current labels (adding a label already present is a no-op). Used to
+// stamp aep:status/* projection and aep:attention flags. 200 is success.
+func (c *Client) AddIssueLabels(ctx context.Context, owner, repo string, cred credentials.Credential, number int, labels []string) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d/labels", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPost, url, "add issue labels", cred, map[string][]string{"labels": labels}, nil, http.StatusOK)
+}
+
+// RemoveIssueLabel removes one label from an issue via DELETE
+// /repos/{owner}/{repo}/issues/{number}/labels/{name}. The label name is
+// path-escaped (aep:status/* contains ':' and '/'). A 404 is treated as success
+// — the label is already absent, which is the desired post-state (idempotent).
+// Used to consume the aep:execute command label and clear stale projections.
+func (c *Client) RemoveIssueLabel(ctx context.Context, owner, repo string, cred credentials.Credential, number int, label string) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d/labels/%s", owner, repo, number, urlpkg.PathEscape(label))
+	// 404 is success: the label is already absent, the desired post-state.
+	return c.doJSON(ctx, http.MethodDelete, url, "remove issue label", cred, nil, nil, http.StatusOK, http.StatusNotFound)
+}
+
+// SetIssueLabels replaces the issue's entire label set via PUT
+// /repos/{owner}/{repo}/issues/{number}/labels. Unlike AddIssueLabels this is
+// authoritative — labels absent from the slice are removed. 200 is success.
+func (c *Client) SetIssueLabels(ctx context.Context, owner, repo string, cred credentials.Credential, number int, labels []string) error {
+	// Never send a nil slice — GitHub then leaves labels unchanged rather than
+	// clearing them; an explicit empty array clears.
+	if labels == nil {
+		labels = []string{}
+	}
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d/labels", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPut, url, "set issue labels", cred, map[string][]string{"labels": labels}, nil, http.StatusOK)
+}
+
+// compareFilesCap is GitHub's per-response cap on the compare endpoint's files
+// list (the endpoint returns at most 300 files and does not page them). A full
+// page signals the diff is truncated (CompareResult.Truncated).
+const compareFilesCap = 300
+
+// CompareRefs returns the file-level diff between two refs via GET
+// /repos/{owner}/{repo}/compare/{base}...{head}. base/head may be branch names,
+// tags, or SHAs. Used for the plan-turn lineage diff (§6): the delta between a
+// Task's lineage tag and the current tag. GitHub caps the files list at
+// compareFilesCap without paging it, so the result's Truncated flag reports when
+// the diff is partial.
+func (c *Client) CompareRefs(ctx context.Context, owner, repo string, cred credentials.Credential, base, head string) (*gitrepo.CompareResult, error) {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/compare/%s...%s",
+		owner, repo, urlpkg.PathEscape(base), urlpkg.PathEscape(head))
+	var raw struct {
+		Status       string `json:"status"`
+		AheadBy      int    `json:"ahead_by"`
+		BehindBy     int    `json:"behind_by"`
+		TotalCommits int    `json:"total_commits"`
+		Files        []struct {
+			Filename  string `json:"filename"`
+			Status    string `json:"status"`
+			Additions int    `json:"additions"`
+			Deletions int    `json:"deletions"`
+			Changes   int    `json:"changes"`
+			Patch     string `json:"patch"`
+		} `json:"files"`
+	}
+	if err := c.getJSON(ctx, url, cred, &raw); err != nil {
+		return nil, err
+	}
+	out := &gitrepo.CompareResult{
+		Status:       raw.Status,
+		AheadBy:      raw.AheadBy,
+		BehindBy:     raw.BehindBy,
+		TotalCommits: raw.TotalCommits,
+		// GitHub caps the compare files list at compareFilesCap and does not
+		// page it; a full page means the diff is (almost certainly) truncated.
+		Truncated: len(raw.Files) >= compareFilesCap,
+		Files:     make([]gitrepo.ChangedFile, 0, len(raw.Files)),
+	}
+	for _, f := range raw.Files {
+		out.Files = append(out.Files, gitrepo.ChangedFile{
+			Filename:  f.Filename,
+			Status:    f.Status,
+			Additions: f.Additions,
+			Deletions: f.Deletions,
+			Changes:   f.Changes,
+			Patch:     f.Patch,
+		})
+	}
+	return out, nil
+}
+
 func (c *Client) RegisterWebhook(ctx context.Context, owner, repo string, cred credentials.Credential, deliveryURL, hmacSecret string, events []string) (int64, error) {
 	payload := map[string]any{
 		"name":   "web",
@@ -506,6 +654,16 @@ func (c *Client) findHookByURL(ctx context.Context, owner, repo string, cred cre
 		}
 	}
 	return 0, fmt.Errorf("hook for url %s not found", deliveryURL)
+}
+
+// UpdateWebhookEvents replaces the subscribed event list of an existing repo
+// webhook via PATCH /repos/{owner}/{repo}/hooks/{id}. Needed for the §9.2
+// cutover: RegisterWebhook's already-exists path returns a pre-existing hook
+// without touching its events, so a hook created before "issues" joined the
+// subscription must be PATCHed to add it. 200 is success.
+func (c *Client) UpdateWebhookEvents(ctx context.Context, owner, repo string, cred credentials.Credential, hookID int64, events []string) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/hooks/%d", owner, repo, hookID)
+	return c.doJSON(ctx, http.MethodPatch, url, "update webhook events", cred, map[string]any{"events": events}, nil, http.StatusOK)
 }
 
 // GetUser performs GET /user using the credential's token. Returns

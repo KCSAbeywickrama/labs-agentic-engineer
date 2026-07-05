@@ -26,7 +26,9 @@ import (
 
 // RefreshResponse is what the workspace credential helper consumes. The
 // shape is identical for long-lived PATs and short-lived App tokens —
-// only the ExpiresAt differs.
+// only the ExpiresAt differs. The `taskId` JSON field name is wire contract
+// with the runner's anti-misroute tripwire — since the §9.2 re-key it carries
+// the EXECUTION id the refresh was scoped to.
 type RefreshResponse struct {
 	Token     string               `json:"token"`
 	ExpiresAt time.Time            `json:"expiresAt"`
@@ -35,14 +37,14 @@ type RefreshResponse struct {
 }
 
 // CredentialsRefreshService returns a fresh GitHub token + identity for the
-// task named in a verified per-task Task JWT.
+// execution named in a verified runner bearer.
 //
-// The Task JWT is verified at the controller layer via JWKS-backed RS256
-// (jwtassertion). Its claims (taskID, ocOrgID) are trusted because the
-// signature originates from the BFF's RSA private key — the JWT itself
-// carries all the org context needed.
+// The bearer is verified at the edge via auth.ExecutionScopedInput (JWKS-backed
+// RS256 Task-JWT or publisher-cc). Its claims are trusted because the signature
+// originates from the BFF's RSA private key (or the platform IDP) — the token
+// itself carries all the org context needed.
 type CredentialsRefreshService interface {
-	Refresh(ctx context.Context, taskID, ocOrgID string) (*RefreshResponse, error)
+	Refresh(ctx context.Context, executionID, ocOrgID string) (*RefreshResponse, error)
 }
 
 type credentialsRefreshService struct {
@@ -54,7 +56,7 @@ func NewCredentialsRefreshService(resolver credentials.Resolver) CredentialsRefr
 	return &credentialsRefreshService{resolver: resolver}
 }
 
-func (s *credentialsRefreshService) Refresh(ctx context.Context, taskID, ocOrgID string) (*RefreshResponse, error) {
+func (s *credentialsRefreshService) Refresh(ctx context.Context, executionID, ocOrgID string) (*RefreshResponse, error) {
 	cred, err := s.resolver.Resolve(ctx, ocOrgID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve credential: %w", err)
@@ -67,6 +69,6 @@ func (s *credentialsRefreshService) Refresh(ctx context.Context, taskID, ocOrgID
 		Token:     token,
 		ExpiresAt: expiresAt,
 		Identity:  cred.Identity(),
-		TaskID:    taskID,
+		TaskID:    executionID,
 	}, nil
 }

@@ -19,6 +19,7 @@ package requirements
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -82,6 +83,8 @@ func RegisterRequirements(api huma.API, svc RequirementsService) {
 	}, func(ctx context.Context, in *reqProjectInput) (*requirementsBundleOutput, error) {
 		out, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName)
 		if err != nil {
+			slog.ErrorContext(ctx, "requirements save failed",
+				"project", in.ProjectName, "error", err)
 			if errors.Is(err, artifacts.ErrSpecNotFound) {
 				return nil, huma.Error404NotFound("requirements not found")
 			}
@@ -100,6 +103,8 @@ func RegisterRequirements(api huma.API, svc RequirementsService) {
 	}, func(ctx context.Context, in *reqProjectInput) (*requirementsBundleOutput, error) {
 		out, err := svc.DiscardChanges(ctx, in.OrgHandle, in.ProjectName)
 		if err != nil {
+			slog.ErrorContext(ctx, "requirements discard failed",
+				"project", in.ProjectName, "error", err)
 			return nil, huma.Error500InternalServerError("failed to discard requirements")
 		}
 		return &requirementsBundleOutput{Body: out}, nil

@@ -2705,35 +2705,6 @@ paths:
       summary: Run a generation/chat turn (SSE — raw StreamPart frames + [DONE])
       tags:
         - GenAI
-  /projects/{projectName}/design:
-    get:
-      operationId: get-design
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Design"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the assembled design
-      tags:
-        - Design(Deprecated)
   /projects/{projectName}/design/bundle:
     get:
       operationId: get-design-bundle

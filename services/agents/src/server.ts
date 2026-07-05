@@ -39,7 +39,7 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, type Skill, type StreamPart } from "@aep/agent-stream";
+import { SSE_DONE, TOOLSETS, isToolset, type Skill, type StreamPart, type Toolset } from "@aep/agent-stream";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
@@ -101,6 +101,7 @@ export function createApp(deps: CreateAppDeps): Express {
       files?: unknown;
       filesChangedExternally?: unknown;
       skills?: unknown;
+      toolset?: unknown;
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
@@ -143,6 +144,17 @@ export function createApp(deps: CreateAppDeps): Express {
       skills = body.skills;
     }
 
+    // toolset (optional): which domain tools to register (§9.3). Absent → "files"
+    // (byte-identical to today). Reject an unknown value pre-stream as a clean 400.
+    let toolset: Toolset | undefined;
+    if (body.toolset !== undefined) {
+      if (!isToolset(body.toolset)) {
+        res.status(400).json({ error: `toolset must be ${TOOLSETS.map((t) => `"${t}"`).join(" or ")}` });
+        return;
+      }
+      toolset = body.toolset;
+    }
+
     // Build the per-turn model from the request key (fail as a pre-stream 500).
     let model: LanguageModel;
     try {
@@ -182,6 +194,7 @@ export function createApp(deps: CreateAppDeps): Express {
         files,
         filesChangedExternally: body.filesChangedExternally === true,
         ...(skills ? { skills } : {}),
+        ...(toolset ? { toolset } : {}),
         model,
         store: deps.store,
         guard,

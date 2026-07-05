@@ -43,7 +43,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -238,6 +237,21 @@ func (f *fakeIssueSvc) CloseIssue(context.Context, string, string, int, string) 
 func (f *fakeIssueSvc) EditIssueBody(context.Context, string, string, int, string) error {
 	panic("fakeIssueSvc: EditIssueBody not expected")
 }
+func (f *fakeIssueSvc) EditIssueTitle(context.Context, string, string, int, string) error {
+	panic("fakeIssueSvc: EditIssueTitle not expected")
+}
+func (f *fakeIssueSvc) AddLabels(context.Context, string, string, int, []string) error {
+	panic("fakeIssueSvc: AddLabels not expected")
+}
+func (f *fakeIssueSvc) RemoveLabel(context.Context, string, string, int, string) error {
+	panic("fakeIssueSvc: RemoveLabel not expected")
+}
+func (f *fakeIssueSvc) SetLabels(context.Context, string, string, int, []string) error {
+	panic("fakeIssueSvc: SetLabels not expected")
+}
+func (f *fakeIssueSvc) GetPullRequestState(context.Context, string, string, int) (*gitrepo.PullRequestState, error) {
+	panic("fakeIssueSvc: GetPullRequestState not expected")
+}
 
 // credAESKey is a fixed 32-byte AES-256 key for the real credential store. The
 // tested handler paths never read/write it (app-installation Disconnect GCs only
@@ -299,7 +313,7 @@ func loadCred(t *testing.T, db *gorm.DB, ocOrgID string) models.OrgCredential {
 func dispatchInstall(t *testing.T, db *gorm.DB, credSvc *orgcreds.CredentialService, issues gitrepo.IssueService, event, payload string) error {
 	t.Helper()
 	router := NewRouter()
-	RegisterInstallationHandlers(router, db, credSvc, issues, repositories.NewTaskRepository(db))
+	RegisterInstallationHandlers(router, db, credSvc, issues)
 	return router.Dispatch(context.Background(), event, []byte(payload))
 }
 
@@ -345,23 +359,16 @@ func TestInstall_ReposAdded_MergesSelectedRepos(t *testing.T) {
 	}
 }
 
-func TestInstall_ReposRemoved_PhaseAMergesAndConfirmFailSkipsCascade(t *testing.T) {
+func TestInstall_ReposRemoved_PhaseAMergesSelectedRepos(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	credSvc := newInstallCredSvc(t, db)
 	insertAppRow(t, db, "acme", 777, "active", []string{"acme/web", "acme/api"})
 
-	// A repo mapping + a live task under (acme, web): the cascade WOULD abandon it
-	// if GitHub confirmed the removal.
 	if err := repositories.NewRepoRepository(db).Create(context.Background(), &models.GitRepository{
 		OrgID: "acme", ProjectID: "web", Status: "ready", RepoURL: "https://github.com/acme/web.git",
 	}); err != nil {
 		t.Fatalf("seed repo: %v", err)
-	}
-	taskRepo := repositories.NewTaskRepository(db)
-	task := &models.ComponentTask{OrgID: "acme", ProjectID: "web", ComponentName: "svc", Status: string(models.TaskStatusInProgress)}
-	if err := taskRepo.Create(context.Background(), task); err != nil {
-		t.Fatalf("seed task: %v", err)
 	}
 
 	err := dispatchInstall(t, db, credSvc, &fakeIssueSvc{}, "installation_repositories",
@@ -370,72 +377,29 @@ func TestInstall_ReposRemoved_PhaseAMergesAndConfirmFailSkipsCascade(t *testing.
 		t.Fatalf("removed dispatch: %v", err)
 	}
 
-	// Phase A ran: acme/web is gone from selected_repos.
+	// Phase A ran: acme/web is gone from selected_repos. (Tasks are GitHub issues
+	// now — there is no task-abandonment cascade to assert.)
 	for _, r := range loadCred(t, db, "acme").SelectedRepos {
 		if r == "acme/web" {
 			t.Fatal("Phase A must remove acme/web from selected_repos")
 		}
 	}
-	// Safety property: the GitHub confirm leg failed (no-App minter →
-	// ErrAppNotConfigured), so the cascade is SKIPPED — the task is untouched.
-	// A forged/unconfirmable removal must never abandon in-flight work.
-	got, err := taskRepo.GetByID(context.Background(), task.ID)
-	if err != nil {
-		t.Fatalf("reload task: %v", err)
-	}
-	if got.Status != string(models.TaskStatusInProgress) {
-		t.Fatalf("unconfirmed removal must NOT abandon the task, got %q", got.Status)
-	}
 }
 
-func TestInstall_Deleted_CascadesDisconnectAndAbandonsTasks(t *testing.T) {
+func TestInstall_Deleted_FinalizesDisconnect(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	credSvc := newInstallCredSvc(t, db)
-	ctx := context.Background()
 	insertAppRow(t, db, "acme", 555, "active", nil)
-	// A decoy org that shares nothing but must prove the cascade is org-scoped.
-	insertAppRow(t, db, "evil", 556, "active", nil)
-
-	taskRepo := repositories.NewTaskRepository(db)
-	seed := func(org, status string, issue int) string {
-		task := &models.ComponentTask{OrgID: org, ProjectID: "web", ComponentName: "svc", Status: status, IssueNumber: issue}
-		if err := taskRepo.Create(ctx, task); err != nil {
-			t.Fatalf("seed task: %v", err)
-		}
-		return task.ID
-	}
-	pendingID := seed("acme", string(models.TaskStatusPending), 7)
-	deployedID := seed("acme", string(models.TaskStatusDeployed), 8) // terminal — must NOT cascade
-	evilID := seed("evil", string(models.TaskStatusInProgress), 9)   // other org — must NOT cascade
 
 	issues := &fakeIssueSvc{}
 	if err := dispatchInstall(t, db, credSvc, issues, "installation", `{"action":"deleted","installation":{"id":555}}`); err != nil {
 		t.Fatalf("deleted dispatch: %v", err)
 	}
-
-	// The org's credential row is finalized to disconnected (Phase D).
+	// The org's credential row is finalized to disconnected (Phase D). Tasks are
+	// GitHub issues now (no cascade); severing the credential makes them inert.
 	if got := loadCred(t, db, "acme").Status; got != "disconnected" {
 		t.Fatalf("installation.deleted must finalize the row to disconnected, got %q", got)
-	}
-	// The non-terminal task cascaded to abandoned with the installation.deleted cause.
-	pending, _ := taskRepo.GetByID(ctx, pendingID)
-	if pending.Status != string(models.TaskStatusAbandoned) {
-		t.Fatalf("pending task must cascade to abandoned, got %q", pending.Status)
-	}
-	if pending.Cause == nil || *pending.Cause != "installation.deleted" {
-		t.Fatalf("cascade must stamp the installation.deleted cause, got %v", pending.Cause)
-	}
-	// Terminal + other-org tasks are untouched.
-	if deployed, _ := taskRepo.GetByID(ctx, deployedID); deployed.Status != string(models.TaskStatusDeployed) {
-		t.Fatalf("terminal task must be untouched, got %q", deployed.Status)
-	}
-	if ev, _ := taskRepo.GetByID(ctx, evilID); ev.Status != string(models.TaskStatusInProgress) {
-		t.Fatalf("other org's task must NOT be cascaded, got %q", ev.Status)
-	}
-	// A best-effort abandonment comment was posted on the task's issue.
-	if len(issues.comments) != 1 || !strings.Contains(issues.comments[0], "abandoned") {
-		t.Fatalf("expected one abandonment comment, got %v", issues.comments)
 	}
 }
 

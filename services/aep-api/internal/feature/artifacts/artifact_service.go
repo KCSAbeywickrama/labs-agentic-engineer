@@ -84,6 +84,32 @@ const (
 // SaveRequest is the body of POST /artifacts/{kind}/save.
 type SaveRequest struct {
 	Message string `json:"message,omitempty"`
+	// CommitSHA pins the commit the save gates and tags. The publish flow sets
+	// it to the commit its files-apply just created so the save never re-reads
+	// `heads/main` — GitHub's ref reads lag writes by seconds (observed live),
+	// and a stale read here fails the gate or tags the wrong tree. Empty →
+	// resolve HEAD (standalone save with no prior apply).
+	CommitSHA string `json:"commitSha,omitempty"`
+}
+
+// commitSHAPattern is the accepted shape of a caller-provided CommitSHA
+// (abbreviated or full hex object name).
+var commitSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
+
+// resolveSaveCommit returns the commit a save operates on: the caller-provided
+// CommitSHA when set (validated, never a ref read), else the current HEAD.
+func (s *artifactService) resolveSaveCommit(ctx context.Context, rc repoCoords, req SaveRequest) (string, error) {
+	if req.CommitSHA != "" {
+		if !commitSHAPattern.MatchString(req.CommitSHA) {
+			return "", fmt.Errorf("%w: %q is not a commit sha", ErrArtifactPathInvalid, req.CommitSHA)
+		}
+		return req.CommitSHA, nil
+	}
+	head, err := s.headCommit(ctx, rc)
+	if err != nil {
+		return "", fmt.Errorf("get head ref: %w", err)
+	}
+	return head, nil
 }
 
 // RequirementsSaveResult is the response of POST /artifacts/requirements/save.
@@ -248,16 +274,24 @@ func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID
 	if err != nil {
 		return nil, err
 	}
-	head, err := s.headCommit(ctx, rc)
+	head, err := s.resolveSaveCommit(ctx, rc, req)
 	if err != nil {
-		return nil, fmt.Errorf("get head ref: %w", err)
+		return nil, err
 	}
 	files, err := s.readBundleAtCommit(ctx, rc, head, requirementsPrefix, requirementsBundleFilter)
 	if err != nil {
 		return nil, err
 	}
+	// The commit this save gates + tags. pinned=false means it came from a ref
+	// read, which can lag a just-completed apply (compare with the apply's
+	// "files apply committed" line).
+	slog.InfoContext(ctx, "requirements save: head read",
+		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", head,
+		"pinned", req.CommitSHA != "", "files", len(files))
 	// Hard gate: requirements.md must exist.
 	if strings.TrimSpace(files[requirementsMainFile]) == "" {
+		slog.WarnContext(ctx, "requirements save: hard gate failed — requirements.md missing at HEAD",
+			"project", projectID, "commit", head, "files", len(files))
 		return nil, fmt.Errorf("%w: %s/%s missing — populate requirements before saving",
 			ErrArtifactPathInvalid, RequirementsDir, requirementsMainFile)
 	}
@@ -270,6 +304,8 @@ func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID
 	// Unchanged detection: HEAD bundle == latest requirements tag's bundle.
 	if latest := latestRequirementsTag(tags); latest != "" {
 		if tagged, terr := s.readBundleAtTag(ctx, rc, latest, requirementsPrefix, requirementsBundleFilter); terr == nil && trimmedMapsEqual(files, tagged) {
+			slog.InfoContext(ctx, "requirements save: unchanged — HEAD matches latest tag",
+				"project", projectID, "tag", latest, "commit", head)
 			return &RequirementsSaveResult{
 				Status:  "unchanged",
 				Tag:     latest,
@@ -315,8 +351,13 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 	if err != nil {
 		return nil, err
 	}
+	// The HEAD this save is about to gate + tag (see the requirements twin).
+	slog.InfoContext(ctx, "design save: head read",
+		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", head, "files", len(files))
 	// Hard gate: nothing malformed may acquire a tag.
 	if err := validateDesignBundle(files); err != nil {
+		slog.WarnContext(ctx, "design save: hard gate failed",
+			"project", projectID, "commit", head, "files", len(files), "error", err)
 		return nil, err
 	}
 
@@ -326,6 +367,8 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 	}
 	parentN := latestRequirementsVersion(tags)
 	if parentN == 0 {
+		slog.WarnContext(ctx, "design save: no requirements baseline tag",
+			"project", projectID, "tags", len(tags))
 		return nil, ErrNoRequirementsBaseline
 	}
 
@@ -333,6 +376,8 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 	if latestM := latestDesignRevision(tags, parentN); latestM > 0 {
 		latestTag := designTagFor(parentN, latestM)
 		if tagged, terr := s.readBundleAtTag(ctx, rc, latestTag, designPrefix, designBundleFilter); terr == nil && trimmedMapsEqual(files, tagged) {
+			slog.InfoContext(ctx, "design save: unchanged — HEAD matches latest tag",
+				"project", projectID, "tag", latestTag, "commit", head)
 			return &DesignSaveResult{
 				Status:              "unchanged",
 				Tag:                 latestTag,

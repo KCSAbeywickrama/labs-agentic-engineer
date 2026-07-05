@@ -19,7 +19,6 @@ package genai
 import (
 	"embed"
 	"io/fs"
-	"strings"
 	"sync"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
@@ -56,8 +55,11 @@ var coreSkillsByUseCase = map[string][]string{
 // choice (§2).
 var steeringByUseCase = map[string]string{
 	useCaseRequirementsGenerate: "\n\nGenerate the requirements document at specs/requirements/requirements.md from the direction above. Write clear, well-structured markdown.",
-	useCaseRequirementsChat:     "\n\nApply the requested change to the current requirements draft, or answer the question if no change is requested.",
-	useCaseDesignGenerate:       "\n\nGenerate the design under specs/design/ from the approved requirements above. Consult the high-level-architecture skill for the design tree, and produce each component's design.json, plus openapi.yaml for services and wireframes.dsl for web apps as the skills direct.",
+	useCaseRequirementsChat: "\n\nApply the requested change to the current requirements draft, or answer the question if no change is requested. " +
+		"Requirements files live under specs/requirements/ (main document: specs/requirements/requirements.md) — when creating a file that does not exist yet, always use that full path, never a bare filename.",
+	useCaseDesignGenerate: "\n\nGenerate the design under specs/design/ from the approved requirements above. Load every relevant skill in ONE loadSkill call, then emit files in EXACTLY this order: " +
+		"(1) a concise specs/design/design.md, (2) EVERY component's design.json — they drive the live architecture diagram, so all of them come before any other artifact, " +
+		"(3) wireframes.dsl per web app, (4) openapi.yaml per service LAST. The skills define each artifact.",
 }
 
 var (
@@ -102,7 +104,7 @@ func loadFlowSkills() (map[string]agentsvc.Skill, error) {
 			}
 			flowSkillsByName[name] = agentsvc.Skill{
 				Name:        name,
-				Description: frontmatterDescription(string(body)),
+				Description: agentsvc.FrontmatterDescription(string(body)),
 				Content:     string(body),
 				References:  refs,
 			}
@@ -128,23 +130,4 @@ func coreSkillsFor(useCase string) ([]agentsvc.Skill, error) {
 		}
 	}
 	return out, nil
-}
-
-// frontmatterDescription extracts the `description:` field from a SKILL.md's
-// leading `---`-fenced YAML frontmatter. Descriptions are single-line in the
-// flow skills, so a full YAML parser is unnecessary.
-func frontmatterDescription(md string) string {
-	lines := strings.Split(md, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return ""
-	}
-	for _, ln := range lines[1:] {
-		if strings.TrimSpace(ln) == "---" {
-			break
-		}
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(ln), "description:"); ok {
-			return strings.TrimSpace(rest)
-		}
-	}
-	return ""
 }

@@ -29,7 +29,8 @@
  */
 
 import type { LanguageModel } from "ai";
-import { createAnthropic } from "@ai-sdk/anthropic";
+import { createAnthropic, type AnthropicLanguageModelOptions } from "@ai-sdk/anthropic";
+import type { ProviderOptions } from "../agents/main/run-turn.js";
 import { config } from "./config.js";
 
 /** Resolved LLM configuration for a single run. */
@@ -52,4 +53,15 @@ export function createModel(cfg: LlmConfig): LanguageModel {
     ...(cfg.baseURL ? { baseURL: cfg.baseURL } : {}),
   });
   return provider(cfg.model ?? config.model);
+}
+
+/**
+ * Provider-specific per-call options, built here so the reasoning-effort knob
+ * (like the provider SDK itself) stays inside this seam. The generic turn loop
+ * passes the returned object through untouched.
+ */
+export function modelProviderOptions(): ProviderOptions {
+  return {
+    anthropic: { effort: config.reasoningEffort } satisfies AnthropicLanguageModelOptions,
+  };
 }

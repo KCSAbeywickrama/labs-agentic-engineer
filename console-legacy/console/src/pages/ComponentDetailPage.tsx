@@ -36,34 +36,9 @@ import {
 import { ArrowLeft, Clock } from '@wso2/oxygen-ui-icons-react';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '../services/api';
-import type { ComponentDefinition, ComponentTask, Project, TaskStatus } from '../services/api';
+import type { ComponentDefinition, TaskView, Project, TaskStatus } from '../services/api';
 import { organizationOverviewPath, projectOverviewPath } from '../lib/paths';
-
-// ---------------------------------------------------------------------------
-// Status helpers
-// ---------------------------------------------------------------------------
-
-const statusColors: Record<string, 'default' | 'primary' | 'warning' | 'success' | 'error'> = {
-  created: 'default',
-  pending: 'default',
-  in_progress: 'warning',
-  implementing: 'warning',
-  completed: 'primary',
-  deployed: 'success',
-  done: 'success',
-  failed: 'error',
-};
-
-const statusLabels: Record<string, string> = {
-  created: 'Created',
-  pending: 'Pending',
-  in_progress: 'Implementing',
-  implementing: 'Implementing',
-  completed: 'Completed',
-  deployed: 'Deployed',
-  done: 'Ready',
-  failed: 'Failed',
-};
+import { displayStatus, IN_FLIGHT_TASK_STATUSES } from '../components/tasks/types';
 
 // ---------------------------------------------------------------------------
 // Pipeline step rendering
@@ -77,14 +52,15 @@ interface PipelineStep {
   state: StepState;
 }
 
-function computePipelineSteps(task: ComponentTask): PipelineStep[] {
+function computePipelineSteps(task: TaskView): PipelineStep[] {
   const steps: PipelineStep[] = [];
 
-  // Phase 0 lifecycle:
   //   pending → in_progress → ready_for_review → merged → building → deployed
   //                                            ↘ rejected
   //                                            ↘ failed (build)
-  const status = task.status;
+  const status = task.derivedStatus;
+  // The failed Execution's `reason` carries the error surfaced in the strip.
+  const errorMessage = task.executions?.build?.reason ?? task.executions?.coding?.reason ?? '';
 
   const stateFor = (atOrPast: TaskStatus[], onlyAt: TaskStatus[] = []): StepState => {
     if (status === 'failed' && onlyAt.includes('building')) return 'failed';
@@ -101,8 +77,8 @@ function computePipelineSteps(task: ComponentTask): PipelineStep[] {
         ? 'Agent is working on the feature branch...'
         : status === 'pending'
           ? 'Waiting to start'
-          : task.errorMessage && status === 'failed'
-            ? task.errorMessage
+          : errorMessage && status === 'failed'
+            ? errorMessage
             : 'Implementation complete',
     state: stateFor(['ready_for_review', 'merged', 'building', 'deployed'], ['in_progress']),
   });
@@ -137,7 +113,7 @@ function computePipelineSteps(task: ComponentTask): PipelineStep[] {
       status === 'building'
         ? 'Building container image...'
         : status === 'failed'
-          ? task.errorMessage || 'Build failed'
+          ? errorMessage || 'Build failed'
           : status === 'deployed'
             ? 'Build succeeded'
             : 'Not started',
@@ -212,7 +188,7 @@ function StepIcon({ state }: { state: StepState }) {
   }
 }
 
-function PipelineStepper({ task }: { task: ComponentTask }) {
+function PipelineStepper({ task }: { task: TaskView }) {
   const steps = computePipelineSteps(task);
 
   return (
@@ -483,7 +459,7 @@ export default function ComponentDetailPage() {
 
   const [project, setProject] = useState<Project | undefined>();
   const [component, setComponent] = useState<ComponentDefinition | undefined>();
-  const [task, setTask] = useState<ComponentTask | undefined>();
+  const [task, setTask] = useState<TaskView | undefined>();
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
@@ -496,7 +472,7 @@ export default function ComponentDetailPage() {
     ]);
     setProject(p);
     setComponent(c);
-    const matchingTask = tasks.find((t) => t.componentName === componentId);
+    const matchingTask = tasks.find((t) => t.component === componentId);
     setTask(matchingTask);
     setLoading(false);
   }, [projectId, componentId, routeOrgId]);
@@ -508,24 +484,19 @@ export default function ComponentDetailPage() {
   // Poll while pipeline is active
   useEffect(() => {
     if (!task) return;
-    const isActive =
-      task.status === 'pending' ||
-      task.status === 'in_progress' ||
-      task.status === 'ready_for_review' ||
-      task.status === 'merged' ||
-      task.status === 'building';
+    const isActive = IN_FLIGHT_TASK_STATUSES.has(task.derivedStatus);
 
     if (isActive && projectId) {
       intervalRef.current = setInterval(async () => {
         const tasks = await api.listTasks(projectId);
-        const match = tasks.find((t) => t.componentName === componentId);
+        const match = tasks.find((t) => t.component === componentId);
         if (match) setTask(match);
       }, 5000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [task?.status, projectId, componentId, routeOrgId]);
+  }, [task?.derivedStatus, projectId, componentId, routeOrgId]);
 
   if (loading) {
     return (
@@ -558,8 +529,9 @@ export default function ComponentDetailPage() {
     );
   }
 
-  const effectiveStatus = task?.status ?? component?.status ?? 'created';
-  const componentName = task?.componentName ?? component?.name ?? componentId ?? '';
+  const effectiveStatus = task?.derivedStatus ?? component?.status ?? 'created';
+  const statusChip = displayStatus(effectiveStatus);
+  const componentName = task?.component ?? component?.name ?? componentId ?? '';
   const techStack = component?.techStack ?? '';
 
   return (
@@ -595,8 +567,8 @@ export default function ComponentDetailPage() {
           <Stack direction="row" spacing={1} sx={{ ml: 'auto' }}>
             {techStack && <Chip label={techStack} variant="outlined" />}
             <Chip
-              label={statusLabels[effectiveStatus] ?? effectiveStatus}
-              color={statusColors[effectiveStatus] ?? 'default'}
+              label={statusChip.label}
+              color={statusChip.color}
             />
           </Stack>
         </Stack>
@@ -610,8 +582,8 @@ export default function ComponentDetailPage() {
             <Clock size={14} opacity={0.5} />
             <Typography variant="body2" color="text.secondary">
               Updated{' '}
-              {(task?.updatedAt ?? component?.updatedAt)
-                ? formatDistanceToNow(new Date(task?.updatedAt ?? component?.updatedAt ?? ''), { addSuffix: true })
+              {component?.updatedAt
+                ? formatDistanceToNow(new Date(component.updatedAt), { addSuffix: true })
                 : 'recently'}
             </Typography>
           </Stack>
@@ -640,8 +612,8 @@ export default function ComponentDetailPage() {
                       </Typography>
                       <Stack direction="row" alignItems="center" gap={1} sx={{ mt: 0.25 }}>
                         <Chip
-                          label={statusLabels[effectiveStatus] ?? effectiveStatus}
-                          color={statusColors[effectiveStatus] ?? 'default'}
+                          label={statusChip.label}
+                          color={statusChip.color}
                           size="small"
                         />
                       </Stack>
@@ -654,8 +626,8 @@ export default function ComponentDetailPage() {
                         Created
                       </Typography>
                       <Typography variant="body2">
-                        {(task?.createdAt ?? component?.createdAt)
-                          ? new Date(task?.createdAt ?? component?.createdAt ?? '').toLocaleDateString()
+                        {component?.createdAt
+                          ? new Date(component.createdAt).toLocaleDateString()
                           : 'Unknown'}
                       </Typography>
                     </Box>
