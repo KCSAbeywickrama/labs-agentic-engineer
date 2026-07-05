@@ -46,6 +46,10 @@ import { setOrgGithubTokenAccessor } from './services/api/orgGithub';
 import { setOrgAnthropicTokenAccessor } from './services/api/orgAnthropic';
 import { setOrgIDPTokenAccessor } from './services/api/orgIDP';
 import { setOrgSkillsTokenAccessor } from './services/api/orgSkills';
+import { setExternalResourcesTokenAccessor } from './services/api/externalResources';
+import { setProvisioningTokenAccessor } from './services/api/provisioning';
+import { setSpecsTokenAccessor } from './services/api/specs';
+import { setAccessRequestsTokenAccessor } from './services/api/accessRequests';
 import { useBillingOrg } from './hooks/useBillingOrg';
 import { organizationOverviewPath } from './lib/paths';
 import { resolveOuHandle } from './utils/orgClaims';
@@ -81,6 +85,10 @@ export function App() {
     setOrgAnthropicTokenAccessor(getAccessToken);
     setOrgIDPTokenAccessor(getAccessToken);
     setOrgSkillsTokenAccessor(getAccessToken);
+    setExternalResourcesTokenAccessor(getAccessToken);
+    setProvisioningTokenAccessor(getAccessToken);
+    setSpecsTokenAccessor(getAccessToken);
+    setAccessRequestsTokenAccessor(getAccessToken);
   }, [getAccessToken]);
 
   // Triggers server-side org/subscription provisioning so downstream entitlement checks pass.
