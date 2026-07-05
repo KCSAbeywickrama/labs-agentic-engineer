@@ -148,6 +148,37 @@ test("malformed tool descriptor (missing name) is skipped, valid siblings still 
   }
 });
 
+test("isError:true from tools/call throws (surfaces as a tool-error, not a swallowed success)", async () => {
+  const { baseUrl, close } = await fakeServer((_req, res, body) => {
+    const { id, method } = body as { id: unknown; method: string };
+    if (method === "tools/list") {
+      jsonRpcOk(res, id, {
+        tools: [
+          {
+            name: "get_external_resource_schema",
+            description: "schema lookup",
+            inputSchema: { type: "object", properties: { name: { type: "string" } } },
+          },
+        ],
+      });
+    } else if (method === "tools/call") {
+      jsonRpcOk(res, id, { content: [{ type: "text", text: "missing required argument: name" }], isError: true });
+    } else {
+      jsonRpcOk(res, id, {});
+    }
+  });
+  try {
+    const tools = await loadMcpTools({ url: baseUrl, token: "tok" });
+    await assert.rejects(
+      tools.get_external_resource_schema!.execute!({}, {} as never),
+      /missing required argument: name/,
+      "an isError:true result must reject, not resolve with the error text as if it were a normal answer",
+    );
+  } finally {
+    await close();
+  }
+});
+
 test("server unreachable degrades to an empty tool set, never throws", async () => {
   // Port 1 is never listening — fetch rejects (ECONNREFUSED-equivalent).
   const tools = await loadMcpTools({ url: "http://127.0.0.1:1/mcp", token: "tok" });

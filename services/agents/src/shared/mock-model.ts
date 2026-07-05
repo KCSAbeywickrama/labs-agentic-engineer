@@ -29,7 +29,6 @@
  */
 
 import { MockLanguageModelV4, convertArrayToReadableStream, simulateReadableStream } from "ai/test";
-import type { LanguageModel } from "ai";
 
 // Derive the provider stream-result + part types from the mock itself.
 type DoStreamArg = NonNullable<NonNullable<ConstructorParameters<typeof MockLanguageModelV4>[0]>["doStream"]>;
@@ -80,7 +79,13 @@ function streamForStep(step: MockStep, i: number, delayMs?: number): StreamResul
   return { stream };
 }
 
-/** Build a mock `LanguageModel` that replays `steps`, one provider stream per model call. */
-export function mockModel(steps: MockStep[], opts: { delayMs?: number } = {}): LanguageModel {
+/**
+ * Build a mock `LanguageModel` that replays `steps`, one provider stream per
+ * model call. Returns the concrete `MockLanguageModelV4` (not the widened
+ * `LanguageModel` union) so callers can inspect `.doStreamCalls` — the exact
+ * `tools`/`prompt` the caller handed the model for that step — to assert on
+ * the ASSEMBLED tool set/instructions rather than only on side effects.
+ */
+export function mockModel(steps: MockStep[], opts: { delayMs?: number } = {}): MockLanguageModelV4 {
   return new MockLanguageModelV4({ doStream: steps.map((s, i) => streamForStep(s, i, opts.delayMs)) });
 }

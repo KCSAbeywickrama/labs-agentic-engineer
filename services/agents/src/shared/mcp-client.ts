@@ -116,6 +116,16 @@ export async function loadMcpTools(config: McpConfig): Promise<ToolSet> {
             .filter((c) => c?.type === "text" && typeof c.text === "string")
             .map((c) => c.text)
             .join("\n");
+          // isError:true is the MCP server flagging the CALL itself as a failure
+          // (bad args, downstream error, etc.) — distinct from a normal result
+          // that merely reports "not found". Throwing here (rather than
+          // returning the text as an ordinary success) mirrors the AI SDK's
+          // tool-error convention: `executeToolCall` catches a thrown error and
+          // emits a `tool-error` stream part, so the model sees a flagged
+          // failure instead of misreading it as a successful lookup.
+          if (result?.isError) {
+            throw new Error(text || `mcp tool ${d.name} reported an error`);
+          }
           return text || JSON.stringify(result ?? {});
         },
       });
