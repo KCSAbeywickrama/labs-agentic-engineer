@@ -41,6 +41,7 @@ import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { registerTechLead } from "./agents/techlead/route.js";
 import { registerArchitect } from "./agents/architect/route.js";
+import { registerDocumentGeneration } from "./agents/document-generation/route.js";
 import { config } from "./shared/config.js";
 
 export interface CreateAppDeps {
@@ -73,6 +74,13 @@ export function createApp(deps: CreateAppDeps): Express {
   // speaks. Legacy-contract parity (same SSE frames the BFF parses); see
   // architect/route.ts.
   registerArchitect(app, { model: deps.model });
+
+  // Generic document-generation route (requirements-from-prompt,
+  // functional/non-functional-requirements, user-stories, wireframes,
+  // domain-model, component-design, component-openapi) — the S2S wire
+  // surface aep-api's StreamDocumentGeneration speaks. Legacy-contract
+  // parity; see document-generation/route.ts.
+  registerDocumentGeneration(app, { model: deps.model });
 
   app.post("/conversations/:id/turns", async (req: Request, res: Response) => {
     const id = req.params.id as string;
