@@ -431,6 +431,18 @@ func (c *resourceClient) ApplyResource(ctx context.Context, namespace string, r 
 					"dependency names must be unique per project across kinds; a differing kind means two deps collided on one name",
 				r.Metadata.Name, formatTypeRef(existing.Spec.Type), formatTypeRef(r.Spec.Type))
 		}
+		// No-op reconcile: when the desired spec is identical to the existing one
+		// there is nothing to propagate and the controller will never cut a new
+		// release — a PUT + wait-for-CHANGE would hang until the poll timeout
+		// (caught live in E2E: an idempotent re-save of unchanged values stalled
+		// the /values endpoint). Report create-equivalent semantics instead:
+		// strip the release so callers wait-for-nonempty, which their first poll
+		// satisfies with the existing (still-correct) release.
+		if specsEqual(existing.Spec, r.Spec) {
+			out := *existing
+			out.Status = nil
+			return &out, nil
+		}
 		put := &Resource{}
 		if _, perr := c.do(ctx, http.MethodPut, nsBase(namespace)+"/resources/"+r.Metadata.Name, r, put); perr != nil {
 			return nil, fmt.Errorf("apply resource %q: conflict but update failed: %w", r.Metadata.Name, perr)
@@ -447,6 +459,18 @@ func (c *resourceClient) ApplyResource(ctx context.Context, namespace string, r 
 	default:
 		return nil, fmt.Errorf("apply resource %q: %w", r.Metadata.Name, err)
 	}
+}
+
+// specsEqual compares two ResourceSpecs by canonical JSON (Go's json.Marshal
+// sorts map keys), normalising the type-ref Kind default first so an implicit
+// "ResourceType" compares equal to an explicit one. Used to detect no-op
+// reconciles on the ApplyResource 409 path.
+func specsEqual(a, b ResourceSpec) bool {
+	a.Type.Kind = resourceTypeRefKind(a.Type.Kind)
+	b.Type.Kind = resourceTypeRefKind(b.Type.Kind)
+	aj, aerr := json.Marshal(a)
+	bj, berr := json.Marshal(b)
+	return aerr == nil && berr == nil && bytes.Equal(aj, bj)
 }
 
 // resourceTypeRefKind normalises an empty Kind to its OC default ("ResourceType")

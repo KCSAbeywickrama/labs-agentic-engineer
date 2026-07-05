@@ -249,6 +249,58 @@ func TestApplyResource_ConflictMismatchedTypeErrors(t *testing.T) {
 	}
 }
 
+// TestApplyResource_ConflictUnchangedSpecSkipsPUT proves the no-op reconcile
+// path: a 409 whose existing spec is IDENTICAL to the desired one issues no PUT
+// (nothing to propagate) and reports create-equivalent semantics — an empty
+// ReleaseName — so callers wait-for-nonempty and pin the EXISTING release on
+// their first poll instead of waiting for a release change the controller will
+// never cut. Regression: an idempotent re-save of unchanged external-resource
+// values hung the /values endpoint for the full poll timeout (caught live in
+// E2E scenario S1).
+func TestApplyResource_ConflictUnchangedSpecSkipsPUT(t *testing.T) {
+	var puts int32
+	existingSpec := ResourceSpec{
+		Type: ResourceTypeRef{Kind: "ResourceType", Name: "conn-postgres-v2"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			writeJSON(t, w, http.StatusConflict, map[string]string{"error": "already exists"})
+		case http.MethodGet:
+			// Existing resource: spec identical to desired, release already cut.
+			writeJSON(t, w, http.StatusOK, Resource{
+				Metadata: OCObjectMeta{Name: "proj-conn1"},
+				Spec:     existingSpec,
+				Status:   &ResourceStatus{LatestRelease: &ResourceLatestRelease{Name: "proj-conn1-rel1"}},
+			})
+		case http.MethodPut:
+			atomic.AddInt32(&puts, 1)
+			writeJSON(t, w, http.StatusOK, nil)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestResourceClient(t, srv)
+	desired := &Resource{
+		Metadata: OCObjectMeta{Name: "proj-conn1"},
+		Spec:     existingSpec,
+	}
+	got, err := c.ApplyResource(context.Background(), "wc-abc", desired)
+	if err != nil {
+		t.Fatalf("ApplyResource: %v", err)
+	}
+	if puts != 0 {
+		t.Errorf("must NOT PUT when the spec is unchanged, got %d PUTs", puts)
+	}
+	// Create-equivalent: empty release → callers wait-for-nonempty, which their
+	// first GetResource poll satisfies with the existing (still-correct) release.
+	if ReleaseName(got) != "" {
+		t.Errorf("no-op reconcile must report an empty ReleaseName (create-equivalent), got %q", ReleaseName(got))
+	}
+}
+
 // ---- GetResource --------------------------------------------------------------
 
 func TestGetResource_Success(t *testing.T) {
