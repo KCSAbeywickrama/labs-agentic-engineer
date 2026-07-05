@@ -17,13 +17,13 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { ProjectLayout } from "../features/projects/components/ProjectLayout";
+import { ProjectOverview } from "../features/projects/components/ProjectOverview";
 
-export const Route = createFileRoute("/projects/$projectName")({
-  component: ProjectLayoutRoute,
+export const Route = createFileRoute("/projects/$projectName/")({
+  component: ProjectOverviewRoute,
 });
 
-function ProjectLayoutRoute() {
+function ProjectOverviewRoute() {
   const { projectName } = Route.useParams();
-  return <ProjectLayout projectName={projectName} />;
+  return <ProjectOverview projectName={projectName} />;
 }

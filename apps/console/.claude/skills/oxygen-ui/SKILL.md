@@ -77,6 +77,12 @@ the canonical structure (`references/app-structure.md`, read from the installed 
 5. **Wrap the app root in `OxygenUIThemeProvider`** with a theme.
 6. **Style with theme tokens via `sx`** (`p: 2`, `bgcolor: 'background.paper'`,
    `color: 'text.primary'`) — never hardcode hex colors or pixel spacing.
+7. **Page precedents first.** Before composing ANY page or page-level surface (header/title,
+   listing, detail view, dashboard, login), check whether the sample app already has that
+   page, **read its real source**, and match its composition — compose from primitives only
+   when no page-level precedent exists. Skipping this rebuilds headers and listings from
+   `Box`/`Typography`/`Grid` into pages that don't match the design system; the sample page is
+   the spec. See [Reading the sample app](#reading-the-sample-app).
 
 ## Quick start
 
@@ -193,6 +199,8 @@ existing pattern. Where to look:
 | App shell (Header/Sidebar/Footer/Outlet) | `layouts/AppLayout.tsx` |
 | Login / unauthenticated layout | `layouts/GateLayout.tsx` |
 | Listing page with a table | `pages/Organizations.tsx`, `pages/Projects.tsx` |
+| Project / detail page (title, avatar, back button, repo link) | `pages/ProjectOverview.tsx` |
+| Rows-as-cards listing (card-variant `ListingTable`) | `pages/ProjectOverview.tsx` (MCP Servers section), `pages/Organizations.tsx` |
 | Multi-step form / wizard | `components/ComponentCreate/IntegrationWizard.tsx` |
 | Settings page | `pages/SettingsPage.tsx` |
 | Dashboard / analytics | `pages/Analytics.tsx` |

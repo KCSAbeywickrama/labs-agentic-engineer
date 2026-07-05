@@ -16,14 +16,11 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { ProjectLayout } from "../features/projects/components/ProjectLayout";
+import { projectKeys } from "../../projects/api/keys";
 
-export const Route = createFileRoute("/projects/$projectName")({
-  component: ProjectLayoutRoute,
-});
-
-function ProjectLayoutRoute() {
-  const { projectName } = Route.useParams();
-  return <ProjectLayout projectName={projectName} />;
-}
+// Extends the project cache tree so project-level invalidation reaches the
+// spec bundle too.
+export const specKeys = {
+  bundle: (projectName: string) =>
+    [...projectKeys.detail(projectName), "spec"] as const,
+};

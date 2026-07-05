@@ -17,13 +17,21 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { ProjectLayout } from "../features/projects/components/ProjectLayout";
+import { Rocket } from "@wso2/oxygen-ui-icons-react";
+import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
 
-export const Route = createFileRoute("/projects/$projectName")({
-  component: ProjectLayoutRoute,
+export const Route = createFileRoute("/projects/$projectName/deployments")({
+  component: DeploymentsPlaceholderRoute,
 });
 
-function ProjectLayoutRoute() {
+function DeploymentsPlaceholderRoute() {
   const { projectName } = Route.useParams();
-  return <ProjectLayout projectName={projectName} />;
+  return (
+    <SectionPlaceholder
+      icon={<Rocket size={48} />}
+      title="Deployments is on its way"
+      description="Dev environment state, versions, and URLs — what's running and how it got there. Its own feature issue will land it."
+      projectName={projectName}
+    />
+  );
 }

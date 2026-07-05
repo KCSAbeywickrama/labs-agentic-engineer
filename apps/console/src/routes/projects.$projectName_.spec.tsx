@@ -17,13 +17,16 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { ProjectLayout } from "../features/projects/components/ProjectLayout";
+import { SpecView } from "../features/spec/components/SpecView";
 
-export const Route = createFileRoute("/projects/$projectName")({
-  component: ProjectLayoutRoute,
+// `$projectName_` (trailing underscore) un-nests this route from the
+// /projects/$projectName layout: the spec view is a full-screen workspace
+// without the shared project header (#80).
+export const Route = createFileRoute("/projects/$projectName_/spec")({
+  component: SpecRoute,
 });
 
-function ProjectLayoutRoute() {
+function SpecRoute() {
   const { projectName } = Route.useParams();
-  return <ProjectLayout projectName={projectName} />;
+  return <SpecView projectName={projectName} />;
 }

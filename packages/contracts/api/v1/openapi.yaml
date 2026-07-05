@@ -378,6 +378,11 @@ components:
           type: string
         displayName:
           type: string
+        endpointUrl:
+          description: >-
+            Public URL of the running dev deployment. Populated for web
+            applications only; absent until deployed.
+          type: string
         name:
           type: string
         projectName:
@@ -1458,6 +1463,16 @@ components:
           format: uri
           readOnly: true
           type: string
+        deployStatus:
+          description: >-
+            Result of the latest dev deployment (e.g. in_progress /
+            succeeded / failed); absent when nothing was deployed.
+          type: string
+        deployedVersion:
+          description: >-
+            Version tag currently deployed to the dev environment; absent
+            when nothing deployed.
+          type: string
         designStatus:
           type: string
         hasDesign:
@@ -1474,7 +1489,17 @@ components:
           type: string
         repoUrl:
           type: string
+        specDirty:
+          description: >-
+            True when the spec/design changed after specVersion was
+            published.
+          type: boolean
         specStatus:
+          type: string
+        specVersion:
+          description: >-
+            Latest published spec version tag (e.g. v1); absent when
+            nothing published.
           type: string
       required:
         - phase
@@ -1735,6 +1760,44 @@ components:
         - version
         - contentSha
         - updatedAt
+      type: object
+    SpecBundle:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SpecBundle.json
+          format: uri
+          readOnly: true
+          type: string
+        files:
+          items:
+            $ref: "#/components/schemas/SpecFile"
+          type: array
+      required:
+        - files
+      type: object
+    SpecFile:
+      additionalProperties: false
+      properties:
+        content:
+          description: Raw file content, inline.
+          type: string
+        group:
+          description: Which spec-view section the file belongs to.
+          enum:
+            - requirements
+            - designs
+            - validation
+          type: string
+        path:
+          description: File path within the project's spec tree (e.g. requirements/prd.md).
+          type: string
+      required:
+        - path
+        - group
+        - content
       type: object
     TaskStatusResponse:
       additionalProperties: false
@@ -4074,6 +4137,35 @@ paths:
       summary: Get the requirements bundle at a version tag
       tags:
         - Requirements(Deprecated)
+  /projects/{projectName}/spec:
+    get:
+      operationId: get-project-spec
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecBundle"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the project's spec bundle (requirement, design, and validation files)
+      tags:
+        - Spec
   /projects/{projectName}/status:
     get:
       operationId: get-project-status
