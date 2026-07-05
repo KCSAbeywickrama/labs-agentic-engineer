@@ -82,6 +82,17 @@ export function buildPlanInput(
   projectName: string,
   files: Record<string, string>,
   skills: Skill[],
+  /**
+   * The task-breakdown skill's RAW `SKILL.md` bytes (frontmatter included),
+   * matching what aep-api pushes in production (planner_skill.go reads the
+   * embedded file and ships it untouched). `skills[].content` is the
+   * frontmatter-STRIPPED body used for the `loadSkill` catalog (ADR-0002) —
+   * the wrong bytes for this field — so the caller resolves the raw copy
+   * separately (see `readSkillRaw` in evals/skills.ts) and passes it here.
+   * Falls back to the (stripped) catalog content when absent, e.g. a synthetic
+   * `skills[]` in a test with no backing file on disk.
+   */
+  taskBreakdownRawBody?: string,
 ): { input: TaskPlannerPlanInput; problems: string[] } {
   const slimDesign: SlimDesignComponent[] = [];
   const problems: string[] = [];
@@ -124,7 +135,10 @@ export function buildPlanInput(
           taskBreakdownSkill: {
             name: breakdown.name,
             description: breakdown.description,
-            body: breakdown.content,
+            // Full raw SKILL.md (frontmatter included) — same bytes aep-api
+            // pushes in production. NOT `breakdown.content`, which is the
+            // frontmatter-stripped catalog body (see the param doc above).
+            body: taskBreakdownRawBody ?? breakdown.content,
           },
         }
       : {}),
@@ -148,8 +162,10 @@ export async function runTasksCommand(
   files: Record<string, string>,
   skills: Skill[],
   model: LanguageModel,
+  /** See `buildPlanInput`'s `taskBreakdownRawBody` param. */
+  taskBreakdownRawBody?: string,
 ): Promise<void> {
-  const { input, problems } = buildPlanInput(projectName, files, skills);
+  const { input, problems } = buildPlanInput(projectName, files, skills, taskBreakdownRawBody);
   for (const p of problems) output.write(`  ⚠ skipped ${p}\n`);
 
   if (input.slimDesign.length === 0) {

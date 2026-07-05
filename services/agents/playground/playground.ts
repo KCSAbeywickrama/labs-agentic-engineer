@@ -46,7 +46,7 @@ import { FileBundle } from "../src/agents/main/bundle.js";
 import { applyToolCall } from "../src/agents/main/change.js";
 import type { StreamPart } from "../src/agents/main/stream-types.js";
 import { streamTurn } from "../evals/sse-client.js";
-import { loadRepoSkills } from "../evals/skills.js";
+import { loadRepoSkills, readSkillRaw } from "../evals/skills.js";
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
@@ -137,7 +137,11 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
 /** Run the task-planner planner over the thread's current spec bundle (read-only). */
 async function runTasks(ctx: ChatCtx): Promise<void> {
   const files = readSnapshot(ctx.thread);
-  await runTasksCommand(ctx.thread, files, ctx.skills, ctx.model);
+  // Raw bytes (frontmatter included) — matches what aep-api pushes in
+  // production; `ctx.skills[].content` is frontmatter-stripped (ADR-0002's
+  // `loadSkill` catalog shape), the wrong bytes for this field.
+  const taskBreakdownRawBody = readSkillRaw(SKILLS_DIR, "task-breakdown");
+  await runTasksCommand(ctx.thread, files, ctx.skills, ctx.model, taskBreakdownRawBody);
 }
 
 function printHelp(): void {

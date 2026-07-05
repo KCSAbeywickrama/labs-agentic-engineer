@@ -187,18 +187,25 @@ services:
 
   # ---------------------------------------------------------------------------
   # agents-service — AI BA/Architect/TaskGen/Wireframe agents (Vercel AI SDK).
-  # No ANTHROPIC_API_KEY env: the key is resolved per-call via git-service
-  # (the org's own key, or 503 when the org hasn't connected one — there is
-  # no platform fallback). See docs/design/anthropic-key-dual-token.md §6.4.
+  # The legacy agents-service resolved the Anthropic key per-call via
+  # git-service (the org's own key, or a platform fallback). The new
+  # `@aep/agents` package that now backs this service is a from-scratch
+  # rewrite and has NOT (yet) ported that per-org resolver — it builds its
+  # model ONCE at boot from ANTHROPIC_API_KEY in its own environment (see
+  # services/agents/src/shared/model.ts). AEP_API_URL is wired below for that
+  # follow-up but is unused until the resolver lands.
   # ---------------------------------------------------------------------------
   agents-service:
     build:
       # The new @aep/agents service (was ../services/agents-legacy, now
       # decommissioning). Its Dockerfile reads $PORT (src/main.ts); PORT=3400
       # below keeps aep-api's AGENTS_SERVICE_BASE_URL (http://agents-service:3400)
-      # working unchanged. See services/agents/Dockerfile for the workspace-dep
-      # build-context caveat.
-      context: ../services/agents
+      # working unchanged. Context is the REPO ROOT (not services/agents/)
+      # because the image also needs the sibling workspace packages
+      # (packages/excalidraw-dsl, packages/design-projection) the service
+      # depends on via `workspace:*` — see services/agents/Dockerfile.
+      context: ..
+      dockerfile: services/agents/Dockerfile
     container_name: aep-agents-service
     ports:
       - "3400:3400"
@@ -206,6 +213,11 @@ services:
       PORT: "3400"
       LOG_LEVEL: "debug"
       AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-5}"
+      # Required at boot (createModel builds the model once in main.ts) —
+      # `${ANTHROPIC_API_KEY}` comes from deployments/.env (setup-aep.sh
+      # writes it there). See the comment above: this is a stand-in for the
+      # not-yet-ported per-org resolver.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       # Inbound identity verification — BFF-signed JWT. agents verifies against
       # the BFF JWKS (not Thunder) and reads org from the verified ocOrgId
       # claim; the BFF is the single issuer for S2S identity tokens.
@@ -214,7 +226,8 @@ services:
       JWT_AUDIENCE: "agents-service"
       # Resolve the per-org Anthropic key (or platform fallback) on each call.
       # Points at the merged aep-api which serves the former
-      # /internal/credentials/orgs/{ocOrgId}/anthropic surface.
+      # /internal/credentials/orgs/{ocOrgId}/anthropic surface. Unused until
+      # the per-call resolver is ported (see the comment above).
       AEP_API_URL: "http://aep-api:9090"
     networks:
       - aep
