@@ -17,7 +17,7 @@
  */
 
 /**
- * Tech-lead wire schema — the S2S contract with aep-api. Ported from
+ * Task-planner wire schema — the S2S contract with aep-api. Ported from
  * agents-legacy so the cutover from agents-legacy to this service is a URL
  * swap: aep-api's `internal/clients/agents/client.go` marshals exactly these
  * request shapes, and `internal/feature/task/task_stream.go` parses exactly the
@@ -33,7 +33,7 @@
  *  - The dependency-awareness fields on `SlimDesignComponent` (external /
  *    platform-resource / org-service context) are ADDITIVE and OPTIONAL. The
  *    current aep-api client sends only `{name, componentType, language,
- *    dependsOn}` (buildPlanRequest → TechLeadSlimComponent), so it round-trips
+ *    dependsOn}` (buildPlanRequest → TaskPlannerSlimComponent), so it round-trips
  *    unchanged; when a future aep-api task extends the wire (the "still named
  *    DependsOn — a later task owns that contract" TODO), the planner already
  *    honors the richer context. Same additive posture as the architect `mcp`
@@ -135,15 +135,15 @@ export const PlanArraySchema = z.array(PlanItemSchema);
 
 // Lightweight skill projection shipped to the planner — name + description
 // only. The planner uses these as context for splitting tasks but does not
-// load the bodies (those go to the detail phase via TechLeadDetailItem).
+// load the bodies (those go to the detail phase via TaskPlannerDetailItem).
 export const AttachedSkillSummary = z.object({
   name: z.string(),
   description: z.string(),
 });
 export type AttachedSkillSummary = z.infer<typeof AttachedSkillSummary>;
 
-// Resolved skill body shipped to the tech-lead detail phase. Full SKILL.md
-// content for every skill attached to the project's design. The tech-lead
+// Resolved skill body shipped to the task-planner detail phase. Full SKILL.md
+// content for every skill attached to the project's design. The task-planner
 // inlines these under "Skills active for this project" with "MUST consult"
 // framing — there is no two-tier split at this point because the architect
 // has already attached only the relevant skills.
@@ -155,7 +155,7 @@ export const ResolvedSkill = z.object({
 export type ResolvedSkill = z.infer<typeof ResolvedSkill>;
 
 // Phase 1 input.
-export const TechLeadPlanInput = z.object({
+export const TaskPlannerPlanInput = z.object({
   projectName: z.string(),
   spec: z.string(),
   slimDesign: z.array(SlimDesignComponent),
@@ -166,15 +166,22 @@ export const TechLeadPlanInput = z.object({
   mode: z.enum(["fresh", "incremental"]),
   // Skills attached to this project — name + description only. The
   // planner uses these as context for splitting; bodies arrive in
-  // TechLeadDetailItem.skillsResolved for the detail phase.
+  // TaskPlannerDetailItem.skillsResolved for the detail phase.
   attachedSkills: z.array(AttachedSkillSummary).optional(),
+  // The `task-breakdown` skill body pushed by the caller (aep-api / the
+  // playground). It carries the HOW of decomposition — topological ordering,
+  // the four dependency kinds' gating implications, issue-brief quality — so
+  // the prompt is pure scaffolding (wire contract + output shape). When absent
+  // the prompt falls back to a minimal built-in guidance string so the route
+  // still functions. See skills/task-breakdown/SKILL.md and ADR-0002.
+  taskBreakdownSkill: ResolvedSkill.optional(),
 });
 
-export type TechLeadPlanInput = z.infer<typeof TechLeadPlanInput>;
+export type TaskPlannerPlanInput = z.infer<typeof TaskPlannerPlanInput>;
 
 // Validator diff context — pre-computed by the BFF (task_diff.go) and shipped
 // on the plan request so the validator's coverage rules can fire. Mirrors
-// aep-api's `TechLeadValidatorDiffContext`.
+// aep-api's `TaskPlannerValidatorDiffContext`.
 export const ValidatorDiffContext = z.object({
   added: z.array(z.string()),
   contractAffectedModified: z.array(z.string()),
@@ -182,15 +189,15 @@ export const ValidatorDiffContext = z.object({
 });
 export type ValidatorDiffContext = z.infer<typeof ValidatorDiffContext>;
 
-// Wire body for POST /internal/v1/agents/tech-lead/plan — the plan input plus
-// the optional validator diff context (aep-api's TechLeadPlanRequest).
-export const PlanRequestBody = TechLeadPlanInput.extend({
+// Wire body for POST /internal/v1/agents/task-planner/plan — the plan input plus
+// the optional validator diff context (aep-api's TaskPlannerPlanRequest).
+export const PlanRequestBody = TaskPlannerPlanInput.extend({
   diff: ValidatorDiffContext.optional(),
 });
 export type PlanRequestBody = z.infer<typeof PlanRequestBody>;
 
 // Phase 2 input — one entry per task surviving GH issue creation.
-export const TechLeadDetailItem = z.object({
+export const TaskPlannerDetailItem = z.object({
   taskId: z.string().describe("Persisted DB UUID; round-tripped on the wire."),
   componentName: z.string(),
   title: z.string(),
@@ -207,20 +214,24 @@ export const TechLeadDetailItem = z.object({
     z.object({ title: z.string(), status: z.string() }),
   ),
   // Full bodies of every skill attached to the project's design at
-  // tech-lead detail time. The tech-lead inlines them in the user
+  // task-planner detail time. The task-planner inlines them in the user
   // prompt with "MUST consult" framing.
   skillsResolved: z.array(ResolvedSkill).optional(),
 });
 
-export type TechLeadDetailItem = z.infer<typeof TechLeadDetailItem>;
+export type TaskPlannerDetailItem = z.infer<typeof TaskPlannerDetailItem>;
 
-export const TechLeadDetailInput = z.object({
+export const TaskPlannerDetailInput = z.object({
   projectName: z.string(),
   spec: z.string(),
-  items: z.array(TechLeadDetailItem),
+  items: z.array(TaskPlannerDetailItem),
+  // The `task-breakdown` skill body — pushed once for the whole detail run.
+  // Its "issue brief (detail phase)" guidance shapes each task body. Optional;
+  // absent → the detail prompt's built-in scaffolding still stands.
+  taskBreakdownSkill: ResolvedSkill.optional(),
 });
 
-export type TechLeadDetailInput = z.infer<typeof TechLeadDetailInput>;
+export type TaskPlannerDetailInput = z.infer<typeof TaskPlannerDetailInput>;
 
 // Validator output — one structured issue per problem found in the plan.
 export type PlanIssue = {

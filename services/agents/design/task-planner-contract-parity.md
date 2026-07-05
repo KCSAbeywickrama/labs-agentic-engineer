@@ -1,7 +1,7 @@
-# Tech-lead contract parity (Task E3)
+# Task-planner contract parity (Task E3)
 
-The tech-lead is a **structured-output** agent (not a file-mutation
-conversation). It ships as `src/agents/techlead/{schema,validator,prompt,run,route}.ts`
+The task-planner is a **structured-output** agent (not a file-mutation
+conversation). It ships as `src/agents/taskplanner/{schema,validator,prompt,run,route}.ts`
 and mounts two SSE routes in `createApp` so the cutover from `agents-legacy` is
 a **URL swap** — aep-api keeps posting the same bodies and parsing the same
 frames.
@@ -10,8 +10,8 @@ frames.
 
 | Path (POST) | Request (aep-api `client.go`) | Response frames (aep-api `task_stream.go`) |
 |---|---|---|
-| `/internal/v1/agents/tech-lead/plan` | `PlanRequestBody` = `TechLeadPlanInput` + optional `diff` | `data-plan-item` `{tempId,componentName,title,rationale,dependsOn}` · `data-plan-complete` · `error{scope:"plan",…}` · `[DONE]` |
-| `/internal/v1/agents/tech-lead/detail` | `TechLeadDetailInput` | `data-task-body-delta` `{taskId,delta}` · `data-task-body-complete` `{taskId,body}` · `[DONE]` |
+| `/internal/v1/agents/task-planner/plan` | `PlanRequestBody` = `TaskPlannerPlanInput` + optional `diff` | `data-plan-item` `{tempId,componentName,title,rationale,dependsOn}` · `data-plan-complete` · `error{scope:"plan",…}` · `[DONE]` |
+| `/internal/v1/agents/task-planner/detail` | `TaskPlannerDetailInput` | `data-task-body-delta` `{taskId,delta}` · `data-task-body-complete` `{taskId,body}` · `[DONE]` |
 
 Both stream `text/event-stream` tagged `x-vercel-ai-ui-message-stream: v1`.
 Pre-stream body-validation failures are a plain HTTP 400.
@@ -54,10 +54,10 @@ dev/eval/playground/tests.
 ## Cutover checklist (open items)
 
 - The additive slim-design dependency fields are unused by the live aep-api
-  client today — widening `TechLeadSlimComponent` in `client.go` is a **future
+  client today — widening `TaskPlannerSlimComponent` in `client.go` is a **future
   aep-api task** (the "still named DependsOn — a later task owns that contract"
   TODO). Until then, external/platform-resource gate rationale only appears when
   the caller populates those fields (playground/eval do).
 - JWT verification for `/internal/v1/*` is not yet implemented in this service;
-  when it lands, gate the tech-lead routes with it (parity with legacy's
+  when it lands, gate the task-planner routes with it (parity with legacy's
   `requireOrgId` + `requireAnthropicKey`).

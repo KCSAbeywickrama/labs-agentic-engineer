@@ -39,7 +39,7 @@ import { SSE_DONE, type McpConfig, type Skill } from "./contracts/sse-events.js"
 import type { ConversationStore } from "./store/conversation-store.js";
 import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
-import { registerTechLead } from "./agents/techlead/route.js";
+import { registerTaskPlanner } from "./agents/taskplanner/route.js";
 import { registerArchitect } from "./agents/architect/route.js";
 import { registerDocumentGeneration } from "./agents/document-generation/route.js";
 import { registerDslRender } from "./agents/dsl-render/route.js";
@@ -67,9 +67,9 @@ export function createApp(deps: CreateAppDeps): Express {
   const guard = new TurnGuard(); // one in-flight guard per app (serializes turns per id)
   app.use(express.json({ limit: deps.bodyLimit ?? config.bodyLimit }));
 
-  // Tech-lead structured-output routes (plan + detail) — the S2S wire surface
-  // aep-api's task_stream speaks. Legacy-contract parity; see techlead/route.ts.
-  registerTechLead(app, { model: deps.model });
+  // Task-planner structured-output routes (plan + detail) — the S2S wire surface
+  // aep-api's task_stream speaks. Legacy-contract parity; see taskplanner/route.ts.
+  registerTaskPlanner(app, { model: deps.model });
 
   // Architect route — the S2S wire surface aep-api's StreamGenerateDesign
   // speaks. Legacy-contract parity (same SSE frames the BFF parses); see

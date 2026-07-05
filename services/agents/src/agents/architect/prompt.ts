@@ -191,7 +191,7 @@ ${input.spec}
   // Skills arrive on the request body (the BFF resolves the org catalogue and
   // pushes builtins as full bodies + org skills as a manifest). This service
   // reads them directly off `input` — it has no disk skills-source (mirrors the
-  // tech-lead route's stance). docs/design/skills-repo-storage.md §5.
+  // task-planner route's stance). docs/design/skills-repo-storage.md §5.
   const builtins = input.builtinSkills ?? [];
   const orgSkills = input.orgSkills ?? [];
   const skillsApplied = input.skillsApplied ?? [];
@@ -228,7 +228,7 @@ The following are authored by your organization or imported from the AgentSkills
   if (attached.length > 0) {
     prompt += `## Currently attached skills (on this project)
 
-The following skills are attached to this project's design. These propagate to the tech-lead and the coding agent on every dispatch.
+The following skills are attached to this project's design. These propagate to the task-planner and the coding agent on every dispatch.
 
 ${attached.map((n) => `- ${n}`).join("\n")}
 

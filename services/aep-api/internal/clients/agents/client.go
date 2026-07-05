@@ -113,11 +113,11 @@ type Client interface {
 	// Caller must close.
 	StreamArchitect(ctx context.Context, orgID string, req ArchitectRequest) (io.ReadCloser, error)
 
-	// StreamTechLeadPlan POSTs the planner input to /internal/v1/agents/tech-lead/plan
+	// StreamTechLeadPlan POSTs the planner input to /internal/v1/agents/task-planner/plan
 	// and returns the raw SSE response body.
 	StreamTechLeadPlan(ctx context.Context, orgID string, req TechLeadPlanRequest) (io.ReadCloser, error)
 
-	// StreamTechLeadDetail POSTs N issued tasks to /internal/v1/agents/tech-lead/detail.
+	// StreamTechLeadDetail POSTs N issued tasks to /internal/v1/agents/task-planner/detail.
 	StreamTechLeadDetail(ctx context.Context, orgID string, req TechLeadDetailRequest) (io.ReadCloser, error)
 
 	// StreamRequirementsChat POSTs a chat turn to /internal/v1/agents/requirements-chat
@@ -195,7 +195,7 @@ type ArchitectDesign struct {
 	Components []models.DesignComponent `json:"components"`
 }
 
-// TechLeadPlanRequest is the body sent to /internal/v1/agents/tech-lead/plan. Mirrors
+// TechLeadPlanRequest is the body sent to /internal/v1/agents/task-planner/plan. Mirrors
 // agents/src/agents/tech-lead/schema.ts → TechLeadPlanInput plus the optional
 // validator diff context.
 type TechLeadPlanRequest struct {
@@ -211,6 +211,12 @@ type TechLeadPlanRequest struct {
 	// project's design.md. Name + description only; bodies arrive in
 	// each TechLeadDetailItem.SkillsResolved at the detail phase.
 	AttachedSkills []SkillDescription `json:"attachedSkills,omitempty"`
+	// TaskBreakdownSkill is the `task-breakdown` skill body pushed to the
+	// task-planner. It carries the decomposition judgment (topological
+	// ordering, dependency-kind gating, issue-brief quality) so the agent's
+	// prompt stays pure scaffolding. Sourced from the embedded default; when
+	// nil the agent falls back to its built-in guidance.
+	TaskBreakdownSkill *SkillRecord `json:"taskBreakdownSkill,omitempty"`
 }
 
 type TechLeadSlimComponent struct {
@@ -233,11 +239,14 @@ type TechLeadValidatorDiffContext struct {
 	Removed                  []string `json:"removed"`
 }
 
-// TechLeadDetailRequest is the body sent to /internal/v1/agents/tech-lead/detail.
+// TechLeadDetailRequest is the body sent to /internal/v1/agents/task-planner/detail.
 type TechLeadDetailRequest struct {
 	ProjectName string               `json:"projectName"`
 	Spec        string               `json:"spec"`
 	Items       []TechLeadDetailItem `json:"items"`
+	// TaskBreakdownSkill — the `task-breakdown` skill body, pushed once for the
+	// whole detail run; its "issue brief" guidance shapes each task body.
+	TaskBreakdownSkill *SkillRecord `json:"taskBreakdownSkill,omitempty"`
 }
 
 type TechLeadDetailItem struct {
@@ -380,11 +389,11 @@ func (c *client) StreamArchitect(ctx context.Context, orgID string, req Architec
 }
 
 func (c *client) StreamTechLeadPlan(ctx context.Context, orgID string, req TechLeadPlanRequest) (io.ReadCloser, error) {
-	return c.streamSSE(ctx, orgID, agentsBase+"/tech-lead/plan", req)
+	return c.streamSSE(ctx, orgID, agentsBase+"/task-planner/plan", req)
 }
 
 func (c *client) StreamTechLeadDetail(ctx context.Context, orgID string, req TechLeadDetailRequest) (io.ReadCloser, error) {
-	return c.streamSSE(ctx, orgID, agentsBase+"/tech-lead/detail", req)
+	return c.streamSSE(ctx, orgID, agentsBase+"/task-planner/detail", req)
 }
 
 func (c *client) StreamRequirementsChat(ctx context.Context, orgID string, req RequirementsChatRequest) (io.ReadCloser, error) {

@@ -17,7 +17,7 @@
  */
 
 /**
- * Headless tech-lead runners — the model-facing core, decoupled from SSE. The
+ * Headless task-planner runners — the model-facing core, decoupled from SSE. The
  * route (route.ts) wraps these with the wire frames aep-api's task_stream
  * parses; the eval and playground call them directly.
  *
@@ -33,8 +33,9 @@
 import { streamObject, streamText, type LanguageModel } from "ai";
 import {
   PlanItemSchema,
-  type TechLeadPlanInput,
-  type TechLeadDetailItem,
+  type TaskPlannerPlanInput,
+  type TaskPlannerDetailItem,
+  type ResolvedSkill,
   type PlanIssue,
 } from "./schema.js";
 import {
@@ -61,15 +62,15 @@ export class MalformedPlanItemError extends Error {
   }
 }
 
-export interface TechLeadPlanRunResult {
+export interface TaskPlannerPlanRunResult {
   items: PlanItemWithTempId[];
   issues: PlanIssue[];
   usage: { inputTokens: number; outputTokens: number };
 }
 
-export interface TechLeadPlanRunOpts {
+export interface TaskPlannerPlanRunOpts {
   model: LanguageModel;
-  input: TechLeadPlanInput;
+  input: TaskPlannerPlanInput;
   /** Pre-computed diff context for incremental coverage rules (BFF supplies). */
   diff?: DiffContext;
   /** Invoked as each plan element seals — route → SSE. Omit in evals. */
@@ -79,9 +80,9 @@ export interface TechLeadPlanRunOpts {
   abortSignal?: AbortSignal;
 }
 
-export async function runTechLeadPlan(
-  opts: TechLeadPlanRunOpts,
-): Promise<TechLeadPlanRunResult> {
+export async function runTaskPlannerPlan(
+  opts: TaskPlannerPlanRunOpts,
+): Promise<TaskPlannerPlanRunResult> {
   const { model, input, diff, onSealed, isClosed, abortSignal } = opts;
 
   // Anthropic (via AI SDK) requires a tool input_schema of type "object". A
@@ -97,7 +98,7 @@ export async function runTechLeadPlan(
     schema: PlanItemSchema,
     ...(abortSignal ? { abortSignal } : {}),
     onError: ({ error }) => {
-      console.error("[tech-lead/plan] streamObject error:", error);
+      console.error("[task-planner/plan] streamObject error:", error);
     },
   });
 
@@ -147,16 +148,18 @@ export async function runTechLeadPlan(
   };
 }
 
-export interface TechLeadDetailRunResult {
+export interface TaskPlannerDetailRunResult {
   body: string;
   usage: { inputTokens: number; outputTokens: number };
 }
 
-export interface TechLeadDetailRunOpts {
+export interface TaskPlannerDetailRunOpts {
   model: LanguageModel;
   projectName: string;
   spec: string;
-  item: TechLeadDetailItem;
+  item: TaskPlannerDetailItem;
+  /** The pushed `task-breakdown` skill (shapes issue-brief quality). Optional. */
+  taskBreakdownSkill?: ResolvedSkill;
   /** Invoked per text chunk — route coalesces into task-body-delta frames. */
   onDelta?: (delta: string) => void;
   abortSignal?: AbortSignal;
@@ -167,18 +170,18 @@ export interface TechLeadDetailRunOpts {
  * each chunk as it streams (the route coalesces them into
  * `data-task-body-delta` frames, then emits `data-task-body-complete`).
  */
-export async function runTechLeadDetailItem(
-  opts: TechLeadDetailRunOpts,
-): Promise<TechLeadDetailRunResult> {
-  const { model, projectName, spec, item, onDelta, abortSignal } = opts;
+export async function runTaskPlannerDetailItem(
+  opts: TaskPlannerDetailRunOpts,
+): Promise<TaskPlannerDetailRunResult> {
+  const { model, projectName, spec, item, taskBreakdownSkill, onDelta, abortSignal } = opts;
 
   const result = streamText({
     model,
     system: detailSystemPrompt,
-    prompt: buildDetailUserPrompt(projectName, spec, item),
+    prompt: buildDetailUserPrompt(projectName, spec, item, taskBreakdownSkill),
     ...(abortSignal ? { abortSignal } : {}),
     onError: ({ error }) => {
-      console.error(`[tech-lead/detail ${item.taskId}] streamText error:`, error);
+      console.error(`[task-planner/detail ${item.taskId}] streamText error:`, error);
     },
   });
 

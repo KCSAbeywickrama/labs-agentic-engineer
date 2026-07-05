@@ -17,14 +17,14 @@
  */
 
 /**
- * Tech-lead PLAN live eval (PAID) — report, not gate. Runs the real
- * `runTechLeadPlan` K times per fixture over the same fixtures + `scorePlan`
+ * Task-planner PLAN live eval (PAID) — report, not gate. Runs the real
+ * `runTaskPlannerPlan` K times per fixture over the same fixtures + `scorePlan`
  * the deterministic plumbing test uses, and prints a summary. SKIPS cleanly
  * (exit 0, no tokens) when `ANTHROPIC_API_KEY` is unset — same posture as the
  * main-agent `eval`.
  *
- *   pnpm --filter @aep/agents eval:techlead
- *   EVAL_SAMPLES=5 pnpm --filter @aep/agents eval:techlead
+ *   pnpm --filter @aep/agents eval:taskplanner
+ *   EVAL_SAMPLES=5 pnpm --filter @aep/agents eval:taskplanner
  *
  * The live case of record is `all-four-kinds`: a bundle with component,
  * org-service, external, and platform-resource dependencies. A passing plan
@@ -37,24 +37,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createModel } from "../../src/shared/model.js";
 import { loadDotenv } from "../../src/shared/env.js";
-import { PlanRequestBody } from "../../src/agents/techlead/schema.js";
-import { runTechLeadPlan } from "../../src/agents/techlead/run.js";
-import { scorePlan, allPass, type TechLeadPlanFixture, type Check } from "./score.js";
+import { PlanRequestBody } from "../../src/agents/taskplanner/schema.js";
+import { runTaskPlannerPlan } from "../../src/agents/taskplanner/run.js";
+import { scorePlan, allPass, type TaskPlannerPlanFixture, type Check } from "./score.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-function loadFixtures(): TechLeadPlanFixture[] {
+function loadFixtures(): TaskPlannerPlanFixture[] {
   const dir = join(here, "fixtures");
   return readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as TechLeadPlanFixture);
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as TaskPlannerPlanFixture);
 }
 
 async function main(): Promise<void> {
   loadDotenv();
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    process.stdout.write("eval:techlead: ANTHROPIC_API_KEY not set — skipping (no tokens spent).\n");
+    process.stdout.write("eval:taskplanner: ANTHROPIC_API_KEY not set — skipping (no tokens spent).\n");
     return;
   }
 
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   let fixtures = loadFixtures();
   if (nameFilter) fixtures = fixtures.filter((f) => f.name === nameFilter);
 
-  process.stdout.write(`\n=== tech-lead plan eval (model=${modelName}, K=${k}) — report-not-gate ===\n`);
+  process.stdout.write(`\n=== task-planner plan eval (model=${modelName}, K=${k}) — report-not-gate ===\n`);
 
   for (const fx of fixtures) {
     const input = PlanRequestBody.parse(fx.input);
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     for (let s = 1; s <= k; s++) {
       let checks: Check[] = [];
       try {
-        const r = await runTechLeadPlan({ model, input });
+        const r = await runTaskPlannerPlan({ model, input });
         checks = scorePlan(r.items, fx.expect, input.slimDesign.map((c) => c.name));
         if (r.issues.length > 0) checks.push({ name: "validator-clean", pass: false, detail: r.issues.map((i) => i.code).join(",") });
       } catch (err) {
@@ -91,5 +91,5 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   // Report, don't gate: print and still exit 0.
-  process.stderr.write(`eval:techlead error: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
+  process.stderr.write(`eval:taskplanner error: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
 });

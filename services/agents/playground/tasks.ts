@@ -17,14 +17,14 @@
  */
 
 /**
- * Playground `/tasks` command — runs the tech-lead PLANNER over the current
+ * Playground `/tasks` command — runs the task-planner PLANNER over the current
  * thread's spec bundle and renders the task plan. It mirrors how `runTurn`
  * drives the main agent (read the thread folder → run in-process → render), but
- * against `runTechLeadPlan` directly (the tech-lead is a structured-output
+ * against `runTaskPlannerPlan` directly (the task-planner is a structured-output
  * agent, not a file-mutation conversation, so there is no bundle to write back).
  *
  * The plan input is derived from the thread's `specs/design/components/<name>/
- * design.json` files — the same `dependencies[]` the tech-lead reasons about:
+ * design.json` files — the same `dependencies[]` the task-planner reasons about:
  * component deps drive build order (dependsOn); external / platform-resource /
  * org-service deps become planning context so the plan can name the gates.
  */
@@ -35,9 +35,9 @@ import {
   componentDesignSchema,
   COMPONENT_DESIGN_JSON_RE,
 } from "../src/agents/main/component-design.js";
-import type { TechLeadPlanInput, SlimDesignComponent } from "../src/agents/techlead/schema.js";
-import { runTechLeadPlan } from "../src/agents/techlead/run.js";
-import type { PlanItemWithTempId } from "../src/agents/techlead/validator.js";
+import type { TaskPlannerPlanInput, SlimDesignComponent } from "../src/agents/taskplanner/schema.js";
+import { runTaskPlannerPlan } from "../src/agents/taskplanner/run.js";
+import type { PlanItemWithTempId } from "../src/agents/taskplanner/validator.js";
 import type { Skill } from "../src/contracts/sse-events.js";
 
 /** Slim one parsed ComponentDesign, splitting its unified deps by kind. */
@@ -82,7 +82,7 @@ export function buildPlanInput(
   projectName: string,
   files: Record<string, string>,
   skills: Skill[],
-): { input: TechLeadPlanInput; problems: string[] } {
+): { input: TaskPlannerPlanInput; problems: string[] } {
   const slimDesign: SlimDesignComponent[] = [];
   const problems: string[] = [];
 
@@ -108,12 +108,26 @@ export function buildPlanInput(
     files["specs/design/design.md"] ??
     "(no top-level spec found)";
 
-  const input: TechLeadPlanInput = {
+  // Push the repo-root `task-breakdown` skill body like the platform does — it
+  // carries the decomposition judgment the planner applies. Absent → the
+  // prompt's built-in fallback stands.
+  const breakdown = skills.find((s) => s.name === "task-breakdown");
+
+  const input: TaskPlannerPlanInput = {
     projectName,
     spec,
     slimDesign,
     mode: "fresh",
     attachedSkills: skills.map((s) => ({ name: s.name, description: s.description })),
+    ...(breakdown
+      ? {
+          taskBreakdownSkill: {
+            name: breakdown.name,
+            description: breakdown.description,
+            body: breakdown.content,
+          },
+        }
+      : {}),
   };
   return { input, problems };
 }
@@ -125,7 +139,7 @@ function renderPlanItem(item: PlanItemWithTempId): void {
 }
 
 /**
- * Run the tech-lead planner over the thread's current files and render the plan
+ * Run the task-planner planner over the thread's current files and render the plan
  * as each item seals. Returns nothing — the plan is a read-only view (no files
  * are written), matching the service's write-nothing contract.
  */
@@ -145,7 +159,7 @@ export async function runTasksCommand(
 
   output.write(`\nPlanning ${input.slimDesign.length} component(s)…\n`);
   try {
-    const { items, issues } = await runTechLeadPlan({
+    const { items, issues } = await runTaskPlannerPlan({
       model,
       input,
       onSealed: renderPlanItem,

@@ -193,7 +193,12 @@ services:
   # ---------------------------------------------------------------------------
   agents-service:
     build:
-      context: ../services/agents-legacy
+      # The new @aep/agents service (was ../services/agents-legacy, now
+      # decommissioning). Its Dockerfile reads $PORT (src/main.ts); PORT=3400
+      # below keeps aep-api's AGENTS_SERVICE_BASE_URL (http://agents-service:3400)
+      # working unchanged. See services/agents/Dockerfile for the workspace-dep
+      # build-context caveat.
+      context: ../services/agents
     container_name: aep-agents-service
     ports:
       - "3400:3400"

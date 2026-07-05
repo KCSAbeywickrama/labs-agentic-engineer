@@ -17,8 +17,8 @@
  */
 
 /**
- * Deterministic tech-lead eval-tree test (no tokens) — drives the real
- * `runTechLeadPlan` seal-rule with a MOCK structured-output model over the
+ * Deterministic task-planner eval-tree test (no tokens) — drives the real
+ * `runTaskPlannerPlan` seal-rule with a MOCK structured-output model over the
  * all-four-dependency-kinds fixture, then grades it with the SAME `scorePlan`
  * the live eval uses. Proves the plumbing (seal-rule + validator + scorer)
  * before the paid run; the only thing the live run adds is the model's
@@ -30,15 +30,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PlanRequestBody } from "../../src/agents/techlead/schema.js";
-import { runTechLeadPlan } from "../../src/agents/techlead/run.js";
+import { PlanRequestBody } from "../../src/agents/taskplanner/schema.js";
+import { runTaskPlannerPlan } from "../../src/agents/taskplanner/run.js";
 import { mockObjectArrayModel } from "../../src/shared/mock-model.js";
-import { scorePlan, allPass, type TechLeadPlanFixture } from "./score.js";
+import { scorePlan, allPass, type TaskPlannerPlanFixture } from "./score.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-function loadFixture(name: string): TechLeadPlanFixture {
-  return JSON.parse(readFileSync(join(here, "fixtures", `${name}.json`), "utf8")) as TechLeadPlanFixture;
+function loadFixture(name: string): TaskPlannerPlanFixture {
+  return JSON.parse(readFileSync(join(here, "fixtures", `${name}.json`), "utf8")) as TaskPlannerPlanFixture;
 }
 
 test("plan seal-rule + scorer over the all-four-kinds fixture (mock model, no tokens)", async () => {
@@ -72,7 +72,7 @@ test("plan seal-rule + scorer over the all-four-kinds fixture (mock model, no to
     5, // chunk the JSON so partialObjectStream advances the seal-rule progressively
   );
 
-  const { items, issues } = await runTechLeadPlan({ model, input });
+  const { items, issues } = await runTaskPlannerPlan({ model, input });
 
   assert.equal(items.length, 3, "seal-rule should emit all three plan items");
   assert.deepEqual(

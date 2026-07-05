@@ -956,12 +956,13 @@ func buildPlanRequest(
 	}
 
 	req := agents.TechLeadPlanRequest{
-		ProjectName:    projectName,
-		Spec:           spec,
-		SlimDesign:     slim,
-		Mode:           mode,
-		ExistingTasks:  existingForPrompt,
-		AttachedSkills: attachedSkills,
+		ProjectName:        projectName,
+		Spec:               spec,
+		SlimDesign:         slim,
+		Mode:               mode,
+		ExistingTasks:      existingForPrompt,
+		AttachedSkills:     attachedSkills,
+		TaskBreakdownSkill: loadTaskBreakdownSkill(),
 	}
 	if mode == "incremental" {
 		req.SpecDiff = specDiff
@@ -1074,9 +1075,10 @@ func buildDetailRequest(
 		})
 	}
 	return agents.TechLeadDetailRequest{
-		ProjectName: projectName,
-		Spec:        spec,
-		Items:       items,
+		ProjectName:        projectName,
+		Spec:               spec,
+		Items:              items,
+		TaskBreakdownSkill: loadTaskBreakdownSkill(),
 	}
 }
 

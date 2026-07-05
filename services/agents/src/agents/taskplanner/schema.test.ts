@@ -17,7 +17,7 @@
  */
 
 /**
- * Wire-parity + validator tests (no tokens). Pins the tech-lead schema against
+ * Wire-parity + validator tests (no tokens). Pins the task-planner schema against
  * aep-api's Go client (`internal/clients/agents/client.go`) and the response
  * frame parser (`internal/feature/task/task_stream.go`), so a drift that would
  * break the URL-swap cutover fails here.
@@ -28,12 +28,12 @@ import assert from "node:assert/strict";
 import {
   PlanRequestBody,
   PlanItemSchema,
-  TechLeadDetailInput,
+  TaskPlannerDetailInput,
 } from "./schema.js";
 import { validatePlan, type PlanItemWithTempId } from "./validator.js";
 
-// The EXACT JSON aep-api's client.go marshals for TechLeadPlanRequest — the
-// current wire (buildPlanRequest → TechLeadSlimComponent sends only
+// The EXACT JSON aep-api's client.go marshals for TaskPlannerPlanRequest — the
+// current wire (buildPlanRequest → TaskPlannerSlimComponent sends only
 // name/componentType/language/dependsOn). Parity means this parses unchanged.
 const AEP_API_PLAN_REQUEST = {
   projectName: "orders",
@@ -89,8 +89,8 @@ test("PlanItem carries exactly the fields task_stream's planItemFrame reads", ()
   assert.deepEqual(Object.keys(item).sort(), ["componentName", "dependsOn", "rationale", "title"]);
 });
 
-test("TechLeadDetailInput accepts the exact aep-api detail payload", () => {
-  const parsed = TechLeadDetailInput.parse({
+test("TaskPlannerDetailInput accepts the exact aep-api detail payload", () => {
+  const parsed = TaskPlannerDetailInput.parse({
     projectName: "orders",
     spec: "# Orders",
     items: [

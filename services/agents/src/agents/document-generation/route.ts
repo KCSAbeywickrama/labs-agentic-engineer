@@ -54,7 +54,7 @@
  * non-200 "agents service error" (raw body text, shape doesn't matter beyond
  * that).
  *
- * AUTH POSTURE: like architect/tech-lead, this service does NOT
+ * AUTH POSTURE: like architect/task-planner, this service does NOT
  * re-authenticate (behind the platform BFF). The per-org effective Anthropic
  * key travels on `X-Anthropic-Key`; when present the route builds a
  * per-request model from it, otherwise it falls back to the injected

@@ -61,7 +61,7 @@ interface ChatCtx {
   baseUrl: string;
   skills: Skill[];
   dryRun: boolean;
-  /** The in-process model — the /tasks command drives the tech-lead planner directly. */
+  /** The in-process model — the /tasks command drives the task-planner planner directly. */
   model: LanguageModel;
   /** Caller-supplied MCP discovery endpoint (Task E2), from AEP_MCP_URL/AEP_MCP_TOKEN. */
   mcp?: TurnRequest["mcp"];
@@ -134,7 +134,7 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   }
 }
 
-/** Run the tech-lead planner over the thread's current spec bundle (read-only). */
+/** Run the task-planner planner over the thread's current spec bundle (read-only). */
 async function runTasks(ctx: ChatCtx): Promise<void> {
   const files = readSnapshot(ctx.thread);
   await runTasksCommand(ctx.thread, files, ctx.skills, ctx.model);

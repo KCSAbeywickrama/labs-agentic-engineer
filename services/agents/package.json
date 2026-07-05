@@ -15,7 +15,7 @@
     "test:eval": "tsx --test \"evals/**/*.test.ts\"",
     "test:playground": "tsx --test \"playground/**/*.test.ts\"",
     "eval": "tsx evals/cli.ts",
-    "eval:techlead": "tsx evals/techlead/techlead.eval.ts",
+    "eval:taskplanner": "tsx evals/taskplanner/taskplanner.eval.ts",
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts"
   },

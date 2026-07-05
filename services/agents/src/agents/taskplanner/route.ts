@@ -17,11 +17,11 @@
  */
 
 /**
- * The tech-lead SSE routes — the wire surface aep-api's task_stream speaks.
+ * The task-planner SSE routes — the wire surface aep-api's task_stream speaks.
  * Kept byte-identical to agents-legacy's contract so the cutover is a URL swap:
  *
- *   POST /internal/v1/agents/tech-lead/plan    → data-plan-item* + data-plan-complete
- *   POST /internal/v1/agents/tech-lead/detail  → data-task-body-delta* + data-task-body-complete
+ *   POST /internal/v1/agents/task-planner/plan    → data-plan-item* + data-plan-complete
+ *   POST /internal/v1/agents/task-planner/detail  → data-task-body-delta* + data-task-body-complete
  *
  * Both stream `data: <frame>\n\n` frames and terminate with `data: [DONE]\n\n`,
  * under a `text/event-stream` response tagged `x-vercel-ai-ui-message-stream:
@@ -44,29 +44,29 @@ import type { LanguageModel } from "ai";
 import { createModel } from "../../shared/model.js";
 import {
   PlanRequestBody,
-  TechLeadDetailInput,
+  TaskPlannerDetailInput,
 } from "./schema.js";
 import {
-  runTechLeadPlan,
-  runTechLeadDetailItem,
+  runTaskPlannerPlan,
+  runTaskPlannerDetailItem,
   MalformedPlanItemError,
 } from "./run.js";
 
 /** Base path root — kept in sync with aep-api's `agentsBase` (client.go). */
-export const TECH_LEAD_BASE = "/internal/v1/agents/tech-lead";
+export const TASK_PLANNER_BASE = "/internal/v1/agents/task-planner";
 
 /** Header carrying the per-org effective Anthropic key (aep-api resolves it). */
 const ANTHROPIC_KEY_HEADER = "x-anthropic-key";
 
 /** Bounded concurrency for the phase-2 detail fan-out. */
 const DETAIL_CONCURRENCY = Number.parseInt(
-  process.env.TECH_LEAD_PHASE2_CONCURRENCY || "4",
+  process.env.TASK_PLANNER_PHASE2_CONCURRENCY || "4",
   10,
 );
 /** Coalesce window for task-body deltas (keeps frame volume sane). */
 const DELTA_COALESCE_MS = 250;
 
-export interface TechLeadDeps {
+export interface TaskPlannerDeps {
   /** Fallback model when no `X-Anthropic-Key` header is present (composition root). */
   model: LanguageModel;
 }
@@ -102,7 +102,7 @@ function setupSse(res: Response): {
 }
 
 /** Per-request model: prefer the forwarded per-org key, else the injected one. */
-function resolveModel(res: Response, deps: TechLeadDeps): LanguageModel {
+function resolveModel(res: Response, deps: TaskPlannerDeps): LanguageModel {
   const key = res.req.header(ANTHROPIC_KEY_HEADER);
   return key && key.length > 0 ? createModel({ apiKey: key }) : deps.model;
 }
@@ -116,7 +116,7 @@ function isAbort(abortController: AbortController, err: unknown): boolean {
   );
 }
 
-export function registerTechLead(app: Express, deps: TechLeadDeps): void {
+export function registerTaskPlanner(app: Express, deps: TaskPlannerDeps): void {
   registerPlan(app, deps);
   registerDetail(app, deps);
 }
@@ -125,8 +125,8 @@ export function registerTechLead(app: Express, deps: TechLeadDeps): void {
 // Phase 1 — Plan
 // =============================================================================
 
-function registerPlan(app: Express, deps: TechLeadDeps): void {
-  app.post(`${TECH_LEAD_BASE}/plan`, async (req, res) => {
+function registerPlan(app: Express, deps: TaskPlannerDeps): void {
+  app.post(`${TASK_PLANNER_BASE}/plan`, async (req, res) => {
     const parsed = PlanRequestBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.format() });
@@ -137,7 +137,7 @@ function registerPlan(app: Express, deps: TechLeadDeps): void {
     const { abortController, keepAlive } = setupSse(res);
 
     try {
-      const { items, issues } = await runTechLeadPlan({
+      const { items, issues } = await runTaskPlannerPlan({
         model,
         input: parsed.data,
         ...(parsed.data.diff ? { diff: parsed.data.diff } : {}),
@@ -165,7 +165,7 @@ function registerPlan(app: Express, deps: TechLeadDeps): void {
           },
         });
       } else if (!isAbort(abortController, err)) {
-        console.error("[tech-lead/plan] error:", err);
+        console.error("[task-planner/plan] error:", err);
         writeFrame(res, {
           type: "error",
           data: {
@@ -188,9 +188,9 @@ function registerPlan(app: Express, deps: TechLeadDeps): void {
 // Phase 2 — Detail (bounded streamText fan-out)
 // =============================================================================
 
-function registerDetail(app: Express, deps: TechLeadDeps): void {
-  app.post(`${TECH_LEAD_BASE}/detail`, async (req, res) => {
-    const parsed = TechLeadDetailInput.safeParse(req.body);
+function registerDetail(app: Express, deps: TaskPlannerDeps): void {
+  app.post(`${TASK_PLANNER_BASE}/detail`, async (req, res) => {
+    const parsed = TaskPlannerDetailInput.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.format() });
       return;
@@ -208,7 +208,7 @@ function registerDetail(app: Express, deps: TechLeadDeps): void {
       const runNext = async (): Promise<void> => {
         const item = queue.shift();
         if (!item) return;
-        await runDetailForItem(res, data.projectName, data.spec, item, abortController, model);
+        await runDetailForItem(res, data.projectName, data.spec, item, abortController, model, data.taskBreakdownSkill);
         await runNext();
       };
 
@@ -216,7 +216,7 @@ function registerDetail(app: Express, deps: TechLeadDeps): void {
       await Promise.all(Array.from({ length: initial }, () => runNext()));
     } catch (err) {
       if (!isAbort(abortController, err)) {
-        console.error("[tech-lead/detail] fan-out error:", err);
+        console.error("[task-planner/detail] fan-out error:", err);
         writeFrame(res, {
           type: "error",
           data: {
@@ -239,9 +239,10 @@ async function runDetailForItem(
   res: Response,
   projectName: string,
   spec: string,
-  item: TechLeadDetailInput["items"][number],
+  item: TaskPlannerDetailInput["items"][number],
   abortController: AbortController,
   model: LanguageModel,
+  taskBreakdownSkill: TaskPlannerDetailInput["taskBreakdownSkill"],
 ): Promise<void> {
   if (res.writableEnded) return;
 
@@ -259,11 +260,12 @@ async function runDetailForItem(
   };
 
   try {
-    const { body } = await runTechLeadDetailItem({
+    const { body } = await runTaskPlannerDetailItem({
       model,
       projectName,
       spec,
       item,
+      ...(taskBreakdownSkill ? { taskBreakdownSkill } : {}),
       abortSignal: abortController.signal,
       onDelta: (chunk) => {
         if (res.writableEnded) return;
@@ -281,7 +283,7 @@ async function runDetailForItem(
     }
   } catch (err) {
     if (isAbort(abortController, err)) return;
-    console.error(`[tech-lead/detail ${item.taskId}] error:`, err);
+    console.error(`[task-planner/detail ${item.taskId}] error:`, err);
     writeFrame(res, {
       type: "error",
       data: {

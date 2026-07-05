@@ -17,105 +17,81 @@
  */
 
 /**
- * Tech-lead prompts — ported from agents-legacy with dependency-awareness
- * folded in. Two differences from legacy:
- *   1. Skills are read straight off the input (`attachedSkills` /
- *      `skillsResolved`) — this service has no disk skills-source; the caller
- *      supplies bodies on the wire (same posture as the main agent, ADR-0002).
- *   2. The plan prompt now renders each component's unified dependencies
- *      (external / platform-resource / org-service) and instructs the planner
- *      to (a) order consumers after providers via `dependsOn`, and (b) note the
- *      platform-authored value-collection / resource-provisioning GATES in a
- *      task's rationale — WITHOUT inventing config-collection or
- *      resource-provisioning tasks (the platform authors those in aep-api's
- *      persistAndIssue; the LLM must not).
+ * Task-planner prompts — pure SCAFFOLDING. The prompts here own the wire
+ * contract and the OUTPUT SHAPE (the Phase-1 JSON array of plan items, the
+ * Phase-2 five-heading issue body). The JUDGMENT of HOW to break a design into
+ * tasks — topological ordering over dependency edges, the four dependency
+ * kinds' gating implications, issue-brief quality — lives in the
+ * `task-breakdown` skill (skills/task-breakdown/SKILL.md), which the caller
+ * pushes on the wire (`input.taskBreakdownSkill`, same ADR-0002 posture as the
+ * main agent). When no skill is pushed, `FALLBACK_BREAKDOWN_GUIDANCE` keeps the
+ * route functional with a minimal built-in restatement of the core rules.
+ *
+ * Skills are read straight off the input — this service has no disk
+ * skills-source; the caller supplies bodies on the wire. The plan prompt also
+ * renders each component's unified dependencies (external / platform-resource /
+ * org-service) as the DATA the guidance operates on. Gate rows themselves are
+ * platform-authored in aep-api's persistAndIssue; the LLM must never mint them.
  */
 
 import type {
-  TechLeadPlanInput,
-  TechLeadDetailItem,
+  TaskPlannerPlanInput,
+  TaskPlannerDetailItem,
   SlimDesignComponent,
   ExistingTaskSummary,
   AttachedSkillSummary,
+  ResolvedSkill,
 } from "./schema.js";
 
 // =============================================================================
 // Phase 1 — Plan
 // =============================================================================
 
-export const planSystemPrompt = `You are a senior tech lead. You produce GitHub issues that translate
-specification + architecture changes into concrete implementation work.
+export const planSystemPrompt = `You are a senior task planner. You turn a published specification +
+architecture into a batch of implementation tasks — one GitHub issue per task.
 
-You operate in two phases. In Phase 1 you produce a list of task plans.
-In Phase 2 you write the issue body for each plan item. The phases are
-separated; you only see one prompt at a time.
+You operate in two phases. In Phase 1 you output the task plan; in Phase 2 you
+write each task's issue body. You only see one phase's prompt at a time.
 
 # Phase 1 — Plan
 
-Output a JSON array of task plans. Each plan has:
-  - componentName  (must exist in the current architecture)
-  - title          (GitHub issue title format)
-  - rationale      (one sentence — why this task exists)
-  - dependsOn      (titles of other plans in this batch this depends on)
+Output a JSON array of task plans and NOTHING else — no surrounding object, no
+commentary. Each element's fields and constraints (componentName, title,
+rationale, dependsOn) are defined by the response schema; honor them.
 
-Rules:
-  - **Exactly one task per component.** You are delegating to a very
-    capable senior engineer agent who handles a complete component (or a
-    complete change-set against one) as a single unit of work in one PR.
-    One task per component is the answer. Splitting wastes context and
-    creates coordination overhead.
-  - Each task targets exactly one component (componentName).
-  - Splitting is **never** justified by component size, page count,
-    endpoint count, feature count, or complexity. Concrete examples that
-    are still ONE task:
-      * A frontend with login + dashboard + settings + profile pages.
-      * A service with 30 endpoints across 5 resources.
-      * A component with both frontend rendering and backend API logic.
-      * A CRUD service with auth, validation, persistence, and listing.
-      * A "large" or "complex" component the spec emphasises.
-    The agent assigned to a component delivers its full implementation in
-    one PR.
-  - The ONLY case where you may produce more than one task for a single
-    component is when the agent literally cannot deliver the work in a
-    single PR — e.g. the component requires a long-running data migration
-    that must merge before feature code can land. If you cannot name the
-    specific physical reason one PR fails, produce one task. "Complexity",
-    "scope", "many features", "distinct responsibilities", "clean
-    partitions", and "separate concerns" are NOT physical reasons.
-  - In incremental mode, scope each task to the change in the spec/design
-    diff. Do not re-plan the original implementation — that work is already
-    captured by existing merged tasks.
+HOW to decompose the design — how many tasks it becomes, what order they run
+in, and how to record dependency gates — is governed by the "Task-breakdown
+guidance" section in the user message. Apply that guidance as the rules for
+this phase.`;
 
-# Build order (dependsOn)
+// Minimal built-in breakdown guidance — used ONLY when the caller pushes no
+// `task-breakdown` skill (dev / eval / a standalone call). It keeps the route
+// functional; the full judgment (dependency-kind table, worked example,
+// issue-brief quality) lives in skills/task-breakdown/SKILL.md, which the
+// platform pushes in production.
+const FALLBACK_BREAKDOWN_GUIDANCE = `Produce exactly one task per component in the architecture; split a component
+into more than one task only when a single PR physically cannot land the work
+(e.g. a data migration that must merge first). Component size, page/endpoint/
+feature count, and complexity never justify a split.
 
-  - dependsOn names must match other titles in this batch verbatim. To
-    depend on already-merged work, omit it from dependsOn (it's done).
-  - Order does not matter in the array — dependsOn carries the topology.
-  - A component's "depends on" list (shown per component below) names the
-    SIBLING COMPONENTS it consumes. A CONSUMER task MUST list its
-    provider components' tasks in dependsOn, so consumers are ordered
-    after their providers (e.g. a UI depending on its API lists the API's
-    task; a service depending on another service lists that service's task).
-  - Titles must be unique within this batch.
+Order the batch by dependency: a consumer's task lists each provider
+component's task title in dependsOn (titles must match verbatim; omit
+already-merged work). Array position is ignored — dependsOn carries the order.
 
-# Platform-authored resource gates (do NOT create tasks for these)
+When a component declares an external dependency, name the value-collection
+gate in that task's rationale; when it declares a platform-resource dependency,
+name the provisioning gate. Never emit a task for a gate — the platform authors
+those.
 
-Some components declare dependencies on EXTERNAL resources (third-party
-systems whose config/secrets a human must provide) or PLATFORM resources
-(databases, caches, etc. the platform provisions). These are shown per
-component below.
+In incremental mode, scope each task to the spec/design diff; do not re-plan
+work captured by existing merged tasks.`;
 
-  - You MUST NOT emit a task to "collect configuration", "provide secrets",
-    "provision a database", or otherwise stand up an external or platform
-    resource. The platform authors those gating steps itself — they are not
-    coding work and are never your output.
-  - Instead, when a component has such a dependency, mention the gate in
-    that component's task rationale: state that the task is blocked until
-    the named external resource's values are collected / the named platform
-    resource is provisioned. This makes the build-order context explicit
-    without inventing work.
-
-Output a JSON array only — no surrounding object, no commentary.`;
+/** Render the pushed task-breakdown skill body, or the built-in fallback. */
+function renderBreakdownGuidance(skill: ResolvedSkill | undefined): string {
+  const body = skill?.body?.trim();
+  const guidance = body && body.length > 0 ? body : FALLBACK_BREAKDOWN_GUIDANCE;
+  return `## Task-breakdown guidance (apply as the rules for this phase)\n\n${guidance}\n`;
+}
 
 function renderDeps(c: SlimDesignComponent): string {
   const lines: string[] = [];
@@ -170,9 +146,10 @@ function renderAttachedSkills(skills: AttachedSkillSummary[] | undefined): strin
   return skills.map((s) => `- \`${s.name}\` — ${s.description}`).join("\n");
 }
 
-export function buildPlanUserPrompt(input: TechLeadPlanInput): string {
+export function buildPlanUserPrompt(input: TaskPlannerPlanInput): string {
   const { projectName, spec, slimDesign, mode } = input;
   const skillsBlock = `\n## Project skills (active for every task)\n${renderAttachedSkills(input.attachedSkills)}\n`;
+  const guidanceBlock = renderBreakdownGuidance(input.taskBreakdownSkill);
 
   if (mode === "fresh") {
     return `Project: ${projectName}
@@ -186,19 +163,10 @@ ${skillsBlock}
 ## Existing tasks
 (none — this is the first task batch for this project)
 
+${guidanceBlock}
 ## Your job
-Produce the list of tasks needed to implement this architecture. **Generate
-exactly one task per component** — one task that brings that component into
-existence end-to-end. Do not split a component across multiple tasks; every
-component is one task. The only exception is the narrow physical-PR-blocker
-case named in the system prompt (e.g. a data migration that must merge
-before feature code can land). Use dependsOn to encode build-order
-constraints so every consumer is ordered after its providers (e.g. a UI
-depending on its API). For components with external or platform-resource
-dependencies, note the platform value-collection / provisioning gate in the
-task rationale — do NOT create tasks for those gates.
-
-Output a JSON array of plan items only.`;
+Produce the task plan for this architecture, applying the Task-breakdown
+guidance above. Output a JSON array of plan items only.`;
   }
 
   // Incremental.
@@ -224,24 +192,18 @@ ${designDiff}
 ## Existing tasks (for context — do not duplicate)
 ${renderExistingTasks(input.existingTasks)}
 
+${guidanceBlock}
 ## Your job
-Produce the list of NEW tasks needed for the changes above. **Generate
-exactly one task per affected component** — a change-set against a component
-is a single unit of work for one agent. A change may affect zero, one, or
-several components; produce one task for each affected component. A new task
-may target a component that already has merged tasks; that's normal in
-incremental mode. Do not propose tasks that duplicate work in
-"Existing tasks". Order consumers after their providers via dependsOn, and
-note any external / platform-resource gate in the rationale (never a task).
-
-Output a JSON array of plan items only.`;
+Produce the NEW task plan for the changes above (incremental mode), applying
+the Task-breakdown guidance above and not duplicating work listed under
+"Existing tasks". Output a JSON array of plan items only.`;
 }
 
 // =============================================================================
 // Phase 2 — Detail
 // =============================================================================
 
-export const detailSystemPrompt = `You are a senior tech lead. You write GitHub issue bodies that delegate a single
+export const detailSystemPrompt = `You are a senior task planner. You write GitHub issue bodies that delegate a single
 component task to an autonomous coding agent.
 
 # Context: how this body is consumed
@@ -412,7 +374,8 @@ Hard rules:
 export function buildDetailUserPrompt(
   projectName: string,
   spec: string,
-  item: TechLeadDetailItem,
+  item: TaskPlannerDetailItem,
+  taskBreakdownSkill?: ResolvedSkill,
 ): string {
   const deps = item.depSummaries.length
     ? item.depSummaries
@@ -439,13 +402,21 @@ export function buildDetailUserPrompt(
   if (skills.length > 0) {
     skillsBlock = `\n## Skills active for this project
 
-The following skills are attached to this project. Treat their content as mandatory rules for the issue body you produce — look for the \`(Tech-lead — issue body bullets)\` sub-section in each skill and follow it verbatim. The coding agent loads the same skills, so do NOT restate skill content in your issue body — just emit the prescribed bullets.
+The following skills are attached to this project. Treat their content as mandatory rules for the issue body you produce — look for the \`(Task-planner — issue body bullets)\` sub-section in each skill and follow it verbatim. The coding agent loads the same skills, so do NOT restate skill content in your issue body — just emit the prescribed bullets.
 
 `;
     for (const sk of skills) {
       skillsBlock += `### ${sk.name}\n\n${sk.body.trim()}\n\n---\n\n`;
     }
   }
+
+  // ── Task-breakdown skill — its "issue brief (detail phase)" guidance shapes
+  // this body. Optional; when absent the five-heading scaffolding still stands.
+  const breakdownBody = taskBreakdownSkill?.body?.trim();
+  const breakdownBlock =
+    breakdownBody && breakdownBody.length > 0
+      ? `\n## Task-breakdown guidance (apply its "issue brief" guidance to this body)\n\n${breakdownBody}\n`
+      : "";
 
   return `Project: ${projectName}
 
@@ -470,7 +441,7 @@ ${deps}
 
 ## Existing tasks already targeting this component (titles + status, for context)
 ${existing}
-${skillsBlock}
+${skillsBlock}${breakdownBlock}
 Write the GitHub issue body in markdown using the five-section structure
 defined in the system prompt (Overview / Scope / Acceptance criteria /
 References / Task dependencies).`;

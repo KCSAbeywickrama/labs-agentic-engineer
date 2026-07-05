@@ -17,7 +17,7 @@
  */
 
 /**
- * Full-route SSE integration for the tech-lead endpoints — boots the real
+ * Full-route SSE integration for the task-planner endpoints — boots the real
  * Express app with MOCK models (no tokens) and asserts the exact wire frames
  * aep-api's task_stream parses. This is the deterministic cutover gate.
  */
@@ -69,7 +69,7 @@ const PLAN_BODY = {
   ],
 };
 
-test("POST tech-lead/plan streams data-plan-item frames + data-plan-complete + [DONE]", async () => {
+test("POST task-planner/plan streams data-plan-item frames + data-plan-complete + [DONE]", async () => {
   const model = mockObjectArrayModel(
     [
       { componentName: "orders-api", title: "Build the orders API", rationale: "core service", dependsOn: [] },
@@ -84,7 +84,7 @@ test("POST tech-lead/plan streams data-plan-item frames + data-plan-complete + [
   );
   const { baseUrl, close } = await boot(model);
   try {
-    const res = await fetch(`${baseUrl}${"/internal/v1/agents/tech-lead/plan"}`, jsonPost(PLAN_BODY));
+    const res = await fetch(`${baseUrl}${"/internal/v1/agents/task-planner/plan"}`, jsonPost(PLAN_BODY));
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
     assert.equal(res.headers.get("x-vercel-ai-ui-message-stream"), "v1");
@@ -109,14 +109,14 @@ test("POST tech-lead/plan streams data-plan-item frames + data-plan-complete + [
   }
 });
 
-test("POST tech-lead/plan emits a plan-scope error frame (not plan-complete) on validator issues", async () => {
+test("POST task-planner/plan emits a plan-scope error frame (not plan-complete) on validator issues", async () => {
   // Unknown component → validatePlan flags unknown-component.
   const model = mockObjectArrayModel([
     { componentName: "ghost", title: "T", rationale: "r", dependsOn: [] },
   ]);
   const { baseUrl, close } = await boot(model);
   try {
-    const res = await fetch(`${baseUrl}/internal/v1/agents/tech-lead/plan`, jsonPost(PLAN_BODY));
+    const res = await fetch(`${baseUrl}/internal/v1/agents/task-planner/plan`, jsonPost(PLAN_BODY));
     assert.equal(res.status, 200);
     const frames = parseFrames(await res.text());
     const err = frames.find((f) => f.type === "error");
@@ -128,22 +128,22 @@ test("POST tech-lead/plan emits a plan-scope error frame (not plan-complete) on 
   }
 });
 
-test("POST tech-lead/plan → 400 on a malformed body (pre-stream)", async () => {
+test("POST task-planner/plan → 400 on a malformed body (pre-stream)", async () => {
   const { baseUrl, close } = await boot(mockObjectArrayModel([]));
   try {
-    const res = await fetch(`${baseUrl}/internal/v1/agents/tech-lead/plan`, jsonPost({ projectName: "x" }));
+    const res = await fetch(`${baseUrl}/internal/v1/agents/task-planner/plan`, jsonPost({ projectName: "x" }));
     assert.equal(res.status, 400);
   } finally {
     await close();
   }
 });
 
-test("POST tech-lead/detail streams task-body-delta + task-body-complete + [DONE]", async () => {
+test("POST task-planner/detail streams task-body-delta + task-body-complete + [DONE]", async () => {
   const model = mockModel([{ kind: "text", text: "## Overview\nBuild it.\n" }]);
   const { baseUrl, close } = await boot(model);
   try {
     const res = await fetch(
-      `${baseUrl}/internal/v1/agents/tech-lead/detail`,
+      `${baseUrl}/internal/v1/agents/task-planner/detail`,
       jsonPost({
         projectName: "orders",
         spec: "# Orders",
@@ -175,11 +175,11 @@ test("POST tech-lead/detail streams task-body-delta + task-body-complete + [DONE
   }
 });
 
-test("POST tech-lead/detail → 400 on a malformed body", async () => {
+test("POST task-planner/detail → 400 on a malformed body", async () => {
   const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "x" }]));
   try {
     const res = await fetch(
-      `${baseUrl}/internal/v1/agents/tech-lead/detail`,
+      `${baseUrl}/internal/v1/agents/task-planner/detail`,
       jsonPost({ projectName: "x", spec: "y", items: [{ taskId: "t1" }] }),
     );
     assert.equal(res.status, 400);

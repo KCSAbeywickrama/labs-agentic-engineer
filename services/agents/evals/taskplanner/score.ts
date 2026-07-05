@@ -17,7 +17,7 @@
  */
 
 /**
- * Tech-lead plan scoring — shared by the deterministic plumbing test (mock
+ * Task-planner plan scoring — shared by the deterministic plumbing test (mock
  * model) and the live model eval, so both grade a plan the same way. The two
  * dependency-awareness properties the migration cares about:
  *   1. build order — a consumer's task lists its provider's task in dependsOn
@@ -27,7 +27,7 @@
  *      separate config-collection / resource-provisioning task).
  */
 
-import type { PlanItemWithTempId } from "../../src/agents/techlead/validator.js";
+import type { PlanItemWithTempId } from "../../src/agents/taskplanner/validator.js";
 
 export interface PlanExpectations {
   /** Each [consumerComponent, providerComponent] pair the plan must order. */
@@ -38,7 +38,7 @@ export interface PlanExpectations {
   coverAllComponents?: boolean;
 }
 
-export interface TechLeadPlanFixture {
+export interface TaskPlannerPlanFixture {
   name: string;
   difficulty?: string;
   input: unknown; // validated to PlanRequestBody by the caller

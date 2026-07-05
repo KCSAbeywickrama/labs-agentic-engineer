@@ -286,7 +286,7 @@ export type SkillDescription = z.infer<typeof SkillDescription>;
 
 // SkillRecord is name + description + full SKILL.md body. Used by the
 // architect input for built-ins (inlined under "Platform skills — MUST
-// consult") and by the tech-lead detail input for every attached skill.
+// consult") and by the task-planner detail input for every attached skill.
 export const SkillRecord = SkillDescription.extend({
   body: z.string(),
 });

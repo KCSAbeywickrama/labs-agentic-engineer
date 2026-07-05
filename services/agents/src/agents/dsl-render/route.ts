@@ -38,7 +38,7 @@
  *
  * AUTH POSTURE: like every other route here, this service does NOT
  * re-authenticate (behind the platform BFF, which authenticates); see
- * `techlead/route.ts`'s AUTH POSTURE note for the fuller rationale.
+ * `taskplanner/route.ts`'s AUTH POSTURE note for the fuller rationale.
  */
 
 import type { Express } from "express";

@@ -18,7 +18,7 @@
 
 /**
  * Deterministic plan validator — ported verbatim from agents-legacy. Runs
- * inside `runTechLeadPlan` after the plan seals; any issue turns into a
+ * inside `runTaskPlannerPlan` after the plan seals; any issue turns into a
  * `{ type: "error", data: { scope: "plan", issues } }` frame (route.ts), the
  * same shape aep-api's task_stream forwards as a plan-scope error.
  */

@@ -38,7 +38,7 @@
  * emitted components MUST carry `componentType`/`openAPISpec`) and top-level
  * `error.errorText`.
  *
- * AUTH POSTURE: like the tech-lead route, this service does NOT re-authenticate
+ * AUTH POSTURE: like the task-planner route, this service does NOT re-authenticate
  * (behind the platform BFF). The per-org effective Anthropic key travels on
  * `X-Anthropic-Key`; when present the route builds a per-request model from it,
  * otherwise it falls back to the injected composition-root model (dev / eval /
