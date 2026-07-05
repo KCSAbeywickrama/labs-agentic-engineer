@@ -134,8 +134,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // malformed → `{}`, logged), so a turn with `mcp` never fails ON ITS
     // ACCOUNT. Omitted `mcp`, or a failed/empty load, means `tools` IS
     // `baseTools` (no wrapping object) — byte-identical to an mcp-free turn.
+    // `baseTools` spreads LAST so a discovered tool can never shadow a core
+    // file-mutation/loadSkill tool of the same name.
     const mcpTools: ToolSet = input.mcp ? await loadMcpTools(input.mcp) : {};
-    const tools = Object.keys(mcpTools).length > 0 ? { ...baseTools, ...mcpTools } : baseTools;
+    const tools = Object.keys(mcpTools).length > 0 ? { ...mcpTools, ...baseTools } : baseTools;
 
     // 4. one generic turn. buildInstructions appends the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
