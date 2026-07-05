@@ -86,8 +86,17 @@ function streamForStep(step: MockStep, i: number, delayMs?: number): StreamResul
  * `tools`/`prompt` the caller handed the model for that step — to assert on
  * the ASSEMBLED tool set/instructions rather than only on side effects.
  */
-export function mockModel(steps: MockStep[], opts: { delayMs?: number } = {}): MockLanguageModelV4 {
-  return new MockLanguageModelV4({ doStream: steps.map((s, i) => streamForStep(s, i, opts.delayMs)) });
+export function mockModel(
+  steps: MockStep[],
+  opts: { delayMs?: number; provider?: string } = {},
+): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    // `provider` drives the architect's `isAnthropicModel` web_search gate — a
+    // caller passes "anthropic.*" to assert the tool is injected, without ever
+    // reaching a real provider (the mock replays a scripted stream regardless).
+    ...(opts.provider ? { provider: opts.provider } : {}),
+    doStream: steps.map((s, i) => streamForStep(s, i, opts.delayMs)),
+  });
 }
 
 /**

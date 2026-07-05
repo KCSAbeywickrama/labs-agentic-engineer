@@ -40,6 +40,7 @@ import type { ConversationStore } from "./store/conversation-store.js";
 import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { registerTechLead } from "./agents/techlead/route.js";
+import { registerArchitect } from "./agents/architect/route.js";
 import { config } from "./shared/config.js";
 
 export interface CreateAppDeps {
@@ -67,6 +68,11 @@ export function createApp(deps: CreateAppDeps): Express {
   // Tech-lead structured-output routes (plan + detail) — the S2S wire surface
   // aep-api's task_stream speaks. Legacy-contract parity; see techlead/route.ts.
   registerTechLead(app, { model: deps.model });
+
+  // Architect route — the S2S wire surface aep-api's StreamGenerateDesign
+  // speaks. Legacy-contract parity (same SSE frames the BFF parses); see
+  // architect/route.ts.
+  registerArchitect(app, { model: deps.model });
 
   app.post("/conversations/:id/turns", async (req: Request, res: Response) => {
     const id = req.params.id as string;
