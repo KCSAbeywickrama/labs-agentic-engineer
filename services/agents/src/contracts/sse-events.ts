@@ -49,6 +49,8 @@ export type ErrCode =
   | "NO_SUCH_FILE"
   | "EMPTY_OLD_STRING"
   | "INVALID_YAML"
+  | "INVALID_JSON"
+  | "SCHEMA_VIOLATION"
   | "NO_FRONTMATTER"
   | "PROTECTED_PATH";
 
@@ -130,6 +132,13 @@ export interface Skill {
   description: string;
   /** The full guidance body (frontmatter stripped) returned by `loadSkill`. */
   content: string;
+  /**
+   * Optional reference files (agentskills.io structure): `references/<file>.md`
+   * → body. A third disclosure level: listed by `loadSkill`, served one at a
+   * time by `loadSkillReference`. Mirrors the coding-agent leg
+   * (`SkillResolution.references` in the remote-worker).
+   */
+  references?: Record<string, string>;
 }
 
 /** The `loadSkill` tool input. WIRE source of truth; drift-guarded in `tool.ts`. */
@@ -140,10 +149,27 @@ export interface LoadSkillInput {
 /**
  * The `loadSkill` tool result. Success carries the body; a miss carries the
  * available names so the model self-corrects in one round-trip (cf. NOT_FOUND).
+ * `references` (when present) lists the skill's reference paths for
+ * `loadSkillReference` — the body tells the agent when each is worth reading.
  */
 export type LoadSkillResult =
-  | { ok: true; name: string; content: string }
+  | { ok: true; name: string; content: string; references?: string[] }
   | { ok: false; name: string; error: string; available: string[] };
+
+/** The `loadSkillReference` tool input. WIRE source of truth; drift-guarded in `tool.ts`. */
+export interface LoadSkillReferenceInput {
+  name: string;
+  path: string;
+}
+
+/**
+ * The `loadSkillReference` tool result. A miss lists what IS addressable so the
+ * model self-corrects in one round-trip: the skills carrying references (name
+ * miss) or that skill's reference paths (path miss).
+ */
+export type LoadSkillReferenceResult =
+  | { ok: true; name: string; path: string; content: string }
+  | { ok: false; name: string; path: string; error: string; available: string[] };
 
 // --- The reviewable change (§7) ---------------------------------------------
 

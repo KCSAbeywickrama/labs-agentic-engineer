@@ -48,6 +48,18 @@ test("readSnapshot reads text recursively, skips dot-entries and binary", () => 
   rmSync(root, { recursive: true, force: true });
 });
 
+test("readSnapshot excludes derived artifacts (.excalidraw, *.gen.json) — agent never sees them", () => {
+  reset();
+  const root = threadDir(NAME);
+  mkdirSync(join(root, "specs"), { recursive: true });
+  writeFileSync(join(root, "specs", "wireframes.dsl"), "screen A\n");
+  writeFileSync(join(root, "specs", "wireframes.excalidraw"), '{"type":"excalidraw"}');
+  writeFileSync(join(root, "specs", "design.gen.json"), "{}");
+
+  assert.deepEqual(Object.keys(readSnapshot(NAME)).sort(), ["specs/wireframes.dsl"]);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("reconcile writes add/edit, deletes removed, and reports kinds", () => {
   reset();
   const before = { "keep.md": "x", "edit.md": "old", "gone.md": "bye" };

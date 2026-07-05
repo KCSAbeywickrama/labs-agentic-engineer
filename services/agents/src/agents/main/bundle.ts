@@ -39,6 +39,7 @@
  */
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { checkComponentDesign } from "./component-design.js";
 import type {
   Op,
   ErrCode,
@@ -243,6 +244,13 @@ export class FileBundle {
     const yamlErr = checkYaml(path, content);
     if (yamlErr) {
       return err(path, op, "INVALID_YAML", rejectMsg(yamlErr));
+    }
+    // Authored component design.json is schema-gated the same way YAML is
+    // reparse-gated: an invalid write aborts with a self-correctable error
+    // and the bundle stays byte-for-byte unchanged.
+    const jsonProblem = checkComponentDesign(path, content);
+    if (jsonProblem) {
+      return err(path, op, jsonProblem.code, jsonProblem.message);
     }
     this.files.set(path, content);
     this.touchedPaths.add(path);

@@ -3,21 +3,25 @@
 build:
 	go build ./...
 
-# Export the code-first OpenAPI specs (same code path as the live routes):
-#   public   → ../../packages/contracts/api/v1/openapi.yaml  (COMMITTED contract)
-#   internal → build/internal-openapi.yaml                    (gitignored tooling artifact)
-# Wired into the root `make gen`; `openapi-check` guards the committed copy.
+# The committed spec (packages/contracts/api/v1/openapi.yaml) is the SOURCE OF
+# TRUTH; the Go code follows it. This target exports what the code currently
+# serves — a comparison aid only, deliberately NOT wired into `make gen`
+# (contract-first inversion; server stubs generated from the spec are tracked
+# in the repo issue referenced by openapi-check below).
+#   public   → ../../packages/contracts/api/v1/openapi.yaml
+#   internal → build/internal-openapi.yaml  (gitignored tooling artifact)
 openapi:
 	go run ./cmd/openapigen
 
-# Sync check: regenerate, then fail if the committed public spec drifted from
-# the code. Make-level only (no CI wiring yet); same shape as gen-oc-client-check.
+# Drift check: fail if what the code serves differs from the committed
+# contract. The fix direction is code → spec, never the reverse.
 openapi-check: openapi
 	@if ! git diff --exit-code --quiet -- ../../packages/contracts/api/v1/openapi.yaml; then \
 		git diff --color -- ../../packages/contracts/api/v1/openapi.yaml | cat; \
 		echo ""; \
-		echo "packages/contracts/api/v1/openapi.yaml is out of sync with the code."; \
-		echo "Run 'make gen' (or 'make -C services/aep-api openapi') and commit the change."; \
+		echo "aep-api serves an API that drifted from the committed contract."; \
+		echo "The spec is the source of truth: update the Go handlers to match,"; \
+		echo "then 'git checkout -- packages/contracts/api/v1/openapi.yaml'."; \
 		exit 1; \
 	fi
 

@@ -46,8 +46,9 @@ import { applyToolCall } from "../src/agents/main/change.js";
 import type { StreamPart } from "../src/agents/main/stream-types.js";
 import { streamTurn } from "../evals/sse-client.js";
 import { loadRepoSkills } from "../evals/skills.js";
-import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile } from "./threads.js";
+import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
+import { materializeDerived } from "./derived.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // pushed every turn (ADR-0002); the service still reads none.
@@ -114,7 +115,16 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   // real server-side mutations, so they still apply.
   const bundle = new FileBundle(before);
   for (const tc of toolCalls) applyToolCall(bundle, tc);
-  renderSummary(reconcile(ctx.thread, before, bundle.snapshot(), ctx.dryRun), ctx.dryRun);
+  const changes = reconcile(ctx.thread, before, bundle.snapshot(), ctx.dryRun);
+  renderSummary(changes, ctx.dryRun);
+
+  // Refresh the derived artifacts (.excalidraw, *.gen.json) — one pipeline
+  // seam, see derived.ts. Skipped under --dry-run: nothing landed on disk.
+  if (!ctx.dryRun) {
+    for (const n of materializeDerived(threadDir(ctx.thread), ctx.thread, changes, bundle.snapshot())) {
+      output.write(n.ok ? `  ⚙ ${n.message}\n` : `  ✗ ${n.message}\n`);
+    }
+  }
 }
 
 function printHelp(): void {

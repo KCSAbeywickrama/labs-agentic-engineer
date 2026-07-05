@@ -275,6 +275,11 @@ components:
           type: string
         displayName:
           type: string
+        endpointUrl:
+          description: >-
+            Public URL of the running dev deployment. Populated for web
+            applications only; absent until deployed.
+          type: string
         name:
           type: string
         projectName:
@@ -489,6 +494,17 @@ components:
         displayName:
           type: string
         name:
+          type: string
+        prompt:
+          description: >-
+            The user's initial requirement — what they want built. Persisted
+            as the project's requirement and triggers spec derivation for the
+            new project.
+          type: string
+        repoName:
+          description: >-
+            Name of the GitHub repository to create for the project's specs
+            and source (in the connected org). Defaults to the project name.
           type: string
       required:
         - name
@@ -1167,6 +1183,9 @@ components:
           type:
             - array
             - "null"
+        nextCursor:
+          description: Cursor for the next page; absent on the last page.
+          type: string
       required:
         - items
       type: object
@@ -1179,6 +1198,16 @@ components:
             - /api/v1/ProjectStatus.json
           format: uri
           readOnly: true
+          type: string
+        deployStatus:
+          description: >-
+            Result of the latest dev deployment (e.g. in_progress /
+            succeeded / failed); absent when nothing was deployed.
+          type: string
+        deployedVersion:
+          description: >-
+            Version tag currently deployed to the dev environment; absent
+            when nothing deployed.
           type: string
         designStatus:
           type: string
@@ -1196,7 +1225,17 @@ components:
           type: string
         repoUrl:
           type: string
+        specDirty:
+          description: >-
+            True when the spec/design changed after specVersion was
+            published.
+          type: boolean
         specStatus:
+          type: string
+        specVersion:
+          description: >-
+            Latest published spec version tag (e.g. v1); absent when
+            nothing published.
           type: string
       required:
         - phase
@@ -2144,6 +2183,21 @@ paths:
           schema:
             description: Opaque pagination cursor
             type: string
+        - description: Case-insensitive substring match on name and displayName
+          explode: false
+          in: query
+          name: search
+          schema:
+            description: Case-insensitive substring match on name and displayName
+            type: string
+        - description: Maximum items per page (server default when absent)
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Maximum items per page (server default when absent)
+            format: int64
+            type: integer
       responses:
         "200":
           content:

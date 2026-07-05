@@ -3,7 +3,9 @@
 React webapps (Vite + Oxygen UI). One package per app; `apps/<name>` →
 `@aep/<name>`.
 
-**Status:** nothing here yet. The console lands here as `apps/aep-console/`.
+**Status:** `apps/console/` (`@aep/console`) is scaffolded — Vite + React +
+Oxygen UI + TanStack Router/Query + openapi-fetch + MSW. Read
+`apps/console/AGENTS.md` before console work.
 
 ## Conventions
 
