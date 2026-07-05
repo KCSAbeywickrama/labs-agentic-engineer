@@ -21,9 +21,7 @@ import type { Component, ComponentType, Connection, Project } from '@wso2/cell-d
 /**
  * One entry of the console's unified, kind-discriminated `Dependency` (see
  * the API type / the BFF's `models.Dependency`). Only `kind` + `name` are
- * needed to place a diagram edge — this is intentionally the minimal shape;
- * a later task adds dedicated `platform-resource` nodes and can widen it
- * then.
+ * needed to place a diagram edge — intentionally the minimal shape.
  */
 export interface CellDiagramDependency {
   kind: string;
@@ -76,14 +74,14 @@ export function buildProjectModel(components: CellDiagramComponent[]): Project {
       label: depName,
       onPlatform: true,
     }));
-    // External nodes: `external` (HTTP APIs the component calls out to) and
-    // `org-service` (another project's published component) dependencies both
+    // External nodes: `external` (HTTP APIs the component calls out to),
+    // `org-service` (another project's published component), and
+    // `platform-resource` (a provisioned db/cache/queue) dependencies all
     // render as chain-link nodes outside the cell — this is what the legacy
-    // `dependentApis` list produced pre-unified-model. `platform-resource` is
-    // deliberately excluded here; it gets dedicated diagram nodes in a later
-    // task.
+    // `dependentApis` list produced pre-unified-model, now widened to include
+    // platform-resource deps too.
     const externalConnections: Connection[] = (comp.dependencies || [])
-      .filter((d) => d.kind === 'external' || d.kind === 'org-service')
+      .filter((d) => d.kind === 'external' || d.kind === 'org-service' || d.kind === 'platform-resource')
       .map(externalDependencyConnection);
 
     return {
