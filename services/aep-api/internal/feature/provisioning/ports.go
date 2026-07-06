@@ -74,6 +74,10 @@ type DesignReader interface {
 // run and the consumer never releases. Wired from repositories.
 type RepoLocator interface {
 	RepoFullName(ctx context.Context, orgID, projectID string) (string, error)
+	// ByFullName resolves a `<owner>/<repo>` full name back to its (orgID,
+	// projectID) — the reverse direction, used by the issues/closed webhook to
+	// locate the provider project of a declined org-publish gate issue.
+	ByFullName(ctx context.Context, fullName string) (orgID, projectID string, err error)
 }
 
 // ExternalResourceCatalog is the org-level external-resource registry the

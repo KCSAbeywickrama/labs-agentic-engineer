@@ -778,7 +778,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Execs:     executionRepo,
 		Reeval:    funnel,
 		Design:    designComponents{store: artifactStore},
-		Repos:     repoNamer{repos: repoRepo},
+		Repos:     repoNamer{repos: repoRepo, db: db},
 		Catalog:   externalResourceRepo,
 		ExtProv:   externalProvisioner,
 		PlatProv:  platformProvisioner,
@@ -796,6 +796,17 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// + the design.json specPath edit (clearing the external-needs-spec gate) via
 	// the Files API. Composition-root adapter keeps files out of the design feature.
 	designService.SetFileCommitter(designFilesCommitter{files: filesSvc})
+	// Grant cascade → design: commit the exposesAPI.orgPublished durability marker
+	// on a provider component when its cross-project access request is granted.
+	// The reverse edge (design→provisioning) is SetProvisionIssueMinter above;
+	// both are setter-wired here so the mutual dependency stays at the root.
+	provisioningSvc.SetOrgPublishMarker(designService)
+	// Reject cascade: an org-publish gate issue closed with its consumers still
+	// ungranted is a decline → flip those access requests to rejected. Registered
+	// on the router's issues/closed chain alongside task's noop (both run). The
+	// router is a pointer held by the already-built controller, so a late Register
+	// (before serve) is picked up.
+	registerWebhook("issues", "closed", provisioningSvc.OnIssueClosed)
 	// Deprovision a project's OC Resource model on project delete (OC does not
 	// cascade the logically-owned Resources/bindings).
 	projectService.SetResourceDeprovisioner(provisioningSvc)

@@ -348,6 +348,73 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 	return specPath, nil
 }
 
+// MarkOrgPublished commits the `exposesAPI.orgPublished` durability marker on a
+// provider component's design.json — the provisioning grant cascade calls it
+// when a provider deploys and a cross-project access request resolves. It is
+// idempotent (already-published or absent component → no-op) and best-effort:
+// the FUNCTIONAL org-service gate already clears via Phase 5's live-catalog
+// proceed-gate; this persists the provider's deliberate publish decision so it
+// survives a redeploy. Provider-owned, source-of-truth: the platform sets it
+// only as the recorded outcome of a grant, never speculatively.
+func (s *designService) MarkOrgPublished(ctx context.Context, orgID, projectID, component string) error {
+	if s.fileCommitter == nil {
+		return fmt.Errorf("cannot mark org-published: no committed-truth write surface wired")
+	}
+	design, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		if artifacts.IsNotFound(err) {
+			return nil // no design — nothing to mark
+		}
+		return fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return nil
+	}
+	idx := -1
+	for i := range design.Components {
+		if design.Components[i].Name == component {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil // component absent — best-effort no-op
+	}
+	comp := design.Components[idx]
+	if comp.ExposesAPI != nil && comp.ExposesAPI.OrgPublished {
+		return nil // idempotent — already published
+	}
+	if comp.ExposesAPI == nil {
+		comp.ExposesAPI = &models.ExposesAPI{}
+	}
+	comp.ExposesAPI.OrgPublished = true
+
+	rendered, err := artifacts.SplitDesign(&artifacts.DesignFile{Components: []models.DesignComponent{comp}})
+	if err != nil {
+		return fmt.Errorf("render component %q design.json: %w", component, err)
+	}
+	designSub := "components/" + component + "/design.json"
+	content, ok := rendered[designSub]
+	if !ok {
+		return fmt.Errorf("render component %q design.json: %q missing from split", component, designSub)
+	}
+	designFull := artifacts.DesignDir + "/" + designSub
+	_, sha, exists, err := s.fileCommitter.ReadFile(ctx, orgID, projectID, designFull)
+	if err != nil {
+		return fmt.Errorf("read design.json for CAS: %w", err)
+	}
+	if !exists {
+		return nil // no on-disk design.json — nothing to mark
+	}
+	if err := s.fileCommitter.Commit(ctx, orgID, projectID,
+		[]DesignFileWrite{{Path: designFull, Content: content, BaseSHA: sha}},
+		fmt.Sprintf("Publish %s org-wide (exposesAPI.orgPublished)", component)); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "committed orgPublished marker", "org", orgID, "project", projectID, "component", component)
+	return nil
+}
+
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {
 	files, err := s.store.ListDesignFiles(ctx, orgID, projectID)
 	if err != nil {
@@ -538,14 +605,41 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		return nil, artifacts.ErrDesignNotFound
 	}
 
-	// TODO(spec-commit follow-up): auto-fetch-on-save. Before the gate, each `external`
-	// dependency the architect flagged with a specUrl hint but no specPath yet
-	// should be fetched (artifacts.FetchSpecFromURL — SSRF-guarded), stored via
-	// StoreConsumedSpec, and have its specPath recorded so the needs-spec gate
-	// below clears. This is blocked on StoreConsumedSpec gaining a committed-truth
-	// commit surface (it currently validates+normalizes only); wire it together
-	// with that commit path in Phase 6. A failed fetch stays non-fatal (the gate
-	// blocks the save until the spec is supplied).
+	// Auto-fetch-on-save (dependency-management): before the gate, fetch any
+	// `external` dependency the architect flagged with a specUrl hint but no
+	// specPath yet, through CollectSpec (SSRF-guarded fetch → validate/normalize
+	// → atomic commit of the spec + the design.json specPath edit that clears the
+	// needs-spec gate). A fetch failure is non-fatal: the gate then blocks the
+	// save until the spec is supplied by hand. Each success commits to main,
+	// advancing HEAD past any pinned commit, so we re-read at HEAD afterwards.
+	fetched := false
+	for ci := range designFile.Components {
+		comp := designFile.Components[ci]
+		for di := range comp.Dependencies {
+			dep := comp.Dependencies[di]
+			if dep.Kind != models.DependencyKindExternal || dep.SpecUrl == "" || dep.SpecPath != "" {
+				continue
+			}
+			if _, ferr := s.CollectSpec(ctx, orgID, projectID, comp.Name, dep.Name, nil, dep.SpecUrl); ferr != nil {
+				slog.WarnContext(ctx, "design save: auto-fetch spec failed (non-fatal — gate may block)",
+					"project", projectID, "component", comp.Name, "dependency", dep.Name, "error", ferr)
+				continue
+			}
+			fetched = true
+		}
+	}
+	if fetched {
+		// HEAD advanced past the (possibly pinned) commit — re-read at HEAD so the
+		// gate + tag observe the freshly committed specPaths.
+		commitSHA = ""
+		designFile, err = s.store.ReadDesign(ctx, orgID, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("re-read design after auto-fetch: %w", err)
+		}
+		if designFile == nil {
+			return nil, artifacts.ErrDesignNotFound
+		}
+	}
 
 	// Proceed-gate (dependency-management Phase 5): block the tag-cut when a
 	// dependency is still non-actionable. The design was just read through

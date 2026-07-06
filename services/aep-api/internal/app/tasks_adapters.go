@@ -117,7 +117,10 @@ func (r runnerSecretResolver) ResolveRunnerSecrets(ctx context.Context, orgID, p
 // repoNamer resolves an org+project to its GitHub repo full name ("owner/name")
 // — the provision Execution row's Repo must equal the gate issue's repo full
 // name so the funnel gate resolves the run. Satisfies provisioning.RepoLocator.
-type repoNamer struct{ repos repositories.RepoRepository }
+type repoNamer struct {
+	repos repositories.RepoRepository
+	db    *gorm.DB
+}
 
 func (r repoNamer) RepoFullName(ctx context.Context, orgID, projectID string) (string, error) {
 	gr, err := r.repos.GetByOrgAndProjectID(ctx, orgID, projectID)
@@ -132,6 +135,13 @@ func (r repoNamer) RepoFullName(ctx context.Context, orgID, projectID string) (s
 		return "", err
 	}
 	return owner + "/" + name, nil
+}
+
+// ByFullName is the reverse lookup (`<owner>/<repo>` → org/project) the
+// issues/closed webhook uses to find the provider project of a declined
+// org-publish gate issue. Satisfies provisioning.RepoLocator.
+func (r repoNamer) ByFullName(_ context.Context, fullName string) (string, string, error) {
+	return repositories.LookupOrgProjectByRepoURL(r.db, fullName)
 }
 
 // provisionProjects enumerates an org's ready projects for the provisioning

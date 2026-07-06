@@ -18,6 +18,7 @@ package provisioning
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -107,12 +108,12 @@ func (s *Service) OnComponentDeployed(ctx context.Context, orgID, projectID, com
 }
 
 // GrantByProviderComponent is the deploy-cascade hook: when a provider component
-// deploys, any open access request targeting it flips to granted and its
-// org-publish issue closes. Best-effort; only the gating read returns an error.
-// (The durability marker — committing exposesAPI.orgPublished on the provider
-// design — needs the single-file committed-truth write path and is tracked as a
-// follow-up; the functional resume is the provider going namespace-visible, which
-// Phase 5's proceed-gate observes over the live catalog.)
+// deploys, any open access request targeting it flips to granted, the
+// exposesAPI.orgPublished durability marker is committed on the provider design,
+// and its org-publish issue closes. Best-effort; only the gating read returns an
+// error. (The functional resume is the provider going namespace-visible, which
+// Phase 5's proceed-gate observes over the live catalog; the marker persists the
+// publish decision across redeploys.)
 func (s *Service) GrantByProviderComponent(ctx context.Context, orgID, providerProjectID, providerComponent string) error {
 	if s.access == nil {
 		return nil
@@ -123,6 +124,14 @@ func (s *Service) GrantByProviderComponent(ctx context.Context, orgID, providerP
 	}
 	if open == nil {
 		return nil // a normal deploy with no pending cross-project access request
+	}
+	// Persist the provider's publish decision (best-effort — the live-catalog
+	// gate already resolves the consumer even if this commit hiccups).
+	if s.orgPublish != nil {
+		if merr := s.orgPublish.MarkOrgPublished(ctx, orgID, providerProjectID, providerComponent); merr != nil {
+			slog.WarnContext(ctx, "provisioning: commit orgPublished marker failed",
+				"project", providerProjectID, "component", providerComponent, "error", merr)
+		}
 	}
 	rows, err := s.access.ListByProviderTask(ctx, open.ProviderTaskID)
 	if err != nil {
@@ -146,12 +155,63 @@ func (s *Service) GrantByProviderComponent(ctx context.Context, orgID, providerP
 	return nil
 }
 
-// NOTE: the reject cascade (flip open riders to rejected when a provider
-// declines to publish) is a tracked follow-up — it needs a "declined" signal on
-// our model (an org-publish gate issue is not a PR, so there is no
-// PR-closed-unmerged webhook to key on). The AccessRequestStatusRejected state +
-// the grant path's skip-rejected guard are already in place for when it lands;
-// see docs/design/dependency-management-migration.md §8 Phase-6 follow-up (c).
+// OnIssueClosed is the issues/closed webhook handler (registered alongside
+// task's noop via the router's handler chain). It is the "declined" signal for
+// the reject cascade: an org-publish gate issue that closes while its consumer
+// access requests are still ungranted is a decline, so those riders flip to
+// rejected. The grant path (GrantByProviderComponent) flips riders to granted
+// BEFORE it closes the issue, so a platform-driven close finds them granted and
+// this no-ops — only a manual/decline close catches open riders. Best-effort:
+// a non-org-publish issue (no riders keyed to it) is a silent no-op, and the
+// handler never fails the delivery for a routine close.
+func (s *Service) OnIssueClosed(ctx context.Context, _, _ string, payload []byte) error {
+	if s.access == nil || s.repos == nil {
+		return nil
+	}
+	var p struct {
+		Issue struct {
+			Number int `json:"number"`
+		} `json:"issue"`
+		Repository struct {
+			FullName string `json:"full_name"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return nil // malformed payload — ack, nothing to do
+	}
+	if p.Repository.FullName == "" || p.Issue.Number == 0 {
+		return nil
+	}
+	orgID, providerProjectID, err := s.repos.ByFullName(ctx, p.Repository.FullName)
+	if err != nil {
+		return nil // unknown repo — not one of ours, ack
+	}
+	taskKey := providerTaskKey(providerProjectID, p.Issue.Number)
+	riders, err := s.access.ListByProviderTask(ctx, taskKey)
+	if err != nil {
+		return fmt.Errorf("provisioning: list riders for reject: %w", err)
+	}
+	if len(riders) == 0 {
+		return nil // not an org-publish gate issue (no access requests key to it)
+	}
+	rejected := 0
+	for i := range riders {
+		switch riders[i].Status {
+		case models.AccessRequestStatusGranted, models.AccessRequestStatusRejected:
+			continue // already resolved — a grant-driven close, not a decline
+		}
+		if uerr := s.access.UpdateStatus(ctx, riders[i].ID, models.AccessRequestStatusRejected); uerr != nil {
+			slog.WarnContext(ctx, "provisioning: reject access request failed", "id", riders[i].ID, "error", uerr)
+			continue
+		}
+		rejected++
+	}
+	if rejected > 0 {
+		slog.InfoContext(ctx, "provisioning: org-publish declined — rejected pending access requests",
+			"orgID", orgID, "project", providerProjectID, "issue", p.Issue.Number, "count", rejected)
+	}
+	return nil
+}
 
 // createOrgPublishIssue mints the provider-side aep:provision org-publish gate
 // issue. It carries no secrets — only the component name being published.

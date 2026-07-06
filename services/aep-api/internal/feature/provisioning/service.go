@@ -49,7 +49,23 @@ type Service struct {
 	projects  ProjectLister
 	access    AccessStore
 	providers ProviderResolver
+	// orgPublish commits the exposesAPI.orgPublished durability marker on a
+	// provider component when its access request is granted. Wired via a setter
+	// (SetOrgPublishMarker) at the composition root — it points BACK at the
+	// design feature, so a setter breaks the design↔provisioning wiring cycle.
+	// Nil is a documented no-op (the live-catalog gate still resolves).
+	orgPublish OrgPublishMarker
 }
+
+// OrgPublishMarker persists a provider component's deliberate publish decision.
+// *design.designService satisfies it.
+type OrgPublishMarker interface {
+	MarkOrgPublished(ctx context.Context, orgID, projectID, component string) error
+}
+
+// SetOrgPublishMarker wires the design feature's orgPublished-marker commit so
+// the grant cascade records the publish on the provider design. Nil no-op.
+func (s *Service) SetOrgPublishMarker(m OrgPublishMarker) { s.orgPublish = m }
 
 // Deps is the provisioning service's collaborator set. reeval / projects /
 // access / providers may be nil (a nil reeval skips the release nudge — the

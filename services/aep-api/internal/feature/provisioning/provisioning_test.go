@@ -136,6 +136,9 @@ func (f fakeDesign) ReadDesignComponents(context.Context, string, string) ([]mod
 type fakeRepos struct{}
 
 func (fakeRepos) RepoFullName(context.Context, string, string) (string, error) { return "o/r", nil }
+func (fakeRepos) ByFullName(context.Context, string) (string, string, error) {
+	return "acme", "warehouse", nil
+}
 
 type fakeCatalog struct {
 	entries map[string]*models.ExternalResource
@@ -286,6 +289,40 @@ func (f *fakeAccess) ListByProviderTask(_ context.Context, providerTaskID string
 		}
 	}
 	return out, nil
+}
+
+func TestOnIssueClosed_RejectsUngrantedRidersOnDecline(t *testing.T) {
+	access := &fakeAccess{}
+	ctx := context.Background()
+	// Two consumers rode the same warehouse#12 org-publish gate issue: one still
+	// pending, one already granted (an earlier partial grant).
+	_ = access.Create(ctx, &models.AccessRequest{OrgID: "acme", ProviderProjectID: "warehouse",
+		ProviderTaskID: providerTaskKey("warehouse", 12), Status: models.AccessRequestStatusRequested})
+	_ = access.Create(ctx, &models.AccessRequest{OrgID: "acme", ProviderProjectID: "warehouse",
+		ProviderTaskID: providerTaskKey("warehouse", 12), Status: models.AccessRequestStatusGranted})
+	svc := NewService(Deps{Access: access, Repos: fakeRepos{}})
+
+	// Provider manually closes the gate issue → decline.
+	payload := []byte(`{"issue":{"number":12},"repository":{"full_name":"asdlc-repos/warehouse"}}`)
+	if err := svc.OnIssueClosed(ctx, "issues", "closed", payload); err != nil {
+		t.Fatalf("OnIssueClosed: %v", err)
+	}
+	if access.rows[0].Status != models.AccessRequestStatusRejected {
+		t.Fatalf("pending rider must flip to rejected, got %q", access.rows[0].Status)
+	}
+	if access.rows[1].Status != models.AccessRequestStatusGranted {
+		t.Fatalf("already-granted rider must stay granted, got %q", access.rows[1].Status)
+	}
+}
+
+func TestOnIssueClosed_NonOrgPublishIssueIsNoop(t *testing.T) {
+	access := &fakeAccess{}
+	svc := NewService(Deps{Access: access, Repos: fakeRepos{}})
+	// No access request keys to issue #99 (a routine coding-issue close) → no-op.
+	payload := []byte(`{"issue":{"number":99},"repository":{"full_name":"asdlc-repos/warehouse"}}`)
+	if err := svc.OnIssueClosed(context.Background(), "issues", "closed", payload); err != nil {
+		t.Fatalf("OnIssueClosed on a non-org-publish issue must be a silent no-op, got %v", err)
+	}
 }
 
 func readyBinding(outputs ...string) *openchoreo.ResourceReleaseBinding {

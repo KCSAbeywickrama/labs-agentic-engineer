@@ -19,13 +19,17 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 )
 
-// Router dispatches a verified, dedup'd delivery to the per-event handler.
+// Router dispatches a verified, dedup'd delivery to the handlers registered for
+// an event class. Multiple handlers may register for the same (event, action) —
+// they run in registration order and their errors aggregate (so several features
+// can independently observe the same GitHub event, e.g. issues/closed).
 // Events with no registered handler are logged and no-op'd.
 type Router struct {
-	handlers map[string]EventHandler
+	handlers map[string][]EventHandler
 }
 
 // EventHandler is the contract every per-event handler implements. The
@@ -44,31 +48,48 @@ func (f EventHandlerFunc) Handle(ctx context.Context, event, action string, payl
 }
 
 func NewRouter() *Router {
-	return &Router{handlers: map[string]EventHandler{}}
+	return &Router{handlers: map[string][]EventHandler{}}
 }
 
-// Register installs a handler for an event class. Pass action="" to register
-// a fallback for the event when no action-specific handler matches.
+// Register appends a handler for an event class. Pass action="" to register a
+// fallback for the event when no action-specific handler matches. Handlers for
+// the same key run in registration order.
 //
 // Lookup order: (event, action) → (event, "") → log + no-op.
 func (r *Router) Register(event, action string, h EventHandler) {
-	r.handlers[key(event, action)] = h
+	k := key(event, action)
+	r.handlers[k] = append(r.handlers[k], h)
 }
 
-// Dispatch parses the action from the payload and runs the matching handler.
-// Returns the handler error verbatim — the receiver decides ack 200 vs. 5xx
-// based on whether the error is nil.
+// Dispatch parses the action from the payload and runs every handler registered
+// for the matching key (action-specific handlers win over the event fallback;
+// the fallback runs only when no action-specific handler exists). All matching
+// handlers run even if one errors; the joined error is returned — the receiver
+// decides ack 200 vs. 5xx based on whether it is nil.
 func (r *Router) Dispatch(ctx context.Context, event string, payload []byte) error {
 	action := parseAction(payload)
-	if h, ok := r.handlers[key(event, action)]; ok {
-		return h.Handle(ctx, event, action, payload)
+	if hs, ok := r.handlers[key(event, action)]; ok {
+		return runAll(ctx, hs, event, action, payload)
 	}
-	if h, ok := r.handlers[key(event, "")]; ok {
-		return h.Handle(ctx, event, action, payload)
+	if hs, ok := r.handlers[key(event, "")]; ok {
+		return runAll(ctx, hs, event, action, payload)
 	}
 	// Persisted, no-op — unknown events are intentionally swallowed.
 	slog.DebugContext(ctx, "webhook: no handler", "event", event, "action", action, "result", "unhandled_event")
 	return nil
+}
+
+// runAll invokes every handler, collecting errors so one handler's failure does
+// not prevent the others (independent subscribers). errors.Join returns nil for
+// an all-success run and preserves errors.Is/As on the aggregate.
+func runAll(ctx context.Context, hs []EventHandler, event, action string, payload []byte) error {
+	var errs []error
+	for _, h := range hs {
+		if err := h.Handle(ctx, event, action, payload); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // ParseAction returns the payload's "action" field if present, else "".
