@@ -41,8 +41,14 @@ export type CollabStatus = "connecting" | "connected" | "offline";
 export interface CollabSpec {
   status: CollabStatus;
   peers: CollabPeer[];
-  /** Y.Text for a path, once synced; null → caller falls back to REST content. */
+  /** Y.Text for a non-md path, once synced; null → REST-content fallback. */
   getFileText: (path: string) => Y.Text | null;
+  /** Y.XmlFragment for an md path, once synced (#86 phase 6 doc model). */
+  getFileFragment: (path: string) => Y.XmlFragment | null;
+  /** The live provider (for CollaborationCaret); null until connected. */
+  provider: HocuspocusProvider | null;
+  /** This client's presence identity (name/color) for caret labels. */
+  self: { name: string; color: string };
   /** True while a transaction originates from this client (binding helper). */
   isLocalTransaction: (transaction: Y.Transaction) => boolean;
   /** Bumped on any files-map change so selections can re-resolve. */
@@ -84,6 +90,7 @@ export function useCollabSpec(
   const [peers, setPeers] = useState<CollabPeer[]>([]);
   const [version, setVersion] = useState(0);
   const docRef = useRef<Y.Doc | null>(null);
+  const providerRef = useRef<HocuspocusProvider | null>(null);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -99,6 +106,7 @@ export function useCollabSpec(
       },
       onAuthenticationFailed: () => setStatus("offline"),
     });
+    providerRef.current = provider;
 
     provider.setAwarenessField("user", {
       name: user.name,
@@ -135,6 +143,7 @@ export function useCollabSpec(
       provider.destroy();
       doc.destroy();
       docRef.current = null;
+      providerRef.current = null;
     };
   }, [projectName, user.name, user.email]);
 
@@ -147,8 +156,19 @@ export function useCollabSpec(
         status === "connected"
           ? (docRef.current?.getMap<Y.Text>("files").get(path) ?? null)
           : null,
+      getFileFragment: (path: string) =>
+        status === "connected"
+          ? (docRef.current?.getXmlFragment(path) ?? null)
+          : null,
+      provider: status === "connected" ? providerRef.current : null,
+      self: {
+        name: user.name,
+        color:
+          PEER_COLORS[(docRef.current?.clientID ?? 0) % PEER_COLORS.length] ??
+          "#888",
+      },
       isLocalTransaction: (transaction: Y.Transaction) => transaction.local,
     }),
-    [status, peers, version],
+    [status, peers, version, user.name],
   );
 }

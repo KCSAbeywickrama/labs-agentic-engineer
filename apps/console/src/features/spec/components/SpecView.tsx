@@ -40,6 +40,7 @@ import { useProject, useProjectStatus } from "../../projects/api/queries";
 import { useProjectSpec } from "../api/queries";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
+import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { SpecFileList } from "./SpecFileList";
 
@@ -281,7 +282,26 @@ export function SpecView({ projectName }: { projectName: string }) {
                 // service is reachable (#86 phase 5); solo-and-unsaved
                 // otherwise (#86 decision 10).
                 (() => {
-                  const ytext = collab.getFileText(selected.path);
+                  const isMd = selected.path.endsWith(".md");
+                  const fragment = isMd
+                    ? collab.getFileFragment(selected.path)
+                    : null;
+                  if (fragment && collab.provider) {
+                    // Markdown gets the Tiptap editor on the file's
+                    // Y.XmlFragment (#86 phase 6).
+                    return (
+                      <SpecMdEditor
+                        key={`${selected.path}:md`}
+                        fragment={fragment}
+                        path={selected.path}
+                        provider={collab.provider}
+                        self={collab.self}
+                      />
+                    );
+                  }
+                  const ytext = isMd
+                    ? null
+                    : collab.getFileText(selected.path);
                   return ytext ? (
                     <CollabTextArea
                       key={`${selected.path}:collab`}

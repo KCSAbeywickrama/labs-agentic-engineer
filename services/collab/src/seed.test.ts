@@ -20,32 +20,54 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 import { seedDocument, filesMap } from "./seed.js";
+import { fragmentToMarkdown } from "./markdown.js";
 
 const bundle = [
   { path: "requirements/prd.md", group: "requirements", content: "# PRD\n" },
-  { path: "design/arch.md", group: "designs", content: "# Arch\n" },
+  {
+    path: "design/arch.excalidraw",
+    group: "designs",
+    content: '{"type":"excalidraw-dsl"}',
+  },
 ];
 
-test("seeds an empty doc with one Y.Text per file", () => {
+test("seeds md files as Y.XmlFragments, others as Y.Text entries", () => {
   const doc = new Y.Doc();
   seedDocument(doc, bundle);
+  const fragment = doc.getXmlFragment("requirements/prd.md");
+  assert.ok(fragment.length > 0);
+  assert.match(fragment.toString(), /<heading level="1">PRD<\/heading>/);
   const map = filesMap(doc);
-  assert.equal(map.size, 2);
-  assert.equal(map.get("requirements/prd.md")?.toString(), "# PRD\n");
-  assert.equal(map.get("design/arch.md")?.toString(), "# Arch\n");
+  assert.equal(map.size, 1);
+  assert.equal(
+    map.get("design/arch.excalidraw")?.toString(),
+    '{"type":"excalidraw-dsl"}',
+  );
+});
+
+test("md fragments round-trip back to markdown (committer seam)", () => {
+  const doc = new Y.Doc();
+  seedDocument(doc, bundle);
+  assert.equal(
+    fragmentToMarkdown(doc.getXmlFragment("requirements/prd.md")).trim(),
+    "# PRD",
+  );
 });
 
 test("never overwrites existing entries (live content wins over reseed)", () => {
   const doc = new Y.Doc();
   seedDocument(doc, bundle);
-  const prd = filesMap(doc).get("requirements/prd.md");
-  assert.ok(prd);
-  prd.insert(prd.length, "user edit\n");
+  const fragment = doc.getXmlFragment("requirements/prd.md");
+  const sizeAfterFirstSeed = fragment.length;
+  const drawing = filesMap(doc).get("design/arch.excalidraw");
+  assert.ok(drawing);
+  drawing.insert(drawing.length, " user edit");
 
   seedDocument(doc, bundle);
+  assert.equal(fragment.length, sizeAfterFirstSeed);
   assert.equal(
-    filesMap(doc).get("requirements/prd.md")?.toString(),
-    "# PRD\nuser edit\n",
+    filesMap(doc).get("design/arch.excalidraw")?.toString(),
+    '{"type":"excalidraw-dsl"} user edit',
   );
 });
 
@@ -54,8 +76,8 @@ test("seed changes replicate to a synced peer doc", () => {
   const client = new Y.Doc();
   server.on("update", (u: Uint8Array) => Y.applyUpdate(client, u));
   seedDocument(server, bundle);
-  assert.equal(
-    client.getMap<Y.Text>("files").get("requirements/prd.md")?.toString(),
-    "# PRD\n",
+  assert.match(
+    client.getXmlFragment("requirements/prd.md").toString(),
+    /PRD/,
   );
 });

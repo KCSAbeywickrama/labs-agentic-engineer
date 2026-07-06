@@ -127,7 +127,7 @@ test("dev mode still rejects unknown rooms", async () => {
   );
 });
 
-test("load seeds from fixtures in dev mode", async () => {
+test("load seeds from fixtures in dev mode (md files become fragments)", async () => {
   const load = buildLoadDocumentHook(devConfig, { bff: null });
   const doc = new Y.Doc() as Document;
   await load({
@@ -135,7 +135,16 @@ test("load seeds from fixtures in dev mode", async () => {
     documentName: "spec-acme-shop",
     context: { user: { name: "d", email: "d", kind: "dev" }, token: null, projectName: null },
   });
-  assert.equal(filesMap(doc).size, devSpecBundle.length);
+  for (const file of devSpecBundle) {
+    if (file.path.endsWith(".md")) {
+      assert.ok(
+        doc.getXmlFragment(file.path).length > 0,
+        `fragment for ${file.path}`,
+      );
+    } else {
+      assert.ok(filesMap(doc).has(file.path), `map entry for ${file.path}`);
+    }
+  }
 });
 
 test("load seeds from the BFF bundle with the joiner's token", async () => {
@@ -161,7 +170,7 @@ test("load seeds from the BFF bundle with the joiner's token", async () => {
     },
   });
   assert.deepEqual(calls, ["jwt-abc", "shop"]);
-  assert.equal(filesMap(doc).get("requirements/prd.md")?.toString(), "hi");
+  assert.match(doc.getXmlFragment("requirements/prd.md").toString(), /hi/);
 });
 
 test("load opens an unseeded doc when the bundle fetch fails (room must survive)", async () => {

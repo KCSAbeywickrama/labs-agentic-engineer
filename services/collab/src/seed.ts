@@ -18,9 +18,11 @@
 
 import * as Y from "yjs";
 import type { SpecFile } from "./bff.js";
+import { isMarkdownPath, markdownToFragment } from "./markdown.js";
 
-// Doc model (#86 decision 2): one Y.Doc per project holding a
-// Y.Map('files') of file-path → Y.Text.
+// Doc model (#86 decision 2 + phase 6): one Y.Doc per project. Markdown
+// files are Y.XmlFragments keyed by path (Tiptap's collaboration binding
+// needs rich structure); everything else is a Y.Text in Y.Map('files').
 export const FILES_MAP = "files";
 
 export function filesMap(doc: Y.Doc): Y.Map<Y.Text> {
@@ -36,7 +38,12 @@ export function seedDocument(doc: Y.Doc, files: SpecFile[]): void {
   const map = filesMap(doc);
   doc.transact(() => {
     for (const file of files) {
-      if (!map.has(file.path)) {
+      if (isMarkdownPath(file.path)) {
+        const fragment = doc.getXmlFragment(file.path);
+        if (fragment.length === 0) {
+          markdownToFragment(file.content, fragment);
+        }
+      } else if (!map.has(file.path)) {
         const text = new Y.Text();
         text.insert(0, file.content);
         map.set(file.path, text);
