@@ -55,7 +55,7 @@ import (
 )
 
 const (
-	base      = "/api/v1/org/skills"
+	base      = "/api/v1/skills"
 	goldenDir = "../../../testdata/harvest/golden"
 )
 

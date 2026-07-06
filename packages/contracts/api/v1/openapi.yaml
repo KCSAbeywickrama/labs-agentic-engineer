@@ -46,39 +46,6 @@ components:
         - createdAt
         - updatedAt
       type: object
-    AnthropicProjection:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/AnthropicProjection.json
-          format: uri
-          readOnly: true
-          type: string
-        connectedAt:
-          format: date-time
-          type: string
-        keyLast4:
-          type: string
-        keyPrefix:
-          type: string
-        lastValidatedAt:
-          format: date-time
-          type: string
-        ocOrgId:
-          type: string
-        status:
-          type: string
-        validationError:
-          type: string
-      required:
-        - ocOrgId
-        - keyPrefix
-        - keyLast4
-        - status
-        - connectedAt
-      type: object
     ApplyRequest:
       additionalProperties: false
       properties:
@@ -416,6 +383,93 @@ components:
         - key
         - secret
       type: object
+    ConfigPatch:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ConfigPatch.json
+          format: uri
+          readOnly: true
+          type: string
+        gitProvider:
+          additionalProperties: false
+          properties:
+            githubLogin:
+              type: string
+            kind:
+              enum:
+                - github
+              type: string
+            mode:
+              enum:
+                - pat
+              type: string
+            pat:
+              type: string
+          required:
+            - kind
+            - mode
+            - pat
+          type:
+            - object
+            - "null"
+        idp:
+          additionalProperties: false
+          properties:
+            issuer:
+              type: string
+            jwksUrl:
+              type: string
+            kind:
+              enum:
+                - platform
+                - asgardeo
+                - custom
+              type: string
+          required:
+            - kind
+          type:
+            - object
+            - "null"
+        llm:
+          additionalProperties: false
+          properties:
+            apiKey:
+              type: string
+            kind:
+              enum:
+                - anthropic
+              type: string
+          required:
+            - kind
+            - apiKey
+          type:
+            - object
+            - "null"
+      type: object
+    ConfigProjection:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ConfigProjection.json
+          format: uri
+          readOnly: true
+          type: string
+        gitProvider:
+          $ref: "#/components/schemas/GitProviderProjection"
+        idp:
+          $ref: "#/components/schemas/IDPProjection"
+        llm:
+          $ref: "#/components/schemas/LLMProjection"
+      required:
+        - llm
+        - gitProvider
+        - idp
+      type: object
     ConsumerDTO:
       additionalProperties: false
       properties:
@@ -719,6 +773,21 @@ components:
           description: "Commit to read, gate and tag (the publish's just-applied commit). Empty: resolve HEAD."
           type: string
       type: object
+    DisconnectOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/DisconnectOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        status:
+          type: string
+      required:
+        - status
+      type: object
     DiscoverOutputBody:
       additionalProperties: false
       properties:
@@ -924,6 +993,118 @@ components:
         - Size
         - Filename
       type: object
+    GitProviderProjection:
+      additionalProperties: false
+      properties:
+        connectedAt:
+          format: date-time
+          type: string
+        githubLogin:
+          type: string
+        identityChangedAt:
+          format: date-time
+          type: string
+        identityEmail:
+          type: string
+        identityLogin:
+          type: string
+        identityName:
+          type: string
+        installationId:
+          format: int64
+          type: integer
+        kind:
+          enum:
+            - github
+          type: string
+        lastValidatedAt:
+          format: date-time
+          type: string
+        mode:
+          enum:
+            - app
+            - pat
+          type: string
+        prevIdentityLogin:
+          type: string
+        selectedRepos:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        status:
+          type: string
+      required:
+        - kind
+        - mode
+        - status
+        - connectedAt
+      type: object
+    GitProviderWrite:
+      additionalProperties: false
+      properties:
+        githubLogin:
+          type: string
+        kind:
+          enum:
+            - github
+          type: string
+        mode:
+          enum:
+            - pat
+          type: string
+        pat:
+          type: string
+      required:
+        - kind
+        - mode
+        - pat
+      type:
+        - object
+        - "null"
+    IDPProjection:
+      additionalProperties: false
+      properties:
+        hasClientSecret:
+          type: boolean
+        issuer:
+          type: string
+        jwksUrl:
+          type: string
+        kind:
+          enum:
+            - platform
+            - asgardeo
+            - custom
+          type: string
+        publisherClientId:
+          type: string
+      required:
+        - kind
+        - issuer
+        - jwksUrl
+        - publisherClientId
+        - hasClientSecret
+      type: object
+    IDPWrite:
+      additionalProperties: false
+      properties:
+        issuer:
+          type: string
+        jwksUrl:
+          type: string
+        kind:
+          enum:
+            - platform
+            - asgardeo
+            - custom
+          type: string
+      required:
+        - kind
+      type:
+        - object
+        - "null"
     ImportResult:
       additionalProperties: false
       properties:
@@ -953,6 +1134,49 @@ components:
         - kind
         - warnings
       type: object
+    LLMProjection:
+      additionalProperties: false
+      properties:
+        connectedAt:
+          format: date-time
+          type: string
+        keyLast4:
+          type: string
+        keyPrefix:
+          type: string
+        kind:
+          enum:
+            - anthropic
+          type: string
+        lastValidatedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+        validationError:
+          type: string
+      required:
+        - kind
+        - keyPrefix
+        - keyLast4
+        - status
+        - connectedAt
+      type: object
+    LLMWrite:
+      additionalProperties: false
+      properties:
+        apiKey:
+          type: string
+        kind:
+          enum:
+            - anthropic
+          type: string
+      required:
+        - kind
+        - apiKey
+      type:
+        - object
+        - "null"
     Lineage:
       additionalProperties: false
       properties:
@@ -960,56 +1184,6 @@ components:
           type: string
         specTag:
           type: string
-      type: object
-    OrgAnthropicConnectInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/OrgAnthropicConnectInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        apiKey:
-          description: Anthropic API key (sk-ant-...)
-          type: string
-      required:
-        - apiKey
-      type: object
-    OrgGitHubConnectPATInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/OrgGitHubConnectPATInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        githubLogin:
-          description: GitHub login the PAT belongs to
-          type: string
-        pat:
-          description: GitHub personal access token
-          type: string
-      required:
-        - pat
-      type: object
-    OrgGitHubStartConnectInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/OrgGitHubStartConnectInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        installationId:
-          description: Optional installation to pin (set when the user picks a candidate from the 2+ picker)
-          format: int64
-          type: integer
       type: object
     OrganizationList:
       additionalProperties: false
@@ -1222,58 +1396,6 @@ components:
         - specStatus
         - designStatus
       type: object
-    Projection:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/Projection.json
-          format: uri
-          readOnly: true
-          type: string
-        connectedAt:
-          format: date-time
-          type: string
-        githubLogin:
-          type: string
-        identityChangedAt:
-          format: date-time
-          type: string
-        identityEmail:
-          type: string
-        identityLogin:
-          type: string
-        identityName:
-          type: string
-        installationId:
-          format: int64
-          type: integer
-        kind:
-          type: string
-        lastValidatedAt:
-          format: date-time
-          type: string
-        ocOrgId:
-          type: string
-        prevIdentityLogin:
-          type: string
-        selectedRepos:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        status:
-          type: string
-      required:
-        - ocOrgId
-        - kind
-        - githubLogin
-        - identityLogin
-        - status
-        - connectedAt
-      type: object
     ProvisionBody:
       additionalProperties: false
       properties:
@@ -1414,6 +1536,36 @@ components:
         - version
         - contentSha
         - updatedAt
+      type: object
+    StartConnectInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/StartConnectInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        installationId:
+          description: Optional installation to pin (set when the user picks a candidate from the 2+ picker)
+          format: int64
+          type: integer
+      type: object
+    StartConnectOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/StartConnectOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        authorizeUrl:
+          type: string
+      required:
+        - authorizeUrl
       type: object
     StatusMsg:
       additionalProperties: false
@@ -1662,30 +1814,6 @@ components:
       required:
         - envVars
       type: object
-    UpdateProfileInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/UpdateProfileInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        issuer:
-          description: OIDC issuer URL; empty leaves the existing value unchanged
-          type: string
-        jwksUrl:
-          description: JWKS URL; empty leaves the existing value unchanged
-          type: string
-        kind:
-          description: "IDP kind: platform | asgardeo | custom"
-          type: string
-      required:
-        - kind
-        - issuer
-        - jwksUrl
-      type: object
     UpdateSkillInput:
       additionalProperties: false
       properties:
@@ -1842,6 +1970,160 @@ paths:
       summary: Authorize a collaboration room (server-to-server)
       tags:
         - Collaboration
+  /config:
+    get:
+      operationId: get-config
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigProjection"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the organization's integration config (statuses/kinds, no secrets)
+      tags:
+        - Org Config
+    patch:
+      operationId: update-config
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigPatch"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigProjection"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Patch the organization's integration config (per-section, atomic)
+      tags:
+        - Org Config
+  /config/git-provider/connect-sessions:
+    post:
+      operationId: start-git-provider-connect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartConnectInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartConnectOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Start App-mode git-provider connect (OAuth-driven)
+      tags:
+        - Org Config
+  /config/git-provider/disconnect:
+    post:
+      operationId: disconnect-git-provider
+      parameters:
+        - description: "App-mode only: when false, leave the install on GitHub for later re-adoption (defaults true)"
+          explode: false
+          in: query
+          name: uninstall
+          schema:
+            default: true
+            description: "App-mode only: when false, leave the install on GitHub for later re-adoption (defaults true)"
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisconnectOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Disconnect the git provider (cascade) for the org
+      tags:
+        - Org Config
+  /config/idp/client-secret:
+    post:
+      operationId: rotate-idp-client-secret
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientSecretOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Rotate the IDP publisher client secret (returned once)
+      tags:
+        - Org Config
+  /config/idp/discovery:
+    get:
+      operationId: discover-idp
+      parameters:
+        - description: OIDC issuer URL to fetch the discovery document for
+          explode: false
+          in: query
+          name: issuer
+          schema:
+            description: OIDC issuer URL to fetch the discovery document for
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoverOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Discover an OIDC issuer's metadata
+      tags:
+        - Org Config
   /dependencies/external-resources:
     get:
       operationId: list-external-resources
@@ -1892,502 +2174,6 @@ paths:
       summary: Delete an external-resource catalog entry (409 if in use)
       tags:
         - Dependencies
-  /org/credentials/anthropic:
-    delete:
-      operationId: disconnect-anthropic
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  type: string
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Disconnect the org's Anthropic key
-      tags:
-        - Anthropic Integration
-    get:
-      operationId: get-anthropic-status
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties: {}
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the org's Anthropic key status (projection, no key)
-      tags:
-        - Anthropic Integration
-    post:
-      operationId: connect-anthropic
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrgAnthropicConnectInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnthropicProjection"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Connect or replace the org's Anthropic API key
-      tags:
-        - Anthropic Integration
-  /org/credentials/github:
-    delete:
-      operationId: disconnect-github
-      parameters:
-        - description: "App-mode only: when false, leave the install on GitHub for later re-adoption (defaults true)"
-          explode: false
-          in: query
-          name: uninstall
-          schema:
-            default: true
-            description: "App-mode only: when false, leave the install on GitHub for later re-adoption (defaults true)"
-            type: boolean
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  type: string
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Disconnect GitHub (cascade) for the org
-      tags:
-        - GitHub Integration
-    get:
-      operationId: get-github-status
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties: {}
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get GitHub connection status (projection, no token)
-      tags:
-        - GitHub Integration
-  /org/credentials/github/connect/start:
-    post:
-      operationId: start-github-connect
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrgGitHubStartConnectInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  type: string
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Start App-mode GitHub connect (OAuth-driven)
-      tags:
-        - GitHub Integration
-  /org/credentials/github/pat:
-    post:
-      operationId: connect-github-pat
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrgGitHubConnectPATInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Projection"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Connect or replace a PAT-mode GitHub credential
-      tags:
-        - GitHub Integration
-  /org/idp:
-    get:
-      operationId: get-idp-profile
-      responses:
-        "200":
-          content:
-            application/json:
-              schema: {}
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the organization's IDP profile
-      tags:
-        - IDP
-    put:
-      operationId: update-idp-profile
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateProfileInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema: {}
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Update the organization's IDP profile
-      tags:
-        - IDP
-  /org/idp/discovery:
-    get:
-      operationId: discover-idp-issuer
-      parameters:
-        - description: OIDC issuer URL to fetch the discovery document for
-          explode: false
-          in: query
-          name: issuer
-          schema:
-            description: OIDC issuer URL to fetch the discovery document for
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DiscoverOutputBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Discover an OIDC issuer's metadata
-      tags:
-        - IDP
-  /org/idp/rotate:
-    post:
-      operationId: regenerate-idp-client-secret
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ClientSecretOutputBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Rotate the publisher client secret
-      tags:
-        - IDP
-  /org/skills:
-    get:
-      operationId: list-skills
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties: {}
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: List skills
-      tags:
-        - Skills
-    post:
-      operationId: create-skill
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateSkillInput"
-        required: true
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SkillDetailBody"
-          description: Created
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Create a custom skill
-      tags:
-        - Skills
-  /org/skills/import:
-    post:
-      operationId: import-skill
-      requestBody:
-        content:
-          multipart/form-data:
-            encoding:
-              file:
-                contentType: application/octet-stream
-            schema:
-              properties:
-                file:
-                  contentEncoding: binary
-                  contentMediaType: application/octet-stream
-                  description: Gzip-compressed AgentSkills tarball
-                  format: binary
-                  type: string
-              required:
-                - file
-              type: object
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ImportResult"
-          description: Created
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Import an AgentSkills tarball
-      tags:
-        - Skills
-  /org/skills/sync:
-    post:
-      operationId: sync-skills
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties: {}
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Sync built-in skills
-      tags:
-        - Skills
-  /org/skills/updates:
-    get:
-      operationId: list-skill-updates
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties: {}
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: List available built-in skill updates
-      tags:
-        - Skills
-  /org/skills/{name}:
-    delete:
-      operationId: delete-skill
-      parameters:
-        - description: Skill name (slug)
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Skill name (slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties: {}
-                type: object
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a custom or imported skill
-      tags:
-        - Skills
-    get:
-      operationId: get-skill
-      parameters:
-        - description: Skill name (slug)
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Skill name (slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SkillDetailBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a skill
-      tags:
-        - Skills
-    put:
-      operationId: update-skill
-      parameters:
-        - description: Skill name (slug)
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Skill name (slug)
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateSkillInput"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SkillDetailBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Update a custom skill
-      tags:
-        - Skills
   /organizations:
     get:
       operationId: list-organizations
@@ -4047,5 +3833,227 @@ paths:
       summary: Attach to a turn's part stream (SSE — replay from ?from / Last-Event-ID, then live-tail)
       tags:
         - GenAI
+  /skills:
+    get:
+      operationId: list-skills
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: {}
+                type: object
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List skills
+      tags:
+        - Skills
+    post:
+      operationId: create-skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSkillInput"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillDetailBody"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Create a custom skill
+      tags:
+        - Skills
+  /skills/import:
+    post:
+      operationId: import-skill
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              file:
+                contentType: application/octet-stream
+            schema:
+              properties:
+                file:
+                  contentEncoding: binary
+                  contentMediaType: application/octet-stream
+                  description: Gzip-compressed AgentSkills tarball
+                  format: binary
+                  type: string
+              required:
+                - file
+              type: object
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Import an AgentSkills tarball
+      tags:
+        - Skills
+  /skills/sync:
+    post:
+      operationId: sync-skills
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: {}
+                type: object
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Sync built-in skills
+      tags:
+        - Skills
+  /skills/updates:
+    get:
+      operationId: list-skill-updates
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: {}
+                type: object
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List available built-in skill updates
+      tags:
+        - Skills
+  /skills/{name}:
+    delete:
+      operationId: delete-skill
+      parameters:
+        - description: Skill name (slug)
+          in: path
+          name: name
+          required: true
+          schema:
+            description: Skill name (slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: {}
+                type: object
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Delete a custom or imported skill
+      tags:
+        - Skills
+    get:
+      operationId: get-skill
+      parameters:
+        - description: Skill name (slug)
+          in: path
+          name: name
+          required: true
+          schema:
+            description: Skill name (slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillDetailBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get a skill
+      tags:
+        - Skills
+    put:
+      operationId: update-skill
+      parameters:
+        - description: Skill name (slug)
+          in: path
+          name: name
+          required: true
+          schema:
+            description: Skill name (slug)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSkillInput"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillDetailBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Update a custom skill
+      tags:
+        - Skills
 servers:
   - url: /api/v1

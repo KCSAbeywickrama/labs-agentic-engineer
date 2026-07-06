@@ -39,7 +39,8 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 		// Tasks-github-native surface (§9.1): the board/dispatch/retry ops are gone.
 		"list-tasks", "get-task", "plan-tasks", "execute-task", "hold-task", "unhold-task",
 		"get-execution-progress",
-		"get-idp-profile", "get-github-status", "get-anthropic-status",
+		// Consolidated org-config surface (replaces the Anthropic/GitHub/IDP tag groups).
+		"get-config", "update-config", "list-skills",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {

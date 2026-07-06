@@ -56,6 +56,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
@@ -706,6 +707,21 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		AnthropicCredService: anthropicCredService,
 	}
 
+	// The consolidated /config orchestrator (docs/design/org-config-consolidation.md):
+	// one settings resource over the reused Anthropic/GitHub/IDP services, with the
+	// platform IDP defaults so GET /config can render the default idp section
+	// without persisting a row on read.
+	orgConfigSvc := orgconfig.NewService(
+		anthropicCredService,
+		credService,
+		disconnectSvc,
+		bearerSvc,
+		idpService,
+		idp.PlatformIDPConfig{Issuer: cfg.PlatformIDP.Issuer, JWKSURL: cfg.PlatformIDP.JWKSURL},
+		cfg.BFFPublicURL,
+		cfg.GitHubAppClientID,
+	)
+
 	// Code-first OpenAPI (Huma) feature dependencies. api.NewHandler creates the
 	// Huma API on apiMux and registers every migrated feature via
 	// RegisterAllHuma. See docs/design/bff-openapi-huma-migration.md.
@@ -727,6 +743,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		DisconnectSvc:     disconnectSvc,
 		BearerSvc:         bearerSvc,
 		AnthropicSvc:      anthropicCredService,
+		OrgConfigSvc:      orgConfigSvc,
 		TaskTokens:        taskTokens,
 		SkillSvc:          skillSvc,
 		SkillMutationSvc:  skillMutationSvc,

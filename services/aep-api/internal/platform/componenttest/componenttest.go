@@ -136,6 +136,9 @@ func (r *Req) Post(path, jsonBody string) *httptest.ResponseRecorder {
 func (r *Req) Put(path, jsonBody string) *httptest.ResponseRecorder {
 	return r.do(http.MethodPut, path, jsonBody)
 }
+func (r *Req) Patch(path, jsonBody string) *httptest.ResponseRecorder {
+	return r.do(http.MethodPatch, path, jsonBody)
+}
 
 func (r *Req) do(method, path, body string) *httptest.ResponseRecorder {
 	r.h.t.Helper()

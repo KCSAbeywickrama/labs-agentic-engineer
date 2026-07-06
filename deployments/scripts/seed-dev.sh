@@ -118,19 +118,37 @@ if [ -z "$TOKEN" ]; then
 fi
 echo "✅ Token minted"
 
-# Soft-fail helper. Body is read from $TMPDIR-style temp file passed in $1.
-_post_connect() {
-    local label="$1" url="$2" body="$3"
-    local code resp_tmp
+# The three org integrations (Anthropic, GitHub, IDP) are one consolidated
+# resource now: GET /config reads all sections; PATCH /config writes them
+# (docs/design/org-config-consolidation.md). We read once, then send the
+# unconnected + env-provided sections as ONE atomic PATCH.
+
+# Read the current config once. Each section (llm|gitProvider|idp) is a null
+# JSON value when unconnected, an object when connected.
+_config_json=$(curl -fsS --max-time 5 -H "Authorization: Bearer ${TOKEN}" \
+    "${BFF_URL%/}/api/v1/config" 2>/dev/null || echo '{}')
+
+# True when the given /config section is already connected (a non-null object).
+# Each connect mints a fresh SecretReference CR + OpenBao entry without deleting
+# the previous one, so blind re-connects (start.sh auto-seeds every run) would
+# accumulate orphans. GET failures / null sections count as unconnected so the
+# PATCH still runs. Bypass with SEED_FORCE=1 to rotate an already-connected one.
+_section_connected() {
+    [ "${SEED_FORCE:-0}" = "1" ] && return 1
+    printf '%s' "$_config_json" | grep -qE "\"$1\"[[:space:]]*:[[:space:]]*\{"
+}
+
+# Soft-fail atomic PATCH /config with the assembled section body.
+_patch_config() {
+    local label="$1" body="$2" code resp_tmp
     resp_tmp=$(mktemp -t seed-dev-XXXXXX.json)
     code=$(curl -sS -o "$resp_tmp" -w '%{http_code}' \
-        -X POST "$url" \
+        -X PATCH "${BFF_URL%/}/api/v1/config" \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Content-Type: application/json" \
         -d "$body" 2>/dev/null || echo 000)
     case "$code" in
         2*) echo "✅ ${label} connected (HTTP $code)" ;;
-        409) echo "✅ ${label} already connected (HTTP 409, no-op)" ;;
         *)
             echo "⚠️  ${label} connect failed (HTTP $code). Response (first 300 chars):"
             printf '   %s\n' "$(head -c 300 "$resp_tmp")"
@@ -140,54 +158,40 @@ _post_connect() {
     rm -f "$resp_tmp"
 }
 
-# True when the credential's status projection reports anything other than
-# "not_connected". Each connect mints a fresh SecretReference CR + OpenBao
-# entry without deleting the previous one, so blind re-connects (e.g.
-# start.sh auto-seeding every run) would accumulate orphans. GET failures
-# count as not-connected so the connect below still runs. Bypass with
-# SEED_FORCE=1 to rotate a credential that's already connected.
-_already_connected() {
-    local url="$1" resp status
-    [ "${SEED_FORCE:-0}" = "1" ] && return 1
-    resp=$(curl -fsS --max-time 5 -H "Authorization: Bearer ${TOKEN}" "$url" 2>/dev/null) || return 1
-    status=$(printf '%s' "$resp" \
-        | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-    [ -n "$status" ] && [ "$status" != "not_connected" ]
-}
-
-# 3. Anthropic
+# 3. Org integrations — Anthropic + GitHub PAT, sent as ONE atomic PATCH /config.
+# Only sections whose env vars are set AND aren't already connected are included.
 echo ""
+_sections=""   # comma-joined JSON section fragments
+_labels=""     # human label of what's being connected
+
 if [ -n "$ANTHROPIC_KEY" ]; then
-    if _already_connected "${BFF_URL%/}/api/v1/org/credentials/anthropic"; then
+    if _section_connected llm; then
         echo "✅ Anthropic already connected — skipping (SEED_FORCE=1 to re-connect)"
     else
-        echo "🤖 Connecting Anthropic key (org derived from the seeder token)..."
-        body=$(printf '{"apiKey":"%s"}' "$ANTHROPIC_KEY")
-        _post_connect "Anthropic" \
-            "${BFF_URL%/}/api/v1/org/credentials/anthropic" \
-            "$body"
+        _sections="${_sections:+$_sections,}$(printf '"llm":{"kind":"anthropic","apiKey":"%s"}' "$ANTHROPIC_KEY")"
+        _labels="${_labels:+$_labels + }Anthropic"
     fi
 else
     echo "⏭️  ANTHROPIC_API_KEY not set in $ENV_FILE — skipping Anthropic seed"
 fi
 
-# 4. GitHub PAT
-echo ""
 if [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_OWNER" ]; then
-    if _already_connected "${BFF_URL%/}/api/v1/org/credentials/github"; then
+    if _section_connected gitProvider; then
         echo "✅ GitHub already connected — skipping (SEED_FORCE=1 to re-connect)"
     else
-        echo "🐙 Connecting GitHub PAT (org derived from the seeder token, owner=$GITHUB_OWNER)..."
-        body=$(printf '{"pat":"%s","githubLogin":"%s"}' "$GITHUB_PAT" "$GITHUB_OWNER")
-        _post_connect "GitHub PAT" \
-            "${BFF_URL%/}/api/v1/org/credentials/github/pat" \
-            "$body"
+        _sections="${_sections:+$_sections,}$(printf '"gitProvider":{"kind":"github","mode":"pat","pat":"%s","githubLogin":"%s"}' "$GITHUB_PAT" "$GITHUB_OWNER")"
+        _labels="${_labels:+$_labels + }GitHub PAT"
     fi
 else
     echo "⏭️  LOCAL_DEV_ADMIN_GITHUB_PAT / LOCAL_DEV_ADMIN_GITHUB_OWNER not set in $ENV_FILE — skipping GitHub seed"
     echo "   To enable, append to $ENV_FILE:"
     echo "       LOCAL_DEV_ADMIN_GITHUB_PAT=<pat>"
     echo "       LOCAL_DEV_ADMIN_GITHUB_OWNER=<github-login>"
+fi
+
+if [ -n "$_sections" ]; then
+    echo "🔗 Connecting org integrations ($_labels) via one atomic PATCH /config..."
+    _patch_config "$_labels" "{${_sections}}"
 fi
 
 echo ""

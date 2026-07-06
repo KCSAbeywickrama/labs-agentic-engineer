@@ -93,17 +93,22 @@ type skillDeleteOutput struct {
 type importResultOutput struct{ Body *ImportResult }
 
 // RegisterSkill registers the org-scoped skills catalogue operations on the
-// Huma API. It is the code-first replacement for registerSkillRoutes
-// (api/skill_routes.go): same paths, same auth posture, with the spec
-// generated from the typed inputs/outputs. Built-ins are read-only — PUT/DELETE
-// against them surface 403.
+// Huma API. Same auth posture as every org-scoped op (the active org is bound
+// from the verified token — no {orgHandle} path param). Built-ins are read-only
+// — PUT/DELETE against them surface 403.
+//
+// The base is /skills (not /org/skills): skills are their own resource
+// collection, and the org-config consolidation dropped the redundant /org
+// prefix across the whole surface so no /org/* routes remain (§2a of
+// docs/design/org-config-consolidation.md). Skills are NOT part of /config;
+// only the path prefix changed.
 func RegisterSkill(
 	api huma.API,
 	skillSvc *SkillService,
 	mutationSvc *SkillMutationService,
 	importSvc *SkillImportService,
 ) {
-	const base = "/org/skills"
+	const base = "/skills"
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-skills",

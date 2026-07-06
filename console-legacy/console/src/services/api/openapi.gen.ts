@@ -21,44 +21,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/org/credentials/anthropic": {
+    "/config": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get the org's Anthropic key status (projection, no key) */
-        get: operations["get-anthropic-status"];
-        put?: never;
-        /** Connect or replace the org's Anthropic API key */
-        post: operations["connect-anthropic"];
-        /** Disconnect the org's Anthropic key */
-        delete: operations["disconnect-anthropic"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/org/credentials/github": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get GitHub connection status (projection, no token) */
-        get: operations["get-github-status"];
+        /** Get the organization's integration config (statuses/kinds, no secrets) */
+        get: operations["get-config"];
         put?: never;
         post?: never;
-        /** Disconnect GitHub (cascade) for the org */
-        delete: operations["disconnect-github"];
+        delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch the organization's integration config (per-section, atomic) */
+        patch: operations["update-config"];
         trace?: never;
     };
-    "/org/credentials/github/connect/start": {
+    "/config/git-provider/connect-sessions": {
         parameters: {
             query?: never;
             header?: never;
@@ -67,15 +48,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start App-mode GitHub connect (OAuth-driven) */
-        post: operations["start-github-connect"];
+        /** Start App-mode git-provider connect (OAuth-driven) */
+        post: operations["start-git-provider-connect"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/org/credentials/github/pat": {
+    "/config/git-provider/disconnect": {
         parameters: {
             query?: never;
             header?: never;
@@ -84,33 +65,32 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Connect or replace a PAT-mode GitHub credential */
-        post: operations["connect-github-pat"];
+        /** Disconnect the git provider (cascade) for the org */
+        post: operations["disconnect-git-provider"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/org/idp": {
+    "/config/idp/client-secret": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get the organization's IDP profile */
-        get: operations["get-idp-profile"];
-        /** Update the organization's IDP profile */
-        put: operations["update-idp-profile"];
-        post?: never;
+        get?: never;
+        put?: never;
+        /** Rotate the IDP publisher client secret (returned once) */
+        post: operations["rotate-idp-client-secret"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/org/idp/discovery": {
+    "/config/idp/discovery": {
         parameters: {
             query?: never;
             header?: never;
@@ -118,7 +98,7 @@ export interface paths {
             cookie?: never;
         };
         /** Discover an OIDC issuer's metadata */
-        get: operations["discover-idp-issuer"];
+        get: operations["discover-idp"];
         put?: never;
         post?: never;
         delete?: never;
@@ -127,84 +107,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/org/idp/rotate": {
+    "/dependencies/external-resources": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        /** Rotate the publisher client secret */
-        post: operations["regenerate-idp-client-secret"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/org/skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List skills */
-        get: operations["list-skills"];
-        put?: never;
-        /** Create a custom skill */
-        post: operations["create-skill"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/org/skills/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Import an AgentSkills tarball */
-        post: operations["import-skill"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/org/skills/sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sync built-in skills */
-        post: operations["sync-skills"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/org/skills/updates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List available built-in skill updates */
-        get: operations["list-skill-updates"];
+        /** List the org's external-resource catalog */
+        get: operations["list-external-resources"];
         put?: never;
         post?: never;
         delete?: never;
@@ -213,20 +124,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/org/skills/{name}": {
+    "/dependencies/external-resources/{name}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get a skill */
-        get: operations["get-skill"];
-        /** Update a custom skill */
-        put: operations["update-skill"];
+        get?: never;
+        put?: never;
         post?: never;
-        /** Delete a custom or imported skill */
-        delete: operations["delete-skill"];
+        /** Delete an external-resource catalog entry (409 if in use) */
+        delete: operations["delete-external-resource"];
         options?: never;
         head?: never;
         patch?: never;
@@ -372,6 +281,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectName}/components/{componentName}/dependencies/{depName}/access-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request access to a cross-project org-service dependency */
+        post: operations["request-org-service-access"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/components/{componentName}/dependencies/{depName}/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Provision a platform-resource dependency (async) */
+        post: operations["provision-platform-resource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/components/{componentName}/dependencies/{depName}/spec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Store a consumed OpenAPI spec for an external dependency */
+        post: operations["collect-dependency-spec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/components/{componentName}/dependencies/{depName}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a dependency's provisioning status (outputs masked to names) */
+        get: operations["get-dependency-status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectName}/components/{componentName}/deployments": {
         parameters: {
             query?: never;
@@ -434,6 +411,40 @@ export interface paths {
         put?: never;
         /** Start a generation/chat turn (202 — runs detached; attach via the turn stream) */
         post: operations["create-turn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/dependencies/access-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a consumer project's access requests */
+        get: operations["list-access-requests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/dependencies/external-resources/{name}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collect an external dependency's values and provision it */
+        post: operations["collect-external-resource-values"];
         delete?: never;
         options?: never;
         head?: never;
@@ -849,26 +860,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List skills */
+        get: operations["list-skills"];
+        put?: never;
+        /** Create a custom skill */
+        post: operations["create-skill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import an AgentSkills tarball */
+        post: operations["import-skill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync built-in skills */
+        post: operations["sync-skills"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List available built-in skill updates */
+        get: operations["list-skill-updates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a skill */
+        get: operations["get-skill"];
+        /** Update a custom skill */
+        put: operations["update-skill"];
+        post?: never;
+        /** Delete a custom or imported skill */
+        delete: operations["delete-skill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        AnthropicProjection: {
+        AccessRequest: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/AnthropicProjection.json
+             * @example /api/v1/AccessRequest.json
              */
             readonly $schema?: string;
+            consumerComponentName: string;
+            consumerProjectId: string;
             /** Format: date-time */
-            connectedAt: string;
-            keyLast4: string;
-            keyPrefix: string;
-            /** Format: date-time */
-            lastValidatedAt?: string;
-            ocOrgId: string;
+            createdAt: string;
+            id: string;
+            orgServiceName: string;
+            providerComponentName?: string;
+            /** Format: int64 */
+            providerIssueNumber?: number;
+            providerIssueUrl?: string;
+            providerProjectId?: string;
+            providerTaskId?: string;
             status: string;
-            validationError?: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         ApplyRequest: {
             /**
@@ -950,6 +1055,28 @@ export interface components {
             email: string;
             name: string;
         };
+        CollectSpecInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/CollectSpecInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description Raw OpenAPI 3.x YAML/JSON (paste path) */
+            rawSpec?: string;
+            /** @description HTTPS URL to fetch the OpenAPI spec from */
+            specUrl?: string;
+        };
+        CollectSpecOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/CollectSpecOutputBody.json
+             */
+            readonly $schema?: string;
+            /** @description Component-relative path where the spec was stored */
+            specPath: string;
+        };
         Component: {
             /**
              * Format: uri
@@ -1004,6 +1131,58 @@ export interface components {
             componentType: string;
             spec: string;
         };
+        ConfigKey: {
+            credentialClass?: string;
+            key: string;
+            secret: boolean;
+        };
+        ConfigKeyDTO: {
+            credentialClass?: string;
+            key: string;
+            secret: boolean;
+        };
+        ConfigPatch: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/ConfigPatch.json
+             */
+            readonly $schema?: string;
+            gitProvider?: {
+                githubLogin?: string;
+                /** @enum {string} */
+                kind: "github";
+                /** @enum {string} */
+                mode: "pat";
+                pat: string;
+            } | null;
+            idp?: {
+                issuer?: string;
+                jwksUrl?: string;
+                /** @enum {string} */
+                kind: "platform" | "asgardeo" | "custom";
+            } | null;
+            llm?: {
+                apiKey: string;
+                /** @enum {string} */
+                kind: "anthropic";
+            } | null;
+        };
+        ConfigProjection: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/ConfigProjection.json
+             */
+            readonly $schema?: string;
+            gitProvider: components["schemas"]["GitProviderProjection"];
+            idp: components["schemas"]["IDPProjection"];
+            llm: components["schemas"]["LLMProjection"];
+        };
+        ConsumerDTO: {
+            componentName: string;
+            projectId: string;
+        };
         CreateProjectRequest: {
             /**
              * Format: uri
@@ -1033,11 +1212,37 @@ export interface components {
             baseSha?: string;
             path: string;
         };
-        DependentAPI: {
-            authentication?: string;
+        Dependency: {
+            candidates?: components["schemas"]["DependencyCandidate"][] | null;
+            config?: components["schemas"]["ConfigKey"][] | null;
             description?: string;
+            kind: string;
             name: string;
-            url: string;
+            needsSpec?: boolean;
+            parameters?: {
+                [key: string]: string;
+            };
+            reason?: string;
+            resourceType?: string;
+            specPath?: string;
+            specUrl?: string;
+            status?: string;
+        };
+        DependencyCandidate: {
+            description?: string;
+            label: string;
+            url?: string;
+        };
+        DependencyStatus: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/DependencyStatus.json
+             */
+            readonly $schema?: string;
+            outputs: string[] | null;
+            ready: boolean;
+            status: string;
         };
         Deployment: {
             componentName?: string;
@@ -1092,13 +1297,15 @@ export interface components {
             callerIdentity?: components["schemas"]["CallerIdentity"];
             componentAgentInstructions: string;
             componentType: string;
-            dependentApis?: components["schemas"]["DependentAPI"][] | null;
-            dependsOn: string[] | null;
+            dependencies: components["schemas"]["Dependency"][] | null;
+            description?: string;
             entrypoint: string;
             exposesAPI?: components["schemas"]["ExposesAPI"];
+            exposure?: string;
             language: string;
             name: string;
             openAPISpec: string;
+            version?: string;
         };
         DesignSaveBody: {
             /**
@@ -1109,6 +1316,15 @@ export interface components {
             readonly $schema?: string;
             /** @description Commit to read, gate and tag (the publish's just-applied commit). Empty: resolve HEAD. */
             commitSha?: string;
+        };
+        DisconnectOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/DisconnectOutputBody.json
+             */
+            readonly $schema?: string;
+            status: string;
         };
         DiscoverOutputBody: {
             /**
@@ -1187,7 +1403,14 @@ export interface components {
         ExposesAPI: {
             auth?: string;
             managed?: boolean;
+            orgPublished?: boolean;
             userContext?: string;
+        };
+        ExternalResourceDTO: {
+            config: components["schemas"]["ConfigKeyDTO"][] | null;
+            consumers: components["schemas"]["ConsumerDTO"][] | null;
+            description?: string;
+            name: string;
         };
         FileContent: {
             /**
@@ -1213,6 +1436,49 @@ export interface components {
             /** Format: int64 */
             Size: number;
         };
+        GitProviderProjection: {
+            /** Format: date-time */
+            connectedAt: string;
+            githubLogin?: string;
+            /** Format: date-time */
+            identityChangedAt?: string;
+            identityEmail?: string;
+            identityLogin?: string;
+            identityName?: string;
+            /** Format: int64 */
+            installationId?: number;
+            /** @enum {string} */
+            kind: "github";
+            /** Format: date-time */
+            lastValidatedAt?: string;
+            /** @enum {string} */
+            mode: "app" | "pat";
+            prevIdentityLogin?: string;
+            selectedRepos?: string[] | null;
+            status: string;
+        };
+        GitProviderWrite: {
+            githubLogin?: string;
+            /** @enum {string} */
+            kind: "github";
+            /** @enum {string} */
+            mode: "pat";
+            pat: string;
+        } | null;
+        IDPProjection: {
+            hasClientSecret: boolean;
+            issuer: string;
+            jwksUrl: string;
+            /** @enum {string} */
+            kind: "platform" | "asgardeo" | "custom";
+            publisherClientId: string;
+        };
+        IDPWrite: {
+            issuer?: string;
+            jwksUrl?: string;
+            /** @enum {string} */
+            kind: "platform" | "asgardeo" | "custom";
+        } | null;
         ImportResult: {
             /**
              * Format: uri
@@ -1226,44 +1492,26 @@ export interface components {
             name: string;
             warnings: string[] | null;
         };
+        LLMProjection: {
+            /** Format: date-time */
+            connectedAt: string;
+            keyLast4: string;
+            keyPrefix: string;
+            /** @enum {string} */
+            kind: "anthropic";
+            /** Format: date-time */
+            lastValidatedAt?: string;
+            status: string;
+            validationError?: string;
+        };
+        LLMWrite: {
+            apiKey: string;
+            /** @enum {string} */
+            kind: "anthropic";
+        } | null;
         Lineage: {
             designTag?: string;
             specTag?: string;
-        };
-        OrgAnthropicConnectInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/OrgAnthropicConnectInputBody.json
-             */
-            readonly $schema?: string;
-            /** @description Anthropic API key (sk-ant-...) */
-            apiKey: string;
-        };
-        OrgGitHubConnectPATInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/OrgGitHubConnectPATInputBody.json
-             */
-            readonly $schema?: string;
-            /** @description GitHub login the PAT belongs to */
-            githubLogin?: string;
-            /** @description GitHub personal access token */
-            pat: string;
-        };
-        OrgGitHubStartConnectInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/OrgGitHubStartConnectInputBody.json
-             */
-            readonly $schema?: string;
-            /**
-             * Format: int64
-             * @description Optional installation to pin (set when the user picks a candidate from the 2+ picker)
-             */
-            installationId?: number;
         };
         OrganizationList: {
             /**
@@ -1366,30 +1614,19 @@ export interface components {
             repoUrl: string;
             specStatus: string;
         };
-        Projection: {
+        ProvisionBody: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/Projection.json
+             * @example /api/v1/ProvisionBody.json
              */
             readonly $schema?: string;
-            /** Format: date-time */
-            connectedAt: string;
-            githubLogin: string;
-            /** Format: date-time */
-            identityChangedAt?: string;
-            identityEmail?: string;
-            identityLogin: string;
-            identityName?: string;
-            /** Format: int64 */
-            installationId?: number;
-            kind: string;
-            /** Format: date-time */
-            lastValidatedAt?: string;
-            ocOrgId: string;
-            prevIdentityLogin?: string;
-            selectedRepos?: string[] | null;
-            status: string;
+            /** @description Environments to provision (default: [development]) */
+            environments?: string[] | null;
+            /** @description Provisioning parameters (override the design defaults) */
+            params?: {
+                [key: string]: string;
+            };
         };
         RequirementsBundle: {
             /**
@@ -1418,6 +1655,20 @@ export interface components {
             /** @description Commit to gate and tag (the publish's just-applied commit). Empty: resolve HEAD. */
             commitSha?: string;
         };
+        SaveValuesBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/SaveValuesBody.json
+             */
+            readonly $schema?: string;
+            /** @description Per-environment { configKey: value } maps. Secret keys are routed to the secret manager by the registered schema. */
+            environments: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
+        };
         SkillDetailBody: {
             /**
              * Format: uri
@@ -1441,6 +1692,37 @@ export interface components {
             updatedAt: string;
             /** Format: int64 */
             version: number;
+        };
+        StartConnectInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/StartConnectInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description Optional installation to pin (set when the user picks a candidate from the 2+ picker)
+             */
+            installationId?: number;
+        };
+        StartConnectOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/StartConnectOutputBody.json
+             */
+            readonly $schema?: string;
+            authorizeUrl: string;
+        };
+        StatusMsg: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/StatusMsg.json
+             */
+            readonly $schema?: string;
+            status: string;
         };
         TaskDetail: {
             /**
@@ -1546,20 +1828,6 @@ export interface components {
             readonly $schema?: string;
             envVars: components["schemas"]["EnvVar"][] | null;
         };
-        UpdateProfileInputBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/UpdateProfileInputBody.json
-             */
-            readonly $schema?: string;
-            /** @description OIDC issuer URL; empty leaves the existing value unchanged */
-            issuer: string;
-            /** @description JWKS URL; empty leaves the existing value unchanged */
-            jwksUrl: string;
-            /** @description IDP kind: platform | asgardeo | custom */
-            kind: string;
-        };
         UpdateSkillInput: {
             /**
              * Format: uri
@@ -1656,7 +1924,7 @@ export interface operations {
             };
         };
     };
-    "get-anthropic-status": {
+    "get-config": {
         parameters: {
             query?: never;
             header?: never;
@@ -1671,9 +1939,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ConfigProjection"];
                 };
             };
             /** @description Error */
@@ -1687,7 +1953,7 @@ export interface operations {
             };
         };
     };
-    "connect-anthropic": {
+    "update-config": {
         parameters: {
             query?: never;
             header?: never;
@@ -1696,7 +1962,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OrgAnthropicConnectInputBody"];
+                "application/json": components["schemas"]["ConfigPatch"];
             };
         };
         responses: {
@@ -1706,7 +1972,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AnthropicProjection"];
+                    "application/json": components["schemas"]["ConfigProjection"];
                 };
             };
             /** @description Error */
@@ -1720,14 +1986,18 @@ export interface operations {
             };
         };
     };
-    "disconnect-anthropic": {
+    "start-git-provider-connect": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartConnectInputBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -1735,9 +2005,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["StartConnectOutputBody"];
                 };
             };
             /** @description Error */
@@ -1751,38 +2019,7 @@ export interface operations {
             };
         };
     };
-    "get-github-status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "disconnect-github": {
+    "disconnect-git-provider": {
         parameters: {
             query?: {
                 /** @description App-mode only: when false, leave the install on GitHub for later re-adoption (defaults true) */
@@ -1800,9 +2037,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["DisconnectOutputBody"];
                 };
             };
             /** @description Error */
@@ -1816,75 +2051,7 @@ export interface operations {
             };
         };
     };
-    "start-github-connect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OrgGitHubStartConnectInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "connect-github-pat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OrgGitHubConnectPATInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Projection"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-idp-profile": {
+    "rotate-idp-client-secret": {
         parameters: {
             query?: never;
             header?: never;
@@ -1899,7 +2066,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ClientSecretOutputBody"];
                 };
             };
             /** @description Error */
@@ -1913,40 +2080,7 @@ export interface operations {
             };
         };
     };
-    "update-idp-profile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateProfileInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "discover-idp-issuer": {
+    "discover-idp": {
         parameters: {
             query?: {
                 /** @description OIDC issuer URL to fetch the discovery document for */
@@ -1978,7 +2112,7 @@ export interface operations {
             };
         };
     };
-    "regenerate-idp-client-secret": {
+    "list-external-resources": {
         parameters: {
             query?: never;
             header?: never;
@@ -1993,7 +2127,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ClientSecretOutputBody"];
+                    "application/json": components["schemas"]["ExternalResourceDTO"][] | null;
                 };
             };
             /** @description Error */
@@ -2007,261 +2141,24 @@ export interface operations {
             };
         };
     };
-    "list-skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "create-skill": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateSkillInput"];
-            };
-        };
-        responses: {
-            /** @description Created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SkillDetailBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "import-skill": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "multipart/form-data": {
-                    /**
-                     * Format: binary
-                     * @description Gzip-compressed AgentSkills tarball
-                     */
-                    file: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImportResult"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "sync-skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "list-skill-updates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-skill": {
+    "delete-external-resource": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Skill name (slug) */
+                /** @description External resource name */
                 name: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description No Content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["SkillDetailBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "update-skill": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Skill name (slug) */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateSkillInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SkillDetailBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "delete-skill": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Skill name (slug) */
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
+                content?: never;
             };
             /** @description Error */
             default: {
@@ -2674,6 +2571,161 @@ export interface operations {
             };
         };
     };
+    "request-org-service-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Consumer project name (DNS-label slug) */
+                projectName: string;
+                /** @description Consumer component name */
+                componentName: string;
+                /** @description org-service dependency name (the provider component) */
+                depName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessRequest"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "provision-platform-resource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description Component the drawer opened on (context only) */
+                componentName: string;
+                /** @description Platform-resource dependency name */
+                depName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProvisionBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusMsg"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "collect-dependency-spec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description Consumer component name */
+                componentName: string;
+                /** @description External dependency name */
+                depName: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectSpecInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectSpecOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-dependency-status": {
+        parameters: {
+            query?: {
+                /** @description Environment (default: development) */
+                environment?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description Component the drawer opened on (context only) */
+                componentName: string;
+                /** @description Dependency name */
+                depName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyStatus"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-deployments": {
         parameters: {
             query?: never;
@@ -2801,6 +2853,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TurnOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-access-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Consumer project name (DNS-label slug) */
+                projectName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessRequest"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "collect-external-resource-values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description External resource (dependency) name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SaveValuesBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusMsg"];
                 };
             };
             /** @description Error */
@@ -3640,6 +3762,273 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSkillInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description Gzip-compressed AgentSkills tarball
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "sync-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-skill-updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Skill name (slug) */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Skill name (slug) */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSkillInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Skill name (slug) */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Error */
             default: {

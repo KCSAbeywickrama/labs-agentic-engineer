@@ -32,6 +32,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
@@ -64,6 +65,7 @@ type HumaDeps struct {
 	DisconnectSvc     *orgcreds.OrgDisconnectService
 	BearerSvc         *orgcreds.BearerService
 	AnthropicSvc      *orgcreds.AnthropicCredentialService
+	OrgConfigSvc      *orgconfig.Service
 	TaskTokens        *auth.TaskTokenManager
 	SkillSvc          *skills.SkillService
 	SkillMutationSvc  *skills.SkillMutationService
@@ -89,9 +91,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	provisioning.RegisterResources(api, d.ProvisioningSvc)
 	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
 	execution.RegisterProgress(api, d.ExecProgress)
-	idp.RegisterIDP(api, d.IDPSvc)
-	orgcreds.RegisterOrgGitHub(api, d.CredentialSvc, d.DisconnectSvc, d.BearerSvc, d.GitHubAppSlug, d.BFFPublicURL, d.GitHubAppClientID)
-	orgcreds.RegisterOrgAnthropic(api, d.AnthropicSvc)
+	orgconfig.RegisterConfig(api, d.OrgConfigSvc)
 	skills.RegisterSkill(api, d.SkillSvc, d.SkillMutationSvc, d.SkillImportSvc)
 	files.RegisterFiles(api, d.FilesSvc)
 	genai.RegisterGenAI(api, d.GenAISvc)

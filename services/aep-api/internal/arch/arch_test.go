@@ -78,6 +78,12 @@ var featureEdgeAllowlist = map[string][]string{
 	"gitrepo":      {},
 	"idp":          {"orgcreds"},
 	"organization": {},
+	// orgconfig is the consolidated /config surface (org-config-consolidation.md):
+	// one orchestrator over the reused Anthropic/GitHub (orgcreds) and IDP (idp)
+	// services. These two edges ARE the feature — it assembles GET /config and runs
+	// the atomic multi-section PATCH across both services — so the concrete edges
+	// are the deliberate design, not incidental coupling.
+	"orgconfig":    {"idp", "orgcreds"},
 	"orgcreds":     {"gitrepo"},
 	"project":      {"artifacts", "gitrepo"},
 	// provisioning is the dependency-provisioning coordinator (dependency-management
