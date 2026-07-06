@@ -252,6 +252,29 @@ if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/d
         echo "ℹ️  ai-rca-agent not installed — run scripts/setup-observability.sh to"
         echo "    enable the alert→RCA→coding-agent pipeline."
     fi
+
+    # 7d. Runner-image drift check. Coding agents dispatch via TWO paths with
+    #     independent image pins: the proxy path (aep-api env AGENT_RUNNER_IMAGE,
+    #     docker-compose.yml) and the legacy ClusterWorkflow path
+    #     (manifests/aep-coding-agent.yaml, used when per-org SM-API secrets are
+    #     absent — e.g. right after a fresh setup). If they drift, dispatches
+    #     behave differently depending on which path fires (this is exactly how
+    #     the related-issues skill silently went missing on one path).
+    COMPOSE_RUNNER=$(docker compose -f "$DEPLOY_DIR/docker-compose.yml" config 2>/dev/null \
+        | grep -m1 'AGENT_RUNNER_IMAGE:' | awk '{print $2}')
+    CW_RUNNER=$(kubectl --context "${CLUSTER_CONTEXT}" get clusterworkflows.openchoreo.dev aep-coding-agent \
+        -o jsonpath='{.spec.runTemplate.spec.templates[0].container.image}' 2>/dev/null)
+    if [ -n "$COMPOSE_RUNNER" ] && [ -n "$CW_RUNNER" ]; then
+        if [ "$COMPOSE_RUNNER" = "$CW_RUNNER" ]; then
+            echo "✅ runner image consistent on both dispatch paths: $CW_RUNNER"
+        else
+            echo "⚠️  runner-image DRIFT between dispatch paths:"
+            echo "      proxy path (compose AGENT_RUNNER_IMAGE): $COMPOSE_RUNNER"
+            echo "      legacy path (ClusterWorkflow):           $CW_RUNNER"
+            echo "    Align docker-compose.yml and manifests/aep-coding-agent.yaml"
+            echo "    (re-run scripts/setup-aep.sh to re-apply the manifest)."
+        fi
+    fi
 fi
 
 # 8. Repair per-org secrets in OpenBao. When the local cluster (or just the

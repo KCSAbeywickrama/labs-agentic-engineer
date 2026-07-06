@@ -42,6 +42,12 @@ services:
       SERVER_PORT: "9090"
       LOG_LEVEL: "debug"
       DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
+      # Runner image override: built from this repo's runners/remote-worker so
+      # it includes the `related-issues` skill (cross-links related GitHub
+      # issues — e.g. an SRE/RCA-handoff issue and the earlier issue whose fix
+      # caused it). The upstream default (xlight05/aep-coding-agent-runner:v4)
+      # predates that skill. See docs/developer-guide/sre-handoff-runbook.md.
+      AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-docker.io/tharindulak/aep-coding-agent-runner:v4-related-issues}"
       DEPLOYMENT_TIER: "${DEPLOYMENT_TIER:-dev}"
       # Central per-route tenant gate (§6.1b). ENFORCE by default (404s
       # cross-org); set TENANT_GATE_MODE=log for the observe-only canary

@@ -110,7 +110,12 @@ fi
 # starts and the task fails with DeadlineExceeded (and any dependent task then
 # sits On Hold forever). Pre-importing makes the first dispatch start instantly.
 # The tag is read from the manifest so it can't drift from what the Job uses.
-RUNNER_IMAGE="$(grep -oE 'image:[[:space:]]*docker.io/xlight05/aep-coding-agent-runner:[^[:space:]]+' "$CODING_AGENT_MANIFEST" | head -1 | awk '{print $2}')"
+# Repo-agnostic match: the runner image moved from xlight05/... to a fork with
+# the related-issues skill (tharindulak/...) — match any registry/repo carrying
+# the aep-coding-agent-runner image so this pre-pull can't silently skip when
+# the manifest's repo changes (a skipped pre-pull = 560MB cold pull on first
+# dispatch = Job DeadlineExceeded).
+RUNNER_IMAGE="$(grep -oE 'image:[[:space:]]*[^[:space:]]*aep-coding-agent-runner:[^[:space:]]+' "$CODING_AGENT_MANIFEST" | head -1 | awk '{print $2}')"
 if [ -n "$RUNNER_IMAGE" ]; then
     echo ""
     echo "🐳 Pre-importing coding-agent runner image ($RUNNER_IMAGE)..."
