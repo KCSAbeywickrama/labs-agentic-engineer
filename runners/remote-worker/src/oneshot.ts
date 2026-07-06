@@ -65,6 +65,10 @@ function readDispatchFromEnv(): DispatchRequest {
   const identityEmail = requireEnv("AEP_IDENTITY_EMAIL");
   const identityLogin = process.env.AEP_IDENTITY_LOGIN || "";
   const correlationId = process.env.AEP_CORRELATION_ID || randomUUID();
+  const taskKind = process.env.AEP_TASK_KIND || "implementation";
+  if (taskKind !== "implementation" && taskKind !== "validation") {
+    throw new Error(`AEP_TASK_KIND must be "implementation" or "validation": ${taskKind}`);
+  }
 
   const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
   const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
@@ -95,6 +99,7 @@ function readDispatchFromEnv(): DispatchRequest {
     gitServiceUrl,
     prompt,
     correlationId,
+    taskKind,
   };
 }
 

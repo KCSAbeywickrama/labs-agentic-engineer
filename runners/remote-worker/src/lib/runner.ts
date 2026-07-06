@@ -95,7 +95,13 @@ export function runClaudeQuery(
   const plugins: Array<{ type: "local"; path: string }> = [
     { type: "local", path: PLUGIN_PATH },
   ];
+  // Validation tasks additionally preload the validation workflow body:
+  // it replaces the implementation workflow and the run cannot afford
+  // the agent skipping a description-triggered load of it.
   const skillPreload: string[] = ["aep:aep"];
+  if (req.taskKind === "validation") {
+    skillPreload.push("aep:aep-validation");
+  }
   if (perTaskSkills?.skillsPluginDir) {
     plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
     for (const name of perTaskSkills.preloadBuiltinNames) {
