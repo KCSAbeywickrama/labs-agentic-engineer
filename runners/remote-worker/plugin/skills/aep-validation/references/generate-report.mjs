@@ -208,21 +208,41 @@ function main() {
   }
 
   // ---- spec-file conventions (header hard-check, locator lint) -----------
+  // Reporter file paths are relative to the run's rootDir (usually the
+  // testDir, e.g. tests/e2e/specs), NOT the repo root — resolve against
+  // rootDir first, then the conventional layouts.
+  const rootDir = results.config?.rootDir;
+  function resolveSpecPath(file) {
+    const candidates = [];
+    if (rootDir) candidates.push(path.resolve(rootDir, file));
+    candidates.push(
+      path.resolve("tests/e2e/specs", file),
+      path.resolve("tests/e2e", file),
+    );
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+    return null;
+  }
   const warnings = [];
   for (const [acId, r] of resultByAc) {
     if (!r.file) continue;
-    const specPath = path.posix.join("tests/e2e", r.file);
-    if (!existsSync(specPath)) continue; // path layout differs — can't verify
-    const src = readFileSync(specPath, "utf8");
+    const abs = resolveSpecPath(r.file);
+    if (!abs) {
+      warnings.push(`${acId}: spec file not found on disk (${r.file}) — header/locator checks skipped`);
+      continue;
+    }
+    r.repoPath = path.relative(process.cwd(), abs).split(path.sep).join("/");
+    const src = readFileSync(abs, "utf8");
     const head = src.split("\n").slice(0, 10);
     if (!head.some((l) => l.startsWith("// spec:"))) {
       errors.push(
-        `${specPath} is missing its "// spec:" header comment (link to the test-plan section for ${acId})`,
+        `${r.repoPath} is missing its "// spec:" header comment (link to the test-plan section for ${acId})`,
       );
     }
     if (/\.locator\(/.test(src)) {
       warnings.push(
-        `${acId}: raw locator() usage in ${specPath} — prefer getByRole/getByLabel/getByPlaceholder`,
+        `${acId}: raw locator() usage in ${r.repoPath} — prefer getByRole/getByLabel/getByPlaceholder`,
       );
     }
   }
@@ -258,7 +278,7 @@ function main() {
           totals.e2e.notRun += 1;
         } else {
           row.status = r.status;
-          row.spec = r.file ? path.posix.join("tests/e2e", r.file) : null;
+          row.spec = r.repoPath ?? (r.file ? path.posix.join("tests/e2e", r.file) : null);
           row.flaky = r.flaky;
           row.durationMs = r.durationMs;
           row.failure = r.failure;
