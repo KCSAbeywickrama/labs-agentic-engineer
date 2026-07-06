@@ -205,45 +205,38 @@ func ConsumedSpecPath(depName string) string {
 	return "dependencies/" + depName + ".openapi.yaml"
 }
 
-// StoreConsumedSpec validates + normalizes rawSpec for the consumer
-// component's `depName` external dependency and returns the component-relative
-// specPath (`dependencies/<depName>.openapi.yaml`).
+// StoreConsumedSpec validates + normalizes rawSpec for the consumer component's
+// `depName` external dependency and returns the component-relative specPath
+// (`dependencies/<depName>.openapi.yaml`) together with the normalized blob to
+// commit.
 //
-// COMMITTED-TRUTH CAVEAT: this store has no single-file commit surface —
-// SaveDesign only reads + tags, and every file write in the rework lands via
-// the Files API (feature/files, atomic apply → main). So StoreConsumedSpec
-// does the validate+normalize half here and returns the path; the actual
-// persistence of the normalized blob at
-// `specs/design/components/<component>/dependencies/<depName>.openapi.yaml`
-// is deferred.
-//
-// TODO(spec-commit follow-up): commit the normalized spec through the committed-truth file
-// path (files.Apply / the Workspace mutate surface) and record the specPath on
-// the dependency, so the proceed-gate's external-needs-spec condition clears
-// after a collect. Until then the returned `normalized` blob is discarded.
+// COMMITTED-TRUTH: this store has no single-file commit surface of its own —
+// every file write lands via the Files API (feature/files, atomic apply →
+// main). So StoreConsumedSpec does the validate+normalize half and hands the
+// normalized blob back; the caller (design.CollectSpec) commits it — atomically
+// with the design.json specPath edit that clears the external-needs-spec gate —
+// through the Files commit port.
 //
 // Error classification:
 //   - %w-wraps ErrInvalidSpecContent: depName path-traversal rejection +
 //     ValidateOpenAPI failures (client/400).
 //   - bare errors: NormalizeOpenAPIYAML failures (infra/500).
-func (s *ArtifactStore) StoreConsumedSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte) (string, error) {
+func (s *ArtifactStore) StoreConsumedSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte) (specPath, normalized string, err error) {
 	// Defense-in-depth: reject depName values that could escape the
 	// dependencies/ directory via path traversal — belt-and-suspenders even
 	// though depName is normally architect/catalog-controlled.
 	if strings.Contains(depName, "/") || strings.Contains(depName, `\`) || strings.Contains(depName, "..") {
-		return "", fmt.Errorf("%w: invalid dependency name %q: must not contain path separators or '..'", ErrInvalidSpecContent, depName)
+		return "", "", fmt.Errorf("%w: invalid dependency name %q: must not contain path separators or '..'", ErrInvalidSpecContent, depName)
 	}
-	if _, err := ValidateOpenAPI(rawSpec); err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidSpecContent, err)
+	if _, verr := ValidateOpenAPI(rawSpec); verr != nil {
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidSpecContent, verr)
 	}
-	if _, err := NormalizeOpenAPIYAML(string(rawSpec)); err != nil {
-		return "", fmt.Errorf("normalize spec: %w", err)
+	normalized, err = NormalizeOpenAPIYAML(string(rawSpec))
+	if err != nil {
+		return "", "", fmt.Errorf("normalize spec: %w", err)
 	}
-	specPath := ConsumedSpecPath(depName)
-	// TODO(spec-commit follow-up): commit the normalized blob at
-	// componentDirPrefix+component+"/"+specPath via the committed-truth write
-	// path and record specPath on the dependency.
-	slog.DebugContext(ctx, "StoreConsumedSpec: validated + normalized (commit deferred (spec-commit follow-up))",
+	specPath = ConsumedSpecPath(depName)
+	slog.DebugContext(ctx, "StoreConsumedSpec: validated + normalized consumed spec",
 		"org", orgID, "project", projectID, "component", component, "dependency", depName, "specPath", specPath)
-	return specPath, nil
+	return specPath, normalized, nil
 }

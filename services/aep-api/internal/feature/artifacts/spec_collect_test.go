@@ -78,15 +78,18 @@ paths:
 
 // TestStoreConsumedSpec_ValidatesAndReturnsPath asserts the committed-truth
 // StoreConsumedSpec: a valid spec validates + normalizes and returns the
-// component-relative path (the commit itself is deferred to Phase 6).
+// component-relative path plus the normalized blob the caller commits.
 func TestStoreConsumedSpec_ValidatesAndReturnsPath(t *testing.T) {
-	store := NewArtifactStore(nil) // no artifact service is touched — no commit path yet
-	got, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte(sampleSpec))
+	store := NewArtifactStore(nil) // no artifact service is touched — validate/normalize only
+	got, normalized, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte(sampleSpec))
 	if err != nil {
 		t.Fatalf("StoreConsumedSpec: unexpected error: %v", err)
 	}
 	if want := ConsumedSpecPath("stripe"); got != want {
 		t.Fatalf("specPath = %q, want %q", got, want)
+	}
+	if normalized == "" {
+		t.Fatal("normalized blob is empty — caller has nothing to commit")
 	}
 }
 
@@ -96,10 +99,10 @@ func TestStoreConsumedSpec_ValidatesAndReturnsPath(t *testing.T) {
 func TestStoreConsumedSpec_RejectsBadInput(t *testing.T) {
 	store := NewArtifactStore(nil)
 
-	if _, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "../escape", []byte(sampleSpec)); !errors.Is(err, ErrInvalidSpecContent) {
+	if _, _, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "../escape", []byte(sampleSpec)); !errors.Is(err, ErrInvalidSpecContent) {
 		t.Fatalf("path-traversal depName: want ErrInvalidSpecContent, got %v", err)
 	}
-	if _, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte("foo: bar")); !errors.Is(err, ErrInvalidSpecContent) {
+	if _, _, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte("foo: bar")); !errors.Is(err, ErrInvalidSpecContent) {
 		t.Fatalf("invalid OpenAPI: want ErrInvalidSpecContent, got %v", err)
 	}
 }

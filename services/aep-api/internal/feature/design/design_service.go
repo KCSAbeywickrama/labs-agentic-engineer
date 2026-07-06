@@ -44,6 +44,28 @@ var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generati
 // only path that checks this; committed-truth has no autosave to gate.
 var ErrUnresolvedDependency = errors.New("design has unresolved dependencies — resolve them before saving")
 
+// Spec-collection sentinels (dependency-management — the collect-dependency-spec
+// route). The HTTP layer maps each to a status: ErrDependencyNotFound→404,
+// ErrDependencyWrongKind/ErrInvalidSpec→400, ErrSpecFetchFailed→502,
+// ErrSpecCommitConflict→409.
+var (
+	// ErrDependencyNotFound: the {component, depName} pair is absent from the
+	// current design.
+	ErrDependencyNotFound = errors.New("dependency not found in design")
+	// ErrDependencyWrongKind: the dependency exists but is not `external` — spec
+	// collection applies only to external API dependencies.
+	ErrDependencyWrongKind = errors.New("dependency is not an external dependency")
+	// ErrSpecFetchFailed: the SSRF-guarded fetch of a user-supplied spec URL
+	// failed (bad URL, blocked target, non-2xx, oversized).
+	ErrSpecFetchFailed = errors.New("failed to fetch spec from URL")
+	// ErrInvalidSpec: the supplied/fetched document is not a valid OpenAPI 3.x
+	// spec (or the depName is unsafe).
+	ErrInvalidSpec = errors.New("invalid OpenAPI spec")
+	// ErrSpecCommitConflict: the design.json moved under the collect between the
+	// read and the atomic commit (stale baseSha) — the caller should reload.
+	ErrSpecCommitConflict = errors.New("design changed while collecting the spec — reload and retry")
+)
+
 // AssembleDesignFromFiles wraps the artifact-store assembler and rejects an
 // empty file map. Used to assemble a tagged design file map read out of band.
 func AssembleDesignFromFiles(files map[string]string) (*artifacts.DesignFile, error) {
@@ -78,6 +100,12 @@ type DesignService interface {
 	SaveAndProceed(ctx context.Context, orgID, projectID, commitSHA string) (*models.Design, error)
 	DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error)
 	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]models.ArtifactVersion, error)
+	// CollectSpec fetches (SSRF-guarded, when specURL is set) / accepts (rawSpec)
+	// an OpenAPI contract for a component's `external` dependency, validates +
+	// normalizes it, and atomically commits the spec file plus the design.json
+	// specPath edit that clears the external-needs-spec proceed-gate. Returns the
+	// component-relative stored path.
+	CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error)
 }
 
 type designService struct {
@@ -86,6 +114,31 @@ type designService struct {
 	taskSvc             taskReconciler            // for SaveAndProceed reconciliation; may be nil in tests
 	externalResourceReg externalResourceRegistrar // for SaveAndProceed external-resource registration; may be nil
 	provisionMinter     provisionIssueMinter      // for SaveAndProceed aep:provision gate minting; may be nil
+	fileCommitter       designFileCommitter       // for CollectSpec's committed-truth spec write; may be nil
+}
+
+// DesignFileWrite is one file in a CollectSpec atomic commit. Path is the full
+// repo path (e.g. `specs/design/components/orders/design.json`); BaseSHA is the
+// blob's current sha for an update (optimistic-concurrency CAS) or "" for a
+// create.
+type DesignFileWrite struct {
+	Path    string
+	Content string
+	BaseSHA string
+}
+
+// designFileCommitter is design_service's narrow consumer port over the Files
+// API (feature/files) — the committed-truth single-commit write surface. The
+// composition root adapts *files.service to it (design imports only artifacts;
+// the port keeps the files package out of this feature). Nil is a documented
+// no-op: CollectSpec then returns an error and the route 503s.
+type designFileCommitter interface {
+	// ReadFile returns the file's current content + blob sha (the CAS token),
+	// ok=false when the path does not exist yet, or an error on infra failure.
+	ReadFile(ctx context.Context, orgID, projectID, path string) (content, sha string, ok bool, err error)
+	// Commit atomically writes every file (per-file BaseSHA CAS) in one commit to
+	// main. A stale BaseSHA surfaces as ErrSpecCommitConflict.
+	Commit(ctx context.Context, orgID, projectID string, writes []DesignFileWrite, message string) error
 }
 
 // provisionIssueMinter is design_service's narrow consumer port for the
@@ -143,6 +196,13 @@ func (s *designService) SetProvisionIssueMinter(m provisionIssueMinter) {
 	s.provisionMinter = m
 }
 
+// SetFileCommitter wires the committed-truth Files commit surface CollectSpec
+// uses to persist a consumed spec + the design.json specPath edit. A nil
+// committer makes CollectSpec fail (the route then returns 503).
+func (s *designService) SetFileCommitter(c designFileCommitter) {
+	s.fileCommitter = c
+}
+
 // registerExternalResources best-effort upserts every distinct `external`
 // dependency in the tagged design into the org's external-resource catalog (the
 // reusable definition layer consumers request access to later). Non-fatal: a
@@ -168,6 +228,124 @@ func (s *designService) registerExternalResources(ctx context.Context, orgID str
 			}
 		}
 	}
+}
+
+// CollectSpec resolves the {component, depName} external dependency in the
+// current design, fetches (SSRF-guarded) or accepts its OpenAPI contract,
+// validates + normalizes it, and atomically commits TWO files to main: the
+// normalized spec at `specs/design/components/<c>/dependencies/<dep>.openapi.yaml`
+// and the component's design.json with the dependency's specPath recorded (which
+// clears the external-needs-spec proceed-gate on the next read; the transient
+// specUrl hint is dropped). Read-time status/reason are never persisted — the
+// design.json codec (SplitDesign → dependencyJSON) omits them (ADR-0003).
+func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error) {
+	hasRaw := len(rawSpec) > 0
+	hasURL := strings.TrimSpace(specURL) != ""
+	switch {
+	case !hasRaw && !hasURL:
+		return "", fmt.Errorf("%w: provide rawSpec or specUrl", ErrInvalidSpec)
+	case hasRaw && hasURL:
+		return "", fmt.Errorf("%w: provide only one of rawSpec or specUrl", ErrInvalidSpec)
+	}
+	if s.fileCommitter == nil {
+		return "", fmt.Errorf("spec collection unavailable: no committed-truth write surface wired")
+	}
+
+	// Resolve the target dependency BEFORE fetching/storing anything, so an
+	// unknown dep (404) or a non-external dep (400) never leaves an orphan blob.
+	design, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		if artifacts.IsNotFound(err) {
+			return "", fmt.Errorf("%w: no design for project %q", ErrDependencyNotFound, projectID)
+		}
+		return "", fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return "", fmt.Errorf("%w: no design for project %q", ErrDependencyNotFound, projectID)
+	}
+	compIdx, depIdx := -1, -1
+	for i := range design.Components {
+		if design.Components[i].Name != component {
+			continue
+		}
+		compIdx = i
+		for j := range design.Components[i].Dependencies {
+			if design.Components[i].Dependencies[j].Name == depName {
+				depIdx = j
+			}
+		}
+	}
+	if compIdx < 0 {
+		return "", fmt.Errorf("%w: component %q not found in design", ErrDependencyNotFound, component)
+	}
+	if depIdx < 0 {
+		return "", fmt.Errorf("%w: dependency %q not found on component %q", ErrDependencyNotFound, depName, component)
+	}
+	if kind := design.Components[compIdx].Dependencies[depIdx].Kind; kind != models.DependencyKindExternal {
+		return "", fmt.Errorf("%w: dependency %q on component %q has kind %q; spec collection applies only to %q",
+			ErrDependencyWrongKind, depName, component, kind, models.DependencyKindExternal)
+	}
+
+	if hasURL {
+		fetched, ferr := artifacts.FetchSpecFromURL(ctx, specURL)
+		if ferr != nil {
+			return "", fmt.Errorf("%w: %v", ErrSpecFetchFailed, ferr)
+		}
+		rawSpec = fetched
+	}
+
+	// Validate + normalize; StoreConsumedSpec returns the component-relative
+	// specPath and the normalized blob to commit.
+	specPath, normalized, err := s.store.StoreConsumedSpec(ctx, orgID, projectID, component, depName, rawSpec)
+	if err != nil {
+		if errors.Is(err, artifacts.ErrInvalidSpecContent) {
+			return "", fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		}
+		return "", err
+	}
+
+	// Record specPath + drop the transient specUrl hint, then render ONLY this
+	// component's design.json through the canonical codec.
+	comp := design.Components[compIdx]
+	comp.Dependencies[depIdx].SpecPath = specPath
+	comp.Dependencies[depIdx].SpecUrl = ""
+	rendered, rerr := artifacts.SplitDesign(&artifacts.DesignFile{Components: []models.DesignComponent{comp}})
+	if rerr != nil {
+		return "", fmt.Errorf("render component %q design.json: %w", component, rerr)
+	}
+	designSub := "components/" + component + "/design.json" // relative to specs/design/
+	designContent, ok := rendered[designSub]
+	if !ok {
+		return "", fmt.Errorf("render component %q design.json: %q missing from split", component, designSub)
+	}
+
+	// Full repo paths + CAS shas. design.json must exist; the spec file may not
+	// yet (a fresh collect creates it, a re-collect overwrites at its sha).
+	designFull := artifacts.DesignDir + "/" + designSub
+	specFull := artifacts.DesignDir + "/components/" + component + "/" + specPath
+	_, designSHA, designExists, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, designFull)
+	if rerr != nil {
+		return "", fmt.Errorf("read design.json for CAS: %w", rerr)
+	}
+	if !designExists {
+		return "", fmt.Errorf("%w: component %q design.json missing on disk", ErrDependencyNotFound, component)
+	}
+	_, specSHA, _, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, specFull)
+	if rerr != nil {
+		return "", fmt.Errorf("read spec file for CAS: %w", rerr)
+	}
+
+	writes := []DesignFileWrite{
+		{Path: specFull, Content: normalized, BaseSHA: specSHA}, // BaseSHA "" ⇒ create
+		{Path: designFull, Content: designContent, BaseSHA: designSHA},
+	}
+	if err := s.fileCommitter.Commit(ctx, orgID, projectID, writes,
+		fmt.Sprintf("Collect OpenAPI spec for %s dependency %s", component, depName)); err != nil {
+		return "", err // ErrSpecCommitConflict (409) or infra (500)
+	}
+	slog.InfoContext(ctx, "collected consumed spec",
+		"org", orgID, "project", projectID, "component", component, "dependency", depName, "specPath", specPath)
+	return specPath, nil
 }
 
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {

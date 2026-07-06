@@ -67,9 +67,27 @@ func (in *designSaveInput) commitSHA() string {
 	return in.Body.CommitSHA
 }
 
+// collectSpecInput carries the {component, dependency} spec target plus the spec
+// source — exactly one of rawSpec (paste) or specUrl (SSRF-guarded fetch).
+type collectSpecInput struct {
+	humakit.OrgScopedInput
+	ProjectName   string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	ComponentName string `path:"componentName" doc:"Consumer component name"`
+	DepName       string `path:"depName" doc:"External dependency name"`
+	Body          struct {
+		RawSpec string `json:"rawSpec,omitempty" doc:"Raw OpenAPI 3.x YAML/JSON (paste path)"`
+		SpecURL string `json:"specUrl,omitempty" doc:"HTTPS URL to fetch the OpenAPI spec from"`
+	}
+}
+
 type designOutput struct{ Body *models.Design }
 type designBundleOutput struct{ Body *DesignBundle }
 type designVersionsOutput struct{ Body []models.ArtifactVersion }
+type collectSpecOutput struct {
+	Body struct {
+		SpecPath string `json:"specPath" doc:"Component-relative path where the spec was stored"`
+	}
+}
 
 // RegisterDesign registers the design feature's HTTP operations on the Huma
 // API. Per the GitHub-direct rework
@@ -122,6 +140,38 @@ func RegisterDesign(api huma.API, svc DesignService) {
 			return nil, huma.Error500InternalServerError("failed to save and proceed design")
 		}
 		return &designOutput{Body: design}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "collect-dependency-spec",
+		Method:        http.MethodPost,
+		Path:          "/projects/{projectName}/components/{componentName}/dependencies/{depName}/spec",
+		Summary:       "Store a consumed OpenAPI spec for an external dependency",
+		Tags:          []string{"Design(Deprecated)"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusOK,
+	}, func(ctx context.Context, in *collectSpecInput) (*collectSpecOutput, error) {
+		specPath, err := svc.CollectSpec(ctx, in.OrgHandle, in.ProjectName, in.ComponentName, in.DepName,
+			[]byte(in.Body.RawSpec), in.Body.SpecURL)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrDependencyNotFound):
+				return nil, huma.Error404NotFound(err.Error())
+			case errors.Is(err, ErrDependencyWrongKind), errors.Is(err, ErrInvalidSpec):
+				return nil, huma.Error400BadRequest(err.Error())
+			case errors.Is(err, ErrSpecFetchFailed):
+				return nil, huma.Error502BadGateway("failed to fetch spec from URL", err)
+			case errors.Is(err, ErrSpecCommitConflict):
+				return nil, huma.Error409Conflict(err.Error())
+			default:
+				slog.ErrorContext(ctx, "collect dependency spec failed",
+					"project", in.ProjectName, "component", in.ComponentName, "dependency", in.DepName, "error", err)
+				return nil, huma.Error500InternalServerError("failed to store spec")
+			}
+		}
+		out := &collectSpecOutput{}
+		out.Body.SpecPath = specPath
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{

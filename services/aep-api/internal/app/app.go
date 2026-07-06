@@ -791,6 +791,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Mint aep:provision gate issues on design approval (before planning gates any
 	// consumer coding task on them).
 	designService.SetProvisionIssueMinter(provisioningSvc)
+	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
+	// external dependency's OpenAPI contract and atomically commits the spec file
+	// + the design.json specPath edit (clearing the external-needs-spec gate) via
+	// the Files API. Composition-root adapter keeps files out of the design feature.
+	designService.SetFileCommitter(designFilesCommitter{files: filesSvc})
 	// Deprovision a project's OC Resource model on project delete (OC does not
 	// cascade the logically-owned Resources/bindings).
 	projectService.SetResourceDeprovisioner(provisioningSvc)
