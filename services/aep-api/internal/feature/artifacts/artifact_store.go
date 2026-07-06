@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -30,29 +31,47 @@ import (
 )
 
 // ArtifactStore wraps the in-process artifact service to add value beyond
-// pure file I/O: external-API catalog resolution and the typed `DesignFile`
-// shape (YAML split/assemble).
+// pure file I/O: the typed `DesignFile` shape (YAML split/assemble) and
+// read-time org-service dependency resolution.
 type ArtifactStore struct {
-	artifactSvc  ArtifactService
-	externalAPIs *ExternalAPICatalog
+	artifactSvc ArtifactService
+	// orgServices resolves `org-service` dependencies against the live org
+	// endpoint catalog at design-read time (see resolveOrgServices). Nil
+	// until the composition root wires a concrete provider via
+	// SetOrgServiceResolver (a later task) — until then, org-service
+	// dependencies keep whatever Status/Reason they already carry (always
+	// empty: Status/Reason are read-time computed and never persisted to
+	// design.json).
+	orgServices OrgServiceResolver
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
-	return &ArtifactStore{artifactSvc: artifactSvc, externalAPIs: DefaultExternalAPICatalog()}
+	return &ArtifactStore{artifactSvc: artifactSvc}
 }
 
-// SetExternalAPICatalog overrides the catalog the store uses to resolve
-// architect-declared dependent-API names into concrete URLs. Optional —
-// without it, NewArtifactStore wires the shipped default catalog. The catalog
-// is instance state only, threaded into splitDesign by WriteDesign — the
-// former package-level catalog pointer is gone (every NewArtifactStore wrote
-// it, racing under parallel construction and leaking one store's catalog into
-// another's saves).
-func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
+// OrgServiceResolver answers whether an `org-service` dependency name is
+// published namespace-visible in the org — the dynamic org endpoint catalog.
+// Declared here (consumer side) so the artifacts package stays free of an
+// OC-client dependency; the concrete provider is wired in by the
+// composition root via SetOrgServiceResolver in a later task.
+type OrgServiceResolver interface {
+	IsNamespaceVisible(ctx context.Context, orgHandle, name string) (bool, error)
+	// ExistsAnyVisibility reports whether a component named `name` publishes
+	// ANY endpoint in the org catalog regardless of visibility — used to
+	// refine an org-service dependency into `blocked`/`access-required`
+	// (exists, project-only) vs `unresolved`/`not-found` (no such
+	// component).
+	ExistsAnyVisibility(ctx context.Context, orgHandle, name string) (bool, error)
+}
+
+// SetOrgServiceResolver wires the dynamic org endpoint catalog used to mark
+// `org-service` dependencies resolved/unresolved at design-read time. A nil
+// store is a documented no-op (mirrors the other Set* setters).
+func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
 	if s == nil {
 		return
 	}
-	s.externalAPIs = c
+	s.orgServices = r
 }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
@@ -115,9 +134,10 @@ func (s *ArtifactStore) DeleteRequirementFile(ctx context.Context, orgID, projec
 // `specs/design/`:
 //
 //	design.md                              # overview prose + sourceSpec frontmatter
-//	components/<name>/design.md            # frontmatter (type, language, dependsOn,
-//	                                       # buildpack, appPath, entrypoint) + body
-//	                                       # (componentAgentInstructions)
+//	components/<name>/design.json          # authored ComponentDesign (type, version,
+//	                                       # language, buildpack, appPath, entrypoint,
+//	                                       # exposure, description, dependencies[],
+//	                                       # exposesAPI, callerIdentity)
 //	components/<name>/openapi.yaml         # OpenAPI 3.0.3 (service components only)
 type DesignFile struct {
 	Overview      string                   `json:"overview"`
@@ -130,13 +150,18 @@ type DesignFile struct {
 // via the API.
 const DesignRootFile = "design.md"
 
+// ComponentDesignFile is the authored per-component design document basename,
+// stored at `components/<name>/design.json`. It replaces the former
+// per-component design.md.
+const ComponentDesignFile = "design.json"
+
 // componentDirPrefix is the path prefix under specs/design/ for per-component
 // directories.
 const componentDirPrefix = "components/"
 
 // ListDesignFiles returns the working-tree file map under `specs/design/`.
 // Keys are paths relative to that directory, using forward slashes (e.g.
-// `design.md`, `components/user-api/design.md`).
+// `design.md`, `components/user-api/design.json`).
 func (s *ArtifactStore) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	files, err := s.artifactSvc.ListDesignFiles(ctx, orgID, projectID)
 	if err != nil {
@@ -205,33 +230,74 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	if err != nil {
 		return nil, err
 	}
-	// Resolve architect-declared dependent-API names against the external
-	// API catalog so the in-memory design always has concrete URLs even
-	// when the on-disk frontmatter declared by intent only.
-	s.resolveExternalAPIs(design)
+	// Mark org-service dependencies resolved/unresolved against the live org
+	// endpoint catalog so the architecture view renders status without user
+	// action. The concrete address is injected at wiring time by a later
+	// task (cascade).
+	s.resolveOrgServices(ctx, orgID, design)
 	return design, nil
 }
 
-// resolveExternalAPIs fills in URLs for catalog-known dependent-API
-// entries whose URL was left blank by the architect. Idempotent — already-
-// populated URLs are left untouched.
-func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
-	if s == nil || s.externalAPIs == nil || d == nil {
+// resolveOrgServices marks each `org-service` dependency with a 4-state
+// status at read time: `resolved` (namespace-visible), `blocked` +
+// `access-required` (exists but project-only — consumer must request
+// access), or `unresolved` + `not-found` (absent from the catalog). orgID is
+// the OC namespace (locally, the org handle).
+//
+// A no-op until the composition root wires a resolver via
+// SetOrgServiceResolver — this codebase deleted the static ExternalAPICatalog
+// fallback the ported source used when no dynamic resolver was wired (task
+// A1), so until wired, org-service dependencies simply keep the Status/Reason
+// AssembleDesign left them with (always empty, since Status/Reason are never
+// persisted to design.json).
+//
+// Best-effort: a resolver error never fails the design read.
+//   - An IsNamespaceVisible error leaves the dependency's Status/Reason
+//     completely untouched — matches the ported source's "leave whatever
+//     status is stored" behavior byte-for-byte.
+//   - An ExistsAnyVisibility error leaves Status = unresolved (already set
+//     before the refinement call, to be overwritten only on success) with an
+//     empty Reason — also ported byte-for-byte from the source, which is
+//     asymmetric with the IsNamespaceVisible case above by construction.
+func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d *DesignFile) {
+	if s == nil || d == nil || s.orgServices == nil {
 		return
 	}
 	for i := range d.Components {
-		for j := range d.Components[i].DependentApis {
-			dep := &d.Components[i].DependentApis[j]
-			if dep.URL != "" {
+		for j := range d.Components[i].Dependencies {
+			dep := &d.Components[i].Dependencies[j]
+			if dep.Kind != models.DependencyKindOrgService {
 				continue
 			}
-			entry := s.externalAPIs.Lookup(dep.Name)
-			if entry.URL == "" {
+			visible, err := s.orgServices.IsNamespaceVisible(ctx, orgID, dep.Name)
+			if err != nil {
+				slog.WarnContext(ctx, "org-service resolver: namespace-visible check failed",
+					"org", orgID, "dependency", dep.Name, "error", err)
 				continue
 			}
-			dep.URL = entry.URL
-			if dep.Authentication == "" {
-				dep.Authentication = entry.Authentication
+			if visible {
+				dep.Status = models.DependencyStatusResolved
+				dep.Reason = ""
+				continue
+			}
+			// Not namespace-visible: refine into `blocked` (project-only —
+			// requestable via access request) vs `unresolved` (absent — not
+			// in the catalog at all).
+			dep.Status = models.DependencyStatusUnresolved
+			dep.Reason = ""
+			exists, err := s.orgServices.ExistsAnyVisibility(ctx, orgID, dep.Name)
+			if err != nil {
+				slog.WarnContext(ctx, "org-service resolver: exists-any-visibility check failed",
+					"org", orgID, "dependency", dep.Name, "error", err)
+				continue
+			}
+			if exists {
+				// Provider exists but publishes only project-only — consumer
+				// must request access.
+				dep.Status = models.DependencyStatusBlocked
+				dep.Reason = models.DependencyReasonAccessRequired
+			} else {
+				dep.Reason = models.DependencyReasonNotFound
 			}
 		}
 	}
@@ -243,7 +309,7 @@ func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
 // the caller is expected to call DeleteDesignDirectory for removed
 // components separately.
 func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string, design *DesignFile) error {
-	files, err := splitDesign(design, s.externalAPIs)
+	files, err := SplitDesign(design)
 	if err != nil {
 		return fmt.Errorf("split design: %w", err)
 	}
@@ -253,6 +319,137 @@ func (s *ArtifactStore) WriteDesign(ctx context.Context, orgID, projectID string
 		}
 	}
 	return nil
+}
+
+// SetComponentOrgPublished durably persists `exposesAPI.orgPublished:true` on
+// the provider component and COMMITS that one `design.json` to remote main
+// (no new design version tag). This is the grant-cascade durability write: when
+// a provider's org-publish task deploys, the flag must survive a future
+// re-implementation so namespace visibility isn't silently dropped.
+//
+// `componentName` may be the design's logical component name OR the OC
+// component name `<project>-<logical>` — both forms match. Idempotent: a no-op
+// (no commit) when the component already has the flag set, when no design
+// exists, or when no matching component is found. Unlike a plain
+// WriteDesignFile (working-tree only), this reaches a real GitHub commit so
+// the change is never lost.
+func (s *ArtifactStore) SetComponentOrgPublished(ctx context.Context, orgID, projectID, componentName string) error {
+	design, err := s.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return nil // no design yet — nothing to persist.
+	}
+	for i := range design.Components {
+		comp := design.Components[i]
+		if !designComponentMatches(comp.Name, projectID, componentName) {
+			continue
+		}
+		if comp.ExposesAPI == nil {
+			comp.ExposesAPI = &models.ExposesAPI{}
+		}
+		if comp.ExposesAPI.OrgPublished {
+			return nil // idempotent — already durable, no commit.
+		}
+		comp.ExposesAPI.OrgPublished = true
+
+		// Render ONLY this component's design.json through the canonical codec
+		// so the file round-trips identically, then commit that single file to
+		// remote main without tagging.
+		files, ferr := SplitDesign(&DesignFile{Components: []models.DesignComponent{comp}})
+		if ferr != nil {
+			return fmt.Errorf("render component %q design: %w", comp.Name, ferr)
+		}
+		subPath := componentDirPrefix + comp.Name + "/" + ComponentDesignFile
+		content, ok := files[subPath]
+		if !ok {
+			return fmt.Errorf("render component %q design: %q missing from split", comp.Name, subPath)
+		}
+		msg := fmt.Sprintf("chore(dependencies): mark %s org-published (namespace visibility)", comp.Name)
+		if _, cerr := s.artifactSvc.CommitDesignFile(ctx, orgID, projectID, subPath, content, msg); cerr != nil {
+			return fmt.Errorf("commit %s: %w", subPath, cerr)
+		}
+		return nil
+	}
+	return nil // no matching component — nothing to persist.
+}
+
+// SetDependencySpecPath records specPath on the named dependency within the
+// named component by writing that component's design.json to the working-tree
+// draft (no commit, no version tag). This is the spec-collection draft write:
+// after StoreConsumedSpec writes the spec blob to the draft, this records the
+// specPath on the dependency so the needsSpec gate is cleared on next read.
+// Both changes are committed atomically when SaveDesign is called.
+//
+// Idempotent: a no-op (no write) when the component/dependency is not found
+// or when specPath already matches. Returns nil in all no-op cases.
+func (s *ArtifactStore) SetDependencySpecPath(ctx context.Context, orgID, projectID, component, depName, specPath string) error {
+	design, err := s.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return nil // no design yet — nothing to persist.
+	}
+	for i := range design.Components {
+		comp := design.Components[i]
+		if comp.Name != component {
+			continue
+		}
+		// Found the component — now find the dependency.
+		found := false
+		for j := range comp.Dependencies {
+			if comp.Dependencies[j].Name != depName {
+				continue
+			}
+			if comp.Dependencies[j].SpecPath == specPath && comp.Dependencies[j].SpecUrl == "" {
+				return nil // idempotent — already recorded + transient hint cleared.
+			}
+			comp.Dependencies[j].SpecPath = specPath
+			// Clear the transient architect hint now that specPath is recorded; also
+			// clear the computed status so the next read re-derives it from specPath
+			// (needsSpec+specPath set → resolved, not unresolved).
+			comp.Dependencies[j].SpecUrl = ""
+			comp.Dependencies[j].Status = ""
+			comp.Dependencies[j].Reason = ""
+			found = true
+			break
+		}
+		if !found {
+			return nil // dep not found — nothing to persist.
+		}
+		// Render ONLY this component's design.json through the canonical codec,
+		// then write it to the working-tree draft via WriteDesignFile (not
+		// CommitDesignFile). The draft save (SaveDesign) will commit both the
+		// spec blob and this design.json atomically with the v<N>-<M> tag.
+		files, ferr := SplitDesign(&DesignFile{Components: []models.DesignComponent{comp}})
+		if ferr != nil {
+			return fmt.Errorf("render component %q design: %w", comp.Name, ferr)
+		}
+		subPath := componentDirPrefix + comp.Name + "/" + ComponentDesignFile
+		content, ok := files[subPath]
+		if !ok {
+			return fmt.Errorf("render component %q design: %q missing from split", comp.Name, subPath)
+		}
+		if _, werr := s.WriteDesignFile(ctx, orgID, projectID, subPath, content); werr != nil {
+			return fmt.Errorf("write %s: %w", subPath, werr)
+		}
+		return nil
+	}
+	return nil // component not found — nothing to persist.
+}
+
+// designComponentMatches reports whether a design component named `logical` is
+// the provider identified by `target`, which may be the bare logical name or
+// the OC component name `<project>-<logical>`. Mirrors the componentMatches
+// helper used elsewhere in the deploy cascade so the durability write lands in
+// either form.
+func designComponentMatches(logical, project, target string) bool {
+	if strings.EqualFold(logical, target) {
+		return true
+	}
+	return strings.EqualFold(project+"-"+logical, target)
 }
 
 // ---- Helpers ------------------------------------------------------------
@@ -283,46 +480,6 @@ func DesignFilesEqual(a, b map[string]string) bool {
 type rootFrontmatter struct {
 	SourceSpec    string   `yaml:"sourceSpec,omitempty"`
 	SkillsApplied []string `yaml:"skillsApplied,omitempty"`
-}
-
-// componentFrontmatter is the YAML frontmatter we accept on each
-// `components/<name>/design.md`. Field names mirror the user-facing keys
-// (snake-free) so frontmatter the architect emits is human-editable.
-type componentFrontmatter struct {
-	Type           string                `yaml:"type"`
-	Language       string                `yaml:"language,omitempty"`
-	DependsOn      []string              `yaml:"dependsOn,omitempty"`
-	Buildpack      string                `yaml:"buildpack,omitempty"`
-	AppPath        string                `yaml:"appPath,omitempty"`
-	Entrypoint     string                `yaml:"entrypoint,omitempty"`
-	ExposesAPI     *exposesAPIConfig     `yaml:"exposesAPI,omitempty"`
-	CallerIdentity *callerIdentityConfig `yaml:"callerIdentity,omitempty"`
-	DependentApis  []dependentApiConfig  `yaml:"dependentApis,omitempty"`
-}
-
-// exposesAPIConfig is the on-disk shape for a service component's API
-// exposure policy. `Auth: "end-user-required"` ⇒ gateway validates a
-// user JWT and injects UserContext upstream.
-type exposesAPIConfig struct {
-	Managed     bool   `yaml:"managed,omitempty"`
-	Auth        string `yaml:"auth,omitempty"`
-	UserContext string `yaml:"userContext,omitempty"`
-}
-
-// callerIdentityConfig is the on-disk shape for a web-app's caller-
-// identity intent. `Mode: "end-user"` ⇒ the SPA performs OIDC + PKCE
-// against the platform IDP.
-type callerIdentityConfig struct {
-	Mode string `yaml:"mode,omitempty"`
-}
-
-// dependentApiConfig is the on-disk shape for an external upstream API the
-// component consumes at runtime. See models.DependentAPI for the wire shape.
-type dependentApiConfig struct {
-	Name           string `yaml:"name"`
-	URL            string `yaml:"url"`
-	Description    string `yaml:"description,omitempty"`
-	Authentication string `yaml:"authentication,omitempty"`
 }
 
 // SplitFrontmatter separates the leading YAML frontmatter block (delimited
@@ -396,7 +553,7 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	componentNames := ComponentNamesIn(files)
 	out.Components = make([]models.DesignComponent, 0, len(componentNames))
 	for _, name := range componentNames {
-		designPath := componentDirPrefix + name + "/design.md"
+		designPath := componentDirPrefix + name + "/" + ComponentDesignFile
 		raw, ok := files[designPath]
 		if !ok {
 			continue
@@ -410,70 +567,20 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	return out, nil
 }
 
-func assembleComponent(name, designMd string, files map[string]string) (models.DesignComponent, error) {
-	fm, body, err := SplitFrontmatter(designMd)
+// assembleComponent parses a component's authored design.json and pairs it with
+// the sibling openapi.yaml (a separate file, not a design.json key).
+func assembleComponent(name, designJSON string, files map[string]string) (models.DesignComponent, error) {
+	comp, err := parseComponentDesignJSON(name, designJSON)
 	if err != nil {
-		return models.DesignComponent{}, fmt.Errorf("frontmatter: %w", err)
-	}
-	var cfm componentFrontmatter
-	if fm != "" {
-		if err := yaml.Unmarshal([]byte(fm), &cfm); err != nil {
-			return models.DesignComponent{}, fmt.Errorf("decode frontmatter: %w", err)
-		}
+		return models.DesignComponent{}, err
 	}
 	openapi := files[componentDirPrefix+name+"/openapi.yaml"]
 	if openapi == "" {
 		// Fallback: support .yml as well.
 		openapi = files[componentDirPrefix+name+"/openapi.yml"]
 	}
-	dependsOn := append([]string(nil), cfm.DependsOn...)
-	if dependsOn == nil {
-		dependsOn = []string{}
-	}
-	var exposes *models.ExposesAPI
-	if cfm.ExposesAPI != nil && (cfm.ExposesAPI.Auth != "" || cfm.ExposesAPI.Managed || cfm.ExposesAPI.UserContext != "") {
-		exposes = &models.ExposesAPI{
-			Managed:     cfm.ExposesAPI.Managed,
-			Auth:        cfm.ExposesAPI.Auth,
-			UserContext: cfm.ExposesAPI.UserContext,
-		}
-	}
-	var caller *models.CallerIdentity
-	if cfm.CallerIdentity != nil && cfm.CallerIdentity.Mode != "" {
-		caller = &models.CallerIdentity{Mode: cfm.CallerIdentity.Mode}
-	}
-	var depApis []models.DependentAPI
-	if len(cfm.DependentApis) > 0 {
-		depApis = make([]models.DependentAPI, 0, len(cfm.DependentApis))
-		for _, d := range cfm.DependentApis {
-			if d.Name == "" {
-				continue
-			}
-			// URL may be empty here — the architect can declare an
-			// intent by name only; the ArtifactStore's catalog post-
-			// process resolves it on the way out of ReadDesign.
-			depApis = append(depApis, models.DependentAPI{
-				Name:           d.Name,
-				URL:            d.URL,
-				Description:    d.Description,
-				Authentication: d.Authentication,
-			})
-		}
-	}
-	return models.DesignComponent{
-		Name:                       name,
-		ComponentType:              cfm.Type,
-		Language:                   cfm.Language,
-		DependsOn:                  dependsOn,
-		Entrypoint:                 cfm.Entrypoint,
-		Buildpack:                  cfm.Buildpack,
-		AppPath:                    cfm.AppPath,
-		OpenAPISpec:                openapi,
-		ComponentAgentInstructions: strings.TrimSpace(body),
-		ExposesAPI:                 exposes,
-		CallerIdentity:             caller,
-		DependentApis:              depApis,
-	}, nil
+	comp.OpenAPISpec = openapi
+	return comp, nil
 }
 
 // ComponentNamesIn walks the file map and returns the unique component
@@ -502,16 +609,8 @@ func ComponentNamesIn(files map[string]string) []string {
 // SplitDesign takes a flat in-memory design and produces the file map for
 // the working tree. The caller is responsible for deleting any
 // pre-existing files NOT present in the returned map (e.g. components
-// removed across a regeneration). Standalone callers get NO external-API
-// catalog (dependent-API URLs are written verbatim); the store's WriteDesign
-// threads its instance catalog via splitDesign so catalog-resolved URLs are
-// stripped on save.
+// removed across a regeneration).
 func SplitDesign(d *DesignFile) (map[string]string, error) {
-	return splitDesign(d, nil)
-}
-
-// splitDesign is the implementation; catalog may be nil (no URL stripping).
-func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string, error) {
 	if d == nil {
 		return nil, fmt.Errorf("nil design")
 	}
@@ -542,64 +641,11 @@ func splitDesign(d *DesignFile, catalog *ExternalAPICatalog) (map[string]string,
 			return nil, fmt.Errorf("component with empty name")
 		}
 		base := componentDirPrefix + comp.Name
-		cfm := componentFrontmatter{
-			Type:       comp.ComponentType,
-			Language:   comp.Language,
-			DependsOn:  comp.DependsOn,
-			Buildpack:  comp.Buildpack,
-			AppPath:    comp.AppPath,
-			Entrypoint: comp.Entrypoint,
-		}
-		// Preserve any non-empty field — gating on `Auth != ""` would drop
-		// designs that set only `managed` or `userContext`.
-		if comp.ExposesAPI != nil && (comp.ExposesAPI.Auth != "" || comp.ExposesAPI.Managed || comp.ExposesAPI.UserContext != "") {
-			cfm.ExposesAPI = &exposesAPIConfig{
-				Managed:     comp.ExposesAPI.Managed,
-				Auth:        comp.ExposesAPI.Auth,
-				UserContext: comp.ExposesAPI.UserContext,
-			}
-		}
-		if comp.CallerIdentity != nil && comp.CallerIdentity.Mode != "" {
-			cfm.CallerIdentity = &callerIdentityConfig{Mode: comp.CallerIdentity.Mode}
-		}
-		if len(comp.DependentApis) > 0 {
-			cfm.DependentApis = make([]dependentApiConfig, 0, len(comp.DependentApis))
-			for _, d := range comp.DependentApis {
-				if d.Name == "" {
-					continue
-				}
-				// Drop the URL on save when it matches the current
-				// catalog entry for this name — the in-memory URL came
-				// from ReadDesign's catalog substitution, not from the
-				// architect. Persisting it would defeat the
-				// "name-only declaration" contract and break catalog
-				// rotation. (catalog == nil for standalone SplitDesign
-				// callers — fall through to write URL.)
-				url := d.URL
-				if catalog != nil {
-					if entry := catalog.Lookup(d.Name); entry.URL != "" && entry.URL == d.URL {
-						url = ""
-					}
-				}
-				if url == "" && d.Description == "" && d.Authentication == "" {
-					// Name-only declaration — emit just the name.
-					cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{Name: d.Name})
-					continue
-				}
-				cfm.DependentApis = append(cfm.DependentApis, dependentApiConfig{
-					Name:           d.Name,
-					URL:            url,
-					Description:    d.Description,
-					Authentication: d.Authentication,
-				})
-			}
-		}
-		cfmBytes, err := marshalFrontmatter(cfm)
+		designJSON, err := marshalComponentDesignJSON(comp.Name, comp)
 		if err != nil {
-			return nil, fmt.Errorf("encode component %q frontmatter: %w", comp.Name, err)
+			return nil, fmt.Errorf("encode component %q design.json: %w", comp.Name, err)
 		}
-		header := fmt.Sprintf("# %s\n\n", comp.Name)
-		out[base+"/design.md"] = joinFrontmatter(string(cfmBytes), header+strings.TrimSpace(comp.ComponentAgentInstructions)+"\n")
+		out[base+"/"+ComponentDesignFile] = string(designJSON)
 		if openapi := strings.TrimSpace(comp.OpenAPISpec); openapi != "" {
 			out[base+"/openapi.yaml"] = openapi + "\n"
 		}

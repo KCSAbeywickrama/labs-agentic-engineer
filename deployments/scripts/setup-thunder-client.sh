@@ -46,6 +46,34 @@ if [ -z "${THUNDER_POD}" ]; then
 fi
 echo "Thunder pod: ${THUNDER_POD}"
 
+# The Thunder image shipped with OC 1.1.1 gates its admin REST API behind
+# Bearer auth once its own bootstrap job finishes (Www-Authenticate: Bearer;
+# THUNDER_SKIP_SECURITY=false on the runtime deployment). This script runs
+# AFTER that lock, so for LOCAL DEV we temporarily lift the gate around the
+# client registration and restore it afterwards. The trap restores security
+# even if the registration fails mid-way.
+SKIP_SEC_CURRENT=$(kubectl --context "${CLUSTER_CONTEXT}" get deploy -n thunder thunder-deployment \
+    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="THUNDER_SKIP_SECURITY")].value}')
+restore_thunder_security() {
+    if [ "${SKIP_SEC_CURRENT}" != "true" ]; then
+        echo "🔒 Restoring THUNDER_SKIP_SECURITY=${SKIP_SEC_CURRENT:-false}"
+        kubectl --context "${CLUSTER_CONTEXT}" set env deploy/thunder-deployment -n thunder \
+            THUNDER_SKIP_SECURITY="${SKIP_SEC_CURRENT:-false}" >/dev/null
+        kubectl --context "${CLUSTER_CONTEXT}" rollout status deploy/thunder-deployment -n thunder --timeout=180s >/dev/null
+    fi
+}
+if [ "${SKIP_SEC_CURRENT}" != "true" ]; then
+    echo "🔓 Temporarily setting THUNDER_SKIP_SECURITY=true for client bootstrap"
+    kubectl --context "${CLUSTER_CONTEXT}" set env deploy/thunder-deployment -n thunder \
+        THUNDER_SKIP_SECURITY=true >/dev/null
+    kubectl --context "${CLUSTER_CONTEXT}" rollout status deploy/thunder-deployment -n thunder --timeout=180s >/dev/null
+    trap restore_thunder_security EXIT
+    # the pod was replaced by the rollout — re-resolve it
+    THUNDER_POD=$(kubectl --context "${CLUSTER_CONTEXT}" get pod -n thunder \
+        -l app.kubernetes.io/name=thunder -o jsonpath='{.items[0].metadata.name}')
+    echo "Thunder pod (post-rollout): ${THUNDER_POD}"
+fi
+
 # The Thunder bootstrap scripts live under /home/wso2thunder/thunder/scripts
 # in the v0.34 image and are sourced as `common.sh`. We replicate the same
 # pattern here in a one-shot inline script piped into the pod.
@@ -55,9 +83,16 @@ set -e
 CLIENT_ID="$1"
 CLIENT_SECRET="$2"
 
-# Source common.sh if available (provides thunder_api_call). Path varies by
-# Thunder version; probe a few known locations.
+# The image's common.sh builds URLs from THUNDER_API_BASE — default it for
+# in-pod calls (the bootstrap job sets it; a bare exec shell does not).
+export THUNDER_API_BASE="${THUNDER_API_BASE:-http://localhost:8090}"
+
+# Source common.sh if available (provides thunder_api_call; on gated images
+# the surrounding script lifts THUNDER_SKIP_SECURITY for the duration).
+# Path varies by Thunder version; probe known locations.
+# /opt/thunder/bootstrap/ is where the image shipped with OC 1.1.1 keeps it.
 for candidate in \
+    /opt/thunder/bootstrap/common.sh \
     /home/wso2thunder/thunder/scripts/common.sh \
     /opt/thunder/scripts/common.sh \
     /thunder/scripts/common.sh; do

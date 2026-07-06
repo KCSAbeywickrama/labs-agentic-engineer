@@ -51,7 +51,11 @@ interface ArchitectFixture {
     componentsMin?: number;
     componentsMax?: number;
     expectAuthService?: boolean;
-    expectDependentApi?: boolean;
+    // Expects at least one component to carry an off-platform dependency —
+    // kind 'external' (a third-party API/SaaS) or 'org-service' (an in-org
+    // catalog entry, e.g. an employee directory). Replaces the legacy
+    // dependentApis-based check now that both collapse into `dependencies`.
+    expectExternalDependency?: boolean;
   };
 }
 
@@ -120,14 +124,16 @@ function score(
     });
   }
 
-  if (fx.expect.expectDependentApi !== undefined) {
-    const hasDep = result.design.components.some(
-      (c) => (c.dependentApis?.length ?? 0) > 0,
+  if (fx.expect.expectExternalDependency !== undefined) {
+    const hasDep = result.design.components.some((c) =>
+      (c.dependencies ?? []).some(
+        (d) => d.kind === "external" || d.kind === "org-service",
+      ),
     );
     checks.push({
-      name: "dependent-api",
-      pass: hasDep === fx.expect.expectDependentApi,
-      detail: `hasDependentApi=${hasDep}, expected=${fx.expect.expectDependentApi}`,
+      name: "external-dependency",
+      pass: hasDep === fx.expect.expectExternalDependency,
+      detail: `hasExternalDependency=${hasDep}, expected=${fx.expect.expectExternalDependency}`,
     });
   }
 

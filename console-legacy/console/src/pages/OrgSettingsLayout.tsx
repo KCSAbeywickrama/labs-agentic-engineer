@@ -18,7 +18,7 @@
 
 import { Outlet, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Box, Stack, Typography, Card, CardContent, useTheme } from '@wso2/oxygen-ui';
-import { Github, Key, Settings, ShieldCheck, Sparkles } from '@wso2/oxygen-ui-icons-react';
+import { Boxes, Github, Key, Settings, ShieldCheck, Sparkles } from '@wso2/oxygen-ui-icons-react';
 
 /**
  * OrgSettingsLayout — Phase 2 PR B settings hub shell.
@@ -59,6 +59,12 @@ export default function OrgSettingsLayout() {
       label: 'Skills',
       icon: <Sparkles size={18} />,
       path: `/organizations/${routeOrgId}/settings/skills`,
+    },
+    {
+      key: 'external-resources',
+      label: 'External resources',
+      icon: <Boxes size={18} />,
+      path: `/organizations/${routeOrgId}/settings/external-resources`,
     },
   ];
 

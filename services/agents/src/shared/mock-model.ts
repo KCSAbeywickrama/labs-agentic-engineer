@@ -29,7 +29,6 @@
  */
 
 import { MockLanguageModelV4, convertArrayToReadableStream, simulateReadableStream } from "ai/test";
-import type { LanguageModel } from "ai";
 
 // Derive the provider stream-result + part types from the mock itself.
 type DoStreamArg = NonNullable<NonNullable<ConstructorParameters<typeof MockLanguageModelV4>[0]>["doStream"]>;
@@ -80,7 +79,46 @@ function streamForStep(step: MockStep, i: number, delayMs?: number): StreamResul
   return { stream };
 }
 
-/** Build a mock `LanguageModel` that replays `steps`, one provider stream per model call. */
-export function mockModel(steps: MockStep[], opts: { delayMs?: number } = {}): LanguageModel {
-  return new MockLanguageModelV4({ doStream: steps.map((s, i) => streamForStep(s, i, opts.delayMs)) });
+/**
+ * Build a mock `LanguageModel` that replays `steps`, one provider stream per
+ * model call. Returns the concrete `MockLanguageModelV4` (not the widened
+ * `LanguageModel` union) so callers can inspect `.doStreamCalls` — the exact
+ * `tools`/`prompt` the caller handed the model for that step — to assert on
+ * the ASSEMBLED tool set/instructions rather than only on side effects.
+ */
+export function mockModel(
+  steps: MockStep[],
+  opts: { delayMs?: number; provider?: string } = {},
+): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    // `provider` drives the architect's `isAnthropicModel` web_search gate — a
+    // caller passes "anthropic.*" to assert the tool is injected, without ever
+    // reaching a real provider (the mock replays a scripted stream regardless).
+    ...(opts.provider ? { provider: opts.provider } : {}),
+    doStream: steps.map((s, i) => streamForStep(s, i, opts.delayMs)),
+  });
+}
+
+/**
+ * Build a mock `LanguageModel` for `streamObject({ output: "array" })`. The SDK
+ * wraps an array result as `{ "elements": [...] }` and parses it out of the
+ * model's TEXT stream (json mode), so the mock streams that JSON as text-delta
+ * chunks. `chunks` splits the JSON string into N deltas so a caller can exercise
+ * the progressive `partialObjectStream` (e.g. the plan seal-rule) deterministically.
+ */
+export function mockObjectArrayModel(elements: unknown[], chunks = 1): MockLanguageModelV4 {
+  const json = JSON.stringify({ elements });
+  const n = Math.max(1, Math.min(chunks, json.length));
+  const size = Math.ceil(json.length / n);
+  const pieces: string[] = [];
+  for (let i = 0; i < json.length; i += size) pieces.push(json.slice(i, i + size));
+
+  const parts: StreamPartV4[] = [{ type: "stream-start", warnings: [] }, { type: "text-start", id: "obj" }];
+  for (const piece of pieces) parts.push({ type: "text-delta", id: "obj", delta: piece });
+  parts.push({ type: "text-end", id: "obj" });
+  parts.push({ type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: USAGE });
+
+  return new MockLanguageModelV4({
+    doStream: async () => ({ stream: convertArrayToReadableStream(parts) }),
+  });
 }

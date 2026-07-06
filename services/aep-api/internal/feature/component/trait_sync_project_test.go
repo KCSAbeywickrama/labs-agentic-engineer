@@ -19,6 +19,7 @@ package component
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
@@ -88,19 +89,31 @@ func ocDeployments(urlsByComponent map[string]string) *mocks.ComponentClientMock
 func traitRootMd() string { return "---\nsourceSpec: v1\n---\n\nOverview.\n" }
 
 func endUserServiceMd(name string) string {
-	return "---\ntype: service\nexposesAPI:\n  auth: end-user-required\n---\n\n# " + name + "\n\nProtected API.\n"
+	return traitServiceJSON(name, "end-user-required")
 }
 
 func serviceToServiceMd(name string) string {
-	return "---\ntype: service\nexposesAPI:\n  auth: service-required\n---\n\n# " + name + "\n\nS2S API.\n"
+	return traitServiceJSON(name, "service-required")
 }
 
 func plainServiceMd(name string) string {
-	return "---\ntype: service\n---\n\n# " + name + "\n\nUnprotected.\n"
+	return traitServiceJSON(name, "")
 }
 
 func webAppMd(name string) string {
-	return "---\ntype: web-app\n---\n\n# " + name + "\n\nSPA.\n"
+	return "{\n  \"name\": \"" + name + "\",\n  \"type\": \"web-app\",\n  \"description\": \"SPA.\",\n  \"dependencies\": []\n}\n"
+}
+
+// traitServiceJSON renders a service component design.json with an optional
+// exposesAPI.auth policy (empty auth ⇒ no exposesAPI block).
+func traitServiceJSON(name, auth string) string {
+	var b strings.Builder
+	b.WriteString("{\n  \"name\": \"" + name + "\",\n  \"type\": \"service\",\n  \"description\": \"API.\",\n  \"dependencies\": []")
+	if auth != "" {
+		b.WriteString(",\n  \"exposesAPI\": {\n    \"auth\": \"" + auth + "\"\n  }")
+	}
+	b.WriteString("\n}\n")
+	return b.String()
 }
 
 // --- SyncProjectAPITraits -----------------------------------------------------
@@ -113,11 +126,11 @@ func TestSyncProjectAPITraits_ReEmitsEnabledServicesOnly(t *testing.T) {
 	// worker: unprotected service (skipped — ResolveAPISecurityEnabled=false).
 	// web: web-app (skipped — not ComponentType "service").
 	files := map[string]string{
-		artifacts.DesignRootFile:      traitRootMd(),
-		"components/api/design.md":    endUserServiceMd("api"),
-		"components/s2s/design.md":    serviceToServiceMd("s2s"),
-		"components/worker/design.md": plainServiceMd("worker"),
-		"components/web/design.md":    webAppMd("web"),
+		artifacts.DesignRootFile:        traitRootMd(),
+		"components/api/design.json":    endUserServiceMd("api"),
+		"components/s2s/design.json":    serviceToServiceMd("s2s"),
+		"components/worker/design.json": plainServiceMd("worker"),
+		"components/web/design.json":    webAppMd("web"),
 	}
 	oc := ocDeployments(map[string]string{"web": "http://web.local/app/"})
 	svc := NewTraitSyncService(oc, traitStoreWith(files))
@@ -200,9 +213,9 @@ func TestSyncProjectAPITraits_PerComponentErrorDoesNotAbort(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	files := map[string]string{
-		artifacts.DesignRootFile:     traitRootMd(),
-		"components/api-a/design.md": serviceToServiceMd("api-a"),
-		"components/api-b/design.md": serviceToServiceMd("api-b"),
+		artifacts.DesignRootFile:       traitRootMd(),
+		"components/api-a/design.json": serviceToServiceMd("api-a"),
+		"components/api-b/design.json": serviceToServiceMd("api-b"),
 	}
 	oc := ocDeployments(map[string]string{})
 	oc.UpdateComponentTraitsFunc = func(_ context.Context, _, _, componentName string, _ []models.ComponentTrait) error {
@@ -281,10 +294,10 @@ func Test_siblingSPAOrigins(t *testing.T) {
 	t.Run("collects each web-app origin, trims path, dedups", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:    traitRootMd(),
-			"components/web1/design.md": webAppMd("web1"),
-			"components/web2/design.md": webAppMd("web2"),
-			"components/api/design.md":  endUserServiceMd("api"),
+			artifacts.DesignRootFile:      traitRootMd(),
+			"components/web1/design.json": webAppMd("web1"),
+			"components/web2/design.json": webAppMd("web2"),
+			"components/api/design.json":  endUserServiceMd("api"),
 		}
 		design := traitReadDesign(t, files)
 		oc := ocDeployments(map[string]string{
@@ -317,8 +330,8 @@ func Test_siblingSPAOrigins(t *testing.T) {
 	t.Run("web-app with no deployment yet contributes nothing", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   traitRootMd(),
-			"components/web/design.md": webAppMd("web"),
+			artifacts.DesignRootFile:     traitRootMd(),
+			"components/web/design.json": webAppMd("web"),
 		}
 		design := traitReadDesign(t, files)
 		oc := ocDeployments(map[string]string{}) // web → empty list
@@ -335,8 +348,8 @@ func Test_siblingSPAOrigins(t *testing.T) {
 	t.Run("duplicate deployment URLs dedup to one origin", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   traitRootMd(),
-			"components/web/design.md": webAppMd("web"),
+			artifacts.DesignRootFile:     traitRootMd(),
+			"components/web/design.json": webAppMd("web"),
 		}
 		design := traitReadDesign(t, files)
 		oc := &mocks.ComponentClientMock{
@@ -360,8 +373,8 @@ func Test_siblingSPAOrigins(t *testing.T) {
 	t.Run("transient ListDeployments error surfaces (no partial allowlist)", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   traitRootMd(),
-			"components/web/design.md": webAppMd("web"),
+			artifacts.DesignRootFile:     traitRootMd(),
+			"components/web/design.json": webAppMd("web"),
 		}
 		design := traitReadDesign(t, files)
 		oc := &mocks.ComponentClientMock{
@@ -378,8 +391,8 @@ func Test_siblingSPAOrigins(t *testing.T) {
 	t.Run("no web-apps yields empty slice, nil error", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   traitRootMd(),
-			"components/api/design.md": endUserServiceMd("api"),
+			artifacts.DesignRootFile:     traitRootMd(),
+			"components/api/design.json": endUserServiceMd("api"),
 		}
 		design := traitReadDesign(t, files)
 		oc := &mocks.ComponentClientMock{} // ListDeployments must never be called

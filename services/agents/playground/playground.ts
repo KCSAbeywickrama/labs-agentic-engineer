@@ -35,6 +35,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as clack from "@clack/prompts";
+import type { LanguageModel } from "ai";
 import type { Skill, TurnRequest } from "../src/contracts/sse-events.js";
 import { createApp } from "../src/server.js";
 import { createModel } from "../src/shared/model.js";
@@ -45,10 +46,11 @@ import { FileBundle } from "../src/agents/main/bundle.js";
 import { applyToolCall } from "../src/agents/main/change.js";
 import type { StreamPart } from "../src/agents/main/stream-types.js";
 import { streamTurn } from "../evals/sse-client.js";
-import { loadRepoSkills } from "../evals/skills.js";
+import { loadRepoSkills, readSkillRaw } from "../evals/skills.js";
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
+import { runTasksCommand } from "./tasks.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // pushed every turn (ADR-0002); the service still reads none.
@@ -59,6 +61,10 @@ interface ChatCtx {
   baseUrl: string;
   skills: Skill[];
   dryRun: boolean;
+  /** The in-process model — the /tasks command drives the task-planner planner directly. */
+  model: LanguageModel;
+  /** Caller-supplied MCP discovery endpoint (Task E2), from AEP_MCP_URL/AEP_MCP_TOKEN. */
+  mcp?: TurnRequest["mcp"];
 }
 
 const NEW = "\0new";
@@ -96,6 +102,7 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
     instruction,
     files: before,
     ...(ctx.skills.length > 0 ? { skills: ctx.skills } : {}),
+    ...(ctx.mcp ? { mcp: ctx.mcp } : {}),
   };
 
   const toolCalls: StreamPart[] = [];
@@ -127,8 +134,18 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   }
 }
 
+/** Run the task-planner planner over the thread's current spec bundle (read-only). */
+async function runTasks(ctx: ChatCtx): Promise<void> {
+  const files = readSnapshot(ctx.thread);
+  // Raw bytes (frontmatter included) — matches what aep-api pushes in
+  // production; `ctx.skills[].content` is frontmatter-stripped (ADR-0002's
+  // `loadSkill` catalog shape), the wrong bytes for this field.
+  const taskBreakdownRawBody = readSkillRaw(SKILLS_DIR, "task-breakdown");
+  await runTasksCommand(ctx.thread, files, ctx.skills, ctx.model, taskBreakdownRawBody);
+}
+
 function printHelp(): void {
-  output.write("  commands: /threads (switch), /quit, /help\n");
+  output.write("  commands: /tasks (plan tasks), /threads (switch), /quit, /help\n");
 }
 
 /** The per-thread readline loop. Returns when the user switches threads or quits. */
@@ -150,6 +167,10 @@ async function chatLoop(ctx: ChatCtx): Promise<"switch" | "quit"> {
       if (line === "") continue;
       if (line === "/quit") return "quit";
       if (line === "/threads") return "switch";
+      if (line === "/tasks") {
+        await runTasks(ctx);
+        continue;
+      }
       if (line === "/help") {
         printHelp();
         continue;
@@ -177,11 +198,20 @@ async function main(): Promise<void> {
 
   const skills = loadRepoSkills(SKILLS_DIR);
   const store = new InMemoryConversationStore();
-  const app = createApp({ store, model: createModel({ apiKey }) });
+  const model = createModel({ apiKey });
+  const app = createApp({ store, model });
   const { baseUrl, close } = await listen0(app.listen(0));
+
+  // MCP discovery (Task E2): both env vars set → push { url, token } on every
+  // turn (mirrors how the caller resolves skills). Either unset → no `mcp`
+  // field at all, same as a checkout with no dependency-discovery server.
+  const mcpUrl = process.env.AEP_MCP_URL;
+  const mcpToken = process.env.AEP_MCP_TOKEN;
+  const mcp = mcpUrl && mcpToken ? { url: mcpUrl, token: mcpToken } : undefined;
 
   clack.intro("AEP spec-agent playground");
   if (skills.length > 0) clack.log.info(`skills: ${skills.map((s) => s.name).join(", ")}`);
+  if (mcp) clack.log.info(`mcp discovery: ${mcp.url}`);
   if (dryRun) clack.log.warn("dry-run: changes are shown but NOT written to disk");
 
   try {
@@ -198,7 +228,7 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, model, ...(mcp ? { mcp } : {}) });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }

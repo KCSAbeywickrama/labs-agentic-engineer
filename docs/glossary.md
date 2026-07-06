@@ -203,3 +203,34 @@ pattern**: per-org OAuth client-secret + per-run ExternalSecret +
   definitions.
 - `openchoreo/` — OC source. Authoritative for what
   `ClusterWorkflow`/`WorkflowRun`/`SecretReference`/`GitSecret` actually mean.
+
+---
+
+## Dependency management
+
+### Dependency kinds
+`component` (sibling in the same project), `org-service` (another project's
+org-published component, addressed by project-prefixed catalog name),
+`external` (third-party service consumed via configured values), and
+`platform-resource` (platform-provisioned infrastructure from a typed catalog,
+e.g. `postgres-cnpg`). Authored in `specs/design/components/<name>/design.json`
+under `dependencies[]`. The word **connection** is banned for these concepts —
+in OC it means a consumed endpoint (WorkloadConnection), the opposite side.
+
+### External resource registry
+Org-level definitions (name + config-key schema) reusable across projects; the
+design agent discovers them via MCP (`list_external_resources`) and reuses the
+exact registered name. Values are per-project, per-environment; secret values
+live in OpenBao via SM-API (`extres-<name>-<env>` entities) and reach pods
+through ResourceReleaseBinding → ExternalSecret → env.
+
+### Gates and typed tasks
+`config-collection` and `resource-provisioning` SYSTEM rows gate component
+tasks (three `depends_on_*` JSONB columns). Completion is contract-event
+driven; a deploy cascades dispatch of held siblings. Recovery for a stuck
+provision is drawer re-provision (SYSTEM tasks are not retryable via the
+coding-agent path).
+
+### Proceed-gate
+`design/save` refuses (409) while any dependency is unresolved, naming the
+component, dependency, and reason.

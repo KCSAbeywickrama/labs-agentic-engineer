@@ -68,6 +68,11 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Spec view — full-screen spec workspace (grouped requirement/design/validation
+  file listing, placeholder textarea content, UI-only build trigger) —
+  [#80](https://github.com/wso2/labs-agentic-engineer/issues/80) (BE
+  handshake: [#81](https://github.com/wso2/labs-agentic-engineer/issues/81),
+  ADR-0007)
 - Project overview page — spec/build/deployment status cards (versioned),
   components list, project-view tab shell —
   [#77](https://github.com/wso2/labs-agentic-engineer/issues/77) (BE

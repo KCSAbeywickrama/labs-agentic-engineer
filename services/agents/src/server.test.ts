@@ -156,6 +156,41 @@ test("400 when the skills payload is malformed", async () => {
   }
 });
 
+test("400 when the mcp payload is malformed", async () => {
+  const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "ok" }]));
+  try {
+    const notObject = await fetch(
+      `${baseUrl}/conversations/c/turns`,
+      jsonPost({ instruction: "x", files: SEED_FILES, mcp: "nope" }),
+    );
+    assert.equal(notObject.status, 400);
+    const missingToken = await fetch(
+      `${baseUrl}/conversations/c/turns`,
+      jsonPost({ instruction: "x", files: SEED_FILES, mcp: { url: "http://x" } }), // missing token
+    );
+    assert.equal(missingToken.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test("accepts an mcp payload without failing the turn (network details covered in run-conversation-turn.test.ts)", async () => {
+  const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "ok" }]));
+  try {
+    // An unreachable MCP endpoint must degrade to no discovery tools — never a
+    // turn failure (best-effort, Task E2).
+    const res = await fetch(
+      `${baseUrl}/conversations/c/turns`,
+      jsonPost({ instruction: "x", files: SEED_FILES, mcp: { url: "http://127.0.0.1:1/mcp", token: "tok" } }),
+    );
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    assert.match(text, /data: \[DONE\]/);
+  } finally {
+    await close();
+  }
+});
+
 test("413 when the files snapshot exceeds the body limit", async () => {
   const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "ok" }]), "1kb");
   try {

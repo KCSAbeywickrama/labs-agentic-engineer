@@ -77,8 +77,8 @@ func TestDiscardRequirements_NoTag_ErrNoVersionToDiscard(t *testing.T) {
 func TestDiscardDesign_RevertsToLatestTag(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
-		"specs/design/design.md":                "baseline root\n",
-		"specs/design/components/api/design.md": "baseline comp\n",
+		"specs/design/design.md":                  "baseline root\n",
+		"specs/design/components/api/design.json": "baseline comp\n",
 	})
 	r.remote.Tag(t, "v1-1", "design v1-1")
 
@@ -91,8 +91,8 @@ func TestDiscardDesign_RevertsToLatestTag(t *testing.T) {
 		t.Fatalf("DiscardDesign: %v", err)
 	}
 	want := map[string]string{
-		"design.md":                "baseline root\n",
-		"components/api/design.md": "baseline comp\n",
+		"design.md":                  "baseline root\n",
+		"components/api/design.json": "baseline comp\n",
 	}
 	if len(restored) != len(want) {
 		t.Fatalf("restored = %v, want %v", restored, want)

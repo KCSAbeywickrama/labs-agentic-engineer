@@ -49,13 +49,15 @@ type ProjectService interface {
 }
 
 type projectService struct {
-	client      openchoreo.ProjectClient
-	repoSvc     gitrepo.RepoService
-	webhookSvc  gitrepo.WebhookService
-	artifactSvc artifacts.ArtifactService
-	store       *artifacts.ArtifactStore
-	taskRepo    repositories.TaskRepository
-	skillsProv  skillsProvisioner
+	client          openchoreo.ProjectClient
+	repoSvc         gitrepo.RepoService
+	webhookSvc      gitrepo.WebhookService
+	artifactSvc     artifacts.ArtifactService
+	store           *artifacts.ArtifactStore
+	taskRepo        repositories.TaskRepository
+	skillsProv      skillsProvisioner
+	resourceProv    resourceDeprovisioner
+	externalResProv externalResourceDeprovisioner
 }
 
 // skillsProvisioner is the narrow port for eagerly provisioning the org's
@@ -66,6 +68,27 @@ type skillsProvisioner interface {
 }
 
 func (s *projectService) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
+
+// resourceDeprovisioner is the narrow port for tearing down a project's
+// platform-resource databases (P5) on delete. *resources.OCNativeProvisioner
+// satisfies it. Defined here so project doesn't import the resources package.
+type resourceDeprovisioner interface {
+	Deprovision(ctx context.Context, orgHandle, projectName, depName string, envs []string) error
+}
+
+func (s *projectService) SetResourceDeprovisioner(p resourceDeprovisioner) { s.resourceProv = p }
+
+// externalResourceDeprovisioner is the narrow port for tearing down a
+// project's external-resource OC Resource models on delete.
+// *resources.ExternalResourceProvisioner satisfies it. Defined here so project
+// doesn't import the resources package.
+type externalResourceDeprovisioner interface {
+	Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error
+}
+
+func (s *projectService) SetExternalResourceDeprovisioner(p externalResourceDeprovisioner) {
+	s.externalResProv = p
+}
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -160,6 +183,46 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 	if s.repoSvc != nil {
 		if err := s.repoSvc.DeleteRepo(ctx, orgName, projectName); err != nil {
 			slog.ErrorContext(ctx, "failed to delete git repo for project", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
+	// Tear down the project's platform-resource databases (P5) and its
+	// external resources' OC Resource models BEFORE deleting the task rows
+	// that name them. The OC Project delete above does NOT cascade to these:
+	// the Resource/binding carry only a logical spec.owner.projectName, not a
+	// k8s ownerReference, so without this the OC Resource + ResourceReleaseBinding
+	// (and, for platform resources, the provisioned backing instance) orphan on
+	// the cluster. Best-effort — the OC project + repo are already gone; a stuck
+	// deprovision must not block the delete.
+	if (s.resourceProv != nil || s.externalResProv != nil) && s.taskRepo != nil {
+		tasks, err := s.taskRepo.ListByProjectID(ctx, orgName, projectName)
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to list tasks for resource teardown on project delete",
+				"org", orgName, "project", projectName, "error", err)
+		} else {
+			if s.resourceProv != nil {
+				for _, t := range tasks {
+					if t.Type == models.TaskTypeResourceProvisioning && t.ResourceName != "" {
+						if derr := s.resourceProv.Deprovision(ctx, orgName, projectName, t.ResourceName, []string{"development"}); derr != nil {
+							slog.ErrorContext(ctx, "failed to deprovision platform-resource on project delete",
+								"org", orgName, "project", projectName, "resource", t.ResourceName, "error", derr)
+						}
+					}
+				}
+			}
+			if s.externalResProv != nil {
+				deprovisioned := make(map[string]bool)
+				for _, t := range tasks {
+					if t.Type != models.TaskTypeConfigCollection || t.ExternalResourceName == "" || deprovisioned[t.ExternalResourceName] {
+						continue
+					}
+					deprovisioned[t.ExternalResourceName] = true
+					if derr := s.externalResProv.Deprovision(ctx, orgName, projectName, t.ExternalResourceName, []string{"development"}); derr != nil {
+						slog.ErrorContext(ctx, "failed to deprovision external resource on project delete",
+							"org", orgName, "project", projectName, "resource", t.ExternalResourceName, "error", derr)
+					}
+				}
+			}
 		}
 	}
 

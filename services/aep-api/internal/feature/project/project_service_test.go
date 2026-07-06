@@ -143,6 +143,34 @@ func (f *fakeSkillsProvisioner) EnsureProvisioned(_ context.Context, orgID strin
 	return nil
 }
 
+// deprovisionCall records one Deprovision invocation's arguments.
+type deprovisionCall struct {
+	org, project, name string
+	envs               []string
+}
+
+// fakeDeprovisioner backs both resourceDeprovisioner and
+// externalResourceDeprovisioner — the two ports are structurally identical
+// (Deprovision(ctx, orgHandle, projectName, name string, envs []string) error),
+// mirroring the concrete *resources.OCNativeProvisioner /
+// *resources.ExternalResourceProvisioner this fake stands in for. When trace
+// is set, every call also appends "<label>:<name>" to it (shared across fakes)
+// so tests can assert relative call order.
+type fakeDeprovisioner struct {
+	err   error
+	trace *[]string
+	label string
+	calls []deprovisionCall
+}
+
+func (f *fakeDeprovisioner) Deprovision(_ context.Context, orgHandle, projectName, name string, envs []string) error {
+	f.calls = append(f.calls, deprovisionCall{orgHandle, projectName, name, envs})
+	if f.trace != nil {
+		*f.trace = append(*f.trace, f.label+":"+name)
+	}
+	return f.err
+}
+
 // statusFixture builds a projectService wired for GetProjectStatus ladder
 // tests: repo ready, and the artifact/tasks seams programmable per case.
 type statusFixture struct {
@@ -436,6 +464,216 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 	svc := NewProjectService(oc, repoSvc, nil, nil, nil, nil)
 	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("repo cleanup failure must be best-effort, got %v", err)
+	}
+}
+
+// --- DeleteProject: resource + external-resource teardown ---------------------
+// The OC Project delete does NOT cascade to Resources/ResourceReleaseBindings —
+// they carry only a logical spec.owner.projectName, not a k8s ownerReference —
+// so DeleteProject must deprovision them itself, before purging the task rows
+// that name them.
+
+func TestDeleteProject_DeprovisionsPlatformResourceTasksByResourceName(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	taskRepo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{
+				{Type: models.TaskTypeComponent, ComponentName: "api"},
+				{Type: models.TaskTypeResourceProvisioning, ResourceName: "db1"},
+				{Type: models.TaskTypeResourceProvisioning, ResourceName: "db2"},
+				{Type: models.TaskTypeResourceProvisioning, ResourceName: ""}, // guard: blank name skipped
+			}, nil
+		},
+		DeleteByProjectIDFunc: func(context.Context, string, string) error { return nil },
+	}
+	resourceProv := &fakeDeprovisioner{}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	svc.SetResourceDeprovisioner(resourceProv)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(resourceProv.calls) != 2 {
+		t.Fatalf("want 2 platform-resource deprovision calls, got %d (%+v)", len(resourceProv.calls), resourceProv.calls)
+	}
+	for i, want := range []string{"db1", "db2"} {
+		c := resourceProv.calls[i]
+		if c.org != "acme" || c.project != "web" || c.name != want {
+			t.Errorf("call %d: got (%q,%q,%q) want (acme,web,%q)", i, c.org, c.project, c.name, want)
+		}
+		if len(c.envs) != 1 || c.envs[0] != "development" {
+			t.Errorf("call %d envs: got %v want [development]", i, c.envs)
+		}
+	}
+}
+
+func TestDeleteProject_DeprovisionsDistinctExternalResourcesOnly(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	taskRepo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{
+				{Type: models.TaskTypeConfigCollection, ExternalResourceName: "stripe"},
+				{Type: models.TaskTypeConfigCollection, ExternalResourceName: "stripe"}, // 2nd consumer, same resource
+				{Type: models.TaskTypeConfigCollection, ExternalResourceName: "sendgrid"},
+				{Type: models.TaskTypeConfigCollection, ExternalResourceName: ""}, // guard: blank name skipped
+				{Type: models.TaskTypeComponent, ComponentName: "api"},
+			}, nil
+		},
+		DeleteByProjectIDFunc: func(context.Context, string, string) error { return nil },
+	}
+	extProv := &fakeDeprovisioner{}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	svc.SetExternalResourceDeprovisioner(extProv)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(extProv.calls) != 2 {
+		t.Fatalf("want 2 distinct external-resource deprovision calls (dedup), got %d (%+v)", len(extProv.calls), extProv.calls)
+	}
+	seen := map[string]bool{}
+	for _, c := range extProv.calls {
+		seen[c.name] = true
+		if c.org != "acme" || c.project != "web" {
+			t.Errorf("call args: got (%q,%q)", c.org, c.project)
+		}
+		if len(c.envs) != 1 || c.envs[0] != "development" {
+			t.Errorf("envs: got %v want [development]", c.envs)
+		}
+	}
+	if !seen["stripe"] || !seen["sendgrid"] {
+		t.Fatalf("want stripe+sendgrid both deprovisioned exactly once, got %+v", extProv.calls)
+	}
+}
+
+// TestDeleteProject_DeprovisionsBeforeTaskPurge pins the load-bearing ordering:
+// both deprovision ports must run to completion BEFORE taskRepo.DeleteByProjectID,
+// or the resource/name that DeleteProject needs to look up would already be gone.
+func TestDeleteProject_DeprovisionsBeforeTaskPurge(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	var trace []string
+	taskRepo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{
+				{Type: models.TaskTypeResourceProvisioning, ResourceName: "db1"},
+				{Type: models.TaskTypeConfigCollection, ExternalResourceName: "stripe"},
+			}, nil
+		},
+		DeleteByProjectIDFunc: func(context.Context, string, string) error {
+			trace = append(trace, "purge")
+			return nil
+		},
+	}
+	resourceProv := &fakeDeprovisioner{trace: &trace, label: "resource"}
+	extProv := &fakeDeprovisioner{trace: &trace, label: "external"}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	svc.SetResourceDeprovisioner(resourceProv)
+	svc.SetExternalResourceDeprovisioner(extProv)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	want := []string{"resource:db1", "external:stripe", "purge"}
+	if len(trace) != len(want) {
+		t.Fatalf("trace: got %v want %v", trace, want)
+	}
+	for i := range want {
+		if trace[i] != want[i] {
+			t.Fatalf("trace[%d]: got %q want %q (full trace: %v)", i, trace[i], want[i], trace)
+		}
+	}
+}
+
+func TestDeleteProject_ResourceDeprovisionFailureIsBestEffort(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	purged := false
+	taskRepo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{{Type: models.TaskTypeResourceProvisioning, ResourceName: "db1"}}, nil
+		},
+		DeleteByProjectIDFunc: func(context.Context, string, string) error { purged = true; return nil },
+	}
+	resourceProv := &fakeDeprovisioner{err: errors.New("provider down")}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	svc.SetResourceDeprovisioner(resourceProv)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("resource deprovision failure must be best-effort, got %v", err)
+	}
+	if !purged {
+		t.Fatal("task purge must still run after a stuck platform-resource deprovision")
+	}
+}
+
+func TestDeleteProject_ExternalResourceDeprovisionFailureIsBestEffort(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	purged := false
+	taskRepo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{{Type: models.TaskTypeConfigCollection, ExternalResourceName: "stripe"}}, nil
+		},
+		DeleteByProjectIDFunc: func(context.Context, string, string) error { purged = true; return nil },
+	}
+	extProv := &fakeDeprovisioner{err: errors.New("provider down")}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	svc.SetExternalResourceDeprovisioner(extProv)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("external-resource deprovision failure must be best-effort, got %v", err)
+	}
+	if !purged {
+		t.Fatal("task purge must still run after a stuck external-resource deprovision")
+	}
+}
+
+// TestDeleteProject_NilDeprovisioners_NoCallsNoPanic proves the teardown block
+// is skipped entirely (no task listing at all) when neither port is wired —
+// ListByProjectIDFunc is intentionally left unset, which panics if invoked.
+func TestDeleteProject_NilDeprovisioners_NoCallsNoPanic(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	purged := false
+	taskRepo := &fakeTaskRepo{
+		DeleteByProjectIDFunc: func(context.Context, string, string) error { purged = true; return nil },
+	}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !purged {
+		t.Fatal("task purge must still run")
+	}
+}
+
+// A task-listing failure for the teardown lookup is best-effort too — the OC
+// project + repo are already gone, so a DB hiccup here must not fail delete.
+func TestDeleteProject_TeardownTaskListFailureIsSwallowed(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{DeleteProjectFunc: func(context.Context, string, string) error { return nil }}
+	purged := false
+	taskRepo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return nil, errors.New("db down")
+		},
+		DeleteByProjectIDFunc: func(context.Context, string, string) error { purged = true; return nil },
+	}
+	resourceProv := &fakeDeprovisioner{}
+	svc := NewProjectService(oc, nil, nil, nil, nil, taskRepo)
+	svc.SetResourceDeprovisioner(resourceProv)
+
+	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("teardown task-list failure must be best-effort, got %v", err)
+	}
+	if !purged {
+		t.Fatal("task purge must still run after a teardown task-list failure")
+	}
+	if len(resourceProv.calls) != 0 {
+		t.Fatalf("no deprovision calls expected when task listing failed, got %+v", resourceProv.calls)
 	}
 }
 

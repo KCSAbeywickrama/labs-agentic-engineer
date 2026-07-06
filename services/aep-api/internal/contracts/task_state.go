@@ -87,6 +87,20 @@ const (
 	// event (the projector treats it as a no-op) and dispatchOne forces
 	// Status=in_progress directly.
 	TaskEventRetry TaskEvent = "operator.retry"
+	// TaskEventValuesProvisioned — config-collection completed: the task's
+	// required configuration values were supplied, so a no-build task is
+	// considered live. Drives pending|on_hold → deployed.
+	TaskEventValuesProvisioned TaskEvent = "values_provisioned"
+	// TaskEventProvisionStarted — resource-provisioning began: the provisioner
+	// accepted the task and is materialising its resource. Drives pending →
+	// building.
+	TaskEventProvisionStarted TaskEvent = "provision_started"
+	// TaskEventResourceReady — resource-provisioning watcher observed the
+	// resource healthy. Drives building → deployed.
+	TaskEventResourceReady TaskEvent = "resource_ready"
+	// TaskEventProvisionFailed — resource-provisioning watcher observed the
+	// resource in an error state. Drives building → failed.
+	TaskEventProvisionFailed TaskEvent = "provision_failed"
 )
 
 // EventCause maps a TaskEvent to the value written into ComponentTask.Cause on
@@ -113,6 +127,12 @@ func EventCause(event TaskEvent) string {
 		return "repo.unselected"
 	case TaskEventBuildPathMismatch:
 		return "build.component_path_mismatch"
+	case TaskEventValuesProvisioned:
+		return "values.provisioned"
+	case TaskEventResourceReady:
+		return "resource.ready"
+	case TaskEventProvisionFailed:
+		return "resource.provision_failed"
 	default:
 		return ""
 	}
@@ -130,6 +150,12 @@ type stateTransition struct {
 //	pending → in_progress → ready_for_review → merged → building → deployed
 //	                                         ↘ rejected
 //	                    (any) ↘ failed (build)
+//
+// No-build lifecycles also land in the same terminal states:
+//
+//	config-collection:     pending|on_hold → deployed        (values_provisioned)
+//	resource-provisioning: pending → building → deployed     (provision_started, resource_ready)
+//	                                          ↘ failed        (provision_failed)
 var allowedTransitions = []stateTransition{
 	{TaskStatusPending, TaskStatusInProgress, TaskEventDispatchSuccess},
 	{TaskStatusInProgress, TaskStatusReadyForReview, TaskEventPRReady},
@@ -156,6 +182,15 @@ var allowedTransitions = []stateTransition{
 	// Push containing this task's own merge SHA arrived but matched no file
 	// under the design-declared appPath — build was never dispatched.
 	{TaskStatusMerged, TaskStatusFailed, TaskEventBuildPathMismatch},
+	// Config-collection completion: a no-build task whose required values were
+	// supplied goes live directly. on_hold is included so a deploy-gated task
+	// completes once its gate clears.
+	{TaskStatusPending, TaskStatusDeployed, TaskEventValuesProvisioned},
+	{TaskStatusOnHold, TaskStatusDeployed, TaskEventValuesProvisioned},
+	// Resource-provisioning lifecycle: pending → building → deployed|failed.
+	{TaskStatusPending, TaskStatusBuilding, TaskEventProvisionStarted},
+	{TaskStatusBuilding, TaskStatusDeployed, TaskEventResourceReady},
+	{TaskStatusBuilding, TaskStatusFailed, TaskEventProvisionFailed},
 }
 
 // ErrInvalidTransition is returned by ApplyTaskEvent when the current status

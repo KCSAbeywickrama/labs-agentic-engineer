@@ -38,6 +38,20 @@ type projectSPARuntimeConfigEmitter interface {
 	EmitForProjectSPAs(ctx context.Context, orgID, projectID string) error
 }
 
+// accessGranter is the consumer port for the cross-project access-request grant
+// close-out. When a provider's `org-publish` task lands `deployed`, the cascade
+// calls GrantByProviderComponent so every open AccessRequest riding on it flips
+// to `granted`, the provider design is marked org-published (durability), and the
+// provider issue is closed. Satisfied structurally by *endpoints.AccessService
+// (C4) — kept as a local interface so the cascade needn't import that package.
+// The whole state-machine lives inside C4; the cascade only fires the trigger.
+type accessGranter interface {
+	// GrantByProviderComponent matches on the LOGICAL component name — the
+	// org-publish task's ComponentName, which is exactly what the deployed task
+	// carries into OnTaskDeployed. Pass it through unchanged.
+	GrantByProviderComponent(ctx context.Context, orgID, projectID, componentName string) error
+}
+
 // DispatchCascadeHook is the post-commit cascade fired by the webhook
 // projector whenever a task lands in `deployed`. It owns the per-project
 // advisory lock + eligibility scan + DispatchService.DispatchTasks call. The
@@ -48,6 +62,7 @@ type DispatchCascadeHook struct {
 	dispatch      DispatchService
 	traitSync     *component.TraitSyncService
 	runtimeConfig projectSPARuntimeConfigEmitter
+	accessGrant   accessGranter
 }
 
 func NewDispatchCascadeHook(db *gorm.DB, dispatch DispatchService) *DispatchCascadeHook {
@@ -72,6 +87,18 @@ func (h *DispatchCascadeHook) SetRuntimeConfig(r projectSPARuntimeConfigEmitter)
 		return
 	}
 	h.runtimeConfig = r
+}
+
+// SetAccessGrant wires the cross-project access-request grant close-out (C4).
+// When a provider's `org-publish` task lands `deployed`, the cascade fires
+// GrantByProviderComponent with the deployed task's LOGICAL component name.
+// Optional + best-effort — a nil granter disables it, and a grant failure never
+// breaks the deploy cascade.
+func (h *DispatchCascadeHook) SetAccessGrant(g accessGranter) {
+	if h == nil {
+		return
+	}
+	h.accessGrant = g
 }
 
 // OnTaskDeployed is the post-commit hook. Acquires a per-project advisory
@@ -142,6 +169,21 @@ func (h *DispatchCascadeHook) OnTaskDeployed(ctx context.Context, orgID, project
 			if rerr := h.runtimeConfig.EmitForProjectSPAs(ctx, orgID, projectID); rerr != nil {
 				slog.WarnContext(ctx, "dispatch cascade: EmitForProjectSPAs failed",
 					"project", projectID, "deployedComponent", componentName, "error", rerr)
+			}
+		}
+
+		// Cross-project access-request grant close-out: if this just-deployed
+		// component is the PROVIDER of an open cross-project access request, flip
+		// every consumer request riding on its publish task to `granted`, persist
+		// exposesAPI.orgPublished (durability), and close the provider issue. The
+		// whole state machine lives inside C4's AccessService; the cascade only
+		// fires the trigger with the deployed task's LOGICAL component name.
+		// Best-effort: a grant failure must never break the deploy cascade, so it
+		// is logged and swallowed rather than aborting the transaction.
+		if h.accessGrant != nil {
+			if gerr := h.accessGrant.GrantByProviderComponent(ctx, orgID, projectID, componentName); gerr != nil {
+				slog.WarnContext(ctx, "dispatch cascade: access grant failed",
+					"project", projectID, "providerComponent", componentName, "error", gerr)
 			}
 		}
 

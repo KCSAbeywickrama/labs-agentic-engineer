@@ -17,6 +17,7 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   alpha,
   Box,
@@ -25,19 +26,43 @@ import {
   Typography,
 } from '@wso2/oxygen-ui';
 import ReactMarkdown from 'react-markdown';
-import { RotateCcw } from '@wso2/oxygen-ui-icons-react';
+import { ExternalLink, RotateCcw } from '@wso2/oxygen-ui-icons-react';
 import { api } from '../../services/api';
 import type { Task } from '../../services/api';
+import { projectArchitecturePath } from '../../lib/paths';
 import { AssigneeChip } from './AssigneeChip';
 
 interface TaskDetailPanelProps {
   task: Task;
+  orgId: string;
   projectId: string;
   onClose: () => void;
 }
 
-export function TaskDetailPanel({ task, projectId, onClose }: TaskDetailPanelProps) {
+export function TaskDetailPanel({ task, orgId, projectId, onClose }: TaskDetailPanelProps) {
   const [isRetrying, setIsRetrying] = useState(false);
+  const navigate = useNavigate();
+
+  // resource-provisioning / config-collection tasks are SYSTEM tasks resolved
+  // in the architecture-page dependency drawer, not by any per-task action
+  // here — deep-link there (?dep=<name>) so ProjectArchitecturePage's existing
+  // effect opens the right dependency's drawer (see F2's `activeDep` wiring).
+  const drawerDep =
+    task.type === 'resource-provisioning' ? task.resourceName
+    : task.type === 'config-collection' ? task.externalResourceName
+    : undefined;
+  const drawerCtaLabel =
+    task.type === 'resource-provisioning' ? 'Provision resource'
+    : task.type === 'config-collection' ? 'Provide configuration'
+    : '';
+  const needsDrawerAction =
+    !!drawerDep && (!task.status || ['pending', 'on_hold', 'failed'].includes(task.status));
+
+  const goToDrawer = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!drawerDep) return;
+    navigate(`${projectArchitecturePath(orgId, projectId)}?dep=${encodeURIComponent(drawerDep)}`);
+  };
 
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -147,8 +172,11 @@ export function TaskDetailPanel({ task, projectId, onClose }: TaskDetailPanelPro
             Re-dispatches with a fresh run + freshly minted bearer via
             dispatchSvc.RetryTask, which clears LastCodingAgentRunName +
             DispatchedAt so the next dispatch creates a new Job; the agent
-            pushes new commits to the same draft PR. */}
-        {task.status === 'failed' && task.componentTaskId && (
+            pushes new commits to the same draft PR. Excludes drawer-resolved
+            SYSTEM tasks (below) — those never go through the coding-agent
+            dispatch path, so a failed provision/config-collection is
+            recovered by reopening the drawer, not by this retry. */}
+        {task.status === 'failed' && task.componentTaskId && !drawerDep && (
           <Button
             variant="contained"
             size="small"
@@ -158,6 +186,20 @@ export function TaskDetailPanel({ task, projectId, onClose }: TaskDetailPanelPro
             onClick={handleRetry}
           >
             {isRetrying ? 'Retrying…' : 'Retry'}
+          </Button>
+        )}
+
+        {/* resource-provisioning / config-collection tasks are resolved in the
+            architecture-page dependency drawer — deep-link there (Provision /
+            Provide configuration) instead of any per-task action here. */}
+        {needsDrawerAction && (
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<ExternalLink size={12} />}
+            onClick={goToDrawer}
+          >
+            {drawerCtaLabel}
           </Button>
         )}
 

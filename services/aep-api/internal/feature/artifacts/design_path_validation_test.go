@@ -29,7 +29,7 @@ func TestValidateDesignSubPath(t *testing.T) {
 		wantErr bool
 	}{
 		{"root design", "design.md", false},
-		{"nested component design", "components/user-api/design.md", false},
+		{"nested component design", "components/user-api/design.json", false},
 		{"nested openapi yaml", "components/user-api/openapi.yaml", false},
 		{"nested openapi yml", "components/user-api/openapi.yml", false},
 
@@ -38,7 +38,7 @@ func TestValidateDesignSubPath(t *testing.T) {
 		{"absolute", "/design.md", true},
 		{"traversal", "components/../../../etc/passwd", true},
 		{"trailing slash non-canonical", "components/user-api/", true},
-		{"double slash non-canonical", "components//user-api/design.md", true},
+		{"double slash non-canonical", "components//user-api/design.json", true},
 		{"disallowed extension", "components/user-api/notes.txt", true},
 		{"no extension", "components/user-api/design", true},
 	}
@@ -79,11 +79,11 @@ func TestValidateDesignSubDir(t *testing.T) {
 }
 
 func TestDesignFilePath_Join(t *testing.T) {
-	got, err := DesignFilePath("components/user-api/design.md")
+	got, err := DesignFilePath("components/user-api/design.json")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "specs/design/components/user-api/design.md"; got != want {
+	if want := "specs/design/components/user-api/design.json"; got != want {
 		t.Errorf("DesignFilePath = %q, want %q", got, want)
 	}
 

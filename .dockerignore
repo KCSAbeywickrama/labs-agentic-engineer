@@ -1,0 +1,40 @@
+# Root Docker build-context ignore.
+#
+# agents-service (deployments/docker-compose.yml) is the one image built with
+# the REPO ROOT as context — it needs sibling workspace packages
+# (packages/excalidraw-dsl, packages/design-projection) alongside
+# services/agents, which live outside services/agents/'s own directory. See
+# services/agents/Dockerfile. Every other image (aep-api, console, the local
+# stub services) builds from a narrower per-service context and never sees
+# this file, so entries here only need to keep the root build sane.
+#
+# Mirrors .gitignore's build-artifact set — none of this is needed inside the
+# image; the Dockerfile builds workspace deps from source.
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+.turbo
+**/.turbo
+*.tsbuildinfo
+generated
+**/generated
+*.gen.go
+*.gen.ts
+
+# VCS / editor / OS cruft.
+.git
+.gitignore
+.DS_Store
+*.log
+
+# Secrets — never bake these into an image layer.
+.env
+.env.*
+!.env.example
+
+# Dev-only scratch (services/agents playground threads; not part of the image).
+chat_playground
+**/chat_playground

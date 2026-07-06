@@ -1,5 +1,51 @@
 components:
   schemas:
+    AccessRequest:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/AccessRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        consumerComponentName:
+          type: string
+        consumerProjectId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        orgServiceName:
+          type: string
+        providerComponentName:
+          type: string
+        providerIssueNumber:
+          format: int64
+          type: integer
+        providerIssueUrl:
+          type: string
+        providerProjectId:
+          type: string
+        providerTaskId:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+        - id
+        - consumerProjectId
+        - consumerComponentName
+        - orgServiceName
+        - status
+        - createdAt
+        - updatedAt
+      type: object
     AnthropicProjection:
       additionalProperties: false
       properties:
@@ -67,6 +113,24 @@ components:
           type:
             - array
             - "null"
+        dependsOnExternalResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnOrgServices:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
         description:
           type: string
         dispatchedAt:
@@ -75,6 +139,8 @@ components:
         errorMessage:
           type: string
         execType:
+          type: string
+        externalResourceName:
           type: string
         id:
           type: string
@@ -86,9 +152,13 @@ components:
             - "null"
         lifecycleStatus:
           type: string
+        resourceName:
+          type: string
         status:
           type: string
         title:
+          type: string
+        type:
           type: string
         url:
           type: string
@@ -255,6 +325,39 @@ components:
         - name
         - email
       type: object
+    CollectSpecInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/CollectSpecInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        rawSpec:
+          description: Raw OpenAPI YAML/JSON (paste path)
+          type: string
+        specUrl:
+          description: HTTPS URL to fetch the OpenAPI spec from
+          type: string
+      type: object
+    CollectSpecOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/CollectSpecOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        specPath:
+          description: Component-relative path where the spec was stored
+          type: string
+      required:
+        - specPath
+      type: object
     Component:
       additionalProperties: false
       properties:
@@ -403,6 +506,24 @@ components:
           type:
             - array
             - "null"
+        dependsOnExternalResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnOrgServices:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
         dispatchDeferredAt:
           format: date-time
           type: string
@@ -412,6 +533,8 @@ components:
         errorMessage:
           type: string
         execType:
+          type: string
+        externalResourceName:
           type: string
         id:
           type: string
@@ -451,6 +574,8 @@ components:
           type: string
         rationale:
           type: string
+        resourceName:
+          type: string
         sourceDesignVersion:
           type: string
         sourceSpecVersion:
@@ -458,6 +583,8 @@ components:
         status:
           type: string
         title:
+          type: string
+        type:
           type: string
         updatedAt:
           format: date-time
@@ -469,6 +596,7 @@ components:
         - projectId
         - componentName
         - title
+        - type
         - order
         - status
         - workspacePath
@@ -476,6 +604,19 @@ components:
         - lifecycleStatus
         - createdAt
         - updatedAt
+      type: object
+    ConfigKey:
+      additionalProperties: false
+      properties:
+        credentialClass:
+          type: string
+        key:
+          type: string
+        secret:
+          type: boolean
+      required:
+        - key
+        - secret
       type: object
     CreateProjectRequest:
       additionalProperties: false
@@ -494,17 +635,6 @@ components:
         displayName:
           type: string
         name:
-          type: string
-        prompt:
-          description: >-
-            The user's initial requirement — what they want built. Persisted
-            as the project's requirement and triggers spec derivation for the
-            new project.
-          type: string
-        repoName:
-          description: >-
-            Name of the GitHub repository to create for the project's specs
-            and source (in the connected org). Defaults to the project name.
           type: string
       required:
         - name
@@ -532,20 +662,90 @@ components:
         - skillMd
         - references
       type: object
-    DependentAPI:
+    Dependency:
       additionalProperties: false
       properties:
-        authentication:
-          type: string
+        candidates:
+          items:
+            $ref: "#/components/schemas/DependencyCandidate"
+          type:
+            - array
+            - "null"
+        config:
+          items:
+            $ref: "#/components/schemas/ConfigKey"
+          type:
+            - array
+            - "null"
         description:
           type: string
+        kind:
+          type: string
         name:
+          type: string
+        needsSpec:
+          type: boolean
+        parameters:
+          additionalProperties:
+            type: string
+          type: object
+        reason:
+          type: string
+        resourceType:
+          type: string
+        specPath:
+          type: string
+        specUrl:
+          type: string
+        status:
+          type: string
+      required:
+        - kind
+        - name
+      type: object
+    DependencyCandidate:
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+        label:
           type: string
         url:
           type: string
       required:
+        - label
+      type: object
+    DependencyOutputName:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required:
         - name
-        - url
+      type: object
+    DependencyStatusOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/DependencyStatusOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        outputs:
+          items:
+            $ref: "#/components/schemas/DependencyOutputName"
+          type:
+            - array
+            - "null"
+        ready:
+          type: boolean
+        status:
+          type: string
+      required:
+        - status
+        - ready
       type: object
     Deployment:
       additionalProperties: false
@@ -660,33 +860,33 @@ components:
           type: string
         componentType:
           type: string
-        dependentApis:
+        dependencies:
           items:
-            $ref: "#/components/schemas/DependentAPI"
+            $ref: "#/components/schemas/Dependency"
           type:
             - array
             - "null"
-        dependsOn:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
+        description:
+          type: string
         entrypoint:
           type: string
         exposesAPI:
           $ref: "#/components/schemas/ExposesAPI"
+        exposure:
+          type: string
         language:
           type: string
         name:
           type: string
         openAPISpec:
           type: string
+        version:
+          type: string
       required:
         - name
         - componentType
         - language
-        - dependsOn
+        - dependencies
         - entrypoint
         - buildpack
         - appPath
@@ -829,8 +1029,56 @@ components:
           type: string
         managed:
           type: boolean
+        orgPublished:
+          type: boolean
         userContext:
           type: string
+      type: object
+    ExternalResourceConfigKeyDTO:
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        secret:
+          type: boolean
+      required:
+        - key
+        - secret
+      type: object
+    ExternalResourceConsumer:
+      additionalProperties: false
+      properties:
+        componentName:
+          type: string
+        projectId:
+          type: string
+      required:
+        - projectId
+        - componentName
+      type: object
+    ExternalResourceDTO:
+      additionalProperties: false
+      properties:
+        configKeys:
+          items:
+            $ref: "#/components/schemas/ExternalResourceConfigKeyDTO"
+          type:
+            - array
+            - "null"
+        consumers:
+          items:
+            $ref: "#/components/schemas/ExternalResourceConsumer"
+          type:
+            - array
+            - "null"
+        description:
+          type: string
+        name:
+          type: string
+      required:
+        - name
+        - configKeys
+        - consumers
       type: object
     FormFile:
       additionalProperties: false
@@ -915,6 +1163,25 @@ components:
       required:
         - name
         - color
+      type: object
+    ListExternalResourcesOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ListExternalResourcesOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        externalResources:
+          items:
+            $ref: "#/components/schemas/ExternalResourceDTO"
+          type:
+            - array
+            - "null"
+      required:
+        - externalResources
       type: object
     OrgAnthropicConnectInputBody:
       additionalProperties: false
@@ -1183,9 +1450,6 @@ components:
           type:
             - array
             - "null"
-        nextCursor:
-          description: Cursor for the next page; absent on the last page.
-          type: string
       required:
         - items
       type: object
@@ -1299,6 +1563,46 @@ components:
         - status
         - connectedAt
       type: object
+    ProvisionDependencyInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ProvisionDependencyInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        environments:
+          description: Environment names to bind the resource to (e.g. ["development"])
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        params:
+          additionalProperties:
+            type: string
+          description: Provisioning parameters (applied to all envs)
+          type: object
+      required:
+        - environments
+      type: object
+    ProvisionDependencyOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ProvisionDependencyOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        status:
+          type: string
+      required:
+        - status
+      type: object
     ReqFileInputBody:
       additionalProperties: false
       properties:
@@ -1372,6 +1676,41 @@ components:
         - filename
         - existed
       type: object
+    SaveExternalResourceValuesInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SaveExternalResourceValuesInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        environments:
+          additionalProperties:
+            additionalProperties:
+              type: string
+            type: object
+          description: Per-environment key→value map (development required)
+          type: object
+      required:
+        - environments
+      type: object
+    SaveExternalResourceValuesOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SaveExternalResourceValuesOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        status:
+          type: string
+      required:
+        - status
+      type: object
     SkillDetailBody:
       additionalProperties: false
       properties:
@@ -1421,6 +1760,44 @@ components:
         - version
         - contentSha
         - updatedAt
+      type: object
+    SpecBundle:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SpecBundle.json
+          format: uri
+          readOnly: true
+          type: string
+        files:
+          items:
+            $ref: "#/components/schemas/SpecFile"
+          type: array
+      required:
+        - files
+      type: object
+    SpecFile:
+      additionalProperties: false
+      properties:
+        content:
+          description: Raw file content, inline.
+          type: string
+        group:
+          description: Which spec-view section the file belongs to.
+          enum:
+            - requirements
+            - designs
+            - validation
+          type: string
+        path:
+          description: File path within the project's spec tree (e.g. requirements/prd.md).
+          type: string
+      required:
+        - path
+        - group
+        - content
       type: object
     TaskStatusResponse:
       additionalProperties: false
@@ -1655,6 +2032,52 @@ paths:
       summary: Authorize a collaboration room (server-to-server)
       tags:
         - Collaboration
+  /dependencies/external-resources:
+    get:
+      operationId: list-external-resources
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListExternalResourcesOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List the org's registered external resources with their consuming components
+      tags:
+        - Dependencies
+  /dependencies/external-resources/{name}:
+    delete:
+      operationId: delete-external-resource
+      parameters:
+        - description: External resource name to delete
+          in: path
+          name: name
+          required: true
+          schema:
+            description: External resource name to delete
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Delete a registered external resource (only when no component uses it)
+      tags:
+        - Dependencies
   /org/credentials/anthropic:
     delete:
       operationId: disconnect-anthropic
@@ -2183,21 +2606,6 @@ paths:
           schema:
             description: Opaque pagination cursor
             type: string
-        - description: Case-insensitive substring match on name and displayName
-          explode: false
-          in: query
-          name: search
-          schema:
-            description: Case-insensitive substring match on name and displayName
-            type: string
-        - description: Maximum items per page (server default when absent)
-          explode: false
-          in: query
-          name: limit
-          schema:
-            description: Maximum items per page (server default when absent)
-            format: int64
-            type: integer
       responses:
         "200":
           content:
@@ -2580,6 +2988,197 @@ paths:
       summary: Update component config
       tags:
         - Config
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/access-request:
+    post:
+      operationId: create-access-request
+      parameters:
+        - description: Consumer project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Consumer project name (DNS-label slug)
+            type: string
+        - description: Consumer component requesting access
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Consumer component requesting access
+            type: string
+        - description: Org-service dependency name (== provider component to publish org-wide)
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Org-service dependency name (== provider component to publish org-wide)
+            type: string
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessRequest"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Request cross-project access to a project-only org-service dependency
+      tags:
+        - Dependencies
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/provision:
+    post:
+      operationId: provision-dependency
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Component name
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Component name
+            type: string
+        - description: Platform-resource dependency name
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Platform-resource dependency name
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionDependencyInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionDependencyOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Author the OC Resource model for a platform-resource dep and mark it in-flight (async)
+      tags:
+        - Dependencies
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/spec:
+    post:
+      operationId: collect-dependency-spec
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Component name
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Component name
+            type: string
+        - description: Dependency name
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Dependency name
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollectSpecInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectSpecOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Store a consumed OpenAPI spec for an external dependency
+      tags:
+        - Design(Deprecated)
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/status:
+    get:
+      operationId: get-dependency-status
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Component name
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Component name
+            type: string
+        - description: Platform-resource dependency name
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Platform-resource dependency name
+            type: string
+        - description: "Environment name (default: development)"
+          explode: false
+          in: query
+          name: environment
+          schema:
+            description: "Environment name (default: development)"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DependencyStatusOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the provisioning status and masked outputs for a platform-resource dependency
+      tags:
+        - Dependencies
   /projects/{projectName}/components/{componentName}/deployments:
     get:
       operationId: list-deployments
@@ -2652,6 +3251,81 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
+  /projects/{projectName}/dependencies/access-requests:
+    get:
+      operationId: list-access-requests
+      parameters:
+        - description: Consumer project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Consumer project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/AccessRequest"
+                type:
+                  - array
+                  - "null"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List a project's cross-project access requests
+      tags:
+        - Dependencies
+  /projects/{projectName}/dependencies/external-resources/{name}/values:
+    post:
+      operationId: save-external-resource-values
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: External resource name (e.g. openweather)
+          in: path
+          name: name
+          required: true
+          schema:
+            description: External resource name (e.g. openweather)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveExternalResourceValuesInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveExternalResourceValuesOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Save an external resource's per-environment values and provision it
+      tags:
+        - Dependencies
   /projects/{projectName}/design:
     get:
       operationId: get-design
@@ -3463,6 +4137,35 @@ paths:
       summary: Get the requirements bundle at a version tag
       tags:
         - Requirements(Deprecated)
+  /projects/{projectName}/spec:
+    get:
+      operationId: get-project-spec
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecBundle"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the project's spec bundle (requirement, design, and validation files)
+      tags:
+        - Spec
   /projects/{projectName}/status:
     get:
       operationId: get-project-status

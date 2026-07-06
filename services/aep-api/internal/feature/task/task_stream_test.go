@@ -182,7 +182,7 @@ func TestPersistAndIssue_UnknownDependencyIsRejected(t *testing.T) {
 	}}
 	svc := streamSvc(repo, &fakeIssueSvc{}, nil)
 
-	design := &artifacts.DesignFile{Components: []models.DesignComponent{{Name: "svc-a", DependsOn: []string{"ghost"}}}}
+	design := &artifacts.DesignFile{Components: []models.DesignComponent{{Name: "svc-a", Dependencies: []models.Dependency{{Kind: models.DependencyKindComponent, Name: "ghost"}}}}}
 	plan := []planItemFrame{{TempID: "p1", ComponentName: "svc-a"}}
 
 	if _, err := svc.persistAndIssue(context.Background(), newSseWriter(&bytes.Buffer{}, nopFlush), "acme", "web", "b", "v1", "v1-1", plan, design, "", ""); err == nil {
@@ -282,6 +282,79 @@ func TestRunReconciliationStreamed_ClosesTasksForRemovedComponents(t *testing.T)
 	}
 	if !strings.Contains(out.String(), "data-task-rejected") {
 		t.Fatalf("data-task-rejected frame not emitted: %s", out.String())
+	}
+}
+
+// TestRunReconciliationStreamed_SkipsNonCodeTaskTypes asserts that
+// config-collection and resource-provisioning tasks are NEVER rejected by
+// design-change reconciliation — they aren't tied to a design component the
+// way a code (component/org-publish) task is, so a component leaving the
+// design must not touch them even though they're pending and their
+// "ComponentName" (the resource/external-resource name) doesn't match any
+// current design component.
+func TestRunReconciliationStreamed_SkipsNonCodeTaskTypes(t *testing.T) {
+	t.Parallel()
+	var updated []string
+	repo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{
+				{ID: "cc", Type: models.TaskTypeConfigCollection, ComponentName: "exchangerate", Status: string(models.TaskStatusPending)},
+				{ID: "rp", Type: models.TaskTypeResourceProvisioning, ComponentName: "maindb", Status: string(models.TaskStatusPending)},
+				{ID: "gone", Type: models.TaskTypeComponent, ComponentName: "removed-svc", Status: string(models.TaskStatusPending)},
+			}, nil
+		},
+		UpdateFunc: func(_ context.Context, task *models.ComponentTask) error {
+			updated = append(updated, task.ID)
+			return nil
+		},
+	}
+	svc := streamSvc(repo, &fakeIssueSvc{}, nil)
+
+	// Empty design: every ComponentName is "removed" from the design's
+	// perspective — only the code (component) task should be rejected.
+	design := &artifacts.DesignFile{}
+	out := &bytes.Buffer{}
+	if err := svc.runReconciliationStreamed(context.Background(), "acme", "web", design, newSseWriter(out, nopFlush)); err != nil {
+		t.Fatalf("reconciliation: %v", err)
+	}
+	if len(updated) != 1 || updated[0] != "gone" {
+		t.Fatalf("only the component task should be rejected, got updates=%v", updated)
+	}
+}
+
+// TestReconcilePendingForDesignChange_SkipsNonCodeTaskTypes is the no-SSE
+// counterpart of the above: SaveAndProceed's post-tag-bump reconciliation must
+// leave config-collection / resource-provisioning tasks alone too.
+func TestReconcilePendingForDesignChange_SkipsNonCodeTaskTypes(t *testing.T) {
+	t.Parallel()
+	var updated []string
+	repo := &fakeTaskRepo{
+		ListByProjectIDFunc: func(context.Context, string, string) ([]models.ComponentTask, error) {
+			return []models.ComponentTask{
+				{ID: "cc", Type: models.TaskTypeConfigCollection, ComponentName: "exchangerate", Status: string(models.TaskStatusPending)},
+				{ID: "rp", Type: models.TaskTypeResourceProvisioning, ComponentName: "maindb", Status: string(models.TaskStatusPending)},
+				{ID: "gone", Type: models.TaskTypeComponent, ComponentName: "removed-svc", Status: string(models.TaskStatusPending)},
+			}, nil
+		},
+		UpdateFunc: func(_ context.Context, task *models.ComponentTask) error {
+			updated = append(updated, task.ID)
+			return nil
+		},
+	}
+	// An empty (but present) design: the root file exists with no components,
+	// so every ComponentName reads as "removed" — only the code task must react.
+	store := artifacts.NewArtifactStore(&artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return map[string]string{artifacts.DesignRootFile: "# Overview"}, nil
+		},
+	})
+	svc := streamSvc(repo, &fakeIssueSvc{}, store)
+
+	if err := svc.ReconcilePendingForDesignChange(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("ReconcilePendingForDesignChange: %v", err)
+	}
+	if len(updated) != 1 || updated[0] != "gone" {
+		t.Fatalf("only the component task should be rejected, got updates=%v", updated)
 	}
 }
 

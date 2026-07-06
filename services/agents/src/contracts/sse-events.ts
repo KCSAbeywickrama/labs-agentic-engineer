@@ -171,6 +171,33 @@ export type LoadSkillReferenceResult =
   | { ok: true; name: string; path: string; content: string }
   | { ok: false; name: string; path: string; error: string; available: string[] };
 
+// --- MCP discovery (caller-supplied, Task E2) -------------------------------
+//
+// The org's dependency-discovery MCP server (aep-api
+// `internal/feature/dependencies/mcp_server.go`) lists read-only tools
+// (list_external_resources, get_external_resource_schema, list_org_endpoints,
+// list_platform_resource_types) so the design agent proposes `dependencies`
+// entries that reuse resources/endpoints already registered in the org instead
+// of inventing new names/shapes. Mirrors `Skill`: the CALLER resolves the
+// endpoint (aep-api mints a short-lived per-turn token) and pushes it in the
+// turn payload; the service never reads it from its own env. Omitted → no
+// `tools/list` fetch and no discovery tools registered (byte-identical to a
+// turn without `mcp`).
+
+/** Caller-supplied MCP discovery endpoint for this turn. */
+export interface McpConfig {
+  /** The MCP JSON-RPC endpoint (aep-api's `/internal/v1/mcp`, org-bound). */
+  url: string;
+  /**
+   * Bearer token for that endpoint. Short-lived (minted per call, ~5 min TTL on
+   * the aep-api side) — a turn that outlives it sees the discovery tools 401
+   * partway through; `loadMcpTools` degrades that to "no tools" up front, but a
+   * mid-turn `tools/call` 401 surfaces as a failed tool call (best-effort, not
+   * retried).
+   */
+  token: string;
+}
+
 // --- The reviewable change (§7) ---------------------------------------------
 
 /**
@@ -214,6 +241,13 @@ export interface TurnRequest {
    * no catalog and no `loadSkill` tool (byte-identical to a skill-free turn).
    */
   skills?: Skill[];
+  /**
+   * Caller-supplied MCP discovery endpoint for this turn (Task E2). Present →
+   * the turn loop fetches `tools/list` from it (best-effort) and registers each
+   * as a dynamic tool. Omitted → no fetch, no discovery tools (byte-identical to
+   * an mcp-free turn).
+   */
+  mcp?: McpConfig;
 }
 
 // --- The emitted event catalog ----------------------------------------------

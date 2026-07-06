@@ -22,7 +22,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSkill, loadRepoSkills } from "./skills.js";
+import { parseSkill, loadRepoSkills, readSkillRaw } from "./skills.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // services/agents/evals → repo root is three up; skills/ lives there (ADR-0002).
@@ -61,6 +61,19 @@ test("loadRepoSkills reads the committed repo-root skill library", () => {
   assert.ok(oas.references?.["references/wso2-rest-api-design-guidelines.md"]);
   const wf = skills.find((s) => s.name === "excalidraw-wireframes")!;
   assert.ok(wf.references?.["references/wireframes-dsl-example.md"]);
+});
+
+test("readSkillRaw returns the untouched file bytes, frontmatter included", () => {
+  const raw = readSkillRaw(repoSkillsDir, "task-breakdown");
+  assert.ok(raw, "expected the committed task-breakdown skill to be readable");
+  assert.match(raw!, /^---\nname: task-breakdown/);
+  // Untouched — unlike parseSkill's `content`, the frontmatter fence survives.
+  const parsed = parseSkill("task-breakdown", raw!);
+  assert.doesNotMatch(parsed.content, /^---/);
+});
+
+test("readSkillRaw returns undefined for a missing skill dir", () => {
+  assert.equal(readSkillRaw(repoSkillsDir, "no-such-skill"), undefined);
 });
 
 test("loadRepoSkills reads references/*.md into the skill's references map", () => {

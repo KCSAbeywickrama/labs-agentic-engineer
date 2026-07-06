@@ -40,7 +40,7 @@ import (
 
 // saveDesignViaAPI implements §8.2 (Git Data API path): the working
 // tree under `specs/design/` is the draft surface (root `design.md` plus
-// per-component `design.md` / `openapi.yaml`). We compute the changeset
+// per-component `design.json` / `openapi.yaml`). We compute the changeset
 // against local-clone HEAD, apply it over current main via blob+tree+commit,
 // then create the next `v<N>-<M>` annotated tag.
 //
@@ -595,7 +595,7 @@ func diffWorkingTreeAgainstHEAD(ctx context.Context, clonePath, subdir string) (
 	}
 
 	// Paths from `git status` are repo-root-relative (e.g.
-	// `specs/design/components/foo/design.md`). Strip the `subdir/` prefix
+	// `specs/design/components/foo/design.json`). Strip the `subdir/` prefix
 	// so `Name` carries the path *within* subdir — including any directory
 	// nesting — rather than just the basename. `filepath.Base` here would
 	// silently drop `components/foo/` and collapse every nested file onto

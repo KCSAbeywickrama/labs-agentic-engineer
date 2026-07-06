@@ -81,21 +81,34 @@ func handleErrorResponse(statusCode int, errs ErrorResponses) error {
 	// Fall-through: gen produced no typed match (gateway-shaped error,
 	// schema mismatch, etc.). Synthesize an error from the bare status so
 	// callers can still branch on the sentinel for the obvious codes.
+	if sentinel := sentinelForStatus(statusCode); sentinel != nil {
+		return fmt.Errorf("%w: status %d", sentinel, statusCode)
+	}
+	return fmt.Errorf("openchoreo: unexpected status %d", statusCode)
+}
+
+// sentinelForStatus maps an HTTP status code to its matching sentinel error,
+// or nil for codes with no sentinel (e.g. 418). Shared by handleErrorResponse
+// (typed gen responses) and any hand-rolled REST client in this package that
+// has no typed error body to inspect (e.g. resource_client.go, which talks to
+// OC endpoints the pinned gen spec predates) — both need identical
+// errors.Is(err, ErrNotFound) semantics regardless of how the error surfaced.
+func sentinelForStatus(statusCode int) error {
 	switch statusCode {
 	case 400:
-		return fmt.Errorf("%w: status %d", ErrBadRequest, statusCode)
+		return ErrBadRequest
 	case 401:
-		return fmt.Errorf("%w: status %d", ErrUnauthorized, statusCode)
+		return ErrUnauthorized
 	case 403:
-		return fmt.Errorf("%w: status %d", ErrForbidden, statusCode)
+		return ErrForbidden
 	case 404:
-		return fmt.Errorf("%w: status %d", ErrNotFound, statusCode)
+		return ErrNotFound
 	case 409:
-		return fmt.Errorf("%w: status %d", ErrConflict, statusCode)
+		return ErrConflict
 	case 500:
-		return fmt.Errorf("%w: status %d", ErrInternalServerError, statusCode)
+		return ErrInternalServerError
 	default:
-		return fmt.Errorf("openchoreo: unexpected status %d", statusCode)
+		return nil
 	}
 }
 

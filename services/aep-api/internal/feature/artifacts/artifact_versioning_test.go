@@ -208,7 +208,7 @@ func TestValidateRelPath(t *testing.T) {
 		{"requirements file", "specs/requirements/requirements.md", false},
 		{"requirements other", "specs/requirements/functional-requirements.md", false},
 		{"design root", "specs/design/design.md", false},
-		{"design component", "specs/design/components/user-api/design.md", false},
+		{"design component", "specs/design/components/user-api/design.json", false},
 		{"design openapi", "specs/design/components/user-api/openapi.yaml", false},
 
 		{"empty", "", true},

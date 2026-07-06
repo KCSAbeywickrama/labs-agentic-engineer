@@ -211,6 +211,92 @@ func TestSMAPIWriter_WriteAnthropic(t *testing.T) {
 	})
 }
 
+// --- WriteExternalResourceSecret -------------------------------------------------
+
+func TestSMAPIWriter_WriteExternalResourceSecret(t *testing.T) {
+	t.Parallel()
+
+	t.Run("disabled (nil client) is a no-op", func(t *testing.T) {
+		t.Parallel()
+		w := NewSMAPIWriter(nil, nil)
+		vaultKey, ref, err := w.WriteExternalResourceSecret(context.Background(), "acme", "proj", "extres-openweather-development", map[string]string{"K": "v"})
+		if err != nil || vaultKey != "" || ref != "" {
+			t.Fatalf("disabled WriteExternalResourceSecret = (%q, %q, %v); want (\"\", \"\", nil)", vaultKey, ref, err)
+		}
+	})
+
+	t.Run("empty ocOrgID/projectName/entityName is a validation error, SM-API never called", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeSMClient{}
+		w := NewSMAPIWriter(fake, nil)
+		for _, args := range [][3]string{
+			{"  ", "proj", "extres-x-dev"},
+			{"acme", "", "extres-x-dev"},
+			{"acme", "proj", "   "},
+		} {
+			if _, _, err := w.WriteExternalResourceSecret(context.Background(), args[0], args[1], args[2], map[string]string{"K": "v"}); err == nil {
+				t.Fatalf("want an error for args %v", args)
+			}
+		}
+		if len(fake.createCalls) != 0 {
+			t.Fatalf("CreateSecret must not be called on validation failure")
+		}
+	})
+
+	t.Run("empty data is a validation error, SM-API never called", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeSMClient{}
+		w := NewSMAPIWriter(fake, nil)
+		if _, _, err := w.WriteExternalResourceSecret(context.Background(), "acme", "proj", "extres-x-dev", nil); err == nil {
+			t.Fatalf("want an error for empty data")
+		}
+		if len(fake.createCalls) != 0 {
+			t.Fatalf("CreateSecret must not be called on validation failure")
+		}
+	})
+
+	t.Run("uploads to the project-scoped entity location with the full payload", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeSMClient{}
+		// db: nil is deliberate — WriteExternalResourceSecret never touches the
+		// DB (no triplet row exists for external resources; the vault path is
+		// carried on the per-env OC binding instead).
+		w := NewSMAPIWriter(fake, nil)
+		_, ref, err := w.WriteExternalResourceSecret(context.Background(), "acme", "weatherproj", "extres-openweather-development",
+			map[string]string{"OPENWEATHER_API_KEY": "k123"})
+		if err == nil {
+			t.Fatalf("want an error: no JWT claims in ctx means resolveVaultKey must fail")
+		}
+		if ref != "ref-name" {
+			t.Fatalf("secretRefName must still be returned alongside the resolve-vault-key error, got %q", ref)
+		}
+		if len(fake.createCalls) != 1 {
+			t.Fatalf("want exactly 1 CreateSecret call, got %d", len(fake.createCalls))
+		}
+		call := fake.createCalls[0]
+		wantLoc := secretmanagersvc.SecretLocation{OrgName: "acme", ProjectName: "weatherproj", EntityName: "extres-openweather-development"}
+		if call.loc != wantLoc {
+			t.Fatalf("SecretLocation = %+v; want %+v", call.loc, wantLoc)
+		}
+		if len(call.data) != 1 || call.data["OPENWEATHER_API_KEY"] != "k123" {
+			t.Fatalf("payload = %v; want the secret key/value map verbatim", call.data)
+		}
+	})
+
+	t.Run("CreateSecret error is wrapped and returned", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeSMClient{createErr: errors.New("sm-api: 503")}
+		w := NewSMAPIWriter(fake, nil)
+		vaultKey, ref, err := w.WriteExternalResourceSecret(context.Background(), "acme", "proj", "extres-x-dev", map[string]string{"K": "v"})
+		if err == nil || vaultKey != "" || ref != "" {
+			t.Fatalf("WriteExternalResourceSecret = (%q, %q, %v); want (\"\", \"\", wrapped error)", vaultKey, ref, err)
+		}
+		if !strings.Contains(err.Error(), "external-resource secret upload") {
+			t.Fatalf("error not wrapped as expected: %v", err)
+		}
+	})
+}
+
 // --- WriteGitHubPAT --------------------------------------------------------------
 
 func TestSMAPIWriter_WriteGitHubPAT(t *testing.T) {
