@@ -26,6 +26,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -112,6 +113,26 @@ func (r repoNamer) RepoFullName(ctx context.Context, orgID, projectID string) (s
 		return "", err
 	}
 	return owner + "/" + name, nil
+}
+
+// provisionProjects enumerates an org's ready projects for the provisioning
+// feature's cross-project design scan (external-resource consumers, teardown).
+// Satisfies provisioning.ProjectLister.
+type provisionProjects struct{ repos repositories.RepoRepository }
+
+func (p provisionProjects) ListProjects(ctx context.Context, orgID string) ([]provisioning.ProjectRef, error) {
+	rows, err := p.repos.ListAllReady(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]provisioning.ProjectRef, 0, len(rows))
+	for i := range rows {
+		if rows[i].OrgID != orgID {
+			continue
+		}
+		out = append(out, provisioning.ProjectRef{OrgID: rows[i].OrgID, ProjectID: rows[i].ProjectID})
+	}
+	return out, nil
 }
 
 // repoLister enumerates ready project repos for the reconciliation sweep.

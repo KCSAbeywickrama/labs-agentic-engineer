@@ -72,14 +72,14 @@ var featureEdgeAllowlist = map[string][]string{
 	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
 	// (artifacts). It NEVER imports feature/task — the §1 split is a package
 	// boundary (enforced by the absence of "task" here and below).
-	"execution":     {"artifacts", "gitrepo"},
-	"files":         {"gitrepo"},
-	"genai":         {"gitrepo"},
-	"gitrepo":       {},
-	"idp":           {"orgcreds"},
-	"organization":  {},
-	"orgcreds":      {"gitrepo"},
-	"project":       {"artifacts", "gitrepo"},
+	"execution":    {"artifacts", "gitrepo"},
+	"files":        {"gitrepo"},
+	"genai":        {"gitrepo"},
+	"gitrepo":      {},
+	"idp":          {"orgcreds"},
+	"organization": {},
+	"orgcreds":     {"gitrepo"},
+	"project":      {"artifacts", "gitrepo"},
 	// provisioning is the dependency-provisioning coordinator (dependency-management
 	// §3.6): it drives the provisioner cores (dependencies/resources) and GitHub gate
 	// issues (gitrepo). Every other collaborator — the executions store, the funnel

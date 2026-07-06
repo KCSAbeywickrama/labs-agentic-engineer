@@ -23,7 +23,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // The consumer ports the provisioning services + watcher drive. Each is the
@@ -79,15 +78,29 @@ type RepoLocator interface {
 
 // ExternalResourceCatalog is the org-level external-resource registry the
 // provisioning surface reads and prunes: Get (its config schema drives the
-// plain/secret split at value collection), List, per-entry Consumers (the
-// in-use delete guard), and the guarded Delete.
+// plain/secret split at value collection), List, and the guarded Delete.
+// Consumers are NOT read from the DB (upstream's component_tasks table is gone) —
+// they are scanned from committed design artifacts (ProjectLister + DesignReader).
 // *repositories.ExternalResourceRepository satisfies it; Get returns (nil, nil)
 // when the name is not registered.
 type ExternalResourceCatalog interface {
 	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
 	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)
-	Consumers(ctx context.Context, orgID, name string) ([]repositories.ExternalResourceConsumer, error)
 	Delete(ctx context.Context, orgID, name string) error
+}
+
+// ProjectRef identifies one project (org + project id) for the cross-project
+// design scan (external-resource consumers, teardown).
+type ProjectRef struct {
+	OrgID     string
+	ProjectID string
+}
+
+// ProjectLister enumerates the org's projects so the service can scan their
+// committed designs — the design-scan replacement for the dropped component_tasks
+// consumer query (dependency-management §3.2 item 7). Wired from repositories.
+type ProjectLister interface {
+	ListProjects(ctx context.Context, orgID string) ([]ProjectRef, error)
 }
 
 // ExternalProvisioner authors the OC external Resource model + writes secrets to
@@ -106,4 +119,21 @@ type PlatformProvisioner = resources.ResourceProvisioner
 // openchoreo.ResourceClient satisfies it.
 type BindingReader interface {
 	GetBinding(ctx context.Context, namespace, name string) (*openchoreo.ResourceReleaseBinding, error)
+}
+
+// ProviderResolver resolves an org-service name to its providing project +
+// component at ANY visibility (an access request targets a not-yet-published
+// provider). *endpoints.Catalog satisfies it.
+type ProviderResolver interface {
+	FindByComponent(ctx context.Context, orgHandle, name string) (openchoreo.WorkloadEndpointInfo, bool, error)
+}
+
+// AccessStore is the cross-project access-request tracking table.
+// *repositories.AccessRequestRepository satisfies it.
+type AccessStore interface {
+	Create(ctx context.Context, ar *models.AccessRequest) error
+	ListByConsumerProject(ctx context.Context, orgID, projectID string) ([]models.AccessRequest, error)
+	FindOpenForTarget(ctx context.Context, orgID, providerProjectID, providerComponentName string) (*models.AccessRequest, error)
+	UpdateStatus(ctx context.Context, id, status string) error
+	ListByProviderTask(ctx context.Context, providerTaskID string) ([]models.AccessRequest, error)
 }

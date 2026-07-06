@@ -19,6 +19,7 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -35,25 +36,26 @@ type ExternalResourceView struct {
 }
 
 // ListExternalResources returns the org's external-resource catalog with each
-// entry's consumers (the components across the org whose design declares an
-// external dependency of that name).
+// entry's consumers (the components across the org whose committed design
+// declares an external dependency of that name — a design scan, since the
+// upstream component_tasks table is gone).
 func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]ExternalResourceView, error) {
 	list, err := s.catalog.List(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: list external resources: %w", err)
 	}
+	consumersByName, err := s.externalConsumersByName(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ExternalResourceView, 0, len(list))
 	for i := range list {
 		er := &list[i]
-		consumers, cerr := s.catalog.Consumers(ctx, orgID, er.Name)
-		if cerr != nil {
-			return nil, fmt.Errorf("provisioning: list consumers of %q: %w", er.Name, cerr)
-		}
 		out = append(out, ExternalResourceView{
 			Name:        er.Name,
 			Description: er.Description,
 			Config:      er.ConfigKeys,
-			Consumers:   consumers,
+			Consumers:   consumersByName[strings.ToLower(er.Name)],
 		})
 	}
 	return out, nil
@@ -62,7 +64,7 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 // DeleteExternalResource removes an org external-resource catalog entry. It is
 // guarded: a resource with consumers returns ErrExternalResourceInUse (→ 409).
 func (s *Service) DeleteExternalResource(ctx context.Context, orgID, name string) error {
-	consumers, err := s.catalog.Consumers(ctx, orgID, name)
+	consumers, err := s.consumersOf(ctx, orgID, name)
 	if err != nil {
 		return fmt.Errorf("provisioning: check consumers of %q: %w", name, err)
 	}
@@ -70,4 +72,48 @@ func (s *Service) DeleteExternalResource(ctx context.Context, orgID, name string
 		return ErrExternalResourceInUse
 	}
 	return s.catalog.Delete(ctx, orgID, name)
+}
+
+// consumersOf scans every project's committed design for components declaring an
+// `external` dependency of the given name. Best-effort per project (a design read
+// error skips that project). Returns nil when no project lister is wired.
+func (s *Service) consumersOf(ctx context.Context, orgID, externalName string) ([]repositories.ExternalResourceConsumer, error) {
+	byName, err := s.externalConsumersByName(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	return byName[strings.ToLower(externalName)], nil
+}
+
+// externalConsumersByName builds, in one project sweep, the consumers of every
+// external dependency name in the org (lowercased name → consumers). One sweep
+// serves both the list (all entries) and a single-name delete guard.
+func (s *Service) externalConsumersByName(ctx context.Context, orgID string) (map[string][]repositories.ExternalResourceConsumer, error) {
+	out := map[string][]repositories.ExternalResourceConsumer{}
+	if s.projects == nil {
+		return out, nil
+	}
+	refs, err := s.projects.ListProjects(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("provisioning: list projects: %w", err)
+	}
+	for _, ref := range refs {
+		comps, derr := s.design.ReadDesignComponents(ctx, ref.OrgID, ref.ProjectID)
+		if derr != nil {
+			continue // best-effort: a project without a readable design has no consumers
+		}
+		for _, c := range comps {
+			for _, d := range c.Dependencies {
+				if d.Kind != models.DependencyKindExternal {
+					continue
+				}
+				key := strings.ToLower(d.Name)
+				out[key] = append(out[key], repositories.ExternalResourceConsumer{
+					ProjectID:     ref.ProjectID,
+					ComponentName: c.Name,
+				})
+			}
+		}
+	}
+	return out, nil
 }

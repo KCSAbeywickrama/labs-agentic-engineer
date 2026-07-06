@@ -772,21 +772,27 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// native Ready condition out-of-band and releases gated consumer tasks.
 	externalProvisioner := resources.NewExternalResourceProvisioner(externalResourceRepo, resourceClient, smWriter)
 	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)
-	provisioningSvc := provisioning.NewService(
-		issueService,
-		executionRepo,
-		funnel,
-		designComponents{store: artifactStore},
-		repoNamer{repos: repoRepo},
-		externalResourceRepo,
-		externalProvisioner,
-		platformProvisioner,
-		resourceClient,
-	)
+	provisioningSvc := provisioning.NewService(provisioning.Deps{
+		Issues:    issueService,
+		Execs:     executionRepo,
+		Reeval:    funnel,
+		Design:    designComponents{store: artifactStore},
+		Repos:     repoNamer{repos: repoRepo},
+		Catalog:   externalResourceRepo,
+		ExtProv:   externalProvisioner,
+		PlatProv:  platformProvisioner,
+		Bindings:  resourceClient,
+		Projects:  provisionProjects{repos: repoRepo},
+		Access:    repositories.NewAccessRequestRepository(db),
+		Providers: orgEndpointCatalog,
+	})
 	params.HumaDeps.ProvisioningSvc = provisioningSvc
 	// Mint aep:provision gate issues on design approval (before planning gates any
 	// consumer coding task on them).
 	designService.SetProvisionIssueMinter(provisioningSvc)
+	// Deprovision a project's OC Resource model on project delete (OC does not
+	// cascade the logically-owned Resources/bindings).
+	projectService.SetResourceDeprovisioner(provisioningSvc)
 	resourceWatcher := provisioning.NewResourceWatcher(provisioningSvc, asServiceIdentity, 0)
 
 	// ADR-0004 declarative wiring: at coding dispatch the platform resolves the
@@ -795,6 +801,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// agent copies into workload.yaml — the platform never patches the CR.
 	codingExecutor.WithDependencyWiring(provisioning.NewWiringResolver(
 		designComponents{store: artifactStore}, orgEndpointCatalog, resourceClient, issueService))
+	// Grant pending cross-project access when a provider component deploys.
+	execWatcher.WithDeployObserver(provisioningSvc)
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 

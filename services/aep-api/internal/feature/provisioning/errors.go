@@ -24,3 +24,8 @@ import "errors"
 // ErrProvisionFailed / ErrNotRegistered live in dependencies/resources and are
 // reused here.)
 var ErrExternalResourceInUse = errors.New("provisioning: external resource is in use")
+
+// ErrOrgServiceNotFound is returned by RequestAccess when the addressed
+// org-service is not present in the org endpoint catalog (no provider component
+// exports it under that name) — the HTTP surface maps it to 404.
+var ErrOrgServiceNotFound = errors.New("provisioning: org-service provider not found")

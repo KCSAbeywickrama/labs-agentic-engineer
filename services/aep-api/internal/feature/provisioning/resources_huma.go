@@ -202,6 +202,9 @@ func RegisterResources(api huma.API, svc *Service) {
 		}
 		return &depStatusOutput{Body: st}, nil
 	})
+
+	// Cross-project org-service access-request surface.
+	registerAccess(api, svc)
 }
 
 func toExternalResourceDTOs(views []ExternalResourceView) []externalResourceDTO {
@@ -232,7 +235,7 @@ func mapProvisionError(err error) error {
 	switch {
 	case errors.Is(err, resources.ErrDepWrongKind):
 		return huma.Error400BadRequest(err.Error())
-	case errors.Is(err, resources.ErrDepNotFound), errors.Is(err, resources.ErrNotRegistered):
+	case errors.Is(err, resources.ErrDepNotFound), errors.Is(err, resources.ErrNotRegistered), errors.Is(err, ErrOrgServiceNotFound):
 		return huma.Error404NotFound(err.Error())
 	case errors.Is(err, ErrExternalResourceInUse):
 		return huma.Error409Conflict(err.Error())

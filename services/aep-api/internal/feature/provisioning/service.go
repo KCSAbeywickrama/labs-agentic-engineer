@@ -34,43 +34,57 @@ const defaultEnv = "development"
 
 // Service coordinates dependency provisioning on the aep:provision funnel: it
 // mints gate issues, collects external values, provisions platform resources,
-// and drives each provision Execution through the store while closing the gate
-// issue with a no-secrets reference.
+// tracks cross-project access requests, and drives each provision Execution
+// through the store while closing the gate issue with a no-secrets reference.
 type Service struct {
-	issues   IssueClient
-	execs    ExecutionStore
-	reeval   Reevaluator
-	design   DesignReader
-	repos    RepoLocator
-	catalog  ExternalResourceCatalog
-	extProv  ExternalProvisioner
-	platProv PlatformProvisioner
-	bindings BindingReader
+	issues    IssueClient
+	execs     ExecutionStore
+	reeval    Reevaluator
+	design    DesignReader
+	repos     RepoLocator
+	catalog   ExternalResourceCatalog
+	extProv   ExternalProvisioner
+	platProv  PlatformProvisioner
+	bindings  BindingReader
+	projects  ProjectLister
+	access    AccessStore
+	providers ProviderResolver
 }
 
-// NewService wires the provisioning service. All ports are required except
-// reeval (a nil reeval simply skips the release nudge — the sweep heals it).
-func NewService(
-	issues IssueClient,
-	execs ExecutionStore,
-	reeval Reevaluator,
-	design DesignReader,
-	repos RepoLocator,
-	catalog ExternalResourceCatalog,
-	extProv ExternalProvisioner,
-	platProv PlatformProvisioner,
-	bindings BindingReader,
-) *Service {
+// Deps is the provisioning service's collaborator set. reeval / projects /
+// access / providers may be nil (a nil reeval skips the release nudge — the
+// sweep heals it; a nil projects skips the cross-project consumer scan; nil
+// access / providers disable the access-request surface).
+type Deps struct {
+	Issues    IssueClient
+	Execs     ExecutionStore
+	Reeval    Reevaluator
+	Design    DesignReader
+	Repos     RepoLocator
+	Catalog   ExternalResourceCatalog
+	ExtProv   ExternalProvisioner
+	PlatProv  PlatformProvisioner
+	Bindings  BindingReader
+	Projects  ProjectLister
+	Access    AccessStore
+	Providers ProviderResolver
+}
+
+// NewService wires the provisioning service from its collaborator set.
+func NewService(d Deps) *Service {
 	return &Service{
-		issues:   issues,
-		execs:    execs,
-		reeval:   reeval,
-		design:   design,
-		repos:    repos,
-		catalog:  catalog,
-		extProv:  extProv,
-		platProv: platProv,
-		bindings: bindings,
+		issues:    d.Issues,
+		execs:     d.Execs,
+		reeval:    d.Reeval,
+		design:    d.Design,
+		repos:     d.Repos,
+		catalog:   d.Catalog,
+		extProv:   d.ExtProv,
+		platProv:  d.PlatProv,
+		bindings:  d.Bindings,
+		projects:  d.Projects,
+		access:    d.Access,
+		providers: d.Providers,
 	}
 }
 

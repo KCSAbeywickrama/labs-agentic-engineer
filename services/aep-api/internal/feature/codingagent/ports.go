@@ -53,6 +53,15 @@ type DependencyWiring interface {
 	PostResolvedDeps(ctx context.Context, orgID, projectID string, issueNumber int, component string) error
 }
 
+// DeployObserver is notified when a component deploys (a build Execution
+// succeeds). The provisioning feature uses it to grant any pending cross-project
+// access request targeting the just-deployed provider component (the grant
+// cascade). Wired at the composition root; nil → skipped. Primitives-only so this
+// feature holds no provisioning import.
+type DeployObserver interface {
+	OnComponentDeployed(ctx context.Context, orgID, projectID, component string) error
+}
+
 // AnthropicProvisioner materializes the per-org Anthropic key Secret on the
 // workflow plane and returns its ref. Best-effort at dispatch. Wired from
 // orgcreds.AnthropicCredentialService.

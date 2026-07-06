@@ -58,6 +58,10 @@ type ExecWatcher struct {
 	// → a git-auth build failure is Finished failed like any other failure.
 	buildRetrier BuildRetrier
 	authBudget   int
+
+	// deployObserver is notified when a component deploys (build success), so the
+	// provisioning feature can grant pending cross-project access (nil → skipped).
+	deployObserver DeployObserver
 }
 
 // NewExecWatcher wires the watcher. asService may be nil (tests); tick defaults
@@ -77,6 +81,13 @@ func (w *ExecWatcher) WithBuildRetrier(retrier BuildRetrier, budget int) *ExecWa
 		budget = defaultBuildAuthRetryBudget
 	}
 	w.authBudget = budget
+	return w
+}
+
+// WithDeployObserver enables the deploy-cascade notification on build success
+// (nil → skipped). Returns the receiver for chained construction.
+func (w *ExecWatcher) WithDeployObserver(o DeployObserver) *ExecWatcher {
+	w.deployObserver = o
 	return w
 }
 
@@ -150,6 +161,13 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 				// A dependency just deployed — release any Task queued on it (§5).
 				if rerr := w.reeval.Reevaluate(ctx); rerr != nil {
 					slog.WarnContext(ctx, "exec watcher: reevaluate after build success failed", "error", rerr)
+				}
+			}
+			if w.deployObserver != nil {
+				// The component deployed — grant any pending cross-project access
+				// request targeting it (best-effort; the grant read no-ops otherwise).
+				if derr := w.deployObserver.OnComponentDeployed(ctx, row.OrgID, row.ProjectID, row.Component); derr != nil {
+					slog.WarnContext(ctx, "exec watcher: deploy observer failed", "component", row.Component, "error", derr)
 				}
 			}
 			return

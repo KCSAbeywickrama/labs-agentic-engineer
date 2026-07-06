@@ -50,13 +50,23 @@ type ProjectService interface {
 }
 
 type projectService struct {
-	client      openchoreo.ProjectClient
-	repoSvc     gitrepo.RepoService
-	webhookSvc  gitrepo.WebhookService
-	artifactSvc artifacts.ArtifactService
-	store       *artifacts.ArtifactStore
-	execs       repositories.ExecutionRepository
-	skillsProv  skillsProvisioner
+	client        openchoreo.ProjectClient
+	repoSvc       gitrepo.RepoService
+	webhookSvc    gitrepo.WebhookService
+	artifactSvc   artifacts.ArtifactService
+	store         *artifacts.ArtifactStore
+	execs         repositories.ExecutionRepository
+	skillsProv    skillsProvisioner
+	deprovisioner resourceDeprovisioner // dependency provisioning teardown; may be nil
+}
+
+// resourceDeprovisioner is project_service's narrow consumer port for the
+// dependency-provisioning teardown: on project delete it deprovisions the
+// project's OC Resource model (external + platform resources), which the OC
+// Project delete does not cascade. *provisioning.Service satisfies it. Wired via
+// SetResourceDeprovisioner at the composition root; nil is a no-op.
+type resourceDeprovisioner interface {
+	DeprovisionProject(ctx context.Context, orgID, projectID string) error
 }
 
 // skillsProvisioner is the narrow port for eagerly provisioning the org's
@@ -167,7 +177,23 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 	return project, nil
 }
 
+// SetResourceDeprovisioner wires the dependency-provisioning teardown so a
+// project delete deprovisions its OC Resource model. A nil deprovisioner is a
+// documented no-op.
+func (s *projectService) SetResourceDeprovisioner(d resourceDeprovisioner) {
+	s.deprovisioner = d
+}
+
 func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName string) error {
+	// Deprovision the project's OC Resource model FIRST — while its design (the
+	// dependency inventory) is still readable and before the OC Project delete,
+	// which does not cascade the logically-owned Resources/bindings. Best-effort.
+	if s.deprovisioner != nil {
+		if err := s.deprovisioner.DeprovisionProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to deprovision project resources", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
 	if err := translateHTTPError(s.client.DeleteProject(ctx, orgName, projectName)); err != nil {
 		return err
 	}

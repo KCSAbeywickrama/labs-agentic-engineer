@@ -28,7 +28,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ---- fakes -----------------------------------------------------------------
@@ -139,9 +138,8 @@ type fakeRepos struct{}
 func (fakeRepos) RepoFullName(context.Context, string, string) (string, error) { return "o/r", nil }
 
 type fakeCatalog struct {
-	entries   map[string]*models.ExternalResource
-	consumers map[string][]repositories.ExternalResourceConsumer
-	deleted   []string
+	entries map[string]*models.ExternalResource
+	deleted []string
 }
 
 func (f *fakeCatalog) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
@@ -154,19 +152,17 @@ func (f *fakeCatalog) List(_ context.Context, _ string) ([]models.ExternalResour
 	}
 	return out, nil
 }
-func (f *fakeCatalog) Consumers(_ context.Context, _, name string) ([]repositories.ExternalResourceConsumer, error) {
-	return f.consumers[name], nil
-}
 func (f *fakeCatalog) Delete(_ context.Context, _, name string) error {
 	f.deleted = append(f.deleted, name)
 	return nil
 }
 
 type fakeExtProv struct {
-	calls  int
-	byEnv  map[string]resources.EnvValues
-	result *resources.ProvisionResult
-	err    error
+	calls         int
+	byEnv         map[string]resources.EnvValues
+	result        *resources.ProvisionResult
+	err           error
+	deprovisioned []string
 }
 
 func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error) {
@@ -180,15 +176,17 @@ func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.Ext
 	}
 	return &resources.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
 }
-func (f *fakeExtProv) Deprovision(context.Context, string, string, string, []string) error {
+func (f *fakeExtProv) Deprovision(_ context.Context, _, _, name string, _ []string) error {
+	f.deprovisioned = append(f.deprovisioned, name)
 	return nil
 }
 
 type fakePlatProv struct {
-	calls  int
-	params map[string]string
-	result *resources.PlatformProvisionResult
-	err    error
+	calls         int
+	params        map[string]string
+	result        *resources.PlatformProvisionResult
+	err           error
+	deprovisioned []string
 }
 
 func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, params map[string]string, _ []string) (*resources.PlatformProvisionResult, error) {
@@ -202,7 +200,8 @@ func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, par
 	}
 	return &resources.PlatformProvisionResult{ResourceName: "o-" + depName, BindingByEnv: map[string]string{"development": "o-" + depName + "-development"}}, nil
 }
-func (f *fakePlatProv) Deprovision(context.Context, string, string, string, []string) error {
+func (f *fakePlatProv) Deprovision(_ context.Context, _, _, depName string, _ []string) error {
+	f.deprovisioned = append(f.deprovisioned, depName)
 	return nil
 }
 
@@ -212,6 +211,74 @@ type fakeBindings struct {
 
 func (f *fakeBindings) GetBinding(_ context.Context, _, name string) (*openchoreo.ResourceReleaseBinding, error) {
 	return f.byName[name], nil
+}
+
+type fakeProjects struct{ refs []ProjectRef }
+
+func (f fakeProjects) ListProjects(_ context.Context, orgID string) ([]ProjectRef, error) {
+	var out []ProjectRef
+	for _, r := range f.refs {
+		if r.OrgID == orgID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+type fakeProviders struct {
+	byName map[string]openchoreo.WorkloadEndpointInfo
+}
+
+func (f fakeProviders) FindByComponent(_ context.Context, _, name string) (openchoreo.WorkloadEndpointInfo, bool, error) {
+	ep, ok := f.byName[name]
+	return ep, ok, nil
+}
+
+type fakeAccess struct {
+	rows   []*models.AccessRequest
+	nextID int
+}
+
+func (f *fakeAccess) Create(_ context.Context, ar *models.AccessRequest) error {
+	f.nextID++
+	ar.ID = fmt.Sprintf("ar-%d", f.nextID)
+	f.rows = append(f.rows, ar)
+	return nil
+}
+func (f *fakeAccess) ListByConsumerProject(_ context.Context, orgID, projectID string) ([]models.AccessRequest, error) {
+	var out []models.AccessRequest
+	for _, r := range f.rows {
+		if r.OrgID == orgID && r.ConsumerProjectID == projectID {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+func (f *fakeAccess) FindOpenForTarget(_ context.Context, orgID, providerProjectID, providerComponent string) (*models.AccessRequest, error) {
+	for _, r := range f.rows {
+		if r.OrgID == orgID && r.ProviderProjectID == providerProjectID && r.ProviderComponentName == providerComponent &&
+			r.Status != models.AccessRequestStatusGranted && r.Status != models.AccessRequestStatusRejected {
+			return r, nil
+		}
+	}
+	return nil, nil
+}
+func (f *fakeAccess) UpdateStatus(_ context.Context, id, status string) error {
+	for _, r := range f.rows {
+		if r.ID == id {
+			r.Status = status
+		}
+	}
+	return nil
+}
+func (f *fakeAccess) ListByProviderTask(_ context.Context, providerTaskID string) ([]models.AccessRequest, error) {
+	var out []models.AccessRequest
+	for _, r := range f.rows {
+		if r.ProviderTaskID == providerTaskID {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
 }
 
 func readyBinding(outputs ...string) *openchoreo.ResourceReleaseBinding {
@@ -239,7 +306,17 @@ func designWithDeps() []models.DesignComponent {
 }
 
 func newTestService(issues *fakeIssues, execs *fakeExecStore, reeval Reevaluator, design DesignReader, catalog *fakeCatalog, ext *fakeExtProv, plat *fakePlatProv, bindings *fakeBindings) *Service {
-	return NewService(issues, execs, reeval, design, fakeRepos{}, catalog, ext, plat, bindings)
+	return NewService(Deps{
+		Issues:   issues,
+		Execs:    execs,
+		Reeval:   reeval,
+		Design:   design,
+		Repos:    fakeRepos{},
+		Catalog:  catalog,
+		ExtProv:  ext,
+		PlatProv: plat,
+		Bindings: bindings,
+	})
 }
 
 // ---- tests -----------------------------------------------------------------
@@ -448,10 +525,17 @@ func TestStatus_MasksOutputsToNames(t *testing.T) {
 }
 
 func TestDeleteExternalResource_InUse409(t *testing.T) {
-	catalog := &fakeCatalog{consumers: map[string][]repositories.ExternalResourceConsumer{
-		"stripe": {{ProjectID: "proj", ComponentName: "orders"}},
-	}}
-	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{}, catalog, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	// Consumers are scanned from committed designs (component_tasks is gone):
+	// project "proj" component "orders" declares external dep "stripe".
+	catalog := &fakeCatalog{}
+	svc := NewService(Deps{
+		Issues:   newFakeIssues(nil),
+		Execs:    &fakeExecStore{},
+		Design:   fakeDesign{comps: designWithDeps()},
+		Repos:    fakeRepos{},
+		Catalog:  catalog,
+		Projects: fakeProjects{refs: []ProjectRef{{OrgID: "org", ProjectID: "proj"}}},
+	})
 	if err := svc.DeleteExternalResource(context.Background(), "org", "stripe"); err != ErrExternalResourceInUse {
 		t.Fatalf("in-use delete must return ErrExternalResourceInUse, got %v", err)
 	}
@@ -464,6 +548,117 @@ func TestDeleteExternalResource_InUse409(t *testing.T) {
 	}
 	if len(catalog.deleted) != 1 || catalog.deleted[0] != "unused" {
 		t.Fatalf("unused resource must be deleted, got %v", catalog.deleted)
+	}
+}
+
+func TestRequestAccess_CreatesRequestAndProviderIssue(t *testing.T) {
+	consumer := models.DesignComponent{Name: "web", Dependencies: []models.Dependency{
+		{Kind: models.DependencyKindOrgService, Name: "inventory"},
+	}}
+	issues := newFakeIssues(nil)
+	access := &fakeAccess{}
+	providers := fakeProviders{byName: map[string]openchoreo.WorkloadEndpointInfo{
+		"inventory": {Project: "warehouse", Component: "warehouse-inventory", Name: "http"},
+	}}
+	svc := NewService(Deps{
+		Issues:    issues,
+		Execs:     &fakeExecStore{},
+		Design:    fakeDesign{comps: []models.DesignComponent{consumer}},
+		Repos:     fakeRepos{},
+		Access:    access,
+		Providers: providers,
+	})
+
+	ar, err := svc.RequestAccess(context.Background(), "org", "storefront", "web", "inventory")
+	if err != nil {
+		t.Fatalf("RequestAccess: %v", err)
+	}
+	if ar.Status != models.AccessRequestStatusRequested {
+		t.Fatalf("new access request must be 'requested', got %q", ar.Status)
+	}
+	if ar.ProviderProjectID != "warehouse" || ar.ProviderComponentName != "inventory" {
+		t.Fatalf("provider resolution wrong: %+v", ar)
+	}
+	// A provider-side org-publish gate issue was created on the provider project.
+	if len(issues.created) != 1 {
+		t.Fatalf("want one provider org-publish issue, got %d", len(issues.created))
+	}
+	block, _ := taskmeta.ParseBlock(issues.created[0].Body)
+	if block.GateKind != taskmeta.GateOrgPublish || block.Component != "inventory" {
+		t.Fatalf("org-publish issue block wrong: %+v", block)
+	}
+	if ar.ProviderIssueNumber == 0 {
+		t.Fatalf("access request must link the provider issue number")
+	}
+
+	// A second consumer of the same provider rides the SAME issue (dedup).
+	issues.created = nil
+	ar2, err := svc.RequestAccess(context.Background(), "org", "another", "api", "inventory")
+	if err != nil {
+		t.Fatalf("RequestAccess #2: %v", err)
+	}
+	if len(issues.created) != 0 {
+		t.Fatalf("second consumer must ride the existing issue, created %d", len(issues.created))
+	}
+	if ar2.ProviderIssueNumber != ar.ProviderIssueNumber {
+		t.Fatalf("second request must reference the same provider issue")
+	}
+}
+
+func TestGrant_OnProviderDeploy(t *testing.T) {
+	issues := newFakeIssues([]gitrepo.IssueInfo{{Number: 20, State: "open", Title: "publish"}})
+	access := &fakeAccess{}
+	// Two riders on the same provider issue, both pending.
+	pk := providerTaskKey("warehouse", 20)
+	_ = access.Create(context.Background(), &models.AccessRequest{
+		OrgID: "org", ConsumerProjectID: "storefront", ProviderProjectID: "warehouse",
+		ProviderComponentName: "inventory", ProviderTaskID: pk, ProviderIssueNumber: 20,
+		Status: models.AccessRequestStatusRequested,
+	})
+	_ = access.Create(context.Background(), &models.AccessRequest{
+		OrgID: "org", ConsumerProjectID: "another", ProviderProjectID: "warehouse",
+		ProviderComponentName: "inventory", ProviderTaskID: pk, ProviderIssueNumber: 20,
+		Status: models.AccessRequestStatusRequested,
+	})
+	svc := NewService(Deps{Issues: issues, Execs: &fakeExecStore{}, Access: access, Repos: fakeRepos{}})
+
+	// The provider component deploys → grant all riders + close the issue.
+	if err := svc.OnComponentDeployed(context.Background(), "org", "warehouse", "inventory"); err != nil {
+		t.Fatalf("OnComponentDeployed: %v", err)
+	}
+	for _, r := range access.rows {
+		if r.Status != models.AccessRequestStatusGranted {
+			t.Fatalf("all riders must be granted, got %q", r.Status)
+		}
+	}
+	if _, closed := issues.closed[20]; !closed {
+		t.Fatalf("provider org-publish issue must be closed on grant")
+	}
+	// A deploy with no pending access is a no-op (does not error).
+	if err := svc.OnComponentDeployed(context.Background(), "org", "warehouse", "other"); err != nil {
+		t.Fatalf("no-op deploy grant: %v", err)
+	}
+}
+
+func TestDeprovisionProject_TearsDownResources(t *testing.T) {
+	ext := &fakeExtProv{}
+	plat := &fakePlatProv{}
+	svc := NewService(Deps{
+		Issues:   newFakeIssues(nil),
+		Execs:    &fakeExecStore{},
+		Design:   fakeDesign{comps: designWithDeps()},
+		Repos:    fakeRepos{},
+		ExtProv:  ext,
+		PlatProv: plat,
+	})
+	if err := svc.DeprovisionProject(context.Background(), "org", "proj"); err != nil {
+		t.Fatalf("DeprovisionProject: %v", err)
+	}
+	if len(ext.deprovisioned) != 1 || ext.deprovisioned[0] != "stripe" {
+		t.Fatalf("external dep must be deprovisioned, got %v", ext.deprovisioned)
+	}
+	if len(plat.deprovisioned) != 1 || plat.deprovisioned[0] != "orders-db" {
+		t.Fatalf("platform-resource dep must be deprovisioned, got %v", plat.deprovisioned)
 	}
 }
 
