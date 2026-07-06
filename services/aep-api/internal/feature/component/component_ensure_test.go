@@ -56,8 +56,13 @@ func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
 	}
 	// A design with one service component named "order-service".
 	files := map[string]string{
-		artifacts.DesignRootFile:             "# Overview\n",
-		"components/order-service/design.md": "---\ntype: service\n---\n\nbody\n",
+		artifacts.DesignRootFile: "# Overview\n",
+		"components/order-service/design.json": "{\n" +
+			"  \"name\": \"order-service\",\n" +
+			"  \"type\": \"service\",\n" +
+			"  \"description\": \"body\",\n" +
+			"  \"dependencies\": []\n" +
+			"}\n",
 	}
 	store := artifacts.NewArtifactStore(&artifactstest.FakeArtifactService{
 		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {

@@ -65,11 +65,17 @@ func (f *fakeTaskReconciler) ReconcilePendingForDesignChange(_ context.Context, 
 
 // validDesignFiles is a well-formed working-tree map that AssembleDesign
 // accepts: a root design.md (frontmatter carrying sourceSpec) plus one service
-// component with a design.md + openapi.yaml. Mirrors the harvested golden shape.
+// component with a design.json + openapi.yaml. Mirrors the harvested golden shape.
 func validDesignFiles() map[string]string {
 	return map[string]string{
-		artifacts.DesignRootFile:            "---\nsourceSpec: v1\n---\n\nOverview prose here.\n",
-		"components/hello-api/design.md":    "---\ntype: service\nlanguage: Go\n---\n\n# hello-api\n\nBuild it.\n",
+		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose here.\n",
+		"components/hello-api/design.json": "{\n" +
+			"  \"name\": \"hello-api\",\n" +
+			"  \"type\": \"service\",\n" +
+			"  \"language\": \"Go\",\n" +
+			"  \"description\": \"Build it.\",\n" +
+			"  \"dependencies\": []\n" +
+			"}\n",
 		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }

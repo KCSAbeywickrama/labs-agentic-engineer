@@ -35,6 +35,7 @@ import (
 //  2. CREATE TABLE access_requests — the cross-project access-request
 //     tracking rows (models.AccessRequest, P3.5): a consumer asking a
 //     provider project to publish an org service cross-project.
+//
 // The upstream PR #85 third step — an ALTER TABLE component_tasks adding the
 // typed-task-graph columns (type + three JSONB depends_on_* lists + two
 // single-target columns) — is deliberately DROPPED: our GitHub-native task model

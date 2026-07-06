@@ -93,18 +93,25 @@ func ValidateComponentDesignInDir(raw []byte, dirName string) error {
 // ---- a compact JSON Schema interpreter -------------------------------------
 //
 // It supports exactly the draft-2020-12 keywords the component-design schema
-// uses: type, properties, required, additionalProperties(bool), enum, minLength,
-// items. Driving validation from the embedded file (rather than a hand-coded Go
-// mirror) is what keeps the "one definition" invariant (§8).
+// uses: type, properties, required, additionalProperties (either the boolean
+// `false` — strict, reject unknown keys — or a subschema, e.g. the unified
+// dependency's `parameters` map whose additionalProperties is `{type:"string"}`,
+// treated as permissive), enum, minLength, items. Driving validation from the
+// embedded file (rather than a hand-coded Go mirror) is what keeps the "one
+// definition" invariant (§8).
 
 type schema struct {
-	Type                 string             `json:"type"`
-	Properties           map[string]*schema `json:"properties"`
-	Required             []string           `json:"required"`
-	AdditionalProperties *bool              `json:"additionalProperties"`
-	Enum                 []any              `json:"enum"`
-	MinLength            *int               `json:"minLength"`
-	Items                *schema            `json:"items"`
+	Type       string             `json:"type"`
+	Properties map[string]*schema `json:"properties"`
+	Required   []string           `json:"required"`
+	// AdditionalProperties is either a boolean or a subschema object (draft
+	// 2020-12), so it is decoded raw: only the literal `false` triggers the
+	// strict "no unknown properties" check; `true` or any subschema (used by the
+	// dependency `parameters` string-map) is permissive.
+	AdditionalProperties json.RawMessage `json:"additionalProperties"`
+	Enum                 []any           `json:"enum"`
+	MinLength            *int            `json:"minLength"`
+	Items                *schema         `json:"items"`
 }
 
 func mustParseSchema(raw []byte) *schema {
@@ -151,7 +158,7 @@ func validateObject(value any, s *schema, path string) []string {
 			return []string{at(path) + "missing required property " + req}
 		}
 	}
-	if s.AdditionalProperties != nil && !*s.AdditionalProperties {
+	if string(s.AdditionalProperties) == "false" {
 		for k := range obj {
 			if _, declared := s.Properties[k]; !declared {
 				return []string{at(path) + "unknown property " + k}

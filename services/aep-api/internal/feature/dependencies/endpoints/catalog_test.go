@@ -23,15 +23,11 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
-	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 )
 
-// Structural compile-time check: *Catalog satisfies artifacts.OrgServiceResolver
-// (IsNamespaceVisible + ExistsAnyVisibility) without either package importing
-// the other's feature edge — this file is a _test.go file, so it is invisible
-// to the arch test's plain (non -test) `go list`, and this package itself
-// takes on no non-test dependency on artifacts.
-var _ artifacts.OrgServiceResolver = (*Catalog)(nil)
+// NOTE (dependency-management migration): the structural compile-time check that
+// *Catalog satisfies artifacts.OrgServiceResolver is re-added in Phase 5, when the
+// read-time org-service resolver (artifacts.OrgServiceResolver) is introduced.
 
 func sampleEndpoints() []openchoreo.WorkloadEndpointInfo {
 	return []openchoreo.WorkloadEndpointInfo{

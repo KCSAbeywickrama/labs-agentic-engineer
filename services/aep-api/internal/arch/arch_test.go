@@ -60,7 +60,14 @@ var featureEdgeAllowlist = map[string][]string{
 	// at the composition root, so it holds no other feature edge.
 	"codingagent": {"execution"},
 	"component":   {"artifacts", "gitrepo"},
-	"design":      {"artifacts"},
+	// dependencies is the dependency-management feature: the parent package (MCP
+	// discovery server + endpoints catalog) composes its own resources subpackage
+	// (external/platform provisioner cores). endpoints/ and resources/ hold no
+	// cross-feature edges of their own — every other collaborator (OC client,
+	// external-resource repo, secret writer, design reader) is a consumer-side
+	// port wired at the composition root, keeping the feature edge surface minimal.
+	"dependencies": {"dependencies/resources"},
+	"design":       {"artifacts"},
 	// execution is the platform-owned half of the Task/Execution split: it reads
 	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
 	// (artifacts). It NEVER imports feature/task — the §1 split is a package

@@ -36,7 +36,7 @@ import (
 func validComponentDesignJSON(name string) string {
 	return `{"name":"` + name + `","type":"service","version":"1.0.0","language":"go",` +
 		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
-		`"connections":[],"description":"a service"}`
+		`"dependencies":[],"description":"a service"}`
 }
 
 func TestSaveRequirements_TagsAtHead(t *testing.T) {
@@ -380,9 +380,10 @@ func TestSaveDesign_GateSchemaViolation(t *testing.T) {
 	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("save requirements: %v", err)
 	}
-	// design.json missing the required "description" → SCHEMA_VIOLATION.
+	// design.json missing the required "description" → SCHEMA_VIOLATION. (dependencies
+	// present + valid so the assemble step passes and the schema gate is what rejects it.)
 	bad := `{"name":"svc","type":"service","version":"1.0.0","language":"go",` +
-		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet","connections":[]}`
+		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet","dependencies":[]}`
 	r.seed(map[string]string{
 		"specs/design/design.md":                  "# System\n",
 		"specs/design/components/svc/design.json": bad,

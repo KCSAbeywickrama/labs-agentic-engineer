@@ -30,7 +30,7 @@ const validComponent = `{
   "appPath": ".",
   "entrypoint": "main.go",
   "exposure": "intranet",
-  "connections": [{"to": "orders-db", "type": "datastore"}],
+  "dependencies": [{"kind": "component", "name": "orders-db"}],
   "description": "Handles the order lifecycle"
 }`
 
@@ -57,22 +57,23 @@ func TestInvalidJSON(t *testing.T) {
 
 func TestMissingRequired(t *testing.T) {
 	// Drop the required "description".
-	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","connections":[]}`
+	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","dependencies":[]}`
 	wantCode(t, ValidateComponentDesign([]byte(raw)), CodeSchemaViolation)
 }
 
 func TestBadEnum(t *testing.T) {
-	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"public","connections":[],"description":"d"}`
+	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"public","dependencies":[],"description":"d"}`
 	wantCode(t, ValidateComponentDesign([]byte(raw)), CodeSchemaViolation)
 }
 
 func TestAdditionalProperty(t *testing.T) {
-	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","connections":[],"description":"d","surprise":true}`
+	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","dependencies":[],"description":"d","surprise":true}`
 	wantCode(t, ValidateComponentDesign([]byte(raw)), CodeSchemaViolation)
 }
 
-func TestConnectionMissingType(t *testing.T) {
-	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","connections":[{"to":"db"}],"description":"d"}`
+func TestDependencyMissingKind(t *testing.T) {
+	// A dependency entry missing the required "kind" → SCHEMA_VIOLATION.
+	raw := `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","dependencies":[{"name":"db"}],"description":"d"}`
 	wantCode(t, ValidateComponentDesign([]byte(raw)), CodeSchemaViolation)
 }
 

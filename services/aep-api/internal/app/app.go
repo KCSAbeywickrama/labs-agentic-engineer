@@ -47,6 +47,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
@@ -723,6 +725,17 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		BFFPublicURL:      cfg.BFFPublicURL,
 		GitHubAppClientID: cfg.GitHubAppClientID,
 	}
+
+	// Dependency-management MCP discovery readers (agnostic subset — Phase 4 of
+	// the dependency-management migration). The MCP surface (surfaces.go) is
+	// mounted behind the AgentsScopedVerifier; wire real backends for its four
+	// read-only tools: the org external-resource catalog (DB) and the org
+	// published endpoints + platform resource types (OC Resource-model client).
+	// Provisioning (value/param collection + issue funnel) stays unwired until Phase 6.
+	resourceClient := openchoreo.NewResourceClient(ocConfig)
+	params.MCPExternalResources = repositories.NewExternalResourceRepository(db)
+	params.MCPOrgEndpoints = endpoints.NewCatalog(resourceClient)
+	params.MCPResourceTypes = resources.NewResourceTypeCatalog(resourceClient)
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 

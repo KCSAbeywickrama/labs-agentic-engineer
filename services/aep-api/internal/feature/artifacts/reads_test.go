@@ -227,15 +227,14 @@ func TestAssembleDesign_ComponentFromDesignJSON(t *testing.T) {
 		"design.md": "---\nsourceSpec: v1\n---\n# Overview\n",
 		"components/task-api/design.json": `{"name":"task-api","type":"service","version":"1.0.0",` +
 			`"language":"go","buildpack":"go","appPath":"task-api","entrypoint":"main.go",` +
-			`"exposure":"internet","connections":[` +
-			`{"to":"task-db","type":"datastore"},` +
-			`{"to":"web-ui","type":"http","onPlatform":true},` +
-			`{"to":"stripe","type":"http","onPlatform":false}` +
+			`"exposure":"internet","dependencies":[` +
+			`{"kind":"component","name":"web-ui"},` +
+			`{"kind":"external","name":"stripe"}` +
 			`],"description":"Task CRUD API"}`,
 		"components/task-api/openapi.yaml": "openapi: 3.0.0\n",
 		"components/web-ui/design.json": `{"name":"web-ui","type":"web-app","version":"1.0.0",` +
 			`"language":"ts","buildpack":"node","appPath":"web-ui","entrypoint":"index.ts",` +
-			`"exposure":"internet","connections":[],"description":"UI"}`,
+			`"exposure":"internet","dependencies":[],"description":"UI"}`,
 	})
 	if err != nil {
 		t.Fatalf("AssembleDesign: %v", err)
@@ -250,22 +249,30 @@ func TestAssembleDesign_ComponentFromDesignJSON(t *testing.T) {
 	if c.OpenAPISpec != "openapi: 3.0.0\n" {
 		t.Errorf("OpenAPISpec = %q, want sibling openapi.yaml content", c.OpenAPISpec)
 	}
-	if c.ComponentAgentInstructions != "Task CRUD API" {
-		t.Errorf("instructions = %q, want design.json description", c.ComponentAgentInstructions)
+	if c.Description != "Task CRUD API" {
+		t.Errorf("description = %q, want design.json description", c.Description)
 	}
-	// DependsOn keeps its legacy meaning: sibling components only. task-db is
-	// on-platform but not a component dir; stripe is off-platform.
-	if len(c.DependsOn) != 1 || c.DependsOn[0] != "web-ui" {
-		t.Errorf("dependsOn = %v, want [web-ui]", c.DependsOn)
+	// Unified dependencies: ComponentDependsOn() derives the sibling components.
+	if sib := c.ComponentDependsOn(); len(sib) != 1 || sib[0] != "web-ui" {
+		t.Errorf("ComponentDependsOn = %v, want [web-ui]", sib)
 	}
-	if len(c.DependentApis) != 1 || c.DependentApis[0].Name != "stripe" {
-		t.Errorf("dependentApis = %+v, want [stripe] (off-platform connection)", c.DependentApis)
+	// The external dependency survives verbatim as a kind=external entry.
+	var externals []string
+	for _, d := range c.Dependencies {
+		if d.Kind == "external" {
+			externals = append(externals, d.Name)
+		}
+	}
+	if len(externals) != 1 || externals[0] != "stripe" {
+		t.Errorf("external deps = %v, want [stripe]", externals)
 	}
 }
 
-// design.json wins over a legacy design.md when both exist — the json is the
-// gated, schema-validated authority.
-func TestAssembleDesign_DesignJSONPrecedesLegacyMd(t *testing.T) {
+// design.json is the SOLE authored component model since the dependency-
+// management migration: a component directory with only a legacy design.md
+// (no design.json) is skipped, and a design.json alongside a stray design.md is
+// the authority (the per-component design.md frontmatter path was retired).
+func TestAssembleDesign_DesignJSONOnly_LegacyMdSkipped(t *testing.T) {
 	t.Parallel()
 	design, err := AssembleDesign(map[string]string{
 		"design.md":                   "# o\n",
@@ -276,20 +283,13 @@ func TestAssembleDesign_DesignJSONPrecedesLegacyMd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleDesign: %v", err)
 	}
-	if len(design.Components) != 2 {
-		t.Fatalf("components = %d, want 2", len(design.Components))
+	// Only svc assembles (it has design.json); the legacy design.md-only dir is skipped.
+	if len(design.Components) != 1 {
+		t.Fatalf("components = %d, want 1 (design.json-only; legacy design.md-only dir skipped)", len(design.Components))
 	}
-	byName := map[string]int{}
-	for i, c := range design.Components {
-		byName[c.Name] = i
-	}
-	svc := design.Components[byName["svc"]]
-	if svc.ComponentType != "service" || svc.Language != "go" {
-		t.Errorf("svc = %+v, want design.json values (service/go), not legacy md (web-app/python)", svc)
-	}
-	legacy := design.Components[byName["legacy"]]
-	if legacy.ComponentType != "service" || legacy.Language != "java" {
-		t.Errorf("legacy = %+v, want frontmatter fallback to keep working", legacy)
+	svc := design.Components[0]
+	if svc.Name != "svc" || svc.ComponentType != "service" || svc.Language != "go" {
+		t.Errorf("svc = %+v, want design.json values (svc/service/go), not legacy md (web-app/python)", svc)
 	}
 }
 

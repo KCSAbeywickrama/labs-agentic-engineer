@@ -56,8 +56,14 @@ const goldenDir = "../../../testdata/harvest/golden"
 // validDesignTree is a well-formed working-tree map the REAL store assembles.
 func validDesignTree() map[string]string {
 	return map[string]string{
-		artifacts.DesignRootFile:            "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
-		"components/hello-api/design.md":    "---\ntype: service\nlanguage: Go\n---\n\n# hello-api\n\nBuild it.\n",
+		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
+		"components/hello-api/design.json": "{\n" +
+			"  \"name\": \"hello-api\",\n" +
+			"  \"type\": \"service\",\n" +
+			"  \"language\": \"Go\",\n" +
+			"  \"description\": \"Build it.\",\n" +
+			"  \"dependencies\": []\n" +
+			"}\n",
 		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }

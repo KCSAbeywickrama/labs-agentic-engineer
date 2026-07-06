@@ -18,7 +18,6 @@ package artifacts
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -30,26 +29,20 @@ import (
 )
 
 // ArtifactStore wraps the GitHub-direct ArtifactService to add value beyond raw
-// file reads: external-API catalog resolution and the typed `DesignFile` shape
-// (YAML split/assemble). It is a read + assemble surface — mutations happen via
-// the Files API and are committed straight to `main`.
+// file reads: the typed `DesignFile` shape (design.json decode + YAML overview
+// assemble). It is a read + assemble surface — mutations happen via the Files
+// API and are committed straight to `main`.
+//
+// Dependency resolution (the old static ExternalAPICatalog) is gone: dependency
+// status/URLs are computed at READ time against the live org catalog
+// (resolveOrgServices, Phase 5 — dependency-management migration ADR-0003),
+// never from a shipped static table.
 type ArtifactStore struct {
-	artifactSvc  ArtifactService
-	externalAPIs *ExternalAPICatalog
+	artifactSvc ArtifactService
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
-	return &ArtifactStore{artifactSvc: artifactSvc, externalAPIs: DefaultExternalAPICatalog()}
-}
-
-// SetExternalAPICatalog overrides the catalog the store uses to resolve
-// architect-declared dependent-API names into concrete URLs. Optional —
-// without it, NewArtifactStore wires the shipped default catalog.
-func (s *ArtifactStore) SetExternalAPICatalog(c *ExternalAPICatalog) {
-	if s == nil {
-		return
-	}
-	s.externalAPIs = c
+	return &ArtifactStore{artifactSvc: artifactSvc}
 }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
@@ -140,35 +133,10 @@ func (s *ArtifactStore) AssembleDesignFrom(files map[string]string) (*DesignFile
 	if err != nil {
 		return nil, err
 	}
-	// Resolve architect-declared dependent-API names against the external API
-	// catalog so the in-memory design always has concrete URLs even when the
-	// on-disk frontmatter declared by intent only.
-	s.resolveExternalAPIs(design)
+	// Read-time dependency resolution (org-service 4-state, external needs-spec)
+	// is layered on by the design service in Phase 5 — the store returns the
+	// as-authored dependencies here.
 	return design, nil
-}
-
-// resolveExternalAPIs fills in URLs for catalog-known dependent-API entries
-// whose URL was left blank by the architect. Idempotent.
-func (s *ArtifactStore) resolveExternalAPIs(d *DesignFile) {
-	if s == nil || s.externalAPIs == nil || d == nil {
-		return
-	}
-	for i := range d.Components {
-		for j := range d.Components[i].DependentApis {
-			dep := &d.Components[i].DependentApis[j]
-			if dep.URL != "" {
-				continue
-			}
-			entry := s.externalAPIs.Lookup(dep.Name)
-			if entry.URL == "" {
-				continue
-			}
-			dep.URL = entry.URL
-			if dep.Authentication == "" {
-				dep.Authentication = entry.Authentication
-			}
-		}
-	}
 }
 
 // ---- Helpers ------------------------------------------------------------
@@ -199,45 +167,6 @@ func DesignFilesEqual(a, b map[string]string) bool {
 type rootFrontmatter struct {
 	SourceSpec    string   `yaml:"sourceSpec,omitempty"`
 	SkillsApplied []string `yaml:"skillsApplied,omitempty"`
-}
-
-// componentFrontmatter is the YAML frontmatter we accept on each
-// `components/<name>/design.md`. Field names mirror the user-facing keys
-// (snake-free) so frontmatter the architect emits is human-editable.
-type componentFrontmatter struct {
-	Type           string                `yaml:"type"`
-	Language       string                `yaml:"language,omitempty"`
-	DependsOn      []string              `yaml:"dependsOn,omitempty"`
-	Buildpack      string                `yaml:"buildpack,omitempty"`
-	AppPath        string                `yaml:"appPath,omitempty"`
-	Entrypoint     string                `yaml:"entrypoint,omitempty"`
-	ExposesAPI     *exposesAPIConfig     `yaml:"exposesAPI,omitempty"`
-	CallerIdentity *callerIdentityConfig `yaml:"callerIdentity,omitempty"`
-	DependentApis  []dependentApiConfig  `yaml:"dependentApis,omitempty"`
-}
-
-// exposesAPIConfig is the on-disk shape for a service component's API exposure
-// policy. `Auth: "end-user-required"` ⇒ gateway validates a user JWT and injects
-// UserContext upstream.
-type exposesAPIConfig struct {
-	Managed     bool   `yaml:"managed,omitempty"`
-	Auth        string `yaml:"auth,omitempty"`
-	UserContext string `yaml:"userContext,omitempty"`
-}
-
-// callerIdentityConfig is the on-disk shape for a web-app's caller-identity
-// intent. `Mode: "end-user"` ⇒ the SPA performs OIDC + PKCE against the IDP.
-type callerIdentityConfig struct {
-	Mode string `yaml:"mode,omitempty"`
-}
-
-// dependentApiConfig is the on-disk shape for an external upstream API a
-// component consumes at runtime. See models.DependentAPI for the wire shape.
-type dependentApiConfig struct {
-	Name           string `yaml:"name"`
-	URL            string `yaml:"url"`
-	Description    string `yaml:"description,omitempty"`
-	Authentication string `yaml:"authentication,omitempty"`
 }
 
 // SplitFrontmatter separates the leading YAML frontmatter block (delimited by
@@ -294,164 +223,72 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	componentNames := ComponentNamesIn(files)
 	out.Components = make([]models.DesignComponent, 0, len(componentNames))
 	for _, name := range componentNames {
-		// design.json is the component model since PR #70 (the agent's write
-		// gate and the save gate both validate it); design.md frontmatter is
-		// the legacy shape, kept as a fallback for pre-#70 projects.
-		if raw, ok := files[componentDirPrefix+name+"/design.json"]; ok {
-			comp, err := assembleComponentFromJSON(name, raw, componentNames, files)
-			if err != nil {
-				return nil, fmt.Errorf("assemble component %q: %w", name, err)
-			}
-			out.Components = append(out.Components, comp)
-			continue
-		}
-		raw, ok := files[componentDirPrefix+name+"/design.md"]
+		// design.json is the authored component model — the agent's write gate and
+		// the save-time gate both validate it (design_json.go / @aep/agent-stream).
+		// The legacy per-component design.md frontmatter path was retired with the
+		// dependency-management migration (design.md was removed upstream).
+		raw, ok := files[componentDirPrefix+name+"/design.json"]
 		if !ok {
 			continue
 		}
-		comp, err := assembleComponent(name, raw, files)
+		comp, err := parseComponentDesignJSON(name, raw)
 		if err != nil {
 			return nil, fmt.Errorf("assemble component %q: %w", name, err)
 		}
+		// OpenAPISpec is not a design.json key — fill it from the sibling openapi.yaml.
+		openapi := files[componentDirPrefix+name+"/openapi.yaml"]
+		if openapi == "" {
+			openapi = files[componentDirPrefix+name+"/openapi.yml"]
+		}
+		comp.OpenAPISpec = openapi
 		out.Components = append(out.Components, comp)
 	}
 	return out, nil
 }
 
-// componentDesignJSON is the on-disk shape of `components/<name>/design.json`
-// (the published component-design schema — packages/contracts/schemas/
-// component-design.schema.json; same definition the agent's write gate and the
-// save-time hard gate validate).
-type componentDesignJSON struct {
-	Name        string                    `json:"name"`
-	Type        string                    `json:"type"`
-	Version     string                    `json:"version"`
-	Language    string                    `json:"language"`
-	Buildpack   string                    `json:"buildpack"`
-	AppPath     string                    `json:"appPath"`
-	Entrypoint  string                    `json:"entrypoint"`
-	Exposure    string                    `json:"exposure"`
-	Connections []componentConnectionJSON `json:"connections"`
-	Description string                    `json:"description"`
-}
+// SplitDesign marshals a DesignFile back into the multi-file map (keys relative
+// to specs/design/, forward slashes) — the inverse of AssembleDesign:
+//
+//	design.md                       # root overview + {sourceSpec, skillsApplied} frontmatter
+//	components/<name>/design.json    # the authored component model (design_json.go codec)
+//	components/<name>/openapi.yaml    # the sibling spec (service components), when present
+//
+// The per-component design.md is NOT emitted — it was retired with the
+// dependency-management migration (design.json is the sole authored component model).
+func SplitDesign(d *DesignFile) (map[string]string, error) {
+	if d == nil {
+		return nil, fmt.Errorf("nil design")
+	}
+	files := make(map[string]string, 1+2*len(d.Components))
 
-// componentConnectionJSON is one design.json connection. OnPlatform defaults
-// to true when omitted (matching @aep/design-projection's `!== false`).
-type componentConnectionJSON struct {
-	To         string `json:"to"`
-	Type       string `json:"type"`
-	OnPlatform *bool  `json:"onPlatform,omitempty"`
-}
+	// Root design.md: optional YAML frontmatter (sourceSpec/skillsApplied) + overview.
+	var root strings.Builder
+	if d.SourceSpec != "" || len(d.SkillsApplied) > 0 {
+		fm, err := yaml.Marshal(rootFrontmatter{SourceSpec: d.SourceSpec, SkillsApplied: d.SkillsApplied})
+		if err != nil {
+			return nil, fmt.Errorf("encode design.md frontmatter: %w", err)
+		}
+		root.WriteString("---\n")
+		root.Write(fm)
+		root.WriteString("---\n\n")
+	}
+	root.WriteString(d.Overview)
+	if !strings.HasSuffix(d.Overview, "\n") {
+		root.WriteString("\n")
+	}
+	files[DesignRootFile] = root.String()
 
-// assembleComponentFromJSON builds a DesignComponent from design.json.
-// DependsOn keeps its legacy meaning — sibling components built by this
-// project — so it takes only on-platform connections whose target is another
-// component directory; off-platform connections surface as DependentApis
-// (design.json carries no URL — the name/type is all we know at design time).
-func assembleComponentFromJSON(name, raw string, componentNames []string, files map[string]string) (models.DesignComponent, error) {
-	var cd componentDesignJSON
-	if err := json.Unmarshal([]byte(raw), &cd); err != nil {
-		return models.DesignComponent{}, fmt.Errorf("parse design.json: %w", err)
-	}
-	siblings := make(map[string]bool, len(componentNames))
-	for _, n := range componentNames {
-		siblings[n] = true
-	}
-	dependsOn := []string{}
-	var depApis []models.DependentAPI
-	for _, conn := range cd.Connections {
-		if conn.To == "" {
-			continue
+	for _, comp := range d.Components {
+		body, err := marshalComponentDesignJSON(comp.Name, comp)
+		if err != nil {
+			return nil, fmt.Errorf("marshal component %q: %w", comp.Name, err)
 		}
-		onPlatform := conn.OnPlatform == nil || *conn.OnPlatform
-		switch {
-		case onPlatform && siblings[conn.To] && conn.To != name:
-			dependsOn = append(dependsOn, conn.To)
-		case !onPlatform:
-			depApis = append(depApis, models.DependentAPI{
-				Name:        conn.To,
-				Description: conn.Type + " connection (off-platform)",
-			})
+		files[componentDirPrefix+comp.Name+"/design.json"] = string(body)
+		if strings.TrimSpace(comp.OpenAPISpec) != "" {
+			files[componentDirPrefix+comp.Name+"/openapi.yaml"] = comp.OpenAPISpec
 		}
 	}
-	openapi := files[componentDirPrefix+name+"/openapi.yaml"]
-	if openapi == "" {
-		openapi = files[componentDirPrefix+name+"/openapi.yml"]
-	}
-	return models.DesignComponent{
-		Name:                       name,
-		ComponentType:              cd.Type,
-		Language:                   cd.Language,
-		DependsOn:                  dependsOn,
-		Entrypoint:                 cd.Entrypoint,
-		Buildpack:                  cd.Buildpack,
-		AppPath:                    cd.AppPath,
-		OpenAPISpec:                openapi,
-		ComponentAgentInstructions: strings.TrimSpace(cd.Description),
-		DependentApis:              depApis,
-	}, nil
-}
-
-func assembleComponent(name, designMd string, files map[string]string) (models.DesignComponent, error) {
-	fm, body, err := SplitFrontmatter(designMd)
-	if err != nil {
-		return models.DesignComponent{}, fmt.Errorf("frontmatter: %w", err)
-	}
-	var cfm componentFrontmatter
-	if fm != "" {
-		if err := yaml.Unmarshal([]byte(fm), &cfm); err != nil {
-			return models.DesignComponent{}, fmt.Errorf("decode frontmatter: %w", err)
-		}
-	}
-	openapi := files[componentDirPrefix+name+"/openapi.yaml"]
-	if openapi == "" {
-		openapi = files[componentDirPrefix+name+"/openapi.yml"]
-	}
-	dependsOn := append([]string(nil), cfm.DependsOn...)
-	if dependsOn == nil {
-		dependsOn = []string{}
-	}
-	var exposes *models.ExposesAPI
-	if cfm.ExposesAPI != nil && (cfm.ExposesAPI.Auth != "" || cfm.ExposesAPI.Managed || cfm.ExposesAPI.UserContext != "") {
-		exposes = &models.ExposesAPI{
-			Managed:     cfm.ExposesAPI.Managed,
-			Auth:        cfm.ExposesAPI.Auth,
-			UserContext: cfm.ExposesAPI.UserContext,
-		}
-	}
-	var caller *models.CallerIdentity
-	if cfm.CallerIdentity != nil && cfm.CallerIdentity.Mode != "" {
-		caller = &models.CallerIdentity{Mode: cfm.CallerIdentity.Mode}
-	}
-	var depApis []models.DependentAPI
-	if len(cfm.DependentApis) > 0 {
-		depApis = make([]models.DependentAPI, 0, len(cfm.DependentApis))
-		for _, d := range cfm.DependentApis {
-			if d.Name == "" {
-				continue
-			}
-			depApis = append(depApis, models.DependentAPI{
-				Name:           d.Name,
-				URL:            d.URL,
-				Description:    d.Description,
-				Authentication: d.Authentication,
-			})
-		}
-	}
-	return models.DesignComponent{
-		Name:                       name,
-		ComponentType:              cfm.Type,
-		Language:                   cfm.Language,
-		DependsOn:                  dependsOn,
-		Entrypoint:                 cfm.Entrypoint,
-		Buildpack:                  cfm.Buildpack,
-		AppPath:                    cfm.AppPath,
-		OpenAPISpec:                openapi,
-		ComponentAgentInstructions: strings.TrimSpace(body),
-		ExposesAPI:                 exposes,
-		CallerIdentity:             caller,
-		DependentApis:              depApis,
-	}, nil
+	return files, nil
 }
 
 // ComponentNamesIn walks the file map and returns the unique component

@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
@@ -119,6 +120,24 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	internalAPI := newInternalAPI(internalMux)
 	RegisterAllInternal(internalAPI, params.InternalDeps)
 	mux.Handle(internalV1+"/executions/", internalMux)
+
+	// ── internal MCP discovery (POST /internal/v1/mcp) ───────────────────────
+	// A raw (non-Huma) JSON-RPC mount: the MCP server the agents service's
+	// designing LLM queries for the org's registered external resources,
+	// published endpoints, and platform resource types. Gated by
+	// auth.AgentsScopedVerifier — the caller presents a BFF-signed token with
+	// aud aep-api-mcp and the acting org is bound from its ocOrgId claim, never
+	// from the request. Mounted only when the token manager exists (same
+	// conditional posture as the internal S2S mount): without it nothing could
+	// verify a caller, so the path 404s instead of 503-ing forever. A nil
+	// MCPExternalResources/OrgEndpoints/ResourceTypes degrades the corresponding
+	// tool to an empty result (see dependencies.NewMCPHandler).
+	if params.HumaDeps.TaskTokens != nil {
+		mcpVerifier := auth.NewAgentsScopedVerifier(params.HumaDeps.TaskTokens)
+		mcpHandler := dependencies.NewMCPHandler(
+			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes)
+		mux.Handle("POST "+internalV1+"/mcp", mcpVerifier.Middleware(mcpHandler))
+	}
 
 	// ── /api/ user-JWT wrapper ───────────────────────────────────────────────
 	// JIT org-onboarding sits between JWT verification and the org-aware route
