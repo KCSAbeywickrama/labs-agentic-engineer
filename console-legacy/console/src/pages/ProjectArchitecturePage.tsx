@@ -27,7 +27,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -68,6 +68,8 @@ import {
   componentNameFromPath,
   designDocumentTypeForPath,
 } from '../lib/designDocumentTypes';
+import { DependenciesSection, type DepRef } from './architecture/DependenciesSection';
+import { DependencyDrawer } from './architecture/DependencyDrawer';
 
 const DESIGN_ROOT_FILE = 'design.md';
 
@@ -154,9 +156,13 @@ const COMPONENT_ROOT_RE = /^components\/[^/]+\/design\.(md|json)$/;
 export default function ProjectArchitecturePage() {
   const navigate = useNavigate();
   const { orgId, projectId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const routeOrgId = orgId ?? 'default';
 
   const [loading, setLoading] = useState(true);
+  // The dependency drawer's open target: which (component × dependency) row the
+  // user clicked in the DependenciesSection below (or arrived at via ?dep=).
+  const [activeDep, setActiveDep] = useState<DepRef | null>(null);
   const [activePath, setActivePath] = useState<string | null>(CELL_DIAGRAM_VIEW_ID);
   const [design, setDesign] = useState<Design | null>(null);
   const [versions, setVersions] = useState<ArtifactVersion[]>([]);
@@ -563,6 +569,44 @@ export default function ProjectArchitecturePage() {
   const effectiveComponents =
     viewingHistorical && historical ? historical.components : design?.components ?? NO_COMPONENTS;
 
+  // Deep-link: /architecture?dep=<name> opens that dependency's drawer directly.
+  // A held coding task's gate caption ("Waiting for: …") links users here so
+  // they can resolve the blocking dependency. Runs once the design has loaded,
+  // then clears the param so closing the drawer sticks.
+  useEffect(() => {
+    const depName = searchParams.get('dep');
+    if (!depName || activeDep || effectiveComponents.length === 0) return;
+    for (const comp of effectiveComponents) {
+      const dep = comp.dependencies?.find((d) => d.name === depName);
+      if (dep) {
+        setActiveDep({ component: comp.name, dependency: dep });
+        break;
+      }
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('dep');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, effectiveComponents, activeDep, setSearchParams]);
+
+  // After a drawer action refetches the design (onChanged → refreshBundle), the
+  // component list carries fresh read-time resolution (e.g. an org-service dep
+  // flips resolved→blocked after a request, or an external dep clears needs-spec
+  // once values are saved). Re-derive activeDep from the new list so the open
+  // drawer always shows the current status. The reference guard stops it looping
+  // (a refetch mints new dep objects; we adopt one, then it matches until the
+  // next refetch). If the dep is gone, leave activeDep untouched.
+  useEffect(() => {
+    if (!activeDep) return;
+    for (const comp of effectiveComponents) {
+      if (comp.name !== activeDep.component) continue;
+      const freshDep = comp.dependencies?.find((d) => d.name === activeDep.dependency.name);
+      if (freshDep && freshDep !== activeDep.dependency) {
+        setActiveDep({ component: activeDep.component, dependency: freshDep });
+      }
+      return;
+    }
+  }, [effectiveComponents, activeDep]);
+
   // Project the cell diagram from the SAME files the tree shows (historical
   // snapshot, live stream preview, or HEAD + buffers) through the exact
   // pipeline that derives the committed `cell-diagram.gen.json`. Without this the
@@ -732,6 +776,15 @@ export default function ProjectArchitecturePage() {
                 showToolbar={false}
                 placeholder="System architecture overview…"
               />
+            </Box>
+            {/* Dependencies — one row per (component × dependency). Read-time
+                resolution drives each row's status chip; clicking a row opens
+                the DependencyDrawer to resolve it (provide external values,
+                attach a spec, provision a platform resource, request org-service
+                access). The provisioning CTAs live here, not on the tasks
+                board — a held coding task only links back to the blocking dep. */}
+            <Box sx={{ flexShrink: 0 }}>
+              <DependenciesSection components={effectiveComponents} onOpen={setActiveDep} />
             </Box>
           </Box>
         ),
@@ -908,6 +961,14 @@ export default function ProjectArchitecturePage() {
           />
         </Box>
       </Box>
+
+      <DependencyDrawer
+        open={!!activeDep}
+        depRef={activeDep}
+        projectId={projectId ?? ''}
+        onClose={() => setActiveDep(null)}
+        onChanged={refreshBundle}
+      />
     </PageContent>
   );
 }
