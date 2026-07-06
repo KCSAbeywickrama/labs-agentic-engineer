@@ -1,5 +1,51 @@
 components:
   schemas:
+    AccessRequest:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/AccessRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        consumerComponentName:
+          type: string
+        consumerProjectId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        orgServiceName:
+          type: string
+        providerComponentName:
+          type: string
+        providerIssueNumber:
+          format: int64
+          type: integer
+        providerIssueUrl:
+          type: string
+        providerProjectId:
+          type: string
+        providerTaskId:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+        - id
+        - consumerProjectId
+        - consumerComponentName
+        - orgServiceName
+        - status
+        - createdAt
+        - updatedAt
+      type: object
     AnthropicProjection:
       additionalProperties: false
       properties:
@@ -311,6 +357,43 @@ components:
         - componentType
         - spec
       type: object
+    ConfigKey:
+      additionalProperties: false
+      properties:
+        credentialClass:
+          type: string
+        key:
+          type: string
+        secret:
+          type: boolean
+      required:
+        - key
+        - secret
+      type: object
+    ConfigKeyDTO:
+      additionalProperties: false
+      properties:
+        credentialClass:
+          type: string
+        key:
+          type: string
+        secret:
+          type: boolean
+      required:
+        - key
+        - secret
+      type: object
+    ConsumerDTO:
+      additionalProperties: false
+      properties:
+        componentName:
+          type: string
+        projectId:
+          type: string
+      required:
+        - projectId
+        - componentName
+      type: object
     CreateProjectRequest:
       additionalProperties: false
       properties:
@@ -365,20 +448,83 @@ components:
       required:
         - path
       type: object
-    DependentAPI:
+    Dependency:
       additionalProperties: false
       properties:
-        authentication:
-          type: string
+        candidates:
+          items:
+            $ref: "#/components/schemas/DependencyCandidate"
+          type:
+            - array
+            - "null"
+        config:
+          items:
+            $ref: "#/components/schemas/ConfigKey"
+          type:
+            - array
+            - "null"
         description:
           type: string
+        kind:
+          type: string
         name:
+          type: string
+        needsSpec:
+          type: boolean
+        parameters:
+          additionalProperties:
+            type: string
+          type: object
+        reason:
+          type: string
+        resourceType:
+          type: string
+        specPath:
+          type: string
+        specUrl:
+          type: string
+        status:
+          type: string
+      required:
+        - kind
+        - name
+      type: object
+    DependencyCandidate:
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+        label:
           type: string
         url:
           type: string
       required:
-        - name
-        - url
+        - label
+      type: object
+    DependencyStatus:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/DependencyStatus.json
+          format: uri
+          readOnly: true
+          type: string
+        outputs:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        ready:
+          type: boolean
+        status:
+          type: string
+      required:
+        - status
+        - ready
+        - outputs
       type: object
     Deployment:
       additionalProperties: false
@@ -493,33 +639,33 @@ components:
           type: string
         componentType:
           type: string
-        dependentApis:
+        dependencies:
           items:
-            $ref: "#/components/schemas/DependentAPI"
+            $ref: "#/components/schemas/Dependency"
           type:
             - array
             - "null"
-        dependsOn:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
+        description:
+          type: string
         entrypoint:
           type: string
         exposesAPI:
           $ref: "#/components/schemas/ExposesAPI"
+        exposure:
+          type: string
         language:
           type: string
         name:
           type: string
         openAPISpec:
           type: string
+        version:
+          type: string
       required:
         - name
         - componentType
         - language
-        - dependsOn
+        - dependencies
         - entrypoint
         - buildpack
         - appPath
@@ -663,8 +809,34 @@ components:
           type: string
         managed:
           type: boolean
+        orgPublished:
+          type: boolean
         userContext:
           type: string
+      type: object
+    ExternalResourceDTO:
+      additionalProperties: false
+      properties:
+        config:
+          items:
+            $ref: "#/components/schemas/ConfigKeyDTO"
+          type:
+            - array
+            - "null"
+        consumers:
+          items:
+            $ref: "#/components/schemas/ConsumerDTO"
+          type:
+            - array
+            - "null"
+        description:
+          type: string
+        name:
+          type: string
+      required:
+        - name
+        - config
+        - consumers
       type: object
     FileContent:
       additionalProperties: false
@@ -1069,6 +1241,29 @@ components:
         - status
         - connectedAt
       type: object
+    ProvisionBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ProvisionBody.json
+          format: uri
+          readOnly: true
+          type: string
+        environments:
+          description: "Environments to provision (default: [development])"
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        params:
+          additionalProperties:
+            type: string
+          description: Provisioning parameters (override the design defaults)
+          type: object
+      type: object
     RequirementsBundle:
       additionalProperties: false
       properties:
@@ -1116,6 +1311,26 @@ components:
         commitSha:
           description: "Commit to gate and tag (the publish's just-applied commit). Empty: resolve HEAD."
           type: string
+      type: object
+    SaveValuesBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SaveValuesBody.json
+          format: uri
+          readOnly: true
+          type: string
+        environments:
+          additionalProperties:
+            additionalProperties:
+              type: string
+            type: object
+          description: "Per-environment { configKey: value } maps. Secret keys are routed to the secret manager by the registered schema."
+          type: object
+      required:
+        - environments
       type: object
     SkillDetailBody:
       additionalProperties: false
@@ -1166,6 +1381,21 @@ components:
         - version
         - contentSha
         - updatedAt
+      type: object
+    StatusMsg:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/StatusMsg.json
+          format: uri
+          readOnly: true
+          type: string
+        status:
+          type: string
+      required:
+        - status
       type: object
     TaskDetail:
       additionalProperties: false
@@ -1579,6 +1809,56 @@ paths:
       summary: Authorize a collaboration room (server-to-server)
       tags:
         - Collaboration
+  /dependencies/external-resources:
+    get:
+      operationId: list-external-resources
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/ExternalResourceDTO"
+                type:
+                  - array
+                  - "null"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List the org's external-resource catalog
+      tags:
+        - Dependencies
+  /dependencies/external-resources/{name}:
+    delete:
+      operationId: delete-external-resource
+      parameters:
+        - description: External resource name
+          in: path
+          name: name
+          required: true
+          schema:
+            description: External resource name
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Delete an external-resource catalog entry (409 if in use)
+      tags:
+        - Dependencies
   /org/credentials/anthropic:
     delete:
       operationId: disconnect-anthropic
@@ -2467,6 +2747,147 @@ paths:
       summary: Update component config
       tags:
         - Config
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/access-request:
+    post:
+      operationId: request-org-service-access
+      parameters:
+        - description: Consumer project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Consumer project name (DNS-label slug)
+            type: string
+        - description: Consumer component name
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Consumer component name
+            type: string
+        - description: org-service dependency name (the provider component)
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: org-service dependency name (the provider component)
+            type: string
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessRequest"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Request access to a cross-project org-service dependency
+      tags:
+        - Dependencies
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/provision:
+    post:
+      operationId: provision-platform-resource
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Component the drawer opened on (context only)
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Component the drawer opened on (context only)
+            type: string
+        - description: Platform-resource dependency name
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Platform-resource dependency name
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionBody"
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMsg"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Provision a platform-resource dependency (async)
+      tags:
+        - Dependencies
+  /projects/{projectName}/components/{componentName}/dependencies/{depName}/status:
+    get:
+      operationId: get-dependency-status
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Component the drawer opened on (context only)
+          in: path
+          name: componentName
+          required: true
+          schema:
+            description: Component the drawer opened on (context only)
+            type: string
+        - description: Dependency name
+          in: path
+          name: depName
+          required: true
+          schema:
+            description: Dependency name
+            type: string
+        - description: "Environment (default: development)"
+          explode: false
+          in: query
+          name: environment
+          schema:
+            description: "Environment (default: development)"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DependencyStatus"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get a dependency's provisioning status (outputs masked to names)
+      tags:
+        - Dependencies
   /projects/{projectName}/components/{componentName}/deployments:
     get:
       operationId: list-deployments
@@ -2616,6 +3037,80 @@ paths:
       summary: Start a generation/chat turn (202 — runs detached; attach via the turn stream)
       tags:
         - GenAI
+  /projects/{projectName}/dependencies/access-requests:
+    get:
+      operationId: list-access-requests
+      parameters:
+        - description: Consumer project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Consumer project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/AccessRequest"
+                type:
+                  - array
+                  - "null"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List a consumer project's access requests
+      tags:
+        - Dependencies
+  /projects/{projectName}/dependencies/external-resources/{name}/values:
+    post:
+      operationId: collect-external-resource-values
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: External resource (dependency) name
+          in: path
+          name: name
+          required: true
+          schema:
+            description: External resource (dependency) name
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveValuesBody"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMsg"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Collect an external dependency's values and provision it
+      tags:
+        - Dependencies
   /projects/{projectName}/design/bundle:
     get:
       operationId: get-design-bundle
