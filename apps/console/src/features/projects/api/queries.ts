@@ -29,15 +29,16 @@ import { githubKeys, projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 
-export function useProjectsList(search = "") {
+export function useProjectsList(search = "", limit?: number) {
   return useInfiniteQuery({
-    queryKey: projectKeys.list(search),
+    queryKey: projectKeys.list(search, limit),
     queryFn: async ({ pageParam }) => {
       const { data, error } = await client.GET("/projects", {
         params: {
           query: {
             ...(search && { search }),
             ...(pageParam && { cursor: pageParam }),
+            ...(limit && { limit }),
           },
         },
       });
@@ -69,6 +70,62 @@ export function useProject(projectName: string) {
     },
     staleTime: 30_000,
   });
+}
+
+// The overview watches the pipeline move, so its reads poll (issue #77
+// decision: 10s while visible; SSE deferred).
+const OVERVIEW_POLL_MS = 10_000;
+
+function useProjectResource<T>(
+  queryKey: readonly unknown[],
+  fetcher: () => Promise<{ data?: T; error?: unknown }>,
+  what: string,
+) {
+  return useQuery({
+    queryKey,
+    queryFn: async () => {
+      const { data, error } = await fetcher();
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(e?.detail ?? e?.title ?? `Failed to load ${what}`);
+      }
+      return data;
+    },
+    refetchInterval: OVERVIEW_POLL_MS,
+  });
+}
+
+export function useProjectStatus(projectName: string) {
+  return useProjectResource(
+    projectKeys.status(projectName),
+    () =>
+      client.GET("/projects/{projectName}/status", {
+        params: { path: { projectName } },
+      }),
+    "project status",
+  );
+}
+
+export function useProjectComponents(projectName: string) {
+  return useProjectResource(
+    projectKeys.components(projectName),
+    () =>
+      client.GET("/projects/{projectName}/components", {
+        params: { path: { projectName } },
+      }),
+    "components",
+  );
+}
+
+export function useProjectBoard(projectName: string) {
+  return useProjectResource(
+    projectKeys.board(projectName),
+    () =>
+      client.GET("/projects/{projectName}/board", {
+        params: { path: { projectName } },
+      }),
+    "build board",
+  );
 }
 
 export function useCreateProject() {

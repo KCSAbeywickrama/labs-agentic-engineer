@@ -147,24 +147,42 @@ func rootDesignMd() string {
 }
 
 func serviceComponentMd() string {
-	return "---\ntype: service\nlanguage: Go\n---\n\n# api\n\nBackend.\n"
+	return componentDesignJSONFixture("api", "service", nil, false)
 }
 
-// webappMd renders a web-app component's design.md. deps go into dependsOn;
-// oidc=true adds callerIdentity.mode=end-user.
+// webappMd renders a web-app component's design.json. deps become component-kind
+// dependencies; oidc=true adds callerIdentity.mode=end-user.
 func webappMd(name string, oidc bool, deps ...string) string {
+	return componentDesignJSONFixture(name, "web-app", deps, oidc)
+}
+
+// componentDesignJSONFixture builds a `components/<name>/design.json` body:
+// component-kind dependencies from deps, optional end-user callerIdentity.
+func componentDesignJSONFixture(name, typ string, deps []string, oidc bool) string {
 	var b strings.Builder
-	b.WriteString("---\ntype: web-app\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"name\": \"" + name + "\",\n")
+	b.WriteString("  \"type\": \"" + typ + "\",\n")
+	if typ == "service" {
+		b.WriteString("  \"language\": \"Go\",\n")
+	}
 	if len(deps) > 0 {
-		b.WriteString("dependsOn:\n")
-		for _, d := range deps {
-			b.WriteString("  - " + d + "\n")
+		b.WriteString("  \"dependencies\": [\n")
+		for i, d := range deps {
+			comma := ","
+			if i == len(deps)-1 {
+				comma = ""
+			}
+			b.WriteString("    {\n      \"kind\": \"component\",\n      \"name\": \"" + d + "\"\n    }" + comma + "\n")
 		}
+		b.WriteString("  ]")
+	} else {
+		b.WriteString("  \"dependencies\": []")
 	}
 	if oidc {
-		b.WriteString("callerIdentity:\n  mode: end-user\n")
+		b.WriteString(",\n  \"callerIdentity\": {\n    \"mode\": \"end-user\"\n  }")
 	}
-	b.WriteString("---\n\n# " + name + "\n\nSPA.\n")
+	b.WriteString("\n}\n")
 	return b.String()
 }
 
@@ -177,9 +195,9 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("resolved service dep, oidc off: ready + sibling URL keys, no THUNDER", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", false, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", false, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -207,10 +225,10 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("multiple service deps: API_BASE_URL is the first declared service", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:        rootDesignMd(),
-			"components/web/design.md":      webappMd("web", false, "api", "auth-svc"),
-			"components/api/design.md":      serviceComponentMd(),
-			"components/auth-svc/design.md": "---\ntype: service\n---\n\n# auth-svc\n\nAuth.\n",
+			artifacts.DesignRootFile:          rootDesignMd(),
+			"components/web/design.json":      webappMd("web", false, "api", "auth-svc"),
+			"components/api/design.json":      serviceComponentMd(),
+			"components/auth-svc/design.json": componentDesignJSONFixture("auth-svc", "service", nil, false),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -234,9 +252,9 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("unresolved service dep gates emission (ready=false)", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", false, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", false, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -256,9 +274,9 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("ListDeployments error on a dep gates emission", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", false, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", false, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -277,9 +295,9 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("nil deployment list on a dep gates emission", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", false, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", false, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -300,9 +318,9 @@ func Test_buildEnvValues(t *testing.T) {
 		// web depends on a peer web-app (not a service) → skipped over HTTP;
 		// no URL contributed, but readiness is NOT withheld.
 		files := map[string]string{
-			artifacts.DesignRootFile:    rootDesignMd(),
-			"components/web/design.md":  webappMd("web", false, "peer"),
-			"components/peer/design.md": webappMd("peer", false),
+			artifacts.DesignRootFile:      rootDesignMd(),
+			"components/web/design.json":  webappMd("web", false, "peer"),
+			"components/peer/design.json": webappMd("peer", false),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -325,8 +343,8 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("dangling dependsOn (unknown sibling) is skipped, not gated", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", false, "ghost"),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", false, "ghost"),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -344,9 +362,9 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("oidc on + everything resolved: ready with THUNDER_* layered", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", true, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", true, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -372,9 +390,9 @@ func Test_buildEnvValues(t *testing.T) {
 	t.Run("oidc on but SPA URL unresolved gates emission", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", true, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", true, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		design := readDesign(t, files)
 		web := componentNamed(t, design, "web")
@@ -634,9 +652,9 @@ func Test_EmitForComponent(t *testing.T) {
 
 	webAndAPI := func(oidc bool) map[string]string {
 		return map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/web/design.md": webappMd("web", oidc, "api"),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/web/design.json": webappMd("web", oidc, "api"),
+			"components/api/design.json": serviceComponentMd(),
 		}
 	}
 
@@ -825,10 +843,10 @@ func Test_EmitForProjectSPAs(t *testing.T) {
 	ctx := context.Background()
 
 	twoSPAsOneService := map[string]string{
-		artifacts.DesignRootFile:    rootDesignMd(),
-		"components/web1/design.md": webappMd("web1", false, "api"),
-		"components/web2/design.md": webappMd("web2", false, "api"),
-		"components/api/design.md":  serviceComponentMd(),
+		artifacts.DesignRootFile:      rootDesignMd(),
+		"components/web1/design.json": webappMd("web1", false, "api"),
+		"components/web2/design.json": webappMd("web2", false, "api"),
+		"components/api/design.json":  serviceComponentMd(),
 	}
 
 	t.Run("emits each web-app, skips services", func(t *testing.T) {
@@ -861,8 +879,8 @@ func Test_EmitForProjectSPAs(t *testing.T) {
 	t.Run("no web-apps is a no-op", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{
-			artifacts.DesignRootFile:   rootDesignMd(),
-			"components/api/design.md": serviceComponentMd(),
+			artifacts.DesignRootFile:     rootDesignMd(),
+			"components/api/design.json": serviceComponentMd(),
 		}
 		oc := &ocmocks.ComponentClientMock{} // must never be touched
 		svc := NewRuntimeConfigService(oc, storeWith(files))

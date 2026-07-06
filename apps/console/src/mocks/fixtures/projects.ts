@@ -75,6 +75,48 @@ export const seedProjects: Project[] = [
     status: "active",
     createdAt: "2026-06-30T18:05:00Z",
   },
+  {
+    name: "plant-care",
+    displayName: "Plant Care",
+    description: "Watering schedules and plant health notes",
+    status: "active",
+    createdAt: "2026-06-10T08:00:00Z",
+  },
+  {
+    name: "team-lunch",
+    displayName: "Team Lunch",
+    description: "Vote on where the team eats on Fridays",
+    status: "active",
+    createdAt: "2026-06-11T12:30:00Z",
+  },
+  {
+    name: "book-club",
+    displayName: "Book Club",
+    description: "Reading lists, meetings, and discussion notes",
+    status: "active",
+    createdAt: "2026-06-14T19:15:00Z",
+  },
+  {
+    name: "run-coach",
+    displayName: "Run Coach",
+    description: "Training plans and race-day countdowns",
+    status: "active",
+    createdAt: "2026-06-17T06:50:00Z",
+  },
+  {
+    name: "expense-lens",
+    displayName: "Expense Lens",
+    description: "Snap receipts and categorize team spend",
+    status: "active",
+    createdAt: "2026-06-23T15:25:00Z",
+  },
+  {
+    name: "ticket-desk",
+    displayName: "Ticket Desk",
+    description: "Lightweight internal helpdesk with SLAs",
+    status: "active",
+    createdAt: "2026-06-27T09:55:00Z",
+  },
 ];
 
 // Mock server-side page size for the projects list (View more pagination).

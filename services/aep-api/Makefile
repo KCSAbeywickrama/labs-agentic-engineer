@@ -3,21 +3,25 @@
 build:
 	go build ./...
 
-# Export the code-first OpenAPI specs (same code path as the live routes):
-#   public   → ../../packages/contracts/api/v1/openapi.yaml  (COMMITTED contract)
-#   internal → build/internal-openapi.yaml                    (gitignored tooling artifact)
-# Wired into the root `make gen`; `openapi-check` guards the committed copy.
+# The committed spec (packages/contracts/api/v1/openapi.yaml) is the SOURCE OF
+# TRUTH; the Go code follows it. This target exports what the code currently
+# serves — a comparison aid only, deliberately NOT wired into `make gen`
+# (contract-first inversion; server stubs generated from the spec are tracked
+# in the repo issue referenced by openapi-check below).
+#   public   → ../../packages/contracts/api/v1/openapi.yaml
+#   internal → build/internal-openapi.yaml  (gitignored tooling artifact)
 openapi:
 	go run ./cmd/openapigen
 
-# Sync check: regenerate, then fail if the committed public spec drifted from
-# the code. Make-level only (no CI wiring yet); same shape as gen-oc-client-check.
+# Drift check: fail if what the code serves differs from the committed
+# contract. The fix direction is code → spec, never the reverse.
 openapi-check: openapi
 	@if ! git diff --exit-code --quiet -- ../../packages/contracts/api/v1/openapi.yaml; then \
 		git diff --color -- ../../packages/contracts/api/v1/openapi.yaml | cat; \
 		echo ""; \
-		echo "packages/contracts/api/v1/openapi.yaml is out of sync with the code."; \
-		echo "Run 'make gen' (or 'make -C services/aep-api openapi') and commit the change."; \
+		echo "aep-api serves an API that drifted from the committed contract."; \
+		echo "The spec is the source of truth: update the Go handlers to match,"; \
+		echo "then 'git checkout -- packages/contracts/api/v1/openapi.yaml'."; \
 		exit 1; \
 	fi
 
@@ -57,6 +61,14 @@ test-db:
 # Pinned spec version — bump this and re-run `make gen-oc-client` when the
 # upstream OC API changes. Keep aligned with the OC build deployed by the
 # deployments-v2/wso2cloud-deployment submodule. Matches agent-manager.
+#
+# NOTE: the deployed OpenChoreo is 1.1.1 (deployments/scripts/env.sh), but this
+# generated-client spec pin stays at v1.0.1-hotfix.1 DELIBERATELY: the Resource
+# model types (ResourceType / Resource / ResourceReleaseBinding) are hand-rolled
+# in internal/clients/openchoreo/resource_client.go because the pinned spec
+# predates them. Bump this pin only when upstream publishes a spec that COVERS
+# those types (so gen can replace the hand-rolled client), not merely to track
+# the deployed OC version.
 OC_SPEC_VERSION ?= v1.0.1-hotfix.1
 OC_SPEC_URL     ?= https://raw.githubusercontent.com/openchoreo/openchoreo/$(OC_SPEC_VERSION)/openapi/openchoreo-api.yaml
 OAPI_CODEGEN    ?= go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.0

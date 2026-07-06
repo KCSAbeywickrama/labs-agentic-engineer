@@ -48,3 +48,10 @@ Never pull raw MUI or another component library alongside Oxygen UI.
   Every view ships all three (see `api-guidelines.md` for the doctrine).
 - **Accessibility.** Interactive elements are keyboard-reachable; icons that
   convey meaning get labels; color is never the only signal.
+- **Page precedents first.** Before composing any page, check whether the
+  oxygen-ui skill's sample app already has that page and match it —
+  `sample/src/pages/ProjectOverview.tsx` for project pages,
+  `Projects.tsx`/`Organizations.tsx` for listings, `Analytics.tsx` for
+  dashboards. Don't assemble layouts from primitives when a page-level
+  precedent exists (learned on #77/PR #79: the hand-rolled header and
+  component grid had to be redone to match the sample's page).

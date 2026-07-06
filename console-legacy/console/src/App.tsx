@@ -41,11 +41,16 @@ import OrgGitHubAppPicker from './pages/OrgGitHubAppPicker';
 import OrgAnthropicSettings from './pages/OrgAnthropicSettings';
 import OrgIDPSettings from './pages/OrgIDPSettings';
 import OrgSkillsSettings from './pages/OrgSkillsSettings';
+import ExternalResourcesSettings from './pages/ExternalResourcesSettings';
 import NoOrganizationPage from './pages/NoOrganizationPage';
 import { setOrgGithubTokenAccessor } from './services/api/orgGithub';
 import { setOrgAnthropicTokenAccessor } from './services/api/orgAnthropic';
 import { setOrgIDPTokenAccessor } from './services/api/orgIDP';
 import { setOrgSkillsTokenAccessor } from './services/api/orgSkills';
+import { setExternalResourcesTokenAccessor } from './services/api/externalResources';
+import { setProvisioningTokenAccessor } from './services/api/provisioning';
+import { setSpecsTokenAccessor } from './services/api/specs';
+import { setAccessRequestsTokenAccessor } from './services/api/accessRequests';
 import { useBillingOrg } from './hooks/useBillingOrg';
 import { organizationOverviewPath } from './lib/paths';
 import { resolveOuHandle } from './utils/orgClaims';
@@ -81,6 +86,10 @@ export function App() {
     setOrgAnthropicTokenAccessor(getAccessToken);
     setOrgIDPTokenAccessor(getAccessToken);
     setOrgSkillsTokenAccessor(getAccessToken);
+    setExternalResourcesTokenAccessor(getAccessToken);
+    setProvisioningTokenAccessor(getAccessToken);
+    setSpecsTokenAccessor(getAccessToken);
+    setAccessRequestsTokenAccessor(getAccessToken);
   }, [getAccessToken]);
 
   // Triggers server-side org/subscription provisioning so downstream entitlement checks pass.
@@ -122,6 +131,7 @@ export function App() {
           <Route path="anthropic" element={<OrgAnthropicSettings />} />
           <Route path="idp" element={<OrgIDPSettings />} />
           <Route path="skills" element={<OrgSkillsSettings />} />
+          <Route path="external-resources" element={<ExternalResourcesSettings />} />
         </Route>
 
         <Route path="/organizations/:orgId/projects/:projectId" element={<ContextForwardingOutlet />}>

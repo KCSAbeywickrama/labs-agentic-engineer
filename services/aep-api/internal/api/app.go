@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/internal/config"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
@@ -91,6 +92,16 @@ type AppParams struct {
 	DB                   *gorm.DB
 	CredService          *orgcreds.CredentialService
 	AnthropicCredService *orgcreds.AnthropicCredentialService
+
+	// MCP discovery ports (dependencies feature). The composition root wires
+	// them concretely (external-resource repository / org endpoint catalog /
+	// platform resource-type catalog); the mounted handler nil-guards each —
+	// a nil MCPExternalResources 503s the surface, a nil lister degrades its
+	// one tool to an empty result. The mount itself (surfaces.go) only needs
+	// HumaDeps.TaskTokens, which verifies the caller's BFF-signed MCP token.
+	MCPExternalResources dependencies.ExternalResourceReader
+	MCPOrgEndpoints      dependencies.OrgEndpointLister
+	MCPResourceTypes     dependencies.ResourceTypeLister
 }
 
 // NewHandler assembles the full HTTP handler with middleware and routes.

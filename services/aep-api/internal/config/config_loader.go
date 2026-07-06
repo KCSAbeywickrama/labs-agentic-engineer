@@ -104,7 +104,8 @@ func Load() (Config, error) {
 			DiskHighPct:    r.readOptionalInt("AEP_WORKSPACE_DISK_HIGH_PCT", 85),
 			DiskLowPct:     r.readOptionalInt("AEP_WORKSPACE_DISK_LOW_PCT", 70),
 		},
-		AgentPlatformURL: r.readOptionalString("AGENT_PLATFORM_URL", ""),
+		AgentPlatformURL:   r.readOptionalString("AGENT_PLATFORM_URL", ""),
+		AEPInternalBaseURL: r.readOptionalString("AEP_API_INTERNAL_BASE_URL", ""),
 		ServiceAuth: ServiceAuthConfig{
 			TokenURL:     r.readOptionalString("SERVICE_AUTH_TOKEN_URL", ""),
 			ClientID:     r.readOptionalString("SERVICE_AUTH_CLIENT_ID", ""),

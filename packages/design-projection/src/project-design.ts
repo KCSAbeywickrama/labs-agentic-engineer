@@ -51,16 +51,34 @@ function frontmatter(raw: string): Record<string, unknown> {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-function connections(v: unknown): ProjectDesignConnection[] {
+// How each unified dependency `kind` renders as a cell-diagram edge. The
+// authored `dependencies[]` (unified, kind-discriminated — the successor to the
+// legacy `connections[]`) drives the diagram:
+//   - component / org-service are on-platform HTTP hops (a sibling component, or
+//     another project's service);
+//   - external is an off-platform HTTP call (SaaS / legacy);
+//   - platform-resource is an on-platform datastore/backing-service.
+// The downstream cell-diagram split (in-project vs east/external) keys off the
+// edge target name + onPlatform, so this table is the only kind-awareness needed.
+const DEP_KIND_EDGE: Record<string, { type: string; onPlatform: boolean }> = {
+  component: { type: "http", onPlatform: true },
+  "org-service": { type: "http", onPlatform: true },
+  external: { type: "http", onPlatform: false },
+  "platform-resource": { type: "datastore", onPlatform: true },
+};
+
+function dependencyEdges(v: unknown): ProjectDesignConnection[] {
   if (!Array.isArray(v)) return [];
   const out: ProjectDesignConnection[] = [];
-  for (const c of v) {
-    if (!c || typeof c !== "object") continue;
-    const rec = c as Record<string, unknown>;
-    const to = str(rec.to);
-    if (!to) continue;
-    const type = str(rec.type) ?? "http";
-    out.push({ id: `${type}://${to}`, type, onPlatform: rec.onPlatform !== false });
+  for (const d of v) {
+    if (!d || typeof d !== "object") continue;
+    const rec = d as Record<string, unknown>;
+    const name = str(rec.name);
+    const kind = str(rec.kind);
+    if (!name || !kind) continue;
+    const edge = DEP_KIND_EDGE[kind];
+    if (!edge) continue; // unknown kind: not a diagram edge (validated elsewhere)
+    out.push({ id: `${edge.type}://${name}`, type: edge.type, onPlatform: edge.onPlatform });
   }
   return out;
 }
@@ -119,7 +137,7 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
           },
         }
       : {}),
-    connections: connections(fm.connections),
+    connections: dependencyEdges(fm.dependencies),
     artifacts,
   };
 }

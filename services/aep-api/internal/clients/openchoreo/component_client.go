@@ -85,7 +85,7 @@ type ComponentClient interface {
 	// with the supplied slice. Passing an empty slice clears traits.
 	// Returns ErrComponentNotFound when the Component does not exist (the
 	// caller decides whether to recreate or no-op). Used by trait_sync.go
-	// when a user toggles `exposesAPI.auth` on `design.md` after first deploy.
+	// when a user toggles `exposesAPI.auth` on `design.json` after first deploy.
 	UpdateComponentTraits(ctx context.Context, orgName, projectName, componentName string, traits []models.ComponentTrait) error
 
 	// UpdateComponentTraitEnvironmentConfigs writes per-environment trait

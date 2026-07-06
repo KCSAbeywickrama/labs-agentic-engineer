@@ -134,7 +134,7 @@ const CD_VALID = JSON.stringify({
   appPath: "expense-api",
   entrypoint: "deployment/service",
   exposure: "internet",
-  connections: [{ to: "postgres", type: "datastore" }],
+  dependencies: [{ kind: "platform-resource", name: "postgres", resourceType: "postgres" }],
   description: "Owns claims and approvals.",
 });
 
