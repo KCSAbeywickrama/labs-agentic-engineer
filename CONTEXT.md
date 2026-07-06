@@ -101,3 +101,9 @@ plus existing open Tasks as read-only context, and planning behavior steered by
 a Skill. Its output stream of task tool calls is executed by the platform as it
 arrives.
 _Avoid_: task generation stream (the legacy two-phase plan/detail orchestration).
+
+**Playground token**:
+A short-lived MCP token minted for a human driving the playground locally,
+via an endpoint that exists only when explicitly enabled in a local deployment.
+Scoped to one org; minted fresh per turn. Never part of the production
+authentication story (which remains an open decision).

@@ -60,6 +60,13 @@ off the stream. The plan tool contract (inputs, results, error codes, the
 - Keep-alives every `AGENT_KEEPALIVE_MS` (default 15s) while a turn streams.
 - The evals/playground read `ANTHROPIC_API_KEY` themselves and send it (plus an
   HS256 M2M token) as headers, like any caller.
+- **Playground MCP discovery (local dev)**: the caller (not the service) pushes an
+  `mcp: { url, token }` bundle on the turn. Set `AEP_MCP_URL` to a local aep-api's
+  `/internal/v1/mcp` to let the playground agent call the dependency-discovery
+  tools; with `AEP_MCP_TOKEN` empty it auto-mints a fresh token per turn via that
+  aep-api's `playground-token` endpoint (needs `PLAYGROUND_TOKEN_ENABLED=true`,
+  which the repo compose sets). `AEP_MCP_ORG` selects the org (defaults `default`);
+  leave `AEP_MCP_URL` unset to run without discovery. See `.env.example`.
 
 ## Test
 

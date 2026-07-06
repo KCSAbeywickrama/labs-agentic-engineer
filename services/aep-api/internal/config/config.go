@@ -49,6 +49,15 @@ type Config struct {
 	// The destructive BFF migrations refuse to run unless tier=dev.
 	DeploymentTier string
 
+	// PlaygroundTokenEnabled gates POST /internal/v1/mcp/playground-token — a
+	// caller-auth-free endpoint that mints a short-lived MCP token so a human
+	// can drive the services/agents playground CLI against a live aep-api
+	// without a caller-auth story (an open decision this endpoint deliberately
+	// does not prejudge). Defaults false, so the route is ABSENT (404, not
+	// 403) everywhere except deployments/docker-compose.yml, which opts in for
+	// local dev. Read from PLAYGROUND_TOKEN_ENABLED.
+	PlaygroundTokenEnabled bool
+
 	// TenantGateMode controls the central per-route tenant gate (§6.1b).
 	// ENFORCE BY DEFAULT (zero-config): "enforce" 404s a path-vs-JWT org
 	// mismatch (closes IDOR-1..5). Set TENANT_GATE_MODE=log to downgrade to

@@ -37,6 +37,11 @@ import (
 //	               (jwt → orgensure)    (org from the verified token, never input)  → api/openapi.yaml
 //	internal S2S   /internal/v1/executions/  BFF Task-JWT or publisher-cc          internal.go · auth.ExecutionScopedInput
 //	               (per-op resolver)         (dual-token verify + INT-6 fence)      → api/internal-openapi.yaml (non-public)
+//	internal MCP   /internal/v1/mcp     BFF-signed JWT, aud aep-api-mcp            dependencies/mcp_server.go ·
+//	               (POST, JSON-RPC)     (org from ocOrgId claim, never input)       auth.AgentsScopedVerifier (no spec — JSON-RPC)
+//	               /mcp/playground-token  NONE — flag-gated only                   dependencies/playground_token.go
+//	               (POST, local dev)      (PLAYGROUND_TOKEN_ENABLED, off by         (mounted only when the flag is true —
+//	                                      default; docker-compose sets it)          404 by absence otherwise)
 //	external       /api/v1/webhooks,    per-route bespoke: GitHub HMAC /           webhook_routes.go · org_github_routes.go
 //	               .../github/connect    signed connect-state (org from payload)    (no generated spec; paths kept — Q4)
 //	dev/test       /_dev/v1             none — registration-gated to dev tier      dev.go · RegisterAllDev
@@ -137,6 +142,19 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 		mcpHandler := dependencies.NewMCPHandler(
 			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes)
 		mux.Handle("POST "+internalV1+"/mcp", mcpVerifier.Middleware(mcpHandler))
+
+		// ── playground-token mint (POST /internal/v1/mcp/playground-token) ────
+		// LOCAL DEV ONLY, and only when explicitly opted in via
+		// PlaygroundTokenEnabled (docker-compose sets it; nothing else does).
+		// Lets a developer drive the services/agents playground CLI against a
+		// live aep-api without a caller-auth story for this route — production
+		// agent→BFF authentication remains an open decision this endpoint
+		// deliberately does not prejudge. Disabled ⇒ not mounted at all (404 by
+		// absence, matching the MCP mount's own conditional-mount posture).
+		if params.Config.PlaygroundTokenEnabled {
+			mux.Handle("POST "+internalV1+"/mcp/playground-token",
+				dependencies.NewPlaygroundTokenHandler(params.HumaDeps.TaskTokens))
+		}
 	}
 
 	// ── /api/ user-JWT wrapper ───────────────────────────────────────────────

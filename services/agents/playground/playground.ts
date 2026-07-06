@@ -56,6 +56,7 @@ import { EvalWorkspace, EVAL_ORG, evalConversationId } from "../evals/workspace.
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
+import { createMcpResolver, readMcpEnv, type McpResolver } from "./mcp.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // materialized into the fixture `_skills` snapshot the in-process server reads (§12).
@@ -72,6 +73,12 @@ interface ChatCtx {
   ws: EvalWorkspace;
   /** Per-process turn counter (turnId attribution only). */
   turnIndex: number;
+  /**
+   * Resolves the MCP discovery bundle — one instance per playground session
+   * (shared "warn once" state + env snapshot). `resolve()` mints fresh every
+   * call when auto-minting (see mcp.ts); resolves null when AEP_MCP_URL is unset.
+   */
+  mcpResolver: McpResolver;
 }
 
 const NEW = "\0new";
@@ -109,9 +116,13 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   // immutable snapshot on the mount and the body carries only the reference;
   // the server applies the turn filter when it reads the snapshot back.
   const conversationId = evalConversationId(ctx.thread);
+  // MCP discovery bundle, resolved fresh for THIS turn — never cached (a mint's
+  // ~5min TTL is shorter than a chat session; see mcp.ts). null when disabled.
+  const mcp = await ctx.mcpResolver.resolve();
   const body: TurnRequest = {
     instruction,
     workspace: ctx.ws.workspaceRef(conversationId, ctx.turnIndex++, before, ctx.skills),
+    ...(mcp ? { mcp } : {}),
   };
 
   const toolCalls: StreamPart[] = [];
@@ -218,8 +229,20 @@ async function main(): Promise<void> {
   // X-Org-Id is load-bearing on workspace turns (the §12 fence).
   const headers = await evalTurnHeaders(apiKey, EVAL_ORG);
 
+  // MCP discovery: one resolver for the whole session (shared "warn once"
+  // state). Built from env, never eagerly minted — resolve() runs fresh per
+  // turn (see mcp.ts + runTurn), so a session that sends no turn never hits the
+  // network for it.
+  const mcpEnv = readMcpEnv();
+  const mcpResolver = createMcpResolver(mcpEnv, (msg) => clack.log.warn(msg));
+
   clack.intro("AEP spec-agent playground");
   if (skills.length > 0) clack.log.info(`skills: ${skills.map((s) => s.name).join(", ")}`);
+  if (mcpEnv.url) {
+    clack.log.info(
+      `mcp discovery: ${mcpEnv.url} (${mcpEnv.token ? "static token" : "auto-mint per turn"})`,
+    );
+  }
   if (dryRun) clack.log.warn("dry-run: changes are shown but NOT written to disk");
 
   try {
@@ -236,7 +259,7 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun, headers, ws, turnIndex: 0 });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, headers, ws, turnIndex: 0, mcpResolver });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }

@@ -74,6 +74,12 @@ services:
       # (docs/design/shared-volume-clone-architecture.md). aep-api is the
       # SOLE writer; the agents service mounts the same volume read-only.
       AEP_WORKSPACE_ROOT: "/workspaces"
+      # Gates POST /internal/v1/mcp/playground-token — mints a short-lived MCP
+      # token with NO caller auth so services/agents' playground CLI can drive
+      # dependency discovery against this aep-api locally (AEP_MCP_URL et al.
+      # in services/agents/.env.example). Local-only by design — never set in
+      # helm release bindings.
+      PLAYGROUND_TOKEN_ENABLED: "true"
 
       # ── OpenChoreo platform API (reached via k3d loadbalancer + Host header)
       PLATFORM_API_SERVICE_BASE_URL: "${PLATFORM_API_SERVICE_BASE_URL}"
