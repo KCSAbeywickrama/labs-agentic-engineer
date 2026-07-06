@@ -113,6 +113,9 @@ func RegisterDesign(api huma.API, svc DesignService) {
 			if errors.Is(err, ErrSpecNotApproved) {
 				return nil, huma.Error409Conflict("save requirements first — no v<N> baseline tag")
 			}
+			if errors.Is(err, ErrUnresolvedDependency) {
+				return nil, huma.Error409Conflict(err.Error())
+			}
 			if de := asDesignValidationError(err); de != nil {
 				return nil, de
 			}

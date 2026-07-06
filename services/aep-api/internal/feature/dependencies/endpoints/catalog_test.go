@@ -23,11 +23,14 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 )
 
-// NOTE (dependency-management migration): the structural compile-time check that
-// *Catalog satisfies artifacts.OrgServiceResolver is re-added in Phase 5, when the
-// read-time org-service resolver (artifacts.OrgServiceResolver) is introduced.
+// Structural compile-time check (dependency-management Phase 5): *Catalog is the
+// concrete provider the composition root wires as the read-time org-service
+// resolver (artifacts.SetOrgServiceResolver), so it must satisfy the artifacts
+// consumer-side port.
+var _ artifacts.OrgServiceResolver = (*Catalog)(nil)
 
 func sampleEndpoints() []openchoreo.WorkloadEndpointInfo {
 	return []openchoreo.WorkloadEndpointInfo{

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -39,10 +40,42 @@ import (
 // never from a shipped static table.
 type ArtifactStore struct {
 	artifactSvc ArtifactService
+	// orgServices resolves `org-service` dependencies against the live org
+	// endpoint catalog at design-read time (see resolveOrgServices). Nil until
+	// the composition root wires a concrete provider via SetOrgServiceResolver
+	// — until then, org-service dependencies keep whatever Status/Reason they
+	// already carry (always empty: Status/Reason are read-time computed and
+	// never persisted to design.json).
+	orgServices OrgServiceResolver
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
 	return &ArtifactStore{artifactSvc: artifactSvc}
+}
+
+// OrgServiceResolver answers whether an `org-service` dependency name is
+// published namespace-visible in the org — the dynamic org endpoint catalog.
+// Declared here (consumer side) so the artifacts package stays free of an
+// OC-client / dependencies-feature dependency; the concrete provider (the
+// dependencies feature's *endpoints.Catalog) is wired in by the composition
+// root via SetOrgServiceResolver.
+type OrgServiceResolver interface {
+	IsNamespaceVisible(ctx context.Context, orgHandle, name string) (bool, error)
+	// ExistsAnyVisibility reports whether a component named `name` publishes
+	// ANY endpoint in the org catalog regardless of visibility — used to refine
+	// an org-service dependency into `blocked`/`access-required` (exists,
+	// project-only) vs `unresolved`/`not-found` (no such component).
+	ExistsAnyVisibility(ctx context.Context, orgHandle, name string) (bool, error)
+}
+
+// SetOrgServiceResolver wires the dynamic org endpoint catalog used to mark
+// `org-service` dependencies resolved/unresolved at design-read time. A nil
+// store is a documented no-op (mirrors the other Set* setters).
+func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
+	if s == nil {
+		return
+	}
+	s.orgServices = r
 }
 
 // ---- Requirements (multi-file Markdown directory) -----------------------
@@ -108,7 +141,7 @@ func (s *ArtifactStore) ReadDesign(ctx context.Context, orgID, projectID string)
 	if err != nil {
 		return nil, err
 	}
-	return s.AssembleDesignFrom(files)
+	return s.AssembleDesignFrom(ctx, orgID, files)
 }
 
 // ReadDesignAt is ReadDesign pinned to an exact commit — the publish flow's
@@ -119,13 +152,19 @@ func (s *ArtifactStore) ReadDesignAt(ctx context.Context, orgID, projectID, comm
 	if err != nil {
 		return nil, err
 	}
-	return s.AssembleDesignFrom(files)
+	return s.AssembleDesignFrom(ctx, orgID, files)
 }
 
 // AssembleDesignFrom assembles the flat DesignFile from an already-listed
 // design file map — the single-read path for callers that also need the raw
 // map (no second HEAD walk). Returns (nil, nil) when no design root exists.
-func (s *ArtifactStore) AssembleDesignFrom(files map[string]string) (*DesignFile, error) {
+//
+// It layers read-time dependency resolution on top of the raw assemble:
+// each `org-service` dependency is marked resolved/blocked/unresolved against
+// the live org endpoint catalog (resolveOrgServices). orgID is the OC
+// namespace the org's Workloads live in. Fail-open: a resolver error leaves
+// the affected dependencies as-authored (empty Status/Reason).
+func (s *ArtifactStore) AssembleDesignFrom(ctx context.Context, orgID string, files map[string]string) (*DesignFile, error) {
 	if len(files) == 0 || strings.TrimSpace(files[DesignRootFile]) == "" {
 		return nil, nil
 	}
@@ -133,10 +172,65 @@ func (s *ArtifactStore) AssembleDesignFrom(files map[string]string) (*DesignFile
 	if err != nil {
 		return nil, err
 	}
-	// Read-time dependency resolution (org-service 4-state, external needs-spec)
-	// is layered on by the design service in Phase 5 — the store returns the
-	// as-authored dependencies here.
+	s.resolveOrgServices(ctx, orgID, design)
 	return design, nil
+}
+
+// resolveOrgServices marks each `org-service` dependency with a 4-state status
+// at read time: `resolved` (namespace-visible), `blocked` +
+// `access-required` (exists but project-only — consumer must request access),
+// or `unresolved` + `not-found` (absent from the catalog). orgID is the OC
+// namespace (locally, the org handle).
+//
+// A no-op until the composition root wires a resolver via
+// SetOrgServiceResolver — until then org-service dependencies keep the empty
+// Status/Reason AssembleDesign left them with.
+//
+// Fail-open: a resolver error never fails the design read.
+//   - An IsNamespaceVisible error leaves the dependency's Status/Reason
+//     completely untouched.
+//   - An ExistsAnyVisibility error leaves Status = unresolved (already set
+//     before the refinement call) with an empty Reason.
+func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d *DesignFile) {
+	if s == nil || d == nil || s.orgServices == nil {
+		return
+	}
+	for i := range d.Components {
+		for j := range d.Components[i].Dependencies {
+			dep := &d.Components[i].Dependencies[j]
+			if dep.Kind != models.DependencyKindOrgService {
+				continue
+			}
+			visible, err := s.orgServices.IsNamespaceVisible(ctx, orgID, dep.Name)
+			if err != nil {
+				slog.WarnContext(ctx, "org-service resolver: namespace-visible check failed",
+					"org", orgID, "dependency", dep.Name, "error", err)
+				continue
+			}
+			if visible {
+				dep.Status = models.DependencyStatusResolved
+				dep.Reason = ""
+				continue
+			}
+			// Not namespace-visible: refine into `blocked` (project-only —
+			// requestable via access request) vs `unresolved` (absent — not in
+			// the catalog at all).
+			dep.Status = models.DependencyStatusUnresolved
+			dep.Reason = ""
+			exists, err := s.orgServices.ExistsAnyVisibility(ctx, orgID, dep.Name)
+			if err != nil {
+				slog.WarnContext(ctx, "org-service resolver: exists-any-visibility check failed",
+					"org", orgID, "dependency", dep.Name, "error", err)
+				continue
+			}
+			if exists {
+				dep.Status = models.DependencyStatusBlocked
+				dep.Reason = models.DependencyReasonAccessRequired
+			} else {
+				dep.Reason = models.DependencyReasonNotFound
+			}
+		}
+	}
 }
 
 // ---- Helpers ------------------------------------------------------------

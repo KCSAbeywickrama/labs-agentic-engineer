@@ -17,6 +17,8 @@
 package artifacts
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +75,34 @@ paths:
     get: { responses: { "200": { description: ok } } }
     post: { responses: { "201": { description: created } } }
 `
+
+// TestStoreConsumedSpec_ValidatesAndReturnsPath asserts the committed-truth
+// StoreConsumedSpec: a valid spec validates + normalizes and returns the
+// component-relative path (the commit itself is deferred to Phase 6).
+func TestStoreConsumedSpec_ValidatesAndReturnsPath(t *testing.T) {
+	store := NewArtifactStore(nil) // no artifact service is touched — no commit path yet
+	got, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte(sampleSpec))
+	if err != nil {
+		t.Fatalf("StoreConsumedSpec: unexpected error: %v", err)
+	}
+	if want := ConsumedSpecPath("stripe"); got != want {
+		t.Fatalf("specPath = %q, want %q", got, want)
+	}
+}
+
+// TestStoreConsumedSpec_RejectsBadInput asserts the validation-class errors are
+// %w-wrapped with ErrInvalidSpecContent (client/400): depName path traversal and
+// a non-OpenAPI document.
+func TestStoreConsumedSpec_RejectsBadInput(t *testing.T) {
+	store := NewArtifactStore(nil)
+
+	if _, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "../escape", []byte(sampleSpec)); !errors.Is(err, ErrInvalidSpecContent) {
+		t.Fatalf("path-traversal depName: want ErrInvalidSpecContent, got %v", err)
+	}
+	if _, err := store.StoreConsumedSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte("foo: bar")); !errors.Is(err, ErrInvalidSpecContent) {
+		t.Fatalf("invalid OpenAPI: want ErrInvalidSpecContent, got %v", err)
+	}
+}
 
 func TestValidateOpenAPICountsOperations(t *testing.T) {
 	n, err := ValidateOpenAPI([]byte(sampleSpec))

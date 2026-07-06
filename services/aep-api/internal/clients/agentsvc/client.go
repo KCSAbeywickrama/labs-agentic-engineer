@@ -80,6 +80,22 @@ type TurnRequest struct {
 	Workspace              WorkspaceRef `json:"workspace"`
 	FilesChangedExternally bool         `json:"filesChangedExternally,omitempty"`
 	Toolset                string       `json:"toolset,omitempty"`
+	// MCP, when set, is the BFF-minted discovery endpoint + short-lived bearer
+	// for this turn (dependency-management migration Phase 5). Omitted → the
+	// agents service registers no MCP discovery tools (byte-identical to a turn
+	// without it). The wire shape is pinned by @aep/agent-stream's McpConfig
+	// (packages/agent-stream/src/contracts/sse-events.ts): `mcp: {url, token}`.
+	MCP *MCPBlock `json:"mcp,omitempty"`
+}
+
+// MCPBlock is the caller-supplied MCP discovery config for a turn. URL is the
+// BFF's org-bound MCP JSON-RPC endpoint (aep-api's /internal/v1/mcp); Token is
+// the short-lived BFF-signed bearer (aud aep-api-mcp) the agents service
+// presents when it calls back. JSON field names match @aep/agent-stream's
+// McpConfig exactly.
+type MCPBlock struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
 }
 
 // UpstreamError is a non-2xx pre-stream response from the agents service. The

@@ -185,7 +185,19 @@ type GenAIService interface {
 	Rehydrate(ctx context.Context, orgID, projectID, conversationID string) (json.RawMessage, error)
 }
 
-// ServiceDeps wires the genai service (all required).
+// MCPTokenMinter mints a short-lived BFF-signed identity token (aud
+// aep-api-mcp) carrying orgID, for the agents service to call back into the
+// BFF's internal MCP discovery surface on a generation turn.
+// *auth.TaskTokenManager satisfies it via IssueMCPToken; defined here (consumer
+// side) so genai needn't import the platform/auth package.
+type MCPTokenMinter interface {
+	IssueMCPToken(orgID string) (string, error)
+}
+
+// ServiceDeps wires the genai service. Repos..SkillsRepo are required; MCPTokens
+// + MCPBaseURL are optional (dependency-management Phase 5) — when both are set,
+// design-generation turns carry a BFF-minted `mcp: {url, token}` block so the
+// architect can discover org endpoints / external resources / resource types.
 type ServiceDeps struct {
 	Repos      RepoResolver
 	Git        GitReader
@@ -195,6 +207,8 @@ type ServiceDeps struct {
 	Broker     *TurnBroker
 	Snapshots  gitrepo.SnapshotProvider
 	SkillsRepo SkillsRepoResolver
+	MCPTokens  MCPTokenMinter
+	MCPBaseURL string
 }
 
 type service struct {
@@ -206,6 +220,8 @@ type service struct {
 	broker     *TurnBroker
 	snapshots  gitrepo.SnapshotProvider
 	skillsRepo SkillsRepoResolver
+	mcpTokens  MCPTokenMinter
+	mcpBaseURL string
 }
 
 // NewService wires the genai service.
@@ -219,6 +235,8 @@ func NewService(d ServiceDeps) GenAIService {
 		broker:     d.Broker,
 		snapshots:  d.Snapshots,
 		skillsRepo: d.SkillsRepo,
+		mcpTokens:  d.MCPTokens,
+		mcpBaseURL: d.MCPBaseURL,
 	}
 }
 

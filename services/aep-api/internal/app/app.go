@@ -427,7 +427,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	}
 	turnRepo := genai.NewTurnRepository(db)
 	turnBroker := genai.NewTurnBroker()
-	genaiSvc := genai.NewService(genai.ServiceDeps{
+	genaiDeps := genai.ServiceDeps{
 		Repos:      repoService,
 		Git:        gitOpsService,
 		Keys:       anthropicKeyForGenAI,
@@ -436,7 +436,18 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
-	})
+	}
+	// MCP discovery on design-generation turns (dependency-management Phase 5):
+	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
+	// service can call back into /internal/v1/mcp. Wired only when the token
+	// manager exists (a nil *TaskTokenManager would satisfy the interface but
+	// panic on use) AND the internal base URL is configured; otherwise the
+	// additive `mcp` field is simply omitted.
+	if taskTokens != nil && cfg.AEPInternalBaseURL != "" {
+		genaiDeps.MCPTokens = taskTokens
+		genaiDeps.MCPBaseURL = cfg.AEPInternalBaseURL
+	}
+	genaiSvc := genai.NewService(genaiDeps)
 
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
@@ -733,9 +744,24 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// published endpoints + platform resource types (OC Resource-model client).
 	// Provisioning (value/param collection + issue funnel) stays unwired until Phase 6.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
-	params.MCPExternalResources = repositories.NewExternalResourceRepository(db)
-	params.MCPOrgEndpoints = endpoints.NewCatalog(resourceClient)
+	orgEndpointCatalog := endpoints.NewCatalog(resourceClient)
+	externalResourceRepo := repositories.NewExternalResourceRepository(db)
+	params.MCPExternalResources = externalResourceRepo
+	params.MCPOrgEndpoints = orgEndpointCatalog
 	params.MCPResourceTypes = resources.NewResourceTypeCatalog(resourceClient)
+
+	// Read-time org-service dependency resolution (dependency-management Phase 5):
+	// the same endpoint catalog that backs the MCP list_org_endpoints tool marks
+	// each design's `org-service` dependencies resolved/blocked/unresolved against
+	// the live namespace-visible catalog. Consumer-side wiring — artifacts never
+	// imports the dependencies feature (the *Catalog satisfies
+	// artifacts.OrgServiceResolver structurally).
+	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
+
+	// Register each tagged design's `external` dependencies into the org's
+	// external-resource catalog on save (best-effort). Consumer-side port —
+	// design never imports repositories concretely.
+	designService.SetExternalResourceRegistry(externalResourceRepo)
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 

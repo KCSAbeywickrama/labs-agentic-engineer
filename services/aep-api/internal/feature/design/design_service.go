@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
@@ -31,6 +32,17 @@ import (
 // controller) when a design is saved before the requirements spec has been
 // approved (tagged). Owned by the design feature — it is the only consumer.
 var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generating a design")
+
+// ErrUnresolvedDependency is the design-domain sentinel surfaced (as 409 by the
+// controller) when the tag-cut (SaveAndProceed) is attempted while a
+// dependency in the design being tagged is still in a non-actionable state:
+// an `org-service` that is not namespace-visible (unresolved/blocked/ambiguous
+// against the live org catalog — see artifacts.resolveOrgServices), or an
+// `external` dependency that declares needsSpec but has no collected spec yet.
+// external-values (config-only) and platform-resource dependencies are NOT
+// proceed-gated here — they are dispatch-gated in Phase 6. The tag-cut is the
+// only path that checks this; committed-truth has no autosave to gate.
+var ErrUnresolvedDependency = errors.New("design has unresolved dependencies — resolve them before saving")
 
 // AssembleDesignFromFiles wraps the artifact-store assembler and rejects an
 // empty file map. Used to assemble a tagged design file map read out of band.
@@ -69,9 +81,19 @@ type DesignService interface {
 }
 
 type designService struct {
-	store       *artifacts.ArtifactStore
-	artifactSvc artifacts.ArtifactService
-	taskSvc     taskReconciler // for SaveAndProceed reconciliation; may be nil in tests
+	store               *artifacts.ArtifactStore
+	artifactSvc         artifacts.ArtifactService
+	taskSvc             taskReconciler            // for SaveAndProceed reconciliation; may be nil in tests
+	externalResourceReg externalResourceRegistrar // for SaveAndProceed external-resource registration; may be nil
+}
+
+// externalResourceRegistrar is design_service's narrow consumer port for the
+// dependency-management external-resource catalog. *repositories.ExternalResourceRepository
+// satisfies it; defined here (consumer side) so design needn't import the
+// repositories package concretely. Wired via SetExternalResourceRegistry at the
+// composition root.
+type externalResourceRegistrar interface {
+	Upsert(ctx context.Context, orgID, name, description string, schema []models.ConfigKey) (*models.ExternalResource, error)
 }
 
 // taskReconciler is design_service's narrow consumer port for the task
@@ -97,6 +119,40 @@ func (s *designService) SetTaskService(taskSvc taskReconciler) {
 	s.taskSvc = taskSvc
 }
 
+// SetExternalResourceRegistry wires the external-resource catalog so `external`
+// dependencies are registered (best-effort) whenever a design is tagged. A nil
+// registry is a documented no-op (mirrors SetTaskService).
+func (s *designService) SetExternalResourceRegistry(reg externalResourceRegistrar) {
+	s.externalResourceReg = reg
+}
+
+// registerExternalResources best-effort upserts every distinct `external`
+// dependency in the tagged design into the org's external-resource catalog (the
+// reusable definition layer consumers request access to later). Non-fatal: a
+// registry hiccup must never fail a design save — the value/wiring provisioning
+// happens later, independently, when a consumer requests access (Phase 6).
+func (s *designService) registerExternalResources(ctx context.Context, orgID string, design *artifacts.DesignFile) {
+	if s.externalResourceReg == nil || design == nil {
+		return
+	}
+	seen := map[string]struct{}{}
+	for _, c := range design.Components {
+		for _, dep := range c.Dependencies {
+			if dep.Kind != models.DependencyKindExternal {
+				continue
+			}
+			if _, ok := seen[dep.Name]; ok {
+				continue
+			}
+			seen[dep.Name] = struct{}{}
+			if _, err := s.externalResourceReg.Upsert(ctx, orgID, dep.Name, dep.Description, dep.Config); err != nil {
+				slog.WarnContext(ctx, "failed to register external resource",
+					"org", orgID, "resource", dep.Name, "error", err)
+			}
+		}
+	}
+}
+
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {
 	files, err := s.store.ListDesignFiles(ctx, orgID, projectID)
 	if err != nil {
@@ -113,7 +169,7 @@ func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) 
 // (assembly and the has-unsaved-changes compare reuse the same map). Returns
 // (nil, nil) when no design exists yet.
 func (s *designService) designFromFiles(ctx context.Context, orgID, projectID string, files map[string]string) (*models.Design, error) {
-	designFile, err := s.store.AssembleDesignFrom(files)
+	designFile, err := s.store.AssembleDesignFrom(ctx, orgID, files)
 	if err != nil {
 		return nil, fmt.Errorf("read design: %w", err)
 	}
@@ -287,6 +343,27 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		return nil, artifacts.ErrDesignNotFound
 	}
 
+	// TODO(Phase 6): auto-fetch-on-save. Before the gate, each `external`
+	// dependency the architect flagged with a specUrl hint but no specPath yet
+	// should be fetched (artifacts.FetchSpecFromURL — SSRF-guarded), stored via
+	// StoreConsumedSpec, and have its specPath recorded so the needs-spec gate
+	// below clears. This is blocked on StoreConsumedSpec gaining a committed-truth
+	// commit surface (it currently validates+normalizes only); wire it together
+	// with that commit path in Phase 6. A failed fetch stays non-fatal (the gate
+	// blocks the save until the spec is supplied).
+
+	// Proceed-gate (dependency-management Phase 5): block the tag-cut when a
+	// dependency is still non-actionable. The design was just read through
+	// ReadDesign/ReadDesignAt → AssembleDesignFrom → resolveOrgServices, so
+	// org-service statuses are computed against the live catalog. Only the
+	// tag-cut gates — committed-truth has no autosave path.
+	if compName, depName, status, blocked := firstUnresolvedDependency(designFile.Components); blocked {
+		slog.InfoContext(ctx, "design save: proceed-gate blocked — unresolved dependency",
+			"project", projectID, "component", compName, "dependency", depName, "status", status)
+		return nil, fmt.Errorf("%w: component %q dep %q (status: %s)",
+			ErrUnresolvedDependency, compName, depName, status)
+	}
+
 	res, err := s.artifactSvc.SaveDesign(ctx, orgID, projectID, artifacts.SaveRequest{
 		Message:   "Update design",
 		CommitSHA: commitSHA,
@@ -309,6 +386,10 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 	slog.InfoContext(ctx, "design save completed",
 		"project", projectID, "tag", res.Tag, "status", res.Status)
 
+	// Register every distinct `external` dependency in the tagged design into the
+	// org's external-resource catalog (best-effort; never fails the save).
+	s.registerExternalResources(ctx, orgID, designFile)
+
 	if s.taskSvc != nil {
 		if rerr := s.taskSvc.ReconcilePendingForDesignChange(ctx, orgID, projectID); rerr != nil {
 			slog.WarnContext(ctx, "task reconciliation after design save failed", "error", rerr)
@@ -325,6 +406,39 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		Versions:   mapDesignVersions(versions),
 		SourceSpec: fmt.Sprintf("v%d", res.RequirementsVersion),
 	}, nil
+}
+
+// firstUnresolvedDependency returns the first dependency (in component then
+// dependency order) that blocks the proceed tag-cut, plus a short status
+// string for the error message. It gates exactly two conditions and no others:
+//
+//   - an `org-service` dependency that is not namespace-visible — its computed
+//     Status (from artifacts.resolveOrgServices) is unresolved, blocked, or
+//     ambiguous. An empty Status (the resolver was never wired → fail-open)
+//     does NOT block, and `resolved` does not block.
+//   - an `external` dependency that declares needsSpec but has no collected
+//     spec yet (SpecPath empty).
+//
+// external-values (config-only external) and platform-resource dependencies
+// are deliberately NOT gated here — they are dispatch-gated in Phase 6. ok is
+// false when every dependency is actionable (the common case).
+func firstUnresolvedDependency(components []models.DesignComponent) (componentName, depName, status string, ok bool) {
+	for _, c := range components {
+		for _, dep := range c.Dependencies {
+			switch dep.Kind {
+			case models.DependencyKindOrgService:
+				switch dep.Status {
+				case models.DependencyStatusUnresolved, models.DependencyStatusBlocked, models.DependencyStatusAmbiguous:
+					return c.Name, dep.Name, dep.Status, true
+				}
+			case models.DependencyKindExternal:
+				if dep.NeedsSpec && strings.TrimSpace(dep.SpecPath) == "" {
+					return c.Name, dep.Name, "needs-spec", true
+				}
+			}
+		}
+	}
+	return "", "", "", false
 }
 
 func (s *designService) DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error) {

@@ -19,8 +19,11 @@
 // Surfaces three entry points:
 //   - ValidateOpenAPI: parses and counts HTTP operations in an OpenAPI 3.x doc.
 //   - FetchSpecFromURL: SSRF-guarded HTTPS GET for user-supplied spec URLs.
-//   - (*ArtifactStore).StoreConsumedSpec: validate + normalize + write the spec
-//     into the consumer component's dependencies/ directory (working-tree draft).
+//   - (*ArtifactStore).StoreConsumedSpec: validate + normalize a consumed spec
+//     and return the component-relative path it will live at. In the
+//     committed-truth model this store has no single-file commit surface
+//     (SaveDesign only reads + tags; all writes land via the Files API), so the
+//     commit is deferred — see the TODO(Phase 6) in StoreConsumedSpec.
 
 package artifacts
 
@@ -29,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -189,7 +193,57 @@ func FetchSpecFromURL(ctx context.Context, rawURL string) ([]byte, error) {
 // ErrInvalidSpecContent is a sentinel wrapped around validation-class errors
 // from StoreConsumedSpec — depName path-traversal rejection and ValidateOpenAPI
 // failures — so that callers can distinguish them from infrastructure errors
-// (NormalizeOpenAPIYAML failures and WriteDesignFile storage failures). A
-// later task's HTTP handler maps this to a 400 without importing artifacts
-// internals.
+// (NormalizeOpenAPIYAML failures). A caller's HTTP handler maps this to a 400
+// without importing artifacts internals.
 var ErrInvalidSpecContent = errors.New("invalid spec content")
+
+// ConsumedSpecPath returns the component-relative path a consumed OpenAPI spec
+// for dependency depName lives at, under the consumer component's directory:
+// `dependencies/<depName>.openapi.yaml`. It is what StoreConsumedSpec returns
+// and what a dependency's specPath records.
+func ConsumedSpecPath(depName string) string {
+	return "dependencies/" + depName + ".openapi.yaml"
+}
+
+// StoreConsumedSpec validates + normalizes rawSpec for the consumer
+// component's `depName` external dependency and returns the component-relative
+// specPath (`dependencies/<depName>.openapi.yaml`).
+//
+// COMMITTED-TRUTH CAVEAT: this store has no single-file commit surface —
+// SaveDesign only reads + tags, and every file write in the rework lands via
+// the Files API (feature/files, atomic apply → main). So StoreConsumedSpec
+// does the validate+normalize half here and returns the path; the actual
+// persistence of the normalized blob at
+// `specs/design/components/<component>/dependencies/<depName>.openapi.yaml`
+// is deferred.
+//
+// TODO(Phase 6): commit the normalized spec through the committed-truth file
+// path (files.Apply / the Workspace mutate surface) and record the specPath on
+// the dependency, so the proceed-gate's external-needs-spec condition clears
+// after a collect. Until then the returned `normalized` blob is discarded.
+//
+// Error classification:
+//   - %w-wraps ErrInvalidSpecContent: depName path-traversal rejection +
+//     ValidateOpenAPI failures (client/400).
+//   - bare errors: NormalizeOpenAPIYAML failures (infra/500).
+func (s *ArtifactStore) StoreConsumedSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte) (string, error) {
+	// Defense-in-depth: reject depName values that could escape the
+	// dependencies/ directory via path traversal — belt-and-suspenders even
+	// though depName is normally architect/catalog-controlled.
+	if strings.Contains(depName, "/") || strings.Contains(depName, `\`) || strings.Contains(depName, "..") {
+		return "", fmt.Errorf("%w: invalid dependency name %q: must not contain path separators or '..'", ErrInvalidSpecContent, depName)
+	}
+	if _, err := ValidateOpenAPI(rawSpec); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidSpecContent, err)
+	}
+	if _, err := NormalizeOpenAPIYAML(string(rawSpec)); err != nil {
+		return "", fmt.Errorf("normalize spec: %w", err)
+	}
+	specPath := ConsumedSpecPath(depName)
+	// TODO(Phase 6): commit the normalized blob at
+	// componentDirPrefix+component+"/"+specPath via the committed-truth write
+	// path and record specPath on the dependency.
+	slog.DebugContext(ctx, "StoreConsumedSpec: validated + normalized (commit deferred to Phase 6)",
+		"org", orgID, "project", projectID, "component", component, "dependency", depName, "specPath", specPath)
+	return specPath, nil
+}

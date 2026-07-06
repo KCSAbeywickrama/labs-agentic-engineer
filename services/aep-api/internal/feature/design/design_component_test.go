@@ -328,3 +328,38 @@ func sortedKeys(m map[string]any) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// TestDesignComponent_Save_UnresolvedDependencyIs409 drives the REAL handler
+// chain: a design whose only component carries an `external` dependency flagged
+// needsSpec but with no collected spec must fail the tag-cut with 409
+// (ErrUnresolvedDependency → Error409Conflict), and SaveDesign must never be
+// reached.
+func TestDesignComponent_Save_UnresolvedDependencyIs409(t *testing.T) {
+	t.Parallel()
+	tree := map[string]string{
+		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview.\n",
+		"components/consumer/design.json": "{\n" +
+			"  \"name\": \"consumer\",\n" +
+			"  \"type\": \"service\",\n" +
+			"  \"language\": \"Go\",\n" +
+			"  \"description\": \"Consumes an external API.\",\n" +
+			"  \"dependencies\": [{\"kind\": \"external\", \"name\": \"stripe\", \"needsSpec\": true}]\n" +
+			"}\n",
+	}
+	fake := &artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return tree, nil
+		},
+		SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+			t.Error("proceed-gate should have blocked before SaveDesign was reached")
+			return nil, errors.New("SaveDesign must not be called")
+		},
+	}
+	resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")
+	if resp.Code != 409 {
+		t.Fatalf("unresolved dependency: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if p := componenttest.DecodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "unresolved") {
+		t.Fatalf("409 detail drifted: %q", p.Detail)
+	}
+}

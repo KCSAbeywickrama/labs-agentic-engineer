@@ -124,6 +124,28 @@ func (s *service) runTurn(ctx context.Context, job turnJob) {
 	s.finishTurn(finishCtx, job, term)
 }
 
+// mcpForTurn mints the per-turn MCP discovery block for a design-generation
+// turn (dependency-management Phase 5): a BFF-signed token (aud aep-api-mcp)
+// carrying the org, plus the BFF's internal MCP endpoint the agents service
+// calls back into. Returns nil (no MCP block) when the minter / base URL are
+// not wired, when the use case is not design generation, or when minting fails
+// — a turn without MCP is byte-identical to today, so this is best-effort.
+func (s *service) mcpForTurn(ctx context.Context, job turnJob) *agentsvc.MCPBlock {
+	if s.mcpTokens == nil || s.mcpBaseURL == "" || job.useCase != useCaseDesignGenerate {
+		return nil
+	}
+	token, err := s.mcpTokens.IssueMCPToken(job.orgID)
+	if err != nil {
+		slog.WarnContext(ctx, "genai: MCP token mint failed — dispatching turn without MCP discovery",
+			"turn", job.turnID, "error", err)
+		return nil
+	}
+	return &agentsvc.MCPBlock{
+		URL:   strings.TrimRight(s.mcpBaseURL, "/") + "/internal/v1/mcp",
+		Token: token,
+	}
+}
+
 // executeTurn produces the turn's terminal state (never panics the goroutine).
 func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 	instruction := job.instruction
@@ -156,6 +178,7 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			SkillsRef:      job.skillsRef,
 		},
 		FilesChangedExternally: filesChangedExternally,
+		MCP:                    s.mcpForTurn(ctx, job),
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)
