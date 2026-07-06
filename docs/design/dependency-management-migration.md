@@ -23,13 +23,15 @@ Update this table as phases complete. The migration is **not complete** until §
 | 1 | **PRE-MERGE** platform bump (OC 1.1.1 + CNPG + Thunder) + full auth-inclusive regression | 🟢 green | ✅ DONE |
 | 2 | The merge (sole known-red checkpoint): keep-ours wholesale + take-theirs + skip-delete + resolve | 🔴 red-expected | ✅ DONE |
 | 3 | Schema & contracts: `connections[]`→`dependencies[]` + additive OpenAPI (+ console-legacy type vocabulary) | 🟡 TS green / Go red | ✅ DONE |
-| 4 | `dependencies/` **agnostic subset** + OC client (task ports **trimmed**, provisioning routes 503) | 🟢 green | ☐ TODO |
+| 4 | `dependencies/` **agnostic subset** + OC client (task ports **trimmed**, provisioning routes **absent**) | 🟢 green | ✅ DONE |
 | 5 | Design-time read-resolution + proceed-gate + main-agent MCP discovery | 🟢 green | ☐ TODO |
 | 6 | **Provisioning-as-issues + funnel gates + declarative wiring** — real `aep:provision` adapters (the crux) | 🟢 green | ☐ TODO |
 | 7 | Frontend: merge console-legacy dep UI + re-point CTAs to `aep:provision` | 🟢 green | ☐ TODO |
 | 8 | **Completion verification & sign-off** | 🟢 green | ☐ TODO |
 
 Status legend: `☐ TODO` → `◐ IN PROGRESS` → `✅ DONE`. A phase is `DONE` only when **both** its work checklist and its verify-against-workspace checklist are fully ticked and its exit criteria hold.
+
+> **⏸️ Planned compaction checkpoint:** compact at the **Phase 5 → Phase 6** boundary (before the crux) — see the **COMPACTION CHECKPOINT** block just above §Phase 6. Fallback: end of Phase 4 if context passes ~75% sooner.
 
 > **Sequencing invariants** (verified by a multi-agent design pass, 2026-07-06 — see §5 for the why):
 > 1. **The platform bump is PRE-merge (Phase 1).** "Prove the platform with zero feature code" is only satisfiable *before* the merge — so any post-merge red is unambiguously feature code, never the OC upgrade.
@@ -403,6 +405,21 @@ Each phase: **Goal → Work checklist → Verify against the PR workspace → Ex
 
 ---
 
+> ## ⏸️ COMPACTION CHECKPOINT — stop here before Phase 6
+>
+> **Reached when:** Phase 5 has exited green (read-resolution + proceed-gate + MCP discovery working, tree green), immediately **before** starting Phase 6.
+> **Why here:** Phase 6 is the crux and the heaviest phase (provisioning-as-issues, funnel gates, declarative wiring — the §3.6 rebuild). Compacting at the 5→6 boundary hands Phase 6 a fresh, near-empty context budget. Both Phase 4 and Phase 5 exit on a **green** tree, so the resume state is clean and cheap to summarize.
+> **Fallback:** if context passes ~75% during Phase 4 or 5, compact at the nearest green boundary instead — **end of Phase 4** (whole tree green, provisioning inert at 503) — rather than pushing into a nearly-full window.
+>
+> **Compaction notes — fill in when reached (delete this italic line):**
+> - _Current commit / tree state (SHA, branch, green/red):_
+> - _Phases done vs remaining; what's green, what (if anything) is red and why:_
+> - _Open threads / TODOs carried into Phase 6 (e.g. `external_resource_repository.Consumers` still on `component_tasks` → design-scan; deferred runner-image repin; `coding_agent_logs` migration):_
+> - _Anything discovered in Phases 4–5 that changes the Phase 6 plan (§3.6 seam surprises, `depsGate`/`Reevaluate` realities, funnel/`taskmeta` gotchas):_
+> - _PR-workspace parity notes still owed:_
+
+---
+
 ### Phase 6 — Provisioning-as-issues + funnel gates + declarative wiring — the crux · 🟢 green
 
 **Goal:** implement the §3.6 model on our funnel/issue substrate and **replace the inert provisioning** with real behavior. **Rebuild** the task-coupled files git-rm'd at the merge (do NOT resurrect upstream's) and **fold in declarative wiring** (posted at dispatch, which this phase rebuilds, and resolves OC outputs that exist only after provisioning). No SYSTEM rows, projector, or gate table.
@@ -532,6 +549,8 @@ Pick one flow at Phase 0 and record the choice in §8.
 - **take-theirs-EDIT:** `phase9_dependency_mgmt.go` (keep 2 CREATE, strip ALTER); `resources/ports.go` (trim `TaskStore`/`TaskCompleter`/`RedispatchFunc`, keep `externalResourceLookup`/`SecretWriter`/`ExternalResourceRegistry`/`DesignReader`).
 
 - **Phase 3 (2026-07-06) ✅** — commit `044bb96`. TS vocab migrated: agent-stream zod `connections[]`→`dependencies[]` (drift-guard vs the already-merged `ComponentDesign` contract passes; `gen` regenerated `component-design.schema.json`), barrel exports, console-legacy `types.ts` DesignComponent→`dependencies[]` + Dependency/ConfigKey/AccessRequest/ExternalResource types, `high-level-architecture/SKILL.md` take-theirs (dependencies + discover-before-invent) + vendored sync. Fixed 2 pre-existing agents breaks (removed unused broken `mcp-client.ts`→P5; fixed `main/component-design.test.ts` import). **Green: packages + @aep/agents + console-legacy SOURCE typecheck.** **OpenAPI refinement (vs doc):** our branch is **code-first** (`make gen`→`make -C aep-api openapi` exports the spec from Go Huma; upstream went spec-first). So dependency paths/schemas are NOT hand-edited — they register in Go Huma and regenerate in **Phase 4**; code-first also preserves #72 naturally. **Deferred:** apps/console typecheck (upstream's #77/#80 files need `/board`,`/spec`,`ProjectStatus.spec*`,`Component.endpointUrl` backend APIs our Go lacks → two-console **convergence** follow-up); console-legacy **vitest** suites + task-coupled gate fields → Phase 7.
+
+- **Phase 4 (2026-07-06) ✅** — commit `00955b1`. aep-api Go **green** (`build`/`vet`/`test`; dbtests skip w/o Docker). Design-codec reconciliation: `artifact_store.go` delegates to `design_json.go`'s dependencies codec + `SplitDesign` (write inverse); dropped `ExternalAPICatalog` + the per-component design.md path (design.json is sole authored model). designspec validator: `additionalProperties` bool-or-subschema; synced go:embed'd schema. `external_resource_repository.Consumers`→empty (design-scan rebuilt P6). **MCP surface LIVE:** `surfaces.go` mounts `POST /internal/v1/mcp` behind `AgentsScopedVerifier`; `app.go` wires real readers (ExternalResourceRepository + endpoints.Catalog + resources.ResourceTypeCatalog over `openchoreo.NewResourceClient`). Arch-lock: added `dependencies → dependencies/resources`. Test-seed migration (subagent, verified) connections→dependencies + design.md→design.json across design/component packages. **Refinement confirmed:** provisioning routes ABSENT (not 503) — the coupled resources_huma/access were git-rm'd at merge. **Deferred:** `commit_design_file`/`StoreConsumedSpec` spec-commit path → P5; apps/console typecheck + the license-check `$param`-filename Makefile quirk (pre-existing; apps/console-convergence follow-up).
 
 **Fill in during the migration:**
 - **Divergence log:** _every behavior that differs from the workspace, with reason (esp. Phase 6: SYSTEM-rows/projector → `aep:provision`/`depsGate`)_
