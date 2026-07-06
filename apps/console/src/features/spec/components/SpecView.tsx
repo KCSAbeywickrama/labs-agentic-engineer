@@ -19,6 +19,8 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Avatar,
+  AvatarGroup,
   Box,
   Button,
   Chip,
@@ -36,8 +38,13 @@ import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { useProject, useProjectStatus } from "../../projects/api/queries";
 import { useProjectSpec } from "../api/queries";
+import { useCollabSpec } from "../collab/useCollabSpec";
+import { CollabTextArea } from "../collab/CollabTextArea";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { SpecFileList } from "./SpecFileList";
+
+// TODO(auth): the signed-in user once auth lands (AppLayout has the same stub).
+const devUser = { name: "Developer", email: "developer@example.com" };
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 
@@ -70,6 +77,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
   const spec = useProjectSpec(projectName);
+  const collab = useCollabSpec(projectName, devUser);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
 
@@ -142,6 +150,36 @@ export function SpecView({ projectName }: { projectName: string }) {
               {displayName}
             </Typography>
           </Box>
+
+          {collab.peers.length > 0 && (
+            <AvatarGroup max={5}>
+              {collab.peers.map((peer) => (
+                <Tooltip
+                  key={peer.clientId}
+                  title={`${peer.name}${peer.kind === "agent" ? " (agent)" : ""}`}
+                >
+                  <Avatar
+                    sx={{
+                      width: 28,
+                      height: 28,
+                      fontSize: "0.8rem",
+                      bgcolor: peer.color,
+                      // Agents get a square-ish avatar so presence is honest
+                      // about who is human (#86 decision 7).
+                      borderRadius: peer.kind === "agent" ? 1 : "50%",
+                    }}
+                  >
+                    {(peer.name.trim()[0] ?? "?").toUpperCase()}
+                  </Avatar>
+                </Tooltip>
+              ))}
+            </AvatarGroup>
+          )}
+          {collab.status === "offline" && (
+            <Tooltip title="Collaboration server unreachable — editing solo; edits aren't shared or saved.">
+              <Chip size="small" variant="outlined" label="solo" />
+            </Tooltip>
+          )}
 
           {status.data?.specVersion && (
             <Chip
@@ -239,21 +277,35 @@ export function SpecView({ projectName }: { projectName: string }) {
               {selected ? (
                 // Placeholder for the per-type renderers (WYSIWYG for
                 // markdown, dedicated components for structured files —
-                // each its own feature). Editable but unsaved (#80).
-                <TextField
-                  key={selected.path}
-                  fullWidth
-                  multiline
-                  minRows={20}
-                  defaultValue={selected.content}
-                  aria-label={`Content of ${selected.path}`}
-                  helperText={`${selected.path} — edits aren't saved yet; editing lands with the file editors.`}
-                  slotProps={{
-                    input: {
-                      sx: { fontFamily: "monospace", fontSize: "0.875rem" },
-                    },
-                  }}
-                />
+                // each its own feature). Collaborative when the collab
+                // service is reachable (#86 phase 5); solo-and-unsaved
+                // otherwise (#86 decision 10).
+                (() => {
+                  const ytext = collab.getFileText(selected.path);
+                  return ytext ? (
+                    <CollabTextArea
+                      key={`${selected.path}:collab`}
+                      ytext={ytext}
+                      path={selected.path}
+                      isLocalTransaction={collab.isLocalTransaction}
+                    />
+                  ) : (
+                    <TextField
+                      key={selected.path}
+                      fullWidth
+                      multiline
+                      minRows={20}
+                      defaultValue={selected.content}
+                      aria-label={`Content of ${selected.path}`}
+                      helperText={`${selected.path} — edits aren't saved yet; editing lands with the file editors.`}
+                      slotProps={{
+                        input: {
+                          sx: { fontFamily: "monospace", fontSize: "0.875rem" },
+                        },
+                      }}
+                    />
+                  );
+                })()
               ) : (
                 <Typography variant="body2" color="text.secondary">
                   {deriving
