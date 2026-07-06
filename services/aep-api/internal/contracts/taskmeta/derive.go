@@ -61,6 +61,7 @@ type GitHubFacts struct {
 //
 //	on_hold
 //	→ merged-group: deployed / building / failed / merged (PR merged)
+//	→ deployed (a succeeded ops/provision gate — closed-on-success, §3.6)
 //	→ abandoned
 //	→ ready_for_review (PR open)
 //	→ in_progress (active coding/ops Execution)
@@ -112,6 +113,19 @@ func Derive(f GitHubFacts, execs []ExecutionFact) DerivedStatus {
 		return StatusMerged
 	}
 
+	// A succeeded ops/provision Execution is a COMPLETED gate, not abandoned work:
+	// the resolving aep:provision gate issue is CLOSED on success by the readiness
+	// watcher / drawer action (§3.6 close-with-reference), so a closed issue backed
+	// by a succeeded provision must derive deployed — this is exactly how dependent
+	// coding tasks unblock. It therefore sits ABOVE the closed-without-merge =
+	// abandoned rule (that rule targets coding Tasks, whose latest Execution is
+	// coding, never ops/provision). Build Executions are excluded — a build's
+	// terminal state is decided under the merged-PR arm above.
+	if l := latestExcludingBuild(execs); l != nil && l.Status == ExecSucceeded &&
+		(l.Kind == KindOps || l.Kind == KindProvision) {
+		return StatusDeployed
+	}
+
 	// The issue was closed without a merge → the work was abandoned.
 	if !f.IssueOpen {
 		return StatusAbandoned
@@ -134,14 +148,11 @@ func Derive(f GitHubFacts, execs []ExecutionFact) DerivedStatus {
 		return StatusRejected
 	}
 
-	// Otherwise fall back to the latest coding/ops/provision Execution outcome.
-	if latest != nil {
-		switch {
-		case latest.Status == ExecFailed:
-			return StatusFailed
-		case latest.Status == ExecSucceeded && (latest.Kind == KindOps || latest.Kind == KindProvision):
-			return StatusDeployed
-		}
+	// Otherwise fall back to the latest Execution outcome. A succeeded
+	// ops/provision already returned deployed above; a succeeded coding
+	// execution with no linked PR yet is transient → pending.
+	if latest != nil && latest.Status == ExecFailed {
+		return StatusFailed
 	}
 
 	return StatusPending
