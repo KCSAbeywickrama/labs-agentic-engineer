@@ -170,11 +170,13 @@ func TestLoadEmbeddedBuiltins(t *testing.T) {
 		t.Fatalf("loadEmbeddedBuiltins: %v", err)
 	}
 	by := nameSet(got)
-	// The four shipped built-ins, all kind=builtin, with `go` bumped to v2.
+	// The four shipped built-ins, all kind=builtin. `go`, `api-management`, and
+	// `react-webapp` are v2 (the latter two carry the dependencies[] vocabulary
+	// after the connections[]→dependencies[] migration).
 	wantVersions := map[string]int{
-		"api-management":         1,
+		"api-management":         2,
 		"go":                     2,
-		"react-webapp":           1,
+		"react-webapp":           2,
 		"thunder-authentication": 1,
 	}
 	for name, wantV := range wantVersions {
