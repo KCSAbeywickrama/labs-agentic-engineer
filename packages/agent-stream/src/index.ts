@@ -50,7 +50,15 @@ export type {
   AgentSseEventType,
 } from "./contracts/sse-events.js";
 export { AGENT_SSE_EVENT_TYPES, SSE_DONE, TOOLSETS, isToolset } from "./contracts/sse-events.js";
-export type { ComponentDesign, ComponentConnection } from "./contracts/component-design.js";
+export type {
+  ComponentDesign,
+  Dependency,
+  DependencyKind,
+  ConfigKey,
+  DependencyCandidate,
+  ExposesAPI,
+  CallerIdentity,
+} from "./contracts/component-design.js";
 
 // --- Task-plan tool contract (tasks-github-native §9.3/§10.3) ----------------
 export { PLAN_TASK, UPDATE_TASK } from "./contracts/task-tools.js";

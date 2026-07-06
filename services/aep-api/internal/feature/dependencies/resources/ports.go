@@ -24,7 +24,6 @@ package resources
 import (
 	"context"
 
-	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -46,27 +45,15 @@ type SecretWriter interface {
 	WriteExternalResourceSecret(ctx context.Context, ocOrgID, projectName, entityName string, data map[string]string) (vaultKey, secretRefName string, err error)
 }
 
-// TaskStore is the slice of the component-task repo the value service needs
-// to FIND the config-collection task to complete. repositories.TaskRepository
-// satisfies it. Completion itself goes through TaskCompleter — this package
-// never writes ComponentTask.Status.
-type TaskStore interface {
-	ListByProjectID(ctx context.Context, orgID, projectID string) ([]models.ComponentTask, error)
-}
-
-// TaskCompleter applies a contracts task event to a task. Its shape matches
-// task.Projector.ApplyBuildResult exactly, so the composition root wires the
-// projector directly — the ONLY legal way to move ComponentTask.Status (the
-// source's direct status UPDATE is deliberately not ported).
-type TaskCompleter interface {
-	ApplyBuildResult(ctx context.Context, taskID string, event contracts.TaskEvent, errMsg string) error
-}
-
-// RedispatchFunc re-runs the dispatch gating loop after a config-collection
-// task completes, so component tasks gated on the external resource get
-// dispatched. Wraps the dispatch service in the composition root (avoids a
-// package dependency on the dispatcher's result type).
-type RedispatchFunc func(ctx context.Context, orgID, projectID string) error
+// NOTE (dependency-management migration, Phase 2): the task-coupled ports that
+// the value/resource services used — TaskStore (read the component_tasks repo),
+// TaskCompleter (drive ComponentTask.Status through the projector) and
+// RedispatchFunc — were removed here at the merge. Their only consumers
+// (external_values.go / resources_service.go) are `git rm`'d until Phase 6, where
+// they are rebuilt on our GitHub-native `aep:provision` funnel; the completion
+// port they actually need there is "close the provision issue + Funnel.Reevaluate",
+// not a component_tasks projector. Trimming them keeps this file compiling with
+// component_tasks (and the internal/contracts task seam) gone.
 
 // ExternalResourceRegistry is the slice of the org-level external-resource
 // catalog the HTTP surface reads and prunes: the listing (with per-entry

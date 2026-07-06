@@ -32,13 +32,53 @@ import type { ComponentDesign } from "./contracts/component-design.js";
 import type { Equal } from "./type-equal.js";
 
 // strictObject, matching the published component-design.schema.json
-// (additionalProperties: false) and the BFF save-gate — a connection carrying
-// unknown properties must be rejected HERE so the agent self-corrects
+// (additionalProperties: false) and the BFF save-gate — a dependency carrying
+// unknown properties (notably the read-time-computed status/reason, which the
+// agent must NEVER author) must be rejected HERE so the agent self-corrects
 // in-turn instead of committing a design.json the tag-time save gate 422s.
-const componentConnectionSchema = z.strictObject({
-  to: z.string().min(1),
-  type: z.enum(["http", "datastore", "connector"]),
-  onPlatform: z.boolean().optional(),
+
+// One env-var key the component reads at runtime (mirrors Go models.ConfigKey).
+const configKeySchema = z.strictObject({
+  key: z.string().min(1),
+  secret: z.boolean().optional(),
+  credentialClass: z.string().optional(),
+});
+
+// One option attached to an ambiguous dependency (mirrors Go models.DependencyCandidate).
+const dependencyCandidateSchema = z.strictObject({
+  label: z.string().min(1),
+  description: z.string().optional(),
+  url: z.string().optional(),
+});
+
+// One unified, kind-discriminated dependency edge — the successor to the legacy
+// per-kind `connections[]`. A single flat shape carries every kind's fields;
+// `kind` selects which are meaningful (LENIENT within the known set, mirroring
+// the Go codec) but unknown keys — status/reason especially — are rejected.
+const dependencySchema = z.strictObject({
+  kind: z.enum(["component", "org-service", "external", "platform-resource"]),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  needsSpec: z.boolean().optional(),
+  specPath: z.string().optional(),
+  specUrl: z.string().optional(),
+  config: z.array(configKeySchema).optional(),
+  resourceType: z.string().optional(),
+  parameters: z.record(z.string(), z.string()).optional(),
+  candidates: z.array(dependencyCandidateSchema).optional(),
+});
+
+// Managed-API exposure policy (platform-owned; mirrors Go models.ExposesAPI).
+const exposesAPISchema = z.strictObject({
+  managed: z.boolean().optional(),
+  auth: z.string().optional(),
+  userContext: z.string().optional(),
+  orgPublished: z.boolean().optional(),
+});
+
+// Caller-identity intent (platform-owned; mirrors Go models.CallerIdentity).
+const callerIdentitySchema = z.strictObject({
+  mode: z.string(),
 });
 
 export const componentDesignSchema = z.strictObject({
@@ -50,8 +90,11 @@ export const componentDesignSchema = z.strictObject({
   appPath: z.string().min(1),
   entrypoint: z.string().min(1),
   exposure: z.enum(["internet", "intranet"]),
-  connections: z.array(componentConnectionSchema),
+  dependencies: z.array(dependencySchema),
   description: z.string().min(1),
+  exposesAPI: exposesAPISchema.optional(),
+  callerIdentity: callerIdentitySchema.optional(),
+  componentAgentInstructions: z.string().optional(),
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).

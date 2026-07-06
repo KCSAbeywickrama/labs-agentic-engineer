@@ -69,7 +69,12 @@ export interface DesignComponent {
   name: string;
   componentType: "service" | "web-app";
   language: string;
-  dependsOn: string[];
+  // Unified, kind-discriminated dependency model — everything this component
+  // needs from outside itself (sibling components, org services, external
+  // systems, platform resources). Successor to the legacy `dependsOn[]` +
+  // `dependentApis[]`. Assembled read-time from components/<name>/design.json
+  // (status/reason are platform-computed, never persisted).
+  dependencies: Dependency[];
   entrypoint: "deployment/service";
   buildpack: "docker";
   appPath: string;
@@ -82,22 +87,110 @@ export interface DesignComponent {
   // `security: 'required'` ⇒ AP enforces JWT validation against the org's
   // IDP. See docs/design/api-platform-integration.md section 5.1.
   api?: APISecurity;
-  // External HTTP APIs this component consumes at runtime — e.g. a
-  // corporate directory like the Secret Santa employee API. Rendered
-  // outside the cell in the architecture diagram; surfaced in the
-  // tech-lead issue body so the coding agent knows the URL + auth.
-  dependentApis?: DependentApi[];
 }
 
 export interface APISecurity {
   security: "required" | "none";
 }
 
-export interface DependentApi {
-  name: string;
-  url: string;
+export type DependencyKind =
+  | "component"
+  | "org-service"
+  | "external"
+  | "platform-resource";
+
+// One env-var key a component reads at runtime. For an external resource
+// these keys form the resource's schema; secret keys route through SM-API.
+export interface ConfigKey {
+  key: string;
+  secret: boolean;
+  credentialClass?: "publishable" | "secret";
+}
+
+export interface DependencyCandidate {
+  label: string;
   description?: string;
-  authentication?: "none" | "bearer" | "api-key";
+  url?: string;
+}
+
+// Unified, kind-discriminated dependency. A single shape carries all kinds;
+// `kind` selects which optional fields are meaningful (config for external;
+// resourceType/parameters for platform-resource).
+export interface Dependency {
+  kind: DependencyKind;
+  name: string;
+  description?: string;
+  // Read-time computed 4-state resolution (never authored, never persisted).
+  status?: "resolved" | "ambiguous" | "unresolved" | "blocked";
+  // Why a dep is not yet resolved. `""` for resolved deps. `access-required` =
+  // org-service exists but not accessible (requestable); `not-found` = no
+  // catalog match; `needs-spec` = external dep has no spec yet. `access-pending`
+  // is client-derived (reconciling access-required deps against in-flight
+  // AccessRequests); `needs-input` reserved for value-entry-required deps.
+  reason?:
+    | ""
+    | "access-required"
+    | "not-found"
+    | "needs-spec"
+    | "access-pending"
+    | "needs-input";
+  // external: whether the architect requires a spec file for this dep.
+  needsSpec?: boolean;
+  // external: path (relative to the component dir) where the spec lives.
+  specPath?: string;
+  // external: transient published-OpenAPI hint auto-fetched at design save,
+  // then cleared once specPath is set.
+  specUrl?: string;
+  // external: the config key schema the consuming component codes against.
+  config?: ConfigKey[];
+  // platform-resource: the registered (Cluster)ResourceType + provisioning params.
+  resourceType?: string;
+  parameters?: Record<string, string>;
+  // resolution UI: candidates attached when status === "ambiguous".
+  candidates?: DependencyCandidate[];
+}
+
+// -- External Resources (org-registered external dependency definitions) ----
+
+export interface ExternalResourceConsumer {
+  projectId: string;
+  componentName: string;
+}
+
+/** An org-registered external resource with its consuming components. */
+export interface ExternalResource {
+  name: string;
+  description?: string;
+  configKeys: ConfigKey[];
+  consumers: ExternalResourceConsumer[];
+}
+
+// -- Access Requests (cross-project org-service visibility) -----------------
+
+export type AccessRequestStatus =
+  | "requested"
+  | "in_progress"
+  | "granted"
+  | "rejected";
+
+/**
+ * A consumer's request for a provider to publish an org-service dependency
+ * cross-project. Created via `POST …/dependencies/{dep}/access-request`
+ * (dep-addressed — the org is implicit).
+ */
+export interface AccessRequest {
+  id: string;
+  consumerProjectId: string;
+  consumerComponentName: string;
+  orgServiceName: string;
+  providerProjectId?: string;
+  providerComponentName?: string;
+  providerTaskId?: string;
+  providerIssueNumber?: number;
+  providerIssueUrl?: string;
+  status: AccessRequestStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Design {
