@@ -91,6 +91,11 @@ func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
 		// now gone). Runs LAST — after every legacy component_tasks migration and
 		// the git_repositories AutoMigrate. Idempotent (IF EXISTS).
 		dbStep("tasks_github_native", RunTasksGitHubNative),
+		// dependency-management (§3.6): the external-resource catalog +
+		// cross-project access-request tables. Two idempotent CREATE TABLEs only —
+		// no component_tasks ALTER (dependency gating lives on aep:provision GitHub
+		// issues + the funnel depsGate, not DB columns).
+		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
 	}
 
 	for _, s := range steps {
