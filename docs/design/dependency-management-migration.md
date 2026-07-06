@@ -19,7 +19,7 @@ Update this table as phases complete. The migration is **not complete** until §
 
 | # | Phase | Build state at end | Status |
 |---|---|---|---|
-| 0 | Pre-flight: clean tree, PR workspace, integration branch (**no merge**) | 🟢 green | ☐ TODO |
+| 0 | Pre-flight: clean tree, PR workspace, integration branch (**no merge**) | 🟢 green | ✅ DONE |
 | 1 | **PRE-MERGE** platform bump (OC 1.1.1 + CNPG + Thunder) + full auth-inclusive regression | 🟢 green | ☐ TODO |
 | 2 | The merge (sole known-red checkpoint): keep-ours wholesale + take-theirs + skip-delete + resolve | 🔴 red-expected | ☐ TODO |
 | 3 | Schema & contracts: `connections[]`→`dependencies[]` + additive OpenAPI (+ console-legacy type vocabulary) | 🟡 TS green / Go red | ☐ TODO |
@@ -517,8 +517,18 @@ Pick one flow at Phase 0 and record the choice in §8.
 - **`types.ts` vocabulary lands in Phase 3** (not 7), else the take-theirs dep-UI pages don't typecheck; only the task-coupled `Task` gate fields stay for Phase 7.
 - **`docker-compose.yml` + helm `aep-api/deployment.yaml` RE-conflict** at the merge (upstream agents block vs ours) — resolve-union keep-ours, do not expect auto-resolve.
 
+**Execution progress (live):**
+- **Phase 0 (2026-07-06) ✅** — Flow chosen: **merge-first** (§4/§5). **Integration branch decision (user):** work **directly on `rewrite-improve`** — no separate `feat/dependency-management` branch; the pre-merge tip `429d5b5` stays recoverable via `origin/rewrite-improve` + reflog. Committed 26 untracked design docs (`8f9d2ef`) → clean tree. PR workspace worktree up at `../aep-pr-workspace` (detached `1076be7`). merge-base confirmed `dfe6f2a`; `rewrite-improve` = `aep-rewrite` + committed-truth commit `429d5b5`.
+- **Phase 1 (2026-07-06) ◐** — Cherry-picked platform infra (all unchanged-by-us → clean): `env.sh` (OC `1.1.1` + `CNPG_VERSION=0.29.0`), `setup-prerequisites.sh` (CNPG operator), `setup-aep.sh` (postgres-cnpg CRT+RBAC + workload-publisher binding), `setup-thunder-client.sh` (THUNDER_SKIP_SECURITY lift/restore). Hand-added `AEP_API_INTERNAL_BASE_URL` to compose + helm aep-api (kept our agents block — did NOT inherit upstream's boot-time `ANTHROPIC_API_KEY`). **Platform-bump robustness fix (proper, in-scope):** a cold OC 1.1.1 control-plane install races the controller-manager validating webhook (chart applies `ClusterAuthzRoleBinding` CRs before the webhook pod has endpoints → `no endpoints available for service controller-manager-webhook-service`, release left `failed`). Fixed `setup-openchoreo.sh`: skip only when status is `deployed` (not merely present) + retry `helm upgrade --install` after waiting for the webhook endpoints. Re-running full teardown→setup→start→seed to validate on a cold pull.
+
+**Phase 0 merge dry-run conflict inventory (`git merge-tree`, 94 paths):**
+- **48 modify/delete** (we deleted, upstream modified → `git rm`, keep our deletion): all upstream net-new `codingagent/{dispatch_service,dispatch_cascade_hook,*_dbtest_test,dispatch_helpers_test}`, `task/{board_service,handlers,task_diff,task_stream,task_service_test,*_test}`, `contracts/{dispatch,task_state,task_state_test}`, `models/component_task.go`, `artifacts/{save_via_api,*_test}`, `design/design_service_test.go`, `gitrepo/issue_body{,_test}.go`, `clients/agents/client.go`, `testdata/harvest/golden/get_{board,task,tasks,tasks_generated}.json`, ALL `services/agents-legacy/**`, `console-legacy/.../tasks/TaskDetailPanel.tsx`, `services/agents/src/contracts/sse-events.ts`.
+- **~42 content** — keep-ours (agents main-agent files, task_huma, project_service, artifacts tests, arch_test, api/{huma_register,surfaces}), **temporarily-keep-ours→graft** (design_service, design_huma, artifact_store [P5]; console types.ts [P3/P7]; component-design-schema.ts, openapi.yaml, SKILL.md [P3]), **accept-theirs** (apps/console/*), **resolve-union** (run_all, app.go, .env.example, compose+helm, console-legacy shared, lockfiles, CONTEXT.md, Makefile).
+- **2 add/add** (agents Dockerfile, .env.example → keep-ours) · **2 implicit-dir-rename** (agents-legacy mcp-client → drop; MCP take-theirs content ported P5).
+- **ALSO git rm** (clean-added upstream but task-coupled → rebuild P6, NOT in conflict list): `dependencies/resources/{external_values,resources_service,resources_component_test,*_test}.go`; **REFINEMENT vs doc §4:** `dependencies/resources/resources_huma.go` (its provisioning handlers structurally reference the deleted `ValueService`/`ResourceService` types → can't 503-guard; provisioning/values/status routes are ABSENT until P6) **and** the entire `dependencies/endpoints/access_*` set (`access_service.go` is HARD-coupled: imports `repositories`, creates `models.ComponentTask` rows, `ProviderTaskID` state machine → NOT agnostic; rebuild on `aep:provision` org-publish issues in P6). So **Phase 4 endpoints/ = catalog + naming only.** Full playbook: `scratchpad/phase2-merge-playbook.md`.
+- **take-theirs-EDIT:** `phase9_dependency_mgmt.go` (keep 2 CREATE, strip ALTER); `resources/ports.go` (trim `TaskStore`/`TaskCompleter`/`RedispatchFunc`, keep `externalResourceLookup`/`SecretWriter`/`ExternalResourceRegistry`/`DesignReader`).
+
 **Fill in during the migration:**
-- **Phase 0 conflict inventory:** _paste `git diff --name-only --diff-filter=U`_
 - **Divergence log:** _every behavior that differs from the workspace, with reason (esp. Phase 6: SYSTEM-rows/projector → `aep:provision`/`depsGate`)_
 
 **Deferred follow-ups (tracked, not abandoned — §0 principle):**

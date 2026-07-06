@@ -92,6 +92,12 @@ services:
       # compose services through k3d's host bridge. All former
       # git-service endpoints + the BFF live on the merged binary.
       AGENT_PLATFORM_URL: "http://host.k3d.internal:9090"
+      # The BFF's own base URL as reached by the agents service (same compose
+      # network) for the internal MCP discovery surface. Enables the `mcp`
+      # bundle handed to agents in the generation turn so it can call back to
+      # <this>/internal/v1/mcp with a BFF-signed MCP token. (Inert until the
+      # dependencies feature lands — Phase 4.)
+      AEP_API_INTERNAL_BASE_URL: "http://aep-api:9090"
 
       # ── GitHub webhook validation + connect-state HMAC.
       GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"

@@ -54,15 +54,49 @@ if ! kubectl get secret backstage-secrets -n openchoreo-control-plane &>/dev/nul
         --from-literal=jenkins-api-key="placeholder-not-in-use"
 fi
 
-if helm status openchoreo-control-plane -n openchoreo-control-plane --kube-context ${CLUSTER_CONTEXT} &>/dev/null; then
+# A fresh control-plane install races the controller-manager's validating
+# webhook: the OC 1.1.1 chart applies webhook-gated CRs (ClusterAuthzRoleBinding)
+# in the SAME helm pass that first creates the controller-manager pod, so on a
+# cold image pull the webhook service has no endpoints yet and the install errors
+# ("no endpoints available for service controller-manager-webhook-service").
+# helm then leaves the release in `failed` — a bare existence check would wrongly
+# report "already installed" and skip re-applying those CRs, leaving the cluster
+# half-configured. So: treat ONLY a `deployed` release as installed, and retry
+# the install once the webhook is ready (helm reconciles the partial release on
+# the second pass — the documented recovery path).
+cp_status="$(helm status openchoreo-control-plane -n openchoreo-control-plane \
+    --kube-context ${CLUSTER_CONTEXT} -o json 2>/dev/null \
+    | grep -o '"status":"[a-z-]*"' | head -1)" || true
+if [ "$cp_status" = '"status":"deployed"' ]; then
     echo "⏭️  Already installed"
 else
     echo "📦 Installing OpenChoreo Control Plane (may take up to 10 minutes)..."
-    helm upgrade --install openchoreo-control-plane \
+    cp_attempt=0
+    until helm upgrade --install openchoreo-control-plane \
         oci://ghcr.io/openchoreo/helm-charts/openchoreo-control-plane \
         --version ${OPENCHOREO_VERSION} \
         --namespace openchoreo-control-plane --create-namespace \
-        --values "$RENDERED_CP_VALUES"
+        --values "$RENDERED_CP_VALUES"; do
+        cp_attempt=$((cp_attempt + 1))
+        if [ "$cp_attempt" -ge 3 ]; then
+            echo "❌ Control Plane install failed after ${cp_attempt} attempts"
+            exit 1
+        fi
+        echo "⚠️  Control-plane install attempt ${cp_attempt} hit the controller-manager"
+        echo "    validating-webhook race; waiting for the webhook to become ready, then"
+        echo "    retrying (helm reconciles the partially-applied release)..."
+        kubectl wait -n openchoreo-control-plane --for=condition=available --timeout=300s \
+            deployment/controller-manager || true
+        # Block until the validating-webhook service actually has endpoints.
+        for _ in $(seq 1 30); do
+            if [ -n "$(kubectl get endpoints controller-manager-webhook-service \
+                -n openchoreo-control-plane \
+                -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null)" ]; then
+                break
+            fi
+            sleep 5
+        done
+    done
 fi
 echo "⏳ Waiting for Control Plane (core components)..."
 kubectl wait -n openchoreo-control-plane --for=condition=available --timeout=300s \
