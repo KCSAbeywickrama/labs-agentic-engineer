@@ -40,7 +40,7 @@ import { execFileSync } from "node:child_process";
 // component design docs).
 // ---------------------------------------------------------------------------
 
-const REPO = "OWNER/PROJECT-REPO"; // TODO: replace with the real project repo
+const REPO = "ChamodOrg/hello-ui";
 const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 const LABELS = ["aep", "validation"];
 
@@ -48,8 +48,8 @@ const LABELS = ["aep", "validation"];
 // hand for now; the platform resolves these from OpenChoreo ReleaseBindings
 // once the trigger moves into aep-api.
 const DEPLOYED_ENDPOINTS = {
-  // "task-webapp": "https://task-webapp.example.dev",
-  // "task-api": "https://task-api.example.dev",
+  "hello-web": "http://localhost:5173",
+  "hello-api": "http://localhost:9090",
 };
 
 // ---------------------------------------------------------------------------
@@ -144,6 +144,9 @@ function renderBody(doc, issueNumber) {
   } else {
     lines.push("| Component | URL |", "|---|---|");
     for (const [name, url] of entries) lines.push(`| ${name} | ${url} |`);
+    if (entries.some(([, url]) => url.includes("localhost"))) {
+      lines.push("", "Localhost endpoints are local dev servers, not a real deployment — start them per the repo's README before running tests.");
+    }
   }
   lines.push(
     "",
