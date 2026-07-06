@@ -79,3 +79,9 @@ The agent that turns a published design into an ordered, dependency-aware task
 breakdown (plan) and expands each task into an issue brief (detail). Guided by
 the `task-breakdown` Skill; typed rows are minted by the platform, never by the agent.
 _Avoid_: tech lead.
+
+**Playground token**:
+A short-lived MCP token minted for a human driving the playground locally,
+via an endpoint that exists only when explicitly enabled in a local deployment.
+Scoped to one org; minted fresh per turn. Never part of the production
+authentication story (which remains an open decision).
