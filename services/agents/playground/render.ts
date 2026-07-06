@@ -58,8 +58,14 @@ export function renderPart(part: StreamPart): void {
       stdout.write(`\n${dim("→")} ${part.toolName ?? "?"} ${dim(inputLabel(part.input))}\n`);
       break;
     case "tool-result": {
-      const r = part.output as ResultShape | undefined;
-      if (r?.ok) stdout.write(`  ${green("✓")} ${r.op ?? "loaded"} ${dim(r.status ?? "")}\n`);
+      const r = part.output as ResultShape | string | undefined;
+      // MCP discovery tools return bare strings, not the file tools'
+      // {ok, op, status} shape — render them as the successes they are
+      // (a thrown MCP failure arrives as a tool-error part, not here).
+      if (typeof r === "string") {
+        const preview = r.replace(/\s+/g, " ").trim();
+        stdout.write(`  ${green("✓")} ${dim(preview.length > 80 ? `${preview.slice(0, 80)}…` : preview)}\n`);
+      } else if (r?.ok) stdout.write(`  ${green("✓")} ${r.op ?? "loaded"} ${dim(r.status ?? "")}\n`);
       else if (r) stdout.write(`  ${red("✗")} ${r.code ?? "error"}${r.message ? `: ${r.message}` : ""}\n`);
       break;
     }
