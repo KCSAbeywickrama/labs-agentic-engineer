@@ -18,9 +18,11 @@
 // the REAL production handler chain — global middleware → faked auth at the
 // auth.WithClaims seam → orgensure → Huma parsing/validation → the tenant gate in
 // ENFORCE → mapSkillError — driven in-process via the componenttest harness. The
-// SkillService/SkillMutationService/SkillImportService run for real over an
-// in-memory fake GitHub (skills.NewComponentStore, the export_test.go handle
-// around repo_store_test.go's fake); NOTHING is faked below the GitHub API.
+// SkillService/SkillMutationService/SkillImportService run for real over the
+// gitfs Workspace engine + one REAL bare file:// origin per org
+// (skills.NewComponentStore, the export_test.go handle around
+// repo_store_test.go's engine-backed host); NOTHING is faked below the git
+// plumbing — every request fetches, reads, and commits genuine git objects.
 //
 // Read-body shapes are asserted by FIELD SET against the harvested goldens
 // (testdata/harvest/golden/). Both goldens and served responses would carry
@@ -58,11 +60,11 @@ const (
 )
 
 // newHarness assembles the real chain around the REAL skills services (all
-// three) over one fake-GitHub-backed store, and returns the store so a test can
+// three) over one engine-backed store, and returns the store so a test can
 // drive repo state (e.g. DowngradeBuiltin for the updates badge).
 func newHarness(t *testing.T) (*componenttest.Harness, *skills.ComponentStore) {
 	t.Helper()
-	store := skills.NewComponentStore()
+	store := skills.NewComponentStore(t)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{
 		SkillSvc:         store.Svc,
 		SkillMutationSvc: skills.NewSkillMutationService(store.Svc),
@@ -170,6 +172,46 @@ func TestSkillsComponent_List_MatchesGolden(t *testing.T) {
 	}
 	if !sawGo {
 		t.Fatalf("expected the `go` built-in in the list: %s", resp.Body.String())
+	}
+}
+
+// TestSkillsComponent_FlowSkillsHiddenFromSurface: flow-kind skills are seeded
+// into the org's _skills repo at provisioning (shared-volume-clone §17.8) but
+// the skills-page surface is unchanged — they never list, resolve, or mutate;
+// their names are still reserved against user creation.
+func TestSkillsComponent_FlowSkillsHiddenFromSurface(t *testing.T) {
+	t.Parallel()
+	h, _ := newHarness(t)
+
+	// Not in the list…
+	resp := h.AsOrg("acme").Get(base)
+	if resp.Code != 200 {
+		t.Fatalf("list: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var obj struct {
+		Skills []map[string]any `json:"skills"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &obj); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, s := range obj.Skills {
+		if s["kind"] == "flow" {
+			t.Fatalf("flow skill leaked into the list: %v", s)
+		}
+	}
+
+	// …not resolvable, not deletable…
+	if resp := h.AsOrg("acme").Get(base + "/high-level-architecture"); resp.Code != 404 {
+		t.Fatalf("get flow: want 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := h.AsOrg("acme").Delete(base + "/task-planning"); resp.Code != 404 {
+		t.Fatalf("delete flow: want 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+
+	// …but the name is reserved: creating a same-named custom skill conflicts.
+	body := `{"name":"task-planning","skillMd":` + jsonString(skillMD("task-planning", "")) + `,"references":{}}`
+	if resp := h.AsOrg("acme").Post(base, body); resp.Code != 409 {
+		t.Fatalf("create over flow name: want 409, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -454,7 +496,7 @@ func TestSkillsComponent_Import_InvalidTarball_400(t *testing.T) {
 func TestSkillsComponent_Create_MutationUnconfigured_503(t *testing.T) {
 	t.Parallel()
 	// SkillSvc wired for reads, but no mutation service → create is 503.
-	store := skills.NewComponentStore()
+	store := skills.NewComponentStore(t)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{SkillSvc: store.Svc}})
 
 	body := `{"name":"cool-skill","skillMd":` + jsonString(skillMD("cool-skill", "")) + `,"references":{}}`

@@ -105,51 +105,6 @@ components:
         - tagName
         - commitHash
       type: object
-    BoardTask:
-      additionalProperties: false
-      properties:
-        assignee:
-          type: string
-        componentName:
-          type: string
-        componentTaskId:
-          type: string
-        dependsOnComponents:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        description:
-          type: string
-        dispatchedAt:
-          format: date-time
-          type: string
-        errorMessage:
-          type: string
-        execType:
-          type: string
-        id:
-          type: string
-        labels:
-          items:
-            $ref: "#/components/schemas/LabelInfo"
-          type:
-            - array
-            - "null"
-        lifecycleStatus:
-          type: string
-        status:
-          type: string
-        title:
-          type: string
-        url:
-          type: string
-      required:
-        - id
-        - title
-        - url
-      type: object
     BuildLogEntry:
       additionalProperties: false
       properties:
@@ -356,114 +311,6 @@ components:
         - componentType
         - spec
       type: object
-    ComponentTask:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ComponentTask.json
-          format: uri
-          readOnly: true
-          type: string
-        batchId:
-          type: string
-        body:
-          type: string
-        bodySyncPending:
-          type: boolean
-        branchName:
-          type: string
-        buildAuthRetryCount:
-          format: int64
-          type: integer
-        cause:
-          type: string
-        componentName:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        dependsOnComponents:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        dispatchDeferredAt:
-          format: date-time
-          type: string
-        dispatchedAt:
-          format: date-time
-          type: string
-        errorMessage:
-          type: string
-        execType:
-          type: string
-        id:
-          type: string
-        issueNumber:
-          format: int64
-          type: integer
-        issueUrl:
-          type: string
-        labels:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        lastBuildRunName:
-          type: string
-        lastBuildSha:
-          type: string
-        lastCodingAgentRunName:
-          type: string
-        lastEventAt:
-          format: date-time
-          type: string
-        lifecycleStatus:
-          type: string
-        mergeCommitSha:
-          type: string
-        order:
-          format: int64
-          type: integer
-        projectId:
-          type: string
-        pullRequestNumber:
-          format: int64
-          type: integer
-        pullRequestUrl:
-          type: string
-        rationale:
-          type: string
-        sourceDesignVersion:
-          type: string
-        sourceSpecVersion:
-          type: string
-        status:
-          type: string
-        title:
-          type: string
-        updatedAt:
-          format: date-time
-          type: string
-        workspacePath:
-          type: string
-      required:
-        - id
-        - projectId
-        - componentName
-        - title
-        - order
-        - status
-        - workspacePath
-        - execType
-        - lifecycleStatus
-        - createdAt
-        - updatedAt
-      type: object
     CreateProjectRequest:
       additionalProperties: false
       properties:
@@ -481,12 +328,6 @@ components:
         displayName:
           type: string
         name:
-          type: string
-        prompt:
-          description: >-
-            The user's initial requirement — what they want built. Persisted
-            as the project's requirement and triggers spec derivation for the
-            new project.
           type: string
       required:
         - name
@@ -685,6 +526,20 @@ components:
         - openAPISpec
         - componentAgentInstructions
       type: object
+    DesignSaveBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/DesignSaveBody.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          description: "Commit to read, gate and tag (the publish's just-applied commit). Empty: resolve HEAD."
+          type: string
+      type: object
     DiscoverOutputBody:
       additionalProperties: false
       properties:
@@ -702,31 +557,6 @@ components:
       required:
         - issuer
         - jwksUrl
-      type: object
-    DispatchResult:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DispatchResult.json
-          format: uri
-          readOnly: true
-          type: string
-        componentName:
-          type: string
-        error:
-          type: string
-        runName:
-          type: string
-        status:
-          type: string
-        taskId:
-          type: string
-      required:
-        - taskId
-        - componentName
-        - status
       type: object
     EnvVar:
       additionalProperties: false
@@ -797,6 +627,34 @@ components:
             - https://example.com/errors/example
           format: uri
           type: string
+      type: object
+    ExecutionView:
+      additionalProperties: false
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        endedAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        reason:
+          type: string
+        runName:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          type: string
+      required:
+        - id
+        - kind
+        - status
+        - createdAt
       type: object
     ExposesAPI:
       additionalProperties: false
@@ -890,16 +748,13 @@ components:
         - kind
         - warnings
       type: object
-    LabelInfo:
+    Lineage:
       additionalProperties: false
       properties:
-        color:
+        designTag:
           type: string
-        name:
+        specTag:
           type: string
-      required:
-        - name
-        - color
       type: object
     OrgAnthropicConnectInputBody:
       additionalProperties: false
@@ -1102,56 +957,6 @@ components:
       required:
         - name
       type: object
-    ProjectBoard:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ProjectBoard.json
-          format: uri
-          readOnly: true
-          type: string
-        done:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        failed:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        inProgress:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        onHold:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        todo:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        url:
-          type: string
-      required:
-        - url
-        - todo
-        - inProgress
-        - done
-        - onHold
-        - failed
-      type: object
     ProjectList:
       additionalProperties: false
       properties:
@@ -1298,6 +1103,20 @@ components:
         - files
         - status
       type: object
+    SaveBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/SaveBody.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          description: "Commit to gate and tag (the publish's just-applied commit). Empty: resolve HEAD."
+          type: string
+      type: object
     SkillDetailBody:
       additionalProperties: false
       properties:
@@ -1348,66 +1167,129 @@ components:
         - contentSha
         - updatedAt
       type: object
-    TaskStatusResponse:
+    TaskDetail:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/TaskStatusResponse.json
+            - /api/v1/TaskDetail.json
           format: uri
           readOnly: true
           type: string
-        buildSteps:
+        attention:
           items:
-            $ref: "#/components/schemas/WorkflowRunTask"
+            type: string
           type:
             - array
             - "null"
-        task:
-          $ref: "#/components/schemas/ComponentTask"
-      required:
-        - task
-      type: object
-    Tasks:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/Tasks.json
-          format: uri
-          readOnly: true
+        body:
           type: string
-        hasUnsavedChanges:
+        component:
+          type: string
+        dependsOn:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        derivedStatus:
+          type: string
+        executionHistory:
+          items:
+            $ref: "#/components/schemas/ExecutionView"
+          type:
+            - array
+            - "null"
+        executions:
+          additionalProperties:
+            $ref: "#/components/schemas/ExecutionView"
+          type: object
+        executorClass:
+          type: string
+        hold:
           type: boolean
-        projectId:
-          type: string
-        sourceDesign:
-          type: string
-        status:
-          type: string
-        tasks:
-          items:
-            $ref: "#/components/schemas/ComponentTask"
-          type:
-            - array
-            - "null"
-        version:
+        issueNumber:
           format: int64
           type: integer
-        versions:
+        issueUrl:
+          type: string
+        lineage:
+          $ref: "#/components/schemas/Lineage"
+        operation:
+          type: string
+        origin:
+          type: string
+        rationale:
+          type: string
+        title:
+          type: string
+      required:
+        - executionHistory
+        - issueNumber
+        - title
+        - issueUrl
+        - dependsOn
+        - lineage
+        - derivedStatus
+        - hold
+        - attention
+        - executions
+      type: object
+    TaskView:
+      additionalProperties: false
+      properties:
+        attention:
           items:
-            $ref: "#/components/schemas/ArtifactVersion"
+            type: string
           type:
             - array
             - "null"
+        body:
+          type: string
+        component:
+          type: string
+        dependsOn:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        derivedStatus:
+          type: string
+        executions:
+          additionalProperties:
+            $ref: "#/components/schemas/ExecutionView"
+          type: object
+        executorClass:
+          type: string
+        hold:
+          type: boolean
+        issueNumber:
+          format: int64
+          type: integer
+        issueUrl:
+          type: string
+        lineage:
+          $ref: "#/components/schemas/Lineage"
+        operation:
+          type: string
+        origin:
+          type: string
+        rationale:
+          type: string
+        title:
+          type: string
       required:
-        - projectId
-        - tasks
-        - status
-        - version
-        - hasUnsavedChanges
+        - issueNumber
+        - title
+        - issueUrl
+        - dependsOn
+        - lineage
+        - derivedStatus
+        - hold
+        - attention
+        - executions
       type: object
     TurnInputBody:
       additionalProperties: false
@@ -1419,14 +1301,6 @@ components:
           format: uri
           readOnly: true
           type: string
-        files:
-          additionalProperties:
-            type: string
-          description: The FE's current draft (latest truth)
-          type: object
-        filesChangedExternally:
-          description: User hand-edited since the last turn (chat)
-          type: boolean
         instruction:
           description: User message / generation directive
           type: string
@@ -1443,6 +1317,68 @@ components:
       required:
         - useCase
         - instruction
+      type: object
+    TurnOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        turnId:
+          description: The started turn's id — poll/attach with it
+          type: string
+      required:
+        - turnId
+      type: object
+    TurnStatus:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnStatus.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          type: string
+        conversationId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        message:
+          type: string
+        noChanges:
+          type: boolean
+        paths:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        reason:
+          type: string
+        status:
+          type: string
+        turnId:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        useCase:
+          type: string
+      required:
+        - turnId
+        - conversationId
+        - useCase
+        - status
+        - createdAt
+        - updatedAt
       type: object
     UpdateConfigBody:
       additionalProperties: false
@@ -2275,35 +2211,6 @@ paths:
       summary: Get a project
       tags:
         - Projects
-  /projects/{projectName}/board:
-    get:
-      operationId: get-board
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProjectBoard"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a project's kanban board
-      tags:
-        - Board
   /projects/{projectName}/components:
     get:
       operationId: list-components
@@ -2692,8 +2599,12 @@ paths:
               $ref: "#/components/schemas/TurnInputBody"
         required: true
       responses:
-        "200":
-          description: OK
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnOutputBody"
+          description: Accepted
         default:
           content:
             application/problem+json:
@@ -2702,7 +2613,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Run a generation/chat turn (SSE — raw StreamPart frames + [DONE])
+      summary: Start a generation/chat turn (202 — runs detached; attach via the turn stream)
       tags:
         - GenAI
   /projects/{projectName}/design/bundle:
@@ -2774,6 +2685,11 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DesignSaveBody"
       responses:
         "200":
           content:
@@ -2861,6 +2777,49 @@ paths:
       summary: Get the design bundle at a tag
       tags:
         - Design(Deprecated)
+  /projects/{projectName}/executions/{executionId}/progress:
+    get:
+      operationId: get-execution-progress
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Execution id
+          in: path
+          name: executionId
+          required: true
+          schema:
+            description: Execution id
+            type: string
+        - description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
+          explode: false
+          in: query
+          name: sinceMillis
+          schema:
+            description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Poll an Execution's progress (build steps / coding status)
+      tags:
+        - Tasks
   /projects/{projectName}/files:
     get:
       operationId: list-files
@@ -3077,6 +3036,11 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveBody"
       responses:
         "200":
           content:
@@ -3204,13 +3168,24 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
+        - description: Which Tasks to return (default open)
+          explode: false
+          in: query
+          name: state
+          schema:
+            description: Which Tasks to return (default open)
+            enum:
+              - open
+              - closed
+              - all
+            type: string
       responses:
         "200":
           content:
             application/json:
               schema:
                 items:
-                  $ref: "#/components/schemas/ComponentTask"
+                  $ref: "#/components/schemas/TaskView"
                 type:
                   - array
                   - "null"
@@ -3223,45 +3198,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List a project's tasks
+      summary: List a project's Tasks (live GitHub ⋈ executions → derived status)
       tags:
         - Tasks
-  /projects/{projectName}/tasks/dispatch:
+  /projects/{projectName}/tasks/plan:
     post:
-      operationId: dispatch-tasks
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                items:
-                  $ref: "#/components/schemas/DispatchResult"
-                type:
-                  - array
-                  - "null"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Dispatch a project's tasks to the coding agent
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/generate:
-    post:
-      operationId: generate-tasks
+      operationId: plan-tasks
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3281,39 +3223,10 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Generate a project's tasks (tech-lead agent, SSE stream)
+      summary: Plan implementation Tasks (SSE — raw StreamPart frames + [DONE])
       tags:
         - Tasks
-  /projects/{projectName}/tasks/generated:
-    get:
-      operationId: get-generated-tasks
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Tasks"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a project's generated tasks
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}:
+  /projects/{projectName}/tasks/{issueNumber}:
     get:
       operationId: get-task
       parameters:
@@ -3324,19 +3237,20 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: ComponentTask UUID
+        - description: GitHub issue number of the Task
           in: path
-          name: taskId
+          name: issueNumber
           required: true
           schema:
-            description: ComponentTask UUID
-            type: string
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ComponentTask"
+                $ref: "#/components/schemas/TaskDetail"
           description: OK
         default:
           content:
@@ -3346,112 +3260,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get a task
+      summary: Get one Task with its full Execution history
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{taskId}/progress/agent:
-    get:
-      operationId: get-task-agent-progress
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
-        - description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-          explode: false
-          in: query
-          name: sinceMillis
-          schema:
-            description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-            type: string
-        - description: Max lines to return (0 ⇒ server default)
-          explode: false
-          in: query
-          name: limit
-          schema:
-            description: Max lines to return (0 ⇒ server default)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProgressResponse"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Poll a task's coding-agent progress
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}/progress/build:
-    get:
-      operationId: get-task-build-progress
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
-        - description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-          explode: false
-          in: query
-          name: sinceMillis
-          schema:
-            description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-            type: string
-        - description: Max lines to return (0 ⇒ server default)
-          explode: false
-          in: query
-          name: limit
-          schema:
-            description: Max lines to return (0 ⇒ server default)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProgressResponse"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Poll a task's build progress
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}/regenerate-body:
+  /projects/{projectName}/tasks/{issueNumber}/execute:
     post:
-      operationId: regenerate-task-body
+      operationId: execute-task
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3460,16 +3274,17 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: ComponentTask UUID
+        - description: GitHub issue number of the Task
           in: path
-          name: taskId
+          name: issueNumber
           required: true
           schema:
-            description: ComponentTask UUID
-            type: string
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
         default:
           content:
             application/problem+json:
@@ -3478,12 +3293,44 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Regenerate a single task's body (Phase 2 detail, SSE stream)
+      summary: Stamp aep:execute and dispatch through the funnel (async)
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{taskId}/retry:
+  /projects/{projectName}/tasks/{issueNumber}/hold:
+    delete:
+      operationId: unhold-task
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: GitHub issue number of the Task
+          in: path
+          name: issueNumber
+          required: true
+          schema:
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Remove the aep:hold label and re-evaluate (idempotent)
+      tags:
+        - Tasks
     post:
-      operationId: retry-task
+      operationId: hold-task
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3492,20 +3339,17 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: ComponentTask UUID
+        - description: GitHub issue number of the Task
           in: path
-          name: taskId
+          name: issueNumber
           required: true
           schema:
-            description: ComponentTask UUID
-            type: string
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
       responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DispatchResult"
-          description: OK
+        "204":
+          description: No Content
         default:
           content:
             application/problem+json:
@@ -3514,12 +3358,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Retry a failed task
+      summary: Set the aep:hold label (level-triggered; idempotent)
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{taskId}/status:
+  /projects/{projectName}/turns/active:
     get:
-      operationId: get-task-status
+      operationId: get-active-turn
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3528,19 +3372,8 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
       responses:
         "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TaskStatusResponse"
           description: OK
         default:
           content:
@@ -3550,8 +3383,92 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get a task's status with build-run steps
+      summary: Get the project's running turn (204 when none)
       tags:
-        - Tasks
+        - GenAI
+  /projects/{projectName}/turns/{turnId}:
+    get:
+      operationId: get-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Turn id from the 202 create response
+          in: path
+          name: turnId
+          required: true
+          schema:
+            description: Turn id from the 202 create response
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnStatus"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get one turn's status
+      tags:
+        - GenAI
+  /projects/{projectName}/turns/{turnId}/stream:
+    get:
+      operationId: stream-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Turn id from the 202 create response
+          in: path
+          name: turnId
+          required: true
+          schema:
+            description: Turn id from the 202 create response
+            type: string
+        - description: Replay from this absolute event index (wins over Last-Event-ID)
+          explode: false
+          in: query
+          name: from
+          schema:
+            default: -1
+            description: Replay from this absolute event index (wins over Last-Event-ID)
+            format: int64
+            minimum: -1
+            type: integer
+        - description: "Standard SSE resume: the last received event id"
+          in: header
+          name: Last-Event-ID
+          schema:
+            description: "Standard SSE resume: the last received event id"
+            type: string
+      responses:
+        "200":
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Attach to a turn's part stream (SSE — replay from ?from / Last-Event-ID, then live-tail)
+      tags:
+        - GenAI
 servers:
   - url: /api/v1

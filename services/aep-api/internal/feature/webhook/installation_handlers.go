@@ -42,17 +42,23 @@ import (
 //   - installation.unsuspend    → flip status='active' on the row
 //   - installation_repositories.added   → JSON-merge selected_repos
 //   - installation_repositories.removed → JSON-merge selected_repos + cascade
+//
+// workspaceTrash is the disconnect cascade's Phase-F disk hook (trash the
+// org's workspace subtree, design §14/D12) — this package builds its own
+// OrgDisconnectService, so the hook must be threaded through here too.
+// nil-safe (nil = no disk hook).
 func RegisterInstallationHandlers(
 	router *Router,
 	db *gorm.DB,
 	credSvc *orgcreds.CredentialService,
 	issueSvc gitrepo.IssueService,
+	workspaceTrash func(ctx context.Context, ocOrgID string),
 ) {
 	h := &installationHandler{
 		db:         db,
 		credSvc:    credSvc,
 		issueSvc:   issueSvc,
-		disconnect: orgcreds.NewOrgDisconnectService(db, credSvc, issueSvc),
+		disconnect: orgcreds.NewOrgDisconnectService(db, credSvc, issueSvc).WithWorkspaceTrash(workspaceTrash),
 	}
 	router.Register("installation", "created", EventHandlerFunc(h.handleCreated))
 	router.Register("installation", "deleted", EventHandlerFunc(h.handleDeleted))

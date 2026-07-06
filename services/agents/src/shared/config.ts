@@ -52,17 +52,21 @@ export const config = {
   // generation completes in one step. intEnv guards a non-numeric override.
   maxOutputTokens: intEnv(process.env.AGENT_MAX_OUTPUT_TOKENS, 64_000),
   logLevel: process.env.LOG_LEVEL || "info",
-  // Max request body for the SSE turn endpoint (the inlined files snapshot). The
-  // express default 100kb silently rejects a real spec repo, so set it explicitly.
-  bodyLimit: process.env.AGENT_BODY_LIMIT || "10mb",
   // SSE keep-alive cadence: a `: keep-alive` comment this often while a turn
   // streams, so long generations don't die behind an idle-timeout ingress.
   keepAliveMs: intEnv(process.env.AGENT_KEEPALIVE_MS, 15_000),
 
+  // Shared workspaces mount root — read-only per-SHA snapshots written by
+  // aep-api (docs/design/shared-volume-clone-architecture.md). Compose/k8s
+  // mount the volume :ro; nothing in this service ever writes it.
+  workspaceMountRoot: process.env.WORKSPACE_MOUNT_ROOT || "/workspaces",
+
   // M2M gate (§12.3.2): a Bearer JWT with this audience, verified against a JWKS
   // (RS256) OR a shared secret (HS256) — whichever is configured. The gate is
   // ALWAYS ON; the composition root refuses to start if neither is set. No org
-  // claim is required (nothing calls back to the BFF); `X-Org-Id` is log-only.
+  // claim in the TOKEN is required (nothing calls back to the BFF); `X-Org-Id`
+  // is load-bearing (the §12 fence asserts the conversation's org segment
+  // equals it).
   auth: {
     audience: process.env.AGENT_JWT_AUDIENCE || "agents-service",
     issuer: process.env.AGENT_JWT_ISSUER || undefined,

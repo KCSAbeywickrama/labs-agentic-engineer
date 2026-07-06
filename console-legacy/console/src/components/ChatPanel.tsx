@@ -17,14 +17,16 @@
  */
 
 /**
- * Requirements-chat panel — post-migration (§5/§6).
+ * Requirements-chat panel — committed-truth model (shared-volume-clone D13/D16).
  *
- * A multi-turn conversation against the unified turn endpoint. Each turn sends
- * the FULL current draft (from the shared `specDraftSession`, manual edits
- * included, `filesChangedExternally` flagged), folds the raw stream client-side,
- * and writes the result back into the SAME draft session — so the requirements
- * page sees the agent's edits live. There is no server working tree, no session
- * baseline: Undo restores a pre-turn draft snapshot held in memory.
+ * A multi-turn conversation against the resumable turn endpoints. Each send is
+ * `startTurn` (instruction only — no file payload; the backend snapshots HEAD)
+ * followed by `attachTurnStream`, whose display-only fold streams assistant
+ * text and tool cards into this panel and live file snapshots onto the
+ * turn-activity bus (the requirements page mirrors them). When the terminal
+ * `turn-committed` event lands, the page refetches the server tree — the
+ * commit is the backend's, the fold here is cosmetic. Undo is gone: every
+ * turn commits to `main`; reverting is the Discard (revert) endpoint's job.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,23 +42,22 @@ import {
   Typography,
   useTheme,
 } from '@wso2/oxygen-ui';
-import { ArrowUp, Check, RotateCcw, Sparkles, Wrench, X } from '@wso2/oxygen-ui-icons-react';
+import { ArrowUp, Check, Sparkles, Wrench, X } from '@wso2/oxygen-ui-icons-react';
 import {
   type ChatMessage,
+  type ProjectKey,
   type ToolMessage,
   type UserMessage,
   appendAssistantText,
   appendErrorMessage,
   appendUserMessage,
+  dropTurnMessages,
+  getChatConversationId,
   getChatMessages,
-  getSyncedDraft,
-  getTurnSnapshot,
-  markTurnUndone,
   nextId,
   opDisplayLabel,
   publishTurnActivity,
-  recordSyncedDraft,
-  saveTurnSnapshot,
+  setChatConversationId,
   setChatMessages,
   setChatPanelOpen,
   setTurnStatus,
@@ -64,20 +65,16 @@ import {
   upsertToolMessage,
 } from '../services/chatStore';
 import {
+  attachTurnStream,
+  getActiveTurn,
   getConversation,
   newConversationId,
-  runTurn,
+  startTurn,
   turnErrorMessage,
   type ConversationMessage,
+  type TurnResult,
 } from '../services/api/turns';
-import { computeDerivedArtifacts, derivedPathsFor } from '../lib/derivedArtifacts';
-import {
-  getConversationId,
-  getSpecDraft,
-  setConversationId,
-  setDraftFiles,
-  type SpecDraftKey,
-} from '../services/specDraftSession';
+import { readTree } from '../services/api/files';
 
 // ---------------------------------------------------------------------------
 // Tab routing — chat is wired for the requirements tab only in v1.
@@ -98,17 +95,6 @@ function resolveTabKey(pathname: string): string {
   if (pathname.includes('/implementation-plan')) return 'implementation-plan';
   if (pathname.includes('/components')) return 'components';
   return 'overview';
-}
-
-// ---------------------------------------------------------------------------
-// Draft helpers
-// ---------------------------------------------------------------------------
-
-/** Shallow structural equality of two draft maps. */
-function sameDraft(a: Record<string, string>, b: Record<string, string>): boolean {
-  const ak = Object.keys(a);
-  if (ak.length !== Object.keys(b).length) return false;
-  return ak.every((k) => a[k] === b[k]);
 }
 
 /** Map a rehydrated `ModelMessage[]` to the display log (user/assistant text only). */
@@ -137,17 +123,7 @@ function toDisplayMessages(messages: ConversationMessage[]): ChatMessage[] {
 // Message bubbles
 // ---------------------------------------------------------------------------
 
-function UserBubble({
-  message,
-  onUndo,
-  canUndo,
-  isUndoing,
-}: {
-  message: UserMessage;
-  onUndo: () => void;
-  canUndo: boolean;
-  isUndoing: boolean;
-}) {
+function UserBubble({ message }: { message: UserMessage }) {
   const theme = useTheme();
   return (
     <Stack alignItems="flex-end" sx={{ mb: 1.5 }} gap={0.5}>
@@ -159,24 +135,12 @@ function UserBubble({
           borderRadius: '16px 16px 4px 16px',
           bgcolor: theme.vars?.palette.primary.main ?? 'primary.main',
           color: theme.vars?.palette.primary.contrastText ?? '#fff',
-          textDecoration: message.turnStatus === 'undone' ? 'line-through' : undefined,
-          opacity: message.turnStatus === 'undone' ? 0.65 : 1,
         }}
       >
         <Typography variant="body2" sx={{ lineHeight: 1.6, fontSize: '0.8125rem' }}>
           {message.content}
         </Typography>
       </Box>
-      {canUndo && (
-        <Chip
-          size="small"
-          icon={isUndoing ? <CircularProgress size={10} /> : <RotateCcw size={12} />}
-          label={isUndoing ? 'Undoing...' : 'Undo this turn'}
-          onClick={isUndoing ? undefined : onUndo}
-          sx={{ height: 22, fontSize: '0.7rem', cursor: isUndoing ? 'default' : 'pointer' }}
-          data-testid="undo-turn"
-        />
-      )}
     </Stack>
   );
 }
@@ -348,7 +312,6 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
 
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [undoingTurn, setUndoingTurn] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -358,12 +321,8 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
 
   const effectiveOrgId = orgId ?? '';
   const effectiveProjectId = projectId ?? '';
-  const projectKey = useMemo(
+  const projectKey = useMemo<ProjectKey>(
     () => ({ orgId: effectiveOrgId, projectId: effectiveProjectId }),
-    [effectiveOrgId, effectiveProjectId],
-  );
-  const sessionKey = useMemo<SpecDraftKey>(
-    () => ({ orgId: effectiveOrgId, projectId: effectiveProjectId, kind: 'requirements' }),
     [effectiveOrgId, effectiveProjectId],
   );
 
@@ -380,11 +339,11 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
   }, [effectiveOrgId, effectiveProjectId]);
 
   // Rehydrate history from the server when local history is empty but a
-  // conversation exists (refresh recovery — the draft comes from localStorage).
+  // conversation exists (refresh recovery — server truth, no local draft).
   useEffect(() => {
     if (!effectiveOrgId || !effectiveProjectId) return;
     if (getChatMessages(effectiveOrgId, effectiveProjectId).length > 0) return;
-    const convId = getConversationId(sessionKey);
+    const convId = getChatConversationId(projectKey);
     if (!convId) return;
     let cancelled = false;
     (async () => {
@@ -396,7 +355,7 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [effectiveOrgId, effectiveProjectId, sessionKey, projectKey]);
+  }, [effectiveOrgId, effectiveProjectId, projectKey]);
 
   useEffect(() => {
     setChatPanelOpen(true);
@@ -411,13 +370,81 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  const latestTurnId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role === 'user' && m.turnStatus === 'completed') return m.turnId;
-    }
-    return undefined;
-  }, [messages]);
+  /**
+   * Attach one turn's stream and drive the chat display: assistant text, tool
+   * cards, live file snapshots (published on the turn-activity bus so the
+   * requirements page mirrors them), and the terminal outcome. `displayTurnId`
+   * is the local message-log id (NOT the server turn id).
+   */
+  const streamChatTurn = useCallback(
+    async (serverTurnId: string, displayTurnId: string, signal?: AbortSignal) => {
+      publishTurnActivity({ kind: 'turnStarted', orgId: effectiveOrgId, projectId: effectiveProjectId });
+      let result: TurnResult;
+      try {
+        // The display fold replays on top of the CURRENT server tree — the
+        // committed truth the backend snapshotted for the turn.
+        const seed = await readTree(effectiveProjectId, 'specs/')
+          .then((t) => t.files)
+          .catch(() => ({}) as Record<string, string>);
+        result = await attachTurnStream(effectiveProjectId, serverTurnId, {
+          from: 0,
+          seed,
+          signal,
+          handlers: {
+            onText: (delta) => appendAssistantText(projectKey, displayTurnId, delta),
+            onSnapshot: (files) =>
+              publishTurnActivity({
+                kind: 'turnSnapshot',
+                orgId: effectiveOrgId,
+                projectId: effectiveProjectId,
+                files,
+              }),
+            onChange: (change) => {
+              const res = change.result;
+              upsertToolMessage(projectKey, {
+                id: change.toolCallId || nextId('tool'),
+                role: 'tool',
+                content: '',
+                timestamp: Date.now(),
+                turnId: displayTurnId,
+                toolName: change.toolName,
+                op: change.op,
+                path: change.path,
+                toolStatus: res.ok ? 'done' : 'error',
+                toolErrorText: res.ok ? undefined : res.message,
+                toolErrorCode: res.ok ? undefined : res.code,
+              });
+            },
+          },
+        });
+      } catch (err) {
+        if (signal?.aborted) {
+          // Unmount/StrictMode abort: the turn keeps running server-side; a
+          // remount's active-turn check re-attaches. Not an outcome.
+          publishTurnActivity({ kind: 'turnEnded', orgId: effectiveOrgId, projectId: effectiveProjectId, committed: false });
+          return;
+        }
+        result = {
+          ok: false,
+          code: 'request_failed',
+          message: err instanceof Error && err.message ? err.message : 'The chat turn failed.',
+        };
+      }
+      publishTurnActivity({
+        kind: 'turnEnded',
+        orgId: effectiveOrgId,
+        projectId: effectiveProjectId,
+        committed: result.ok,
+      });
+      if (result.ok) {
+        setTurnStatus(projectKey, displayTurnId, 'completed');
+      } else {
+        appendErrorMessage(projectKey, displayTurnId, turnErrorMessage(result), result.code);
+        setTurnStatus(projectKey, displayTurnId, 'failed');
+      }
+    },
+    [effectiveOrgId, effectiveProjectId, projectKey],
+  );
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -428,78 +455,60 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
     setIsSending(true);
 
     // One conversation id across the whole chat session.
-    let convId = getConversationId(sessionKey);
+    let convId = getChatConversationId(projectKey);
     if (!convId) {
       convId = newConversationId();
-      setConversationId(sessionKey, convId);
+      setChatConversationId(projectKey, convId);
     }
 
     const turnId = nextId('t');
     appendUserMessage(projectKey, trimmed, turnId);
 
-    // Snapshot the pre-turn draft (client-side Undo) and decide whether the
-    // user hand-edited it since the last turn.
-    const preDraft = getSpecDraft(sessionKey).draft;
-    saveTurnSnapshot(projectKey, turnId, preDraft);
-    const synced = getSyncedDraft(projectKey);
-    const filesChangedExternally = synced !== undefined && !sameDraft(synced, preDraft);
-
-    publishTurnActivity({ kind: 'turnStarted', orgId: effectiveOrgId, projectId: effectiveProjectId });
-
-    const result = await runTurn(
-      effectiveProjectId,
-      convId,
-      {
-        useCase: 'requirements-chat',
-        instruction: trimmed,
-        files: preDraft,
-        filesChangedExternally,
-      },
-      {
-        onText: (delta) => appendAssistantText(projectKey, turnId, delta),
-        onSnapshot: (files) => {
-          // Live preview: overlay the agent's edits onto the current draft.
-          const cur = getSpecDraft(sessionKey).draft;
-          setDraftFiles(sessionKey, { ...cur, ...files });
-        },
-        onChange: (change) => {
-          const res = change.result;
-          upsertToolMessage(projectKey, {
-            id: change.toolCallId || nextId('tool'),
-            role: 'tool',
-            content: '',
-            timestamp: Date.now(),
-            turnId,
-            toolName: change.toolName,
-            op: change.op,
-            path: change.path,
-            toolStatus: res.ok ? 'done' : 'error',
-            toolErrorText: res.ok ? undefined : res.message,
-            toolErrorCode: res.ok ? undefined : res.code,
-          });
-        },
-      },
-    );
-
-    publishTurnActivity({ kind: 'turnEnded', orgId: effectiveOrgId, projectId: effectiveProjectId });
-
-    if (result.ok) {
-      // Commit the folded result + recomputed derived artifacts into the draft.
-      const derived = computeDerivedArtifacts(effectiveProjectId, result.files);
-      const keep = derivedPathsFor(result.files);
-      const next: Record<string, string> = { ...result.files };
-      for (const [p, c] of Object.entries(derived.files)) if (keep.has(p)) next[p] = c;
-      setDraftFiles(sessionKey, next);
-      recordSyncedDraft(projectKey, next);
-      setTurnStatus(projectKey, turnId, 'completed');
-    } else {
-      // Roll back the live overlay to the pre-turn draft; report the failure.
-      setDraftFiles(sessionKey, preDraft);
-      appendErrorMessage(projectKey, turnId, turnErrorMessage(result), result.code);
+    const start = await startTurn(effectiveProjectId, convId, {
+      useCase: 'requirements-chat',
+      instruction: trimmed,
+    });
+    if (!start.ok) {
+      // One active turn per project (D18): a 409 here means some other
+      // generation is running — the pages own the viewer attach; chat just
+      // reports it.
+      appendErrorMessage(projectKey, turnId, turnErrorMessage(start), start.code);
       setTurnStatus(projectKey, turnId, 'failed');
+      setIsSending(false);
+      return;
     }
+    await streamChatTurn(start.turnId, turnId);
     setIsSending(false);
-  }, [input, isSending, isChatEnabledTab, effectiveOrgId, effectiveProjectId, projectKey, sessionKey]);
+  }, [input, isSending, isChatEnabledTab, effectiveOrgId, effectiveProjectId, projectKey, streamChatTurn]);
+
+  // Refresh-mid-chat recovery (D16): a running requirements-chat turn is
+  // re-attached from index 0. Any partial output persisted before the refresh
+  // is dropped first — the replay re-streams the same frames.
+  useEffect(() => {
+    if (!effectiveOrgId || !effectiveProjectId) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    (async () => {
+      const active = await getActiveTurn(effectiveProjectId).catch(() => null);
+      if (cancelled || !active || active.status !== 'running') return;
+      if (active.useCase !== 'requirements-chat') return;
+      const inFlight = [...getChatMessages(effectiveOrgId, effectiveProjectId)]
+        .reverse()
+        .find((m): m is UserMessage => m.role === 'user' && m.turnStatus === 'in_flight');
+      const displayTurnId = inFlight?.turnId ?? nextId('t');
+      if (inFlight?.turnId) dropTurnMessages(projectKey, inFlight.turnId);
+      setIsSending(true);
+      try {
+        await streamChatTurn(active.turnId, displayTurnId, controller.signal);
+      } finally {
+        if (!cancelled) setIsSending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [effectiveOrgId, effectiveProjectId, projectKey, streamChatTurn]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -507,24 +516,6 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
       void handleSend();
     }
   };
-
-  const handleUndo = useCallback(
-    (turnId: string) => {
-      if (!effectiveOrgId || !effectiveProjectId) return;
-      const snapshot = getTurnSnapshot(projectKey, turnId);
-      if (!snapshot) {
-        appendErrorMessage(projectKey, turnId, 'This turn can no longer be undone (snapshot expired).', 'undo_expired');
-        return;
-      }
-      setUndoingTurn(turnId);
-      // Client-side undo: restore the pre-turn draft into the shared session.
-      setDraftFiles(sessionKey, snapshot);
-      recordSyncedDraft(projectKey, snapshot);
-      markTurnUndone(projectKey, turnId);
-      setUndoingTurn(null);
-    },
-    [effectiveOrgId, effectiveProjectId, projectKey, sessionKey],
-  );
 
   const showGreeting = messages.length === 0;
 
@@ -605,19 +596,7 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
           )}
 
           {messages.map((msg) => {
-            if (msg.role === 'user') {
-              const canUndo =
-                msg.turnId !== undefined && msg.turnStatus === 'completed' && msg.turnId === latestTurnId;
-              return (
-                <UserBubble
-                  key={msg.id}
-                  message={msg}
-                  canUndo={canUndo}
-                  isUndoing={undoingTurn === msg.turnId}
-                  onUndo={() => msg.turnId && handleUndo(msg.turnId)}
-                />
-              );
-            }
+            if (msg.role === 'user') return <UserBubble key={msg.id} message={msg} />;
             if (msg.role === 'assistant') return <AssistantBubble key={msg.id} content={msg.content} />;
             if (msg.role === 'tool') return <ToolCard key={msg.id} msg={msg} />;
             if (msg.role === 'error') return <ErrorBubble key={msg.id} message={msg} />;

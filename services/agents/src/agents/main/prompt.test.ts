@@ -18,18 +18,20 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Skill } from "@aep/agent-stream";
+import { testSkillSource, type TestSkill } from "../../testing/skill-source.js";
 import { instructions, buildInstructions, buildSkillCatalog } from "./prompt.js";
 
-const SKILLS: Skill[] = [
+const SKILL_LIST: TestSkill[] = [
   { name: "a-skill", description: "does A", content: "BODY A — secret guidance" },
   { name: "b-skill", description: "does B", content: "BODY B — secret guidance" },
 ];
+const SKILLS = testSkillSource(SKILL_LIST);
 
 test("no skills → catalog is empty and instructions are byte-identical to base", () => {
-  assert.equal(buildSkillCatalog([]), "");
+  assert.equal(buildSkillCatalog(undefined), "");
+  assert.equal(buildSkillCatalog(testSkillSource([])), "");
   assert.equal(buildInstructions(), instructions);
-  assert.equal(buildInstructions([]), instructions);
+  assert.equal(buildInstructions(testSkillSource([])), instructions);
 });
 
 test("catalog lists name+description, appended at the END (base prefix preserved)", () => {
@@ -48,15 +50,15 @@ test("catalog NEVER inlines skill bodies (progressive disclosure)", () => {
 });
 
 test("catalog mentions loadSkillReference only when a skill carries references", () => {
-  const withRefs: Skill[] = [
-    ...SKILLS,
+  const withRefs = testSkillSource([
+    ...SKILL_LIST,
     {
       name: "c-skill",
       description: "does C",
       content: "see references/deep.md",
       references: { "references/deep.md": "REF BODY — never inlined" },
     },
-  ];
+  ]);
   const out = buildInstructions(withRefs);
   assert.match(out, /loadSkillReference/);
   assert.doesNotMatch(out, /REF BODY/); // reference bodies are third-level, never in the prompt

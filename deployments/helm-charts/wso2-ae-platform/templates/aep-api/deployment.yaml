@@ -19,6 +19,10 @@ spec:
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
       serviceAccountName: aep-api
+      securityContext:
+        # The shared workspaces PVC is handed to the pod's fsGroup so the
+        # non-root runtime user (uid 1000) can write it.
+        fsGroup: 1000
       containers:
         - name: aep-api
           image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
@@ -40,6 +44,12 @@ spec:
               value: "false"
             - name: LOCAL_OPENBAO_REPAIR
               value: "false"
+
+            # ── Shared git workspaces (RWX PVC aep-workspaces) ────────────────
+            # Bare mirrors + per-SHA snapshots
+            # (docs/design/shared-volume-clone-architecture.md). Sole writer.
+            - name: AEP_WORKSPACE_ROOT
+              value: "/workspaces"
 
             # ── Database ──────────────────────────────────────────────────────
             {{- if .Values.postgres.url }}
@@ -184,6 +194,8 @@ spec:
             - name: task-signing-key
               mountPath: /app/keys
               readOnly: true
+            - name: workspaces
+              mountPath: /workspaces
             {{- if .Values.github.appPrivateKeyPem }}
             - name: github-app-key
               mountPath: /etc/github-app
@@ -194,6 +206,9 @@ spec:
         - name: task-signing-key
           configMap:
             name: aep-api-task-signing-key
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces
         {{- if .Values.github.appPrivateKeyPem }}
         - name: github-app-key
           configMap:

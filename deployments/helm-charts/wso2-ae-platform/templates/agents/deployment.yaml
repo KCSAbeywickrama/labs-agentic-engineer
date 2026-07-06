@@ -18,6 +18,10 @@ spec:
         app: agents
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
+      securityContext:
+        # Snapshots on the shared workspaces PVC stay readable for the
+        # non-root runtime user (uid 1000) via the pod's fsGroup.
+        fsGroup: 1000
       containers:
         - name: agents
           image: "{{ .Values.agents.image.repository }}:{{ .Values.agents.image.tag }}"
@@ -59,3 +63,19 @@ spec:
               value: {{ .Values.agents.m2mSecret | quote }}
             - name: AGENT_JWT_AUDIENCE
               value: {{ .Values.agents.jwtAudience | quote }}
+
+            # ── Shared git workspaces (RWX PVC aep-workspaces) ────────────────
+            # Read-only per-SHA snapshots written by aep-api; the readOnly
+            # mount enforces the reader-only contract structurally (D3).
+            - name: WORKSPACE_MOUNT_ROOT
+              value: "/workspaces"
+
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+              readOnly: true
+
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces

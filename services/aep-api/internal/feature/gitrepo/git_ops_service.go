@@ -18,41 +18,39 @@ package gitrepo
 
 import (
 	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 )
 
-// TagInfo describes a git tag.
-type TagInfo struct {
-	Name       string `json:"name"`
-	CommitHash string `json:"commitHash"`
-	Message    string `json:"message,omitempty"`
-}
+// TagInfo describes a git tag. Alias of the gitfs definition (identical
+// fields/tags) so Workspace.ListTags results flow into the version-naming
+// helpers unchanged.
+type TagInfo = gitfs.TagInfo
 
-// GitOpsService is the git-object gateway consumed by the artifacts + skills
-// stores: the GitData port (blobs/trees/commits/refs/tags), the credential
-// resolver, and the save-identity helper. Since the GitHub-direct rework
-// (docs/design/agents-generation-migration.md §5) there is NO local clone —
-// reads, commits, and tags all go over the Git Data API — so this surface no
-// longer carries any per-project clone/working-tree primitives.
+// GitOpsService is the git-object gateway consumed by the artifacts, files,
+// genai, skills, and task stores: the Workspace port (the disk-backed mirror
+// engine, docs/design/shared-volume-clone-architecture.md §5), the credential
+// resolver, and the save-identity helper.
 type GitOpsService interface {
 	ResolveSaveIdentities(cred credentials.Credential) (*GitIdentity, *GitIdentity)
-	GitData() GitData
+	// Workspace is the mount-backed git engine (reads, Mutate, tags, diff).
+	Workspace() Workspace
 	Resolver() credentials.Resolver
 }
 
 type gitOpsService struct {
 	resolver credentials.Resolver
-	// gitHub is the GitData port (git-host client) the save/read flows drive.
-	gitHub GitData
+	// workspace is the gitfs engine over the shared /workspaces mount.
+	workspace Workspace
 }
 
-// NewGitOpsService builds the git-object gateway. `github` is the GitData port
-// (git-host client) used by the artifact + skills stores.
-func NewGitOpsService(resolver credentials.Resolver, github GitData) GitOpsService {
-	return &gitOpsService{resolver: resolver, gitHub: github}
+// NewGitOpsService builds the git-object gateway over the mount-backed
+// Workspace engine every repo-content consumer runs on.
+func NewGitOpsService(resolver credentials.Resolver, workspace Workspace) GitOpsService {
+	return &gitOpsService{resolver: resolver, workspace: workspace}
 }
 
-// GitData returns the GitData port wired in at construction.
-func (s *gitOpsService) GitData() GitData { return s.gitHub }
+// Workspace returns the mount-backed Workspace engine wired in at construction.
+func (s *gitOpsService) Workspace() Workspace { return s.workspace }
 
 // Resolver returns the credential resolver wired in at construction.
 func (s *gitOpsService) Resolver() credentials.Resolver { return s.resolver }
@@ -68,6 +66,9 @@ func (s *gitOpsService) ResolveSaveIdentities(cred credentials.Credential) (*Git
 	if id.Email == "" {
 		id.Email = "noreply@aep.dev"
 	}
-	gi := &GitIdentity{Name: id.Name, Email: id.Email}
-	return gi, gi
+	// Two distinct pointers with identical fields: a caller mutating the author
+	// (e.g. to override a co-author) must never alias the committer.
+	author := &GitIdentity{Name: id.Name, Email: id.Email}
+	committer := &GitIdentity{Name: id.Name, Email: id.Email}
+	return author, committer
 }

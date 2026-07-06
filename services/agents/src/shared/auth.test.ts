@@ -101,6 +101,23 @@ test("rejects wrong audience, wrong secret, and expired tokens", async () => {
   }
 });
 
+test("accepts a token whose nbf is a few seconds ahead of this pod's clock (skew tolerance)", async () => {
+  const { baseUrl, close } = await bootGuarded();
+  try {
+    // nbf ~2s in the future — inside the 5s clockTolerance, so it must still verify.
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "HS256" })
+      .setAudience(AUD)
+      .setIssuedAt()
+      .setNotBefore(Math.floor(Date.now() / 1000) + 2)
+      .setExpirationTime("1h")
+      .sign(new TextEncoder().encode(SECRET));
+    assert.equal((await fetch(`${baseUrl}/secure`, bearer(token))).status, 200);
+  } finally {
+    await close();
+  }
+});
+
 test("enforces issuer when configured", async () => {
   const { baseUrl, close } = await bootGuarded({ audience: AUD, secret: SECRET, issuer: "aep-bff" });
   try {

@@ -17,9 +17,12 @@
 // Package github is the GitHub implementation of gitrepo's provider ports.
 //
 // A single *Client satisfies gitrepo.Host — the REST surface (repo / issue /
-// pull-request / webhook / git-data / app-installation) in client.go +
-// artifacts.go. GitHub Projects v2 is dropped (tasks-github-native §4): Tasks
-// are plain GitHub issues, so there is no GraphQL board surface.
+// pull-request / webhook / app-installation) in client.go. The git-object
+// (Git-Data) surface is gone: all repo content reads/writes run on the
+// disk-backed Workspace engine (internal/platform/gitfs, see
+// docs/design/shared-volume-clone-architecture.md §9 for what stays REST).
+// GitHub Projects v2 is dropped (tasks-github-native §4): Tasks are plain
+// GitHub issues, so there is no GraphQL board surface.
 //
 // This is the only place in the codebase that builds Authorization: Bearer
 // headers (authHeaders / the App-JWT and pat paths). Selected by GIT_PROVIDER
@@ -518,60 +521,6 @@ func (c *Client) SetIssueLabels(ctx context.Context, owner, repo string, cred cr
 	}
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d/labels", owner, repo, number)
 	return c.doJSON(ctx, http.MethodPut, url, "set issue labels", cred, map[string][]string{"labels": labels}, nil, http.StatusOK)
-}
-
-// compareFilesCap is GitHub's per-response cap on the compare endpoint's files
-// list (the endpoint returns at most 300 files and does not page them). A full
-// page signals the diff is truncated (CompareResult.Truncated).
-const compareFilesCap = 300
-
-// CompareRefs returns the file-level diff between two refs via GET
-// /repos/{owner}/{repo}/compare/{base}...{head}. base/head may be branch names,
-// tags, or SHAs. Used for the plan-turn lineage diff (§6): the delta between a
-// Task's lineage tag and the current tag. GitHub caps the files list at
-// compareFilesCap without paging it, so the result's Truncated flag reports when
-// the diff is partial.
-func (c *Client) CompareRefs(ctx context.Context, owner, repo string, cred credentials.Credential, base, head string) (*gitrepo.CompareResult, error) {
-	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/compare/%s...%s",
-		owner, repo, urlpkg.PathEscape(base), urlpkg.PathEscape(head))
-	var raw struct {
-		Status       string `json:"status"`
-		AheadBy      int    `json:"ahead_by"`
-		BehindBy     int    `json:"behind_by"`
-		TotalCommits int    `json:"total_commits"`
-		Files        []struct {
-			Filename  string `json:"filename"`
-			Status    string `json:"status"`
-			Additions int    `json:"additions"`
-			Deletions int    `json:"deletions"`
-			Changes   int    `json:"changes"`
-			Patch     string `json:"patch"`
-		} `json:"files"`
-	}
-	if err := c.getJSON(ctx, url, cred, &raw); err != nil {
-		return nil, err
-	}
-	out := &gitrepo.CompareResult{
-		Status:       raw.Status,
-		AheadBy:      raw.AheadBy,
-		BehindBy:     raw.BehindBy,
-		TotalCommits: raw.TotalCommits,
-		// GitHub caps the compare files list at compareFilesCap and does not
-		// page it; a full page means the diff is (almost certainly) truncated.
-		Truncated: len(raw.Files) >= compareFilesCap,
-		Files:     make([]gitrepo.ChangedFile, 0, len(raw.Files)),
-	}
-	for _, f := range raw.Files {
-		out.Files = append(out.Files, gitrepo.ChangedFile{
-			Filename:  f.Filename,
-			Status:    f.Status,
-			Additions: f.Additions,
-			Deletions: f.Deletions,
-			Changes:   f.Changes,
-			Patch:     f.Patch,
-		})
-	}
-	return out, nil
 }
 
 func (c *Client) RegisterWebhook(ctx context.Context, owner, repo string, cred credentials.Credential, deliveryURL, hmacSecret string, events []string) (int64, error) {

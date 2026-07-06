@@ -16,34 +16,42 @@
 
 package artifacts
 
-// Shared harness for the GitHub-direct artifact tests. The gittest tier
+// Shared harness for the artifact tests. The gittest tier
 // (docs/design/aep-api-target-structure.md — "Git testing") runs the REAL code
 // paths, not mocked git:
 //
 //   - a real bare repo whose `main` tip IS the draft "working tree"
 //     (gittest.NewRemote; arranged with r.seed / r.tag),
-//   - the REAL GitHub client (clients/github) pointed at a real Git-Data-API
-//     fake backed by that same bare repo (gittest.GitDataServer + WithAPIBase),
-//   - the REAL gitrepo.gitOpsService as the GitGateway (GitData + Resolver +
-//     ResolveSaveIdentities) — no clone,
+//   - the REAL gitfs Workspace engine mirroring that repo over file://
+//     (workspacetest.NewEngine + production NewGitOpsService) — every read,
+//     the save tag, AND the discard revert run through the mount plumbing;
+//     the Git-Data fake is gone with the REST write path,
 //   - the REAL artifacts.ArtifactService over all of the above.
 //
 // Only the two edges the flow doesn't own are faked: the RepoRepository row (a
-// single in-memory GitRepository) and the credential Resolver (a static token +
-// identity). save→tag / discard→revert-commit / read-at-HEAD / read-at-tag
-// therefore run end-to-end over genuine git object-store semantics, offline.
+// single in-memory GitRepository, RepoSlug pinned — SlugForURL can't parse
+// file:// URLs) and the credential Resolver (a static token + identity).
+// save→tag / discard→revert-commit / read-at-HEAD / read-at-tag therefore run
+// end-to-end over genuine git object-store semantics, offline.
+//
+// hookedWorkspace replaces the retired Git-Data server's ref-move/tag-create
+// race-injection hooks: it wraps the real engine and lets a test act right
+// before a Tag push attempt or inside each Mutate fn attempt (post-fetch,
+// pre-push) — the deterministic windows for CAS / tag-collision races.
 
 import (
 	"context"
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
-	githubclient "github.com/wso2/aep/aep-api/internal/clients/github"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
 	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -63,6 +71,9 @@ func (s *stubRepoRepo) GetByOrgAndSlug(context.Context, string, string) (*models
 	return nil, gitrepo.ErrRepoNotFound
 }
 func (s *stubRepoRepo) ListAllReady(context.Context) ([]models.GitRepository, error) {
+	return nil, nil
+}
+func (s *stubRepoRepo) ListAll(context.Context) ([]models.GitRepository, error) {
 	return nil, nil
 }
 func (s *stubRepoRepo) Create(context.Context, *models.GitRepository) error { return nil }
@@ -91,13 +102,47 @@ func (stubResolver) Resolve(context.Context, string) (credentials.Credential, er
 	return stubCred{}, nil
 }
 
+// ----- race-injection seam (the ex-Git-Data-server hooks' successor) -----
+
+// hookedWorkspace delegates to the real engine, exposing two deterministic
+// injection points: BeforeTag fires before every Tag push attempt (the
+// tag-collision window), and BeforeMutateFn fires inside every Mutate fn
+// attempt with its 1-based attempt number — fn runs AFTER the engine's fetch
+// and BEFORE its push, so seeding the origin there makes that attempt's push a
+// genuine non-fast-forward.
+type hookedWorkspace struct {
+	gitrepo.Workspace
+	BeforeTag      func(spec gitrepo.TagSpec)
+	BeforeMutateFn func(attempt int)
+}
+
+func (h *hookedWorkspace) Tag(ctx context.Context, ref gitrepo.RepoRef, spec gitrepo.TagSpec) error {
+	if h.BeforeTag != nil {
+		h.BeforeTag(spec)
+	}
+	return h.Workspace.Tag(ctx, ref, spec)
+}
+
+func (h *hookedWorkspace) Mutate(ctx context.Context, ref gitrepo.RepoRef, fn func(gitrepo.Tx) error, opts gitrepo.CommitOpts) (gitrepo.CommitResult, error) {
+	if h.BeforeMutateFn == nil {
+		return h.Workspace.Mutate(ctx, ref, fn, opts)
+	}
+	attempt := 0
+	return h.Workspace.Mutate(ctx, ref, func(tx gitrepo.Tx) error {
+		attempt++
+		h.BeforeMutateFn(attempt)
+		return fn(tx)
+	}, opts)
+}
+
 // ----- rig -----
 
 type rig struct {
 	t      *testing.T
 	svc    ArtifactService
 	remote *gittest.Remote
-	gd     *gittest.GitData
+	engine *gitfs.Engine
+	ws     *hookedWorkspace
 	rec    *models.GitRepository
 	org    string
 	proj   string
@@ -105,36 +150,73 @@ type rig struct {
 
 var idSanitize = regexp.MustCompile(`[^A-Za-z0-9_-]`)
 
-// idsFor derives a unique (orgID, projectID) from the test name so the
-// package-global CAS leaky bucket (keyed "<org>:<proj>") is never shared between
-// parallel tests.
+// idsFor derives a unique (orgID, projectID) from the test name so parallel
+// tests never share a mount path key.
 func idsFor(t *testing.T) (string, string) {
 	safe := idSanitize.ReplaceAllString(t.Name(), "-")
 	return "org-" + safe, "proj-" + safe
 }
 
-// newRig seeds a bare origin's `main` with `seed` (repo-relative path → content)
-// as the initial draft, stands up the Git Data API fake over it, and wires the
-// real gitOps GitGateway + artifact service. No clone.
+// newRig seeds a bare origin's `main` with `seed` (repo-relative path →
+// content) as the initial draft, stands up a real workspace engine over it,
+// and wires the production gitOps GitGateway + artifact service. Reads AND
+// writes (tag, revert) all run through the engine.
 func newRig(t *testing.T, seed map[string]string) *rig {
 	t.Helper()
 	org, proj := idsFor(t)
 	remote := gittest.NewRemote(t, gittest.WithSeed(seed, "seed"))
-	gd := gittest.GitDataServer(t, remote)
-	gh := githubclient.NewClient(githubclient.WithAPIBase(gd.URL))
 
 	rec := &models.GitRepository{
 		OrgID:         org,
 		ProjectID:     proj,
-		RepoURL:       "https://github.com/acme/widgets.git",
+		RepoURL:       remote.URL(),
+		RepoSlug:      "acme-widgets", // pinned — SlugForURL can't parse file:// URLs
 		DefaultBranch: "main",
 		Status:        "ready",
 	}
 	repoRepo := &stubRepoRepo{rec: rec}
-	gitOps := gitrepo.NewGitOpsService(stubResolver{}, gh)
+	engine := workspacetest.NewEngine(t)
+	ws := &hookedWorkspace{Workspace: engine}
+	gitOps := gitrepo.NewGitOpsService(stubResolver{}, ws)
 	svc := NewArtifactService(repoRepo, gitOps)
 
-	return &rig{t: t, svc: svc, remote: remote, gd: gd, rec: rec, org: org, proj: proj}
+	return &rig{t: t, svc: svc, remote: remote, engine: engine, ws: ws, rec: rec, org: org, proj: proj}
+}
+
+// workspaceRef derives the same mount RepoRef production resolves for the row.
+func (r *rig) workspaceRef() gitrepo.RepoRef {
+	return gitrepo.WorkspaceRefFor(r.org, r.rec, stubCred{})
+}
+
+// mirrorRevParse resolves rev inside the ENGINE's bare mirror (not the origin)
+// — the C8 sha-consistency probe.
+func (r *rig) mirrorRevParse(rev string) string {
+	r.t.Helper()
+	gitDir, err := gitfs.GitDir(r.engine.Root(), gitfs.RepoRef{
+		OrgID: r.org, ProjectID: r.proj, RepoSlug: r.rec.RepoSlug,
+	})
+	if err != nil {
+		r.t.Fatalf("mirror git dir: %v", err)
+	}
+	c := exec.Command("git", "--git-dir", gitDir, "rev-parse", "--verify", rev)
+	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		r.t.Fatalf("mirror rev-parse %s: %v\n%s", rev, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// originRevParse resolves rev on the bare ORIGIN.
+func (r *rig) originRevParse(rev string) string {
+	r.t.Helper()
+	c := exec.Command("git", "--git-dir="+r.remote.Dir(), "rev-parse", "--verify", rev)
+	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		r.t.Fatalf("origin rev-parse %s: %v\n%s", rev, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ----- arrange / assert helpers (against the bare origin = the draft) -----

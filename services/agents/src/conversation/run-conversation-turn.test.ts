@@ -20,9 +20,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./run-conversation-turn.js";
 import { InMemoryConversationStore } from "../store/memory-store.js";
+import type { Conversation } from "../store/conversation-store.js";
 import { SEED_FILES } from "../agents/main/prompt.js";
 import type { StreamPart } from "@aep/agent-stream";
+import { sha256Hex } from "../shared/hash.js";
 import { mockModel, type MockStep } from "../shared/mock-model.js";
+import { testSkillSource } from "../testing/skill-source.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 
@@ -123,7 +126,7 @@ test("default turn (no flag) carries no divergence note", async () => {
   assert.doesNotMatch(content, /files were changed outside/);
 });
 
-test("skills: loadSkill is registered, executes server-side, and its body reaches history", async () => {
+test("skills: loadSkill is registered over the skillSource, executes server-side, and its body reaches history", async () => {
   const store = new InMemoryConversationStore();
   const guard = new TurnGuard();
   const { events, onEvent } = collector();
@@ -143,9 +146,9 @@ test("skills: loadSkill is registered, executes server-side, and its body reache
     id: "skilled",
     instruction: "derive a component using the skill",
     files: SEED_FILES,
-    skills: [
+    skillSource: testSkillSource([
       { name: "component-architecture", description: "deriving components", content: "Components live at specs/design/components/<name>/design.md." },
-    ],
+    ]),
     model,
     store,
     guard,
@@ -190,6 +193,110 @@ test("toolset task-plan runs planTask over the read-only snapshot (no file mutat
   assert.match(JSON.stringify(planned.output), /"ok":true/);
   // No file mutation tool ever ran.
   assert.equal(events.some((e) => e.toolName === "addFile" || e.toolName === "editFile"), false);
+});
+
+// --- The terminal manifest (D14) ---------------------------------------------
+
+/** The manifest frame, asserted to be the LAST emitted event of the turn. */
+function lastManifest(events: StreamPart[]): StreamPart {
+  const last = events.at(-1);
+  assert.ok(last, "turn emitted events");
+  assert.equal(last.type, "manifest", `last event must be the manifest, got ${last.type}`);
+  assert.equal(events.filter((e) => e.type === "manifest").length, 1, "exactly one manifest per turn");
+  return last;
+}
+
+test("manifest: an applied edit yields touched-path → sha256 of the FINAL content", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  await runConversationTurn({ id: "m1", instruction: "rename", files: SEED_FILES, model: editModel(), store, guard, onEvent });
+
+  const manifest = lastManifest(events);
+  const expected = SEED_FILES[OPENAPI]!.replace('example: "Hello, World!"', 'example: "Hi there!"');
+  assert.deepEqual(manifest.files, { [OPENAPI]: sha256Hex(expected) });
+  assert.deepEqual(manifest.deleted, []);
+});
+
+test("manifest: a removed file lands in deleted; an added file is hashed", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  const model = mockModel([
+    { kind: "toolCall", toolCallId: "r1", toolName: "removeFile", input: { path: OPENAPI } },
+    { kind: "toolCall", toolCallId: "a1", toolName: "addFile", input: { path: "specs/notes.md", content: "note\n" } },
+    { kind: "text", text: "done" },
+  ]);
+  await runConversationTurn({ id: "m2", instruction: "restructure", files: SEED_FILES, model, store, guard, onEvent });
+
+  const manifest = lastManifest(events);
+  assert.deepEqual(manifest.deleted, [OPENAPI]);
+  assert.deepEqual(manifest.files, { "specs/notes.md": sha256Hex("note\n") });
+});
+
+test("manifest: a chat-only turn emits the EMPTY manifest (files toolset)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  await runConversationTurn({ id: "m3", instruction: "just talk", files: SEED_FILES, model: textModel("hi"), store, guard, onEvent });
+
+  const manifest = lastManifest(events);
+  assert.deepEqual(manifest.files, {});
+  assert.deepEqual(manifest.deleted, []);
+});
+
+test("manifest: a task-plan turn emits the EMPTY manifest (nothing mutates)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  const model = mockModel([
+    { kind: "toolCall", toolCallId: "p1", toolName: "planTask", input: { component: "hello-api", title: "Build hello-api", dependsOn: [], rationale: "core." } },
+    { kind: "text", text: "planned" },
+  ]);
+  await runConversationTurn({ id: "m4", instruction: "plan", files: SEED_FILES, toolset: "task-plan", model, store, guard, onEvent });
+
+  const manifest = lastManifest(events);
+  assert.deepEqual(manifest.files, {});
+  assert.deepEqual(manifest.deleted, []);
+});
+
+test("manifest: a rejected/noop op does not appear (touched = applied only)", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  const model = mockModel([
+    // NOT_FOUND edit (rejected) + idempotent remove of an absent path (noop).
+    { kind: "toolCall", toolCallId: "e1", toolName: "editFile", input: { path: OPENAPI, oldString: "no such anchor", newString: "x" } },
+    { kind: "toolCall", toolCallId: "r1", toolName: "removeFile", input: { path: "specs/absent.md" } },
+    { kind: "text", text: "done" },
+  ]);
+  await runConversationTurn({ id: "m5", instruction: "try", files: SEED_FILES, model, store, guard, onEvent });
+
+  const manifest = lastManifest(events);
+  assert.deepEqual(manifest.files, {});
+  assert.deepEqual(manifest.deleted, []);
+});
+
+test("manifest: NOT emitted when the turn throws (severed/failed stream carries no manifest)", async () => {
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+  const failingStore = {
+    get: async (): Promise<Conversation | null> => null,
+    save: async (): Promise<void> => {
+      throw new Error("db down");
+    },
+  };
+
+  await assert.rejects(
+    runConversationTurn({ id: "m6", instruction: "x", files: SEED_FILES, model: textModel("ok"), store: failingStore, guard, onEvent }),
+    /db down/,
+  );
+  assert.equal(events.some((e) => e.type === "manifest"), false, "no manifest on a failed turn");
 });
 
 test("a concurrent turn for the same id rejects with ConcurrentTurnError (409 source)", async () => {

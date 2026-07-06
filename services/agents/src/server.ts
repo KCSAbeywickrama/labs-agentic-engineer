@@ -25,23 +25,33 @@
  *
  * Every conversation route is behind the M2M gate (`aud`-checked Bearer JWT).
  * The turn requires an `X-Anthropic-Key` header — the model is built PER TURN
- * from it (§12.3.1), so the service holds no key of its own; `X-Org-Id` is
- * read for log attribution only. While a turn streams, a `: keep-alive` comment
- * is emitted every `keepAliveMs` so long generations survive an idle ingress.
+ * from it (§12.3.1), so the service holds no key of its own. While a turn
+ * streams, a `: keep-alive` comment is emitted every `keepAliveMs` so long
+ * generations survive an idle ingress.
+ *
+ * The ONLY turn shape is the workspace shape (§12/D9): the body carries IDs +
+ * shas, never file content. `snapshot-path.ts` fences + derives the snapshot
+ * dirs (`X-Org-Id` is LOAD-BEARING — the conversation's org segment must equal
+ * it, 403 otherwise) and `load-workspace.ts` reads the files + a lazy skill
+ * source from the mount. Bodies that inline `files`/`skills` (the pre-§12
+ * contract) are rejected with a clean 400.
  *
  * The route maps `runConversationTurn`'s `onEvent` straight to `data: <part>`
  * frames (no envelope). The stream starts LAZILY (on the first event), so a
- * pre-stream failure (400 missing key / invalid body, 409 concurrent turn, 413
- * body too large) is still an HTTP status; once streaming, every failure is an
- * `error` frame then `[DONE]`.
+ * pre-stream failure (400 missing key / invalid body / unknown snapshot, 403
+ * org-fence, 409 concurrent turn) is still an HTTP status; once streaming,
+ * every failure is an `error` frame then `[DONE]`.
  */
 
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, TOOLSETS, isToolset, type Skill, type StreamPart, type Toolset } from "@aep/agent-stream";
+import { SSE_DONE, TOOLSETS, isToolset, type StreamPart, type Toolset } from "@aep/agent-stream";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
+import type { SkillSource } from "./agents/main/skill-source.js";
+import { readSnapshot, loadSkillsFromSnapshot } from "./conversation/load-workspace.js";
+import { resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
 import { config } from "./shared/config.js";
@@ -52,10 +62,10 @@ export interface CreateAppDeps {
   buildModel: (apiKey: string) => LanguageModel;
   /** M2M gate config (always on): JWKS or shared secret. */
   auth: AgentsAuthConfig;
-  /** Max request body for the turn endpoint (default `config.bodyLimit`). */
-  bodyLimit?: string;
   /** SSE keep-alive cadence in ms (default `config.keepAliveMs`). */
   keepAliveMs?: number;
+  /** The shared workspaces mount (default `config.workspaceMountRoot`); tests/evals point it at a fixture tree. */
+  workspaceMountRoot?: string;
 }
 
 function startSSE(res: Response): void {
@@ -70,7 +80,8 @@ function startSSE(res: Response): void {
 export function createApp(deps: CreateAppDeps): Express {
   const app = express();
   const guard = new TurnGuard(); // one in-flight guard per app (serializes turns per id)
-  const jsonParser = express.json({ limit: deps.bodyLimit ?? config.bodyLimit });
+  // A workspace turn body is a few hundred bytes of IDs + shas; 256kb is generous headroom.
+  const jsonParser = express.json({ limit: "256kb" });
   const requireAuth = createAuthMiddleware(deps.auth);
   const keepAliveMs = deps.keepAliveMs ?? config.keepAliveMs;
 
@@ -90,7 +101,8 @@ export function createApp(deps: CreateAppDeps): Express {
       res.status(400).json({ error: "X-Anthropic-Key header is required" });
       return;
     }
-    // Org id is attribution-only (§12.3.2) — logged, never trusted for auth.
+    // Org id: LOAD-BEARING — the §12 fence asserts the conversation's org
+    // segment equals it (403 otherwise).
     const orgId = req.header("x-org-id");
     if (config.logLevel === "debug" && orgId) {
       process.stderr.write(`[turn ${id}] org=${orgId}\n`);
@@ -98,6 +110,7 @@ export function createApp(deps: CreateAppDeps): Express {
 
     const body = (req.body ?? {}) as {
       instruction?: unknown;
+      workspace?: unknown;
       files?: unknown;
       filesChangedExternally?: unknown;
       skills?: unknown;
@@ -109,39 +122,43 @@ export function createApp(deps: CreateAppDeps): Express {
       res.status(400).json({ error: "instruction is required" });
       return;
     }
-    if (body.files === null || typeof body.files !== "object" || Array.isArray(body.files)) {
-      res.status(400).json({ error: "files (a path→content map) is required" });
-      return;
-    }
-    const fileEntries = Object.entries(body.files as Record<string, unknown>);
-    const badEntry = fileEntries.find(([, v]) => typeof v !== "string");
-    if (badEntry) {
-      res.status(400).json({ error: `files["${badEntry[0]}"] must be a string` });
-      return;
-    }
-    // Validated above (every value is a string) — no rebuild needed.
-    const files = body.files as Record<string, string>;
 
-    // skills (optional): the caller-resolved candidate set (ADR-0002). Each must
-    // be { name, description, content } strings; reject a malformed payload
-    // pre-stream so it's a clean 400, not an opaque mid-stream failure.
-    let skills: Skill[] | undefined;
+    // The pre-§12 inline contract is GONE — reject it loudly so a stale caller
+    // cannot silently run a turn against the wrong file/skill supply.
+    if (body.files !== undefined) {
+      res.status(400).json({ error: "files is no longer accepted — send a workspace reference (§12)" });
+      return;
+    }
     if (body.skills !== undefined) {
-      if (!Array.isArray(body.skills)) {
-        res.status(400).json({ error: "skills must be an array" });
+      res.status(400).json({ error: "skills is no longer accepted — skills load from the workspace's skills snapshot" });
+      return;
+    }
+    if (body.workspace === undefined) {
+      res.status(400).json({ error: "workspace is required" });
+      return;
+    }
+
+    // Workspace resolution (§12/D9): derive + fence the snapshot dirs, then
+    // read the files and the lazy skill source from the mount.
+    let files: Record<string, string>;
+    let skillSource: SkillSource;
+    try {
+      const ws = resolveWorkspace({
+        conversationIdParam: id,
+        workspace: body.workspace,
+        orgIdClaim: orgId,
+        ...(deps.workspaceMountRoot ? { mountRoot: deps.workspaceMountRoot } : {}),
+      });
+      files = readSnapshot(ws.snapshotDir);
+      skillSource = loadSkillsFromSnapshot(ws.skillsSnapshotDir);
+    } catch (err) {
+      if (err instanceof WorkspaceRefError) {
+        res.status(err.status).json({ error: err.message });
         return;
       }
-      const isSkill = (s: unknown): s is Skill =>
-        s !== null &&
-        typeof s === "object" &&
-        typeof (s as Record<string, unknown>).name === "string" &&
-        typeof (s as Record<string, unknown>).description === "string" &&
-        typeof (s as Record<string, unknown>).content === "string";
-      if (!body.skills.every(isSkill)) {
-        res.status(400).json({ error: "each skill must be { name, description, content } strings" });
-        return;
-      }
-      skills = body.skills;
+      // A stat-checked snapshot failing to read = an infrastructure fault.
+      res.status(500).json({ error: err instanceof Error ? err.message : "workspace read failed" });
+      return;
     }
 
     // toolset (optional): which domain tools to register (§9.3). Absent → "files"
@@ -169,16 +186,25 @@ export function createApp(deps: CreateAppDeps): Express {
     // every read site regardless of control-flow narrowing.
     const ac = new AbortController();
     let started = false;
+    // Set when the client disconnects. Every terminal write is guarded on it (plus
+    // `res.writableEnded`) so a client that leaves in the completion window never
+    // triggers a write to a torn-down socket.
+    let clientGone = false;
     const keepAlive: { stop: (() => void) | null } = { stop: null };
     res.on("close", () => {
+      clientGone = true;
       ac.abort();
       keepAlive.stop?.();
     });
+    // The socket is writable only while the client is attached and the response
+    // has not been finished/closed.
+    const canWrite = (): boolean => !clientGone && !res.writableEnded && !res.closed;
 
     // Lazy stream start: headers (and the keep-alive timer) go out on the FIRST
     // event. A failure BEFORE any event (e.g. a concurrent turn) is still a clean
     // HTTP status.
     const send = (part: StreamPart): void => {
+      if (clientGone) return; // client left mid-turn — drop frames it can't receive
       if (!started) {
         startSSE(res);
         started = true;
@@ -193,7 +219,7 @@ export function createApp(deps: CreateAppDeps): Express {
         instruction: body.instruction,
         files,
         filesChangedExternally: body.filesChangedExternally === true,
-        ...(skills ? { skills } : {}),
+        skillSource,
         ...(toolset ? { toolset } : {}),
         model,
         store: deps.store,
@@ -201,12 +227,14 @@ export function createApp(deps: CreateAppDeps): Express {
         onEvent: send,
         abortSignal: ac.signal,
       });
+      keepAlive.stop?.();
+      if (!canWrite()) return; // client vanished in the completion window — nothing to flush
       if (!started) startSSE(res); // no events emitted — still open + terminate the stream
       res.write(`data: ${SSE_DONE}\n\n`);
-      keepAlive.stop?.();
       res.end();
     } catch (err) {
       keepAlive.stop?.();
+      if (!canWrite()) return; // client already gone — do not write to a torn-down socket
       if (!started) {
         // Pre-stream failure → HTTP status + JSON.
         if (err instanceof ConcurrentTurnError) {
@@ -239,15 +267,10 @@ export function createApp(deps: CreateAppDeps): Express {
     });
   });
 
-  // Body-parser / payload errors → JSON (413 when the snapshot exceeds the limit).
+  // Body-parser errors (invalid JSON, malformed payloads) → a clean 400.
   app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
       next(err); // mid-stream — let the default handler tear down the connection
-      return;
-    }
-    const e = err as { type?: string; status?: number } | null;
-    if (e?.type === "entity.too.large" || e?.status === 413) {
-      res.status(413).json({ error: "request body exceeds the configured limit" });
       return;
     }
     res.status(400).json({ error: "invalid request body" });

@@ -15,10 +15,14 @@
 // under the License.
 
 // Component tier for the Files API: the REAL Huma handler (via componenttest)
-// over the REAL GitHub client pointed at the gittest Git-Data-API fake backed by
-// a real bare repo. Only the repo row + credential resolver are faked, so
-// list/read/apply run against genuine git object-store semantics — a stale
-// baseSha is a real 409, a multi-write+delete apply is a real single commit.
+// over the production gitrepo gateway — reads AND the Apply write through the
+// REAL gitfs Workspace engine mirroring a REAL bare file:// origin (pure
+// workspacetest fixture; the Git-Data fake is gone with the REST write path).
+// Only the repo row + credential resolver are faked, so list/read/apply run
+// against genuine git object-store semantics — a stale baseSha is a real 409,
+// a multi-write+delete apply is a real single commit pushed to origin under
+// --force-with-lease, and a read right after an apply proves the mirror
+// freshening.
 package files_test
 
 import (
@@ -26,16 +30,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/api"
-	githubclient "github.com/wso2/aep/aep-api/internal/clients/github"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
 	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -43,15 +52,19 @@ import (
 const (
 	testOrg  = "acme-org"
 	testProj = "widgets"
+	testSlug = "acme-widgets"
 	apiBase  = "/api/v1/projects/" + testProj + "/files"
 )
 
 // ---- faked edges ----
 
+// stubRepoResolver hands out the single repo row, keyed by the AUTHENTICATED
+// org — a caller resolved to any other org gets ErrRepoNotFound (the 404),
+// mirroring the production (org_id, project_id) row lookup.
 type stubRepoResolver struct{ rec *models.GitRepository }
 
-func (s stubRepoResolver) GetRepo(_ context.Context, _, _ string) (*models.GitRepository, error) {
-	if s.rec == nil {
+func (s stubRepoResolver) GetRepo(_ context.Context, orgID, _ string) (*models.GitRepository, error) {
+	if s.rec == nil || orgID != s.rec.OrgID {
 		return nil, gitrepo.ErrRepoNotFound
 	}
 	return s.rec, nil
@@ -74,39 +87,52 @@ func (stubResolver) Resolve(context.Context, string) (credentials.Credential, er
 	return stubCred{}, nil
 }
 
-// testGateway is the narrow files.GitGateway backed by the real github client.
-type testGateway struct{ gh gitrepo.GitData }
-
-func (g testGateway) GitData() gitrepo.GitData       { return g.gh }
-func (g testGateway) Resolver() credentials.Resolver { return stubResolver{} }
-func (g testGateway) ResolveSaveIdentities(cred credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity) {
-	id := cred.Identity()
-	gi := &gitrepo.GitIdentity{Name: id.Name, Email: id.Email}
-	return gi, gi
-}
-
 // ---- harness ----
 
 type filesRig struct {
 	h      *componenttest.Harness
 	remote *gittest.Remote
+	engine *gitfs.Engine
 }
 
 func newFilesRig(t *testing.T, seed map[string]string) *filesRig {
 	t.Helper()
 	remote := gittest.NewRemote(t, gittest.WithSeed(seed, "seed"))
-	gd := gittest.GitDataServer(t, remote)
-	gh := githubclient.NewClient(githubclient.WithAPIBase(gd.URL))
 	rec := &models.GitRepository{
 		OrgID:         testOrg,
 		ProjectID:     testProj,
-		RepoURL:       "https://github.com/acme/widgets.git",
+		RepoURL:       remote.URL(),
+		RepoSlug:      testSlug, // pinned — SlugForURL can't parse file:// URLs
 		DefaultBranch: "main",
 		Status:        "ready",
 	}
-	svc := files.NewService(stubRepoResolver{rec: rec}, testGateway{gh: gh})
+	// The production gateway over the real engine: every read AND the Apply
+	// write run through the Workspace port (the REST git-object port is nil —
+	// files never touches it).
+	engine := workspacetest.NewEngine(t)
+	gitOps := gitrepo.NewGitOpsService(stubResolver{}, engine)
+	svc := files.NewService(stubRepoResolver{rec: rec}, gitOps)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{FilesSvc: svc}})
-	return &filesRig{h: h, remote: remote}
+	return &filesRig{h: h, remote: remote, engine: engine}
+}
+
+// mirrorRevParse resolves rev inside the ENGINE's bare mirror (not the origin)
+// — the C8 sha-consistency probe.
+func (r *filesRig) mirrorRevParse(t *testing.T, rev string) string {
+	t.Helper()
+	gitDir, err := gitfs.GitDir(r.engine.Root(), gitfs.RepoRef{
+		OrgID: testOrg, ProjectID: testProj, RepoSlug: testSlug,
+	})
+	if err != nil {
+		t.Fatalf("mirror git dir: %v", err)
+	}
+	cmd := exec.Command("git", "--git-dir", gitDir, "rev-parse", "--verify", rev)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mirror rev-parse %s: %v\n%s", rev, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (r *filesRig) get(path string) *httptest.ResponseRecorder {
@@ -240,17 +266,14 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("apply code %d, want 409: %s", rec.Code, rec.Body.String())
 	}
-	var got struct {
-		Conflicts []files.Conflict `json:"conflicts"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode conflicts: %v", err)
-	}
-	if len(got.Conflicts) != 1 || got.Conflicts[0].Path != "specs/requirements/requirements.md" {
-		t.Fatalf("conflicts wrong: %+v", got.Conflicts)
-	}
-	if got.Conflicts[0].CurrentSHA == "" || got.Conflicts[0].BaseSHA == "" {
-		t.Errorf("conflict missing shas: %+v", got.Conflicts[0])
+	// THE FROZEN 409 CONTRACT — asserted against a literal, not a helper.
+	// currentSha is the git blob sha of "v1" (deterministic), baseSha echoes
+	// the stale sha the caller sent. Byte-identical to the pre-Phase-3 body.
+	const wantBody = `{"conflicts":[{"path":"specs/requirements/requirements.md",` +
+		`"baseSha":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",` +
+		`"currentSha":"28c218c44b49222f91536daf5b4d9871638edc8e"}]}`
+	if got := strings.TrimSpace(rec.Body.String()); got != wantBody {
+		t.Fatalf("409 body drifted:\n got: %s\nwant: %s", got, wantBody)
 	}
 	// Nothing applied — HEAD unchanged, content unchanged.
 	if r.remote.HeadSHA(t) != headBefore {
@@ -258,6 +281,44 @@ func TestApply_StaleBaseSHA_409_NothingApplied(t *testing.T) {
 	}
 	if got := r.remote.FileAt(t, "main", "specs/requirements/requirements.md"); got != "v1" {
 		t.Errorf("content mutated on conflict: %q", got)
+	}
+}
+
+// A batch where only ONE op conflicts is rejected wholesale: the valid delete
+// must not be applied (all-or-nothing), and every conflict is collected.
+func TestApply_BatchConflict_AllOrNothing_CollectsAllConflicts(t *testing.T) {
+	r := newFilesRig(t, map[string]string{
+		"specs/requirements/requirements.md": "keep me",
+		"specs/requirements/todo.md":         "scratch",
+	})
+	todoSHA := r.readSHA(t, "specs/requirements/todo.md")
+	headBefore := r.remote.HeadSHA(t)
+
+	body := mustJSON(t, files.ApplyRequest{
+		Writes: []files.WriteOp{
+			{Path: "specs/requirements/requirements.md", Content: "clobber", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"},
+			{Path: "specs/design/design.md", Content: "new", BaseSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}, // absent + baseSha set ⇒ conflict too
+		},
+		Deletes: []files.DeleteOp{{Path: "specs/requirements/todo.md", BaseSHA: todoSHA}}, // valid — must still NOT apply
+	})
+	rec := r.apply(body)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("code %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Conflicts []files.Conflict `json:"conflicts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode conflicts: %v", err)
+	}
+	if len(got.Conflicts) != 2 {
+		t.Fatalf("conflicts = %+v, want ALL 2 collected", got.Conflicts)
+	}
+	if r.remote.HeadSHA(t) != headBefore {
+		t.Error("HEAD advanced on a conflicting batch")
+	}
+	if got := r.remote.FileAt(t, "main", "specs/requirements/todo.md"); got != "scratch" {
+		t.Errorf("valid delete leaked through a conflicting batch: todo.md = %q", got)
 	}
 }
 
@@ -351,5 +412,213 @@ func TestFiles_NoAuth_401(t *testing.T) {
 	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "x"})
 	if rec := r.h.NoAuth().Get(apiBase); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no-auth list: code %d, want 401", rec.Code)
+	}
+}
+
+// The org is derived solely from the verified token, and the repo row is keyed
+// by it — a caller from another org resolves no repo and gets a 404, never the
+// project's files (the mount path deriver consults only the row, D6).
+func TestFiles_CrossOrg_404(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "secret"})
+	if rec := r.h.AsOrg("intruder-org").Get(apiBase); rec.Code != http.StatusNotFound {
+		t.Errorf("cross-org list: code %d, want 404 (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := r.h.AsOrg("intruder-org").Get(apiBase + "/specs/requirements/requirements.md"); rec.Code != http.StatusNotFound {
+		t.Errorf("cross-org read: code %d, want 404", rec.Code)
+	}
+}
+
+// A unicode path survives the whole chain — URL escaping, the Huma {path...}
+// param, ls-tree -z (unquoted NUL plumbing), cat-file — byte-identically.
+func TestReadAtHead_UnicodePath(t *testing.T) {
+	const path = "specs/requirements/仕様-résumé ノート.md"
+	const content = "非ASCIIコンテンツ — ünïcödé\n"
+	r := newFilesRig(t, map[string]string{path: content})
+
+	escaped := (&url.URL{Path: "/" + path}).EscapedPath()
+	rec := r.get(apiBase + escaped)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unicode read: code %d (%s)", rec.Code, rec.Body.String())
+	}
+	var fc files.FileContent
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if fc.Path != path || fc.Content != content || fc.SHA == "" {
+		t.Fatalf("unicode read wrong: %+v", fc)
+	}
+
+	list := r.get(apiBase + "?prefix=specs/requirements/")
+	var metas []files.FileMeta
+	_ = json.Unmarshal(list.Body.Bytes(), &metas)
+	if len(metas) != 1 || metas[0].Path != path {
+		t.Fatalf("unicode list wrong: %+v", metas)
+	}
+}
+
+// A ~1 MiB file reads back byte-identically with the exact blob size in the
+// listing (well under the 5 MiB write cap, well over any pipe-buffer size).
+func TestReadAtHead_LargeFile(t *testing.T) {
+	const path = "specs/design/big.md"
+	content := strings.Repeat("0123456789abcdef", 1<<16) // 1 MiB
+	r := newFilesRig(t, map[string]string{path: content})
+
+	rec := r.get(apiBase + "/" + path)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("large read: code %d", rec.Code)
+	}
+	var fc files.FileContent
+	if err := json.Unmarshal(rec.Body.Bytes(), &fc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if fc.Content != content {
+		t.Fatalf("large read: content mismatch (%d bytes, want %d)", len(fc.Content), len(content))
+	}
+
+	list := r.get(apiBase + "?prefix=specs/design/")
+	var metas []files.FileMeta
+	_ = json.Unmarshal(list.Body.Bytes(), &metas)
+	if len(metas) != 1 || metas[0].Size != int64(len(content)) {
+		t.Fatalf("large list wrong: %+v", metas)
+	}
+}
+
+// SHA consistency (design C8): the commitSha the apply returns is the sha on
+// the ORIGIN's branch tip AND the mirror's local ref; the per-file shas in the
+// response are the exact blob shas a subsequent read (ls-tree) returns — the
+// FE folds them into its next baseShas.
+func TestApply_ShaConsistency_OriginMirrorAndReadBack(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "v1"})
+	reqSHA := r.readSHA(t, "specs/requirements/requirements.md")
+
+	body := mustJSON(t, files.ApplyRequest{
+		Writes: []files.WriteOp{
+			{Path: "specs/requirements/requirements.md", Content: "v2", BaseSHA: reqSHA},
+			{Path: "specs/design/design.md", Content: "# Design"},
+		},
+	})
+	rec := r.apply(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("apply code %d: %s", rec.Code, rec.Body.String())
+	}
+	var res files.ApplyResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Returned commit sha == origin tip == mirror ref.
+	if origin := r.remote.HeadSHA(t); res.CommitSHA != origin {
+		t.Errorf("commitSha %s != origin tip %s", res.CommitSHA, origin)
+	}
+	if mirror := r.mirrorRevParse(t, "refs/heads/main"); res.CommitSHA != mirror {
+		t.Errorf("commitSha %s != mirror ref %s", res.CommitSHA, mirror)
+	}
+	// Returned per-file shas == what a subsequent read serves.
+	for _, f := range res.Files {
+		if got := r.readSHA(t, f.Path); got != f.SHA {
+			t.Errorf("%s: apply returned sha %s, read returns %s", f.Path, f.SHA, got)
+		}
+	}
+}
+
+// Two concurrent applies to DISJOINT paths: one fast-forward-lands, the other
+// is push-rejected, re-fetches, re-checks its (still valid) preconditions and
+// lands — both 200, both files present, exactly two commits, linear history.
+func TestApply_ConcurrentDisjointApplies_BothLand(t *testing.T) {
+	r := newFilesRig(t, map[string]string{"specs/requirements/requirements.md": "seed"})
+	base := r.remote.HeadSHA(t)
+
+	bodies := []string{
+		mustJSON(t, files.ApplyRequest{Writes: []files.WriteOp{{Path: "specs/design/a.md", Content: "A"}}}),
+		mustJSON(t, files.ApplyRequest{Writes: []files.WriteOp{{Path: "specs/design/b.md", Content: "B"}}}),
+	}
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range bodies {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = r.apply(bodies[i]).Code
+		}(i)
+	}
+	wg.Wait()
+	if codes[0] != http.StatusOK || codes[1] != http.StatusOK {
+		t.Fatalf("codes = %v, want both 200 (disjoint applies must both land)", codes)
+	}
+	if got := r.remote.FileAt(t, "main", "specs/design/a.md"); got != "A" {
+		t.Errorf("a.md = %q", got)
+	}
+	if got := r.remote.FileAt(t, "main", "specs/design/b.md"); got != "B" {
+		t.Errorf("b.md = %q", got)
+	}
+	// Exactly two new commits on a linear history (the loser REPLAYED, it did
+	// not merge or clobber).
+	if n := r.remote.HeadSHA(t); n == base {
+		t.Fatal("HEAD did not advance")
+	}
+}
+
+// Two concurrent applies to the SAME path with the same baseSha: exactly one
+// lands, the other re-runs its precondition against the winner's commit and
+// gets the clean 409 — never a lost update.
+func TestApply_ConcurrentSamePath_OneLandsOne409(t *testing.T) {
+	const path = "specs/requirements/requirements.md"
+	r := newFilesRig(t, map[string]string{path: "seed"})
+	baseSHA := r.readSHA(t, path)
+
+	bodies := []string{
+		mustJSON(t, files.ApplyRequest{Writes: []files.WriteOp{{Path: path, Content: "first", BaseSHA: baseSHA}}}),
+		mustJSON(t, files.ApplyRequest{Writes: []files.WriteOp{{Path: path, Content: "second", BaseSHA: baseSHA}}}),
+	}
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range bodies {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = r.apply(bodies[i]).Code
+		}(i)
+	}
+	wg.Wait()
+	ok, conflict := 0, 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusOK:
+			ok++
+		case http.StatusConflict:
+			conflict++
+		}
+	}
+	if ok != 1 || conflict != 1 {
+		t.Fatalf("codes = %v, want exactly one 200 and one 409", codes)
+	}
+	got := r.remote.FileAt(t, "main", path)
+	if got != "first" && got != "second" {
+		t.Errorf("content = %q, want the single winner's write", got)
+	}
+}
+
+// Branch-tip reads freshen the mirror on every request: a commit made directly
+// on the ORIGIN (an external writer) is visible on the very next read, with the
+// new blob sha — there is no cache tier to go stale.
+func TestRead_SeesOriginAdvanceImmediately(t *testing.T) {
+	const path = "specs/requirements/requirements.md"
+	r := newFilesRig(t, map[string]string{path: "v1"})
+
+	sha1 := r.readSHA(t, path)
+
+	// External writer advances origin (not through the API).
+	r.remote.Seed(t, map[string]string{path: "v2 external"}, "external edit")
+
+	rec := r.get(apiBase + "/" + path)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("re-read: code %d", rec.Code)
+	}
+	var fc files.FileContent
+	_ = json.Unmarshal(rec.Body.Bytes(), &fc)
+	if fc.Content != "v2 external" {
+		t.Fatalf("content = %q, want the origin's new commit (no stale cache)", fc.Content)
+	}
+	if fc.SHA == sha1 {
+		t.Error("blob sha did not change across an origin advance")
 	}
 }

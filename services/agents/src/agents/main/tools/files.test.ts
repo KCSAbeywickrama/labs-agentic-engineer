@@ -18,27 +18,30 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FileBundle, type Skill, type LoadSkillResult, type LoadSkillReferenceResult } from "@aep/agent-stream";
+import { FileBundle, type LoadSkillResult, type LoadSkillReferenceResult } from "@aep/agent-stream";
 import { buildFileTools, LOAD_SKILL, LOAD_SKILL_REFERENCE } from "./files.js";
+import { testSkillSource, type TestSkill } from "../../../testing/skill-source.js";
 
-const SKILLS: Skill[] = [
+const SKILL_LIST: TestSkill[] = [
   { name: "component-architecture", description: "deriving components", content: "Components live at specs/design/components/<name>/design.md." },
   { name: "openapi-conventions", description: "openapi", content: "operationId is lowerCamelCase" },
 ];
+const SKILLS = testSkillSource(SKILL_LIST);
 
 /** A library where one skill carries reference files (agentskills.io structure). */
-const SKILLS_WITH_REFS: Skill[] = [
-  ...SKILLS,
+const SKILLS_WITH_REFS = testSkillSource([
+  ...SKILL_LIST,
   {
     name: "excalidraw-diagrams",
     description: "architecture diagrams",
     content: "For the JSON element vocabulary read references/schema.md.",
     references: { "references/schema.md": "rectangles, bound arrows, text labels" },
   },
-];
+]);
 
+type SkillSourceArg = ReturnType<typeof testSkillSource>;
 type LoadSkillExec = (i: { names: string[] }, o: unknown) => Promise<LoadSkillResult>;
-const loadSkillExec = (skills: Skill[]): LoadSkillExec =>
+const loadSkillExec = (skills: SkillSourceArg): LoadSkillExec =>
   buildFileTools(new FileBundle({}), skills)[LOAD_SKILL]!.execute as unknown as LoadSkillExec;
 
 test("buildFileTools omits loadSkill when no skills are supplied (skill-free = today)", () => {
@@ -79,7 +82,7 @@ test("loadSkill miss is self-correctable AND partial: resolved bodies + missing 
 // --- references (agentskills.io structure: SKILL.md + references/) ----------
 
 type LoadSkillRefExec = (i: { name: string; path: string }, o: unknown) => Promise<LoadSkillReferenceResult>;
-const loadSkillRefExec = (skills: Skill[]): LoadSkillRefExec =>
+const loadSkillRefExec = (skills: SkillSourceArg): LoadSkillRefExec =>
   buildFileTools(new FileBundle({}), skills)[LOAD_SKILL_REFERENCE]!.execute as unknown as LoadSkillRefExec;
 
 test("loadSkill lists a skill's reference paths in a success result", async () => {

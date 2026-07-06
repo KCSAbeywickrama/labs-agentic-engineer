@@ -185,8 +185,57 @@ func TestListProjects_TranslatesOCError(t *testing.T) {
 		},
 	}
 	svc := NewProjectService(oc, nil, nil, nil, nil, nil)
-	if _, err := svc.ListProjects(context.Background(), "acme", 100, ""); !errors.Is(err, ErrProjectNotFound) {
+	if _, err := svc.ListProjects(context.Background(), "acme", 100, "", ""); !errors.Is(err, ErrProjectNotFound) {
 		t.Fatalf("want ErrProjectNotFound, got %v", err)
+	}
+}
+
+func TestListProjects_SearchFiltersPageCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{
+		ListProjectsFunc: func(context.Context, string, int, string) (*models.ProjectList, error) {
+			return &models.ProjectList{Items: []models.Project{
+				{Name: "billing-api", DisplayName: "Billing"},
+				{Name: "web-shop", DisplayName: "Shop Front"},
+				{Name: "svc-x", DisplayName: "Mobile BILLING helper"},
+			}, NextCursor: "tok-2"}, nil
+		},
+	}
+	svc := NewProjectService(oc, nil, nil, nil, nil, nil)
+	list, err := svc.ListProjects(context.Background(), "acme", 100, "", "bIlLiNg")
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(list.Items) != 2 || list.Items[0].Name != "billing-api" || list.Items[1].Name != "svc-x" {
+		t.Fatalf("filtered items = %+v; want billing-api (name match) + svc-x (displayName match)", list.Items)
+	}
+	// The page-scoped filter must NOT eat the continuation token — the caller
+	// pages through and filters each page.
+	if list.NextCursor != "tok-2" {
+		t.Fatalf("NextCursor = %q; want tok-2", list.NextCursor)
+	}
+}
+
+func TestListProjects_SurfacesNextCursorAndPassesParams(t *testing.T) {
+	t.Parallel()
+	var gotLimit int
+	var gotCursor string
+	oc := &ocmocks.ProjectClientMock{
+		ListProjectsFunc: func(_ context.Context, _ string, limit int, cursor string) (*models.ProjectList, error) {
+			gotLimit, gotCursor = limit, cursor
+			return &models.ProjectList{Items: []models.Project{{Name: "a"}}, NextCursor: "next-tok"}, nil
+		},
+	}
+	svc := NewProjectService(oc, nil, nil, nil, nil, nil)
+	list, err := svc.ListProjects(context.Background(), "acme", 42, "cur-1", "")
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if gotLimit != 42 || gotCursor != "cur-1" {
+		t.Fatalf("client got (limit=%d cursor=%q); want (42, cur-1)", gotLimit, gotCursor)
+	}
+	if list.NextCursor != "next-tok" || len(list.Items) != 1 {
+		t.Fatalf("list = %+v; want 1 item + NextCursor next-tok", list)
 	}
 }
 

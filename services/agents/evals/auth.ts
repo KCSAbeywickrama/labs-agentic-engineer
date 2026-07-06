@@ -42,8 +42,15 @@ export async function signM2mToken(secret: string, audience: string): Promise<st
     .sign(new TextEncoder().encode(secret));
 }
 
-/** The header pair a turn POST needs: the M2M token + the per-request Anthropic key. */
-export async function evalTurnHeaders(apiKey: string): Promise<Record<string, string>> {
+/**
+ * The headers a turn POST needs: the M2M token + the per-request Anthropic key,
+ * plus `X-Org-Id` (load-bearing for the §12 fence on every turn).
+ */
+export async function evalTurnHeaders(apiKey: string, orgId?: string): Promise<Record<string, string>> {
   const token = await signM2mToken(EVAL_AUTH.secret, EVAL_AUTH.audience);
-  return { Authorization: `Bearer ${token}`, "X-Anthropic-Key": apiKey };
+  return {
+    Authorization: `Bearer ${token}`,
+    "X-Anthropic-Key": apiKey,
+    ...(orgId !== undefined ? { "X-Org-Id": orgId } : {}),
+  };
 }

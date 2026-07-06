@@ -14,17 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package files is the generic, specs/-scoped, GitHub-at-HEAD backed Files API
+// Package files is the generic, specs/-scoped Files API
 // (docs/design/agents-generation-migration.md §4, §12.2). It replaces the
-// per-project local working tree: reads are served from GitHub at HEAD (with a
-// HEAD-SHA-revalidated tree cache, the skills-store pattern) and the single
-// write is an atomic, all-or-nothing `apply` that commits straight to `main`
-// via the Git Data API under a bounded CAS retry.
+// per-project local working tree: reads are served from the workspace-mounted
+// bare mirror at the branch tip via the gitrepo.Workspace port
+// (docs/design/shared-volume-clone-architecture.md §5 — ls-tree/cat-file blob
+// shas are the same git blob shas the GitHub tree API returned, so the FE's
+// baseSha CAS flow is unaffected), and the single write is an atomic,
+// all-or-nothing `apply`: one Workspace.Mutate that stages the whole batch as
+// one commit and pushes it to origin under `--force-with-lease` (origin stays
+// the CAS arbiter; Mutate owns the bounded fast-forward retry).
 //
-// Draft state lives on the frontend; committed truth is GitHub. `apply` carries
-// per-file baseSha optimistic-concurrency: a stale baseSha (or a baseSha-omitted
-// write to a path that already exists) fails the whole batch with 409 and
-// nothing is applied. There are no individual PUT/DELETE routes.
+// Draft state lives on the frontend; committed truth is the git origin. `apply`
+// carries per-file baseSha optimistic-concurrency: a stale baseSha (or a
+// baseSha-omitted write to a path that already exists) fails the whole batch
+// with 409 and nothing is applied. There are no individual PUT/DELETE routes.
 package files
 
 import (
@@ -125,10 +129,13 @@ type RepoResolver interface {
 	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
 }
 
-// GitGateway is the narrow git-object surface + credential resolver + save
-// identities. *gitrepo.gitOpsService satisfies it structurally.
+// GitGateway is the narrow git surface + credential resolver + save identities.
+// Every operation — reads and the Apply write — goes through the Workspace port
+// (the mounted bare mirror); the feature holds no REST Git-Data dependency.
+// *gitrepo.gitOpsService satisfies it structurally.
 type GitGateway interface {
-	GitData() gitrepo.GitData
+	// Workspace is the mount-backed git engine serving all reads and writes.
+	Workspace() gitrepo.Workspace
 	Resolver() credentials.Resolver
 	ResolveSaveIdentities(cred credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity)
 }
@@ -145,20 +152,17 @@ type FilesService interface {
 type service struct {
 	repos RepoResolver
 	git   GitGateway
-	cache *treeCache
 }
 
 // NewService wires the Files API. Either dep may be nil in degraded boot; the
 // operations then surface ErrProjectRepoNotFound.
 func NewService(repos RepoResolver, git GitGateway) FilesService {
-	return &service{repos: repos, git: git, cache: newTreeCache()}
+	return &service{repos: repos, git: git}
 }
 
-// repoContext is the resolved GitHub coordinates for one project — the shared
-// gitrepo resolution (owner/name from URL, org credential, "main" fallback).
-type repoContext = gitrepo.RepoCoords
-
-func (s *service) resolve(ctx context.Context, orgID, projectID string) (*repoContext, error) {
+// repoRow looks up the project's repo row, mapping absence to
+// ErrProjectRepoNotFound (the 404).
+func (s *service) repoRow(ctx context.Context, orgID, projectID string) (*models.GitRepository, error) {
 	if s == nil || s.repos == nil || s.git == nil {
 		return nil, ErrProjectRepoNotFound
 	}
@@ -172,110 +176,73 @@ func (s *service) resolve(ctx context.Context, orgID, projectID string) (*repoCo
 	if repo == nil {
 		return nil, ErrProjectRepoNotFound
 	}
-	rc, err := gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), orgID, repo)
-	if err != nil {
-		return nil, err
-	}
-	return &rc, nil
+	return repo, nil
 }
 
-// List returns every blob at HEAD, filtered to those whose path has the given
-// prefix (empty prefix ⇒ all), sorted by path.
+// resolveRef derives the workspace-mount address every operation starts from:
+// the repo row keyed by the AUTHENTICATED org (never client input) plus the
+// org credential for mirror freshening and pushes.
+func (s *service) resolveRef(ctx context.Context, orgID, projectID string) (gitrepo.RepoRef, error) {
+	repo, err := s.repoRow(ctx, orgID, projectID)
+	if err != nil {
+		return gitrepo.RepoRef{}, err
+	}
+	return gitrepo.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
+}
+
+// List returns every blob at the branch tip, filtered to those whose path has
+// the given prefix (empty prefix ⇒ all), sorted by path.
 func (s *service) List(ctx context.Context, orgID, projectID, prefix string) ([]FileMeta, error) {
-	rc, err := s.resolve(ctx, orgID, projectID)
+	ref, err := s.resolveRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	blobs, err := s.blobsAtHead(ctx, orgID, projectID, rc)
+	entries, _, err := s.git.Workspace().List(ctx, ref, "")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list files at head: %w", err)
 	}
-	out := make([]FileMeta, 0, len(blobs))
-	for path, e := range blobs {
-		if prefix != "" && !strings.HasPrefix(path, prefix) {
+	out := make([]FileMeta, 0, len(entries))
+	for _, e := range entries {
+		if prefix != "" && !strings.HasPrefix(e.Path, prefix) {
 			continue
 		}
-		out = append(out, FileMeta{Path: path, SHA: e.SHA, Size: e.Size})
+		out = append(out, FileMeta{Path: e.Path, SHA: e.SHA, Size: e.Size})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
-// Read returns the content + blob sha of a single file at HEAD.
+// Read returns the content + blob sha of a single file at the branch tip.
 func (s *service) Read(ctx context.Context, orgID, projectID, path string) (*FileContent, error) {
 	if err := validatePath(path); err != nil {
 		return nil, err
 	}
-	rc, err := s.resolve(ctx, orgID, projectID)
+	ref, err := s.resolveRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	blobs, err := s.blobsAtHead(ctx, orgID, projectID, rc)
+	content, blobSHA, err := s.git.Workspace().ReadFile(ctx, ref, "", path)
 	if err != nil {
-		return nil, err
-	}
-	entry, ok := blobs[path]
-	if !ok {
-		return nil, ErrFileNotFound
-	}
-	data, err := s.git.GitData().GetBlob(ctx, rc.Owner, rc.Name, rc.Cred, entry.SHA)
-	if err != nil {
-		return nil, fmt.Errorf("get blob %s: %w", path, err)
-	}
-	return &FileContent{Path: path, Content: string(data), SHA: entry.SHA}, nil
-}
-
-// blobsAtHead returns path → blob entry at the current HEAD, reusing the cached
-// tree when HEAD is unchanged (HEAD-SHA-revalidated, one GetRef per read).
-func (s *service) blobsAtHead(ctx context.Context, orgID, projectID string, rc *repoContext) (map[string]gitrepo.TreeEntryResult, error) {
-	gh := s.git.GitData()
-	headSHA, err := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
-	if err != nil {
-		return nil, fmt.Errorf("get head ref: %w", err)
-	}
-	key := orgID + "/" + projectID
-	if blobs, ok := s.cache.matching(key, headSHA); ok {
-		return blobs, nil
-	}
-	tree, _, err := s.treeAtHead(ctx, rc, headSHA)
-	if err != nil {
-		return nil, err
-	}
-	blobs := map[string]gitrepo.TreeEntryResult{}
-	for _, e := range tree.Entries {
-		if e.Type == "blob" {
-			blobs[e.Path] = e
+		if errors.Is(err, gitrepo.ErrPathNotFound) {
+			return nil, ErrFileNotFound
 		}
+		return nil, fmt.Errorf("read %s at head: %w", path, err)
 	}
-	s.cache.put(key, headSHA, blobs)
-	return blobs, nil
+	return &FileContent{Path: path, Content: string(content), SHA: blobSHA}, nil
 }
 
-// treeAtHead downloads the commit + full recursive tree for an already-resolved
-// HEAD SHA — the shared second step of blobsAtHead's cache miss and the Apply
-// CAS loop (each does its own GetRef; the fresh ref read is the point). Returns
-// the tree and the commit's base tree SHA.
-func (s *service) treeAtHead(ctx context.Context, rc *repoContext, headSHA string) (*gitrepo.TreeObject, string, error) {
-	gh := s.git.GitData()
-	commit, err := gh.GetCommit(ctx, rc.Owner, rc.Name, rc.Cred, headSHA)
-	if err != nil {
-		return nil, "", fmt.Errorf("get head commit: %w", err)
-	}
-	tree, err := gh.GetTree(ctx, rc.Owner, rc.Name, rc.Cred, commit.TreeSHA, true)
-	if err != nil {
-		return nil, "", fmt.Errorf("get head tree: %w", err)
-	}
-	return tree, commit.TreeSHA, nil
-}
-
-// Apply validates + commits a batch atomically. On a baseSha precondition
-// failure it returns (nil, conflicts, ErrApplyConflict) with nothing applied.
+// Apply validates + commits a batch atomically: one Workspace.Mutate whose fn
+// checks every per-file baseSha precondition against the fetched branch tip
+// (Tx.Base()) and stages the whole batch as one commit. A non-fast-forward
+// push (a concurrent writer) re-runs fn against the new base, bounded by the
+// retry policy; a precondition failure aborts immediately with no retry and
+// returns (nil, conflicts, ErrApplyConflict) — nothing applied.
 func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyRequest) (*ApplyResult, []Conflict, error) {
 	if len(req.Writes) == 0 && len(req.Deletes) == 0 {
 		return nil, nil, fmt.Errorf("%w: empty apply (no writes or deletes)", ErrPathInvalid)
 	}
-	// Path + size validation happens once, before any GitHub call: a bad path
-	// is a 400, never a partial commit.
+	// Path + size validation happens once, before any git operation: a bad
+	// path is a 400, never a partial commit.
 	seen := map[string]bool{}
 	for _, w := range req.Writes {
 		if err := validatePath(w.Path); err != nil {
@@ -299,72 +266,52 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		seen[d.Path] = true
 	}
 
-	rc, err := s.resolve(ctx, orgID, projectID)
+	ref, err := s.resolveRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
+	author, committer := s.git.ResolveSaveIdentities(ref.Cred)
 
-	var result *ApplyResult
 	var conflicts []Conflict
-	err = gitrepo.RetryCAS(ctx, "files apply", casAttempts, func() error {
-		gh := s.git.GitData()
-		headSHA, ferr := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
-		if ferr != nil {
-			return fmt.Errorf("get ref: %w", ferr)
-		}
-		tree, baseTreeSHA, ferr := s.treeAtHead(ctx, rc, headSHA)
-		if ferr != nil {
-			return ferr
-		}
+	var files []FileMeta
+	var warnings []Warning
+	res, err := s.git.Workspace().Mutate(ctx, ref, func(tx gitrepo.Tx) error {
+		// fn re-runs against a fresh base on a CAS retry — start clean.
+		conflicts, files, warnings = nil, nil, nil
+
+		// The committed base tree this attempt builds on: path → blob sha,
+		// the input to every per-file baseSha precondition.
 		current := map[string]string{}
-		for _, e := range tree.Entries {
-			if e.Type == "blob" {
-				current[e.Path] = e.SHA
-			}
+		if werr := tx.Base().Walk("", func(rel, blobSHA string) error {
+			current[rel] = blobSHA
+			return nil
+		}); werr != nil {
+			return fmt.Errorf("walk base tree: %w", werr)
 		}
 
 		conflicts = checkPreconditions(req, current)
 		if len(conflicts) > 0 {
-			return errConflictSentinel
+			return errConflictSentinel // fn error aborts Mutate — no retry, the 409 path
 		}
 
-		var entries []gitrepo.TreeEntry
-		var files []FileMeta
-		var warnings []Warning
 		for _, w := range req.Writes {
-			blobSHA, berr := gh.CreateBlob(ctx, rc.Owner, rc.Name, rc.Cred, []byte(w.Content))
-			if berr != nil {
-				return fmt.Errorf("create blob %s: %w", w.Path, berr)
-			}
-			entries = append(entries, gitrepo.TreeEntry{Path: w.Path, Mode: "100644", Type: "blob", SHA: blobSHA})
-			files = append(files, FileMeta{Path: w.Path, SHA: blobSHA})
+			tx.Write(w.Path, []byte(w.Content))
+			// The staged blob's object name is a pure function of its content
+			// (what `git hash-object` will produce), so the response carries
+			// the exact sha a subsequent read returns — the FE folds it into
+			// its baseShas.
+			files = append(files, FileMeta{Path: w.Path, SHA: blobSHA([]byte(w.Content))})
 			warnings = append(warnings, softValidate(w.Path, w.Content)...)
 		}
 		for _, d := range req.Deletes {
-			// Empty SHA → sha:null on the wire → deletion.
-			entries = append(entries, gitrepo.TreeEntry{Path: d.Path, Mode: "100644", Type: "blob"})
+			tx.Delete(d.Path)
 		}
-
-		treeSHA, terr := gh.CreateTree(ctx, rc.Owner, rc.Name, rc.Cred, baseTreeSHA, entries)
-		if terr != nil {
-			return fmt.Errorf("create tree: %w", terr)
-		}
-		author, committer := s.git.ResolveSaveIdentities(rc.Cred)
-		newSHA, cerr := gh.CreateCommit(ctx, rc.Owner, rc.Name, rc.Cred, gitrepo.CreateCommitRequest{
-			Message:   applyMessage(req.Message),
-			TreeSHA:   treeSHA,
-			Parents:   []string{headSHA},
-			Author:    author,
-			Committer: committer,
-		})
-		if cerr != nil {
-			return fmt.Errorf("create commit: %w", cerr)
-		}
-		if uerr := gh.UpdateRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch, newSHA, false); uerr != nil {
-			return uerr
-		}
-		result = &ApplyResult{CommitSHA: newSHA, Files: files, Warnings: warnings}
 		return nil
+	}, gitrepo.CommitOpts{
+		Message:   applyMessage(req.Message),
+		Author:    author,
+		Committer: committer,
+		Retry:     gitrepo.RetryPolicy{Attempts: casAttempts},
 	})
 	if errors.Is(err, errConflictSentinel) {
 		slog.InfoContext(ctx, "files apply conflict — nothing applied",
@@ -376,9 +323,13 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 			"project", projectID, "writes", len(req.Writes), "deletes", len(req.Deletes), "error", err)
 		return nil, nil, err
 	}
-	s.cache.evict(orgID + "/" + projectID)
+	// res.Changed == false means the batch was byte-identical to the base tree
+	// (every precondition passed) — no commit was made and CommitSHA is the
+	// unchanged tip, which already carries exactly the requested state.
+	result := &ApplyResult{CommitSHA: res.CommitSHA, Files: files, Warnings: warnings}
 	slog.InfoContext(ctx, "files apply committed",
-		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", result.CommitSHA,
+		"project", projectID, "repo", ref.OrgID+"/"+ref.ProjectID+"/"+ref.RepoSlug,
+		"commit", result.CommitSHA, "changed", res.Changed,
 		"writes", len(req.Writes), "deletes", len(req.Deletes))
 	return result, nil, nil
 }

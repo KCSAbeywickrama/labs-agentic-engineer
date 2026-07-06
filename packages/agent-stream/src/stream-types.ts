@@ -38,4 +38,11 @@ export interface StreamPart {
   error?: unknown;
   /** On `finish` / `finish-step` frames: why the step ended (`stop`, `length`, …). */
   finishReason?: string;
+  /**
+   * Manifest-part fields (`type: "manifest"`, D14): path → sha256 hex of the
+   * final content for every path mutated this turn and still present.
+   */
+  files?: Record<string, string>;
+  /** Manifest-part field: touched paths no longer present at turn end. */
+  deleted?: string[];
 }

@@ -19,16 +19,13 @@ package github
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
-	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
 // stubCred is a fixed-token credential for driving the real client against an
@@ -142,82 +139,6 @@ func TestSetIssueLabels(t *testing.T) {
 	}
 	if capNil.body != `{"labels":[]}` {
 		t.Errorf("nil labels body = %s; want an explicit empty array", capNil.body)
-	}
-}
-
-func TestCompareRefs(t *testing.T) {
-	resp := `{
-		"status":"ahead","ahead_by":2,"behind_by":0,"total_commits":2,
-		"files":[
-			{"filename":"specs/design/components/svc/design.md","status":"modified","additions":5,"deletions":1,"changes":6,"patch":"@@ -1 +1 @@"},
-			{"filename":"specs/req.md","status":"added","additions":10,"deletions":0,"changes":10}
-		]
-	}`
-	c, cap := newFake(t, http.StatusOK, resp)
-	got, err := c.CompareRefs(context.Background(), "acme", "repo", stubCred{}, "design-v4", "design-v5")
-	if err != nil {
-		t.Fatalf("CompareRefs: %v", err)
-	}
-	if cap.method != http.MethodGet {
-		t.Errorf("method = %s; want GET", cap.method)
-	}
-	if cap.escapedPath != "/repos/acme/repo/compare/design-v4...design-v5" {
-		t.Errorf("path = %s", cap.escapedPath)
-	}
-	if got.Status != "ahead" || got.AheadBy != 2 || got.TotalCommits != 2 {
-		t.Errorf("summary: %+v", got)
-	}
-	if len(got.Files) != 2 {
-		t.Fatalf("files = %d; want 2", len(got.Files))
-	}
-	if got.Files[0].Filename != "specs/design/components/svc/design.md" || got.Files[0].Status != "modified" || got.Files[0].Patch != "@@ -1 +1 @@" {
-		t.Errorf("file[0]: %+v", got.Files[0])
-	}
-	if got.Files[1].Status != "added" || got.Files[1].Additions != 10 {
-		t.Errorf("file[1]: %+v", got.Files[1])
-	}
-}
-
-// TestCompareRefsTruncation confirms the Truncated flag is set when GitHub
-// returns a full page of files (the 300-file cap) and clear otherwise.
-func TestCompareRefsTruncation(t *testing.T) {
-	makeResp := func(n int) string {
-		files := make([]string, n)
-		for i := range files {
-			files[i] = fmt.Sprintf(`{"filename":"f%d","status":"modified","additions":1,"deletions":0,"changes":1}`, i)
-		}
-		return `{"status":"ahead","ahead_by":1,"behind_by":0,"total_commits":1,"files":[` + strings.Join(files, ",") + `]}`
-	}
-
-	// A full page (cap) → Truncated.
-	cFull, _ := newFake(t, http.StatusOK, makeResp(compareFilesCap))
-	full, err := cFull.CompareRefs(context.Background(), "acme", "repo", stubCred{}, "a", "b")
-	if err != nil {
-		t.Fatalf("CompareRefs(full): %v", err)
-	}
-	if !full.Truncated {
-		t.Fatalf("a %d-file response should be Truncated", compareFilesCap)
-	}
-	if len(full.Files) != compareFilesCap {
-		t.Fatalf("files = %d; want %d", len(full.Files), compareFilesCap)
-	}
-
-	// A short page → not truncated.
-	cShort, _ := newFake(t, http.StatusOK, makeResp(3))
-	short, err := cShort.CompareRefs(context.Background(), "acme", "repo", stubCred{}, "a", "b")
-	if err != nil {
-		t.Fatalf("CompareRefs(short): %v", err)
-	}
-	if short.Truncated {
-		t.Fatalf("a 3-file response should not be Truncated")
-	}
-}
-
-func TestCompareRefsError(t *testing.T) {
-	c, _ := newFake(t, http.StatusNotFound, `{"message":"Not Found"}`)
-	_, err := c.CompareRefs(context.Background(), "acme", "repo", stubCred{}, "a", "b")
-	if !gitrepo.IsHTTPStatus(err, http.StatusNotFound) {
-		t.Fatalf("expected HTTPStatusError 404, got %v", err)
 	}
 }
 

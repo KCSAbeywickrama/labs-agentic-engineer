@@ -62,6 +62,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/reaper"
 	"github.com/wso2/aep/aep-api/internal/seed"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -295,8 +297,38 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	repoService := gitrepo.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility)
-	gitOpsService := gitrepo.NewGitOpsService(credResolver, gitHost)
+
+	// Workspace engine — the disk-backed git plumbing over the shared
+	// /workspaces mount (docs/design/shared-volume-clone-architecture.md).
+	// Fail fast on an unusable root: the volume is mounted in compose/k8s,
+	// and dev runs override AEP_WORKSPACE_ROOT. It backs the disk-lifecycle
+	// pieces (the two best-effort trash hooks below + the reaper watcher) and
+	// the GitOpsService Workspace port (skills today; files/artifacts/genai
+	// in Phases 2–3).
+	workspaceEngine, err := gitfs.New(cfg.Workspace.Root)
+	if err != nil {
+		return nil, fmt.Errorf("workspace engine init (root %q): %w", cfg.Workspace.Root, err)
+	}
+	slog.Info("workspace engine", "root", workspaceEngine.Root())
+	// Both hooks are phase 1 of the two-phase delete (O(1) rename into
+	// trash/) and best-effort by contract: failures are logged, never
+	// surfaced — the reaper's orphan pass is the correctness backstop.
+	trashWorkspaceRepo := func(ctx context.Context, orgID, projectID, repoSlug string) {
+		if err := workspaceEngine.TrashRepo(ctx, gitfs.RepoRef{OrgID: orgID, ProjectID: projectID, RepoSlug: repoSlug}); err != nil {
+			slog.WarnContext(ctx, "workspace: trash repo subtree failed (reaper will reconcile)",
+				"org", orgID, "project", projectID, "slug", repoSlug, "error", err)
+		}
+	}
+	trashWorkspaceOrg := func(ctx context.Context, ocOrgID string) {
+		if err := workspaceEngine.TrashOrg(ctx, ocOrgID); err != nil {
+			slog.WarnContext(ctx, "workspace: trash org subtree failed (reaper will reconcile)",
+				"ocOrgId", ocOrgID, "error", err)
+		}
+	}
+
+	repoService := gitrepo.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility,
+		gitrepo.WithWorkspaceTrash(trashWorkspaceRepo))
+	gitOpsService := gitrepo.NewGitOpsService(credResolver, workspaceEngine)
 	artifactSvcGit := artifacts.NewArtifactService(repoRepo, gitOpsService)
 	issueService := gitrepo.NewIssueService(repoRepo, gitHost, credResolver)
 	webhookRegService := gitrepo.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
@@ -341,9 +373,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	artifactStore := artifacts.NewArtifactStore(artifactSvcGit)
 
 	// Repo-backed skills store (single source of truth = per-org org-skills
-	// repo). Reads HEAD via the GitHub API with an in-memory cache; writes
-	// commit to main. Built-ins seed/reconcile from the embedded files on
-	// demand. docs/design/skills-repo-storage.md.
+	// repo). Reads walk the shared-volume mirror at branch tip and writes
+	// commit to main through the Workspace port (shared-volume-clone
+	// architecture, Phase 1). Built-ins + flow skills seed/reconcile from the
+	// embedded files on demand. docs/design/skills-repo-storage.md.
 	skillSvc := skills.NewSkillService(gitOpsService, repoService)
 	skillMutationSvc := skills.NewSkillMutationService(skillSvc)
 	skillImportSvc := skills.NewSkillImportService(skillSvc)
@@ -363,42 +396,45 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// (commits straight to main under CAS retry). No local working tree.
 	filesSvc := files.NewService(repoService, gitOpsService)
 
-	// Unified genai turn/chat surface. It resolves the org Anthropic key (no
-	// platform fallback), pushes embedded flow skills + the org's auxiliary
-	// (non-builtin) skills, and streams the agents service's raw frames back.
+	// Unified genai committed-truth turn surface (shared-volume-clone §6). It
+	// resolves the org Anthropic key (no platform fallback), snapshots the
+	// project repo + the org's _skills repo onto the workspace mount, and
+	// runs turns detached behind the durable agent_turns guard. Skills are
+	// NOT pushed inline anymore — agents reads the full catalog (embedded
+	// flow skills seeded into _skills + org skills) from the SkillsRef
+	// snapshot.
 	anthropicKeyForGenAI := func(ctx context.Context, orgID string) (string, error) {
 		res, err := anthropicCredService.EffectiveKey(ctx, orgID)
 		if err != nil {
 			return "", err
 		}
 		if res == nil || res.Source == "none" {
-			return "", nil // no key → genai raises a pre-stream 4xx
+			return "", nil // no key → genai raises a pre-202 4xx
 		}
 		return res.Key, nil
 	}
-	orgSkillsForGenAI := func(ctx context.Context, orgID string) ([]agentsvc.Skill, error) {
-		list, err := skillSvc.List(ctx, orgID)
-		if err != nil {
-			// Never block a generation on a skills-store hiccup — proceed with
-			// core flow skills only (matches the store's degrade philosophy).
-			slog.WarnContext(ctx, "genai: org skills unavailable — proceeding without", "org", orgID, "error", err)
-			return nil, nil
+	// skillsRepoForTurns ensures the org's _skills repo exists (seeding the
+	// embedded builtin/flow skills on first touch) and hands back its row —
+	// the SkillsRef source for genai + task-plan turns. A closure at the
+	// composition root so neither feature grows a skills edge.
+	skillsRepoForTurns := func(ctx context.Context, orgID string) (*models.GitRepository, error) {
+		if err := skillSvc.EnsureProvisioned(ctx, orgID); err != nil {
+			return nil, err
 		}
-		out := make([]agentsvc.Skill, 0, len(list))
-		for _, sk := range list {
-			if sk.Kind == "builtin" {
-				continue // builtins are coding-agent skills, not flow skills
-			}
-			out = append(out, agentsvc.Skill{
-				Name:        sk.Name,
-				Description: sk.Description,
-				Content:     sk.SkillMD,
-				References:  sk.References,
-			})
-		}
-		return out, nil
+		return repoService.GetRepo(ctx, orgID, models.SkillsRepoSentinelProjectID)
 	}
-	genaiSvc := genai.NewService(repoService, gitOpsService, anthropicKeyForGenAI, orgSkillsForGenAI, agentsvcClient)
+	turnRepo := genai.NewTurnRepository(db)
+	turnBroker := genai.NewTurnBroker()
+	genaiSvc := genai.NewService(genai.ServiceDeps{
+		Repos:      repoService,
+		Git:        gitOpsService,
+		Keys:       anthropicKeyForGenAI,
+		Client:     agentsvcClient,
+		Turns:      turnRepo,
+		Broker:     turnBroker,
+		Snapshots:  workspaceEngine,
+		SkillsRepo: skillsRepoForTurns,
+	})
 
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
@@ -424,8 +460,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// asServiceIdentity. repoService/artifactStore/artifactSvcGit/gitOpsService
 	// satisfy the task consumer ports directly.
 	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit)
-	taskPlan := task.NewPlanService(repoService, artifactStore, artifactSvcGit, gitOpsService,
-		anthropicKeyForGenAI, orgSkillsForGenAI, agentsvcClient, issueService)
+	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
+		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
 
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
@@ -580,7 +616,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
 	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService)
 	execEvents.RegisterHandlers(registerWebhook)
-	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService)
+	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
 
 	// Reconciliation sweep (missed webhooks / requeue gating / PR-state healing /
@@ -618,7 +654,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Org-scoped GitHub connect/disconnect surface. Tasks are GitHub issues now
 	// (no rows to abandon on disconnect); the disconnect service severs the
 	// credential and the issues become inert to the router (no valid webhook).
-	disconnectSvc := orgcreds.NewOrgDisconnectService(db, credService, issueService)
+	disconnectSvc := orgcreds.NewOrgDisconnectService(db, credService, issueService).
+		WithWorkspaceTrash(trashWorkspaceOrg)
 	orgGitHubCtrl := orgcreds.NewOrgGitHubController(
 		credService,
 		disconnectSvc,
@@ -704,6 +741,15 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised credentials.
 		credValidator,
+		// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot
+		// age-reap, DB↔disk orphan reconciliation, quota/LRU eviction. The
+		// global passes self-elect via a non-blocking flock on the mount, so
+		// running one per replica is correct.
+		reaper.New(workspaceEngine, repoRepo, cfg.Workspace),
+		// agent_turns crash-safety sweep (design D17): a stale-heartbeat
+		// running turn is failed and the D18 one-active guard released;
+		// locally-buffered streams get the terminal event.
+		genai.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
 	}
 	// JobWatcher polls the proxy-dispatched `ca-…` coding-agent Jobs and Finishes
 	// the coding execution FAILED on Job failure (success rides the PR webhook),

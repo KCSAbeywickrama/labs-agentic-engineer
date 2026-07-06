@@ -23,9 +23,10 @@ package artifacts
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
 func TestDiscardRequirements_RevertsToLastTag(t *testing.T) {
@@ -114,6 +115,34 @@ func TestDiscardDesign_RevertsToLastTag(t *testing.T) {
 	}
 }
 
+// A discard when the subtree already matches the latest tag stages a tree
+// identical to base — Mutate commits nothing and HEAD stays put (today's
+// no-commit-on-no-diff behavior, preserved through the Mutate port).
+func TestDiscardRequirements_NoDiff_NoCommit(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "approved\n"})
+	ctx := context.Background()
+	if _, err := r.svc.SaveRequirements(ctx, r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	head := r.headSHA()
+
+	files, err := r.svc.DiscardRequirements(ctx, r.org, r.proj)
+	if err != nil {
+		t.Fatalf("DiscardRequirements: %v", err)
+	}
+	if files["requirements.md"] != "approved\n" {
+		t.Errorf("bundle = %v, want the approved content", files)
+	}
+	if got := r.headSHA(); got != head {
+		t.Errorf("HEAD moved %s → %s on a no-diff discard — must not commit", head, got)
+	}
+}
+
+// A concurrent writer advances origin between the revert's fetch and its push
+// (injected inside the first Mutate fn attempt — post-fetch, pre-push): the
+// push is a genuine non-fast-forward, Mutate re-fetches and re-runs the fn
+// against the new base, and the retry lands with the external commit preserved.
 func TestDiscardRequirements_CASConflict_RetriesAndSucceeds(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "approved\n"})
@@ -123,32 +152,34 @@ func TestDiscardRequirements_CASConflict_RetriesAndSucceeds(t *testing.T) {
 	}
 	r.seed(map[string]string{"specs/requirements/requirements.md": "draft\n"}, "draft")
 
-	var updateRefCalls int32
-	var once sync.Once
-	r.gd.BeforeUpdateRef = func() {
-		atomic.AddInt32(&updateRefCalls, 1)
-		// Once, right before the discard commit's ref move, an external writer
-		// advances main → the first UpdateRef is a real non-fast-forward.
-		once.Do(func() {
+	var fnAttempts int32
+	r.ws.BeforeMutateFn = func(attempt int) {
+		atomic.AddInt32(&fnAttempts, 1)
+		if attempt == 1 {
+			// An external writer advances main after this attempt's fetch →
+			// its push is a real non-fast-forward.
 			r.seed(map[string]string{"external.md": "external\n"}, "external push")
-		})
+		}
 	}
 
 	if _, err := r.svc.DiscardRequirements(ctx, r.org, r.proj); err != nil {
 		t.Fatalf("DiscardRequirements: %v", err)
 	}
-	if n := atomic.LoadInt32(&updateRefCalls); n != 2 {
-		t.Errorf("UpdateRef attempts = %d, want 2 (first non-FF, retry succeeds)", n)
+	if n := atomic.LoadInt32(&fnAttempts); n != 2 {
+		t.Errorf("Mutate fn attempts = %d, want 2 (first push non-FF, retry succeeds)", n)
 	}
 	if got := r.fileAt("main", "specs/requirements/requirements.md"); got != "approved\n" {
 		t.Errorf("requirements.md = %q, want reverted to approved", got)
 	}
 	if got := r.fileAt("main", "external.md"); got != "external\n" {
-		t.Errorf("external.md = %q, want preserved (base_tree refresh on retry)", got)
+		t.Errorf("external.md = %q, want preserved (base refresh on retry)", got)
 	}
 }
 
-func TestDiscardRequirements_CASBudgetExhausted(t *testing.T) {
+// Origin advances on EVERY attempt → Mutate exhausts its bounded retry and the
+// discard surfaces the wrapped ErrRefNotFastForward sentinel (the retired
+// REST leaky bucket's ErrConflictBudgetExhausted is gone).
+func TestDiscardRequirements_RetryExhaustionSurfacesNonFastForward(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "approved\n"})
 	ctx := context.Background()
@@ -157,17 +188,22 @@ func TestDiscardRequirements_CASBudgetExhausted(t *testing.T) {
 	}
 	r.seed(map[string]string{"specs/requirements/requirements.md": "draft\n"}, "draft")
 
-	key := r.org + ":" + r.proj
-	for i := 0; i < bucketCapacity; i++ {
-		globalRetrier.claim(key)
-	}
-	// Advance main on every UpdateRef so the client can never fast-forward.
-	r.gd.BeforeUpdateRef = func() {
-		r.seed(map[string]string{"ext.md": "push\n"}, "external push")
+	var fnAttempts int32
+	r.ws.BeforeMutateFn = func(attempt int) {
+		n := atomic.AddInt32(&fnAttempts, 1)
+		// Advance main after every fetch so no push can ever fast-forward.
+		r.seed(map[string]string{"ext.md": string(rune('a' + n))}, "external push")
 	}
 
 	_, err := r.svc.DiscardRequirements(ctx, r.org, r.proj)
-	if !errors.Is(err, ErrConflictBudgetExhausted) {
-		t.Fatalf("err = %v, want wrapped ErrConflictBudgetExhausted", err)
+	if !errors.Is(err, gitrepo.ErrRefNotFastForward) {
+		t.Fatalf("err = %v, want wrapped gitrepo.ErrRefNotFastForward after exhaustion", err)
+	}
+	if n := atomic.LoadInt32(&fnAttempts); n != 4 {
+		t.Errorf("Mutate fn attempts = %d, want the full default policy of 4", n)
+	}
+	// The revert never landed — the draft is still on main.
+	if got := r.fileAt("main", "specs/requirements/requirements.md"); got != "draft\n" {
+		t.Errorf("requirements.md = %q, want the untouched draft", got)
 	}
 }

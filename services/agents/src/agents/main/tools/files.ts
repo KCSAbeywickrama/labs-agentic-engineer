@@ -42,9 +42,9 @@ import {
   type Equal,
   type RemoveFileInput,
   type SetFrontmatterFieldInput,
-  type Skill,
 } from "@aep/agent-stream";
 import { buildSkillTools } from "./skill-tools.js";
+import type { SkillSource } from "../skill-source.js";
 
 export const ADD_FILE = "addFile" as const;
 export const EDIT_FILE = "editFile" as const;
@@ -119,11 +119,11 @@ export const askQuestionTool: Tool = tool({
 
 /**
  * Build the file tool set bound to one bundle for the duration of a turn. When
- * `skills` is non-empty, also registers the shared skill loaders (ADR-0002). No
- * skills → no `loadSkill` (the catalog is likewise omitted from the prompt), so
- * a skill-free turn is byte-identical.
+ * `skills` (a `SkillSource`) is non-empty, also registers the shared skill
+ * loaders (ADR-0002). No skills → no `loadSkill` (the catalog is likewise
+ * omitted from the prompt), so a skill-free turn is byte-identical.
  */
-export function buildFileTools(bundle: FileBundle, skills: readonly Skill[] = []): Record<string, Tool> {
+export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record<string, Tool> {
   const tools: Record<string, Tool> = {
     [ADD_FILE]: tool({
       description:

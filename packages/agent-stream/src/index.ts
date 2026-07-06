@@ -37,7 +37,6 @@ export type {
   EditFileInput,
   RemoveFileInput,
   SetFrontmatterFieldInput,
-  Skill,
   LoadSkillInput,
   LoadSkillResult,
   LoadedSkill,
@@ -45,6 +44,8 @@ export type {
   LoadSkillReferenceResult,
   Change,
   TurnRequest,
+  WorkspaceRef,
+  ManifestPart,
   Toolset,
   AgentSseEventType,
 } from "./contracts/sse-events.js";

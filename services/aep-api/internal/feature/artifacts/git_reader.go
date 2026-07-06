@@ -16,34 +16,34 @@
 
 package artifacts
 
-// GitHub-direct bundle reads (docs/design/agents-generation-migration.md §5).
-// The per-project local clone is gone: the "working tree" is now the untagged
-// tip of `main`, and every read walks the repo tree via the Git Data API — at
-// HEAD for the live draft, or at a `v*` tag for an approved version (peeling the
-// annotated tag object to its commit, mirroring genai_reads.go and the skills
-// store's HEAD walk). Downstream consumers key on tags, so intermediate commits
-// on main are harmless by construction.
+// Workspace-mount bundle reads (docs/design/shared-volume-clone-architecture.md
+// §5, §15). The per-project local clone is gone: the "working tree" is the
+// untagged tip of `main`, and every read is one `Workspace.ReadBundle` against
+// the shared bare mirror — at the branch tip for the live draft, at a `v*` tag
+// for an approved version (the engine peels annotated tags), or at an exact
+// commit for the publish flow's pinned read. Downstream consumers key on tags,
+// so intermediate commits on main are harmless by construction.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
-	"github.com/wso2/aep/aep-api/models"
 )
 
-// GitGateway is the git-object surface + credential resolver + save identities
-// the GitHub-direct artifact store drives. It is capability-sliced to exactly
-// what reads (GitData + Resolver) and save/discard commits (ResolveSaveIdentities)
-// need — the concrete *gitrepo.gitOpsService satisfies it structurally, the same
-// port the files + genai features consume. No clone primitives.
+// GitGateway is the git surface + credential resolver + save identities the
+// artifact store drives. Everything — bundle reads, the save tag, the discard
+// revert — goes through the Workspace port (the mounted bare mirror); the
+// feature holds no REST Git-Data dependency. The concrete
+// *gitrepo.gitOpsService satisfies it structurally — the same port the files
+// feature consumes. No clone primitives.
 type GitGateway interface {
-	GitData() gitrepo.GitData
+	// Workspace is the mount-backed git engine serving all reads and writes.
+	Workspace() gitrepo.Workspace
 	Resolver() credentials.Resolver
 	ResolveSaveIdentities(cred credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity)
 }
@@ -68,133 +68,64 @@ func designBundleFilter(rel string) bool {
 	return hasAllowedDesignExt(rel)
 }
 
-// repoCoords is the resolved GitHub coordinates + credential for one project —
-// the shared gitrepo resolution (owner/name from URL, org credential, "main"
-// fallback).
-type repoCoords = gitrepo.RepoCoords
-
-func (s *artifactService) resolveCoords(ctx context.Context, repo *models.GitRepository) (repoCoords, error) {
-	return gitrepo.ResolveRepoCoords(ctx, s.git.Resolver(), repo.OrgID, repo)
-}
-
-// headCommit returns the tip commit SHA of the default branch.
-func (s *artifactService) headCommit(ctx context.Context, rc repoCoords) (string, error) {
-	return s.git.GitData().GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "heads/"+rc.Branch)
-}
-
-// blobFetchConcurrency bounds the parallel GetBlob fan-out per bundle read.
-const blobFetchConcurrency = 8
-
-// readBundleAtCommit reads every blob under prefix at the given commit,
-// returning path→content keyed RELATIVE to prefix, filtered by keep. Blobs are
-// fetched with a bounded concurrent fan-out; assembly stays deterministic (the
-// result is keyed by path, and any fetch error fails the whole read).
-func (s *artifactService) readBundleAtCommit(ctx context.Context, rc repoCoords, commitSHA, prefix string, keep bundleFilter) (map[string]string, error) {
-	gh := s.git.GitData()
-	commit, err := gh.GetCommit(ctx, rc.Owner, rc.Name, rc.Cred, commitSHA)
+// readBundleAt reads every blob under prefix at `at` (branch tip when empty, a
+// "tags/<name>" ref, or an exact commit sha), returning path→content keyed
+// RELATIVE to prefix, filtered by keep. One ReadBundle call — the engine
+// freshens the mirror and streams blobs via plumbing; there is no per-blob
+// fan-out to bound anymore.
+func (s *artifactService) readBundleAt(ctx context.Context, ref gitrepo.RepoRef, at, prefix string, keep bundleFilter) (map[string]string, error) {
+	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, at, func(path string) bool {
+		rel, ok := strings.CutPrefix(path, prefix)
+		return ok && rel != "" && keep(rel)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("get commit %s: %w", commitSHA, err)
-	}
-	tree, err := gh.GetTree(ctx, rc.Owner, rc.Name, rc.Cred, commit.TreeSHA, true)
-	if err != nil {
-		return nil, fmt.Errorf("get tree %s: %w", commit.TreeSHA, err)
-	}
-	var targets []gitrepo.TreeEntryResult
-	var rels []string
-	for _, e := range tree.Entries {
-		if e.Type != "blob" || !strings.HasPrefix(e.Path, prefix) {
-			continue
-		}
-		rel := strings.TrimPrefix(e.Path, prefix)
-		if rel == "" || !keep(rel) {
-			continue
-		}
-		targets = append(targets, e)
-		rels = append(rels, rel)
-	}
-	contents := make([]string, len(targets))
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(blobFetchConcurrency)
-	for i, e := range targets {
-		g.Go(func() error {
-			data, err := gh.GetBlob(gctx, rc.Owner, rc.Name, rc.Cred, e.SHA)
-			if err != nil {
-				return fmt.Errorf("get blob %s: %w", e.Path, err)
-			}
-			contents[i] = string(data)
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	out := map[string]string{}
-	for i, rel := range rels {
-		out[rel] = contents[i]
+	out := make(map[string]string, len(files))
+	for path, content := range files {
+		out[strings.TrimPrefix(path, prefix)] = content
 	}
 	return out, nil
 }
 
-// readBundleAtHead reads the artifact bundle at the default branch's HEAD.
-func (s *artifactService) readBundleAtHead(ctx context.Context, rc repoCoords, prefix string, keep bundleFilter) (map[string]string, error) {
-	head, err := s.headCommit(ctx, rc)
+// readBundleAtCommit reads the artifact bundle at an exact commit (the publish
+// flow's pinned read — no ref resolution involved beyond object lookup).
+func (s *artifactService) readBundleAtCommit(ctx context.Context, ref gitrepo.RepoRef, commitSHA, prefix string, keep bundleFilter) (map[string]string, error) {
+	files, err := s.readBundleAt(ctx, ref, commitSHA, prefix, keep)
 	if err != nil {
-		return nil, fmt.Errorf("get head ref: %w", err)
+		return nil, fmt.Errorf("read bundle at %s: %w", commitSHA, err)
 	}
-	files, err := s.readBundleAtCommit(ctx, rc, head, prefix, keep)
-	if err != nil {
-		return nil, err
-	}
-	// The HEAD each at-HEAD read resolved. A read that lands right after a
-	// files-apply but logs the PRE-apply commit is a stale GetRef caught in the
-	// act (compare with the apply's "files apply committed" line).
-	slog.DebugContext(ctx, "bundle read at head",
-		"repo", rc.Owner+"/"+rc.Name, "prefix", prefix, "commit", head, "files", len(files))
 	return files, nil
 }
 
-// readBundleAtTag reads the artifact bundle at a `v*` tag. The tag ref's object
-// is peeled to its commit (GetTagObject; a lightweight tag already points at a
-// commit, so a 404 peel falls back to the ref sha). Returns ErrArtifactNotFound
-// when the tag ref itself is absent.
-func (s *artifactService) readBundleAtTag(ctx context.Context, rc repoCoords, tag, prefix string, keep bundleFilter) (map[string]string, error) {
-	commitSHA, err := s.tagCommit(ctx, rc, tag)
+// readBundleAtHead reads the artifact bundle at the default branch's tip.
+func (s *artifactService) readBundleAtHead(ctx context.Context, ref gitrepo.RepoRef, prefix string, keep bundleFilter) (map[string]string, error) {
+	files, err := s.readBundleAt(ctx, ref, "", prefix, keep)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read bundle at head: %w", err)
 	}
-	return s.readBundleAtCommit(ctx, rc, commitSHA, prefix, keep)
+	slog.DebugContext(ctx, "bundle read at head",
+		"repo", ref.OrgID+"/"+ref.ProjectID+"/"+ref.RepoSlug, "prefix", prefix, "files", len(files))
+	return files, nil
 }
 
-// tagCommit resolves a `v*` tag ref to the commit it points at. Returns
-// ErrArtifactNotFound when the ref is absent.
-func (s *artifactService) tagCommit(ctx context.Context, rc repoCoords, tag string) (string, error) {
-	gh := s.git.GitData()
-	tagSHA, err := gh.GetRef(ctx, rc.Owner, rc.Name, rc.Cred, "tags/"+tag)
+// readBundleAtTag reads the artifact bundle at a `v*` tag. The engine resolves
+// the ref and peels an annotated tag to its commit; an absent tag surfaces as
+// ErrArtifactNotFound.
+func (s *artifactService) readBundleAtTag(ctx context.Context, ref gitrepo.RepoRef, tag, prefix string, keep bundleFilter) (map[string]string, error) {
+	files, err := s.readBundleAt(ctx, ref, "tags/"+tag, prefix, keep)
 	if err != nil {
-		if gitrepo.IsHTTPStatus(err, 404) {
-			return "", ErrArtifactNotFound
+		if errors.Is(err, gitrepo.ErrRefNotFound) {
+			return nil, ErrArtifactNotFound
 		}
-		return "", fmt.Errorf("get tag ref %s: %w", tag, err)
+		return nil, fmt.Errorf("read bundle at tag %s: %w", tag, err)
 	}
-	return gitrepo.PeelTagToCommit(ctx, gh, rc.Owner, rc.Name, rc.Cred, tagSHA), nil
+	return files, nil
 }
 
-// listVersionTags returns every `v*` tag with its Name + resolved commit SHA
-// (the annotated tag object peeled to its commit). Message is not exposed by the
-// Git Data refs API, so it is left empty — the version list is name + commit.
-func (s *artifactService) listVersionTags(ctx context.Context, rc repoCoords) ([]gitrepo.TagInfo, error) {
-	refs, err := s.git.GitData().ListMatchingRefs(ctx, rc.Owner, rc.Name, rc.Cred, "tags/v")
-	if err != nil {
-		return nil, err
-	}
-	out := make([]gitrepo.TagInfo, 0, len(refs))
-	for _, r := range refs {
-		name := strings.TrimPrefix(r.Ref, "refs/tags/")
-		if name == "" || name == r.Ref {
-			continue
-		}
-		commit := gitrepo.PeelTagToCommit(ctx, s.git.GitData(), rc.Owner, rc.Name, rc.Cred, r.SHA)
-		out = append(out, gitrepo.TagInfo{Name: name, CommitHash: commit})
-	}
-	return out, nil
+// listVersionTags returns every `v*` tag with its Name, peeled commit SHA, and
+// annotation subject. The local read restores the Message the Git Data refs API
+// could not expose (it is empty only for lightweight tags).
+func (s *artifactService) listVersionTags(ctx context.Context, ref gitrepo.RepoRef) ([]gitrepo.TagInfo, error) {
+	return s.git.Workspace().ListTags(ctx, ref, "v")
 }

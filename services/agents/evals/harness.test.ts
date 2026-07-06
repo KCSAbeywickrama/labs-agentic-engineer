@@ -18,10 +18,10 @@
 
 /**
  * Deterministic harness integration test — drives the WHOLE eval pipeline
- * (boot app → streamTurn → reconstruct-from-stream → score) over the real SSE
- * route with a MOCK model (no tokens). Proves the reconstruction + scoring
- * contract before the real-model run; the only thing the real run adds is the
- * model's behavior.
+ * (materialize fixture mount → boot app → streamTurn → reconstruct-from-stream
+ * → score) over the real SSE route with a MOCK model (no tokens). Fixtures run
+ * the workspace shape (§12: files/skills read from a fixture tree under a temp
+ * WORKSPACE_MOUNT_ROOT — no files in the payload).
  */
 
 import { test } from "node:test";
@@ -31,18 +31,21 @@ import type { Fixture } from "./fixture.js";
 import { SEED_FILES } from "../src/agents/main/prompt.js";
 import { mockModel } from "../src/shared/mock-model.js";
 
+const REQUIREMENTS = "specs/requirements/requirements.md";
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
 const suite: EvalSuite = { agent: "main", fixturesDir: "", defaultSeed: SEED_FILES };
 
-test("single-turn: reconstruct-from-stream + score passes over the real route", async () => {
+test("workspace shape (default): fixture tree materialized, fold over the FILTERED view, score passes", async () => {
   const fixture: Fixture = {
     name: "smoke-edit",
-    turns: [{ prompt: "rename the example" }],
+    turns: [{ prompt: "rename the hello message" }],
     expect: {
-      filesContain: [{ path: OPENAPI, text: "Hi there!" }],
-      filesNotContain: [{ path: OPENAPI, text: 'example: "Hello, World!"' }],
-      touched: [OPENAPI],
-      yamlValid: [OPENAPI],
+      filesContain: [{ path: REQUIREMENTS, text: "Hi there!" }],
+      filesNotContain: [{ path: REQUIREMENTS, text: 'responds with "Hello, World!" when called' }],
+      touched: [REQUIREMENTS],
+      // The §12 turn filter: the seed's openapi.yaml is on disk but NOT in the
+      // turn input, so it never appears in the reconstructed state.
+      filesAbsent: [OPENAPI],
       preferEdit: true,
     },
   };
@@ -51,7 +54,11 @@ test("single-turn: reconstruct-from-stream + score passes over the real route", 
       kind: "toolCall",
       toolCallId: "c1",
       toolName: "editFile",
-      input: { path: OPENAPI, oldString: 'example: "Hello, World!"', newString: 'example: "Hi there!"' },
+      input: {
+        path: REQUIREMENTS,
+        oldString: 'A simple API that responds with "Hello, World!" when called.',
+        newString: 'A simple API that responds with "Hi there!" when called.',
+      },
     },
     { kind: "text", text: "done" },
   ]);
@@ -61,9 +68,10 @@ test("single-turn: reconstruct-from-stream + score passes over the real route", 
   assert.equal(result.passRate, 1);
 });
 
-test("captured-trace continuation: pre-seeds the store, reconstructs prior turns", async () => {
-  // Turn 1 recorded as messages (adds an `enabled` frontmatter via setFrontmatterField),
-  // turn 2 (mock) edits it. Proves messages pre-seed + reconstruction of prior tool-calls.
+test("workspace shape: captured-trace continuation pre-seeds the store, reconstructs prior turns", async () => {
+  // Turn 1 recorded as messages (adds a notes file), turn 2 (mock) edits it.
+  // Proves messages pre-seed + reconstruction of prior tool-calls under the
+  // namespaced workspace conversation id.
   const fixture: Fixture = {
     name: "smoke-continuation",
     messages: [
@@ -110,7 +118,7 @@ test("captured-trace continuation: pre-seeds the store, reconstructs prior turns
   assert.equal(result.passed, 1, JSON.stringify(result.sampleResults[0]?.turns, null, 2));
 });
 
-test("skills: agent loads a skill, applies an edit; toolsUsed scores, loadSkill not harvested as an OpResult", async () => {
+test("workspace shape: skills load from the _skills snapshot (no skills in the payload)", async () => {
   const skills = [
     { name: "component-architecture", description: "deriving components", content: "Components live at specs/design/components/<name>/design.md." },
   ];
@@ -119,7 +127,7 @@ test("skills: agent loads a skill, applies an edit; toolsUsed scores, loadSkill 
     turns: [{ prompt: "use the relevant skill, then edit" }],
     expect: {
       toolsUsed: ["loadSkill"],
-      filesContain: [{ path: OPENAPI, text: "Hi there!" }],
+      filesContain: [{ path: REQUIREMENTS, text: "Hi there!" }],
       // preferEdit + noToolErrors only pass if the loadSkill result is excluded
       // from the OpResult harvest (it is not an add and not an error).
       preferEdit: true,
@@ -132,7 +140,11 @@ test("skills: agent loads a skill, applies an edit; toolsUsed scores, loadSkill 
       kind: "toolCall",
       toolCallId: "c1",
       toolName: "editFile",
-      input: { path: OPENAPI, oldString: 'example: "Hello, World!"', newString: 'example: "Hi there!"' },
+      input: {
+        path: REQUIREMENTS,
+        oldString: 'A simple API that responds with "Hello, World!" when called.',
+        newString: 'A simple API that responds with "Hi there!" when called.',
+      },
     },
     { kind: "text", text: "done" },
   ]);
@@ -140,3 +152,4 @@ test("skills: agent loads a skill, applies an edit; toolsUsed scores, loadSkill 
   const result = await runFixture(suite, fixture, { model, samples: 1, skills });
   assert.equal(result.passed, 1, JSON.stringify(result.sampleResults[0]?.turns, null, 2));
 });
+

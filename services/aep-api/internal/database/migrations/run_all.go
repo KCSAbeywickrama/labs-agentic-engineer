@@ -83,6 +83,9 @@ func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
 		// Executions table (AutoMigrated from the model) gains its partial
 		// admission-mutex unique index, which AutoMigrate cannot express.
 		ctxStep("executions", RunExecutions),
+		// agent_turns table (AutoMigrated from the model) gains the D18
+		// one-active-turn-per-project partial unique index.
+		ctxStep("agent_turns", RunAgentTurns),
 		// tasks-github-native cutover: drop component_tasks + the
 		// git_repositories.github_project_id cache column (both AutoMigrate-only,
 		// now gone). Runs LAST — after every legacy component_tasks migration and

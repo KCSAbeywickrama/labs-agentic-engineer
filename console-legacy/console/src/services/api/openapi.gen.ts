@@ -285,23 +285,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/board": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a project's kanban board */
-        get: operations["get-board"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{projectName}/components": {
         parameters: {
             query?: never;
@@ -449,7 +432,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run a generation/chat turn (SSE — raw StreamPart frames + [DONE]) */
+        /** Start a generation/chat turn (202 — runs detached; attach via the turn stream) */
         post: operations["create-turn"];
         delete?: never;
         options?: never;
@@ -534,6 +517,23 @@ export interface paths {
         };
         /** Get the design bundle at a tag */
         get: operations["get-design-bundle-at-tag"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/executions/{executionId}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Poll an Execution's progress (build steps / coding status) */
+        get: operations["get-execution-progress"];
         put?: never;
         post?: never;
         delete?: never;
@@ -719,7 +719,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List a project's tasks */
+        /** List a project's Tasks (live GitHub ⋈ executions → derived status) */
         get: operations["list-tasks"];
         put?: never;
         post?: never;
@@ -729,7 +729,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/tasks/dispatch": {
+    "/projects/{projectName}/tasks/plan": {
         parameters: {
             query?: never;
             header?: never;
@@ -738,56 +738,22 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Dispatch a project's tasks to the coding agent */
-        post: operations["dispatch-tasks"];
+        /** Plan implementation Tasks (SSE — raw StreamPart frames + [DONE]) */
+        post: operations["plan-tasks"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/tasks/generate": {
+    "/projects/{projectName}/tasks/{issueNumber}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        /** Generate a project's tasks (tech-lead agent, SSE stream) */
-        post: operations["generate-tasks"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectName}/tasks/generated": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a project's generated tasks */
-        get: operations["get-generated-tasks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectName}/tasks/{taskId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a task */
+        /** Get one Task with its full Execution history */
         get: operations["get-task"];
         put?: never;
         post?: never;
@@ -797,41 +763,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/tasks/{taskId}/progress/agent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Poll a task's coding-agent progress */
-        get: operations["get-task-agent-progress"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectName}/tasks/{taskId}/progress/build": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Poll a task's build progress */
-        get: operations["get-task-build-progress"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectName}/tasks/{taskId}/regenerate-body": {
+    "/projects/{projectName}/tasks/{issueNumber}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -840,15 +772,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Regenerate a single task's body (Phase 2 detail, SSE stream) */
-        post: operations["regenerate-task-body"];
+        /** Stamp aep:execute and dispatch through the funnel (async) */
+        post: operations["execute-task"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/tasks/{taskId}/retry": {
+    "/projects/{projectName}/tasks/{issueNumber}/hold": {
         parameters: {
             query?: never;
             header?: never;
@@ -857,23 +789,58 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry a failed task */
-        post: operations["retry-task"];
-        delete?: never;
+        /** Set the aep:hold label (level-triggered; idempotent) */
+        post: operations["hold-task"];
+        /** Remove the aep:hold label and re-evaluate (idempotent) */
+        delete: operations["unhold-task"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/tasks/{taskId}/status": {
+    "/projects/{projectName}/turns/active": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get a task's status with build-run steps */
-        get: operations["get-task-status"];
+        /** Get the project's running turn (204 when none) */
+        get: operations["get-active-turn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/turns/{turnId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one turn's status */
+        get: operations["get-turn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectName}/turns/{turnId}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Attach to a turn's part stream (SSE — replay from ?from / Last-Event-ID, then live-tail) */
+        get: operations["stream-turn"];
         put?: never;
         post?: never;
         delete?: never;
@@ -932,23 +899,6 @@ export interface components {
             tagName: string;
             /** Format: int64 */
             version: number;
-        };
-        BoardTask: {
-            assignee?: string;
-            componentName?: string;
-            componentTaskId?: string;
-            dependsOnComponents?: string[] | null;
-            description?: string;
-            /** Format: date-time */
-            dispatchedAt?: string;
-            errorMessage?: string;
-            execType?: string;
-            id: string;
-            labels?: components["schemas"]["LabelInfo"][] | null;
-            lifecycleStatus?: string;
-            status?: string;
-            title: string;
-            url: string;
         };
         BuildLogEntry: {
             level?: string;
@@ -1054,57 +1004,6 @@ export interface components {
             componentType: string;
             spec: string;
         };
-        ComponentTask: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/ComponentTask.json
-             */
-            readonly $schema?: string;
-            batchId?: string;
-            body?: string;
-            bodySyncPending?: boolean;
-            branchName?: string;
-            /** Format: int64 */
-            buildAuthRetryCount?: number;
-            cause?: string;
-            componentName: string;
-            /** Format: date-time */
-            createdAt: string;
-            dependsOnComponents?: string[] | null;
-            /** Format: date-time */
-            dispatchDeferredAt?: string;
-            /** Format: date-time */
-            dispatchedAt?: string;
-            errorMessage?: string;
-            execType: string;
-            id: string;
-            /** Format: int64 */
-            issueNumber?: number;
-            issueUrl?: string;
-            labels?: string[] | null;
-            lastBuildRunName?: string;
-            lastBuildSha?: string;
-            lastCodingAgentRunName?: string;
-            /** Format: date-time */
-            lastEventAt?: string;
-            lifecycleStatus: string;
-            mergeCommitSha?: string;
-            /** Format: int64 */
-            order: number;
-            projectId: string;
-            /** Format: int64 */
-            pullRequestNumber?: number;
-            pullRequestUrl?: string;
-            rationale?: string;
-            sourceDesignVersion?: string;
-            sourceSpecVersion?: string;
-            status: string;
-            title: string;
-            /** Format: date-time */
-            updatedAt: string;
-            workspacePath: string;
-        };
         CreateProjectRequest: {
             /**
              * Format: uri
@@ -1116,8 +1015,6 @@ export interface components {
             description?: string;
             displayName?: string;
             name: string;
-            /** @description The user's initial requirement — what they want built. Persisted as the project's requirement and triggers spec derivation for the new project. */
-            prompt?: string;
         };
         CreateSkillInput: {
             /**
@@ -1203,6 +1100,16 @@ export interface components {
             name: string;
             openAPISpec: string;
         };
+        DesignSaveBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/DesignSaveBody.json
+             */
+            readonly $schema?: string;
+            /** @description Commit to read, gate and tag (the publish's just-applied commit). Empty: resolve HEAD. */
+            commitSha?: string;
+        };
         DiscoverOutputBody: {
             /**
              * Format: uri
@@ -1212,19 +1119,6 @@ export interface components {
             readonly $schema?: string;
             issuer: string;
             jwksUrl: string;
-        };
-        DispatchResult: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/DispatchResult.json
-             */
-            readonly $schema?: string;
-            componentName: string;
-            error?: string;
-            runName?: string;
-            status: string;
-            taskId: string;
         };
         EnvVar: {
             key: string;
@@ -1277,6 +1171,19 @@ export interface components {
              */
             type: string;
         };
+        ExecutionView: {
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            endedAt?: string;
+            id: string;
+            kind: string;
+            reason?: string;
+            runName?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            status: string;
+        };
         ExposesAPI: {
             auth?: string;
             managed?: boolean;
@@ -1319,9 +1226,9 @@ export interface components {
             name: string;
             warnings: string[] | null;
         };
-        LabelInfo: {
-            color: string;
-            name: string;
+        Lineage: {
+            designTag?: string;
+            specTag?: string;
         };
         OrgAnthropicConnectInputBody: {
             /**
@@ -1431,20 +1338,6 @@ export interface components {
             status?: string;
             uid?: string;
         };
-        ProjectBoard: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/ProjectBoard.json
-             */
-            readonly $schema?: string;
-            done: components["schemas"]["BoardTask"][] | null;
-            failed: components["schemas"]["BoardTask"][] | null;
-            inProgress: components["schemas"]["BoardTask"][] | null;
-            onHold: components["schemas"]["BoardTask"][] | null;
-            todo: components["schemas"]["BoardTask"][] | null;
-            url: string;
-        };
         ProjectList: {
             /**
              * Format: uri
@@ -1515,6 +1408,16 @@ export interface components {
             version?: number;
             versions?: components["schemas"]["ArtifactVersion"][] | null;
         };
+        SaveBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/SaveBody.json
+             */
+            readonly $schema?: string;
+            /** @description Commit to gate and tag (the publish's just-applied commit). Empty: resolve HEAD. */
+            commitSha?: string;
+        };
         SkillDetailBody: {
             /**
              * Format: uri
@@ -1539,31 +1442,52 @@ export interface components {
             /** Format: int64 */
             version: number;
         };
-        TaskStatusResponse: {
+        TaskDetail: {
             /**
              * Format: uri
              * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/TaskStatusResponse.json
+             * @example /api/v1/TaskDetail.json
              */
             readonly $schema?: string;
-            buildSteps?: components["schemas"]["WorkflowRunTask"][] | null;
-            task: components["schemas"]["ComponentTask"];
-        };
-        Tasks: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example /api/v1/Tasks.json
-             */
-            readonly $schema?: string;
-            hasUnsavedChanges: boolean;
-            projectId: string;
-            sourceDesign?: string;
-            status: string;
-            tasks: components["schemas"]["ComponentTask"][] | null;
+            attention: string[] | null;
+            body?: string;
+            component?: string;
+            dependsOn: string[] | null;
+            derivedStatus: string;
+            executionHistory: components["schemas"]["ExecutionView"][] | null;
+            executions: {
+                [key: string]: components["schemas"]["ExecutionView"];
+            };
+            executorClass?: string;
+            hold: boolean;
             /** Format: int64 */
-            version: number;
-            versions?: components["schemas"]["ArtifactVersion"][] | null;
+            issueNumber: number;
+            issueUrl: string;
+            lineage: components["schemas"]["Lineage"];
+            operation?: string;
+            origin?: string;
+            rationale?: string;
+            title: string;
+        };
+        TaskView: {
+            attention: string[] | null;
+            body?: string;
+            component?: string;
+            dependsOn: string[] | null;
+            derivedStatus: string;
+            executions: {
+                [key: string]: components["schemas"]["ExecutionView"];
+            };
+            executorClass?: string;
+            hold: boolean;
+            /** Format: int64 */
+            issueNumber: number;
+            issueUrl: string;
+            lineage: components["schemas"]["Lineage"];
+            operation?: string;
+            origin?: string;
+            rationale?: string;
+            title: string;
         };
         TurnInputBody: {
             /**
@@ -1572,12 +1496,6 @@ export interface components {
              * @example /api/v1/TurnInputBody.json
              */
             readonly $schema?: string;
-            /** @description The FE's current draft (latest truth) */
-            files?: {
-                [key: string]: string;
-            };
-            /** @description User hand-edited since the last turn (chat) */
-            filesChangedExternally?: boolean;
             /** @description User message / generation directive */
             instruction: string;
             /** @description Optional target (e.g. a doc type) */
@@ -1587,6 +1505,37 @@ export interface components {
              * @enum {string}
              */
             useCase: "requirements-generate" | "requirements-chat" | "design-generate";
+        };
+        TurnOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/TurnOutputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The started turn's id — poll/attach with it */
+            turnId: string;
+        };
+        TurnStatus: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/TurnStatus.json
+             */
+            readonly $schema?: string;
+            commitSha?: string;
+            conversationId: string;
+            /** Format: date-time */
+            createdAt: string;
+            message?: string;
+            noChanges?: boolean;
+            paths?: string[] | null;
+            reason?: string;
+            status: string;
+            turnId: string;
+            /** Format: date-time */
+            updatedAt: string;
+            useCase: string;
         };
         UpdateConfigBody: {
             /**
@@ -2483,38 +2432,6 @@ export interface operations {
             };
         };
     };
-    "get-board": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectBoard"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
     "list-components": {
         parameters: {
             query?: never;
@@ -2877,12 +2794,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TurnOutputBody"];
+                };
             };
             /** @description Error */
             default: {
@@ -2969,7 +2888,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DesignSaveBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -3044,6 +2967,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DesignBundle"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-execution-progress": {
+        parameters: {
+            query?: {
+                /** @description Cursor: only lines after this epoch-millis (0 ⇒ initial load) */
+                sinceMillis?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description Execution id */
+                executionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressResponse"];
                 };
             };
             /** @description Error */
@@ -3271,7 +3231,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SaveBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -3393,7 +3357,10 @@ export interface operations {
     };
     "list-tasks": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which Tasks to return (default open) */
+                state?: "open" | "closed" | "all";
+            };
             header?: never;
             path: {
                 /** @description Project name (DNS-label slug) */
@@ -3409,7 +3376,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ComponentTask"][] | null;
+                    "application/json": components["schemas"]["TaskView"][] | null;
                 };
             };
             /** @description Error */
@@ -3423,39 +3390,7 @@ export interface operations {
             };
         };
     };
-    "dispatch-tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DispatchResult"][] | null;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "generate-tasks": {
+    "plan-tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -3473,38 +3408,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-generated-tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Tasks"];
-                };
             };
             /** @description Error */
             default: {
@@ -3524,8 +3427,8 @@ export interface operations {
             path: {
                 /** @description Project name (DNS-label slug) */
                 projectName: string;
-                /** @description ComponentTask UUID */
-                taskId: string;
+                /** @description GitHub issue number of the Task */
+                issueNumber: number;
             };
             cookie?: never;
         };
@@ -3537,7 +3440,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ComponentTask"];
+                    "application/json": components["schemas"]["TaskDetail"];
                 };
             };
             /** @description Error */
@@ -3551,93 +3454,109 @@ export interface operations {
             };
         };
     };
-    "get-task-agent-progress": {
-        parameters: {
-            query?: {
-                /** @description Cursor: only return lines after this epoch-millis (0 ⇒ initial load) */
-                sinceMillis?: string;
-                /** @description Max lines to return (0 ⇒ server default) */
-                limit?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description ComponentTask UUID */
-                taskId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProgressResponse"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-task-build-progress": {
-        parameters: {
-            query?: {
-                /** @description Cursor: only return lines after this epoch-millis (0 ⇒ initial load) */
-                sinceMillis?: string;
-                /** @description Max lines to return (0 ⇒ server default) */
-                limit?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Project name (DNS-label slug) */
-                projectName: string;
-                /** @description ComponentTask UUID */
-                taskId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProgressResponse"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "regenerate-task-body": {
+    "execute-task": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Project name (DNS-label slug) */
                 projectName: string;
-                /** @description ComponentTask UUID */
-                taskId: string;
+                /** @description GitHub issue number of the Task */
+                issueNumber: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "hold-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description GitHub issue number of the Task */
+                issueNumber: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "unhold-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
+                /** @description GitHub issue number of the Task */
+                issueNumber: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-active-turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project name (DNS-label slug) */
+                projectName: string;
             };
             cookie?: never;
         };
@@ -3661,15 +3580,15 @@ export interface operations {
             };
         };
     };
-    "retry-task": {
+    "get-turn": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Project name (DNS-label slug) */
                 projectName: string;
-                /** @description ComponentTask UUID */
-                taskId: string;
+                /** @description Turn id from the 202 create response */
+                turnId: string;
             };
             cookie?: never;
         };
@@ -3681,7 +3600,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DispatchResult"];
+                    "application/json": components["schemas"]["TurnStatus"];
                 };
             };
             /** @description Error */
@@ -3695,15 +3614,21 @@ export interface operations {
             };
         };
     };
-    "get-task-status": {
+    "stream-turn": {
         parameters: {
-            query?: never;
-            header?: never;
+            query?: {
+                /** @description Replay from this absolute event index (wins over Last-Event-ID) */
+                from?: number;
+            };
+            header?: {
+                /** @description Standard SSE resume: the last received event id */
+                "Last-Event-ID"?: string;
+            };
             path: {
                 /** @description Project name (DNS-label slug) */
                 projectName: string;
-                /** @description ComponentTask UUID */
-                taskId: string;
+                /** @description Turn id from the 202 create response */
+                turnId: string;
             };
             cookie?: never;
         };
@@ -3714,9 +3639,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["TaskStatusResponse"];
-                };
+                content?: never;
             };
             /** @description Error */
             default: {

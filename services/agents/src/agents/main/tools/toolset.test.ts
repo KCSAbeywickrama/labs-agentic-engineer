@@ -24,13 +24,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FileBundle, type Skill } from "@aep/agent-stream";
+import { FileBundle } from "@aep/agent-stream";
 import { buildFileTools } from "./files.js";
 import { buildTaskPlanTools } from "./task-plan.js";
 import { TaskPlan } from "../task-plan-accumulator.js";
 import { instructions, buildInstructions, taskPlanInstructions, buildTaskPlanInstructions } from "../prompt.js";
+import { testSkillSource } from "../../../testing/skill-source.js";
 
-const SKILLS: Skill[] = [{ name: "task-planning", description: "plan tasks", content: "one task per component" }];
+const SKILLS = testSkillSource([{ name: "task-planning", description: "plan tasks", content: "one task per component" }]);
 const bundle = () => new FileBundle({});
 const plan = () => new TaskPlan({});
 

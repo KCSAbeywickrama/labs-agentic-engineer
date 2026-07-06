@@ -19,11 +19,13 @@
 /**
  * A terminal chat over the main spec agent's SSE endpoint (a dev playground).
  *
- * It boots the real Express app in-process (the eval-harness pattern), then for
- * a named THREAD — a folder under `chat_playground/` whose name is the
- * conversation id — runs a multi-turn loop: read the folder → POST one turn →
- * stream the frames → fold the tool-calls back through a `FileBundle` → write
- * the folder. The service writes no files; this client owns the disk.
+ * It boots the real Express app in-process (the eval-harness pattern) over a
+ * temp workspace mount, then for a named THREAD — a folder under
+ * `chat_playground/` — runs a multi-turn loop: read the folder → materialize it
+ * (plus the repo skill library) into a fake immutable workspace snapshot → POST
+ * one workspace-shape turn → stream the frames → fold the tool-calls back
+ * through a `FileBundle` → write the folder. The service writes no files; this
+ * client owns the disk.
  *
  *   pnpm --filter @aep/agents playground            # pick/create a thread
  *   pnpm --filter @aep/agents playground my-spec    # jump straight into `my-spec`
@@ -39,32 +41,37 @@ import {
   FileBundle,
   applyToolCall,
   streamTurn,
-  type Skill,
   type StreamPart,
   type TurnRequest,
 } from "@aep/agent-stream";
 import { createApp } from "../src/server.js";
 import { createModel } from "../src/shared/model.js";
 import { loadDotenv, loadAnthropicKey } from "../src/shared/env.js";
+import { filterTurnSnapshot } from "../src/conversation/load-workspace.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
 import { listen0 } from "../src/shared/listen.js";
-import { loadRepoSkills } from "../evals/skills.js";
+import { loadRepoSkills, type RepoSkill } from "../evals/skills.js";
 import { EVAL_AUTH, evalTurnHeaders } from "../evals/auth.js";
+import { EvalWorkspace, EVAL_ORG, evalConversationId } from "../evals/workspace.js";
 import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, threadDir } from "./threads.js";
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
-// pushed every turn (ADR-0002); the service still reads none.
+// materialized into the fixture `_skills` snapshot the in-process server reads (§12).
 const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "skills");
 
 interface ChatCtx {
   thread: string;
   baseUrl: string;
-  skills: Skill[];
+  skills: RepoSkill[];
   dryRun: boolean;
   /** M2M token + `X-Anthropic-Key` sent on every turn, like any caller. */
   headers: Record<string, string>;
+  /** The fixture mount the in-process server reads; snapshots materialize here. */
+  ws: EvalWorkspace;
+  /** Per-process turn counter (turnId attribution only). */
+  turnIndex: number;
 }
 
 const NEW = "\0new";
@@ -87,7 +94,7 @@ async function pickThread(): Promise<string | null> {
   const name = await clack.text({
     message: "Thread name",
     placeholder: "my-spec",
-    validate: (v) => (isValidThreadName((v ?? "").trim()) ? undefined : "letters, digits, . _ - only"),
+    validate: (v) => (isValidThreadName((v ?? "").trim()) ? undefined : "letters, digits, . _ - only (no leading dot, no --)"),
   });
   if (clack.isCancel(name)) return null;
   const n = name.trim();
@@ -95,18 +102,21 @@ async function pickThread(): Promise<string | null> {
   return n;
 }
 
-/** Run one turn end to end: snapshot → stream → reconstruct → write. */
+/** Run one turn end to end: snapshot → materialize → stream → reconstruct → write. */
 async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   const before = readSnapshot(ctx.thread);
+  // Workspace shape (§12): the folder state is materialized into a fake
+  // immutable snapshot on the mount and the body carries only the reference;
+  // the server applies the turn filter when it reads the snapshot back.
+  const conversationId = evalConversationId(ctx.thread);
   const body: TurnRequest = {
     instruction,
-    files: before,
-    ...(ctx.skills.length > 0 ? { skills: ctx.skills } : {}),
+    workspace: ctx.ws.workspaceRef(conversationId, ctx.turnIndex++, before, ctx.skills),
   };
 
   const toolCalls: StreamPart[] = [];
   try {
-    for await (const part of streamTurn(ctx.baseUrl, ctx.thread, body, { headers: ctx.headers })) {
+    for await (const part of streamTurn(ctx.baseUrl, conversationId, body, { headers: ctx.headers })) {
       renderPart(part);
       if (part.type === "tool-call") toolCalls.push(part);
     }
@@ -116,18 +126,28 @@ async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   }
   output.write("\n");
 
-  // Reconstruct final files by folding the streamed tool-calls (canonical ops),
-  // then write the diff. Tool-calls that streamed before a mid-stream error are
-  // real server-side mutations, so they still apply.
-  const bundle = new FileBundle(before);
+  // Reconstruct final files by folding the streamed tool-calls (canonical ops)
+  // over the SERVER'S filtered view of the snapshot — the state the agent
+  // actually saw — then write the diff. Tool-calls that streamed before a
+  // mid-stream error are real server-side mutations, so they still apply.
+  const view = filterTurnSnapshot(before);
+  const bundle = new FileBundle(view);
   for (const tc of toolCalls) applyToolCall(bundle, tc);
-  const changes = reconcile(ctx.thread, before, bundle.snapshot(), ctx.dryRun);
+  const folded = bundle.snapshot();
+  // Rebuild the full folder state: files the turn filter hid from the agent
+  // stay untouched; deletions apply only to files the agent could see.
+  const after: Record<string, string> = { ...before };
+  for (const path of Object.keys(view)) {
+    if (!(path in folded)) delete after[path];
+  }
+  Object.assign(after, folded);
+  const changes = reconcile(ctx.thread, before, after, ctx.dryRun);
   renderSummary(changes, ctx.dryRun);
 
   // Refresh the derived artifacts (.excalidraw, *.gen.json) — one pipeline
   // seam, see derived.ts. Skipped under --dry-run: nothing landed on disk.
   if (!ctx.dryRun) {
-    for (const n of materializeDerived(threadDir(ctx.thread), ctx.thread, changes, bundle.snapshot())) {
+    for (const n of materializeDerived(threadDir(ctx.thread), ctx.thread, changes, after)) {
       output.write(n.ok ? `  ⚙ ${n.message}\n` : `  ✗ ${n.message}\n`);
     }
   }
@@ -183,15 +203,20 @@ async function main(): Promise<void> {
 
   const skills = loadRepoSkills(SKILLS_DIR);
   const store = new InMemoryConversationStore();
-  // In-process server: the M2M gate runs on the shared-secret path, and the model
-  // is built per turn from the X-Anthropic-Key header (like the deployed service).
+  // In-process server: the M2M gate runs on the shared-secret path, the model
+  // is built per turn from the X-Anthropic-Key header (like the deployed
+  // service), and the workspace snapshots are read from a temp fixture mount
+  // this process materializes (the eval-harness pattern).
+  const ws = new EvalWorkspace();
   const app = createApp({
     store,
     buildModel: (key) => createModel({ apiKey: key }),
     auth: { audience: EVAL_AUTH.audience, secret: EVAL_AUTH.secret },
+    workspaceMountRoot: ws.root,
   });
   const { baseUrl, close } = await listen0(app.listen(0));
-  const headers = await evalTurnHeaders(apiKey);
+  // X-Org-Id is load-bearing on workspace turns (the §12 fence).
+  const headers = await evalTurnHeaders(apiKey, EVAL_ORG);
 
   clack.intro("AEP spec-agent playground");
   if (skills.length > 0) clack.log.info(`skills: ${skills.map((s) => s.name).join(", ")}`);
@@ -200,7 +225,7 @@ async function main(): Promise<void> {
   try {
     let thread = positional;
     if (thread && !isValidThreadName(thread)) {
-      clack.log.error(`invalid thread name "${thread}" — letters, digits, . _ - only`);
+      clack.log.error(`invalid thread name "${thread}" — letters, digits, . _ - only (no leading dot, no --)`);
       thread = undefined;
     }
     if (thread) ensureThread(thread);
@@ -211,12 +236,13 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun, headers });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, headers, ws, turnIndex: 0 });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }
   } finally {
     await close();
+    ws.cleanup();
     clack.outro("bye");
   }
 }

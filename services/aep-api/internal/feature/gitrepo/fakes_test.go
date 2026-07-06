@@ -21,7 +21,7 @@ package gitrepo_test
 // and the persistence seam (repositories.RepoRepository). The git-exec paths
 // run against a real gittest.Remote, and the GitHub HTTP paths run through the
 // REAL clients/github client pointed at gittest fakes (WithAPIBase /
-// WithGraphQLEndpoint / GitDataServer). No service or client is mocked.
+// WithGraphQLEndpoint). No service or client is mocked.
 //
 // These tests live in the external gitrepo_test package (not white-box
 // gitrepo): they construct the real client from clients/github, which imports
@@ -152,6 +152,16 @@ func (f *fakeRepoRepo) ListAllReady(context.Context) ([]models.GitRepository, er
 		if r.Status == "ready" {
 			out = append(out, *r)
 		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepoRepo) ListAll(context.Context) ([]models.GitRepository, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []models.GitRepository
+	for _, r := range f.rows {
+		out = append(out, *r)
 	}
 	return out, nil
 }

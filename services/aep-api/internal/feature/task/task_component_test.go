@@ -36,11 +36,14 @@ import (
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
+	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -195,8 +198,8 @@ func newRig(t *testing.T, iss *fakeIssues, execs fakeExecs, designVersions []art
 	disp := &fakeDispatcher{signal: make(chan struct{}, 8)}
 	reads := task.NewReads(iss, fakeRepos{}, execs, nil)
 	commands := task.NewCommands(iss, fakeRepos{}, disp)
-	plan := task.NewPlanService(fakeRepos{}, nil, fakeVersions{design: designVersions}, nil,
-		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, nil, iss)
+	plan := task.NewPlanService(fakeRepos{}, fakeVersions{design: designVersions}, nil,
+		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, iss, nil, nil)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{
 		TaskReads: reads, TaskCommands: commands, TaskPlan: plan,
 	}})
@@ -309,15 +312,37 @@ func TestPlan_InProgress_409(t *testing.T) {
 	// The one-active-plan-turn invariant (§6): while a plan turn holds the
 	// per-project in-flight lock (blocked in the upstream Turn), a second
 	// StartPlan for the same project must be rejected with ErrPlanInProgress
-	// (which the HTTP layer maps to 409 {code:"plan_in_progress"}).
+	// (which the HTTP layer maps to 409 {code:"plan_in_progress"}). The plan
+	// dispatch is workspace-shaped now, so the rig runs a real engine over
+	// real file:// origins.
 	iss := newIssues()
 	bt := &blockingTurn{started: make(chan struct{}), release: make(chan struct{})}
-	plan := task.NewPlanService(fakeRepos{}, fakeDesign{},
-		fakeVersions{design: []artifacts.DesignVersionInfo{{Tag: "v1-1"}}}, nil,
-		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, bt, iss)
+	fx := workspacetest.New(t, map[string]string{"specs/design/design.md": "# d"})
+	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
+		"skills/flow/task-planning/SKILL.md": "---\nname: task-planning\n---\nbody",
+	}, "seed"))
+	repoRow := &models.GitRepository{OrgID: org, ProjectID: proj, RepoURL: fx.Origin.URL(),
+		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}
+	skillsRow := &models.GitRepository{OrgID: org, ProjectID: models.SkillsRepoSentinelProjectID,
+		RepoURL: skillsOrigin.URL(), DefaultBranch: "main", RepoSlug: "org-skills", Status: "ready"}
+	git := gitrepo.NewGitOpsService(nilCredResolver{}, fx.Engine)
+	plan := task.NewPlanService(fixedRepos{repo: repoRow},
+		fakeVersions{design: []artifacts.DesignVersionInfo{{Tag: "v1-1"}}}, git,
+		func(context.Context, string) (string, error) { return "sk-key", nil }, bt, iss, fx.Engine,
+		func(context.Context, string) (*models.GitRepository, error) { return skillsRow, nil })
 
-	go func() { _, _ = plan.StartPlan(context.Background(), org, proj) }()
-	<-bt.started // the first turn now holds the in-flight lock
+	firstErr := make(chan error, 1)
+	go func() {
+		_, err := plan.StartPlan(context.Background(), org, proj)
+		firstErr <- err
+	}()
+	select {
+	case <-bt.started: // the first turn now holds the in-flight lock
+	case err := <-firstErr:
+		t.Fatalf("first plan failed before dispatch: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("first plan never reached the turn dispatch")
+	}
 
 	if _, err := plan.StartPlan(context.Background(), org, proj); !errors.Is(err, task.ErrPlanInProgress) {
 		t.Fatalf("second concurrent plan: err = %v, want ErrPlanInProgress", err)
@@ -325,16 +350,19 @@ func TestPlan_InProgress_409(t *testing.T) {
 	close(bt.release)
 }
 
-type fakeDesign struct{}
+// fixedRepos serves one fixed row (the workspace-backed plan rig's repo).
+type fixedRepos struct{ repo *models.GitRepository }
 
-func (fakeDesign) ReadDesign(context.Context, string, string) (*artifacts.DesignFile, error) {
-	return &artifacts.DesignFile{}, nil
+func (f fixedRepos) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
+	return f.repo, nil
 }
-func (fakeDesign) ListRequirements(context.Context, string, string) (map[string]string, error) {
-	return map[string]string{}, nil
-}
-func (fakeDesign) ListDesignFiles(context.Context, string, string) (map[string]string, error) {
-	return map[string]string{}, nil
+
+// nilCredResolver satisfies credentials.Resolver for file:// origins (the
+// engine skips askpass injection on a nil credential).
+type nilCredResolver struct{}
+
+func (nilCredResolver) Resolve(context.Context, string) (credentials.Credential, error) {
+	return nil, nil
 }
 
 // blockingTurn holds the in-flight lock by blocking inside Turn until released.

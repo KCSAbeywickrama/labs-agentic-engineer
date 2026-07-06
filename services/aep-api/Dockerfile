@@ -24,9 +24,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o bin/aep-api ./cmd/aep-api
 
 FROM alpine:3.21
 
-# No git at runtime: the binary reads/writes/tags project repos entirely through
-# the GitHub Git Data API (docs/design/agents-generation-migration.md §5) — there
-# is no local clone or working tree, so no shell-git and no repo storage dir.
+# git at runtime: the binary reads/writes/tags project repos via local git
+# plumbing over bare mirrors on the shared /workspaces volume
+# (docs/design/shared-volume-clone-architecture.md) — clone/fetch/push/tag
+# shell out to the git CLI. GitHub REST remains only for repo admin, issues,
+# webhooks, and App installs (§9). aep-api is the sole writer of the mount;
+# the agents service consumes read-only per-SHA snapshots from it.
+RUN apk add --no-cache git
 RUN addgroup -g 1000 appgroup && adduser -S -u 1000 -G appgroup appuser
 
 WORKDIR /app

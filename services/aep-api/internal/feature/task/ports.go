@@ -50,14 +50,6 @@ type RepoResolver interface {
 	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
 }
 
-// DesignReader reads the project's design + requirements at HEAD (the plan-turn
-// context is HEAD content; approved tags are provenance/lineage stamps — §6).
-type DesignReader interface {
-	ReadDesign(ctx context.Context, orgID, projectID string) (*artifacts.DesignFile, error)
-	ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
-}
-
 // VersionReader lists approved (tagged) spec/design versions and reads a bundle
 // at a tag — the lineage stamps and the incremental-plan baseline diff (§6).
 type VersionReader interface {
@@ -67,13 +59,20 @@ type VersionReader interface {
 	GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 }
 
-// GitReader is the read-only git-object surface + credential resolver used for
-// the plan-turn lineage diff (CompareRefs between a Task's lineage tag and the
-// current tag, §6). gitOpsService satisfies it (GitData + Resolver).
+// GitReader is the workspace-backed git surface the plan turn drives: the
+// snapshot refs (Head), the lineage diff (Workspace.Diff between a Task's
+// lineage tag and the current tag, §6), and per-op credentials.
+// gitrepo.GitOpsService satisfies it.
 type GitReader interface {
-	GitData() gitrepo.GitData
+	Workspace() gitrepo.Workspace
 	Resolver() credentials.Resolver
 }
+
+// SkillsRepoResolver ensures the org's _skills repo is provisioned (the
+// task-planning flow skill is seeded there) and returns its row — the source
+// of the plan turn's SkillsRef snapshot. Wired at the composition root from
+// the skills feature so task holds no skills edge.
+type SkillsRepoResolver func(ctx context.Context, orgID string) (*models.GitRepository, error)
 
 // ExecutionReader is the read side of the executions rows (the platform-owned
 // half), consumed org-scoped by the read path to fuse derived status. It is the
@@ -88,10 +87,6 @@ type ExecutionReader interface {
 // AnthropicKeyResolver resolves the org's effective Anthropic key. Empty key +
 // nil error means "org has none" → the plan turn raises ErrNoAnthropicKey.
 type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error)
-
-// OrgSkillSource returns the org's auxiliary (non-core) skills to ride along in
-// the plan turn (nil allowed).
-type OrgSkillSource func(ctx context.Context, orgID string) ([]agentsvc.Skill, error)
 
 // TurnClient is the agents-service turn client — the plan turn POSTs a
 // toolset:"task-plan" turn and streams raw StreamPart frames back for the tap.

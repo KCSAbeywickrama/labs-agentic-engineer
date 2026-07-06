@@ -57,6 +57,7 @@ func main() {
 		&models.WebhookPayload{},
 		&models.Organization{},
 		&models.Execution{},
+		&models.AgentTurn{},
 	)
 	if err != nil {
 		slog.Error("database init failed", "error", err)

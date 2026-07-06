@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { ProjectOverview } from "../features/projects/components/ProjectOverview";
 
 export const Route = createFileRoute("/projects/$projectName")({
@@ -25,5 +25,13 @@ export const Route = createFileRoute("/projects/$projectName")({
 
 function ProjectOverviewRoute() {
   const { projectName } = Route.useParams();
+  // The create flow hands the user's initial requirement over CLIENT-SIDE in
+  // history state (Phase-5 handshake change: POST /projects takes {name}
+  // only). TODO: feed streamPrompt into the requirements-generation flow when
+  // this page grows it; today it is merely held here (a refresh loses it).
+  const streamPrompt = useRouterState({
+    select: (s) => s.location.state.streamPrompt,
+  });
+  void streamPrompt;
   return <ProjectOverview projectName={projectName} />;
 }

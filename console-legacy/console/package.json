@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
     "test": "TSX_TSCONFIG_PATH=tsconfig.test.json tsx --test \"test/**/*.test.ts\"",
     "gen:api": "npx --yes openapi-typescript@7 ../../packages/contracts/api/v1/openapi.yaml -o src/services/api/openapi.gen.ts"
   },

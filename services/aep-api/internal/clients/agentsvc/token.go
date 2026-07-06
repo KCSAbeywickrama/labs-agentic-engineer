@@ -29,6 +29,11 @@ const (
 	// tokenTTL bounds replay: the token only needs to be valid when the request
 	// reaches the service; once the stream is accepted expiry is irrelevant.
 	tokenTTL = 5 * time.Minute
+	// nbfSkew backdates the nbf claim to absorb minor multi-node clock skew.
+	// Without it, a verifier whose clock trails ours by a fraction of a second
+	// rejects an otherwise-valid token as not-yet-valid, 401ing S2S turn
+	// dispatch.
+	nbfSkew = 30 * time.Second
 )
 
 // tokenSigner mints the outbound M2M bearer. The interface is the seam that
@@ -55,7 +60,7 @@ func (s *hs256Signer) sign() (string, error) {
 	claims := jwt.RegisteredClaims{
 		Audience:  jwt.ClaimStrings{s.audience},
 		IssuedAt:  jwt.NewNumericDate(now),
-		NotBefore: jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now.Add(-nbfSkew)),
 		ExpiresAt: jwt.NewNumericDate(now.Add(tokenTTL)),
 	}
 	if s.issuer != "" {

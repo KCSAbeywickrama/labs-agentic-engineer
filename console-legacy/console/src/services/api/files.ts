@@ -19,14 +19,15 @@
 /**
  * The generic `specs/`-scoped Files API (BFF `internal/feature/files`).
  *
- * GitHub-at-HEAD backed: reads carry per-file blob SHAs that double as the
- * draft's `baseSha`; the single `apply` endpoint commits a draft to `main`
- * atomically (all-or-nothing, CAS on every `baseSha`). This is the console's
- * only write path now that the per-file PUT/DELETE routes are gone — manual
- * edits, generation folds, and chat folds all land through `applyFiles`.
+ * Committed-truth backed: reads at HEAD are the COMPLETE truth (no client
+ * draft, no overlay) and carry per-file blob SHAs that double as an apply's
+ * `baseSha`; the single `apply` endpoint commits a batch of manual edits to
+ * `main` atomically (all-or-nothing, CAS on every `baseSha` — one commit per
+ * save, D13). Generation commits happen SERVER-side from the verified stream
+ * fold; this client only commits what the user edits by hand.
  *
  * Paths are always full `specs/…` keys (the page-level filename ↔ full-path
- * mapping lives in the draft session, not here).
+ * mapping lives with the pages, not here).
  */
 
 import { API_V1, authHeaders, toApiError } from './http';

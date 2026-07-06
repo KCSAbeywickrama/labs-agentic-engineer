@@ -22,6 +22,21 @@ services:
       - aep
 
   # ---------------------------------------------------------------------------
+  # workspace-init — one-shot chown of the shared workspaces volume. A fresh
+  # named volume is root-owned, but both aep-api and agents run non-root
+  # (uid 1000); hand the mount to uid 1000 once before either starts.
+  # ---------------------------------------------------------------------------
+  workspace-init:
+    image: alpine:3.21
+    container_name: aep-workspace-init
+    command: ["chown", "1000:1000", "/workspaces"]
+    volumes:
+      - aep-workspaces:/workspaces
+    restart: "no"
+    networks:
+      - aep
+
+  # ---------------------------------------------------------------------------
   # aep-api — Go BFF + GitHub webhook receiver. Reaches OC via the k3d
   # docker network (k3d-openchoreo-serverlb) and Thunder via the same
   # loadbalancer routed by Host header.
@@ -37,6 +52,8 @@ services:
         condition: service_healthy
       agents:
         condition: service_started
+      workspace-init:
+        condition: service_completed_successfully
     environment:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9090"
@@ -53,6 +70,10 @@ services:
       # Local-only by design — cloud release bindings never set this.
       # See deployments/scripts/repair-secrets.sh.
       LOCAL_OPENBAO_REPAIR: "true"
+      # ── Shared git workspaces volume — bare mirrors + per-SHA snapshots
+      # (docs/design/shared-volume-clone-architecture.md). aep-api is the
+      # SOLE writer; the agents service mounts the same volume read-only.
+      AEP_WORKSPACE_ROOT: "/workspaces"
 
       # ── OpenChoreo platform API (reached via k3d loadbalancer + Host header)
       PLATFORM_API_SERVICE_BASE_URL: "${PLATFORM_API_SERVICE_BASE_URL}"
@@ -177,6 +198,7 @@ services:
       - ./keys/task-signing.pem:/app/keys/task-signing.pem:ro
       - ./github-app-private-key.pem:/etc/github-app/private-key.pem:ro
       - ./.kube/config:/app/.kube/config:ro
+      - aep-workspaces:/workspaces
     networks:
       - aep
       - k3d-openchoreo
@@ -206,6 +228,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      workspace-init:
+        condition: service_completed_successfully
     environment:
       PORT: "4000"
       LOG_LEVEL: "${LOG_LEVEL:-debug}"
@@ -218,6 +242,12 @@ services:
       # (AGENTS_SVC_JWT_SECRET). aud must match the BFF's AGENTS_SVC_JWT_AUDIENCE.
       AGENT_JWT_SECRET: "${AGENTS_M2M_SECRET:-dev-agents-m2m-secret}"
       AGENT_JWT_AUDIENCE: "agents-service"
+      # Read-only view of the shared workspaces volume — per-SHA snapshots
+      # written by aep-api. The :ro mount enforces the reader-only contract
+      # structurally (design D3).
+      WORKSPACE_MOUNT_ROOT: "/workspaces"
+    volumes:
+      - aep-workspaces:/workspaces:ro
     networks:
       - aep
 
@@ -342,6 +372,9 @@ services:
 
 volumes:
   pgdata:
+  # Shared git workspaces — bare mirrors + per-SHA snapshots. A single Docker
+  # host makes a named volume de-facto RWX; aep-api writes, agents reads (:ro).
+  aep-workspaces:
 
 networks:
   aep:

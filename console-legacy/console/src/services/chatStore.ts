@@ -19,13 +19,17 @@
 /**
  * Per-project chat store backing the requirements chat panel.
  *
- * Post-migration model (§5/§6): chat is a multi-turn conversation whose stream
- * is folded client-side into the SHARED `specDraftSession` — there is no server
- * working tree and no server-held session baseline. This store therefore keeps
- * only the DISPLAY concerns:
+ * Committed-truth model (shared-volume-clone D13): every chat turn commits
+ * server-side; the console holds no draft. This store therefore keeps only
+ * the DISPLAY concerns:
  *   - the message log (persisted to localStorage; transient by design),
- *   - a turn-activity bus so the spec page can pause collab while a turn runs,
- *   - in-memory pre-turn draft snapshots that power the client-side Undo.
+ *   - the persisted chat conversation id (one conversation per project),
+ *   - a turn-activity bus so the spec page can pause collab, mirror the live
+ *     fold, and refetch the committed tree when a chat turn lands.
+ *
+ * The pre-turn draft snapshots that powered the client-side Undo are GONE:
+ * with every turn committed to `main`, "undo" would be a revert commit — a
+ * server-side operation the discard endpoint covers — not a local restore.
  */
 
 // ---------------------------------------------------------------------------
@@ -40,8 +44,8 @@ export interface UserMessage {
   content: string;
   timestamp: number;
   turnId?: string;
-  /** Drives the "Undo this turn" affordance on the user bubble. */
-  turnStatus?: 'in_flight' | 'completed' | 'undone' | 'failed';
+  /** Lifecycle of the turn this message started. */
+  turnStatus?: 'in_flight' | 'completed' | 'failed';
 }
 
 export interface AssistantMessage {
@@ -94,8 +98,10 @@ export function opDisplayLabel(op: ToolMessage['op']): string {
 // Persistence (messages only)
 // ---------------------------------------------------------------------------
 
-const SCHEMA_VERSION = 2;
-const STORE_KEY_PREFIX = 'aep.chat.v2.';
+// v3: committed-truth cutover — the 'undone' turn status is gone (client-side
+// Undo removed), so pre-cutover logs are simply left behind under the v2 key.
+const SCHEMA_VERSION = 3;
+const STORE_KEY_PREFIX = 'aep.chat.v3.';
 const MAX_MESSAGES_PER_PROJECT = 200;
 
 interface StoredBlob {
@@ -269,65 +275,53 @@ export function appendErrorMessage(
   mutateMessages(key.orgId, key.projectId, (msgs) => [...msgs, msg]);
 }
 
-export function markTurnUndone(key: ProjectKey, turnId: string): void {
+/**
+ * Drop a turn's streamed output messages (assistant/tool/error) but keep the
+ * user prompt. Used when re-attaching to a running turn after a refresh: the
+ * `?from=0` replay re-streams the same frames, so the previously-persisted
+ * partial output would otherwise duplicate.
+ */
+export function dropTurnMessages(key: ProjectKey, turnId: string): void {
   mutateMessages(key.orgId, key.projectId, (msgs) =>
-    msgs.map((m) =>
-      m.role === 'user' && m.turnId === turnId ? { ...m, turnStatus: 'undone' as const } : m,
-    ),
+    msgs.filter((m) => m.role === 'user' || m.turnId !== turnId),
   );
 }
 
 // ---------------------------------------------------------------------------
-// Client-side Undo: pre-turn draft snapshots (in-memory, per project)
+// Chat conversation id (persisted; one conversation per project)
 // ---------------------------------------------------------------------------
 
-const turnSnapshots = new Map<string, Map<string, Record<string, string>>>();
+const CONV_KEY_PREFIX = 'aep.chat.conv.';
 
-// Each snapshot is a whole draft copy and Undo only reaches back to recent
-// turns, so cap the held snapshots per project (like MAX_MESSAGES_PER_PROJECT
-// caps the log) instead of accumulating one per turn for the session's life.
-const MAX_TURN_SNAPSHOTS_PER_PROJECT = 8;
-
-/** Record the draft as it was BEFORE `turnId` so Undo can restore it. */
-export function saveTurnSnapshot(key: ProjectKey, turnId: string, draft: Record<string, string>): void {
-  const ck = cacheKey(key.orgId, key.projectId);
-  let byTurn = turnSnapshots.get(ck);
-  if (!byTurn) {
-    byTurn = new Map();
-    turnSnapshots.set(ck, byTurn);
-  }
-  byTurn.set(turnId, { ...draft });
-  // Prune oldest-first (Map preserves insertion order) down to the cap.
-  for (const oldest of byTurn.keys()) {
-    if (byTurn.size <= MAX_TURN_SNAPSHOTS_PER_PROJECT) break;
-    byTurn.delete(oldest);
+export function getChatConversationId(key: ProjectKey): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    return window.localStorage.getItem(`${CONV_KEY_PREFIX}${key.orgId}.${key.projectId}`) ?? undefined;
+  } catch {
+    return undefined;
   }
 }
 
-/** The pre-turn draft for `turnId`, if still held this session. */
-export function getTurnSnapshot(key: ProjectKey, turnId: string): Record<string, string> | undefined {
-  return turnSnapshots.get(cacheKey(key.orgId, key.projectId))?.get(turnId);
-}
-
-// The draft as the agent last left it. Compared at the next turn to set
-// `filesChangedExternally` when the user hand-edited the draft in between.
-const syncedDrafts = new Map<string, Record<string, string>>();
-
-export function recordSyncedDraft(key: ProjectKey, draft: Record<string, string>): void {
-  syncedDrafts.set(cacheKey(key.orgId, key.projectId), { ...draft });
-}
-
-export function getSyncedDraft(key: ProjectKey): Record<string, string> | undefined {
-  return syncedDrafts.get(cacheKey(key.orgId, key.projectId));
+export function setChatConversationId(key: ProjectKey, id: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${CONV_KEY_PREFIX}${key.orgId}.${key.projectId}`, id);
+  } catch {
+    /* quota — a fresh conversation next session is acceptable */
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Turn-activity bus — chat → spec page (pause collab while a turn runs)
+// Turn-activity bus — chat → spec page (pause collab while a turn runs,
+// mirror the live fold, refetch the committed tree when the turn lands)
 // ---------------------------------------------------------------------------
 
 export type TurnActivityEvent =
   | { kind: 'turnStarted'; orgId: string; projectId: string }
-  | { kind: 'turnEnded'; orgId: string; projectId: string };
+  /** The chat turn's live folded snapshot (full `specs/…` keys, display-only). */
+  | { kind: 'turnSnapshot'; orgId: string; projectId: string; files: Record<string, string> }
+  /** `committed` — the backend committed the turn; subscribers refetch HEAD. */
+  | { kind: 'turnEnded'; orgId: string; projectId: string; committed: boolean };
 
 const turnActivityListeners = new Set<(e: TurnActivityEvent) => void>();
 

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -41,7 +42,7 @@ var (
 
 // ProjectService handles business logic for project operations.
 type ProjectService interface {
-	ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error)
+	ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*models.ProjectList, error)
 	GetProject(ctx context.Context, orgName, projectName string) (*models.Project, error)
 	CreateProject(ctx context.Context, orgName string, req *models.CreateProjectRequest) (*models.Project, error)
 	DeleteProject(ctx context.Context, orgName, projectName string) error
@@ -85,10 +86,25 @@ func NewProjectService(
 	}
 }
 
-func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error) {
+func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*models.ProjectList, error) {
 	list, err := s.client.ListProjects(ctx, orgName, limit, cursor)
 	if err != nil {
 		return nil, translateHTTPError(err)
+	}
+	// The search filter is applied Go-side over the FETCHED PAGE only — the
+	// OpenChoreo list API takes just (limit, cursor), so a match on a later
+	// page is not pulled forward; the caller pages via nextCursor and filters
+	// each page. Acceptable for the console's org-sized project counts.
+	if search != "" {
+		needle := strings.ToLower(search)
+		filtered := make([]models.Project, 0, len(list.Items))
+		for _, p := range list.Items {
+			if strings.Contains(strings.ToLower(p.Name), needle) ||
+				strings.Contains(strings.ToLower(p.DisplayName), needle) {
+				filtered = append(filtered, p)
+			}
+		}
+		list.Items = filtered
 	}
 	return list, nil
 }

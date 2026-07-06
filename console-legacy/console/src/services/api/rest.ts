@@ -267,11 +267,13 @@ export const restApi = {
   },
 
   /**
-   * Cut the requirements version tag. `commitSha` pins the commit the publish's
-   * apply just created so the server never re-reads `heads/main` (whose reads
-   * lag writes — the silent-untagged-publish incident). Let ApiError bubble —
-   * Publish must stop (keep the draft, show the message) when the tag fails,
-   * not navigate on as if it succeeded.
+   * Cut the requirements version tag. The `commitSha` pin is OPTIONAL and
+   * vestigial now: the backend resolves HEAD from its own git mirror (the
+   * shared-volume workspace), so the GitHub ref-read lag that once made the
+   * pin load-bearing is gone. Pass it when a just-landed apply naturally
+   * provides a fresh sha; call unpinned otherwise. Let ApiError bubble —
+   * Publish must stop (show the message) when the tag fails, not navigate on
+   * as if it succeeded.
    */
   async saveRequirements(projectId: string, commitSha?: string): Promise<RequirementsBundle> {
     return fetchJSON<RequirementsBundle>(`${projectPrefix(projectId)}/requirements/save`, {
@@ -327,7 +329,7 @@ export const restApi = {
 
   // -- Designs (real backend) ------------------------------------------------
 
-  /** `commitSha` pins the publish's just-applied commit — see saveRequirements. */
+  /** `commitSha` pin: optional-and-vestigial, see saveRequirements. */
   async saveAndProceedDesign(projectId: string, commitSha?: string): Promise<Design> {
     // Let ApiError bubble — Publish needs to surface the server's error
     // message (e.g. missing requirements baseline, save-via-API failures)

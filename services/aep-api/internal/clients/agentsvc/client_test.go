@@ -60,15 +60,15 @@ func TestTurn_SendsExactRequestAndHeaders(t *testing.T) {
 
 	c := New(Config{BaseURL: srv.URL, Secret: "shh", Audience: "agents-service", Issuer: "aep-bff"})
 	req := TurnRequest{
-		Instruction:            "Generate the design.",
-		Files:                  map[string]string{"specs/design/design.md": "# Design"},
+		Instruction: "Generate the design.",
+		Workspace: WorkspaceRef{
+			ConversationID: "org_o--proj_p--design-generate--uuid1",
+			TurnID:         "turn-1",
+			RepoSlug:       "o-r",
+			Ref:            strings.Repeat("a", 40),
+			SkillsRef:      strings.Repeat("b", 40),
+		},
 		FilesChangedExternally: true,
-		Skills: []Skill{{
-			Name:        "high-level-architecture",
-			Description: "design skill",
-			Content:     "# body",
-			References:  map[string]string{"references/x.md": "ref body"},
-		}},
 	}
 	body, err := c.Turn(context.Background(), "org_o--proj_p--design-generate--uuid1", "org-o", "sk-ant-123", req)
 	if err != nil {
@@ -117,19 +117,40 @@ func TestTurn_SendsExactRequestAndHeaders(t *testing.T) {
 		t.Errorf("iss = %q", iss)
 	}
 
-	// Body is the exact TurnRequest JSON, skills + references intact.
+	// Body is the exact TurnRequest JSON with the pinned camelCase workspace
+	// field names (the agents-side resolveWorkspace contract) and NO
+	// files/skills keys — the snapshot is read from the mount, never inlined.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(srv.body), &raw); err != nil {
+		t.Fatalf("unmarshal sent body: %v", err)
+	}
+	for _, banned := range []string{"files", "skills"} {
+		if _, ok := raw[banned]; ok {
+			t.Errorf("body carries banned key %q: %s", banned, srv.body)
+		}
+	}
+	var ws map[string]string
+	if err := json.Unmarshal(raw["workspace"], &ws); err != nil {
+		t.Fatalf("unmarshal workspace: %v", err)
+	}
+	want := map[string]string{
+		"conversationId": req.Workspace.ConversationID,
+		"turnId":         "turn-1",
+		"repoSlug":       "o-r",
+		"ref":            strings.Repeat("a", 40),
+		"skillsRef":      strings.Repeat("b", 40),
+	}
+	for k, v := range want {
+		if ws[k] != v {
+			t.Errorf("workspace[%q] = %q, want %q", k, ws[k], v)
+		}
+	}
 	var sent TurnRequest
 	if err := json.Unmarshal([]byte(srv.body), &sent); err != nil {
 		t.Fatalf("unmarshal sent body: %v", err)
 	}
 	if sent.Instruction != req.Instruction || !sent.FilesChangedExternally {
 		t.Errorf("instruction/flag mismatch: %+v", sent)
-	}
-	if len(sent.Skills) != 1 || sent.Skills[0].References["references/x.md"] != "ref body" {
-		t.Errorf("skills/references not sent intact: %+v", sent.Skills)
-	}
-	if sent.Files["specs/design/design.md"] != "# Design" {
-		t.Errorf("files not sent: %+v", sent.Files)
 	}
 }
 

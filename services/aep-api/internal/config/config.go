@@ -97,6 +97,7 @@ type Config struct {
 	Observability ObservabilityConfig
 	AgentsSvc     AgentsSvcConfig
 	ServiceAuth   ServiceAuthConfig
+	Workspace     WorkspaceConfig
 
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
 	// back to the BFF (every former git-service endpoint is served by the
@@ -236,6 +237,33 @@ type AgentsSvcConfig struct {
 	JWTSecret   string
 	JWTAudience string
 	JWTIssuer   string
+}
+
+// WorkspaceConfig holds the shared git-workspaces mount settings
+// (docs/design/shared-volume-clone-architecture.md §13–§14): the mount root
+// where bare repo mirrors + per-SHA snapshots live, plus the disk-lifecycle
+// (reaper) knobs. aep-api is the sole writer of the mount; the agents service
+// consumes read-only snapshots from the same volume.
+type WorkspaceConfig struct {
+	// Root is the workspace mount root (AEP_WORKSPACE_ROOT). Layout under it:
+	// repos/<orgId>/<projectId>/<repoSlug>/{git,repo.lock,snapshots/<sha>},
+	// trash/<ulid>, tmp/.
+	Root string
+	// ReapInterval is the background reaper sweep cadence (trash purge,
+	// snapshot age-reap, orphan reconciliation, quota/LRU eviction).
+	ReapInterval time.Duration
+	// SnapshotMaxAge — snapshots/<sha> dirs older than this and not the
+	// repo's current HEAD are reaped.
+	SnapshotMaxAge time.Duration
+	// TrashMaxAge — trash/<ulid> entries (phase 1 of the two-phase delete)
+	// older than this are purged.
+	TrashMaxAge time.Duration
+	// OrgQuotaBytes is the per-org disk quota before LRU eviction kicks in.
+	OrgQuotaBytes int64
+	// DiskHighPct / DiskLowPct are the statfs water marks (%): usage above
+	// high triggers eviction, which runs until usage drops below low.
+	DiskHighPct int
+	DiskLowPct  int
 }
 
 // ObservabilityConfig holds connection settings for the OpenChoreo Observer

@@ -45,6 +45,17 @@ import {
   suggestProjectName,
 } from "../lib/projectName";
 
+// Phase-5 handshake change (supersedes the issue #72 `prompt` field): the API
+// creates a project from {name} ONLY. The prompt never crosses the create
+// call — it rides client-side in router history state (the console-legacy
+// streamPrompt pattern) for the project page to start generation with.
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    /** The user's initial requirement, carried to the project page client-side. */
+    streamPrompt?: string;
+  }
+}
+
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
 const EXAMPLE_PROMPTS = [
@@ -112,12 +123,13 @@ export function ProjectCreate() {
 
   const accept = () => {
     createProject.mutate(
-      { name, prompt },
+      { name },
       {
         onSuccess: (project) =>
           void navigate({
             to: "/projects/$projectName",
             params: { projectName: project.name },
+            state: { streamPrompt: prompt },
           }),
       },
     );

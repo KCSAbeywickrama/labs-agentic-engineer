@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { Skill } from "@aep/agent-stream";
+import { EMPTY_SKILL_SOURCE, type SkillSource } from "./skill-source.js";
 
 /** System instructions for the file-mutating main agent. */
 export const instructions = `You are a spec-bundle editing agent. You are given a set of existing files
@@ -51,16 +51,18 @@ Keep prose outside tool calls to a single short sentence. When the instruction i
 /**
  * The skill catalog appended to the END of the system prompt (ADR-0002): skill
  * names + one-line descriptions only, never bodies. It is identical across a
- * conversation's turns (the caller sends the same library), so the cacheable
- * instruction prefix is preserved. Returns "" for an empty list, leaving the
- * base instructions byte-identical to a skill-free turn.
+ * conversation's turns (the `_skills` snapshot pins the same catalog), so the
+ * cacheable instruction prefix is preserved. Built through the `SkillSource`
+ * seam. Returns "" for an empty catalog, leaving the base instructions
+ * byte-identical to a skill-free turn.
  */
-export function buildSkillCatalog(skills: readonly Skill[]): string {
-  if (skills.length === 0) return "";
-  const lines = skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
+export function buildSkillCatalog(skills: SkillSource | undefined): string {
+  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog();
+  if (entries.length === 0) return "";
+  const lines = entries.map((e) => `- ${e.name}: ${e.description}`).join("\n");
   // The reference note appears only when some skill actually carries reference
   // files, so a references-free library keeps today's byte-identical catalog.
-  const hasRefs = skills.some((s) => s.references && Object.keys(s.references).length > 0);
+  const hasRefs = entries.some((e) => e.hasReferences);
   const refNote = hasRefs
     ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
     : "";
@@ -74,7 +76,7 @@ ${lines}`;
 }
 
 /** Base instructions + the skill catalog (empty when no skills are supplied). */
-export function buildInstructions(skills: readonly Skill[] = []): string {
+export function buildInstructions(skills?: SkillSource): string {
   return instructions + buildSkillCatalog(skills);
 }
 
@@ -113,7 +115,7 @@ Load the task-planning skill before planning, and follow it. Keep prose outside 
 except a final note flagging anything that needs a human (e.g. a requirement no component covers).`;
 
 /** Task-plan instructions + the skill catalog (empty when no skills are supplied). */
-export function buildTaskPlanInstructions(skills: readonly Skill[] = []): string {
+export function buildTaskPlanInstructions(skills?: SkillSource): string {
   return taskPlanInstructions + buildSkillCatalog(skills);
 }
 

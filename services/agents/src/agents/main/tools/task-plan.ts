@@ -40,9 +40,9 @@ import {
   updateTaskInputSchema,
   type PlanTaskResult,
   type UpdateTaskResult,
-  type Skill,
 } from "@aep/agent-stream";
 import { buildSkillTools } from "./skill-tools.js";
+import type { SkillSource } from "../skill-source.js";
 import type { TaskPlan } from "../task-plan-accumulator.js";
 
 export { PLAN_TASK, UPDATE_TASK };
@@ -52,7 +52,7 @@ export { PLAN_TASK, UPDATE_TASK };
  * `planTask` + `updateTask` and (when skills are supplied) the shared skill
  * loaders — NO file tools. The catalog behaves exactly as on a files turn.
  */
-export function buildTaskPlanTools(plan: TaskPlan, skills: readonly Skill[] = []): Record<string, Tool> {
+export function buildTaskPlanTools(plan: TaskPlan, skills?: SkillSource): Record<string, Tool> {
   const tools: Record<string, Tool> = {
     [PLAN_TASK]: tool({
       description:

@@ -23,6 +23,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
@@ -49,8 +50,9 @@ type applyInput struct {
 	Body        ApplyRequest `doc:"Atomic write/delete batch with per-file baseSha"`
 }
 
-// applyMaxBodyBytes bounds the apply request body, chosen to agree with the
-// agents service's 10 MiB limit (§7). Huma returns 413 above it.
+// applyMaxBodyBytes bounds the apply request body (file contents ride in the
+// apply batch, unlike turn bodies). Huma returns 413 above it; the per-file
+// 5 MiB cap (a 400) is the finer guard below it.
 const applyMaxBodyBytes = 10 << 20
 
 type listOutput struct{ Body []FileMeta }
@@ -112,9 +114,8 @@ func RegisterFiles(api huma.API, svc FilesService) {
 		Summary:     "Atomically apply a batch of writes/deletes (single commit to main)",
 		Tags:        []string{"Files"},
 		Security:    humakit.SecurityUserJWT,
-		// Agree with the agents service body limit (AGENT_BODY_LIMIT=10mb) so a
-		// too-large batch is a 413 here rather than surprising the caller mid-commit;
-		// the per-file 5 MiB cap (a 400) is the finer guard below it.
+		// A too-large batch is a clean 413 here rather than a surprise
+		// mid-commit; the per-file 5 MiB cap (a 400) is the finer guard.
 		MaxBodyBytes: applyMaxBodyBytes,
 	}, func(ctx context.Context, in *applyInput) (*applyOutput, error) {
 		res, conflicts, err := svc.Apply(ctx, in.OrgHandle, in.ProjectName, in.Body)
@@ -137,6 +138,11 @@ func mapFilesError(err error) error {
 		return huma.Error404NotFound("file not found")
 	case errors.Is(err, ErrPathInvalid):
 		return huma.Error400BadRequest(err.Error())
+	case errors.Is(err, gitrepo.ErrRefNotFastForward):
+		// Workspace.Mutate exhausted its CAS retries: the ref tip moved under
+		// us on every attempt. That is a concurrent-write conflict, not a
+		// server fault — surface it as a retryable 409, never a 500.
+		return huma.Error409Conflict("the repository changed during the write; retry")
 	default:
 		return huma.Error500InternalServerError("internal error")
 	}

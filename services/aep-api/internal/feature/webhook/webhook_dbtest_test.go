@@ -313,7 +313,7 @@ func loadCred(t *testing.T, db *gorm.DB, ocOrgID string) models.OrgCredential {
 func dispatchInstall(t *testing.T, db *gorm.DB, credSvc *orgcreds.CredentialService, issues gitrepo.IssueService, event, payload string) error {
 	t.Helper()
 	router := NewRouter()
-	RegisterInstallationHandlers(router, db, credSvc, issues)
+	RegisterInstallationHandlers(router, db, credSvc, issues, nil)
 	return router.Dispatch(context.Background(), event, []byte(payload))
 }
 

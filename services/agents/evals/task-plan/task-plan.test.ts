@@ -38,7 +38,7 @@ const incremental = taskPlanFixtures.find((f) => f.name === "incremental")!;
 
 // --- fixture shapes ---------------------------------------------------------
 
-test("the repo skill library includes task-planning (pushed to the plan turn)", () => {
+test("the repo skill library includes task-planning (materialized for the plan turn)", () => {
   assert.ok(skills.some((s) => s.name === "task-planning"), skills.map((s) => s.name).join(", "));
 });
 

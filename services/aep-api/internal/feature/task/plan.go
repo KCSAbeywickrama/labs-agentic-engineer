@@ -18,46 +18,56 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // planInstruction is the steering directive the BFF composes server-side (§9.1:
 // the request body is empty; the BFF assembles the whole generation directive).
-const planInstruction = "Plan the implementation Tasks for this project. Load the task-planning skill and follow it: create one Task per design component with planTask, wire dependsOn by component name, and write each Task's body with updateTask in the same turn. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are in tasks/*.md — update those that changed and add Tasks only for uncovered components. Never invent a component the design does not define."
+// The design/requirements content is NOT inlined anymore — the agents service
+// reads it from the workspace snapshot (shared-volume-clone D9); the existing-
+// task renders + lineage diffs are appended to this instruction (they are
+// platform state, not repository files, so they cannot ride in the snapshot —
+// see renderPlanContext).
+const planInstruction = "Plan the implementation Tasks for this project. Load the task-planning skill and follow it: create one Task per design component with planTask, wire dependsOn by component name, and write each Task's body with updateTask in the same turn. The design is under specs/design/ and the requirements under specs/requirements/. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for components they do not cover, and do not recreate or update the listed Tasks in this turn. Never invent a component the design does not define."
 
 // PlanService assembles the plan-turn context, starts the upstream turn, and
 // hands back a PlanSession the HTTP edge streams. One active plan turn per
 // project is enforced by an in-process in-flight set (§6) plus the upstream 409
-// passthrough.
+// passthrough. (This guard is a separate concern from genai's durable
+// one-active-turn row — plan turns commit nothing, so the in-process set is
+// enough.)
 type PlanService struct {
-	repos     RepoResolver
-	design    DesignReader
-	versions  VersionReader
-	git       GitReader
-	keys      AnthropicKeyResolver
-	orgSkills OrgSkillSource
-	client    TurnClient
-	issues    IssueClient
+	repos      RepoResolver
+	versions   VersionReader
+	git        GitReader
+	keys       AnthropicKeyResolver
+	client     TurnClient
+	issues     IssueClient
+	snapshots  gitrepo.SnapshotProvider
+	skillsRepo SkillsRepoResolver
 
 	inflight sync.Map // projectKey → struct{}
 }
 
-// NewPlanService wires the plan service. orgSkills and git may be nil (then no
-// auxiliary skills / no lineage diff).
-func NewPlanService(repos RepoResolver, design DesignReader, versions VersionReader, git GitReader, keys AnthropicKeyResolver, orgSkills OrgSkillSource, client TurnClient, issues IssueClient) *PlanService {
-	return &PlanService{repos: repos, design: design, versions: versions, git: git, keys: keys, orgSkills: orgSkills, client: client, issues: issues}
+// NewPlanService wires the plan service. git/snapshots/skillsRepo back the
+// workspace dispatch (snapshot refs + lineage diffs).
+func NewPlanService(repos RepoResolver, versions VersionReader, git GitReader, keys AnthropicKeyResolver, client TurnClient, issues IssueClient, snapshots gitrepo.SnapshotProvider, skillsRepo SkillsRepoResolver) *PlanService {
+	return &PlanService{repos: repos, versions: versions, git: git, keys: keys, client: client, issues: issues, snapshots: snapshots, skillsRepo: skillsRepo}
 }
 
 // PlanSession is a started plan turn: the raw upstream SSE body, the tap that
@@ -95,9 +105,22 @@ func (s *PlanService) StartPlan(ctx context.Context, orgID, projectID string) (*
 }
 
 func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID string, release func()) (*PlanSession, error) {
-	repo, owner, name, err := resolveProjectRepo(ctx, s.repos, orgID, projectID)
+	// Resolved directly (not via resolveProjectRepo): the plan turn keys on
+	// the workspace ref, so it needs no owner/name split — only a ready row.
+	repo, err := s.repos.GetRepo(ctx, orgID, projectID)
 	if err != nil {
+		if errors.Is(err, gitrepo.ErrRepoNotFound) {
+			return nil, ErrProjectRepoNotFound
+		}
 		return nil, err
+	}
+	if repo == nil {
+		return nil, ErrProjectRepoNotFound
+	}
+	// The plan turn reads its context from a workspace snapshot — a repo that
+	// is not ready yet cannot back one.
+	if repo.Status != "" && repo.Status != "ready" {
+		return nil, ErrProjectRepoNotFound
 	}
 
 	// Gate: an approved (tagged) design version must exist (§6, approve-first).
@@ -119,26 +142,17 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 		return nil, ErrNoAnthropicKey
 	}
 
-	// The artifact ports return paths RELATIVE to their spec roots (`design.md`,
-	// `components/<name>/design.json`); the turn snapshot must carry the full
-	// repo paths — the agent's known-components set is derived from the
-	// `specs/design/components/<name>/` prefix (task-context.ts), so stripped
-	// keys would make every planTask fail with UNKNOWN_COMPONENT.
-	files := map[string]string{}
-	if designFiles, derr := s.design.ListDesignFiles(ctx, orgID, projectID); derr == nil {
-		for p, c := range designFiles {
-			files["specs/design/"+p] = c
-		}
-	}
-	if reqFiles, rerr := s.design.ListRequirements(ctx, orgID, projectID); rerr == nil {
-		for p, c := range reqFiles {
-			files["specs/requirements/"+p] = c
-		}
+	ref, err := gitrepo.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace ref: %w", err)
 	}
 
-	// Existing open Tasks → read-only context files + tap preload + lineage diff.
-	preload, existingKeys, olderTags := s.assembleExistingTasks(ctx, orgID, projectID, currentDesignTag, files)
-	s.appendLineageDiffs(ctx, repo, owner, name, currentDesignTag, olderTags, files)
+	// Existing open Tasks → instruction context + tap preload + lineage diff.
+	// These are platform state (GitHub issues), not repository files, so they
+	// ride in the instruction — the snapshot carries only committed content.
+	contextFiles := map[string]string{}
+	preload, existingKeys, olderTags := s.assembleExistingTasks(ctx, orgID, projectID, currentDesignTag, contextFiles)
+	s.appendLineageDiffs(ctx, ref, currentDesignTag, olderTags, contextFiles)
 	// Freeze the set of issue numbers the agent actually received as context: an
 	// updateTask{issueNumber} ref is fenced to it (a hallucinated / out-of-context
 	// number must never be written — plan_tap.resolveRef).
@@ -147,13 +161,28 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 		contextNumbers[n] = true
 	}
 
-	skills := []agentsvc.Skill{loadTaskPlanningSkill()}
-	if s.orgSkills != nil {
-		if aux, aerr := s.orgSkills(ctx, orgID); aerr == nil {
-			skills = append(skills, aux...)
-		} else {
-			slog.WarnContext(ctx, "plan: org skills unavailable — proceeding without", "org", orgID, "error", aerr)
-		}
+	// Workspace snapshot refs (D9): the design/requirements context is read
+	// from snapshots/<baseRef>/; the task-planning skill is a flow skill
+	// seeded into the org's _skills repo (Phase 1), read from its snapshot.
+	ws := s.git.Workspace()
+	baseRef, err := ws.Head(ctx, ref, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolve base ref: %w", err)
+	}
+	skillsRow, err := s.skillsRepo(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve skills repo: %w", err)
+	}
+	skillsRepoRef := gitrepo.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
+	skillsRef, err := ws.Head(ctx, skillsRepoRef, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolve skills ref: %w", err)
+	}
+	if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
+		return nil, fmt.Errorf("ensure repo snapshot: %w", err)
+	}
+	if err := s.snapshots.Ensure(ctx, skillsRepoRef, skillsRef); err != nil {
+		return nil, fmt.Errorf("ensure skills snapshot: %w", err)
 	}
 
 	// A fresh, namespaced conversation id per plan turn — plan turns are one-shot
@@ -164,10 +193,15 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// Detached context so the turn drains even if the client disconnects (§6).
 	detached := context.WithoutCancel(ctx)
 	body, err := s.client.Turn(detached, conversationID, orgID, apiKey, agentsvc.TurnRequest{
-		Instruction: planInstruction,
-		Files:       files,
-		Skills:      skills,
-		Toolset:     "task-plan",
+		Instruction: planInstruction + renderPlanContext(contextFiles),
+		Workspace: agentsvc.WorkspaceRef{
+			ConversationID: conversationID,
+			TurnID:         uuid.NewString(),
+			RepoSlug:       ref.RepoSlug,
+			Ref:            baseRef,
+			SkillsRef:      skillsRef,
+		},
+		Toolset: "task-plan",
 	})
 	if err != nil {
 		return nil, err // typed *agentsvc.UpstreamError (409 → plan_in_progress passthrough)
@@ -237,24 +271,39 @@ func (s *PlanService) assembleExistingTasks(ctx context.Context, orgID, projectI
 
 // appendLineageDiffs includes the spec/design delta between each older lineage
 // tag and the current design tag so incremental planning reasons over the real
-// change (§6 — GitHub compare, not the deleted DB diff machinery).
-func (s *PlanService) appendLineageDiffs(ctx context.Context, repo *models.GitRepository, owner, name, currentDesignTag string, olderTags map[string]bool, files map[string]string) {
+// change (§6 — Workspace.Diff on the local mirror, was GitHub CompareRefs).
+func (s *PlanService) appendLineageDiffs(ctx context.Context, ref gitrepo.RepoRef, currentDesignTag string, olderTags map[string]bool, files map[string]string) {
 	if s.git == nil || len(olderTags) == 0 {
 		return
 	}
-	cred, err := s.git.Resolver().Resolve(ctx, repo.OrgID)
-	if err != nil {
-		slog.WarnContext(ctx, "plan: resolve credential for lineage diff failed", "error", err)
-		return
-	}
 	for oldTag := range olderTags {
-		cmp, cerr := s.git.GitData().CompareRefs(ctx, owner, name, cred, oldTag, currentDesignTag)
+		cmp, cerr := s.git.Workspace().Diff(ctx, ref, oldTag, currentDesignTag)
 		if cerr != nil {
 			slog.WarnContext(ctx, "plan: lineage compare failed", "from", oldTag, "to", currentDesignTag, "error", cerr)
 			continue
 		}
 		files["context/lineage-diff-"+oldTag+".md"] = renderCompare(oldTag, currentDesignTag, cmp)
 	}
+}
+
+// renderPlanContext renders the existing-task + lineage-diff context files as
+// deterministic instruction sections. They keep their historical
+// tasks/<n>.md / context/… names so the model's mental layout is unchanged.
+func renderPlanContext(files map[string]string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	var sb strings.Builder
+	sb.WriteString("\n\n## Existing open Tasks and lineage diffs (reference)\n")
+	for _, p := range paths {
+		fmt.Fprintf(&sb, "\n--- %s ---\n%s\n", p, files[p])
+	}
+	return sb.String()
 }
 
 // renderCompare renders a compare result as a compact markdown summary for the
@@ -264,7 +313,7 @@ func renderCompare(from, to string, cmp *gitrepo.CompareResult) string {
 	fmt.Fprintf(&sb, "# Lineage diff: %s → %s\n\n", from, to)
 	fmt.Fprintf(&sb, "Status: %s (%d commit(s), +%d/-%d)\n\n", cmp.Status, cmp.TotalCommits, cmp.AheadBy, cmp.BehindBy)
 	if cmp.Truncated {
-		sb.WriteString("> NOTE: GitHub capped this compare at its file limit — the change list below is INCOMPLETE. Treat components not shown as possibly-changed and re-verify against the current design rather than assuming they are untouched.\n\n")
+		sb.WriteString("> NOTE: this compare was capped at a file limit — the change list below is INCOMPLETE. Treat components not shown as possibly-changed and re-verify against the current design rather than assuming they are untouched.\n\n")
 	}
 	for _, f := range cmp.Files {
 		fmt.Fprintf(&sb, "## %s (%s, +%d/-%d)\n", f.Filename, f.Status, f.Additions, f.Deletions)

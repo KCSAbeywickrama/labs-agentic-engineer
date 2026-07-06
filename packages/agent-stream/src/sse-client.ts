@@ -19,10 +19,13 @@
 /**
  * The reference SSE consumer — exactly what a browser fold is. POSTs one turn and
  * yields each raw `StreamPart` frame until `[DONE]`, buffered across chunk
- * boundaries. Each frame is a single physical line (`data: <json>`), since the
- * SDK `JSON.stringify`s each part (embedded newlines are escaped), so the only
- * real hazard is the cross-chunk buffering handled here. Comment frames
- * (`: keep-alive`) are skipped — they carry no data line.
+ * boundaries. The JSON payload is always a single physical line (`data: <json>`),
+ * since the SDK `JSON.stringify`s each part (embedded newlines are escaped), but a
+ * frame is a multi-line SSE record: the BFF prefixes an `id: <index>` line (for
+ * `Last-Event-ID` resume) ahead of the `data:` line, and the agents service emits
+ * the bare `data:` line. So a frame is parsed line-by-line — the `data:` line(s)
+ * are the payload; `id:`/`event:` metadata and `: keep-alive` comment lines carry
+ * no payload and are skipped.
  */
 
 import { SSE_DONE, type TurnRequest } from "./contracts/sse-events.js";
@@ -72,32 +75,50 @@ export async function* parseSseStream(
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return "eof";
-    buffer += decoder.decode(value, { stream: true });
+  // finally runs on normal end AND on early generator.return() (the consumer
+  // breaking out of the loop), so the reader lock is always released — letting
+  // the caller cancel() the body to close the connection on a reconnect.
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return "eof";
+      buffer += decoder.decode(value, { stream: true });
 
-    // Frames are delimited by a blank line.
-    let sep: number;
-    while ((sep = buffer.indexOf("\n\n")) !== -1) {
-      const frame = buffer.slice(0, sep).trim();
-      buffer = buffer.slice(sep + 2);
-      if (!frame.startsWith("data:")) continue;
-      const data = frame.slice("data:".length).trim();
-      if (data === SSE_DONE) return "done";
-      // A frame that doesn't parse is a truncation remnant (the BFF closes a
-      // partial in-flight frame with a blank line before its synthetic error
-      // frame when the upstream dies). Wire frames are single-line JSON, so
-      // nothing legitimate is skipped — and the error/[DONE] frames that
-      // follow (or the "eof" return) carry the failure signal.
-      let part: StreamPart;
-      try {
-        part = JSON.parse(data) as StreamPart;
-      } catch {
-        continue;
+      // Frames are delimited by a blank line.
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        // A frame is a multi-line SSE record. Collect its `data:` line(s) —
+        // the BFF prefixes an `id:` line (Last-Event-ID resume) that must not
+        // hide the payload, and `id:`/`event:`/`: comment` lines carry none.
+        // Per the SSE spec, multiple data lines join with "\n" (our payload is
+        // one line, but stay spec-correct). One optional space after the colon
+        // is stripped.
+        const data = frame
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice("data:".length).replace(/^ /, ""))
+          .join("\n")
+          .trim();
+        if (data === "") continue; // comment / metadata-only frame — no data line
+        if (data === SSE_DONE) return "done";
+        // A frame that doesn't parse is a truncation remnant (the BFF closes a
+        // partial in-flight frame with a blank line before its synthetic error
+        // frame when the upstream dies). Wire frames are single-line JSON, so
+        // nothing legitimate is skipped — and the error/[DONE] frames that
+        // follow (or the "eof" return) carry the failure signal.
+        let part: StreamPart;
+        try {
+          part = JSON.parse(data) as StreamPart;
+        } catch {
+          continue;
+        }
+        yield part;
       }
-      yield part;
     }
+  } finally {
+    reader.releaseLock();
   }
 }
 

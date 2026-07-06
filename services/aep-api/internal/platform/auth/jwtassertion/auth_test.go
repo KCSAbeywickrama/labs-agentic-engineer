@@ -17,6 +17,7 @@
 package jwtassertion
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -169,5 +170,25 @@ func TestValidateIssuer(t *testing.T) {
 	}
 	if err := validateIssuer("thunder", nil); err == nil {
 		t.Error("expected error when no allowed issuers configured")
+	}
+}
+
+// TokenClaims declares its own `Sub string json:"sub"` at depth 0 AND embeds
+// jwt.RegisteredClaims whose Subject carries the same tag one level deeper.
+// encoding/json decodes ONLY the shallower field, so consumers must read
+// tc.Sub — the promoted tc.Subject is always empty. auth.JWTMiddleware
+// projecting tc.Subject instead of tc.Sub lost the user identity on every
+// authenticated request (turn commits fell back to the credential identity;
+// found in e2e 2026-07-06). This pins the decode shape.
+func TestTokenClaims_SubShadowsEmbeddedSubject(t *testing.T) {
+	var tc TokenClaims
+	if err := json.Unmarshal([]byte(`{"sub":"user-123"}`), &tc); err != nil {
+		t.Fatal(err)
+	}
+	if tc.Sub != "user-123" {
+		t.Fatalf("tc.Sub = %q, want %q", tc.Sub, "user-123")
+	}
+	if tc.Subject != "" {
+		t.Fatalf("tc.Subject = %q — the shadowing assumption changed; re-audit every tc.Sub consumer", tc.Subject)
 	}
 }

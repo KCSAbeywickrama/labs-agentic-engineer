@@ -20,7 +20,8 @@
  * The single per-turn orchestration the SSE route calls: load-or-lazy-create →
  * mark active → fresh throwaway WorkingBundle from the passed snapshot →
  * `runTurn` (prepending a one-line CURRENT-STATE-authoritative note ONLY when
- * the FE flagged an external edit) → set status → persist the whole aggregate.
+ * the FE flagged an external edit) → set status → persist the whole aggregate
+ * → emit the terminal manifest part (D14; success only — never after a throw).
  *
  * Files NEVER touch the store; the passed `files` snapshot is both the inlined
  * CURRENT STATE and (when diverged) the basis of the note. History is
@@ -29,12 +30,14 @@
  */
 
 import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
-import { FileBundle, type Skill, type StreamPart, type Toolset } from "@aep/agent-stream";
+import { FileBundle, type StreamPart, type Toolset } from "@aep/agent-stream";
 import { runTurn } from "../agents/main/run-turn.js";
 import { buildFileTools, ASK_QUESTION } from "../agents/main/tools/files.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
 import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt } from "../agents/main/prompt.js";
+import type { SkillSource } from "../agents/main/skill-source.js";
+import { buildManifestPart } from "./manifest.js";
 import { config } from "../shared/config.js";
 import { modelProviderOptions } from "../shared/model.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
@@ -95,11 +98,12 @@ export interface RunConversationTurnInput {
   /** Optional FE flag (default false): prepend the CURRENT-STATE-authoritative note (§10). */
   filesChangedExternally?: boolean;
   /**
-   * Candidate skills for this turn (ADR-0002), resolved by the caller. Their
-   * name+description form the catalog at the end of the system prompt; the agent
-   * pulls a body via `loadSkill`. Omitted/empty → no catalog, no `loadSkill`.
+   * The turn's skill supply (§12, ADR-0002): a lazy, disk-backed source over the
+   * turn's `_skills` snapshot. Its name+description catalog lands at the end of
+   * the system prompt; the agent pulls a body via `loadSkill`. Omitted/empty →
+   * no catalog, no `loadSkill`.
    */
-  skills?: Skill[];
+  skillSource?: SkillSource;
   /**
    * Which tool set to register (tasks-github-native §9.3). Default/absent →
    * `files` (today's file-mutation tools, byte-identical). `task-plan` →
@@ -126,18 +130,22 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 3. select the tool set from `toolset` (default `files`). Both build a
     //    throwaway per-turn accumulator from the passed snapshot; the skill
     //    catalog + `loadSkill` are registered identically (only when skills were
-    //    pushed, ADR-0002); ask_question stays DISABLED.
+    //    supplied, ADR-0002); ask_question stays DISABLED. The FileBundle is
+    //    held by name: it is the source of the terminal manifest (D14).
     const toolset: Toolset = input.toolset ?? "files";
+    const skills = input.skillSource;
+    let bundle: FileBundle | undefined;
     let tools: ToolSet;
     let instructions: string;
     if (toolset === "task-plan") {
       // Read-only context: `files` mutates nothing; the accumulator validates
       // planTask/updateTask against it (known components + existing Tasks).
-      tools = buildTaskPlanTools(new TaskPlan(input.files), input.skills);
-      instructions = buildTaskPlanInstructions(input.skills);
+      tools = buildTaskPlanTools(new TaskPlan(input.files), skills);
+      instructions = buildTaskPlanInstructions(skills);
     } else {
-      tools = buildFileTools(new FileBundle(input.files), input.skills);
-      instructions = buildInstructions(input.skills);
+      bundle = new FileBundle(input.files);
+      tools = buildFileTools(bundle, skills);
+      instructions = buildInstructions(skills);
     }
 
     // 4. one generic turn. The instructions append the skill catalog at the END
@@ -171,6 +179,12 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
 
     // 7. persist the whole aggregate (history is append-only)
     await input.store.save(conv);
+
+    // 8. terminal manifest (D14) — emitted LAST, only on full success (any
+    //    throw above skips it, so a severed/failed stream carries no manifest
+    //    and the aep-api fold refuses to commit). Mutated-paths-only from the
+    //    turn's bundle; empty for chat-only and task-plan turns.
+    input.onEvent(buildManifestPart(bundle));
     return conv;
   } finally {
     input.guard.release(input.id);

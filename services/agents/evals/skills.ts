@@ -17,11 +17,13 @@
  */
 
 /**
- * The eval's skill resolver (ADR-0002). The SERVICE never reads skills from disk;
- * the caller resolves them and pushes them in the turn payload. In evals THIS is
- * that caller: it reads repo-root `skills/<id>/SKILL.md`, parses the frontmatter
- * for `name`+`description`, takes the body as `content`, and returns the whole
- * library as `Skill[]` to attach to every turn. Only `evals/` touches the fs.
+ * The eval's skill resolver (ADR-0002/§12). Skills never travel in the turn
+ * payload; the evals/playground resolve the repo-root library here and
+ * MATERIALIZE it into the fixture mount's `_skills` snapshot
+ * (`EvalWorkspace.materializeSkills`), which the service reads like any caller's.
+ * This module reads repo-root `skills/<id>/SKILL.md`, parses the frontmatter for
+ * `name`+`description`, and takes the body as `content`. Only `evals/` touches
+ * the fs.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -29,7 +31,22 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 // Reuse the bundle's single frontmatter grammar + LF canonicalizer so the
 // SKILL.md fence parsing can't drift from the spec-file fence parsing.
-import { FRONTMATTER_RE, lf, type Skill } from "@aep/agent-stream";
+import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
+
+/**
+ * One resolved repo skill — the eval-side shape `materializeSkills` renders into
+ * a fixture `_skills` snapshot (`skills/flow/<name>/SKILL.md` + references).
+ */
+export interface RepoSkill {
+  /** Stable id; the snapshot dir name and what the catalog lists. */
+  name: string;
+  /** One-line summary rendered into the SKILL.md frontmatter. */
+  description: string;
+  /** The full guidance body (frontmatter stripped). */
+  content: string;
+  /** Optional `references/<file>.md` → body (agentskills.io structure). */
+  references?: Record<string, string>;
+}
 
 /** Split a `SKILL.md` into its YAML frontmatter block and markdown body. */
 function splitFrontmatter(raw: string): { frontmatter: string; body: string } {
@@ -39,8 +56,8 @@ function splitFrontmatter(raw: string): { frontmatter: string; body: string } {
   return { frontmatter: m[1] ?? "", body: text.slice(m[0].length) };
 }
 
-/** Parse one `SKILL.md` into a `Skill`; `name` falls back to the directory id. */
-export function parseSkill(dirId: string, raw: string): Skill {
+/** Parse one `SKILL.md` into a `RepoSkill`; `name` falls back to the directory id. */
+export function parseSkill(dirId: string, raw: string): RepoSkill {
   const { frontmatter, body } = splitFrontmatter(raw);
   let fm: Record<string, unknown> = {};
   if (frontmatter.trim() !== "") {
@@ -57,7 +74,7 @@ export function parseSkill(dirId: string, raw: string): Skill {
  * immediate subdirectory holding a `SKILL.md`, sorted by id. Returns `[]` when
  * the directory is absent, so a checkout without `skills/` runs skill-free.
  */
-export function loadRepoSkills(skillsDir: string): Skill[] {
+export function loadRepoSkills(skillsDir: string): RepoSkill[] {
   if (!existsSync(skillsDir)) return [];
   return readdirSync(skillsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -77,7 +94,7 @@ export function loadRepoSkills(skillsDir: string): Skill[] {
  * Read `references/*.md` for one skill dir into a path→body map keyed
  * `references/<file>` (the wire shape `loadSkillReference` addresses).
  * Returns undefined — not an empty map — when the dir is absent or empty, so a
- * references-free skill stays byte-identical to today's `Skill`.
+ * references-free skill stays byte-identical.
  */
 function loadReferences(skillDir: string): Record<string, string> | undefined {
   const refsDir = join(skillDir, "references");

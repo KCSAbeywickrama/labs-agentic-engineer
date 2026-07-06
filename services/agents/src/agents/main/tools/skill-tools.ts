@@ -23,6 +23,10 @@
  * which domain tools are registered. Extracted here so both `files.ts` and
  * `task-plan.ts` register identical `loadSkill`(+`loadSkillReference`) behavior.
  *
+ * The tools read through the `SkillSource` seam (`../skill-source.ts`): the
+ * turn's `_skills` snapshot supplies the catalog, and bodies are read from disk
+ * at call time.
+ *
  * No skills → returns `{}`, so a skill-free turn is byte-identical to today.
  */
 
@@ -36,8 +40,8 @@ import type {
   LoadedSkill,
   LoadSkillReferenceInput,
   LoadSkillReferenceResult,
-  Skill,
 } from "@aep/agent-stream";
+import { EMPTY_SKILL_SOURCE, type SkillSource } from "../skill-source.js";
 
 /** Progressive-disclosure skill loader — registered only when skills are supplied. */
 export const LOAD_SKILL = "loadSkill" as const;
@@ -69,15 +73,16 @@ const _drift: [
 void _drift;
 
 /**
- * The skill loaders bound to `skills` for one turn. Empty when no skills are
- * supplied (the catalog is likewise omitted from the prompt). `loadSkillReference`
- * is registered only when some skill actually carries references, so a
- * references-free library keeps today's exact tool set.
+ * The skill loaders bound to one turn's `SkillSource`. Empty when no skills are
+ * supplied (the catalog is likewise omitted from the prompt).
+ * `loadSkillReference` is registered only when some skill actually carries
+ * references, so a references-free library keeps today's exact tool set.
  */
-export function buildSkillTools(skills: readonly Skill[] = []): Record<string, Tool> {
-  if (skills.length === 0) return {};
-  const byName = new Map(skills.map((s) => [s.name, s] as const));
-  const available = skills.map((s) => s.name);
+export function buildSkillTools(skills?: SkillSource): Record<string, Tool> {
+  const source = skills ?? EMPTY_SKILL_SOURCE;
+  const entries = source.catalog();
+  if (entries.length === 0) return {};
+  const available = entries.map((e) => e.name);
 
   const tools: Record<string, Tool> = {
     [LOAD_SKILL]: tool({
@@ -91,13 +96,16 @@ export function buildSkillTools(skills: readonly Skill[] = []): Record<string, T
         const skills: LoadedSkill[] = [];
         const missing: string[] = [];
         for (const name of names) {
-          const skill = byName.get(name);
-          if (skill === undefined) {
+          const loaded = source.load(name);
+          if (loaded === undefined) {
             missing.push(name);
             continue;
           }
-          const refs = Object.keys(skill.references ?? {});
-          skills.push({ name, content: skill.content, ...(refs.length > 0 ? { references: refs } : {}) });
+          skills.push({
+            name,
+            content: loaded.content,
+            ...(loaded.references.length > 0 ? { references: loaded.references } : {}),
+          });
         }
         if (missing.length > 0) {
           return { ok: false, error: `unknown skills: ${missing.join(", ")}`, skills, missing, available };
@@ -107,9 +115,8 @@ export function buildSkillTools(skills: readonly Skill[] = []): Record<string, T
     }),
   };
 
-  const withRefs = skills.filter((s) => s.references && Object.keys(s.references).length > 0);
-  if (withRefs.length > 0) {
-    const refSkillNames = withRefs.map((s) => s.name);
+  const refSkillNames = entries.filter((e) => e.hasReferences).map((e) => e.name);
+  if (refSkillNames.length > 0) {
     tools[LOAD_SKILL_REFERENCE] = tool({
       description:
         "Read ONE reference file of a loaded skill (loadSkill lists each skill's reference paths). Call it only " +
@@ -117,14 +124,13 @@ export function buildSkillTools(skills: readonly Skill[] = []): Record<string, T
         "re-call with one of those.",
       inputSchema: loadSkillReferenceInputSchema,
       execute: async ({ name, path }): Promise<LoadSkillReferenceResult> => {
-        const skill = byName.get(name);
-        const refs = skill?.references ?? {};
-        if (skill === undefined || Object.keys(refs).length === 0) {
+        const loaded = source.load(name);
+        if (loaded === undefined || loaded.references.length === 0) {
           return { ok: false, name, path, error: `unknown skill: ${name}`, available: refSkillNames };
         }
-        const content = refs[path];
+        const content = source.loadReference(name, path);
         return content === undefined
-          ? { ok: false, name, path, error: `unknown reference: ${path}`, available: Object.keys(refs) }
+          ? { ok: false, name, path, error: `unknown reference: ${path}`, available: loaded.references }
           : { ok: true, name, path, content };
       },
     });

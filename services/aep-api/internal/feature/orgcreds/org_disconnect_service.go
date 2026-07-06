@@ -54,6 +54,11 @@ type OrgDisconnectService struct {
 	db       *gorm.DB
 	credSvc  *CredentialService
 	issueSvc gitrepo.IssueService
+	// workspaceTrash, when set (from the composition root), is Phase F:
+	// rename the org's whole repos/<orgId>/ workspace subtree (all projects
+	// incl. _skills) into trash (design §14/D12). Best-effort by contract —
+	// it returns nothing and never fails the cascade.
+	workspaceTrash func(ctx context.Context, ocOrgID string)
 }
 
 // NewOrgDisconnectService constructs the cascade orchestrator.
@@ -67,6 +72,13 @@ func NewOrgDisconnectService(
 		credSvc:  credSvc,
 		issueSvc: issueSvc,
 	}
+}
+
+// WithWorkspaceTrash installs the Phase-F disk-trash hook (nil-safe).
+// Returns s for chaining at the construction sites.
+func (s *OrgDisconnectService) WithWorkspaceTrash(fn func(ctx context.Context, ocOrgID string)) *OrgDisconnectService {
+	s.workspaceTrash = fn
+	return s
 }
 
 // Disconnect runs the cascade synchronously. `cause` is recorded on each
@@ -118,6 +130,16 @@ func (s *OrgDisconnectService) Disconnect(ctx context.Context, ocOrgID, cause st
 		if err := s.credSvc.UninstallAppInstallation(ctx, ocOrgID); err != nil {
 			slog.WarnContext(ctx, "disconnect Phase E: uninstall failed", "ocOrgId", ocOrgID, "error", err)
 		}
+	}
+
+	// Phase F — best-effort disk cleanup: rename the org's whole workspace
+	// subtree (all projects incl. _skills) into trash. The hook logs its own
+	// failures and never fails the cascade; a missed trash here just leaves
+	// dirs whose git_repositories rows still exist, and the disconnected org
+	// has no credential to re-fetch with — the reaper's quota/LRU pass
+	// eventually reclaims the cold mirrors.
+	if s.workspaceTrash != nil {
+		s.workspaceTrash(ctx, ocOrgID)
 	}
 
 	slog.InfoContext(ctx, "disconnect: cascade complete", "ocOrgId", ocOrgID, "uninstallApp", uninstallApp)

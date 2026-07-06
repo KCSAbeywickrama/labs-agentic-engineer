@@ -76,6 +76,23 @@ func SlugForURL(repoURL string) string {
 	return strings.ToLower(strings.ReplaceAll(m[1], "/", "-"))
 }
 
+// WorkspaceSlug returns the on-disk directory leaf for this repo row on the
+// shared workspace volume (repos/<org>/<project>/<slug>/ — design D6: a pure
+// function of the DB row). For the per-org skills repo the leaf is the pinned
+// constant SkillsRepoDirName — the agents service derives the skills snapshot
+// path structurally from that fixed name and never receives a path or slug
+// for it on the wire. For everything else it is RepoSlug, backfilled from the
+// URL for pre-phase2 rows.
+func (r *GitRepository) WorkspaceSlug() string {
+	if r.ProjectID == SkillsRepoSentinelProjectID {
+		return SkillsRepoDirName
+	}
+	if r.RepoSlug != "" {
+		return r.RepoSlug
+	}
+	return SlugForURL(r.RepoURL)
+}
+
 // OwnerRepoFromURL extracts (owner, repo) from a GitHub HTTPS URL, preserving
 // the original case (unlike SlugForURL which lowercases). Returns empty
 // strings if the URL doesn't match the GitHub HTTPS pattern. Used by the

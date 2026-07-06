@@ -17,10 +17,11 @@
 package gittest
 
 // Stub is a route-registry httptest fake for the plain JSON GitHub endpoints —
-// repo create/adopt, issues, webhook registration, Projects-v2 GraphQL — where
-// a git-backed fake would be over-engineering (the GitData server handles the
-// git-object endpoints). It is the reusable, exported form of the stubGitHub
-// pattern proven in orgcreds' credential_service_test.go.
+// repo create/adopt, issues, webhook registration — where a git-backed fake
+// would be over-engineering (git-object traffic no longer exists: repo content
+// runs on the gitfs Workspace engine against a gittest.Remote origin). It is
+// the reusable, exported form of the stubGitHub pattern proven in orgcreds'
+// credential_service_test.go.
 //
 // Register a fixed status+body per "METHOD /path" with On(); an unregistered
 // path 404s (so a caller's own not-found handling is exercised). Every request

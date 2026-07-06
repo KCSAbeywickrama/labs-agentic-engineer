@@ -11,7 +11,7 @@ diverge between implementations. The package has **zero server-side dependencies
 | Export | Purpose |
 |---|---|
 | `StreamPart`, `SSE_DONE`, `AGENT_SSE_EVENT_TYPES` | the raw wire frame + terminal sentinel |
-| `TurnRequest`, `Toolset`, `Skill`, `*Input`, `OpResult`, `Change` | the turn-request body (incl. `toolset`) + SSE payload shapes |
+| `TurnRequest`, `WorkspaceRef`, `Toolset`, `*Input`, `OpResult`, `Change` | the turn-request body (workspace ref + `toolset`) + SSE payload shapes |
 | `FileBundle`, `applyToolCall`, `toChange`, `isFileMutationTool` | the fold: reconstruct file state from the streamed tool-calls |
 | `checkComponentDesign`, `componentDesignSchema`, `COMPONENT_DESIGN_JSON_RE` | the component `design.json` write-gate (travels with `FileBundle`) |
 | `PLAN_TASK`/`UPDATE_TASK`, `PlanTaskInput`/`UpdateTaskInput`, `*Result`, `TaskContextFile` | the plan-turn tool contract (tasks-github-native §9.3) |

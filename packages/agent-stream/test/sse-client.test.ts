@@ -113,6 +113,38 @@ test("the BFF's upstream-failure marker (comment, no [DONE]) reads as a truncate
   );
 });
 
+test("BFF `id:`-prefixed frames parse — the data line is not hidden by the id line", async () => {
+  // The committed-truth turn stream (genai_huma.go streamSubscription) writes
+  // every part as `id: <index>\ndata: <json>\n\n` for Last-Event-ID resume. The
+  // parser must read the `data:` line within the multi-line frame, not require
+  // the frame to START with `data:` (that dropped every part → dead live-preview).
+  const { parts, end } = await collect(
+    byteStream([
+      'id: 0\ndata: {"type":"tool-input-start","id":"t1","toolName":"addFile"}\n\n',
+      'id: 1\ndata: {"type":"tool-call","toolCallId":"t1","toolName":"addFile","input":{"path":"specs/requirements/requirements.md","content":"# Reqs\\n"}}\n\n',
+      'id: 2\ndata: {"type":"turn-committed","commitSha":"abc123"}\n\n',
+      "data: [DONE]\n\n", // the [DONE] sentinel is written WITHOUT an id
+    ]),
+  );
+  assert.equal(end, "done");
+  assert.deepEqual(
+    parts.map((p) => p.type),
+    ["tool-input-start", "tool-call", "turn-committed"],
+  );
+});
+
+test("an `id:`-prefixed frame split across chunk boundaries (id line, then data line) parses", async () => {
+  const { parts, end } = await collect(
+    byteStream([
+      "id: 7\n", // the id line arrives before the data line's chunk
+      'data: {"type":"text-delta","text":"a"}\n\n',
+      "data: [DONE]\n\n",
+    ]),
+  );
+  assert.equal(end, "done");
+  assert.deepEqual(parts, [{ type: "text-delta", text: "a" }]);
+});
+
 test("for-await consumers are unaffected by the return value", async () => {
   const parts: StreamPart[] = [];
   for await (const part of parseSseStream(

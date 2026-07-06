@@ -120,29 +120,12 @@ export interface SetFrontmatterFieldInput {
 
 // --- Skills (progressive disclosure, ADR-0002) ------------------------------
 //
-// Skills are GUIDANCE, not code. The caller RESOLVES them (the eval reads
-// repo-root `skills/`; in production a BFF reads the org repo) and pushes the
-// full candidate set in the turn request. The service never reads skills from
-// disk: it shows only a name+description catalog at the end of the system prompt
-// and serves a body on demand via the `loadSkill` tool. The body enters context
-// only when loaded, and then persists as a tool result in message history.
-
-/** One candidate skill pushed in the turn request — a resolved `SKILL.md`. */
-export interface Skill {
-  /** Stable id; what the catalog lists and `loadSkill` takes (the dir name). */
-  name: string;
-  /** One-line summary shown in the catalog so the agent can decide to load it. */
-  description: string;
-  /** The full guidance body (frontmatter stripped) returned by `loadSkill`. */
-  content: string;
-  /**
-   * Optional reference files (agentskills.io structure): `references/<file>.md`
-   * → body. A third disclosure level: listed by `loadSkill`, served one at a
-   * time by `loadSkillReference`. Mirrors the coding-agent leg
-   * (`SkillResolution.references` in the remote-worker).
-   */
-  references?: Record<string, string>;
-}
+// Skills are GUIDANCE, not code, and they never travel on the wire: the turn's
+// `WorkspaceRef.skillsRef` names an immutable `_skills` snapshot on the shared
+// mount, and the service reads the catalog (and, lazily, the bodies) from
+// there. The system prompt shows only a name+description catalog; the agent
+// pulls a body on demand via the `loadSkill` tool. The body enters context only
+// when loaded, and then persists as a tool result in message history.
 
 /**
  * The `loadSkill` tool input. WIRE source of truth; drift-guarded in `tool.ts`.
@@ -213,22 +196,45 @@ export interface Change {
 // --- The turn request (the `POST /conversations/:id/turns` body) -------------
 
 /**
- * The turn-request body. The caller passes the full accepted `files` snapshot
- * every turn (the service reads no repo/disk); `filesChangedExternally` flags an
- * out-of-band edit so the server prepends a CURRENT-STATE-authoritative note.
- * The producer (server) validates an untrusted body against this shape; the eval
- * client (and a future browser) construct it — one definition, no drift.
+ * The shared-volume workspace reference (shared-volume-clone-architecture §12,
+ * D9): IDs + shas only — **no filesystem path ever crosses the boundary**. The
+ * agents service derives
+ * `$WORKSPACE_MOUNT_ROOT/repos/<org>/<proj>/<repoSlug>/snapshots/<ref>/` (and
+ * the `_skills` analog) itself from these fields, so a hostile payload has no
+ * path input to traverse: the tenancy fence is structural, not validated-in.
+ */
+export interface WorkspaceRef {
+  /**
+   * The namespaced conversation id, `org_<orgId>--proj_<projectId>--<useCase>--<uuid>`.
+   * Must equal the URL `:id`; supplies the org/proj path segments and the org
+   * value asserted against the caller's `X-Org-Id` claim (the IDOR fence).
+   */
+  conversationId: string;
+  /** Per-dispatch uuid (turn attribution/tracing; never used in path derivation). */
+  turnId: string;
+  /** The repo directory segment (`git_repositories.repo_slug`; validated slug format). */
+  repoSlug: string;
+  /** 40-hex committed base sha — the turn reads `snapshots/<ref>/`. */
+  ref: string;
+  /** 40-hex `_skills` head sha — skills load from `_skills/org-skills/snapshots/<skillsRef>/`. */
+  skillsRef: string;
+}
+
+/**
+ * The turn-request body (D9/§12): the body carries a `WorkspaceRef` and the
+ * service reads the file snapshot AND the skills from the shared read-only
+ * mount — no file content or skill bodies ever cross the wire.
+ *
+ * `filesChangedExternally` flags an out-of-band edit so the server prepends a
+ * CURRENT-STATE-authoritative note. The producer (server) validates an
+ * untrusted body against this shape; the eval client (and the BFF) construct
+ * it — one definition, no drift.
  */
 export interface TurnRequest {
   instruction: string;
-  files: Record<string, string>;
+  /** Where to read files + skills from the shared mount (IDs + shas only). */
+  workspace: WorkspaceRef;
   filesChangedExternally?: boolean;
-  /**
-   * The candidate skills for this turn (ADR-0002). Only `name`+`description` are
-   * shown (the catalog); the agent pulls a body via `loadSkill`. Omitted/empty →
-   * no catalog and no `loadSkill` tool (byte-identical to a skill-free turn).
-   */
-  skills?: Skill[];
   /**
    * Which domain tool set to register (tasks-github-native §9.3). `files`
    * (default, and identical to an absent value) registers the file-mutation
@@ -250,12 +256,34 @@ export function isToolset(v: unknown): v is Toolset {
   return (TOOLSETS as readonly unknown[]).includes(v);
 }
 
+// --- The terminal manifest (shared-volume-clone-architecture D14) ------------
+
+/**
+ * The terminal manifest frame — ALWAYS emitted (possibly empty) after a turn
+ * completes successfully, before `[DONE]`; a severed/failed stream carries NO
+ * manifest, which is exactly what lets the consumer (the aep-api fold) treat
+ * its absence as "do not commit". Covers ONLY the paths mutated THIS turn:
+ * `files` maps each still-present touched path to the sha256 (lowercase hex,
+ * over the UTF-8 bytes) of its final content; `deleted` lists the touched
+ * paths no longer present. A chat-only or task-plan turn emits
+ * `{files: {}, deleted: []}`. Structurally a `StreamPart` (open type), named
+ * here so both fold sides hash-check against ONE definition.
+ */
+export interface ManifestPart {
+  type: "manifest";
+  /** path → sha256 hex of the final content, for every path mutated this turn and still present. */
+  files: Record<string, string>;
+  /** Paths mutated this turn that are no longer present at turn end. */
+  deleted: string[];
+}
+
 // --- The emitted event catalog ----------------------------------------------
 
 /**
  * The documented subset of `StreamPart` `type`s the SSE route emits, one SSE
  * frame each. The wire carries the raw part verbatim; this catalog names what a
- * consumer can expect to see.
+ * consumer can expect to see. `manifest` (D14) is terminal: at most one, after
+ * the loop's last `finish` and before `[DONE]`, only on a successful turn.
  */
 export const AGENT_SSE_EVENT_TYPES = [
   "text-delta",
@@ -266,6 +294,7 @@ export const AGENT_SSE_EVENT_TYPES = [
   "tool-error",
   "error",
   "finish",
+  "manifest",
 ] as const;
 
 export type AgentSseEventType = (typeof AGENT_SSE_EVENT_TYPES)[number];

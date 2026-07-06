@@ -101,6 +101,19 @@ func (h *Harness) AsOrg(org string) *Req {
 // gate's no-claims branch (the tier's ENFORCE proof).
 func (h *Harness) NoAuth() *Req { return &Req{h: h, claims: nil} }
 
+// ClaimsHeader returns the header key/value that authenticates a RAW HTTP
+// request as a verified token for org — for tests that wrap Harness.Handler in
+// an httptest.Server because they need a real streaming client (SSE live-tail)
+// instead of the recorder. Mirrors AsOrg's claims exactly.
+func ClaimsHeader(t testing.TB, org string) (key, value string) {
+	t.Helper()
+	raw, err := json.Marshal(&auth.Claims{OuHandle: org, OuId: org + "-ouid", Subject: "componenttest-user"})
+	if err != nil {
+		t.Fatalf("componenttest: marshal claims: %v", err)
+	}
+	return hdrClaims, string(raw)
+}
+
 // With customizes the claims (sub/OuId/…) when a handler reads more than
 // OuHandle. No-op on a NoAuth request.
 func (r *Req) With(mut func(*auth.Claims)) *Req {

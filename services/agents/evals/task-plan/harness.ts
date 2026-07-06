@@ -18,10 +18,11 @@
 
 /**
  * The plan-turn eval harness — the file harness's sibling. Per fixture, per turn,
- * ×K it boots the real Express app, POSTs a `toolset: "task-plan"` turn with the
- * read-only context (spec/design [+ existing Tasks]) as `files` and the repo skill
- * library pushed, consumes the SSE stream, distills it into a `PlanTrace`, and
- * scores skill pickup + plan quality. Report-not-gate.
+ * ×K it materializes the read-only context (spec/design [+ existing Tasks]) and
+ * the repo skill library into a fixture workspace mount, boots the real Express
+ * app over it, POSTs a `toolset: "task-plan"` workspace turn, consumes the SSE
+ * stream, distills it into a `PlanTrace`, and scores skill pickup + plan
+ * quality. Report-not-gate.
  *
  * The plumbing — `boot`, `collectTurn`, the result shapes, and the K-sampling
  * drivers (`sampleFixture`/`sampleSuite`) — is the file harness's, imported from
@@ -29,7 +30,7 @@
  */
 
 import type { LanguageModel } from "ai";
-import { type Skill, type TurnRequest } from "@aep/agent-stream";
+import { type TurnRequest } from "@aep/agent-stream";
 import {
   boot,
   collectTurn,
@@ -41,7 +42,9 @@ import {
   type TurnResult,
 } from "../harness.js";
 import { evalTurnHeaders } from "../auth.js";
+import { EvalWorkspace, EVAL_ORG, evalConversationId } from "../workspace.js";
 import { allPass } from "../scoring.js";
+import type { RepoSkill } from "../skills.js";
 import { scoreTaskPlan, traceOfTurn, type TaskPlanExpect } from "./scoring.js";
 
 export interface TaskPlanTurn {
@@ -61,7 +64,7 @@ export interface TaskPlanFixture {
 export interface TaskPlanSuite {
   agent: string;
   defaultSeed: Record<string, string>;
-  /** Repo-root `skills/` — pushed whole on every turn (ADR-0002), incl. task-planning. */
+  /** Repo-root `skills/` — materialized whole into the fixture `_skills` snapshot, incl. task-planning. */
   skillsDir?: string;
 }
 
@@ -69,29 +72,27 @@ export interface RunOptions {
   model: LanguageModel;
   samples: number;
   apiKey?: string;
-  skills?: Skill[];
+  skills?: RepoSkill[];
   onLog?: (msg: string) => void;
-}
-
-function turnBody(prompt: string, files: Record<string, string>, skills?: Skill[]): TurnRequest {
-  return {
-    instruction: prompt,
-    files,
-    toolset: "task-plan",
-    ...(skills && skills.length > 0 ? { skills } : {}),
-  };
 }
 
 async function runSample(suite: TaskPlanSuite, fixture: TaskPlanFixture, opts: RunOptions): Promise<SampleResult> {
   const seed = fixture.seed ?? suite.defaultSeed;
-  const { baseUrl, close } = await boot(opts.model);
+  const ws = new EvalWorkspace();
+  const { baseUrl, close } = await boot(opts.model, ws.root);
   try {
-    const id = fixture.name;
-    const headers = await evalTurnHeaders(opts.apiKey ?? "eval");
+    const id = evalConversationId(fixture.name);
+    const headers = await evalTurnHeaders(opts.apiKey ?? "eval", EVAL_ORG);
     const turns: TurnResult[] = [];
     for (let i = 0; i < fixture.turns.length; i++) {
       const turn = fixture.turns[i]!;
-      const parts = await collectTurn(baseUrl, id, turnBody(turn.prompt, seed, opts.skills), headers);
+      // The plan context is read-only, so every turn references the same seed snapshot.
+      const body: TurnRequest = {
+        instruction: turn.prompt,
+        workspace: ws.workspaceRef(id, i, seed, opts.skills ?? []),
+        toolset: "task-plan",
+      };
+      const parts = await collectTurn(baseUrl, id, body, headers);
 
       const checks = scoreTaskPlan(turn.expect, traceOfTurn(parts));
       // A mid-stream error frame yields no scoreable result — fail explicitly so a
@@ -105,6 +106,7 @@ async function runSample(suite: TaskPlanSuite, fixture: TaskPlanFixture, opts: R
     return { pass: turns.every((t) => t.pass), turns };
   } finally {
     await close();
+    ws.cleanup();
   }
 }
 

@@ -17,12 +17,13 @@ against the wire `*Input` types there. See `design/`
 (`ADR-0001-anchored-file-edits.md`, `ADR-0002-skills-progressive-disclosure.md`,
 `agent-loop-and-eval-framework.md`).
 
-**Skills** are guidance (not code): the caller pushes `skills: { name, description,
-content }[]` in the turn payload, the service shows a name+description **catalog** at
-the end of the system prompt, and the agent pulls a body on demand via the
-**`loadSkill`** tool. The service never reads skills from disk (the eval reads
-repo-root `skills/`); no skills in the payload → no catalog, behaves as today. See
-ADR-0002.
+**Skills** are guidance (not code): the service shows a name+description **catalog**
+at the end of the system prompt, and the agent pulls a body on demand via the
+**`loadSkill`** tool — both built over the `SkillSource` seam
+(`src/agents/main/skill-source.ts`). One supply: skills load lazily from the
+turn's `_skills` snapshot on the mount (`src/conversation/load-workspace.ts`);
+they never travel in the turn payload. No skills → no catalog, behaves as today.
+See ADR-0002 and `docs/design/shared-volume-clone-architecture.md` §12.
 
 **Tool sets** (`TurnRequest.toolset`, tasks-github-native §9.3): the turn selects
 which domain tools the generic loop registers. `files` (default, and identical to
@@ -44,7 +45,13 @@ off the stream. The plan tool contract (inputs, results, error codes, the
 - Endpoints: `GET /healthz` (open) · `POST /conversations/:id/turns` (SSE) ·
   `GET /conversations/:id` — the last two behind the M2M gate.
 - **No boot-time Anthropic key**: the model is built per turn from the
-  `X-Anthropic-Key` header (missing → 400). `X-Org-Id` is log-only attribution.
+  `X-Anthropic-Key` header (missing → 400). `X-Org-Id` is LOAD-BEARING: the
+  conversation's `org_` segment must equal it (403 otherwise — the §12 fence).
+- **One turn shape**: `workspace` (IDs + shas; files/skills read from
+  `WORKSPACE_MOUNT_ROOT` snapshots via `snapshot-path.ts` +
+  `load-workspace.ts`). Inline `files`/`skills` in the body → 400.
+  Every successful turn ends with a terminal `manifest` frame (D14:
+  mutated-paths → sha256) before `[DONE]`; a failed/severed stream has none.
 - **M2M gate is always on**: set `AGENT_JWT_JWKS_URL` (RS256) **or**
   `AGENT_JWT_SECRET` (HS256) — the server refuses to boot with neither. `aud`
   defaults to `agents-service` (`AGENT_JWT_AUDIENCE`); `AGENT_JWT_ISSUER` optional.
@@ -67,4 +74,6 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   here; the client-safe fold + wire contracts live in `@aep/agent-stream`.
 - Latest Claude models by default (see the `claude-api` skill for model ids).
 - One agent per `src/agents/<name>/`; the loop (`run-turn.ts`) is shared.
-- `src/` writes no files; only `evals/` touches the filesystem.
+- `src/` writes no files; its only filesystem READS are the §12 snapshot dirs
+  (`load-workspace.ts`, paths derived solely by `snapshot-path.ts`). Only
+  `evals/` writes to the filesystem (fixture mounts/previews).

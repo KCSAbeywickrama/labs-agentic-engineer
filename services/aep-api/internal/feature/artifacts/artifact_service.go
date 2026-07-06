@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package artifacts is the requirements + design version store. Since the
-// GitHub-direct rework (docs/design/agents-generation-migration.md §5) it holds
-// NO local state: reads walk the repo tree via the Git Data API (at HEAD for the
-// live draft, at a `v*` tag for an approved version), a save is the hard
-// semantic gate followed by an annotated tag at HEAD (no commit — the accepted
-// draft is already on `main` via the Files API), and a discard is a revert-commit
-// back to the last tag. Drafts live on the frontend; committed truth is GitHub.
+// Package artifacts is the requirements + design version store. It holds NO
+// local per-project state: reads are served from the workspace-mounted bare
+// mirror via the gitrepo.Workspace port (at the branch tip for the live draft,
+// at a `v*` tag for an approved version — docs/design/
+// shared-volume-clone-architecture.md §5), a save is the hard semantic gate
+// followed by an annotated tag via Workspace.Tag (no commit — the accepted
+// draft is already on `main` via the Files API), and a discard is one revert
+// Mutate back to the last tag, pushed under origin's push-CAS. The feature
+// holds no REST Git-Data dependency. Drafts live on the frontend; committed
+// truth is the origin.
 package artifacts
 
 import (
@@ -98,15 +101,17 @@ type SaveRequest struct {
 var commitSHAPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 
 // resolveSaveCommit returns the commit a save operates on: the caller-provided
-// CommitSHA when set (validated, never a ref read), else the current HEAD.
-func (s *artifactService) resolveSaveCommit(ctx context.Context, rc repoCoords, req SaveRequest) (string, error) {
+// CommitSHA when set (validated, never a ref read), else the current HEAD via
+// the workspace mirror (the engine fetches origin first, so an unpinned save
+// never sees a lagging ref).
+func (s *artifactService) resolveSaveCommit(ctx context.Context, ref gitrepo.RepoRef, req SaveRequest) (string, error) {
 	if req.CommitSHA != "" {
 		if !commitSHAPattern.MatchString(req.CommitSHA) {
 			return "", fmt.Errorf("%w: %q is not a commit sha", ErrArtifactPathInvalid, req.CommitSHA)
 		}
 		return req.CommitSHA, nil
 	}
-	head, err := s.headCommit(ctx, rc)
+	head, err := s.git.Workspace().Head(ctx, ref, "")
 	if err != nil {
 		return "", fmt.Errorf("get head ref: %w", err)
 	}
@@ -133,7 +138,8 @@ type DesignSaveResult struct {
 // ----- Service -----
 
 // ArtifactService is the typed entry-point for the artifact endpoints. Reads
-// are GitHub-at-HEAD / at-tag; saves cut tags; discards revert to the last tag.
+// are workspace-at-HEAD / at-tag; saves cut tags; discards revert to the last
+// tag.
 type ArtifactService interface {
 	// Requirements bundle at HEAD (flat directory of markdown/dsl/excalidraw).
 	ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
@@ -161,9 +167,9 @@ type artifactService struct {
 	git  GitGateway
 }
 
-// NewArtifactService builds a GitHub-direct ArtifactService. `git` is the
+// NewArtifactService builds the workspace-backed ArtifactService. `git` is the
 // git-object surface + credential resolver + save identities (the concrete
-// gitOpsService); `repo` resolves the project's repo row (owner/repo + branch).
+// gitOpsService); `repo` resolves the project's repo row (slug + branch).
 func NewArtifactService(repo repositories.RepoRepository, git GitGateway) ArtifactService {
 	return &artifactService{repo: repo, git: git}
 }
@@ -204,62 +210,62 @@ func hasAllowedRequirementExt(name string) bool {
 // ----- Reads (GitHub-at-HEAD / at-tag) -----
 
 func (s *artifactService) ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return s.readBundleAtHead(ctx, rc, requirementsPrefix, requirementsBundleFilter)
+	return s.readBundleAtHead(ctx, ref, requirementsPrefix, requirementsBundleFilter)
 }
 
 func (s *artifactService) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return s.readBundleAtHead(ctx, rc, designPrefix, designBundleFilter)
+	return s.readBundleAtHead(ctx, ref, designPrefix, designBundleFilter)
 }
 
 func (s *artifactService) GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error) {
 	if _, ok := parseRequirementsTag(tag); !ok {
 		return nil, fmt.Errorf("%w: %q is not a v<N> tag", ErrInvalidVersionTag, tag)
 	}
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return s.readBundleAtTag(ctx, rc, tag, requirementsPrefix, requirementsBundleFilter)
+	return s.readBundleAtTag(ctx, ref, tag, requirementsPrefix, requirementsBundleFilter)
 }
 
 func (s *artifactService) GetDesignAtCommit(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error) {
 	if !commitSHAPattern.MatchString(commitSHA) {
 		return nil, fmt.Errorf("%w: %q is not a commit sha", ErrArtifactPathInvalid, commitSHA)
 	}
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return s.readBundleAtCommit(ctx, rc, commitSHA, designPrefix, designBundleFilter)
+	return s.readBundleAtCommit(ctx, ref, commitSHA, designPrefix, designBundleFilter)
 }
 
 func (s *artifactService) GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error) {
 	if _, _, ok := parseDesignTag(tag); !ok {
 		return nil, fmt.Errorf("%w: %q is not a v<N>-<M> tag", ErrInvalidVersionTag, tag)
 	}
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return s.readBundleAtTag(ctx, rc, tag, designPrefix, designBundleFilter)
+	return s.readBundleAtTag(ctx, ref, tag, designPrefix, designBundleFilter)
 }
 
 // ----- Versions -----
 
 func (s *artifactService) ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]RequirementsVersionInfo, error) {
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	tags, err := s.listVersionTags(ctx, rc)
+	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
@@ -267,11 +273,11 @@ func (s *artifactService) ListRequirementsVersions(ctx context.Context, orgID, p
 }
 
 func (s *artifactService) ListDesignVersions(ctx context.Context, orgID, projectID string) ([]DesignVersionInfo, error) {
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	tags, err := s.listVersionTags(ctx, rc)
+	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
@@ -285,23 +291,22 @@ func (s *artifactService) ListDesignVersions(ctx context.Context, orgID, project
 // created — the accepted draft is already on `main`. When HEAD already matches
 // the latest tag the save is a no-op ("unchanged").
 func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID string, req SaveRequest) (*RequirementsSaveResult, error) {
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	head, err := s.resolveSaveCommit(ctx, rc, req)
+	head, err := s.resolveSaveCommit(ctx, ref, req)
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.readBundleAtCommit(ctx, rc, head, requirementsPrefix, requirementsBundleFilter)
+	files, err := s.readBundleAtCommit(ctx, ref, head, requirementsPrefix, requirementsBundleFilter)
 	if err != nil {
 		return nil, err
 	}
-	// The commit this save gates + tags. pinned=false means it came from a ref
-	// read, which can lag a just-completed apply (compare with the apply's
-	// "files apply committed" line).
+	// The commit this save gates + tags (pinned by the publish flow's apply,
+	// or the freshly-fetched branch tip when unpinned).
 	slog.InfoContext(ctx, "requirements save: head read",
-		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", head,
+		"project", projectID, "repo", ref.OrgID+"/"+ref.ProjectID+"/"+ref.RepoSlug, "commit", head,
 		"pinned", req.CommitSHA != "", "files", len(files))
 	// Hard gate: requirements.md must exist.
 	if strings.TrimSpace(files[requirementsMainFile]) == "" {
@@ -311,14 +316,14 @@ func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID
 			ErrArtifactPathInvalid, RequirementsDir, requirementsMainFile)
 	}
 
-	tags, err := s.fetchTagNames(ctx, rc)
+	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
 
 	// Unchanged detection: HEAD bundle == latest requirements tag's bundle.
 	if latest := latestRequirementsTag(tags); latest != "" {
-		if tagged, terr := s.readBundleAtTag(ctx, rc, latest, requirementsPrefix, requirementsBundleFilter); terr == nil && trimmedMapsEqual(files, tagged) {
+		if tagged, terr := s.readBundleAtTag(ctx, ref, latest, requirementsPrefix, requirementsBundleFilter); terr == nil && trimmedMapsEqual(files, tagged) {
 			slog.InfoContext(ctx, "requirements save: unchanged — HEAD matches latest tag",
 				"project", projectID, "tag", latest, "commit", head)
 			return &RequirementsSaveResult{
@@ -334,7 +339,7 @@ func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID
 	if req.Message != "" && req.Message != "Update requirements" {
 		tagBody = fmt.Sprintf("%s\n\n%s", tagBody, req.Message)
 	}
-	if err := s.createAnnotatedTagViaAPI(ctx, rc, &tags, &nextN, &tagName, tagBody, head, 0, "requirements"); err != nil {
+	if err := s.createAnnotatedTag(ctx, ref, &tags, &nextN, &tagName, tagBody, head, 0, "requirements"); err != nil {
 		return nil, fmt.Errorf("create tag: %w", err)
 	}
 
@@ -354,21 +359,21 @@ func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID
 // exists. When HEAD already matches the latest design tag the save is
 // "unchanged".
 func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID string, req SaveRequest) (*DesignSaveResult, error) {
-	_, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	head, err := s.resolveSaveCommit(ctx, rc, req)
+	head, err := s.resolveSaveCommit(ctx, ref, req)
 	if err != nil {
 		return nil, err
 	}
-	files, err := s.readBundleAtCommit(ctx, rc, head, designPrefix, designBundleFilter)
+	files, err := s.readBundleAtCommit(ctx, ref, head, designPrefix, designBundleFilter)
 	if err != nil {
 		return nil, err
 	}
 	// The commit this save gates + tags (see the requirements twin).
 	slog.InfoContext(ctx, "design save: head read",
-		"project", projectID, "repo", rc.Owner+"/"+rc.Name, "commit", head,
+		"project", projectID, "repo", ref.OrgID+"/"+ref.ProjectID+"/"+ref.RepoSlug, "commit", head,
 		"pinned", req.CommitSHA != "", "files", len(files))
 	// Hard gate: nothing malformed may acquire a tag.
 	if err := validateDesignBundle(files); err != nil {
@@ -377,7 +382,7 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 		return nil, err
 	}
 
-	tags, err := s.fetchTagNames(ctx, rc)
+	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
@@ -391,7 +396,7 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 	// Unchanged detection: HEAD bundle == latest v<parentN>-<M> tag's bundle.
 	if latestM := latestDesignRevision(tags, parentN); latestM > 0 {
 		latestTag := designTagFor(parentN, latestM)
-		if tagged, terr := s.readBundleAtTag(ctx, rc, latestTag, designPrefix, designBundleFilter); terr == nil && trimmedMapsEqual(files, tagged) {
+		if tagged, terr := s.readBundleAtTag(ctx, ref, latestTag, designPrefix, designBundleFilter); terr == nil && trimmedMapsEqual(files, tagged) {
 			slog.InfoContext(ctx, "design save: unchanged — HEAD matches latest tag",
 				"project", projectID, "tag", latestTag, "commit", head)
 			return &DesignSaveResult{
@@ -408,7 +413,7 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 	if req.Message != "" && req.Message != "Update design" {
 		tagBody = fmt.Sprintf("%s\n\n%s", tagBody, req.Message)
 	}
-	if err := s.createAnnotatedTagViaAPI(ctx, rc, &tags, &nextRev, &tagName, tagBody, head, parentN, "design"); err != nil {
+	if err := s.createAnnotatedTag(ctx, ref, &tags, &nextRev, &tagName, tagBody, head, parentN, "design"); err != nil {
 		return nil, fmt.Errorf("create tag: %w", err)
 	}
 
@@ -429,16 +434,16 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 // working tree to reset). With no tag yet the subtree is reverted to empty
 // (nothing has ever been approved). Returns the reverted bundle.
 func (s *artifactService) DiscardRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	repo, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	tags, err := s.fetchTagNames(ctx, rc)
+	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
 	tag := latestRequirementsTag(tags)
-	return s.revertSubtreeToTag(ctx, repo, rc, requirementsPrefix, requirementsBundleFilter, tag,
+	return s.revertSubtreeToTag(ctx, ref, requirementsPrefix, requirementsBundleFilter, tag,
 		discardMessage("requirements", tag))
 }
 
@@ -446,16 +451,16 @@ func (s *artifactService) DiscardRequirements(ctx context.Context, orgID, projec
 // content at the latest `v<N>-<M>` tag via a revert-commit. With no tag yet the
 // subtree is reverted to empty. Returns the reverted bundle.
 func (s *artifactService) DiscardDesign(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	repo, rc, err := s.readyCoords(ctx, orgID, projectID)
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	tags, err := s.fetchTagNames(ctx, rc)
+	tags, err := s.listVersionTags(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}
 	tag := latestDesignTag(tags)
-	return s.revertSubtreeToTag(ctx, repo, rc, designPrefix, designBundleFilter, tag,
+	return s.revertSubtreeToTag(ctx, ref, designPrefix, designBundleFilter, tag,
 		discardMessage("design", tag))
 }
 
@@ -482,17 +487,19 @@ func (s *artifactService) requireReadyRepo(ctx context.Context, orgID, projectID
 	return repoRecord, nil
 }
 
-// readyCoords resolves the ready repo row + its GitHub coordinates in one step.
-func (s *artifactService) readyCoords(ctx context.Context, orgID, projectID string) (*models.GitRepository, repoCoords, error) {
+// readyRef resolves the ready repo row + its workspace-mount address in one
+// step — every entrypoint's resolution (reads, saves, discards). orgID is the
+// authenticated org; the mount path is derived from the row alone (design D6).
+func (s *artifactService) readyRef(ctx context.Context, orgID, projectID string) (*models.GitRepository, gitrepo.RepoRef, error) {
 	repo, err := s.requireReadyRepo(ctx, orgID, projectID)
 	if err != nil {
-		return nil, repoCoords{}, err
+		return nil, gitrepo.RepoRef{}, err
 	}
-	rc, err := s.resolveCoords(ctx, repo)
+	ref, err := gitrepo.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
-		return nil, repoCoords{}, err
+		return nil, gitrepo.RepoRef{}, err
 	}
-	return repo, rc, nil
+	return repo, ref, nil
 }
 
 // trimmedMapsEqual compares two file maps for byte-equality after trimming

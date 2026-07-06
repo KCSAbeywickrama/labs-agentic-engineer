@@ -95,6 +95,15 @@ func Load() (Config, error) {
 			JWTAudience: r.readOptionalString("AGENTS_SVC_JWT_AUDIENCE", "agents-service"),
 			JWTIssuer:   r.readOptionalString("AGENTS_SVC_JWT_ISSUER", "aep-bff"),
 		},
+		Workspace: WorkspaceConfig{
+			Root:           r.readOptionalString("AEP_WORKSPACE_ROOT", "/workspaces"),
+			ReapInterval:   r.readOptionalDuration("AEP_WORKSPACE_REAP_INTERVAL", 5*time.Minute),
+			SnapshotMaxAge: r.readOptionalDuration("AEP_WORKSPACE_SNAPSHOT_MAX_AGE", 24*time.Hour),
+			TrashMaxAge:    r.readOptionalDuration("AEP_WORKSPACE_TRASH_MAX_AGE", 24*time.Hour),
+			OrgQuotaBytes:  r.readOptionalInt64("AEP_WORKSPACE_ORG_QUOTA_BYTES", 5<<30),
+			DiskHighPct:    r.readOptionalInt("AEP_WORKSPACE_DISK_HIGH_PCT", 85),
+			DiskLowPct:     r.readOptionalInt("AEP_WORKSPACE_DISK_LOW_PCT", 70),
+		},
 		AgentPlatformURL: r.readOptionalString("AGENT_PLATFORM_URL", ""),
 		ServiceAuth: ServiceAuthConfig{
 			TokenURL:     r.readOptionalString("SERVICE_AUTH_TOKEN_URL", ""),
@@ -215,6 +224,21 @@ func (r *configReader) readOptionalInt(key string, defaultVal int) int {
 		return defaultVal
 	}
 	n, err := strconv.Atoi(val)
+	if err != nil {
+		r.errors = append(r.errors, fmt.Errorf("%s must be an integer: %w", key, err))
+		return defaultVal
+	}
+	return n
+}
+
+// readOptionalInt64 parses base-10 int64 values (byte sizes); falls back to
+// defaultVal on empty input, records an error on unparseable input.
+func (r *configReader) readOptionalInt64(key string, defaultVal int64) int64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
 	if err != nil {
 		r.errors = append(r.errors, fmt.Errorf("%s must be an integer: %w", key, err))
 		return defaultVal

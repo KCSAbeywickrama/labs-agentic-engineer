@@ -21,7 +21,8 @@
  * routes: the token's `aud` must match, verified against a configured JWKS
  * (RS256, the BFF's real S2S path) OR a shared secret (HS256, for local/eval).
  * There is NO org claim — nothing here calls back to the BFF, so all context is
- * pushed in per turn; `X-Org-Id` (read by the route) is attribution-only.
+ * pushed in per turn; `X-Org-Id` (read by the route) is load-bearing there: the
+ * §12 fence asserts the conversation's org segment equals it.
  *
  * The gate is config-driven and injectable so tests exercise the shared-secret
  * path without a live IDP. It is always on: `resolveKey` throws at construction
@@ -56,6 +57,10 @@ type Verifier = (token: string) => Promise<unknown>;
 function buildVerifier(cfg: AgentsAuthConfig): Verifier {
   const base: JWTVerifyOptions = {
     audience: cfg.audience,
+    // Absorb small clock drift between this pod and the token issuer so a token
+    // whose `nbf`/`iat` is a few seconds ahead of our clock (or `exp` a few
+    // seconds behind) does not spuriously 401. jose's default is 0 (no skew).
+    clockTolerance: "5s",
     ...(cfg.issuer ? { issuer: cfg.issuer } : {}),
   };
   if (cfg.jwksUrl) {

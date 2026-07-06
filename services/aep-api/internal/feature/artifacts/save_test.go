@@ -16,9 +16,9 @@
 
 package artifacts
 
-// Save = hard semantic gate → annotated tag at HEAD (no commit). These run over
-// the real Git Data API fake, so the tag lands as a genuine annotated tag object
-// in the bare repo.
+// Save = hard semantic gate → annotated tag at HEAD (no commit). These run
+// over the real gitfs Workspace engine, so the tag lands as a genuine
+// annotated tag object pushed to the bare origin.
 
 import (
 	"context"
@@ -26,6 +26,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
 // validComponentDesignJSON is a component design.json that satisfies the
@@ -201,34 +203,119 @@ func TestSaveRequirements_TagCollision_RecomputesToNextName(t *testing.T) {
 	}
 }
 
-// TestSaveRequirements_TagCollision_Real422ThroughRealClient forces a true
+// TestSaveRequirements_TagCollision_InWindowClaim forces a true
 // external-pusher collision in the window between the save's fresh tag-list
-// fetch and its CreateTagRef, via the harness BeforeCreateTagRef hook. The REAL
-// clients/github CreateTagRef receives a genuine 422 and must translate it to
-// ErrTagAlreadyExists for retryOnTagCollision to recompute (v2) — the only test
-// proving that 422→sentinel mapping.
-func TestSaveRequirements_TagCollision_Real422ThroughRealClient(t *testing.T) {
+// read and its Tag push, via the harness BeforeTag hook: the engine's own
+// fetch+precheck (or origin's push rejection) surfaces ErrTagAlreadyExists,
+// and the collision-recompute loop must refresh the tag list and land v2.
+func TestSaveRequirements_TagCollision_InWindowClaim(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
 
-	fired := false
-	r.gd.BeforeCreateTagRef = func() {
-		if fired {
-			return
-		}
-		fired = true
-		r.tag("v1", "external claim in the race window")
+	var tagAttempts int32
+	var once sync.Once
+	r.ws.BeforeTag = func(gitrepo.TagSpec) {
+		atomic.AddInt32(&tagAttempts, 1)
+		once.Do(func() { r.tag("v1", "external claim in the race window") })
 	}
 
 	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
-	if !fired {
-		t.Fatal("BeforeCreateTagRef hook never fired — collision was not injected")
-	}
 	if res.Tag != "v2" || res.Version != 2 {
 		t.Fatalf("result = %+v, want v2/2 (retry past the claimed v1)", res)
+	}
+	if n := atomic.LoadInt32(&tagAttempts); n < 2 {
+		t.Errorf("Tag attempts = %d, want ≥2 (first collides, recompute lands v2)", n)
+	}
+	tags := r.tags()
+	if len(tags) != 2 || tags[0] != "v1" || tags[1] != "v2" {
+		t.Errorf("tags = %v, want [v1 v2] (external v1 preserved)", tags)
+	}
+}
+
+// The exit-gate concurrency pin: two goroutines race the SAME next tag name
+// (both start from an empty tag list, both compute v1). One lands v1; the
+// other collides, re-lists, recomputes, and lands v2 — both succeed, both
+// tags point at the pinned commit.
+func TestCreateAnnotatedTag_ConcurrentSameName_LoserRecomputesToNext(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	s := r.svc.(*artifactService)
+	ref := r.workspaceRef()
+	head := r.headSHA()
+
+	type outcome struct {
+		name string
+		err  error
+	}
+	results := make([]outcome, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tags := []gitrepo.TagInfo{} // both believe no tags exist yet
+			var n int
+			var name string
+			err := s.createAnnotatedTag(context.Background(), ref, &tags, &n, &name,
+				"Requirements (race)", head, 0, "requirements")
+			results[i] = outcome{name: name, err: err}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, res := range results {
+		if res.err != nil {
+			t.Fatalf("goroutine %d: %v", i, res.err)
+		}
+	}
+	got := map[string]bool{results[0].name: true, results[1].name: true}
+	if !got["v1"] || !got["v2"] {
+		t.Fatalf("tag names = %s/%s, want exactly {v1, v2}", results[0].name, results[1].name)
+	}
+	for _, tag := range []string{"v1", "v2"} {
+		if peeled := r.originRevParse(tag + "^{commit}"); peeled != head {
+			t.Errorf("%s peels to %s on origin, want the pinned commit %s", tag, peeled, head)
+		}
+	}
+}
+
+// SHA consistency (design C8): the CommitHash a save reports == the peeled tag
+// commit on the ORIGIN == the mirror's view of the same tag.
+func TestSaveRequirements_TagShaConsistency_OriginAndMirror(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+
+	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{})
+	if err != nil {
+		t.Fatalf("SaveRequirements: %v", err)
+	}
+	if origin := r.originRevParse("v1^{commit}"); res.CommitHash != origin {
+		t.Errorf("CommitHash %s != origin peeled v1 %s", res.CommitHash, origin)
+	}
+	if mirror := r.mirrorRevParse("v1^{commit}"); res.CommitHash != mirror {
+		t.Errorf("CommitHash %s != mirror peeled v1 %s", res.CommitHash, mirror)
+	}
+	if head := r.headSHA(); res.CommitHash != head {
+		t.Errorf("CommitHash %s != origin tip %s (save must tag HEAD)", res.CommitHash, head)
+	}
+}
+
+// A well-formed but UNKNOWN pinned sha fails the gate read with the engine's
+// ref-not-found — same surface as before this phase (the pinned bundle read
+// runs first; no tag is ever attempted).
+func TestSaveRequirements_UnknownPinnedSha_RefNotFound(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
+	_, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj,
+		SaveRequest{CommitSHA: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	if !errors.Is(err, gitrepo.ErrRefNotFound) {
+		t.Fatalf("err = %v, want wrapped gitrepo.ErrRefNotFound", err)
+	}
+	if got := r.tags(); len(got) != 0 {
+		t.Errorf("tags = %v, want none (unknown sha must never acquire a tag)", got)
 	}
 }
 
@@ -353,29 +440,5 @@ func TestSaveDesign_GateBrokenOpenAPI(t *testing.T) {
 	}
 	if ve.Files[0].Code != codeInvalidOpenAPI {
 		t.Errorf("code = %s, want %s", ve.Files[0].Code, codeInvalidOpenAPI)
-	}
-}
-
-// ----- CAS-under-tag-collision full-flow (moved from the clone era) -----
-
-func TestSaveRequirements_TagCollision_ConcurrentClaim(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "body\n"})
-
-	var claims int32
-	var once sync.Once
-	r.gd.BeforeCreateTagRef = func() {
-		atomic.AddInt32(&claims, 1)
-		once.Do(func() { r.tag("v1", "external") })
-	}
-	res, err := r.svc.SaveRequirements(context.Background(), r.org, r.proj, SaveRequest{})
-	if err != nil {
-		t.Fatalf("SaveRequirements: %v", err)
-	}
-	if res.Tag != "v2" {
-		t.Fatalf("tag = %s, want v2 after the injected collision", res.Tag)
-	}
-	if n := atomic.LoadInt32(&claims); n < 2 {
-		t.Errorf("CreateTagRef attempts = %d, want ≥2 (first collides, retry lands v2)", n)
 	}
 }

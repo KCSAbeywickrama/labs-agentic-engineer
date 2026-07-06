@@ -18,11 +18,12 @@
 
 /**
  * A thread is a folder under `chat_playground/` whose name doubles as the
- * conversation id. This module is the only place that touches that tree: list
- * threads, validate a name, read the folder into a `files` snapshot, and
- * reconcile the agent's reconstructed snapshot back to disk. Keys are
- * POSIX-relative; dot-entries and binary files are skipped; every write is
- * sandboxed inside the thread dir (the model supplies the keys).
+ * conversation-id suffix (the playground namespaces it per §12). This module is
+ * the only place that touches that tree: list threads, validate a name, read
+ * the folder into the path→content map the playground materializes into a
+ * workspace snapshot, and reconcile the agent's reconstructed snapshot back to
+ * disk. Keys are POSIX-relative; dot-entries and binary files are skipped;
+ * every write is sandboxed inside the thread dir (the model supplies the keys).
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -34,11 +35,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 /** Thread data lives next to the code, under `services/agents/chat_playground/` (gitignored). */
 export const THREADS_ROOT = join(here, "..", "chat_playground");
 
-// A legal directory name AND a clean conversation id — no separators, no `..`.
+// A legal directory name AND a clean conversation-id suffix — no separators,
+// no `..`, and no `--` (the namespaced id's segment delimiter, §12).
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 export function isValidThreadName(name: string): boolean {
-  return NAME_RE.test(name) && name !== "." && name !== "..";
+  return NAME_RE.test(name) && name !== "." && name !== ".." && !name.includes("--") && !name.startsWith(".");
 }
 
 export function threadDir(name: string): string {
@@ -84,7 +86,7 @@ function walk(dir: string, rel: string, out: Record<string, string>): void {
   }
 }
 
-/** Read the whole thread folder into the `files` snapshot inlined in a turn. */
+/** Read the whole thread folder into the map a turn's workspace snapshot is built from. */
 export function readSnapshot(name: string): Record<string, string> {
   const out: Record<string, string> = {};
   const root = threadDir(name);

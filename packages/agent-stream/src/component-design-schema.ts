@@ -31,7 +31,11 @@ import { z } from "zod";
 import type { ComponentDesign } from "./contracts/component-design.js";
 import type { Equal } from "./type-equal.js";
 
-const componentConnectionSchema = z.object({
+// strictObject, matching the published component-design.schema.json
+// (additionalProperties: false) and the BFF save-gate — a connection carrying
+// unknown properties must be rejected HERE so the agent self-corrects
+// in-turn instead of committing a design.json the tag-time save gate 422s.
+const componentConnectionSchema = z.strictObject({
   to: z.string().min(1),
   type: z.enum(["http", "datastore", "connector"]),
   onPlatform: z.boolean().optional(),

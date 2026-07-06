@@ -36,76 +36,13 @@ import (
 // never cross a service boundary. All ports/types are stateless and
 // concurrency-safe.
 //
-// The sentinels the implementations must return (ErrRefNotFastForward,
-// ErrTagAlreadyExists, ErrRepoNameConflict, ...) and the wire DTOs
-// (TreeEntry, IssueResult, CommitObject, ...) are part of this contract —
-// see errors.go and wire.go. conflict_retry.go and the orgcreds validator key
-// off the sentinels, so any provider impl MUST reproduce them.
-
-// GitData is the git-object surface (blobs / trees / commits / refs / tags)
-// that the artifacts save flow drives. GitLab's Repository/Commits/Refs APIs
-// map onto it directly. Consumed via gitOpsService's GitData() accessor by
-// feature/artifacts (save_via_api) and feature/skills (repo_store).
-type GitData interface {
-	// GetRef returns the tip SHA of a ref. `ref` is the ref name without
-	// "refs/" prefix (e.g. "heads/main" or "tags/v1").
-	GetRef(ctx context.Context, owner, repo string, cred credentials.Credential, ref string) (string, error)
-
-	// GetCommit returns the tree SHA and parents of a commit object.
-	GetCommit(ctx context.Context, owner, repo string, cred credentials.Credential, sha string) (*CommitObject, error)
-
-	// GetTree returns the entries of a tree object. `recursive=true` walks
-	// nested trees in one call (capped by GitHub at ~100k entries).
-	GetTree(ctx context.Context, owner, repo string, cred credentials.Credential, treeSHA string, recursive bool) (*TreeObject, error)
-
-	// GetBlob returns the raw (decoded) content of a blob object by SHA.
-	// Returns an HTTPStatusError wrapping 404 when the blob is absent.
-	GetBlob(ctx context.Context, owner, repo string, cred credentials.Credential, sha string) ([]byte, error)
-
-	// CreateBlob stores raw content as a blob and returns its SHA.
-	CreateBlob(ctx context.Context, owner, repo string, cred credentials.Credential, content []byte) (string, error)
-
-	// CreateTree assembles a tree from `baseTree` plus a partial overlay of
-	// entries. Entries with empty SHA represent deletions (sha: null on the
-	// wire); GitHub returns 422 if the deleted path is absent in baseTree.
-	CreateTree(ctx context.Context, owner, repo string, cred credentials.Credential, baseTree string, entries []TreeEntry) (string, error)
-
-	// CreateCommit creates a commit object pointing at the given tree.
-	CreateCommit(ctx context.Context, owner, repo string, cred credentials.Credential, req CreateCommitRequest) (string, error)
-
-	// UpdateRef atomically advances a ref to `sha`. With `force=false` the
-	// call is fast-forward-only — non-FF moves return ErrRefNotFastForward.
-	UpdateRef(ctx context.Context, owner, repo string, cred credentials.Credential, ref, sha string, force bool) error
-
-	// CreateTagObject creates an annotated tag object pointing at `objectSHA`
-	// (typically a commit). Returns the tag object's SHA; the caller still
-	// needs CreateTagRef to make the tag visible.
-	CreateTagObject(ctx context.Context, owner, repo string, cred credentials.Credential, req CreateTagObjectRequest) (string, error)
-
-	// CreateTagRef creates the refs/tags/<name> ref pointing at the supplied
-	// tag-object SHA. Returns ErrTagAlreadyExists if another writer has
-	// claimed the name.
-	CreateTagRef(ctx context.Context, owner, repo string, cred credentials.Credential, tagName, tagObjectSHA string) error
-
-	// ListMatchingRefs lists all refs under the given prefix (e.g. "tags/v").
-	// Returns an empty slice (not 404) when no refs match.
-	ListMatchingRefs(ctx context.Context, owner, repo string, cred credentials.Credential, prefix string) ([]MatchingRef, error)
-
-	// GetTagObject dereferences an annotated tag object to the SHA it points at
-	// (typically a commit) via GET /git/tags/{sha}. Returns an HTTPStatusError
-	// wrapping 404 when the sha is not a tag object (e.g. a lightweight tag ref
-	// that already points at a commit). Used to read repository content at a tag
-	// — a tag ref's object.sha is the tag object, which must be peeled to the
-	// commit before GetCommit/GetTree can walk the tree.
-	GetTagObject(ctx context.Context, owner, repo string, cred credentials.Credential, tagSHA string) (string, error)
-
-	// CompareRefs returns the file-level diff between two refs (branches, tags,
-	// or SHAs) via GET /compare/{base}...{head}. The plan-turn context assembler
-	// (docs/design/tasks-github-native.md §6) uses it to feed the planner the
-	// spec/design delta between a Task's lineage tag and the current tag —
-	// replacing the deleted DB diff machinery.
-	CompareRefs(ctx context.Context, owner, repo string, cred credentials.Credential, base, head string) (*CompareResult, error)
-}
+// The sentinels the implementations must return (ErrRepoNameConflict,
+// HTTPStatusError codes, ...) and the wire DTOs (IssueResult, IssueInfo,
+// GitHubUser, ...) are part of this contract — see errors.go and wire.go.
+// The orgcreds validator keys off the sentinels, so any provider impl MUST
+// reproduce them. Repo CONTENT (blobs/trees/commits/refs/tags) never goes
+// through these ports: it runs on the Workspace engine (workspace.go /
+// internal/platform/gitfs).
 
 // RepoAdmin is the repository-lifecycle surface. Consumed by repoService
 // (CreateRepo / EnsureBareRepo). Repo delete/get are DB operations in
@@ -217,7 +154,6 @@ type AppInstallOps interface {
 // GIT_PROVIDER and threads it into each domain service, where it narrows to the
 // port that service consumes. clients/github's *Client satisfies Host.
 type Host interface {
-	GitData
 	RepoAdmin
 	IssueOps
 	WebhookOps

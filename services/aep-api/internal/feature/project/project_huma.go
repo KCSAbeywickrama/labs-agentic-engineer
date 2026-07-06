@@ -36,6 +36,7 @@ import (
 type listProjectsInput struct {
 	humakit.OrgScopedInput
 	Cursor string `query:"cursor" doc:"Opaque pagination cursor"`
+	Search string `query:"search" doc:"Case-insensitive substring match on name and displayName"`
 }
 
 type orgProjectInput struct {
@@ -66,7 +67,7 @@ func RegisterProject(api huma.API, svc ProjectService) {
 		Tags:        []string{"Projects"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *listProjectsInput) (*projectListOutput, error) {
-		list, err := svc.ListProjects(ctx, in.OrgHandle, 100, in.Cursor)
+		list, err := svc.ListProjects(ctx, in.OrgHandle, 100, in.Cursor, in.Search)
 		if err != nil {
 			return nil, mapProjectError(err)
 		}

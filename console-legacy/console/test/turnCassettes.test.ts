@@ -24,6 +24,13 @@
  * exactly the way the browser does and pins the streaming behavior the UI
  * depends on. Golden files: run with `UPDATE_GOLDENS=1` to (re)write
  * `test/fixtures/turns/golden/`.
+ *
+ * Committed-truth note: these cassettes predate the resumable-stream contract,
+ * so they carry NO `turn-committed` terminal event — a full replay ends
+ * `severed` with `done: true` ([DONE] arrived, no terminal). They remain valid
+ * fold-parity inputs: the fold seeds from the recorded `request.body.files`
+ * verbatim (the same seed the recorded agents run had) and the folded files
+ * are pinned against the goldens byte for byte.
  */
 
 import { test } from 'node:test';
@@ -88,8 +95,17 @@ test('every recorded turn folds cleanly to completion (fold sanity, all use case
     const result = await foldTurnStream(cassetteToStream(cassette), seedOf(cassette), {}, {
       previewThrottleMs: 0,
     });
-    assert.ok(result.ok, `${goldenName(cassette)}: fold failed: ${JSON.stringify(result)}`);
-    assert.equal(result.truncated, undefined, `${goldenName(cassette)}: unexpectedly truncated`);
+    // Pre-terminal-event recordings: a complete replay is `severed` with the
+    // [DONE] sentinel seen and no in-band error.
+    assert.ok(
+      result.end.kind === 'severed' && result.end.done,
+      `${goldenName(cassette)}: fold did not run to [DONE]: ${JSON.stringify(result.end)}`,
+    );
+    assert.equal(
+      result.end.streamError,
+      undefined,
+      `${goldenName(cassette)}: unexpected in-band error`,
+    );
   }
 });
 
@@ -105,8 +121,10 @@ test('requirements-generate: the recorded streams fold with live progress', {
       { previewThrottleMs: 0 },
     );
 
-    assert.ok(result.ok, `fold failed: ${JSON.stringify(result)}`);
-    assert.equal(result.truncated, undefined, 'the recorded stream completed — not truncated');
+    assert.ok(
+      result.end.kind === 'severed' && result.end.done,
+      `fold did not run to [DONE]: ${JSON.stringify(result.end)}`,
+    );
 
     const reqPath = Object.keys(result.files).find((p) => /requirements\.md$/.test(p));
     assert.ok(reqPath, 'the turn authored a requirements.md');
@@ -191,8 +209,10 @@ async function checkDesignCassette(cassette: Cassette): Promise<void> {
     { previewThrottleMs: 0 },
   );
 
-  assert.ok(result.ok, `fold failed: ${JSON.stringify(result)}`);
-  assert.equal(result.truncated, undefined, 'the recorded stream completed — not truncated');
+  assert.ok(
+    result.end.kind === 'severed' && result.end.done,
+    `fold did not run to [DONE]: ${JSON.stringify(result.end)}`,
+  );
   assert.ok(sawProject, 'a diagram appeared during the stream');
   assert.ok(snapshotCount > 10, `expected live streaming, got ${snapshotCount} snapshot(s)`);
   assert.ok(
@@ -207,14 +227,14 @@ async function checkDesignCassette(cassette: Cassette): Promise<void> {
   checkGolden(goldenName(cassette), result.files);
 }
 
-test('a mid-stream cut of a real recording is reported as truncated, not success', {
+test('a mid-stream cut of a real recording is reported as a connection loss, not success', {
   skip: designs.length === 0 && requirements.length === 0 && 'no cassettes recorded yet',
 }, async () => {
   const cassette = (designs[0] ?? requirements[0])!;
   const cut: Cassette = { ...cassette, chunks: cassette.chunks.slice(0, Math.floor(cassette.chunks.length / 2)) };
   const result = await foldTurnStream(cassetteToStream(cut), seedOf(cut), {}, { previewThrottleMs: 0 });
-  assert.ok(result.ok, 'a disconnect still returns the salvaged fold');
-  assert.equal(result.truncated, true, 'half a stream must NOT look like a completed turn');
+  assert.equal(result.end.kind, 'severed', 'half a stream must NOT look like a completed turn');
+  assert.ok(result.end.kind === 'severed' && !result.end.done, 'the [DONE] sentinel never arrived');
 });
 
 test('the fold is chunking-independent: seeded re-chunk replays produce identical files', {
@@ -222,7 +242,7 @@ test('the fold is chunking-independent: seeded re-chunk replays produce identica
 }, async () => {
   const cassette = requirements[0]!;
   const baseline = await foldTurnStream(cassetteToStream(cassette), seedOf(cassette), {}, { previewThrottleMs: 0 });
-  assert.ok(baseline.ok);
+  assert.ok(baseline.end.kind === 'severed' && baseline.end.done);
   for (const seed of [1, 2, 3]) {
     const result = await foldTurnStream(
       cassetteToStream(cassette, { rechunk: { seed, minBytes: 1, maxBytes: 97 } }),
@@ -230,7 +250,7 @@ test('the fold is chunking-independent: seeded re-chunk replays produce identica
       {},
       { previewThrottleMs: 0 },
     );
-    assert.ok(result.ok);
+    assert.ok(result.end.kind === 'severed' && result.end.done);
     assert.deepEqual(result.files, baseline.files, `re-chunk seed ${seed} changed the fold`);
   }
 });

@@ -18,19 +18,23 @@
 // (services/agents) — the sole agents backend for all generation and task
 // planning flows.
 //
-// Contract (Phase 1, docs/design/agents-generation-migration.md §12.3):
-//   - POST /conversations/{id}/turns  body {instruction, files,
-//     filesChangedExternally?, skills?}  → raw StreamPart SSE frames + [DONE]
-//     with `: keep-alive` comments; pre-stream statuses 400/409/413/500.
+// Contract (docs/design/shared-volume-clone-architecture.md §12, D9):
+//   - POST /conversations/{id}/turns  body {instruction, workspace,
+//     filesChangedExternally?, toolset?}  → raw StreamPart SSE frames +
+//     [DONE] with `: keep-alive` comments; pre-stream statuses 400/403/409.
+//     The body carries IDs + shas only — the agents service reads the turn
+//     input from the shared-volume snapshot the workspace ref names; no file
+//     content or skills ever cross this boundary.
 //   - GET  /conversations/{id}         → {messages: [...]} (no files).
 //
-// Auth is a plain M2M bearer JWT (aud: agents-service) minted per call — the
-// service is tenancy-blind, so the only claims are the standard registered set;
-// the acting org rides the log-only X-Org-Id header. The per-org Anthropic key
-// travels in X-Anthropic-Key (resolved by the caller — there is no platform
-// fallback). The client performs NO stream parsing: Turn hands back the raw
-// response body for verbatim passthrough, and non-2xx pre-stream responses come
-// back as a typed *UpstreamError the caller maps to a BFF status.
+// Auth is a plain M2M bearer JWT (aud: agents-service) minted per call. The
+// acting org rides the X-Org-Id header — for workspace turns it is
+// LOAD-BEARING: the agents service 403s when it does not match the org
+// segment woven into the conversation id (the tenancy fence). The per-org
+// Anthropic key travels in X-Anthropic-Key (resolved by the caller — there is
+// no platform fallback). The client performs NO stream parsing: Turn hands
+// back the raw response body, and non-2xx pre-stream responses come back as a
+// typed *UpstreamError the caller maps to a BFF status.
 package agentsvc
 
 import (
@@ -44,36 +48,43 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/httpx"
 )
 
-// Skill is one skill pushed in a turn (progressive disclosure level 1: the
-// catalog carries name+description; content is the SKILL.md body; references
-// maps a "references/<file>" path to its body, surfaced via loadSkillReference).
-type Skill struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Content     string            `json:"content"`
-	References  map[string]string `json:"references,omitempty"`
+// WorkspaceRef names the immutable snapshot dirs a turn reads (design D9,
+// §12). IDs + shas only — the agents service derives
+// $WORKSPACE_MOUNT_ROOT/repos/<org>/<proj>/<repoSlug>/snapshots/<ref>/ (and
+// the _skills analog) itself, so no filesystem path crosses the boundary.
+// JSON field names are pinned by @aep/agent-stream's WorkspaceRef
+// (packages/agent-stream/src/contracts/sse-events.ts).
+type WorkspaceRef struct {
+	// ConversationID is the namespaced service id
+	// (org_<o>--proj_<p>--<useCase>--<uuid>) — it supplies the org/proj path
+	// segments and the org claim for the agents-side fence.
+	ConversationID string `json:"conversationId"`
+	// TurnID is the per-dispatch turn uuid.
+	TurnID string `json:"turnId"`
+	// RepoSlug is the repo path segment (git_repositories.repo_slug).
+	RepoSlug string `json:"repoSlug"`
+	// Ref is the committed base sha (40-hex lowercase) → snapshots/<ref>/.
+	Ref string `json:"ref"`
+	// SkillsRef is the _skills head sha → _skills/org-skills/snapshots/<skillsRef>/.
+	SkillsRef string `json:"skillsRef"`
 }
 
-// TurnRequest is the body POSTed to the turn endpoint. `Files` is the full
-// current snapshot every turn (the caller re-inlines it as CURRENT STATE);
-// FilesChangedExternally flags a user hand-edit since the last turn.
-//
-// Toolset selects the per-turn tool registration on the agents service
-// (docs/design/tasks-github-native.md §9.3): "" / "files" (default) registers
-// today's file tools — byte-identical to before — while "task-plan" registers
-// planTask/updateTask with no file tools (the plan turn). It is omitempty so a
-// files turn serializes exactly as it did before the field existed.
+// TurnRequest is the body POSTed to the turn endpoint (design D9): the
+// instruction plus the WorkspaceRef naming the snapshot to read.
+// FilesChangedExternally is SERVER-derived now (D20 — the previous turn's
+// landed ref differs from the current base). Toolset selects the per-turn
+// tool registration ("" / "files" default; "task-plan" registers
+// planTask/updateTask with no file tools).
 type TurnRequest struct {
-	Instruction            string            `json:"instruction"`
-	Files                  map[string]string `json:"files"`
-	FilesChangedExternally bool              `json:"filesChangedExternally,omitempty"`
-	Skills                 []Skill           `json:"skills,omitempty"`
-	Toolset                string            `json:"toolset,omitempty"`
+	Instruction            string       `json:"instruction"`
+	Workspace              WorkspaceRef `json:"workspace"`
+	FilesChangedExternally bool         `json:"filesChangedExternally,omitempty"`
+	Toolset                string       `json:"toolset,omitempty"`
 }
 
 // UpstreamError is a non-2xx pre-stream response from the agents service. The
-// caller maps StatusCode to a BFF status (409 → turn_in_progress, 413 → 413,
-// 400/500 → 502-style). Once the SSE body has started, failures arrive in-band
+// caller maps StatusCode to a BFF status (409 → turn_in_progress, 400/500 →
+// 502-style). Once the SSE body has started, failures arrive in-band
 // as error frames instead — this type only ever carries a pre-stream status.
 type UpstreamError struct {
 	StatusCode int
@@ -88,7 +99,9 @@ func (e *UpstreamError) Error() string {
 type Client interface {
 	// Turn POSTs a turn and, on 200, returns the raw SSE body for verbatim
 	// passthrough (caller must Close). conversationID is the already-namespaced
-	// service id; orgID rides X-Org-Id (log-only); anthropicKey is forwarded as
+	// service id; orgID rides X-Org-Id, which carries the org tenancy claim the
+	// agents service enforces (a mismatch vs the conversation-id org segment
+	// 403s — it is not merely logged); anthropicKey is forwarded as
 	// X-Anthropic-Key (must be non-empty — resolve + 4xx before calling).
 	// A non-200 pre-stream response is returned as *UpstreamError.
 	Turn(ctx context.Context, conversationID, orgID, anthropicKey string, req TurnRequest) (io.ReadCloser, error)
@@ -187,8 +200,10 @@ func (c *client) GetConversation(ctx context.Context, conversationID, orgID stri
 	return json.RawMessage(body), nil
 }
 
-// attachAuth mints the per-call M2M bearer and sets the log-only org header. A
-// nil signer (dev/tests) skips the bearer.
+// attachAuth mints the per-call M2M bearer and sets the X-Org-Id header, which
+// carries the org tenancy claim the agents service enforces (a mismatch vs the
+// conversation-id org segment 403s — it is not merely logged). A nil signer
+// (dev/tests) skips the bearer.
 func (c *client) attachAuth(orgID string, req *http.Request) error {
 	if orgID != "" {
 		req.Header.Set("X-Org-Id", orgID)

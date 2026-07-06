@@ -75,11 +75,21 @@ export function cassetteEvents(cassette: Cassette): CassetteEvent[] {
       const completedAt = cassette.chunks[chunkEnd]?.tMs ?? tMs;
 
       const base = { index: events.length, raw, chunkStart, chunkEnd, tMs: completedAt };
-      if (!raw.startsWith("data:")) {
+      // A frame is a multi-line SSE record: the committed-truth BFF prefixes an
+      // `id: <index>` line (Last-Event-ID resume) ahead of the `data:` line, so
+      // reading the data payload means scanning the frame's lines, not requiring
+      // the frame to START with `data:`. A frame with no data line (`: keep-alive`
+      // comment, bare `id:`) is a comment. `raw` stays the full frame for
+      // byte-faithful replay.
+      const dataLines = raw.split(/\r?\n/).filter((line) => line.startsWith("data:"));
+      if (dataLines.length === 0) {
         events.push({ ...base, kind: "comment" });
         continue;
       }
-      const data = raw.slice("data:".length).trim();
+      const data = dataLines
+        .map((line) => line.slice("data:".length).replace(/^ /, ""))
+        .join("\n")
+        .trim();
       if (data === "[DONE]") {
         events.push({ ...base, kind: "done" });
         continue;

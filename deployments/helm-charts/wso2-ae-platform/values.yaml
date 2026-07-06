@@ -63,6 +63,17 @@ postgres:
     password: "aep-dev-password"
   storage: "5Gi"
 
+# ── Shared git workspaces (RWX PVC) ──────────────────────────────────────────
+# Bare repo mirrors + per-SHA snapshots shared between aep-api (sole writer)
+# and agents (read-only). See docs/design/shared-volume-clone-architecture.md §13.
+workspaces:
+  storage: "10Gi"
+  # StorageClass for the ReadWriteMany claim. Empty = the cluster default. A
+  # REAL RWX class (NFS / EFS / CephFS) is required to run more than one
+  # aep-api replica; single-node k3d fakes RWX on the local-path provisioner,
+  # which is fine locally but does not survive multi-node scheduling.
+  storageClassName: ""
+
 # ── Task JWT signing key ──────────────────────────────────────────────────────
 taskSigning:
   issuer: "aep-bff"

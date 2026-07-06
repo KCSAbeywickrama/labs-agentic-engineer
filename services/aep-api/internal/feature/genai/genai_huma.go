@@ -16,19 +16,43 @@
 
 package genai
 
+// genai_huma.go — the committed-truth turn HTTP edge (design §6 API delta):
+//
+//	POST …/conversations/{id}/turns {useCase,instruction,target?} → 202 {turnId}
+//	GET  …/turns/{turnId}                                         → status
+//	GET  …/turns/active                                           → status | 204
+//	GET  …/turns/{turnId}/stream?from=N (SSE, Last-Event-ID)      → replay + tail
+//	GET  …/conversations/{id}                                     → rehydrate
+//
+// The stream events are the raw agents StreamParts plus ONE aep-api terminal
+// event (turn-committed / turn-failed), each stamped with `id: <index>`; the
+// manifest part is backend plumbing and never appears.
+
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 )
 
-// --- Inputs / Outputs ------------------------------------------------------
+// startTurnMaxBodyBytes bounds the turn-create body. The body carries no
+// file content (D13/D16 — the draft-era big-body guards are gone), so 64 KiB
+// comfortably covers useCase + instruction + target.
+const startTurnMaxBodyBytes = 64 << 10
+
+// streamKeepAliveEvery paces `: keep-alive` comments on an idle attached
+// stream so proxies keep the connection open and a dead client is noticed.
+const streamKeepAliveEvery = 15 * time.Second
+
+// --- Inputs / Outputs --------------------------------------------------------
 // Every input embeds humakit.OrgScopedInput (org from the verified token; the
 // IDOR fence). conversationId is a FE-chosen uuid; the service namespaces it
 // into the authenticated tenant scope before it reaches the agents service.
@@ -38,12 +62,38 @@ type turnInput struct {
 	ProjectName    string `path:"projectName" doc:"Project name (DNS-label slug)"`
 	ConversationID string `path:"conversationId" doc:"FE-chosen conversation uuid"`
 	Body           struct {
-		UseCase                string            `json:"useCase" enum:"requirements-generate,requirements-chat,design-generate" doc:"Which generation/chat flow"`
-		Instruction            string            `json:"instruction" doc:"User message / generation directive"`
-		Files                  map[string]string `json:"files,omitempty" doc:"The FE's current draft (latest truth)"`
-		FilesChangedExternally bool              `json:"filesChangedExternally,omitempty" doc:"User hand-edited since the last turn (chat)"`
-		Target                 string            `json:"target,omitempty" doc:"Optional target (e.g. a doc type)"`
+		UseCase     string `json:"useCase" enum:"requirements-generate,requirements-chat,design-generate" doc:"Which generation/chat flow"`
+		Instruction string `json:"instruction" doc:"User message / generation directive"`
+		Target      string `json:"target,omitempty" doc:"Optional target (e.g. a doc type)"`
 	}
+}
+
+type turnOutput struct {
+	Body struct {
+		TurnID string `json:"turnId" doc:"The started turn's id — poll/attach with it"`
+	}
+}
+
+type turnStatusInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	TurnID      string `path:"turnId" doc:"Turn id from the 202 create response"`
+}
+
+type turnStatusOutput struct{ Body *TurnStatus }
+
+type activeTurnInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+}
+
+type turnStreamInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	TurnID      string `path:"turnId" doc:"Turn id from the 202 create response"`
+	// From = -1 means "absent" (Huma cannot bind pointer params).
+	From        int    `query:"from" default:"-1" minimum:"-1" doc:"Replay from this absolute event index (wins over Last-Event-ID)"`
+	LastEventID string `header:"Last-Event-ID" doc:"Standard SSE resume: the last received event id"`
 }
 
 type rehydrateInput struct {
@@ -54,62 +104,110 @@ type rehydrateInput struct {
 
 type rehydrateOutput struct{ Body json.RawMessage }
 
-// turnMaxBodyBytes bounds the turn request body to agree with the agents
-// service's 10 MiB limit (§7). Huma returns 413 above it (mapped, like the
-// upstream 413, straight through).
-const turnMaxBodyBytes = 10 << 20
-
-// turnInProgressError renders the 409 body verbatim as {"code":"turn_in_progress"}
-// (Huma writes a StatusError value directly). The FE uses it to show "a turn is
-// already running".
-type turnInProgressError struct {
-	Code string `json:"code"`
+// turnConflictError renders the pinned 409 bodies verbatim (Huma writes a
+// StatusError value directly): {"code":"turn_in_progress","activeTurnId":…}
+// and {"code":"requirements_not_approved"}.
+type turnConflictError struct {
+	Code         string `json:"code"`
+	ActiveTurnID string `json:"activeTurnId,omitempty"`
 }
 
-func (e *turnInProgressError) Error() string {
-	return "a turn is already running for this conversation"
-}
-func (e *turnInProgressError) GetStatus() int { return http.StatusConflict }
+func (e *turnConflictError) Error() string  { return e.Code }
+func (e *turnConflictError) GetStatus() int { return http.StatusConflict }
 
-// statusError carries an arbitrary status + message body for the upstream
-// mappings that have no dedicated huma helper (413).
-type statusError struct {
-	status  int
-	Message string `json:"message"`
-}
-
-func (e *statusError) Error() string  { return e.Message }
-func (e *statusError) GetStatus() int { return e.status }
-
-// RegisterGenAI registers the unified turn (SSE) + chat rehydrate operations.
+// RegisterGenAI registers the turn create/status/active/stream + chat
+// rehydrate operations.
 func RegisterGenAI(api huma.API, svc GenAIService) {
 	huma.Register(api, huma.Operation{
-		OperationID: "create-turn",
-		Method:      http.MethodPost,
-		Path:        "/projects/{projectName}/conversations/{conversationId}/turns",
-		Summary:     "Run a generation/chat turn (SSE — raw StreamPart frames + [DONE])",
-		Tags:        []string{"GenAI"},
-		Security:    humakit.SecurityUserJWT,
-		// Agree with the agents service body limit (AGENT_BODY_LIMIT=10mb): the
-		// FE snapshot rides in the body, so a too-large turn is a 413 here.
-		MaxBodyBytes: turnMaxBodyBytes,
-	}, func(ctx context.Context, in *turnInput) (*huma.StreamResponse, error) {
-		body, err := svc.Turn(ctx, in.OrgHandle, in.ProjectName, TurnInput{
-			UseCase:                in.Body.UseCase,
-			ConversationID:         in.ConversationID,
-			Instruction:            in.Body.Instruction,
-			Files:                  in.Body.Files,
-			FilesChangedExternally: in.Body.FilesChangedExternally,
-			Target:                 in.Body.Target,
+		OperationID:   "create-turn",
+		Method:        http.MethodPost,
+		Path:          "/projects/{projectName}/conversations/{conversationId}/turns",
+		Summary:       "Start a generation/chat turn (202 — runs detached; attach via the turn stream)",
+		Tags:          []string{"GenAI"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusAccepted,
+		MaxBodyBytes:  startTurnMaxBodyBytes,
+	}, func(ctx context.Context, in *turnInput) (*turnOutput, error) {
+		turnID, err := svc.StartTurn(ctx, in.OrgHandle, in.ProjectName, TurnInput{
+			UseCase:        in.Body.UseCase,
+			ConversationID: in.ConversationID,
+			Instruction:    in.Body.Instruction,
+			Target:         in.Body.Target,
 		})
 		if err != nil {
 			return nil, mapTurnError(err)
 		}
+		out := &turnOutput{}
+		out.Body.TurnID = turnID
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-turn",
+		Method:      http.MethodGet,
+		Path:        "/projects/{projectName}/turns/{turnId}",
+		Summary:     "Get one turn's status",
+		Tags:        []string{"GenAI"},
+		Security:    humakit.SecurityUserJWT,
+	}, func(ctx context.Context, in *turnStatusInput) (*turnStatusOutput, error) {
+		st, err := svc.TurnStatus(ctx, in.OrgHandle, in.ProjectName, in.TurnID)
+		if err != nil {
+			return nil, mapTurnError(err)
+		}
+		return &turnStatusOutput{Body: st}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-active-turn",
+		Method:      http.MethodGet,
+		Path:        "/projects/{projectName}/turns/active",
+		Summary:     "Get the project's running turn (204 when none)",
+		Tags:        []string{"GenAI"},
+		Security:    humakit.SecurityUserJWT,
+	}, func(ctx context.Context, in *activeTurnInput) (*huma.StreamResponse, error) {
+		st, err := svc.ActiveTurn(ctx, in.OrgHandle, in.ProjectName)
+		if err != nil {
+			return nil, mapTurnError(err)
+		}
+		// Manual body write: 200 with the status JSON, or a bodyless 204 —
+		// a typed output cannot express the 204-no-body arm.
+		return &huma.StreamResponse{Body: func(hctx huma.Context) {
+			if st == nil {
+				hctx.SetStatus(http.StatusNoContent)
+				return
+			}
+			hctx.SetHeader("Content-Type", "application/json")
+			hctx.SetStatus(http.StatusOK)
+			_ = json.NewEncoder(hctx.BodyWriter()).Encode(st)
+		}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "stream-turn",
+		Method:      http.MethodGet,
+		Path:        "/projects/{projectName}/turns/{turnId}/stream",
+		Summary:     "Attach to a turn's part stream (SSE — replay from ?from / Last-Event-ID, then live-tail)",
+		Tags:        []string{"GenAI"},
+		Security:    humakit.SecurityUserJWT,
+	}, func(ctx context.Context, in *turnStreamInput) (*huma.StreamResponse, error) {
+		// ?from wins over Last-Event-ID; the header names the last RECEIVED
+		// event, so resumption starts at the next index.
+		from := 0
+		switch {
+		case in.From >= 0:
+			from = in.From
+		case in.LastEventID != "":
+			if last, err := strconv.Atoi(in.LastEventID); err == nil {
+				from = last + 1
+			}
+		}
+		sub, err := svc.AttachTurn(ctx, in.OrgHandle, in.ProjectName, in.TurnID, from)
+		if err != nil {
+			return nil, mapTurnError(err) // pre-stream 404 / 409
+		}
 		return &huma.StreamResponse{Body: humakit.SSEBody(func(w io.Writer, flush func()) {
-			defer body.Close()
-			// Verbatim passthrough — frames, `: keep-alive` comments and [DONE]
-			// flow through unchanged; the BFF injects and folds nothing.
-			passThrough(w, body, flush)
+			defer sub.Cancel()
+			streamSubscription(ctx, w, flush, sub)
 		})}, nil
 	})
 
@@ -129,58 +227,88 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 	})
 }
 
-// passThrough copies the upstream SSE body to the client writer, flushing after
-// every chunk so frames and keep-alives are not buffered behind ingress.
-//
-// A clean upstream EOF passes through verbatim. Either way the response ends
-// WITHOUT the [DONE] sentinel when the upstream died mid-turn — that missing
-// sentinel is how the client's fold detects truncation (and salvages the
-// partial). A mid-stream READ failure additionally appends a blank line (it
-// terminates the possibly-partial in-flight frame so clients skip the
-// unparseable remnant) and an SSE comment naming the cause — visible in
-// captures/logs, invisible to parsers. Deliberately NOT a synthetic error
-// frame: an in-band `error` means "the agent failed" and makes the client
-// discard the fold as a hard failure, which would throw away salvageable work.
-func passThrough(w io.Writer, r io.Reader, flush func()) {
-	buf := make([]byte, 16*1024)
+// streamSubscription writes a subscription as SSE: replayed then live events,
+// each as `id: <index>` + `data: <raw part>`, and — once the terminal event
+// has been written — the trailing `data: [DONE]`. A subscriber dropped for
+// falling behind (or an expired buffer) ends WITHOUT [DONE]; the client
+// resumes with Last-Event-ID. Keep-alive comments pace idle waits.
+func streamSubscription(ctx context.Context, w io.Writer, flush func(), sub *TurnSubscription) {
+	writeEvent := func(ev BrokerEvent) bool {
+		if _, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.Index, ev.Data); err != nil {
+			return false
+		}
+		flush()
+		return true
+	}
+	done := func() {
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		flush()
+	}
+
+	for _, ev := range sub.Replay {
+		if !writeEvent(ev) {
+			return
+		}
+		if ev.Terminal {
+			done()
+			return
+		}
+	}
+	keepAlive := time.NewTicker(streamKeepAliveEvery)
+	defer keepAlive.Stop()
 	for {
-		n, rerr := r.Read(buf)
-		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
+		select {
+		case <-ctx.Done():
+			return // client went away
+		case <-keepAlive.C:
+			if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil {
 				return
 			}
 			flush()
-		}
-		if rerr != nil {
-			if rerr != io.EOF {
-				_, _ = io.WriteString(w, "\n\n: upstream-error\n\n")
-				flush()
+		case ev, ok := <-sub.C:
+			if !ok {
+				return // dropped subscriber / expired buffer — no [DONE]
 			}
-			return
+			if !writeEvent(ev) {
+				return
+			}
+			if ev.Terminal {
+				done()
+				return
+			}
 		}
 	}
 }
 
-// mapTurnError maps pre-stream failures to a BFF status. Upstream statuses map
-// per §12.2: 409 → 409 turn_in_progress, 413 → 413, 400/500 → 502.
+// mapTurnError maps pre-202/pre-stream failures to the BFF status. The 409
+// bodies are the pinned {"code": …} shapes; upstream statuses map per the
+// shared edge policy (dispatch happens post-202 now, so upstream errors here
+// are limited to rehydrate-like paths).
 func mapTurnError(err error) error {
-	if mapped, ok := humakit.MapAgentsUpstreamError(err, map[int]error{
-		http.StatusConflict:              &turnInProgressError{Code: "turn_in_progress"},
-		http.StatusRequestEntityTooLarge: &statusError{status: http.StatusRequestEntityTooLarge, Message: "request too large"},
-	}); ok {
+	var inProgress *TurnInProgressError
+	if errors.As(err, &inProgress) {
+		return &turnConflictError{Code: "turn_in_progress", ActiveTurnID: inProgress.ActiveTurnID}
+	}
+	if mapped, ok := humakit.MapAgentsUpstreamError(err, nil); ok {
 		return mapped
 	}
 	switch {
 	case errors.Is(err, ErrProjectRepoNotFound):
 		return huma.Error404NotFound("project repository not found")
+	case errors.Is(err, ErrTurnNotFound):
+		return huma.Error404NotFound("turn not found")
 	case errors.Is(err, ErrInvalidUseCase):
 		return huma.Error400BadRequest("invalid use case")
 	case errors.Is(err, ErrInvalidConversationID):
 		return huma.Error400BadRequest("invalid conversation id")
+	case errors.Is(err, ErrEmptyInstruction):
+		return huma.Error400BadRequest(ErrEmptyInstruction.Error())
 	case errors.Is(err, ErrNoAnthropicKey):
 		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
 	case errors.Is(err, ErrRequirementsNotApproved):
-		return huma.Error409Conflict(ErrRequirementsNotApproved.Error())
+		return &turnConflictError{Code: "requirements_not_approved"}
+	case errors.Is(err, ErrTurnBufferTruncated):
+		return huma.Error409Conflict(ErrTurnBufferTruncated.Error())
 	default:
 		return huma.Error500InternalServerError("internal error")
 	}
