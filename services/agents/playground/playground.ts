@@ -51,6 +51,7 @@ import { ensureThread, isValidThreadName, listThreads, readSnapshot, reconcile, 
 import { renderPart, renderSummary } from "./render.js";
 import { materializeDerived } from "./derived.js";
 import { runTasksCommand } from "./tasks.js";
+import { createMcpResolver, readMcpEnv, type McpResolver } from "./mcp.js";
 
 // Repo-root `skills/` (services/agents/playground → up 3). The whole library is
 // pushed every turn (ADR-0002); the service still reads none.
@@ -63,8 +64,14 @@ interface ChatCtx {
   dryRun: boolean;
   /** The in-process model — the /tasks command drives the task-planner planner directly. */
   model: LanguageModel;
-  /** Caller-supplied MCP discovery endpoint (Task E2), from AEP_MCP_URL/AEP_MCP_TOKEN. */
-  mcp?: TurnRequest["mcp"];
+  /**
+   * Resolves the MCP discovery bundle (Task E2 / Task: playground-token) —
+   * one instance per playground session, shared across every thread and the
+   * `/tasks` command path, so its "warn once" state and env snapshot are
+   * consistent no matter which command reaches for it first. `resolve()`
+   * mints fresh every call when auto-minting; see mcp.ts.
+   */
+  mcpResolver: McpResolver;
 }
 
 const NEW = "\0new";
@@ -98,11 +105,14 @@ async function pickThread(): Promise<string | null> {
 /** Run one turn end to end: snapshot → stream → reconstruct → write. */
 async function runTurn(ctx: ChatCtx, instruction: string): Promise<void> {
   const before = readSnapshot(ctx.thread);
+  // Resolved fresh for THIS turn — never cached across turns (a mint's ~5min
+  // TTL is shorter than a chat session; see mcp.ts).
+  const mcp = await ctx.mcpResolver.resolve();
   const body: TurnRequest = {
     instruction,
     files: before,
     ...(ctx.skills.length > 0 ? { skills: ctx.skills } : {}),
-    ...(ctx.mcp ? { mcp: ctx.mcp } : {}),
+    ...(mcp ? { mcp } : {}),
   };
 
   const toolCalls: StreamPart[] = [];
@@ -202,16 +212,21 @@ async function main(): Promise<void> {
   const app = createApp({ store, model });
   const { baseUrl, close } = await listen0(app.listen(0));
 
-  // MCP discovery (Task E2): both env vars set → push { url, token } on every
-  // turn (mirrors how the caller resolves skills). Either unset → no `mcp`
-  // field at all, same as a checkout with no dependency-discovery server.
-  const mcpUrl = process.env.AEP_MCP_URL;
-  const mcpToken = process.env.AEP_MCP_TOKEN;
-  const mcp = mcpUrl && mcpToken ? { url: mcpUrl, token: mcpToken } : undefined;
+  // MCP discovery (Task E2 / Task: playground-token): one resolver for the
+  // whole session (every thread + turn shares its "warn once" state). Built
+  // from env, never eagerly minted here — resolve() runs fresh per turn (see
+  // mcp.ts and runTurn above), so a session that never sends a turn never
+  // hits the network for it.
+  const mcpEnv = readMcpEnv();
+  const mcpResolver = createMcpResolver(mcpEnv, (msg) => clack.log.warn(msg));
 
   clack.intro("AEP spec-agent playground");
   if (skills.length > 0) clack.log.info(`skills: ${skills.map((s) => s.name).join(", ")}`);
-  if (mcp) clack.log.info(`mcp discovery: ${mcp.url}`);
+  if (mcpEnv.url) {
+    clack.log.info(
+      `mcp discovery: ${mcpEnv.url} (${mcpEnv.token ? "static token" : "auto-mint per turn"})`,
+    );
+  }
   if (dryRun) clack.log.warn("dry-run: changes are shown but NOT written to disk");
 
   try {
@@ -228,7 +243,7 @@ async function main(): Promise<void> {
         if (!picked) break;
         thread = picked;
       }
-      const action = await chatLoop({ thread, baseUrl, skills, dryRun, model, ...(mcp ? { mcp } : {}) });
+      const action = await chatLoop({ thread, baseUrl, skills, dryRun, model, mcpResolver });
       if (action === "quit") break;
       thread = undefined; // /threads → back to the picker
     }
