@@ -48,9 +48,20 @@ export interface McpResolver {
   resolve(): Promise<TurnRequest["mcp"]>;
 }
 
-/** Reads the AEP_MCP_* vars — the only inputs this module reads from the environment. */
+/**
+ * Reads the AEP_MCP_* vars — the only inputs this module reads from the
+ * environment. AEP_MCP_URL defaults to the local compose stack's aep-api
+ * (the playground is a local-dev tool); set it to an empty string to run
+ * without MCP discovery entirely.
+ */
+export const DEFAULT_MCP_URL = "http://localhost:9090/internal/v1/mcp";
+
 export function readMcpEnv(env: NodeJS.ProcessEnv = process.env): McpEnv {
-  return { url: env.AEP_MCP_URL, token: env.AEP_MCP_TOKEN, org: env.AEP_MCP_ORG };
+  return {
+    url: env.AEP_MCP_URL ?? DEFAULT_MCP_URL,
+    token: env.AEP_MCP_TOKEN,
+    org: env.AEP_MCP_ORG,
+  };
 }
 
 /**

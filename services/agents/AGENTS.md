@@ -26,8 +26,9 @@ ADR-0002.
 - `pnpm --filter @aep/agents dev` — SSE server, watch/reload. `start` — run once.
 - Endpoints: `POST /conversations/:id/turns` (SSE) · `GET /conversations/:id`.
 - Needs `ANTHROPIC_API_KEY` (export, or `deployments/.env` — see `.env.example`).
-- **Playground MCP discovery against a local aep-api**: set `AEP_MCP_URL=http://localhost:9090/internal/v1/mcp`
-  (port 9090 is host-published by `deployments/docker-compose.yml`). The playground auto-mints a fresh token
+- **Playground MCP discovery against a local aep-api**: on by default — `AEP_MCP_URL` defaults to
+  `http://localhost:9090/internal/v1/mcp` (port 9090 is host-published by `deployments/docker-compose.yml`);
+  set `AEP_MCP_URL=""` to disable discovery. The playground auto-mints a fresh token
   per turn via that aep-api's `playground-token` endpoint — this requires `PLAYGROUND_TOKEN_ENABLED=true`,
   which the repo's compose file already sets. `AEP_MCP_ORG` optionally selects the org (defaults `"default"`);
   setting `AEP_MCP_TOKEN` overrides auto-minting and is used verbatim.

@@ -38,10 +38,6 @@ spec:
               value: {{ .Values.aepApi.deploymentTier | quote }}
             - name: TEST_MODE
               value: "false"
-            # Local-dev-only playground-token mint — never enabled in cluster
-            # deployments; explicit false mirrors the TEST_MODE backstop convention.
-            - name: PLAYGROUND_TOKEN_ENABLED
-              value: "false"
             - name: LOCAL_OPENBAO_REPAIR
               value: "false"
 
