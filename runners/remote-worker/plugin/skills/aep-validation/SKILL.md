@@ -112,12 +112,24 @@ tests/e2e/
   refresh it from the new issue.
 - Install with `npm install` on first scaffold (commit the lockfile),
   `npm ci` on later runs.
+- `scripts/generate-report.mjs` is platform-owned: on re-validation
+  runs, re-copy it from references even when it already exists, so the
+  repo always runs the current version.
 
 ### 6. PLAN, then GENERATE
 
-Follow the **`playwright-authoring`** skill: explore each flow live
-with playwright-cli first, write the test plan, then author one spec
-per uncovered e2e criterion.
+Before this step, load both companion skills with the Skill tool —
+do not proceed from memory:
+
+- `aep:playwright-authoring` — the authoring discipline (plan format,
+  collect-generated-code loop, assertion rules, criterion↔spec contract)
+- `aep:playwright-cli` — the CLI's own skill (commands, refs, eval,
+  storage state; vendored from @playwright/cli)
+
+Then: write the test plan, author one spec per uncovered e2e criterion
+(source-informed where unambiguous; playwright-cli exploration when the
+live app is the only trustworthy source), and remember the bar: a spec
+counts only after passing twice consecutively against the live app.
 
 - Plan artifact: `specs/validation/test-plan.md` — one section per
   criterion (id, must, target, numbered steps, expected assertion).
@@ -138,7 +150,8 @@ regression set — that's free regression coverage, not an accident.
 
 ### 8. HEAL (bounded)
 
-For failures, follow the **`playwright-healing`** skill: triage each
+For failures, load **`aep:playwright-healing`** with the Skill tool
+before touching any spec. Then: triage each
 one against the live app, repair only *brittleness* (locators, waits,
 setup), never weaken what a test asserts. Log each heal in
 `tests/e2e/heal-log.json`. When the budget is exhausted, finish with
@@ -155,9 +168,11 @@ node tests/e2e/scripts/generate-report.mjs \
 
 This writes `specs/validation/report.md` + `report.json` and sets
 `covered: true` in the criteria file for each passing e2e criterion
-(it never flips `true` back to `false`). Exit code 2 means your spec
-titles don't map cleanly to criterion ids — fix the titles and rerun
-from step 7. Commit the report, criteria file, and tests together.
+(it never flips `true` back to `false`). Exit code 2 means a contract
+violation: spec titles that don't map to criterion ids (fix titles,
+re-run tests from step 7) or a spec file missing its `// spec:` header
+(add the header, regenerate the report — no test re-run needed).
+Commit the report, criteria file, and tests together.
 
 If `$AEP_PLATFORM_URL` is set, also push the report to the platform
 (best-effort — do not fail the task if this call fails):

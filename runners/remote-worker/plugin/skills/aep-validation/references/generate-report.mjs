@@ -43,6 +43,13 @@
 // Join key: every automated spec's title MUST start with "<AC-ID>: "
 // (e.g. "AC-001-a: shows a name text box"). Duplicate or unknown AC ids
 // are hard errors (exit 2) — fix the spec titles, then re-run.
+//
+// Each mapped spec file must also carry a "// spec:" header comment
+// linking it to its test-plan section (hard error when absent — add the
+// header and regenerate; no test re-run needed). Raw page.locator()
+// usage is reported as a warning: semantic locators (getByRole/
+// getByLabel/...) survive UI change, raw CSS is what the healer ends
+// up fixing later.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -200,6 +207,30 @@ function main() {
     healByAc.set(h.criterionId, list);
   }
 
+  // ---- spec-file conventions (header hard-check, locator lint) -----------
+  const warnings = [];
+  for (const [acId, r] of resultByAc) {
+    if (!r.file) continue;
+    const specPath = path.posix.join("tests/e2e", r.file);
+    if (!existsSync(specPath)) continue; // path layout differs — can't verify
+    const src = readFileSync(specPath, "utf8");
+    const head = src.split("\n").slice(0, 10);
+    if (!head.some((l) => l.startsWith("// spec:"))) {
+      errors.push(
+        `${specPath} is missing its "// spec:" header comment (link to the test-plan section for ${acId})`,
+      );
+    }
+    if (/\.locator\(/.test(src)) {
+      warnings.push(
+        `${acId}: raw locator() usage in ${specPath} — prefer getByRole/getByLabel/getByPlaceholder`,
+      );
+    }
+  }
+  if (errors.length > 0) {
+    for (const e of errors) console.error(`generate-report: ${e}`);
+    process.exit(2);
+  }
+
   // ---- build per-criterion rows ------------------------------------------
   const rows = [];
   const totals = { e2e: { total: 0, pass: 0, fail: 0, notRun: 0 }, manual: 0, scenario: 0 };
@@ -255,6 +286,7 @@ function main() {
     playwrightVersion: results.config?.version ?? "unknown",
     totals,
     criteria: rows,
+    ...(warnings.length > 0 ? { warnings } : {}),
     ...(unmappedTests.length > 0 ? { unmappedTests } : {}),
   };
   mkdirSync(args.out, { recursive: true });
@@ -365,6 +397,15 @@ function main() {
       md.push(
         `| ${h.criterionId ?? "—"} | ${escapeCell(h.classification ?? "—")} | ${escapeCell(h.change ?? "—")} | ${h.commit ? `\`${String(h.commit).slice(0, 8)}\`` : "—"} |`,
       );
+    }
+    md.push("");
+  }
+
+  if (warnings.length > 0) {
+    md.push(`## Warnings`);
+    md.push("");
+    for (const w of warnings) {
+      md.push(`- ${escapeCell(w)}`);
     }
     md.push("");
   }

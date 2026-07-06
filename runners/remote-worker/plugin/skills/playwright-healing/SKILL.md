@@ -35,6 +35,21 @@ When unsure after re-driving: treat as genuine. A false red gets
 caught by the human reviewer; a false green silently corrupts the
 validation phase.
 
+## Heal technique
+
+- **One fix at a time, then retest.** When a spec has multiple errors,
+  fix the first, re-run the spec, and only then look at the next —
+  batched fixes hide which change mattered.
+- Re-derive locators from a fresh live snapshot
+  (`playwright-cli snapshot`, `playwright-cli --raw generate-locator eN`
+  — see the `playwright-cli` skill), don't guess corrections.
+- For inherently dynamic data (counters, timestamps, generated names),
+  heal to a **regular-expression locator/assertion** that pins what the
+  criterion actually requires — never to today's literal value.
+- Never introduce `waitForTimeout`, `networkidle` waits, or other
+  discouraged/deprecated APIs as a "fix" — replace bad waits with
+  web-first assertions on the state the test actually depends on.
+
 ## Budget
 
 - Max **2 heal attempts per criterion**; each followed by a focused
@@ -75,6 +90,9 @@ Never, under any classification:
 - Delete or comment out an assertion.
 - Convert `expect` to `expect.soft`.
 - Add `.skip`, `.fixme`, or conditional early-returns around failures.
+  (Playwright's own healer agent marks stubborn tests `test.fixme()` —
+  that is test-suite maintenance, not validation. Here a stubborn
+  failure stays red and goes in the report.)
 - Wrap assertions in `try/catch`.
 - Add retries in the config (retries stay 0 — they mask brittleness).
 - Raise a timeout to "fix" a hang: >15s expect timeouts need the app to
