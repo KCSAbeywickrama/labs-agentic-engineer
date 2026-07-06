@@ -16,8 +16,13 @@
  * under the License.
  */
 
+import { resolveAuthMode } from "./authMode";
+
 interface RuntimeEnv {
   VITE_API_BASE_URL?: string;
+  VITE_THUNDER_URL?: string;
+  VITE_THUNDER_CLIENT_ID?: string;
+  VITE_THUNDER_SCOPES?: string;
 }
 
 declare global {
@@ -40,4 +45,16 @@ function getEnv(key: keyof RuntimeEnv): string | undefined {
 
 export const env = {
   apiBaseUrl: getEnv("VITE_API_BASE_URL") || "/aep-api-service",
+  // VITE_AUTH_MODE is a dev-only switch, so it is read from build-time env
+  // only — runtime config cannot demote production to mock auth.
+  authMode: resolveAuthMode(
+    import.meta.env.DEV,
+    import.meta.env.VITE_API_MODE,
+    import.meta.env.VITE_AUTH_MODE,
+  ),
+  // Thunder OIDC (issue #91). Dev default is the dev-thunder-setup
+  // container; deployments override via window._env_.
+  thunderUrl: getEnv("VITE_THUNDER_URL") || "http://localhost:8097",
+  thunderClientId: getEnv("VITE_THUNDER_CLIENT_ID") || "aep-console-client",
+  thunderScopes: getEnv("VITE_THUNDER_SCOPES") || "openid profile email",
 } as const;

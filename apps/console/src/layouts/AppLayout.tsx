@@ -26,15 +26,10 @@ import {
   UserMenu,
   version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
-import { FolderOpen, Settings, User as UserIcon, WSO2 } from "@wso2/oxygen-ui-icons-react";
+import { FolderOpen, LogOut, Settings, User as UserIcon, WSO2 } from "@wso2/oxygen-ui-icons-react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-
-// TODO(auth): replace with the signed-in user when auth lands.
-const devUser = {
-  name: "Developer",
-  email: "developer@example.com",
-  role: "Developer",
-};
+import { useSession } from "../auth/SessionContext";
+import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 
 // Sidebar highlight follows the route; grows one mapping per top-level route.
 function activeItemFor(pathname: string): string {
@@ -43,11 +38,11 @@ function activeItemFor(pathname: string): string {
 }
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
-// Main(Outlet) + Footer. NotificationPanel and org/project switchers arrive
-// with their features.
+// Main(Outlet) + Footer. NotificationPanel arrives with its feature.
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeItem = activeItemFor(pathname);
+  const { user, signOut } = useSession();
 
   return (
     <AppShell initialCollapsed={false} collapseOnSelectOnMobile>
@@ -71,19 +66,25 @@ export function AppLayout() {
               <Header.BrandTitle>Agentic Engineer</Header.BrandTitle>
             </Link>
           </Header.Brand>
+          <Header.Switchers showDivider={false}>
+            <OrgSwitcher />
+            <ProjectSwitcher />
+          </Header.Switchers>
           <Header.Spacer />
           <Header.Actions>
             <ColorSchemeToggle />
             <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
             <UserMenu>
-              <UserMenu.Trigger name={devUser.name} />
+              <UserMenu.Trigger name={user.name} />
               <UserMenu.Header
-                name={devUser.name}
-                email={devUser.email}
-                role={devUser.role}
+                name={user.name}
+                email={user.email}
+                {...(user.role ? { role: user.role } : {})}
               />
               <UserMenu.Item icon={<UserIcon />} label="Profile" />
               <UserMenu.Item icon={<Settings />} label="Settings" />
+              <UserMenu.Divider />
+              <UserMenu.Logout icon={<LogOut />} label="Sign out" onClick={signOut} />
             </UserMenu>
           </Header.Actions>
         </Header>

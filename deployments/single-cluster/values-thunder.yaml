@@ -125,7 +125,9 @@ bootstrap:
       )
 
       PUBLIC_APPS=(
-        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,${PUBLIC_CONSOLE_URL}|given_name,family_name,username,groups,ouId,ouName,ouHandle"
+        # Root redirects serve the legacy console; /callback is the new
+        # console's dedicated OAuth route (issue #91).
+        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
       )
 
       # ──────────────────────────────────────────────────────────────────

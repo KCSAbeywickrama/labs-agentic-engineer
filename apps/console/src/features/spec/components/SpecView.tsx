@@ -43,9 +43,7 @@ import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { SpecFileList } from "./SpecFileList";
-
-// TODO(auth): the signed-in user once auth lands (AppLayout has the same stub).
-const devUser = { name: "Developer", email: "developer@example.com" };
+import { useSession } from "../../../auth/SessionContext";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 
@@ -78,7 +76,10 @@ export function SpecView({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
   const spec = useProjectSpec(projectName);
-  const collab = useCollabSpec(projectName, devUser);
+  const { user, orgHandle } = useSession();
+  // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
+  // back to the collab mock BFF's default org so mock mode keeps working.
+  const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
 

@@ -16,16 +16,18 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
+export type AuthMode = "mock" | "thunder";
 
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <AppLayout />
-    </AuthGuard>
-  ),
-});
+// Issue #91 dev-mode matrix: production always signs in against Thunder;
+// in dev the default follows the API mode (mock APIs → mock auth, nothing
+// to run), and VITE_AUTH_MODE=thunder opts into real OIDC against the
+// dev-thunder-setup container while MSW keeps serving the APIs.
+export function resolveAuthMode(
+  isDev: boolean,
+  apiMode: string | undefined,
+  override: string | undefined,
+): AuthMode {
+  if (!isDev) return "thunder";
+  if (override === "thunder" || override === "mock") return override;
+  return apiMode === "mock" ? "mock" : "thunder";
+}
