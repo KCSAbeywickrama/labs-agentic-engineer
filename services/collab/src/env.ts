@@ -22,18 +22,33 @@ export interface CollabConfig {
   aepApiBase: string | null;
   /** Skip the BFF oracle and seed rooms from fixtures. Never in cluster. */
   devMode: boolean;
+  /** Run the embedded mock BFF and point the real code paths at it
+   *  (stand-in for #81 / #86 phase 2). Never in cluster. */
+  mockBff: boolean;
+  mockBffPort: number;
+}
+
+function flag(value: string | undefined): boolean {
+  return value === "1" || value === "true";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollabConfig {
-  const aepApiBase = env.AEP_API_BASE?.replace(/\/$/, "") ?? null;
-  const devFlag = env.COLLAB_DEV === "1" || env.COLLAB_DEV === "true";
-  // Without a BFF there is no oracle or seed source — dev mode is the only
-  // way to run, so imply it rather than refusing to start (`make dev`
-  // ergonomics; the console's mock mode has the same spirit).
-  const devMode = devFlag || aepApiBase === null;
+  const mockBff = flag(env.COLLAB_MOCK_BFF);
+  const mockBffPort = Number(env.COLLAB_MOCK_BFF_PORT ?? 8092);
+  const aepApiBase = mockBff
+    ? `http://127.0.0.1:${mockBffPort}/api/v1`
+    : (env.AEP_API_BASE?.replace(/\/$/, "") ?? null);
+  // Without any BFF (real or mock) there is no oracle or seed source — dev
+  // mode is the only way to run, so imply it rather than refusing to start
+  // (`make dev` ergonomics; the console's mock mode has the same spirit).
+  // With the mock BFF the REAL code paths run, so dev mode stays off unless
+  // explicitly forced.
+  const devMode = flag(env.COLLAB_DEV) || aepApiBase === null;
   return {
     port: Number(env.COLLAB_PORT ?? 8091),
     aepApiBase,
     devMode,
+    mockBff,
+    mockBffPort,
   };
 }

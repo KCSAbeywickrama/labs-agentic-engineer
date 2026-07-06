@@ -22,7 +22,7 @@ import type {
   onLoadDocumentPayload,
 } from "@hocuspocus/server";
 import type { CollabConfig } from "./env.js";
-import type { BffClient, CollabIdentity } from "./bff.js";
+import type { BffClient } from "./bff.js";
 import { isSpecRoom } from "./room.js";
 import { seedDocument } from "./seed.js";
 import { devSpecBundle } from "./fixtures.js";
@@ -31,10 +31,10 @@ import { devSpecBundle } from "./fixtures.js";
 // hooks. The token is retained for the seed read (performed as the first
 // joiner) — it never leaves this process except toward the BFF.
 export interface CollabContext {
-  user: CollabIdentity & { kind: "user" | "dev" };
+  user: { name: string; email: string; kind: "user" | "dev" };
   token: string | null;
-  /** From the `project` ws request parameter; needed because the room ID
-   *  can't be split without the org (only the BFF can do that). */
+  /** Resolved by the oracle from the room ID (only the BFF can split
+   *  `spec-<org>-<project>` — it knows the caller's org). Null in dev mode. */
   projectName: string | null;
 }
 
@@ -45,22 +45,18 @@ export interface CollabDeps {
 
 export function buildAuthenticateHook(config: CollabConfig, deps: CollabDeps) {
   return async (
-    data: Pick<
-      onAuthenticatePayload,
-      "token" | "documentName" | "requestParameters"
-    >,
+    data: Pick<onAuthenticatePayload, "token" | "documentName">,
   ): Promise<CollabContext> => {
-    const { token, documentName, requestParameters } = data;
+    const { token, documentName } = data;
     if (!isSpecRoom(documentName)) {
       throw new Error(`unknown room: ${documentName}`);
     }
-    const projectName = requestParameters.get("project") || null;
 
     if (config.devMode) {
       return {
         user: { name: "Dev User", email: "dev@localhost", kind: "dev" },
         token: null,
-        projectName,
+        projectName: null,
       };
     }
 
@@ -68,12 +64,13 @@ export function buildAuthenticateHook(config: CollabConfig, deps: CollabDeps) {
     if (!token) throw new Error("missing token");
     // The oracle does both halves: JWT verification (Thunder JWKS) and the
     // room's project-ownership/tenancy check. This service verifies nothing
-    // itself (#86: identity stays the BFF's problem).
+    // itself (#86: identity stays the BFF's problem). It also resolves the
+    // room into a project name for the seed read.
     const identity = await deps.bff.validateAccess(token, documentName);
     return {
-      user: { ...identity, kind: "user" },
+      user: { name: identity.name, email: identity.email, kind: "user" },
       token,
-      projectName,
+      projectName: identity.projectName,
     };
   };
 }

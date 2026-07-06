@@ -31,21 +31,29 @@ const prodConfig: CollabConfig = {
   port: 0,
   aepApiBase: "http://bff.test/api/v1",
   devMode: false,
+  mockBff: false,
+  mockBffPort: 0,
 };
-const devConfig: CollabConfig = { port: 0, aepApiBase: null, devMode: true };
+const devConfig: CollabConfig = {
+  port: 0,
+  aepApiBase: null,
+  devMode: true,
+  mockBff: false,
+  mockBffPort: 0,
+};
 
 function fakeBff(overrides: Partial<BffClient> = {}): BffClient {
   return {
-    validateAccess: async () => ({ name: "Jo", email: "jo@example.com" }),
+    validateAccess: async () => ({
+      name: "Jo",
+      email: "jo@example.com",
+      projectName: "shop",
+    }),
     fetchSpecBundle: async () => [
       { path: "requirements/prd.md", group: "requirements", content: "# P\n" },
     ],
     ...overrides,
   };
-}
-
-function params(entries: Record<string, string> = {}): URLSearchParams {
-  return new URLSearchParams(entries);
 }
 
 test("auth rejects unknown rooms before hitting the oracle", async () => {
@@ -54,32 +62,28 @@ test("auth rejects unknown rooms before hitting the oracle", async () => {
     bff: fakeBff({
       validateAccess: async () => {
         oracleCalled = true;
-        return { name: "x", email: "x" };
+        return { name: "x", email: "x", projectName: "x" };
       },
     }),
   });
   await assert.rejects(
-    auth({ token: "t", documentName: "not-a-spec-room", requestParameters: params() }),
+    auth({ token: "t", documentName: "not-a-spec-room" }),
     /unknown room/,
   );
   assert.equal(oracleCalled, false);
 });
 
-test("auth passes token + room to the oracle and returns its identity", async () => {
+test("auth passes token + room to the oracle; identity and project come back", async () => {
   const seen: string[] = [];
   const auth = buildAuthenticateHook(prodConfig, {
     bff: fakeBff({
       validateAccess: async (token, room) => {
         seen.push(token, room);
-        return { name: "Jo", email: "jo@example.com" };
+        return { name: "Jo", email: "jo@example.com", projectName: "shop" };
       },
     }),
   });
-  const ctx = await auth({
-    token: "jwt-abc",
-    documentName: "spec-acme-shop",
-    requestParameters: params({ project: "shop" }),
-  });
+  const ctx = await auth({ token: "jwt-abc", documentName: "spec-acme-shop" });
   assert.deepEqual(seen, ["jwt-abc", "spec-acme-shop"]);
   assert.equal(ctx.user.name, "Jo");
   assert.equal(ctx.user.kind, "user");
@@ -96,7 +100,7 @@ test("auth propagates oracle denial", async () => {
     }),
   });
   await assert.rejects(
-    auth({ token: "t", documentName: "spec-acme-shop", requestParameters: params() }),
+    auth({ token: "t", documentName: "spec-acme-shop" }),
     BffAccessDeniedError,
   );
 });
@@ -104,25 +108,21 @@ test("auth propagates oracle denial", async () => {
 test("auth rejects a missing token outside dev mode", async () => {
   const auth = buildAuthenticateHook(prodConfig, { bff: fakeBff() });
   await assert.rejects(
-    auth({ token: "", documentName: "spec-acme-shop", requestParameters: params() }),
+    auth({ token: "", documentName: "spec-acme-shop" }),
     /missing token/,
   );
 });
 
 test("dev mode skips the oracle entirely", async () => {
   const auth = buildAuthenticateHook(devConfig, { bff: null });
-  const ctx = await auth({
-    token: "",
-    documentName: "spec-acme-shop",
-    requestParameters: params(),
-  });
+  const ctx = await auth({ token: "", documentName: "spec-acme-shop" });
   assert.equal(ctx.user.kind, "dev");
 });
 
 test("dev mode still rejects unknown rooms", async () => {
   const auth = buildAuthenticateHook(devConfig, { bff: null });
   await assert.rejects(
-    auth({ token: "", documentName: "lobby", requestParameters: params() }),
+    auth({ token: "", documentName: "lobby" }),
     /unknown room/,
   );
 });
@@ -164,7 +164,7 @@ test("load seeds from the BFF bundle with the joiner's token", async () => {
   assert.equal(filesMap(doc).get("requirements/prd.md")?.toString(), "hi");
 });
 
-test("load opens an empty doc when the project parameter is missing", async () => {
+test("load opens an empty doc when the oracle gave no project (pre-phase-2 BFF)", async () => {
   const load = buildLoadDocumentHook(prodConfig, { bff: fakeBff() });
   const doc = new Y.Doc() as Document;
   await load({

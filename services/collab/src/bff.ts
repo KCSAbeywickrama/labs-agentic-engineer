@@ -23,6 +23,13 @@
 export interface CollabIdentity {
   name: string;
   email: string;
+  /**
+   * Project resolved from the room ID by the oracle — only the BFF can split
+   * `spec-<org>-<project>` (it knows the caller's org). Phase 2 of #86 adds
+   * this field to the validate-collab-access response; the mock BFF already
+   * serves it.
+   */
+  projectName: string;
 }
 
 export interface SpecFile {
@@ -59,7 +66,11 @@ export function createBffClient(
       });
       if (!res.ok) throw new BffAccessDeniedError(res.status);
       const body = (await res.json()) as CollabIdentity;
-      return { name: body.name, email: body.email };
+      return {
+        name: body.name,
+        email: body.email,
+        projectName: body.projectName,
+      };
     },
 
     async fetchSpecBundle(token, projectName) {

@@ -18,11 +18,19 @@ cannot be split without the org from the caller's token. Seeding reads the
 spec bundle **as the first joiner** (their token); the `project` ws request
 parameter names the project for that read.
 
-## Dev mode
+## Modes
 
-`COLLAB_DEV=1` — or simply no `AEP_API_BASE` — bypasses the oracle and seeds
-rooms from `fixtures.ts` (mirrors the console mock layer's demo-shop).
-Never enable in a cluster.
+- **Dev mode** (`COLLAB_DEV=1`, implied when no BFF at all): oracle bypassed,
+  rooms seed from `fixtures.ts`. The auth/seed code paths are NOT exercised.
+- **Mock BFF** (`COLLAB_MOCK_BFF=1`): an embedded stand-in for the BFF
+  (`mockbff.ts`) serves `validate-collab-access` + `get-project-spec` from
+  the same fixtures, and the service runs its **real** auth and seed paths
+  against it — use this while the Go implementations land (#81 / #86 phase 2).
+  Token `deny` exercises the rejection path; a JWT-shaped token's
+  `name`/`email` claims become the identity.
+- **Real BFF**: set `AEP_API_BASE`.
+
+Never enable dev mode or the mock BFF in a cluster.
 
 ## Env
 
@@ -30,7 +38,9 @@ Never enable in a cluster.
 |---|---|---|
 | `COLLAB_PORT` | `8091` | ws listen port |
 | `AEP_API_BASE` | unset | BFF base incl. prefix, e.g. `http://localhost:9090/api/v1` |
-| `COLLAB_DEV` | off | force dev mode (implied when `AEP_API_BASE` unset) |
+| `COLLAB_DEV` | off | force dev mode (implied when no BFF, real or mock) |
+| `COLLAB_MOCK_BFF` | off | run the embedded mock BFF; overrides `AEP_API_BASE` |
+| `COLLAB_MOCK_BFF_PORT` | `8092` | mock BFF listen port |
 
 ## Phase status (#86)
 

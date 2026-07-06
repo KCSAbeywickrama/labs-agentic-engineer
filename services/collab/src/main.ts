@@ -26,8 +26,17 @@
 import { loadConfig } from "./env.js";
 import { createBffClient } from "./bff.js";
 import { createCollabServer } from "./server.js";
+import { startMockBff } from "./mockbff.js";
 
 const config = loadConfig();
+
+if (config.mockBff) {
+  await startMockBff(config.mockBffPort);
+  console.warn(
+    `[collab] MOCK BFF on http://127.0.0.1:${config.mockBffPort} — real auth/seed paths, mocked backend (#81 stand-in)`,
+  );
+}
+
 const bff = config.aepApiBase ? createBffClient(config.aepApiBase) : null;
 
 if (config.devMode) {
