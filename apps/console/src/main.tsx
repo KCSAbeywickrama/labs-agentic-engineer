@@ -18,22 +18,15 @@
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createRouter, RouterProvider } from "@tanstack/react-router";
+import { RouterProvider } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   AcrylicOrangeTheme,
   CssBaseline,
   OxygenUIThemeProvider,
 } from "@wso2/oxygen-ui";
-import { routeTree } from "./generated/routeTree.gen";
-
-const router = createRouter({ routeTree });
-
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: typeof router;
-  }
-}
+import { AppAuthProvider } from "./auth/AuthProvider";
+import { router } from "./router";
 
 // api-guidelines: retry 3 for queries (TanStack default, made explicit),
 // no automatic retry for mutations; per-query staleTime set at the hook.
@@ -58,12 +51,15 @@ async function enableMocking(): Promise<void> {
 void enableMocking().then(() => {
   createRoot(document.getElementById("app")!).render(
     <StrictMode>
-      <OxygenUIThemeProvider theme={AcrylicOrangeTheme}>
-        <CssBaseline />
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>
-      </OxygenUIThemeProvider>
+      {/* Auth outermost (issue #91): the OIDC session exists before any UI. */}
+      <AppAuthProvider>
+        <OxygenUIThemeProvider theme={AcrylicOrangeTheme}>
+          <CssBaseline />
+          <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </OxygenUIThemeProvider>
+      </AppAuthProvider>
     </StrictMode>,
   );
 });

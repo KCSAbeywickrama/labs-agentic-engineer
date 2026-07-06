@@ -16,16 +16,22 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
+/* eslint-disable no-underscore-dangle */
 
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <AppLayout />
-    </AuthGuard>
-  ),
-});
+// Gate (hosted sign-in) runtime config: point the SPA's API calls at the
+// dev-thunder-setup public URL instead of the image default.
+window.__THUNDERID_RUNTIME_CONFIG__ = {
+  brand: {
+    product_name: 'ThunderID',
+    favicon: {
+      light: 'assets/images/favicon.ico',
+      dark: 'assets/images/favicon-inverted.ico',
+    },
+  },
+  client: {
+    base: '/gate',
+  },
+  server: {
+    public_url: 'http://localhost:8097',
+  },
+};

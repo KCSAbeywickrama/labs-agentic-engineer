@@ -16,23 +16,22 @@
  * under the License.
  */
 
-import createClient, { type Middleware } from "openapi-fetch";
+import createClient from "openapi-fetch";
 import type { paths } from "../generated/aep-api";
 import { env } from "../config/env";
+import { getAccessToken, redirectToSignIn, renewAccessToken } from "../auth/token";
+import { createAuthFetch } from "./authFetch";
 
-// The single global 401 handler (api-guidelines non-negotiable #3).
-// TODO(auth): wire the re-auth flow here when auth lands; features never
-// handle 401s themselves.
-const auth401: Middleware = {
-  onResponse({ response }) {
-    if (response.status === 401) {
-      console.warn("[api] 401 from BFF — re-auth flow not implemented yet");
-    }
-    return response;
-  },
-};
-
+// Token attach + the single global 401 handler live in the fetch wrapper
+// (see authFetch.ts); features never handle auth themselves.
+//
 // The contract's paths are unprefixed; its `servers` entry is /api/v1, which
 // openapi-fetch does not apply automatically — so it lives in the baseUrl.
-export const client = createClient<paths>({ baseUrl: `${env.apiBaseUrl}/api/v1` });
-client.use(auth401);
+export const client = createClient<paths>({
+  baseUrl: `${env.apiBaseUrl}/api/v1`,
+  fetch: createAuthFetch({
+    getToken: getAccessToken,
+    renewToken: renewAccessToken,
+    redirectToSignIn,
+  }),
+});

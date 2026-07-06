@@ -19,15 +19,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import { getAccessToken } from "../../../auth/token";
 
 // Console side of #86 phase 5: connect the spec view to the collab service.
 // One room + one Y.Doc per project (`spec-<org>-<project>`), Y.Map('files')
 // of path → Y.Text. If no collab server is reachable the view degrades to
 // solo (#86 decision 10) — callers keep their non-collaborative fallback.
 //
-// Until auth lands the connection identifies as the AppLayout dev user via a
-// JWT-shaped unsigned token (the collab mock BFF reads name/email claims;
-// the real oracle will verify a real JWT here instead).
+// The connection authenticates with the session's access token (#91): a real
+// Thunder JWT in thunder mode (verified by the BFF oracle), the unsigned
+// mock token in mock mode (decoded by the collab mock BFF). The token is a
+// getter so reconnects pick up silently-renewed tokens.
 
 export interface CollabPeer {
   clientId: number;
@@ -60,16 +62,6 @@ const PEER_COLORS = [
   "#ba68c8", "#4dd0e1", "#f06292", "#aed581",
 ];
 
-// TODO(auth): replace with the session token when platform auth lands.
-function devToken(name: string, email: string): string {
-  const b64 = (v: unknown) =>
-    btoa(JSON.stringify(v))
-      .replaceAll("+", "-")
-      .replaceAll("/", "_")
-      .replace(/=+$/, "");
-  return `${b64({ alg: "none" })}.${b64({ name, email })}.dev`;
-}
-
 function collabWsUrl(): string {
   const env = (window as { _env_?: { collabWsUrl?: string } })._env_;
   if (env?.collabWsUrl) return env.collabWsUrl;
@@ -78,13 +70,10 @@ function collabWsUrl(): string {
   return `${proto}//${window.location.host}/collab`;
 }
 
-// TODO(auth): org comes from the session once auth lands; the collab mock
-// BFF's default org is used until then.
-const DEV_ORG = "acme";
-
 export function useCollabSpec(
   projectName: string,
   user: { name: string; email: string },
+  orgHandle: string,
 ): CollabSpec {
   const [status, setStatus] = useState<CollabStatus>("connecting");
   const [peers, setPeers] = useState<CollabPeer[]>([]);
@@ -97,9 +86,9 @@ export function useCollabSpec(
     docRef.current = doc;
     const provider = new HocuspocusProvider({
       url: collabWsUrl(),
-      name: `spec-${DEV_ORG}-${projectName}`,
+      name: `spec-${orgHandle}-${projectName}`,
       document: doc,
-      token: devToken(user.name, user.email),
+      token: async () => (await getAccessToken()) ?? "",
       onSynced: () => setStatus("connected"),
       onStatus: ({ status: s }) => {
         if (s === "disconnected") setStatus("offline");
@@ -145,7 +134,7 @@ export function useCollabSpec(
       docRef.current = null;
       providerRef.current = null;
     };
-  }, [projectName, user.name, user.email]);
+  }, [projectName, user.name, user.email, orgHandle]);
 
   return useMemo(
     () => ({
