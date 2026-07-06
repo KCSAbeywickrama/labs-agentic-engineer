@@ -16,16 +16,7 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
-
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <AppLayout />
-    </AuthGuard>
-  ),
-});
+export const organizationKeys = {
+  all: ["organizations"] as const,
+  list: () => [...organizationKeys.all, "list"] as const,
+};

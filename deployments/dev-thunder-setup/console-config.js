@@ -16,16 +16,23 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
+/* eslint-disable no-underscore-dangle */
 
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <AppLayout />
-    </AuthGuard>
-  ),
-});
+// Thunder management console runtime config (http://localhost:8097/console).
+window.__THUNDERID_RUNTIME_CONFIG__ = {
+  brand: {
+    product_name: 'ThunderID',
+    favicon: {
+      light: 'assets/images/favicon.ico',
+      dark: 'assets/images/favicon-inverted.ico',
+    },
+  },
+  client: {
+    base: '/console',
+    client_id: 'CONSOLE',
+    scopes: ['openid', 'profile', 'email', 'system'],
+  },
+  server: {
+    public_url: 'http://localhost:8097',
+  },
+};

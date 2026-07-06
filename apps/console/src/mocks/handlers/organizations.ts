@@ -16,16 +16,13 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
+import { http, HttpResponse } from "msw";
+import { seedOrganizations } from "../fixtures/organizations";
 
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <AppLayout />
-    </AuthGuard>
+export const organizationsHandlers = [
+  // Wildcard prefix: matches whatever runtime API base URL sits in front of
+  // /api/v1.
+  http.get("*/api/v1/organizations", () =>
+    HttpResponse.json(seedOrganizations),
   ),
-});
+];

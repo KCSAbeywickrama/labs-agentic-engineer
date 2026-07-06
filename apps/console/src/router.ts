@@ -16,16 +16,15 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
+import { createRouter } from "@tanstack/react-router";
+import { routeTree } from "./generated/routeTree.gen";
 
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <AppLayout />
-    </AuthGuard>
-  ),
-});
+// Module-scoped so non-component code (the OIDC signin callback) can
+// navigate without a hook.
+export const router = createRouter({ routeTree });
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
