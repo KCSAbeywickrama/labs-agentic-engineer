@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -71,6 +72,23 @@ var ErrNoAnthropicKey = errors.New("no Anthropic API key configured for this org
 // agents-service, rather than agents-service calling back to fetch it.
 type KeyResolver func(ctx context.Context, orgID string) (string, error)
 
+// MCPTokenIssuer mints a short-lived BFF-signed MCP token (aud aep-api-mcp)
+// bound to an org, so agents-service can call back to the BFF's internal MCP
+// discovery surface as the acting org. The BFF wires this from
+// auth.TaskTokenManager.IssueMCPToken. A nil issuer (or empty MCP URL) disables
+// MCP propagation — the additive `mcp` field is simply omitted.
+type MCPTokenIssuer func(orgID string) (string, error)
+
+// MCPBinding is the additive `mcp` block the BFF attaches to the architect
+// request: the URL of the BFF's internal MCP surface plus a per-run BFF-signed
+// token the agent presents on the callback. Legacy agents-service ignores it
+// until the E-phase wires the MCP client. Kept in sync with
+// agents/src/agents/architect/schema.ts.
+type MCPBinding struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
+}
+
 // Client calls the aep-agents-service.
 //
 // Every streaming method carries an `orgID` parameter, bound into a per-call
@@ -95,11 +113,11 @@ type Client interface {
 	// Caller must close.
 	StreamArchitect(ctx context.Context, orgID string, req ArchitectRequest) (io.ReadCloser, error)
 
-	// StreamTechLeadPlan POSTs the planner input to /internal/v1/agents/tech-lead/plan
+	// StreamTechLeadPlan POSTs the planner input to /internal/v1/agents/task-planner/plan
 	// and returns the raw SSE response body.
 	StreamTechLeadPlan(ctx context.Context, orgID string, req TechLeadPlanRequest) (io.ReadCloser, error)
 
-	// StreamTechLeadDetail POSTs N issued tasks to /internal/v1/agents/tech-lead/detail.
+	// StreamTechLeadDetail POSTs N issued tasks to /internal/v1/agents/task-planner/detail.
 	StreamTechLeadDetail(ctx context.Context, orgID string, req TechLeadDetailRequest) (io.ReadCloser, error)
 
 	// StreamRequirementsChat POSTs a chat turn to /internal/v1/agents/requirements-chat
@@ -147,6 +165,11 @@ type ArchitectRequest struct {
 	BuiltinSkills []SkillRecord      `json:"builtinSkills,omitempty"`
 	OrgSkills     []SkillDescription `json:"orgSkills,omitempty"`
 	SkillsApplied []string           `json:"skillsApplied,omitempty"`
+	// MCP, when present, tells agents-service where the BFF's internal MCP
+	// discovery surface lives and carries the BFF-signed token to reach it.
+	// Injected by the client at send time (StreamArchitect) — callers never
+	// set it. Additive; legacy agents-service ignores it until the E-phase.
+	MCP *MCPBinding `json:"mcp,omitempty"`
 }
 
 // SkillDescription mirrors agents/src/agents/architect/schema.ts >
@@ -172,7 +195,7 @@ type ArchitectDesign struct {
 	Components []models.DesignComponent `json:"components"`
 }
 
-// TechLeadPlanRequest is the body sent to /internal/v1/agents/tech-lead/plan. Mirrors
+// TechLeadPlanRequest is the body sent to /internal/v1/agents/task-planner/plan. Mirrors
 // agents/src/agents/tech-lead/schema.ts → TechLeadPlanInput plus the optional
 // validator diff context.
 type TechLeadPlanRequest struct {
@@ -188,6 +211,12 @@ type TechLeadPlanRequest struct {
 	// project's design.md. Name + description only; bodies arrive in
 	// each TechLeadDetailItem.SkillsResolved at the detail phase.
 	AttachedSkills []SkillDescription `json:"attachedSkills,omitempty"`
+	// TaskBreakdownSkill is the `task-breakdown` skill body pushed to the
+	// task-planner. It carries the decomposition judgment (topological
+	// ordering, dependency-kind gating, issue-brief quality) so the agent's
+	// prompt stays pure scaffolding. Sourced from the embedded default; when
+	// nil the agent falls back to its built-in guidance.
+	TaskBreakdownSkill *SkillRecord `json:"taskBreakdownSkill,omitempty"`
 }
 
 type TechLeadSlimComponent struct {
@@ -210,11 +239,14 @@ type TechLeadValidatorDiffContext struct {
 	Removed                  []string `json:"removed"`
 }
 
-// TechLeadDetailRequest is the body sent to /internal/v1/agents/tech-lead/detail.
+// TechLeadDetailRequest is the body sent to /internal/v1/agents/task-planner/detail.
 type TechLeadDetailRequest struct {
 	ProjectName string               `json:"projectName"`
 	Spec        string               `json:"spec"`
 	Items       []TechLeadDetailItem `json:"items"`
+	// TaskBreakdownSkill — the `task-breakdown` skill body, pushed once for the
+	// whole detail run; its "issue brief" guidance shapes each task body.
+	TaskBreakdownSkill *SkillRecord `json:"taskBreakdownSkill,omitempty"`
 }
 
 type TechLeadDetailItem struct {
@@ -242,6 +274,10 @@ type client struct {
 	httpClient  *http.Client
 	signer      ServiceTokenSigner
 	keyResolver KeyResolver
+	// mcpURL + mcpToken, when both set, drive the additive `mcp` block on the
+	// architect request. Both nil/empty ⇒ no MCP propagation.
+	mcpURL   string
+	mcpToken MCPTokenIssuer
 }
 
 // NewClient builds an agents-service client. signer mints a short-lived
@@ -249,8 +285,9 @@ type client struct {
 // in the ocOrgId claim, attached as the bearer; pass nil to disable signing in
 // tests/dev. keyResolver resolves the effective Anthropic key per call and is
 // forwarded as X-Anthropic-Key; pass nil in tests/dev that don't stream (no key
-// is forwarded then).
-func NewClient(baseURL string, signer ServiceTokenSigner, keyResolver KeyResolver) Client {
+// is forwarded then). mcpURL + mcpToken, when both set, attach the additive
+// `mcp` block to the architect request (empty/nil disables it).
+func NewClient(baseURL string, signer ServiceTokenSigner, keyResolver KeyResolver, mcpURL string, mcpToken MCPTokenIssuer) Client {
 	return &client{
 		baseURL: baseURL,
 		// No client-side timeout — streaming responses can take minutes.
@@ -262,6 +299,8 @@ func NewClient(baseURL string, signer ServiceTokenSigner, keyResolver KeyResolve
 		},
 		signer:      signer,
 		keyResolver: keyResolver,
+		mcpURL:      mcpURL,
+		mcpToken:    mcpToken,
 	}
 }
 
@@ -304,6 +343,18 @@ func (c *client) StreamDocumentGeneration(ctx context.Context, orgID, skillID st
 }
 
 func (c *client) StreamArchitect(ctx context.Context, orgID string, req ArchitectRequest) (io.ReadCloser, error) {
+	// Attach the additive MCP bundle so agents-service can reach the BFF's
+	// internal MCP discovery surface as this org. Best-effort: a mint failure
+	// must not fail design generation — the field is simply omitted and the
+	// agent falls back to its non-MCP path (legacy today; consumed in E-phase).
+	if c.mcpURL != "" && c.mcpToken != nil {
+		if tok, terr := c.mcpToken(orgID); terr != nil {
+			slog.WarnContext(ctx, "agents: MCP token mint failed; omitting mcp block", "error", terr)
+		} else {
+			req.MCP = &MCPBinding{URL: c.mcpURL, Token: tok}
+		}
+	}
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -338,11 +389,11 @@ func (c *client) StreamArchitect(ctx context.Context, orgID string, req Architec
 }
 
 func (c *client) StreamTechLeadPlan(ctx context.Context, orgID string, req TechLeadPlanRequest) (io.ReadCloser, error) {
-	return c.streamSSE(ctx, orgID, agentsBase+"/tech-lead/plan", req)
+	return c.streamSSE(ctx, orgID, agentsBase+"/task-planner/plan", req)
 }
 
 func (c *client) StreamTechLeadDetail(ctx context.Context, orgID string, req TechLeadDetailRequest) (io.ReadCloser, error) {
-	return c.streamSSE(ctx, orgID, agentsBase+"/tech-lead/detail", req)
+	return c.streamSSE(ctx, orgID, agentsBase+"/task-planner/detail", req)
 }
 
 func (c *client) StreamRequirementsChat(ctx context.Context, orgID string, req RequirementsChatRequest) (io.ReadCloser, error) {

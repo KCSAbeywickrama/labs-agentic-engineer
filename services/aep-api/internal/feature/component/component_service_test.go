@@ -315,8 +315,9 @@ func TestComponentService_GetBuildLogs_SuccessAndError(t *testing.T) {
 // the given type + optional openapi.yaml.
 func designFiles(componentDir, componentType, openapi string) map[string]string {
 	files := map[string]string{
-		artifacts.DesignRootFile:                    "# Overview\n",
-		"components/" + componentDir + "/design.md": "---\ntype: " + componentType + "\n---\n\nbody\n",
+		artifacts.DesignRootFile: "# Overview\n",
+		"components/" + componentDir + "/design.json": "{\n  \"name\": \"" + componentDir +
+			"\",\n  \"type\": \"" + componentType + "\",\n  \"description\": \"body\",\n  \"dependencies\": []\n}\n",
 	}
 	if openapi != "" {
 		files["components/"+componentDir+"/openapi.yaml"] = openapi

@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -34,6 +34,8 @@ import { MdEditor } from '@aep/md-editor';
 import { OpenApiView } from '@aep/openapi-view';
 import { api } from '../services/api';
 import type { ArtifactVersion, Design, DesignComponent } from '../services/api';
+import { DependenciesSection, type DepRef } from './architecture/DependenciesSection';
+import { DependencyDrawer } from './architecture/DependencyDrawer';
 import { projectTasksPath } from '../lib/paths';
 import VersionSelector from '../components/VersionSelector';
 import LineageLabel from '../components/LineageLabel';
@@ -85,6 +87,7 @@ function getArchitectureFileLabel(path: string): string | undefined {
 export default function ProjectArchitecturePage() {
   const navigate = useNavigate();
   const { orgId, projectId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const routeOrgId = orgId ?? 'default';
 
   const [loading, setLoading] = useState(true);
@@ -99,6 +102,7 @@ export default function ProjectArchitecturePage() {
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [activeDep, setActiveDep] = useState<DepRef | null>(null);
 
   // Streaming state populated from architect SSE events while `generating`.
   // The cell diagram reads from `streamingComponents` and the file tree shows
@@ -339,6 +343,42 @@ export default function ProjectArchitecturePage() {
   // finalize fires and the bundle refreshes, fall back to design.components.
   const effectiveComponents = generating ? streamingComponents : (design?.components ?? []);
 
+  // Deep-link: /architecture?dep=<name> opens that dependency's drawer directly
+  // (the tasks board's Provision / Provide configuration CTAs link here). Runs
+  // once the design is loaded, then clears the param so closing the drawer sticks.
+  useEffect(() => {
+    const depName = searchParams.get('dep');
+    if (!depName || activeDep || effectiveComponents.length === 0) return;
+    for (const comp of effectiveComponents) {
+      const dep = comp.dependencies?.find((d) => d.name === depName);
+      if (dep) {
+        setActiveDep({ component: comp.name, dependency: dep });
+        break;
+      }
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('dep');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, effectiveComponents, activeDep, setSearchParams]);
+
+  // When effectiveComponents changes (e.g. after onChanged refetches the design),
+  // re-derive activeDep from the fresh component list so the open drawer always
+  // shows the up-to-date dependency (e.g. org-service status flips after a
+  // request is created). If the dep is no longer found, leave activeDep as-is.
+  useEffect(() => {
+    if (!activeDep) return;
+    for (const comp of effectiveComponents) {
+      if (comp.name === activeDep.component) {
+        const freshDep = comp.dependencies?.find((d) => d.name === activeDep.dependency.name);
+        if (freshDep) {
+          setActiveDep({ component: activeDep.component, dependency: freshDep });
+        }
+        return;
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveComponents]);
+
   const designMdContent = liveContents[DESIGN_ROOT_FILE] ?? '';
   const designReadOnly = viewingHistorical || generating;
   const handleDesignMdChange = useCallback(
@@ -435,6 +475,14 @@ export default function ProjectArchitecturePage() {
                 readOnly={designReadOnly}
                 showToolbar={false}
                 placeholder="System architecture overview…"
+              />
+            </Box>
+            {/* Dependencies section — one row per (component × dependency).
+                Clicking a row opens the DependencyDrawer for resolution. */}
+            <Box sx={{ flexShrink: 0 }}>
+              <DependenciesSection
+                components={effectiveComponents}
+                onOpen={setActiveDep}
               />
             </Box>
           </Box>
@@ -579,6 +627,14 @@ export default function ProjectArchitecturePage() {
       </Box>
 
       {DESIGN_DOCUMENT_TYPES.length > 0 && null /* keep import used for tree-shake stability */}
+
+      <DependencyDrawer
+        open={!!activeDep}
+        depRef={activeDep}
+        projectId={projectId ?? ''}
+        onClose={() => setActiveDep(null)}
+        onChanged={refreshBundle}
+      />
     </PageContent>
   );
 }

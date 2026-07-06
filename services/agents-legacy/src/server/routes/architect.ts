@@ -24,6 +24,7 @@ import type { SseSink, FinalizeResolver } from "../../agents/architect/tools.js"
 import { createModel } from "../../shared/model.js";
 import { AGENTS_BASE } from "../../shared/config.js";
 import { getOrgId, getAnthropicKey } from "../../middleware/org-id.js";
+import { loadMcpTools } from "../../shared/mcp-client.js";
 
 function writeFrame(res: express.Response, frame: unknown): void {
   res.write(`data: ${JSON.stringify(frame)}\n\n`);
@@ -83,22 +84,36 @@ export function registerArchitect(app: express.Express) {
       },
     };
 
+    // aep-api attaches an additive `mcp` block (url + a per-run bearer token)
+    // to the request when it wants dependency-discovery tools available to
+    // the architect (client.go StreamArchitect). Absent ⇒ no discovery tools
+    // (today's default). Best-effort: an unreachable/unauthorized MCP server
+    // degrades to no discovery tools, never fails the turn.
+    const extraTools = parsed.data.mcp ? await loadMcpTools(parsed.data.mcp) : {};
+
     try {
-      const { finalized } = await runArchitect({
+      const { finalized, finishReason } = await runArchitect({
         model,
         input: parsed.data,
         sink,
         finalizer,
         abortSignal: abortController.signal,
+        extraTools,
       });
 
       // Loop ended without finalize() succeeding. Could be: stepCountIs hit,
       // model gave up, or upstream error. Emit error so BFF doesn't write.
       if (!finalized && !res.writableEnded) {
+        // Anthropic maps a model-level safety refusal to finishReason
+        // "content-filter" — the model declines the input and returns almost
+        // no output. Surface it distinctly so the user knows to rephrase
+        // rather than reading it as an agent malfunction.
+        const refused = finishReason === "content-filter";
         writeFrame(res, {
           type: "error",
-          errorText:
-            "architect agent ended without calling finalize — design not produced",
+          errorText: refused
+            ? "The AI assistant declined this request as it appears to conflict with its usage policies. Please rephrase and try again."
+            : "architect agent ended without calling finalize — design not produced",
         });
       }
 

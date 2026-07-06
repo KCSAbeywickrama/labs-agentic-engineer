@@ -105,6 +105,16 @@ type Config struct {
 	// cross-namespace FQDN.
 	AgentPlatformURL string
 
+	// AEPInternalBaseURL is the BFF's own base URL as reached by peer
+	// cluster-internal services (agents-service) for the internal MCP
+	// discovery surface (/internal/v1/mcp). The BFF hands agents-service an
+	// `mcp: {url, token}` bundle in the architect request; agents-service calls
+	// back to `AEPInternalBaseURL + /internal/v1/mcp` with the BFF-signed MCP
+	// token. Optional — empty disables MCP propagation (the additive `mcp`
+	// field is simply omitted; consumed in the E-phase). Read from
+	// AEP_API_INTERNAL_BASE_URL.
+	AEPInternalBaseURL string
+
 	// JWKS settings for inbound JWT verification — Thunder publishes the
 	// User JWT and Service JWT signing key at JWKSURL; verifiers refresh
 	// on kid miss. Issuer and audience configure RFC 7519 claim checks.

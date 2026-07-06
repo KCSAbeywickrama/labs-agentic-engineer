@@ -74,21 +74,73 @@ Rules:
   - In incremental mode, scope each task to the change in the spec/design
     diff. Do not re-plan the original implementation — that work is already
     captured by existing merged tasks.
+
+# Build order (dependsOn)
+
   - dependsOn names must match other titles in this batch verbatim. To
     depend on already-merged work, omit it from dependsOn (it's done).
-  - Order does not matter — dependsOn carries the topology.
+  - Order does not matter in the array — dependsOn carries the topology.
+  - A component's "depends on" list (shown per component below) names the
+    SIBLING COMPONENTS it consumes. A CONSUMER task MUST list its
+    provider components' tasks in dependsOn, so consumers are ordered
+    after their providers (e.g. a UI depending on its API lists the API's
+    task; a service depending on another service lists that service's task).
   - Titles must be unique within this batch.
-  - Output a JSON array only — no surrounding object, no commentary.`;
+
+# Platform-authored resource gates (do NOT create tasks for these)
+
+Some components declare dependencies on EXTERNAL resources (third-party
+systems whose config/secrets a human must provide) or PLATFORM resources
+(databases, caches, etc. the platform provisions). These are shown per
+component below.
+
+  - You MUST NOT emit a task to "collect configuration", "provide secrets",
+    "provision a database", or otherwise stand up an external or platform
+    resource. The platform authors those gating steps itself — they are not
+    coding work and are never your output.
+  - Instead, when a component has such a dependency, mention the gate in
+    that component's task rationale: state that the task is blocked until
+    the named external resource's values are collected / the named platform
+    resource is provisioned. This makes the build-order context explicit
+    without inventing work.
+
+Output a JSON array only — no surrounding object, no commentary.`;
+
+function renderDeps(c: SlimDesignComponent): string {
+  const lines: string[] = [];
+  if (c.dependsOn.length) {
+    lines.push(`    · depends on components: ${c.dependsOn.join(", ")}`);
+  }
+  if (c.orgServiceDependencies?.length) {
+    lines.push(
+      `    · consumes org services (other projects): ${c.orgServiceDependencies
+        .map((d) => d.name)
+        .join(", ")}`,
+    );
+  }
+  if (c.externalResources?.length) {
+    lines.push(
+      `    · external resources (GATED on platform value-collection): ${c.externalResources
+        .map((d) => (d.description ? `${d.name} (${d.description})` : d.name))
+        .join(", ")}`,
+    );
+  }
+  if (c.platformResources?.length) {
+    lines.push(
+      `    · platform resources (GATED on platform provisioning): ${c.platformResources
+        .map((d) =>
+          d.resourceType ? `${d.name} [${d.resourceType}]` : d.name,
+        )
+        .join(", ")}`,
+    );
+  }
+  return lines.length ? `\n${lines.join("\n")}` : "";
+}
 
 function renderSlimDesign(components: SlimDesignComponent[]): string {
   if (components.length === 0) return "(no components)";
   return components
-    .map(
-      (c) =>
-        `- ${c.name} (${c.componentType}, ${c.language})${
-          c.dependsOn.length ? ` — depends on: ${c.dependsOn.join(", ")}` : ""
-        }`,
-    )
+    .map((c) => `- ${c.name} (${c.componentType}, ${c.language})${renderDeps(c)}`)
     .join("\n");
 }
 
@@ -129,8 +181,11 @@ exactly one task per component** — one task that brings that component into
 existence end-to-end. Do not split a component across multiple tasks; every
 component is one task. The only exception is the narrow physical-PR-blocker
 case named in the system prompt (e.g. a data migration that must merge
-before feature code can land). Use dependsOn to encode obvious build-order
-constraints (e.g. a UI depending on its API).
+before feature code can land). Use dependsOn to encode build-order
+constraints so every consumer is ordered after its providers (e.g. a UI
+depending on its API). For components with external or platform-resource
+dependencies, note the platform value-collection / provisioning gate in the
+task rationale — do NOT create tasks for those gates.
 
 Output a JSON array of plan items only.`;
   }
@@ -165,7 +220,8 @@ is a single unit of work for one agent. A change may affect zero, one, or
 several components; produce one task for each affected component. A new task
 may target a component that already has merged tasks; that's normal in
 incremental mode. Do not propose tasks that duplicate work in
-"Existing tasks".
+"Existing tasks". Order consumers after their providers via dependsOn, and
+note any external / platform-resource gate in the rationale (never a task).
 
 Output a JSON array of plan items only.`;
 }
@@ -197,14 +253,13 @@ The agent has access to:
     agent should consult whichever of these are relevant to its task.
   - The architecture as a multi-file tree under \`specs/design/\`:
       * \`design.md\` — system-level overview.
-      * \`components/<componentName>/design.md\` — per-component design with
-        YAML frontmatter (\`type\`, \`language\`, \`dependsOn\`, \`buildpack\`,
-        \`appPath\`, \`entrypoint\`) and a Markdown body covering Overview /
-        Responsibilities / Interfaces / Implementation Notes.
+      * \`components/<componentName>/design.json\` — per-component design:
+        \`type\`, \`language\`, \`dependencies\`, \`buildpack\`, \`appPath\`,
+        \`entrypoint\`, and the description.
       * \`components/<componentName>/openapi.yaml\` — OpenAPI 3.0.3 contract.
         Present for \`type: service\` components only. Web-app components
         have NO \`openapi.yaml\`; their interface is described in their
-        \`design.md\` body.
+        \`design.json\` description.
   - The repo working tree, including any code already committed for this or
     other components.
   - The platform's coding-agent loads the \`aep\` skill and every skill
@@ -218,7 +273,7 @@ content (especially never paste OpenAPI YAML into the issue).
 
 After your body, the platform automatically appends:
   - A "Component Reference" card (name, type, language, app path, OpenAPI pointer).
-  - Component dependency wiring (workload.yaml env-binding boilerplate), when the component declares dependsOn.
+  - Component dependency wiring (workload.yaml env-binding boilerplate), when the component declares component or external/platform-resource dependencies.
   - Skill-fact bullets sourced from the design-version snapshot — one per attached skill.
   - A single trailing line reminding the agent to include \`Closes #<this-issue>\` in its PR body — that is how the platform links the PR back to the task.
 
@@ -311,7 +366,7 @@ Section rules:
 
   - **References**: Task-specific pointers, not content. The platform's
     appended Component Reference card already points at the component's
-    \`specs/design/components/<componentName>/design.md\` and (for service
+    \`specs/design/components/<componentName>/design.json\` and (for service
     components) \`specs/design/components/<componentName>/openapi.yaml\` —
     do NOT repeat those generic pointers here. Use References for things
     the agent might otherwise miss:
@@ -323,7 +378,7 @@ Section rules:
       * For EXISTING-component tasks (esp. bug fixes), the likely **area**
         of the codebase to start in.
     If there is nothing task-specific to point at, write "None.".
-    Never inline OpenAPI YAML or design.md contents. Never enumerate endpoints
+    Never inline OpenAPI YAML or design.json contents. Never enumerate endpoints
     or schemas in prose — point at \`openapi.yaml\` and stop.
 
   - **Task dependencies**: List other tasks in THIS batch by title (from the
@@ -333,7 +388,7 @@ Hard rules:
   - Stay at the WHAT/boundary altitude. Do NOT write step-by-step instructions,
     code skeletons, or library choices. Trust the agent + the skills.
   - Tailor depth to task kind. Don't pad short tasks; don't truncate big ones.
-  - Do NOT inline OpenAPI YAML or per-component design.md content. Reference by path.
+  - Do NOT inline OpenAPI YAML or per-component design.json content. Reference by path.
   - Do NOT restate the platform-appended sections (Component Reference card,
     constraints, do-not list, submission flow, project-structure hints,
     workload.yaml templates, local setup, "Closes #N").
@@ -394,7 +449,7 @@ ${spec}
 ## Component situation
 ${componentSituation}
 
-## Component design entry (assembled from \`specs/design/components/${item.componentName}/design.md\`; \`openAPISpec\` stripped here for brevity. The agent reads the full \`design.md\` + \`openapi.yaml\` on disk. Do NOT inline.)
+## Component design entry (assembled from \`specs/design/components/${item.componentName}/design.json\`; \`openAPISpec\` stripped here for brevity. The agent reads the full \`design.json\` + \`openapi.yaml\` on disk. Do NOT inline.)
 \`\`\`json
 ${item.designSlice}
 \`\`\`

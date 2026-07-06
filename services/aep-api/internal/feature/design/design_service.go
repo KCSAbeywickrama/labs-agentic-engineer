@@ -41,6 +41,38 @@ import (
 // consumer.
 var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generating a design")
 
+// ErrUnresolvedDependency is the design-domain sentinel surfaced (as 409 by
+// the controller) when a design save is attempted while one or more
+// dependencies are still unresolved (e.g. an external dep that declares
+// needsSpec but has no specPath yet). The caller must resolve the dependency
+// before the design can be approved. Draft autosave (UpdateDesignFile) is
+// NEVER gated — only SaveAndProceed checks this.
+var ErrUnresolvedDependency = errors.New("design has unresolved dependencies — resolve them before saving")
+
+// ErrSpecFetchFailed is the design-domain sentinel surfaced (as 502 by the
+// HTTP handler) when fetching an OpenAPI spec from a user/architect-supplied
+// URL fails (SaveAndProceed's auto-fetch phase logs-and-continues instead of
+// surfacing this; only CollectSpec's explicit specURL path returns it).
+var ErrSpecFetchFailed = errors.New("failed to fetch spec from URL")
+
+// ErrInvalidSpec is the design-domain sentinel surfaced (as 400 by the HTTP
+// handler) when the supplied OpenAPI document fails content validation —
+// depName path-traversal rejection or an invalid/incomplete OpenAPI 3.x doc.
+// Storage/infra failures are intentionally NOT wrapped with this sentinel so
+// the handler can distinguish them and return 500.
+var ErrInvalidSpec = errors.New("invalid OpenAPI spec")
+
+// ErrDependencyNotFound is the design-domain sentinel surfaced (as 404 by the
+// HTTP handler) when CollectSpec targets a component/dependency that does not
+// exist in the current design — so an unknown dep never orphans a stored spec
+// blob.
+var ErrDependencyNotFound = errors.New("dependency not found in design")
+
+// ErrDependencyWrongKind is the design-domain sentinel surfaced (as 400 by the
+// HTTP handler) when CollectSpec targets a dependency whose kind is not
+// `external` — spec collection applies only to external dependencies.
+var ErrDependencyWrongKind = errors.New("dependency is not an external dependency")
+
 // toK8sName is a thin in-package shim over k8sname.ToK8sName.
 func toK8sName(name string) string { return k8sname.ToK8sName(name) }
 
@@ -74,6 +106,10 @@ type DesignService interface {
 	SaveAndProceed(ctx context.Context, orgID, projectID string) (*models.Design, error)
 	DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error)
 	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]models.ArtifactVersion, error)
+	// CollectSpec stores a consumed OpenAPI spec for an external dependency and
+	// records its specPath on the component design (clearing the needsSpec
+	// gate). Exactly one of rawSpec or specURL must be non-empty.
+	CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (specPath string, err error)
 }
 
 type designService struct {
@@ -90,6 +126,15 @@ type designService struct {
 	// Optional in tests; nil → architect runs with no skills attached
 	// (equivalent to pre-skills-system behaviour).
 	skillSvc skillCatalog
+	// externalResourceReg registers `external` dependencies into the org-level
+	// external-resource catalog when a design is saved/generated. Optional in
+	// tests; nil → no registration (values/wiring are provisioned later,
+	// independently, once a consumer requests access).
+	externalResourceReg externalResourceRegistrar
+	// fetchSpec is the SSRF-guarded HTTP fetch function used by the auto-fetch
+	// path in SaveAndProceed. Defaults to artifacts.FetchSpecFromURL;
+	// injectable for tests so no real HTTP calls are made.
+	fetchSpec func(ctx context.Context, url string) ([]byte, error)
 }
 
 // traitSyncReconciler is design_service's narrow consumer port for the
@@ -106,6 +151,15 @@ type traitSyncReconciler interface {
 // satisfies it; defined here so design needn't import the skills feature.
 type skillCatalog interface {
 	List(ctx context.Context, orgID string) ([]models.Skill, error)
+}
+
+// externalResourceRegistrar is design_service's narrow consumer port for the
+// dependency-mgmt external-resource catalog. *repositories.ExternalResourceRepository
+// satisfies it; defined here (consumer side) so design needn't import the
+// repositories package concretely. Wired via SetExternalResourceRegistry at
+// the composition root once the repository is available there.
+type externalResourceRegistrar interface {
+	Upsert(ctx context.Context, orgID, name, description string, schema []models.ConfigKey) (*models.ExternalResource, error)
 }
 
 // taskReconciler is design_service's narrow consumer port for the task
@@ -126,6 +180,7 @@ func NewDesignService(
 		store:        store,
 		agentsClient: agentsClient,
 		artifactSvc:  artifactSvc,
+		fetchSpec:    artifacts.FetchSpecFromURL,
 	}
 }
 
@@ -139,6 +194,40 @@ func (s *designService) SetTraitSync(traitSync traitSyncReconciler) {
 
 func (s *designService) SetSkillService(svc skillCatalog) {
 	s.skillSvc = svc
+}
+
+// SetExternalResourceRegistry wires the external-resource catalog so
+// `external` dependencies are registered (best-effort) whenever a design is
+// generated. Mirrors the other optional-dependency Set* setters.
+func (s *designService) SetExternalResourceRegistry(reg externalResourceRegistrar) {
+	s.externalResourceReg = reg
+}
+
+// registerExternalResources best-effort upserts every distinct `external`
+// dependency in the design into the org's external-resource catalog (the
+// reusable definition layer consumers request access to later). Non-fatal: a
+// registry hiccup must never fail a design generation — values + wiring are
+// provisioned later, independently, when a consumer requests access.
+func (s *designService) registerExternalResources(ctx context.Context, orgID string, design *artifacts.DesignFile) {
+	if s.externalResourceReg == nil || design == nil {
+		return
+	}
+	seen := map[string]struct{}{}
+	for _, c := range design.Components {
+		for _, dep := range c.Dependencies {
+			if dep.Kind != models.DependencyKindExternal {
+				continue
+			}
+			if _, ok := seen[dep.Name]; ok {
+				continue
+			}
+			seen[dep.Name] = struct{}{}
+			if _, err := s.externalResourceReg.Upsert(ctx, orgID, dep.Name, dep.Description, dep.Config); err != nil {
+				slog.WarnContext(ctx, "failed to register external resource",
+					"org", orgID, "resource", dep.Name, "error", err)
+			}
+		}
+	}
 }
 
 func (s *designService) GetDesign(ctx context.Context, orgID, projectID string) (*models.Design, error) {
@@ -418,6 +507,10 @@ func (s *designService) StreamGenerateDesign(ctx context.Context, orgID, project
 		return fmt.Errorf("write design: %w", err)
 	}
 
+	// Catalogue any `external` dependencies into the org's external-resource
+	// registry (best-effort — see registerExternalResources).
+	s.registerExternalResources(ctx, orgID, designFile)
+
 	slog.InfoContext(ctx, "design written from stream",
 		"project", projectID, "components", len(designFile.Components))
 	return nil
@@ -469,7 +562,7 @@ func (s *designService) GetDesignBundleAtTag(ctx context.Context, orgID, project
 // UpdateDesignFile writes a single file under specs/design/ and returns
 // the refreshed bundle.
 //
-// Side effect: when the written file is a per-component `design.md`,
+// Side effect: when the written file is a per-component `design.json`,
 // fire `SyncComponentTraits` so an `exposesAPI.auth` toggle propagates to
 // the OC Component + ReleaseBindings before the next dispatch. Best-
 // effort — failures are logged but never bubble (design tree is the
@@ -494,12 +587,12 @@ func (s *designService) UpdateDesignFile(ctx context.Context, orgID, projectID, 
 }
 
 // componentNameFromDesignPath returns the component name encoded in a
-// `components/<name>/design.md` sub-path, or false for any other path
+// `components/<name>/design.json` sub-path, or false for any other path
 // (root design.md, openapi.yaml, etc.). Used by UpdateDesignFile to gate
 // the trait_sync hook to the one path where `exposesAPI.auth` lives.
 func componentNameFromDesignPath(subPath string) (string, bool) {
 	const prefix = "components/"
-	const suffix = "/design.md"
+	const suffix = "/design.json"
 	if !strings.HasPrefix(subPath, prefix) || !strings.HasSuffix(subPath, suffix) {
 		return "", false
 	}
@@ -570,6 +663,65 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID str
 		return nil, artifacts.ErrDesignNotFound
 	}
 
+	// Auto-fetch phase: for each external dep the architect flagged with a
+	// specUrl hint but no specPath yet, attempt a fetch+store before the
+	// proceed-gate runs. A successful fetch clears the specUrl hint and
+	// records the specPath via CollectSpec → store.SetDependencySpecPath, so
+	// the gate sees the dep as resolved. A failed fetch (or a failed
+	// CollectSpec) is non-fatal — logged, and the dep is left unresolved (the
+	// user can supply the spec manually, or the gate below blocks the save as
+	// usual). After any fetch attempt, re-read the design so the gate
+	// operates on the freshest state.
+	needsReread := false
+	fetchFn := s.fetchSpec
+	if fetchFn == nil {
+		fetchFn = artifacts.FetchSpecFromURL
+	}
+	for _, c := range designFile.Components {
+		for _, dep := range c.Dependencies {
+			if dep.Kind != models.DependencyKindExternal {
+				continue
+			}
+			if !dep.NeedsSpec || dep.SpecPath != "" || strings.TrimSpace(dep.SpecUrl) == "" {
+				continue
+			}
+			rawSpec, fetchErr := fetchFn(ctx, dep.SpecUrl)
+			if fetchErr != nil {
+				slog.WarnContext(ctx, "auto-fetch spec failed — dep left unresolved",
+					"org", orgID, "project", projectID,
+					"component", c.Name, "dep", dep.Name,
+					"specUrl", dep.SpecUrl, "error", fetchErr)
+				needsReread = true
+				continue
+			}
+			if _, collectErr := s.CollectSpec(ctx, orgID, projectID, c.Name, dep.Name, rawSpec, ""); collectErr != nil {
+				slog.WarnContext(ctx, "auto-fetch: CollectSpec failed — dep left unresolved",
+					"org", orgID, "project", projectID,
+					"component", c.Name, "dep", dep.Name, "error", collectErr)
+			}
+			needsReread = true
+		}
+	}
+	// Re-read the design so the gate below sees the updated specPath values.
+	if needsReread {
+		updated, rerr := s.store.ReadDesign(ctx, orgID, projectID)
+		if rerr == nil && updated != nil {
+			designFile = updated
+		}
+	}
+
+	// Block save when any dependency is in a non-actionable state —
+	// unresolved (e.g. external needsSpec with no specPath, or absent
+	// org-service), ambiguous (multiple candidates), or blocked (project-only
+	// org-service awaiting an access grant). Status is computed at read time
+	// (assembleDependencies + resolveOrgServices) so we check the assembled
+	// view. Draft autosave (UpdateDesignFile) is NOT gated — only this
+	// SaveAndProceed path blocks.
+	if compName, depName, status, blocked := firstUnresolvedDependency(designFile.Components); blocked {
+		return nil, fmt.Errorf("%w: component %q dep %q (status: %s)",
+			ErrUnresolvedDependency, compName, depName, status)
+	}
+
 	res, err := s.artifactSvc.SaveDesign(ctx, orgID, projectID, artifacts.SaveRequest{
 		Message: "Update design",
 	})
@@ -609,6 +761,26 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID str
 	}, nil
 }
 
+// firstUnresolvedDependency returns the first dependency (in component then
+// dependency order) across components whose computed Status marks it
+// non-actionable — ambiguous (multiple candidates), unresolved (e.g. an
+// external dep still needing a spec), or blocked (an org-service awaiting an
+// access grant) — the condition SaveAndProceed's proceed-gate blocks a save
+// on. ok is false when every dependency is resolved or carries no computed
+// status (the common case: no dependencies, or every dependency already
+// resolved).
+func firstUnresolvedDependency(components []models.DesignComponent) (componentName, depName, status string, ok bool) {
+	for _, c := range components {
+		for _, dep := range c.Dependencies {
+			switch dep.Status {
+			case models.DependencyStatusAmbiguous, models.DependencyStatusUnresolved, models.DependencyStatusBlocked:
+				return c.Name, dep.Name, dep.Status, true
+			}
+		}
+	}
+	return "", "", "", false
+}
+
 func (s *designService) DiscardChanges(ctx context.Context, orgID, projectID string) (*models.Design, error) {
 	if s.artifactSvc == nil {
 		return nil, fmt.Errorf("git client not configured")
@@ -631,6 +803,84 @@ func (s *designService) ListDesignVersions(ctx context.Context, orgID, projectID
 		return nil, fmt.Errorf("list design versions: %w", err)
 	}
 	return mapDesignVersions(v), nil
+}
+
+// CollectSpec stores a consumed OpenAPI spec for an external dependency and
+// records its specPath on the component design (clearing the needsSpec
+// gate). Exactly one of rawSpec or specURL must be non-empty. When specURL is
+// provided, artifacts.FetchSpecFromURL is called first; a fetch failure is
+// wrapped in ErrSpecFetchFailed so the HTTP handler can map it to a 502.
+func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error) {
+	if len(rawSpec) == 0 && specURL == "" {
+		return "", fmt.Errorf("provide rawSpec or specUrl")
+	}
+	if len(rawSpec) != 0 && specURL != "" {
+		return "", fmt.Errorf("provide only one of rawSpec or specUrl")
+	}
+	// Resolve the target component + dependency from the current design BEFORE
+	// storing anything, so an unknown dep (404) or a non-external dep (400) never
+	// leaves an orphan spec blob behind.
+	if err := s.validateExternalDepTarget(ctx, orgID, projectID, component, depName); err != nil {
+		return "", err
+	}
+	if len(rawSpec) == 0 {
+		fetched, err := artifacts.FetchSpecFromURL(ctx, specURL)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrSpecFetchFailed, err)
+		}
+		rawSpec = fetched
+	}
+	specPath, err := s.store.StoreConsumedSpec(ctx, orgID, projectID, component, depName, rawSpec)
+	if err != nil {
+		// Re-wrap validation-class errors (depName traversal + invalid OpenAPI)
+		// as ErrInvalidSpec so the HTTP handler maps them to 400.
+		// Infrastructure failures (normalize/storage) are not wrapped with
+		// ErrInvalidSpecContent and fall through as plain errors → handler
+		// maps them to 500.
+		if errors.Is(err, artifacts.ErrInvalidSpecContent) {
+			return "", fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		}
+		return "", err
+	}
+	if err := s.store.SetDependencySpecPath(ctx, orgID, projectID, component, depName, specPath); err != nil {
+		return "", err
+	}
+	return specPath, nil
+}
+
+// validateExternalDepTarget resolves (component, depName) against the current
+// design and enforces the CollectSpec kind policy: unknown component/dep →
+// ErrDependencyNotFound (404), a dep of a kind other than `external` →
+// ErrDependencyWrongKind (400, naming both kinds). Runs BEFORE any spec store so
+// a rejected target never orphans a blob.
+func (s *designService) validateExternalDepTarget(ctx context.Context, orgID, projectID, component, depName string) error {
+	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		if artifacts.IsNotFound(err) {
+			return fmt.Errorf("%w: no design for project %q", ErrDependencyNotFound, projectID)
+		}
+		return fmt.Errorf("read design: %w", err)
+	}
+	if designFile == nil {
+		return fmt.Errorf("%w: no design for project %q", ErrDependencyNotFound, projectID)
+	}
+	for _, c := range designFile.Components {
+		if c.Name != component {
+			continue
+		}
+		for _, dep := range c.Dependencies {
+			if dep.Name != depName {
+				continue
+			}
+			if dep.Kind != models.DependencyKindExternal {
+				return fmt.Errorf("%w: dependency %q on component %q has kind %q; spec collection applies only to kind %q",
+					ErrDependencyWrongKind, depName, component, dep.Kind, models.DependencyKindExternal)
+			}
+			return nil
+		}
+		return fmt.Errorf("%w: dependency %q not found on component %q", ErrDependencyNotFound, depName, component)
+	}
+	return fmt.Errorf("%w: component %q not found in design", ErrDependencyNotFound, component)
 }
 
 // extractWireframeDsls picks `.dsl` files from the requirements bundle and

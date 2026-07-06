@@ -94,6 +94,15 @@ func (f *fakeBuildDispatcher) DispatchTaskBuild(ctx context.Context, task *model
 	return f.fn(ctx, task, sha)
 }
 
+// fakeAccessRejector captures the P3.5 reject close-out invocation.
+type fakeAccessRejector struct {
+	fn func(ctx context.Context, providerTaskID string) error
+}
+
+func (f *fakeAccessRejector) RejectByProviderTask(ctx context.Context, providerTaskID string) error {
+	return f.fn(ctx, providerTaskID)
+}
+
 // fakeDispatchHook captures the post-commit deploy cascade trigger.
 type fakeDispatchHook struct {
 	ch chan [3]string
@@ -371,6 +380,72 @@ func TestHandler_PullRequestClosed_MergedDispatchesBuild(t *testing.T) {
 	// The merge handler dispatches the build for exactly this task + merge SHA.
 	if dispatchedTask != id || dispatchedSHA != "cafebabe" {
 		t.Fatalf("build not dispatched for the merged task: task=%q sha=%q", dispatchedTask, dispatchedSHA)
+	}
+}
+
+// TestHandler_PullRequestClosed_UnmergedRejectsAccessForOrgPublishTask covers
+// the P3.5 close-out: an unmerged PR-closed on a provider `org-publish` task
+// must, after the task transitions to `rejected`, invoke AccessRejector with
+// that task's id so every consumer AccessRequest riding on it flips to
+// `rejected` too.
+func TestHandler_PullRequestClosed_UnmergedRejectsAccessForOrgPublishTask(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+	seedRepo(t, db, "acme", "provider-web", "acme/provider-web")
+	id := seedTask(t, db, &models.ComponentTask{
+		OrgID: "acme", ProjectID: "provider-web", ComponentName: "catalog-api",
+		Type: models.TaskTypeOrgPublish, PullRequestNumber: 9, Status: string(models.TaskStatusInProgress),
+	})
+
+	var rejectedTaskID string
+	rejector := &fakeAccessRejector{fn: func(_ context.Context, providerTaskID string) error {
+		rejectedTaskID = providerTaskID
+		return nil
+	}}
+	h := &Handler{db: db, projector: NewProjector(db), accessRejector: rejector}
+
+	body := `{"pull_request":{"number":9,"merged":false},"repository":{"full_name":"acme/provider-web"}}`
+	if err := h.PullRequestClosed(ctx, "pull_request", "closed", []byte(body)); err != nil {
+		t.Fatalf("PullRequestClosed: %v", err)
+	}
+
+	got := reload(t, db, id)
+	if got.Status != string(models.TaskStatusRejected) {
+		t.Fatalf("unmerged PR-closed must reject the task, got status=%q", got.Status)
+	}
+	if rejectedTaskID != id {
+		t.Fatalf("AccessRejector.RejectByProviderTask not invoked with the rejected org-publish task id: got %q, want %q", rejectedTaskID, id)
+	}
+}
+
+// TestHandler_PullRequestClosed_UnmergedSkipsAccessRejectForComponentTask
+// asserts the P3.5 close-out is scoped to org-publish tasks only — a regular
+// component task rejecting must NOT invoke AccessRejector.
+func TestHandler_PullRequestClosed_UnmergedSkipsAccessRejectForComponentTask(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+	seedRepo(t, db, "acme", "web", "acme/web")
+	id := seedTask(t, db, &models.ComponentTask{
+		OrgID: "acme", ProjectID: "web", ComponentName: "svc",
+		Type: models.TaskTypeComponent, PullRequestNumber: 4, Status: string(models.TaskStatusInProgress),
+	})
+
+	called := false
+	rejector := &fakeAccessRejector{fn: func(context.Context, string) error { called = true; return nil }}
+	h := &Handler{db: db, projector: NewProjector(db), accessRejector: rejector}
+
+	body := `{"pull_request":{"number":4,"merged":false},"repository":{"full_name":"acme/web"}}`
+	if err := h.PullRequestClosed(ctx, "pull_request", "closed", []byte(body)); err != nil {
+		t.Fatalf("PullRequestClosed: %v", err)
+	}
+	got := reload(t, db, id)
+	if got.Status != string(models.TaskStatusRejected) {
+		t.Fatalf("unmerged PR-closed must still reject the component task, got status=%q", got.Status)
+	}
+	if called {
+		t.Fatal("AccessRejector must not be invoked for a non-org-publish task")
 	}
 }
 

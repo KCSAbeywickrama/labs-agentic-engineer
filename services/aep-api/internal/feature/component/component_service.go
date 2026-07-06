@@ -132,7 +132,7 @@ func (s *componentService) UpdateWorkflowEnvVars(ctx context.Context, orgName, p
 }
 
 // GetComponentOpenAPI reads the `specs/design/` tree via the ArtifactStore
-// (assembling per-component design.md + openapi.yaml into the in-memory
+// (assembling per-component design.json + openapi.yaml into the in-memory
 // design) and returns the OpenAPI spec for the named component. The URL
 // param is the k8s-shaped slug; we match it against k8sname.ToK8sName(design.Name)
 // so callers can use the same identifier they use everywhere else (build,

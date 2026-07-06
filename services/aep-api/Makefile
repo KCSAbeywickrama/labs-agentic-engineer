@@ -48,6 +48,14 @@ test-db:
 # Pinned spec version — bump this and re-run `make gen-oc-client` when the
 # upstream OC API changes. Keep aligned with the OC build deployed by the
 # deployments-v2/wso2cloud-deployment submodule. Matches agent-manager.
+#
+# NOTE: the deployed OpenChoreo is 1.1.1 (deployments/scripts/env.sh), but this
+# generated-client spec pin stays at v1.0.1-hotfix.1 DELIBERATELY: the Resource
+# model types (ResourceType / Resource / ResourceReleaseBinding) are hand-rolled
+# in internal/clients/openchoreo/resource_client.go because the pinned spec
+# predates them. Bump this pin only when upstream publishes a spec that COVERS
+# those types (so gen can replace the hand-rolled client), not merely to track
+# the deployed OC version.
 OC_SPEC_VERSION ?= v1.0.1-hotfix.1
 OC_SPEC_URL     ?= https://raw.githubusercontent.com/openchoreo/openchoreo/$(OC_SPEC_VERSION)/openapi/openchoreo-api.yaml
 OAPI_CODEGEN    ?= go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.0

@@ -49,6 +49,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
@@ -105,6 +107,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	taskRepo := repositories.NewTaskRepository(db)
 	configRepo := repositories.NewConfigRepository(db)
 	repoRepo := repositories.NewRepoRepository(db)
+	// Dependency-management repos (A3). extResRepo is the org external-resource
+	// catalog (registry list/get/consumers/delete + schema-bump upsert);
+	// accessReqRepo is the cross-project access-request store. Both key on the
+	// OC org handle — the same org key humakit binds from the token and every
+	// other read/write in Build uses (see the org-id-consistency note in the
+	// dependency-management wiring block below).
+	extResRepo := repositories.NewExternalResourceRepository(db)
+	accessReqRepo := repositories.NewAccessRequestRepository(db)
 
 	// Token provider for service-to-service auth. OC authorizes requests by
 	// the service client subject (aep-api-client), so every OC API call
@@ -164,6 +174,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
 	// for both cloud (CP/WP split) and local k3d — one unified path.
 	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
+	// ResourceClient drives the dependency-management surface: the org endpoint
+	// catalog (C1), the platform-resource type catalog + native provisioner (C3),
+	// the external-resource provisioner (C2), the resource-readiness watcher (D3),
+	// and the dispatch-time binding reader (D2). Same M2M/impersonation posture
+	// as the other OC clients (ocConfig).
+	resourceClient := openchoreo.NewResourceClient(ocConfig)
 
 	// Observability client (optional — build logs disabled when URL not set)
 	var observClient observability.Client
@@ -395,6 +411,18 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// when configured, so c.signer == nil holds in dev (no signing key).
 		agentsSigner = taskTokens
 	}
+	// MCP propagation into the architect request (C5 + E-phase). Only when both
+	// the internal self-URL is configured AND the RS256 signer exists (the same
+	// key mints the aud=aep-api-mcp token). The URL is derived from config; when
+	// unset the additive `mcp` field is simply omitted. agents-service consumes
+	// it in the E-phase — legacy ignores it.
+	var mcpURL string
+	var mcpTokenIssuer agents.MCPTokenIssuer
+	if taskTokens != nil && cfg.AEPInternalBaseURL != "" {
+		mcpURL = strings.TrimRight(cfg.AEPInternalBaseURL, "/") + "/internal/v1/mcp"
+		mcpTokenIssuer = taskTokens.IssueMCPToken
+		slog.Info("agents MCP propagation enabled", "mcpURL", mcpURL)
+	}
 	agentsClient := agents.NewClient(cfg.AgentsService.BaseURL, agentsSigner,
 		func(ctx context.Context, orgID string) (string, error) {
 			res, err := anthropicCredService.EffectiveKey(ctx, orgID)
@@ -405,7 +433,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 				return "", agents.ErrNoAnthropicKey
 			}
 			return res.Key, nil
-		})
+		}, mcpURL, mcpTokenIssuer)
 
 	// SM-API mirror writer wired into both credential services. nil-safe via
 	// the Enabled() check.
@@ -419,6 +447,27 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// external-API catalog + the `DesignFile` YAML split/assemble layer
 	// on top of raw file I/O.
 	artifactStore := artifacts.NewArtifactStore(artifactSvcGit)
+
+	// Dependency-management: the org endpoint catalog (C1) over the OC
+	// ResourceClient. It is the single provider of org-service resolution and
+	// is used in three roles: (a) read-time org-service dependency status on
+	// ReadDesign (SetOrgServiceResolver below), (b) the dispatch-time
+	// consumer-dependency renderer (D2, wired on dispatchSvc), (c) the access-
+	// request provider lookup (C4) and the MCP org-endpoint tool (C5).
+	//
+	// SetOrgServiceResolver MUST run before any design read so the 4-state
+	// org-service status (resolved/blocked/unresolved) is computed; wiring it
+	// here — at store construction, before designService and every request —
+	// guarantees that ordering.
+	depEndpointCatalog := endpoints.NewCatalog(resourceClient)
+	artifactStore.SetOrgServiceResolver(depEndpointCatalog)
+
+	// designComponentsReader adapts artifactStore.ReadDesign onto the models-
+	// typed DesignReader port both dependencies/resources (C3) and
+	// dependencies/endpoints (C4) declare — keeping those packages off the
+	// artifacts feature edge (their arch-allowlist rows stay minimal). nil
+	// design ⇒ nil components ("no design yet").
+	designReader := designComponentsReader{store: artifactStore}
 
 	// Repo-backed skills store (single source of truth = per-org org-skills
 	// repo). Reads HEAD via the GitHub API with an in-memory cache; writes
@@ -447,6 +496,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	requirementsService := requirements.NewRequirementsService(artifactStore, agentsClient, artifactSvcGit).WithLocker(requirementsDirLocker)
 	requirementsChatService := requirements.NewRequirementsChatService(artifactStore, agentsClient, artifactSvcGit, requirementsDirLocker)
 	designService := design.NewDesignService(artifactStore, agentsClient, artifactSvcGit)
+	// B4: as StreamGenerateDesign lands `external`-kind dependencies, the design
+	// service registers/updates each in the org external-resource catalog (A3
+	// repo) so later value-collection + provisioning have a durable schema. nil
+	// registrar was a documented no-op until this wiring.
+	designService.SetExternalResourceRegistry(extResRepo)
 
 	taskService := task.NewTaskService(db, taskRepo, artifactStore, issueService, artifactSvcGit, repoService, agentsClient)
 	boardService := task.NewBoardService(repoBoardService, taskRepo)
@@ -468,7 +522,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// `api-configuration` ClusterTrait on a Component CR + per-environment
 	// ReleaseBindings. Hooked from both the dispatch path (after
 	// CreateComponent) and the design-edit path (after
-	// `components/<name>/design.md` PUT). See
+	// `components/<name>/design.json` PUT). See
 	// docs/design/api-platform-integration.md §6 Phase 2.
 	traitSyncService := component.NewTraitSyncService(componentClient, artifactStore)
 	designService.SetTraitSync(traitSyncService)
@@ -563,6 +617,49 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	webhookRouter := webhook.NewRouter()
 	projector := task.NewProjector(db)
 
+	// ── Dependency management: external + platform resources, access requests ──
+	// Constructed after the projector because the value/resource services and
+	// the resource watcher complete tasks ONLY through the projector's contracts
+	// transitions (TaskCompleter/TaskTransitions) — the sole legal way to move
+	// ComponentTask.Status. Org-id consistency: every collaborator below keys on
+	// the OC org handle (the humakit token org). At the HTTP tier the resources
+	// surface passes OrgHandle for both the orgHandle and ocOrgID params (C3);
+	// the ValueService keeps the two separate only so async SM-API callers can
+	// diverge — here they are the same handle used everywhere else in Build.
+	//
+	// External-resource provisioner (C2): authors the OC Resource + per-env
+	// bindings and writes secret fields to SM-API (smWriter). ValueService turns
+	// user per-env values into a provision + config-collection task completion.
+	externalResourceProvisioner := resources.NewExternalResourceProvisioner(extResRepo, resourceClient, smWriter)
+	// RedispatchFunc is deliberately nil (sanctioned no-op, same rationale as
+	// D3's ResourceWatcher): completeConfigTask lands the config-collection task
+	// in `deployed` via TaskEventValuesProvisioned, and the projector's
+	// OnTaskDeployed cascade (DispatchCascadeHook, wired below) already re-runs
+	// DispatchTasks under the per-project lock on that transition. Wiring a
+	// redispatch closure here would double-fire the cascade.
+	externalResourceValues := resources.NewValueService(extResRepo, externalResourceProvisioner, taskRepo, projector, nil)
+	// Platform-resource half (C3): the installed ClusterResourceType catalog
+	// (read-only discovery; also the MCP resource-type tool) + the OC-native
+	// provisioner + the provision/status service.
+	resourceTypeCatalog := resources.NewResourceTypeCatalog(resourceClient)
+	platformResourceProvisioner := resources.NewOCNativeProvisioner(resourceClient)
+	resourceService := resources.NewResourceService(designReader, platformResourceProvisioner, taskRepo, projector)
+
+	// Cross-project access-request state machine (C4). Single owner of every
+	// transition; grant is driven from the deploy cascade (SetAccessGrant below)
+	// and reject from the webhook path (RegisterHandlers below).
+	accessService := endpoints.NewAccessService(accessReqRepo, depEndpointCatalog, designReader, issueService, taskRepo, artifactStore)
+
+	// Project teardown (D4): tearing down a project deprovisions its platform
+	// resources AND its external resources (OC Resources/bindings carry only a
+	// logical owner, so the OC Project delete doesn't cascade them).
+	projectService.SetResourceDeprovisioner(platformResourceProvisioner)
+	projectService.SetExternalResourceDeprovisioner(externalResourceProvisioner)
+
+	// Resource-readiness watcher (D3): completes resource-provisioning tasks when
+	// their OC bindings go Ready. Appended to the watcher slice below.
+	resourceWatcher := codingagent.NewResourceWatcher(db, resourceClient, projector, asServiceIdentity)
+
 	wfRunService := codingagent.NewWorkflowRunService(db, taskRepo, componentClient, repoService, buildCredService, artifactStore, projector, asServiceIdentity)
 
 	// Dispatch service routes to WorkflowRunService.TriggerCodingAgent
@@ -590,6 +687,17 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		runtimeConfigSvc.SetThunderAdmin(thunderAdminClient)
 	}
 	dispatchSvc.SetRuntimeConfig(runtimeConfigSvc)
+	// D2: at dispatch time the BFF resolves the component's org-service /
+	// same-project component endpoints (via the C1 catalog) plus its bound
+	// external-/platform-resource outputs (via the OC binding reader) and posts
+	// the exact workload.yaml `dependencies:` block to the task's GitHub issue.
+	// resourceClient.GetBinding and issueService.CommentIssue already match the
+	// narrow func ports (BindingReader / IssueCommenter) verbatim.
+	dispatchSvc.SetConsumerDependencyResolver(depEndpointCatalog, resourceClient.GetBinding, issueService.CommentIssue)
+	// D2: the proxy dispatch path materialises the task's bound external-resource
+	// secrets into the runner pod via per-run ExternalSecrets. The provisioner's
+	// ResolveRunnerSecrets matches the resolver func port verbatim.
+	dispatchSvc.SetExternalResourceSecretResolver(externalResourceProvisioner.ResolveRunnerSecrets)
 	slog.Info("Dispatch service", "agentPlatformURL", cfg.AgentPlatformURL)
 
 	// Wire the post-deploy dispatch cascade. The projector fires
@@ -600,11 +708,18 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	cascadeHook := codingagent.NewDispatchCascadeHook(db, dispatchSvc)
 	cascadeHook.SetTraitSync(traitSyncService)
 	cascadeHook.SetRuntimeConfig(runtimeConfigSvc)
+	// D2/C4: when a provider's org-publish task deploys, grant every open
+	// AccessRequest riding on it (flip riders → granted, mark org-published,
+	// close the issue). Matched on the logical component name.
+	cascadeHook.SetAccessGrant(accessService)
 	projector.SetDispatchHook(cascadeHook)
 
+	// D1/C4: the AccessRejector closes out consumer AccessRequests when a
+	// provider's org-publish PR is closed unmerged (task → rejected). The
+	// AccessService is now constructed, so it is wired here (was nil until D5).
 	task.RegisterHandlers(func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
 		webhookRouter.Register(event, action, webhook.EventHandlerFunc(h))
-	}, db, projector, wfRunService)
+	}, db, projector, wfRunService, accessService)
 	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, taskRepo)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
 
@@ -723,7 +838,20 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		GitHubAppSlug:       cfg.GitHubAppSlug,
 		BFFPublicURL:        cfg.BFFPublicURL,
 		GitHubAppClientID:   cfg.GitHubAppClientID,
+		// Dependency-management surface (C2/C3/C4). Concrete services now that
+		// the composition root constructs them; nil-guards to 503 disappear.
+		ExternalResourceRegistry: extResRepo,
+		ExternalResourceValues:   externalResourceValues,
+		ResourceSvc:              resourceService,
+		ResourceClient:           resourceClient,
+		AccessSvc:                accessService,
 	}
+
+	// MCP discovery ports (C5) — wired concretely so the /internal/v1/mcp mount
+	// answers 401 (not 503) once a caller presents a valid BFF-signed MCP token.
+	params.MCPExternalResources = extResRepo
+	params.MCPOrgEndpoints = depEndpointCatalog
+	params.MCPResourceTypes = resourceTypeCatalog
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 
@@ -750,6 +878,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised credentials.
 		credValidator,
+		// Resource-readiness watcher (D3) — 10s sweep completing
+		// resource-provisioning tasks whose OC bindings have gone Ready (and
+		// failing them on terminal binding conditions), via the projector.
+		resourceWatcher,
 	}
 	// Coding-agent run watchers coexist because each filters to the tasks it
 	// owns by run-name prefix: the proxy-based JobWatcher only picks up "ca-…"
@@ -782,6 +914,24 @@ func (a buildSecretStagerAdapter) StageBuildSecret(ctx context.Context, ocOrgID,
 		return "", nil
 	}
 	return res.SecretRef, nil
+}
+
+// designComponentsReader adapts *artifacts.ArtifactStore.ReadDesign onto the
+// models-typed DesignReader port that dependencies/resources (C3) and
+// dependencies/endpoints (C4) each declare locally. Returning only
+// []models.DesignComponent keeps those feature packages off the artifacts
+// feature edge — the adapter lives here at the composition root, per §6.8. A
+// nil design (no design.json yet) yields nil components, never an error.
+type designComponentsReader struct {
+	store *artifacts.ArtifactStore
+}
+
+func (r designComponentsReader) ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error) {
+	df, err := r.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil || df == nil {
+		return nil, err
+	}
+	return df.Components, nil
 }
 
 // progressService builds the BFF's progress service and, when the

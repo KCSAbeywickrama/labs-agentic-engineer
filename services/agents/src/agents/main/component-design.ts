@@ -28,10 +28,52 @@
 import { z } from "zod";
 import type { ComponentDesign } from "../../contracts/component-design.js";
 
-const componentConnectionSchema = z.object({
-  to: z.string().min(1),
-  type: z.enum(["http", "datastore", "connector"]),
-  onPlatform: z.boolean().optional(),
+// One unified dependency entry. Deliberately a FLAT strictObject, not a
+// per-kind discriminated union: the authoritative Go codec
+// (aep-api/internal/feature/artifacts/design_json.go) decodes every kind into a
+// single struct and enforces NO kind-specific field policy — only `kind` (closed
+// set), a non-empty `name`, and unknown-key rejection. A closed-branch union
+// would reject documents the Go side accepts (and writes), breaking every
+// round-trip. So: every field but `kind`/`name` is optional and valid on any
+// kind. `status`/`reason` are absent, so strictObject rejects them (they are
+// read-time computed, never authored) — matching the Go struct that omits them.
+const configKeySchema = z.strictObject({
+  key: z.string().min(1),
+  secret: z.boolean().optional(),
+  credentialClass: z.string().optional(),
+});
+
+const dependencyCandidateSchema = z.strictObject({
+  label: z.string().min(1),
+  description: z.string().optional(),
+  url: z.string().optional(),
+});
+
+const dependencySchema = z.strictObject({
+  kind: z.enum(["component", "org-service", "external", "platform-resource"]),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  needsSpec: z.boolean().optional(),
+  specPath: z.string().optional(),
+  specUrl: z.string().optional(),
+  config: z.array(configKeySchema).optional(),
+  resourceType: z.string().optional(),
+  parameters: z.record(z.string(), z.string()).optional(),
+  candidates: z.array(dependencyCandidateSchema).optional(),
+});
+
+// Platform-owned passthrough blocks (Go-written, agent-visible). All fields
+// optional, mirroring the Go `*JSON` structs' omitempty; strictObject keeps
+// unknown-key rejection at parity with the Go DisallowUnknownFields codec.
+const exposesAPISchema = z.strictObject({
+  managed: z.boolean().optional(),
+  auth: z.string().optional(),
+  userContext: z.string().optional(),
+  orgPublished: z.boolean().optional(),
+});
+
+const callerIdentitySchema = z.strictObject({
+  mode: z.string().min(1),
 });
 
 export const componentDesignSchema = z.strictObject({
@@ -43,8 +85,11 @@ export const componentDesignSchema = z.strictObject({
   appPath: z.string().min(1),
   entrypoint: z.string().min(1),
   exposure: z.enum(["internet", "intranet"]),
-  connections: z.array(componentConnectionSchema),
+  dependencies: z.array(dependencySchema),
   description: z.string().min(1),
+  exposesAPI: exposesAPISchema.optional(),
+  callerIdentity: callerIdentitySchema.optional(),
+  componentAgentInstructions: z.string().optional(),
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).

@@ -25,3 +25,16 @@ import "embed"
 
 //go:embed builtin/*/SKILL.md
 var BuiltinFS embed.FS
+
+// PlannerFS carries the planner-facing built-in skills that are NOT part of the
+// design-attachable catalogue and are never bootstrapped into the `skills`
+// table. Today this is the `task-breakdown` skill the BFF pushes on every
+// task-planner plan/detail call (mirrors how BuiltinFS backs the architect's
+// builtins, but pushed on the wire directly rather than via the DB catalogue).
+// See docs/design/skills-system.md and skills/task-breakdown/SKILL.md.
+//
+//go:embed planner/task-breakdown/SKILL.md
+var PlannerFS embed.FS
+
+// TaskBreakdownSkillPath is the embedded path of the task-breakdown SKILL.md.
+const TaskBreakdownSkillPath = "planner/task-breakdown/SKILL.md"

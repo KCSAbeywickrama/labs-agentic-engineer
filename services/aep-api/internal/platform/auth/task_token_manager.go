@@ -154,6 +154,25 @@ func (m *TaskTokenManager) Issue(taskID, ocOrgID, projectID string) (string, err
 	return signed, nil
 }
 
+// AudienceMCP is the aud claim on BFF-signed tokens that authenticate a caller
+// to the BFF's internal MCP discovery surface (POST /internal/v1/mcp). The MCP
+// auth middleware (AgentsScopedVerifier) pins it, so a token minted for another
+// service (agents-service, git-service) cannot be replayed against MCP.
+const AudienceMCP = "aep-api-mcp"
+
+// mcpTokenTTL bounds an MCP identity token's validity. Like the agents-service
+// token it only needs to be live when the request lands; minutes is ample and
+// caps replay.
+const mcpTokenTTL = 5 * time.Minute
+
+// IssueMCPToken mints a short-lived BFF-signed identity JWT (aud AudienceMCP)
+// carrying orgID in the ocOrgId claim, for a caller that will drive the BFF's
+// MCP discovery surface. It is a thin wrapper over IssueServiceToken pinning the
+// MCP audience + TTL; the org still travels in a verified claim, never a header.
+func (m *TaskTokenManager) IssueMCPToken(orgID string) (string, error) {
+	return m.IssueServiceToken(AudienceMCP, orgID, mcpTokenTTL)
+}
+
 // IssueServiceToken mints a short-lived BFF-signed JWT that authenticates an
 // outbound BFF→service call (e.g. BFF→agents-service) and carries the acting
 // org in the ocOrgId claim. It is the outbound half of the symmetric S2S

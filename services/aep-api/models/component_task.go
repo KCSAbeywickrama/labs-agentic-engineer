@@ -65,6 +65,25 @@ const (
 	TaskStatusOnHold         = contracts.TaskStatusOnHold
 )
 
+// Task types (the typed task graph). "component" is a code task (1:1 with a
+// GitHub issue + PR). "config-collection" collects an external resource's
+// per-env config values in the console (no GitHub issue; reaching `deployed`
+// means provisioned). "resource-provisioning" is the platform-resource path.
+// "org-publish" is a cross-project publish task. Empty Type is treated as
+// "component" (old rows).
+const (
+	TaskTypeComponent            = "component"
+	TaskTypeConfigCollection     = "config-collection"
+	TaskTypeResourceProvisioning = "resource-provisioning"
+	// TaskTypeOrgPublish is a cross-project publish task: a TARGETED
+	// modification of an already-built provider component, created on the
+	// PROVIDER's project/repo when a consumer requests access to a project-only
+	// org-service. It behaves like a normal component task for dispatch +
+	// lifecycle; only its issue body differs — the agent adds `namespace`
+	// visibility to the component's workload.yaml.
+	TaskTypeOrgPublish = "org-publish"
+)
+
 // ComponentTask is one implementation task targeting a single component.
 // Scoped to an append-only batch (see BatchID, SourceDesignVersion,
 // SourceSpecVersion). Maps 1:1:1:1 to a GitHub issue, feature branch, and
@@ -79,7 +98,7 @@ type ComponentTask struct {
 	OrgID     string `gorm:"index;not null" json:"-"`
 
 	// Component identity — name only. Full component shape lives under
-	// `specs/design/components/<ComponentName>/` (design.md +
+	// `specs/design/components/<ComponentName>/` (design.json +
 	// optional openapi.yaml).
 	ComponentName string `gorm:"not null" json:"componentName"`
 
@@ -100,14 +119,52 @@ type ComponentTask struct {
 
 	// DependsOnComponents lists component names this task's component
 	// depends on, sourced directly from the `specs/design/` tree
-	// (design.Components[*].DependsOn, parsed from per-component
-	// design.md frontmatter). The value is platform-authored,
+	// (design.Components[*].ComponentDependsOn() — the component-kind entries
+	// of the unified Dependencies list). The value is platform-authored,
 	// not LLM-authored, so gating cannot silently fail open on a
 	// hallucinated identifier. Dispatch (deploy-gated): a task is
 	// dispatchable only when, for every entry c in DependsOnComponents,
 	// the batch contains a task whose ComponentName == c and Status
 	// == deployed. See services/dispatch_service.go::depsAllDeployed.
 	DependsOnComponents StringSlice `gorm:"column:depends_on_components;type:jsonb;serializer:json" json:"dependsOnComponents,omitempty"`
+
+	// DependsOnExternalResources lists the `external` resource names this
+	// component binds. A component task gates (in addition to
+	// DependsOnComponents) until each external resource's config-collection task
+	// is deployed — the typed task graph. Platform-authored from the design's
+	// external dependencies.
+	DependsOnExternalResources StringSlice `gorm:"column:depends_on_external_resources;type:jsonb;serializer:json" json:"dependsOnExternalResources,omitempty"`
+
+	// DependsOnOrgServices lists the cross-project `org-service` dependency names
+	// (= provider component names) this component consumes (P3). Platform-authored
+	// from the design's org-service dependencies. Drives the post-deploy OC
+	// WorkloadConnection wiring: the org endpoint catalog resolves each name to a
+	// namespace-visible provider endpoint, injected into the consumer pod env.
+	DependsOnOrgServices StringSlice `gorm:"column:depends_on_org_services;type:jsonb;serializer:json" json:"dependsOnOrgServices,omitempty"`
+
+	// DependsOnResources lists the `platform-resource` dependency names this
+	// component binds. Gates the component task until each resource's
+	// resource-provisioning task is `deployed` (provisioned + Ready). Platform-
+	// authored from the design's platform-resource dependencies (P5).
+	DependsOnResources StringSlice `gorm:"column:depends_on_resources;type:jsonb;serializer:json" json:"dependsOnResources,omitempty"`
+
+	// ExternalResourceName is set only on config-collection tasks (Type ==
+	// config-collection): the external resource whose per-env values this task
+	// collects. Empty for component tasks.
+	ExternalResourceName string `gorm:"column:external_resource_name;index" json:"externalResourceName,omitempty"`
+
+	// ResourceName is set only on resource-provisioning tasks (Type ==
+	// resource-provisioning): the platform-resource dependency this task
+	// provisions. Empty for other task types. (Mirrors ExternalResourceName.)
+	ResourceName string `gorm:"column:resource_name;index" json:"resourceName,omitempty"`
+
+	// Type discriminates the task graph. "component" = a code task (1:1 with a
+	// GitHub issue + PR). Forward-compat: "config-collection" (collect external
+	// resource / component config values in the console; no GitHub issue),
+	// "resource-provisioning" (P5) and "org-publish". Kept an OPEN string, not a
+	// fixed switch — gating/cascade branch on "is this blocker satisfied" per
+	// type. Empty is treated as "component" for old rows.
+	Type string `gorm:"default:component;index" json:"type"`
 
 	// Lineage — set at generation time, immutable thereafter.
 	BatchID             *string `gorm:"type:uuid;index" json:"batchId,omitempty"`

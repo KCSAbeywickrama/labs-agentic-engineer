@@ -42,7 +42,7 @@ LICENSE_FILES = $(shell git ls-files | \
 	grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/')
 
-.PHONY: install gen build dev test lint typecheck license license-check tools clean eval
+.PHONY: install gen build dev test test-console-legacy lint typecheck license license-check tools clean eval
 
 install:
 	$(PNPM) install
@@ -67,6 +67,12 @@ test: gen
 # Not a turbo task — kept out of the CI `test` graph.
 eval:
 	$(PNPM) --filter @aep/agents eval
+
+# console-legacy tests. NOT chained into `make test`: console-legacy/console is a
+# separate pnpm workspace being decommissioned post-cutover, so its suite runs
+# on demand (and from the PR checklist) rather than in the main test graph.
+test-console-legacy:
+	cd console-legacy/console && $(PNPM) install --frozen-lockfile && $(PNPM) run test
 
 lint:
 	$(TURBO) run lint

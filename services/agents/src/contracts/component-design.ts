@@ -49,16 +49,94 @@ export interface ComponentDesign {
   entrypoint: string;
   /** Gateway exposure of the component's endpoint. */
   exposure: "internet" | "intranet";
-  /** Typed dependency edges — mirrors the design.md Interactions section. */
-  connections: ComponentConnection[];
+  /**
+   * Unified, kind-discriminated dependency edges — the successor to the
+   * legacy `connections[]`. Mirrors the aep-api Go `models.Dependency` MINUS
+   * `status`/`reason` (those are PLATFORM-COMPUTED at read time against the
+   * live catalog — never authored, presence of either is a schema violation).
+   */
+  dependencies: Dependency[];
   /** The single-responsibility paragraph (what it does / does NOT do). */
   description: string;
+  /**
+   * PLATFORM-OWNED (optional). Managed-API exposure policy for a service, set
+   * by the platform — the agent must NOT invent it. Round-trips through the
+   * file untouched. Mirrors Go `models.ExposesAPI`.
+   */
+  exposesAPI?: ExposesAPI;
+  /**
+   * PLATFORM-OWNED (optional). Caller-identity intent for a webapp, set by the
+   * platform. Mirrors Go `models.CallerIdentity`.
+   */
+  callerIdentity?: CallerIdentity;
+  /**
+   * PLATFORM-OWNED (optional). Extra instructions the platform injects for the
+   * downstream coding agent. Passthrough — the design agent must not author it.
+   */
+  componentAgentInstructions?: string;
 }
 
-export interface ComponentConnection {
-  /** Target: a sibling component name, or an external system id. */
-  to: string;
-  type: "http" | "datastore" | "connector";
-  /** False for systems outside the platform. Default: true. */
-  onPlatform?: boolean;
+/** The closed set of dependency kinds (mirrors Go `models.DependencyKind`). */
+export type DependencyKind = "component" | "org-service" | "external" | "platform-resource";
+
+/**
+ * One unified dependency edge. A single flat shape carries every kind's
+ * fields; `kind` selects which are meaningful — mirroring the Go codec, which
+ * uses one struct and is LENIENT about kind-specific fields (it does not
+ * reject, e.g., `resourceType` on an `external` dep). Only `kind` (closed set)
+ * and `name` are required; every other field is optional. `status`/`reason`
+ * are deliberately ABSENT — they are read-time computed, never authored.
+ */
+export interface Dependency {
+  kind: DependencyKind;
+  /** Sibling component / org-service provider / external system / resource name. */
+  name: string;
+  description?: string;
+  /** external (REST/GraphQL): the agent must call specific endpoints ⇒ a spec is needed. */
+  needsSpec?: boolean;
+  /** external: stored contract path, component-relative (dependencies/<name>.openapi.yaml). */
+  specPath?: string;
+  /** external: transient published-OpenAPI hint auto-fetched at save then cleared. */
+  specUrl?: string;
+  /** external: the config-key schema the consuming component codes against. */
+  config?: ConfigKey[];
+  /** platform-resource: the registered (Cluster)ResourceType. */
+  resourceType?: string;
+  /** platform-resource: provisioning parameters. */
+  parameters?: Record<string, string>;
+  /** resolution UI: options attached when the platform marks a dep ambiguous. */
+  candidates?: DependencyCandidate[];
+}
+
+/** One env-var key a component reads at runtime. Mirrors Go `models.ConfigKey`. */
+export interface ConfigKey {
+  key: string;
+  /** Secret keys route through the secret path. Default: false. */
+  secret?: boolean;
+  /** publishable | secret. */
+  credentialClass?: string;
+}
+
+/** One option attached to an ambiguous dependency. Mirrors Go `models.DependencyCandidate`. */
+export interface DependencyCandidate {
+  label: string;
+  description?: string;
+  url?: string;
+}
+
+/** Managed-API exposure policy (platform-owned). Mirrors Go `models.ExposesAPI`. */
+export interface ExposesAPI {
+  managed?: boolean;
+  /** "end-user-required" | "service-required" | "none". */
+  auth?: string;
+  /** injected header name, e.g. "X-User-Id". */
+  userContext?: string;
+  /** endpoint consumable by OTHER projects in the org. */
+  orgPublished?: boolean;
+}
+
+/** Caller-identity intent (platform-owned). Mirrors Go `models.CallerIdentity`. */
+export interface CallerIdentity {
+  /** "end-user" | "service-account" | "none". */
+  mode: string;
 }

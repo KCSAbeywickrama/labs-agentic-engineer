@@ -35,10 +35,14 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, type Skill } from "./contracts/sse-events.js";
+import { SSE_DONE, type McpConfig, type Skill } from "./contracts/sse-events.js";
 import type { ConversationStore } from "./store/conversation-store.js";
 import type { StreamPart } from "./agents/main/stream-types.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
+import { registerTaskPlanner } from "./agents/taskplanner/route.js";
+import { registerArchitect } from "./agents/architect/route.js";
+import { registerDocumentGeneration } from "./agents/document-generation/route.js";
+import { registerDslRender } from "./agents/dsl-render/route.js";
 import { config } from "./shared/config.js";
 
 export interface CreateAppDeps {
@@ -63,6 +67,27 @@ export function createApp(deps: CreateAppDeps): Express {
   const guard = new TurnGuard(); // one in-flight guard per app (serializes turns per id)
   app.use(express.json({ limit: deps.bodyLimit ?? config.bodyLimit }));
 
+  // Task-planner structured-output routes (plan + detail) — the S2S wire surface
+  // aep-api's task_stream speaks. Legacy-contract parity; see taskplanner/route.ts.
+  registerTaskPlanner(app, { model: deps.model });
+
+  // Architect route — the S2S wire surface aep-api's StreamGenerateDesign
+  // speaks. Legacy-contract parity (same SSE frames the BFF parses); see
+  // architect/route.ts.
+  registerArchitect(app, { model: deps.model });
+
+  // Generic document-generation route (requirements-from-prompt,
+  // functional/non-functional-requirements, user-stories, wireframes,
+  // domain-model, component-design, component-openapi) — the S2S wire
+  // surface aep-api's StreamDocumentGeneration speaks. Legacy-contract
+  // parity; see document-generation/route.ts.
+  registerDocumentGeneration(app, { model: deps.model });
+
+  // Stateless DSL→Excalidraw render helper — the wire surface aep-api's
+  // RenderDsl speaks (client.go); org-less, plain JSON, no model. See
+  // dsl-render/route.ts.
+  registerDslRender(app);
+
   app.post("/conversations/:id/turns", async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const body = (req.body ?? {}) as {
@@ -70,6 +95,7 @@ export function createApp(deps: CreateAppDeps): Express {
       files?: unknown;
       filesChangedExternally?: unknown;
       skills?: unknown;
+      mcp?: unknown;
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
@@ -112,6 +138,20 @@ export function createApp(deps: CreateAppDeps): Express {
       skills = body.skills;
     }
 
+    // mcp (optional, Task E2): the caller-resolved discovery endpoint for this
+    // turn (aep-api mints a short-lived, org-bound token per call). Reject a
+    // malformed payload pre-stream, same as skills.
+    let mcp: McpConfig | undefined;
+    if (body.mcp !== undefined) {
+      const m = body.mcp as Record<string, unknown> | null;
+      const valid = m !== null && typeof m === "object" && typeof m.url === "string" && typeof m.token === "string";
+      if (!valid) {
+        res.status(400).json({ error: "mcp must be { url, token } strings" });
+        return;
+      }
+      mcp = { url: m.url as string, token: m.token as string };
+    }
+
     // Abort the turn if the client disconnects mid-stream.
     const ac = new AbortController();
     res.on("close", () => ac.abort());
@@ -134,6 +174,7 @@ export function createApp(deps: CreateAppDeps): Express {
         files,
         filesChangedExternally: body.filesChangedExternally === true,
         ...(skills ? { skills } : {}),
+        ...(mcp ? { mcp } : {}),
         model: deps.model,
         store: deps.store,
         guard,

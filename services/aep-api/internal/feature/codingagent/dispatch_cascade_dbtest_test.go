@@ -156,6 +156,73 @@ func TestDispatchCascadeHook_OnTaskDeployed_SerialisesConcurrentDeploys(t *testi
 	}
 }
 
+// fakeAccessGranter records GrantByProviderComponent calls and can be made to
+// fail, so the grant-cascade tests can assert delegation + best-effort semantics.
+type fakeAccessGranter struct {
+	mu    sync.Mutex
+	calls []string // "<org>/<project>/<component>"
+	err   error
+}
+
+func (f *fakeAccessGranter) GrantByProviderComponent(_ context.Context, orgID, projectID, componentName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, orgID+"/"+projectID+"/"+componentName)
+	return f.err
+}
+
+func (f *fakeAccessGranter) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
+}
+
+// TestDispatchCascadeHook_OnTaskDeployed_FiresAccessGrant: a deployed org-publish
+// component drives GrantByProviderComponent with the exact LOGICAL component name
+// the task carried, and the dispatch still runs afterwards.
+func TestDispatchCascadeHook_OnTaskDeployed_FiresAccessGrant(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+
+	dispatch := &fakeDispatchService{}
+	granter := &fakeAccessGranter{}
+	hook := NewDispatchCascadeHook(db, dispatch)
+	hook.SetAccessGrant(granter)
+
+	// componentName is the logical name the org-publish task carried.
+	hook.OnTaskDeployed(ctx, "acme", "hr-directory", "employee-api")
+
+	if got := granter.snapshot(); len(got) != 1 || got[0] != "acme/hr-directory/employee-api" {
+		t.Fatalf("grant must fire once with the logical component name, got %v", got)
+	}
+	if calls := dispatch.dispatchCalls(); len(calls) != 1 {
+		t.Fatalf("cascade must still dispatch after the grant, got %d calls", len(calls))
+	}
+}
+
+// TestDispatchCascadeHook_OnTaskDeployed_GrantFailureDoesNotBreakCascade: a grant
+// error is logged-and-swallowed — the dispatch must still run.
+func TestDispatchCascadeHook_OnTaskDeployed_GrantFailureDoesNotBreakCascade(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+
+	dispatch := &fakeDispatchService{}
+	granter := &fakeAccessGranter{err: errors.New("grant boom")}
+	hook := NewDispatchCascadeHook(db, dispatch)
+	hook.SetAccessGrant(granter)
+
+	hook.OnTaskDeployed(ctx, "acme", "hr-directory", "employee-api") // must not panic
+
+	if got := granter.snapshot(); len(got) != 1 {
+		t.Fatalf("grant must have been attempted once, got %v", got)
+	}
+	if calls := dispatch.dispatchCalls(); len(calls) != 1 {
+		t.Fatalf("a grant failure must not break the cascade; dispatch calls = %d", len(calls))
+	}
+}
+
 // fakeSPAEmitter satisfies the unexported projectSPARuntimeConfigEmitter port.
 type fakeSPAEmitter struct {
 	mu    sync.Mutex

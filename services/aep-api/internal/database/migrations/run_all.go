@@ -80,6 +80,7 @@ func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
 		ctxStep("git_repositories_composite_unique", RunGitRepoCompositeUnique),
 		dbStep("phase7_skills", RunPhase7Skills),
 		ctxStep("phase8_idp_sm_api_columns", RunPhase8IDPSMAPIColumns),
+		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
 	}
 
 	for _, s := range steps {

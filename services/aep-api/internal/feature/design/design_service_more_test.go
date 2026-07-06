@@ -145,7 +145,7 @@ func (f *fakeSkillCatalog) List(_ context.Context, orgID string) ([]models.Skill
 func validDesignFiles() map[string]string {
 	return map[string]string{
 		artifacts.DesignRootFile:            "---\nsourceSpec: v1\n---\n\nOverview prose here.\n",
-		"components/hello-api/design.md":    "---\ntype: service\nlanguage: Go\n---\n\n# hello-api\n\nBuild it.\n",
+		"components/hello-api/design.json":  "{\n  \"name\": \"hello-api\",\n  \"type\": \"service\",\n  \"language\": \"Go\",\n  \"description\": \"Build it.\",\n  \"dependencies\": []\n}\n",
 		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
@@ -441,7 +441,7 @@ func TestStreamGenerate_HappyPersistsAndConsultsSkillCatalog(t *testing.T) {
 	agentsClient := &fakeAgentsClient{
 		streamArchitect: func(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
 			return sseFinish("Generated overview", models.DesignComponent{
-				Name: "svc-a", ComponentType: "service", Language: "Go", DependsOn: []string{},
+				Name: "svc-a", ComponentType: "service", Language: "Go", Dependencies: []models.Dependency{},
 			}), nil
 		},
 	}
@@ -529,9 +529,9 @@ func TestStreamGenerate_RemovedComponentDirsAreDeleted(t *testing.T) {
 		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
 			// Prior tree has "old-svc"; the new design only has "svc-a".
 			return map[string]string{
-				artifacts.DesignRootFile:       "old\n",
-				"components/old-svc/design.md": "---\ntype: service\n---\n\n# old-svc\n",
-				"components/svc-a/design.md":   "---\ntype: service\n---\n\n# svc-a\n",
+				artifacts.DesignRootFile:         "old\n",
+				"components/old-svc/design.json": "{\n  \"name\": \"old-svc\",\n  \"type\": \"service\",\n  \"dependencies\": []\n}\n",
+				"components/svc-a/design.json":   "{\n  \"name\": \"svc-a\",\n  \"type\": \"service\",\n  \"dependencies\": []\n}\n",
 			}, nil
 		},
 		DeleteDesignDirectoryFunc: func(_ context.Context, _, _, sub string) error {
@@ -598,7 +598,7 @@ func TestUpdateDesignFile_ComponentDesignFiresTraitSync(t *testing.T) {
 	svc := newService(fake, nil)
 	svc.SetTraitSync(trait)
 
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/Hello API/design.md", "new"); err != nil {
+	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/Hello API/design.json", "new"); err != nil {
 		t.Fatalf("UpdateDesignFile: %v", err)
 	}
 	if len(trait.syncCalls) != 1 {
@@ -652,7 +652,7 @@ func TestUpdateDesignFile_NilTraitSyncDoesNotPanic(t *testing.T) {
 	}
 	// No SetTraitSync — production tolerates a nil port on this best-effort hook.
 	svc := newService(fake, nil)
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.md", "x"); err != nil {
+	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.json", "x"); err != nil {
 		t.Fatalf("nil traitSync must be a no-op, got: %v", err)
 	}
 }
@@ -674,7 +674,7 @@ func TestUpdateDesignFile_TraitSyncFailureIsBestEffort(t *testing.T) {
 	svc := newService(fake, nil)
 	svc.SetTraitSync(trait)
 	// A trait-sync failure must never bubble — the design tree is canonical.
-	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.md", "x"); err != nil {
+	if _, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/svc/design.json", "x"); err != nil {
 		t.Fatalf("trait sync failure must be swallowed, got: %v", err)
 	}
 }
@@ -1081,5 +1081,479 @@ func TestExtractWireframeDsls(t *testing.T) {
 	})
 	if len(got) != 2 || got["login"] != "canvas-dsl-1" || got["home"] != "canvas-dsl-2" {
 		t.Fatalf("only .dsl files, keyed by canvas name: %+v", got)
+	}
+}
+
+// ==== B4: proceed-gate, spec auto-fetch, CollectSpec, external-resource
+// registration ==============================================================
+
+// --- firstUnresolvedDependency (the proceed-gate's pure decision) ----------
+
+func TestFirstUnresolvedDependency_BlocksAmbiguousUnresolvedAndBlocked(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{
+		models.DependencyStatusAmbiguous,
+		models.DependencyStatusUnresolved,
+		models.DependencyStatusBlocked,
+	} {
+		components := []models.DesignComponent{
+			{Name: "svc-a", Dependencies: []models.Dependency{{Name: "dep-a", Status: status}}},
+		}
+		comp, dep, got, ok := firstUnresolvedDependency(components)
+		if !ok {
+			t.Fatalf("status %q: want blocked, got ok=false", status)
+		}
+		if comp != "svc-a" || dep != "dep-a" || got != status {
+			t.Fatalf("status %q: want (svc-a,dep-a,%s), got (%s,%s,%s)", status, status, comp, dep, got)
+		}
+	}
+}
+
+func TestFirstUnresolvedDependency_PassesWhenResolvedOrEmptyOrNoDeps(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		components []models.DesignComponent
+	}{
+		{"no components", nil},
+		{"component with no dependencies", []models.DesignComponent{{Name: "svc-a"}}},
+		{"empty status", []models.DesignComponent{{Name: "svc-a", Dependencies: []models.Dependency{{Name: "dep-a", Status: ""}}}}},
+		{"resolved status", []models.DesignComponent{{Name: "svc-a", Dependencies: []models.Dependency{{Name: "dep-a", Status: models.DependencyStatusResolved}}}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, _, _, ok := firstUnresolvedDependency(c.components); ok {
+				t.Fatalf("%s: want no blocking dependency", c.name)
+			}
+		})
+	}
+}
+
+func TestFirstUnresolvedDependency_FirstOffenderWins(t *testing.T) {
+	t.Parallel()
+	components := []models.DesignComponent{
+		{Name: "svc-a", Dependencies: []models.Dependency{{Name: "ok", Status: models.DependencyStatusResolved}}},
+		{Name: "svc-b", Dependencies: []models.Dependency{
+			{Name: "blocked-first", Status: models.DependencyStatusBlocked},
+			{Name: "unresolved-second", Status: models.DependencyStatusUnresolved},
+		}},
+	}
+	comp, dep, status, ok := firstUnresolvedDependency(components)
+	if !ok || comp != "svc-b" || dep != "blocked-first" || status != models.DependencyStatusBlocked {
+		t.Fatalf("want first offender (svc-b,blocked-first,blocked), got (%s,%s,%s,%v)", comp, dep, status, ok)
+	}
+}
+
+// --- SaveAndProceed: proceed-gate wired through the real read pipeline -----
+
+// designJSONWithExternalDep builds a component design.json whose single
+// dependency is an `external` kind carrying the given needsSpec/specPath/
+// specUrl combination — the shape assembleDependencies (artifacts package)
+// reads to compute Status/Reason at design-read time.
+func designJSONWithExternalDep(name, depName string, needsSpec bool, specPath, specURL string) string {
+	dep := map[string]any{"kind": "external", "name": depName, "description": "an external API", "needsSpec": needsSpec}
+	if specPath != "" {
+		dep["specPath"] = specPath
+	}
+	if specURL != "" {
+		dep["specUrl"] = specURL
+	}
+	doc := map[string]any{
+		"name":         name,
+		"type":         "service",
+		"language":     "Go",
+		"description":  "Build it.",
+		"dependencies": []any{dep},
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// designFilesWithExternalDep is a well-formed working tree with one
+// component ("hello-api") carrying one external dependency.
+func designFilesWithExternalDep(needsSpec bool, specPath, specURL string) map[string]string {
+	return map[string]string{
+		artifacts.DesignRootFile:           "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
+		"components/hello-api/design.json": designJSONWithExternalDep("hello-api", "ext-api", needsSpec, specPath, specURL),
+	}
+}
+
+func TestSaveAndProceed_GateBlocksWhenExternalDepNeedsSpec(t *testing.T) {
+	t.Parallel()
+	fake := &artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return designFilesWithExternalDep(true, "", ""), nil // needsSpec, no specPath, no specUrl hint
+		},
+	}
+	_, err := newService(fake, nil).SaveAndProceed(context.Background(), "acme", "web")
+	if !errors.Is(err, ErrUnresolvedDependency) {
+		t.Fatalf("want ErrUnresolvedDependency, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "hello-api") || !strings.Contains(err.Error(), "ext-api") || !strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("gate error must name the component/dep/status: %v", err)
+	}
+}
+
+func TestSaveAndProceed_GatePassesWhenDependencyAlreadyResolved(t *testing.T) {
+	t.Parallel()
+	fake := &artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			// needsSpec + specPath already recorded → assembleDependencies leaves
+			// Status empty (resolved), so the gate must not block.
+			return designFilesWithExternalDep(true, "dependencies/ext-api.openapi.yaml", ""), nil
+		},
+		SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+			return &artifacts.DesignSaveResult{Status: "approved", Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}, nil
+		},
+		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+			return []artifacts.DesignVersionInfo{{Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}}, nil
+		},
+	}
+	d, err := newService(fake, nil).SaveAndProceed(context.Background(), "acme", "web")
+	if err != nil {
+		t.Fatalf("resolved dependency must not block save, got: %v", err)
+	}
+	if d.Status != "approved" {
+		t.Fatalf("want approved design, got %+v", d)
+	}
+}
+
+// --- SaveAndProceed: auto-fetch phase ---------------------------------------
+
+// mutableDesignFake returns a FakeArtifactService backed by the given shared
+// file map: ListDesignFiles reads a snapshot copy, PutFile writes back into
+// it. CollectSpec's StoreConsumedSpec + SetDependencySpecPath both go through
+// WriteDesignFile → PutFile, so the auto-fetch tests need read-after-write to
+// observe the specPath the fetch recorded.
+func mutableDesignFake(files map[string]string) *artifactstest.FakeArtifactService {
+	fake := &artifactstest.FakeArtifactService{}
+	fake.ListDesignFilesFunc = func(context.Context, string, string) (map[string]string, error) {
+		out := make(map[string]string, len(files))
+		for k, v := range files {
+			out[k] = v
+		}
+		return out, nil
+	}
+	fake.PutFileFunc = func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
+		sub := strings.TrimPrefix(relPath, artifacts.DesignDir+"/")
+		files[sub] = content
+		return &artifacts.PutResult{SHA: "sha"}, nil
+	}
+	return fake
+}
+
+const sampleOpenAPISpecB4 = `openapi: 3.0.3
+info:
+  title: External API
+  version: "1.0"
+paths:
+  /items:
+    get:
+      summary: List items
+      responses:
+        "200":
+          description: OK
+`
+
+func TestSaveAndProceed_AutoFetchSuccess_ClearsGateAndSaves(t *testing.T) {
+	t.Parallel()
+	files := designFilesWithExternalDep(true, "", "https://api.example.com/openapi.yaml")
+	fake := mutableDesignFake(files)
+	fake.SaveDesignFunc = func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+		return &artifacts.DesignSaveResult{Status: "approved", Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}, nil
+	}
+	fake.ListDesignVersionsFunc = func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+		return []artifacts.DesignVersionInfo{{Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}}, nil
+	}
+
+	svc := newService(fake, nil)
+	var fetchedURL string
+	svc.fetchSpec = func(_ context.Context, url string) ([]byte, error) {
+		fetchedURL = url
+		return []byte(sampleOpenAPISpecB4), nil
+	}
+
+	d, err := svc.SaveAndProceed(context.Background(), "acme", "web")
+	if err != nil {
+		t.Fatalf("SaveAndProceed must succeed after a successful auto-fetch, got: %v", err)
+	}
+	if fetchedURL != "https://api.example.com/openapi.yaml" {
+		t.Fatalf("fetchSpec not called with the dep's specUrl, got %q", fetchedURL)
+	}
+	if d.Status != "approved" {
+		t.Fatalf("want approved design, got %+v", d)
+	}
+	// The stored design.json must now carry specPath and have cleared specUrl.
+	updated := files["components/hello-api/design.json"]
+	if !strings.Contains(updated, `"specPath"`) {
+		t.Fatalf("auto-fetch must record specPath on the dependency: %s", updated)
+	}
+	if strings.Contains(updated, "specUrl") {
+		t.Fatalf("auto-fetch must clear the transient specUrl hint: %s", updated)
+	}
+	// The spec blob itself must have been stored under dependencies/.
+	if _, ok := files["components/hello-api/dependencies/ext-api.openapi.yaml"]; !ok {
+		t.Fatalf("auto-fetch must store the fetched spec blob, got files: %v", files)
+	}
+}
+
+func TestSaveAndProceed_AutoFetchFailure_LeavesDependencyUnresolved(t *testing.T) {
+	t.Parallel()
+	files := designFilesWithExternalDep(true, "", "https://api.example.com/openapi.yaml")
+	fake := mutableDesignFake(files)
+
+	svc := newService(fake, nil)
+	svc.fetchSpec = func(context.Context, string) ([]byte, error) {
+		return nil, errors.New("network unreachable")
+	}
+
+	_, err := svc.SaveAndProceed(context.Background(), "acme", "web")
+	if !errors.Is(err, ErrUnresolvedDependency) {
+		t.Fatalf("a failed auto-fetch must leave the dep unresolved so the gate blocks, got: %v", err)
+	}
+}
+
+func TestSaveAndProceed_NilFetchSpecDefaultsToArtifactsFetcher(t *testing.T) {
+	t.Parallel()
+	// No dependency needs a fetch (no specUrl hint), so the nil fetchSpec field
+	// (struct literal construction, bypassing NewDesignService's default) is
+	// never actually invoked — this proves the nil-safe fallback wiring alone
+	// doesn't panic when there's nothing to fetch.
+	fake := &artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return validDesignFiles(), nil
+		},
+		SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+			return &artifacts.DesignSaveResult{Status: "approved", Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}, nil
+		},
+		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+			return nil, nil
+		},
+	}
+	svc := newService(fake, nil) // fetchSpec left nil, as newService always does
+	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("nil fetchSpec with nothing to fetch must not panic or error, got: %v", err)
+	}
+}
+
+// --- CollectSpec -------------------------------------------------------------
+
+func TestCollectSpec_NeitherRawSpecNorURLErrors(t *testing.T) {
+	t.Parallel()
+	svc := newService(&artifactstest.FakeArtifactService{}, nil)
+	if _, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api", nil, ""); err == nil {
+		t.Fatal("want an error when neither rawSpec nor specURL is provided")
+	}
+}
+
+func TestCollectSpec_BothRawSpecAndURLErrors(t *testing.T) {
+	t.Parallel()
+	svc := newService(&artifactstest.FakeArtifactService{}, nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api",
+		[]byte(sampleOpenAPISpecB4), "https://api.example.com/openapi.yaml")
+	if err == nil {
+		t.Fatal("want an error when both rawSpec and specURL are provided")
+	}
+}
+
+func TestCollectSpec_URLFetchFailureWrapsErrSpecFetchFailed(t *testing.T) {
+	t.Parallel()
+	// The dep target must resolve (external + present) so validation passes and
+	// the fetch runs. A non-https scheme fails FetchSpecFromURL's validation
+	// synchronously — no network access needed to exercise the fetch-failure wrap.
+	svc := newService(mutableDesignFake(designFilesWithExternalDep(true, "", "")), nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api", nil, "http://insecure.example.com/openapi.yaml")
+	if !errors.Is(err, ErrSpecFetchFailed) {
+		t.Fatalf("want ErrSpecFetchFailed, got %v", err)
+	}
+}
+
+func TestCollectSpec_InvalidSpecWrapsErrInvalidSpec(t *testing.T) {
+	t.Parallel()
+	svc := newService(mutableDesignFake(designFilesWithExternalDep(true, "", "")), nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api", []byte("not an openapi doc"), "")
+	if !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("want ErrInvalidSpec, got %v", err)
+	}
+}
+
+// TestCollectSpec_UnknownDepIsNotFound proves the pre-store validation: an
+// unknown component/dep returns ErrDependencyNotFound and stores nothing.
+func TestCollectSpec_UnknownDepIsNotFound(t *testing.T) {
+	t.Parallel()
+	files := designFilesWithExternalDep(true, "", "")
+	svc := newService(mutableDesignFake(files), nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ghost", []byte(sampleOpenAPISpecB4), "")
+	if !errors.Is(err, ErrDependencyNotFound) {
+		t.Fatalf("want ErrDependencyNotFound, got %v", err)
+	}
+	if _, ok := files["components/hello-api/dependencies/ghost.openapi.yaml"]; ok {
+		t.Fatal("unknown dep must not store an orphan spec blob")
+	}
+}
+
+// TestCollectSpec_WrongKindIsWrongKind proves a non-external dep is rejected
+// with ErrDependencyWrongKind naming both kinds, and stores nothing.
+func TestCollectSpec_WrongKindIsWrongKind(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
+		"components/hello-api/design.json": `{
+  "name": "hello-api",
+  "type": "service",
+  "language": "Go",
+  "description": "Build it.",
+  "dependencies": [
+    {"kind": "platform-resource", "name": "maindb", "resourceType": "postgres-cnpg"}
+  ]
+}
+`,
+	}
+	svc := newService(mutableDesignFake(files), nil)
+	_, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "maindb", []byte(sampleOpenAPISpecB4), "")
+	if !errors.Is(err, ErrDependencyWrongKind) {
+		t.Fatalf("want ErrDependencyWrongKind, got %v", err)
+	}
+	for _, want := range []string{models.DependencyKindExternal, models.DependencyKindPlatformResource} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must name kind %q: %v", want, err)
+		}
+	}
+}
+
+func TestCollectSpec_RawSpecStoresBlobAndRecordsSpecPath(t *testing.T) {
+	t.Parallel()
+	files := designFilesWithExternalDep(true, "", "")
+	fake := mutableDesignFake(files)
+	svc := newService(fake, nil)
+
+	specPath, err := svc.CollectSpec(context.Background(), "acme", "web", "hello-api", "ext-api", []byte(sampleOpenAPISpecB4), "")
+	if err != nil {
+		t.Fatalf("CollectSpec: %v", err)
+	}
+	wantSpecPath := "dependencies/ext-api.openapi.yaml"
+	if specPath != wantSpecPath {
+		t.Fatalf("specPath = %q, want %q", specPath, wantSpecPath)
+	}
+	if _, ok := files["components/hello-api/dependencies/ext-api.openapi.yaml"]; !ok {
+		t.Fatalf("spec blob not stored, got files: %v", files)
+	}
+	updated := files["components/hello-api/design.json"]
+	if !strings.Contains(updated, `"specPath": "`+wantSpecPath+`"`) && !strings.Contains(updated, `"specPath":"`+wantSpecPath+`"`) {
+		t.Fatalf("design.json must record the specPath, got:\n%s", updated)
+	}
+}
+
+// --- registerExternalResources ----------------------------------------------
+
+type externalResourceUpsertCall struct {
+	org, name, description string
+	schema                 []models.ConfigKey
+}
+
+// fakeExternalResourceRegistrar records every Upsert call; errFor optionally
+// makes one specific resource name fail (to prove best-effort continuation).
+type fakeExternalResourceRegistrar struct {
+	calls  []externalResourceUpsertCall
+	errFor string
+}
+
+func (f *fakeExternalResourceRegistrar) Upsert(_ context.Context, orgID, name, description string, schema []models.ConfigKey) (*models.ExternalResource, error) {
+	f.calls = append(f.calls, externalResourceUpsertCall{org: orgID, name: name, description: description, schema: schema})
+	if f.errFor != "" && f.errFor == name {
+		return nil, errors.New("upsert boom")
+	}
+	return &models.ExternalResource{Name: name}, nil
+}
+
+func TestRegisterExternalResources_NilRegistrarIsNoop(t *testing.T) {
+	t.Parallel()
+	svc := newService(&artifactstest.FakeArtifactService{}, nil) // no SetExternalResourceRegistry
+	design := &artifacts.DesignFile{Components: []models.DesignComponent{
+		{Name: "svc-a", Dependencies: []models.Dependency{{Kind: models.DependencyKindExternal, Name: "ext-a"}}},
+	}}
+	// Must not panic with no registrar wired.
+	svc.registerExternalResources(context.Background(), "acme", design)
+}
+
+func TestRegisterExternalResources_UpsertsDistinctExternalsBestEffort(t *testing.T) {
+	t.Parallel()
+	svc := newService(&artifactstest.FakeArtifactService{}, nil)
+	reg := &fakeExternalResourceRegistrar{errFor: "flaky-api"}
+	svc.SetExternalResourceRegistry(reg)
+
+	design := &artifacts.DesignFile{Components: []models.DesignComponent{
+		{Name: "svc-a", Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "ext-a", Description: "d1", Config: []models.ConfigKey{{Key: "API_KEY", Secret: true}}},
+			{Kind: models.DependencyKindComponent, Name: "sibling-svc"}, // not external — skipped
+			{Kind: models.DependencyKindExternal, Name: "flaky-api"},    // Upsert errors — must not stop the rest
+		}},
+		{Name: "svc-b", Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "ext-a"}, // duplicate name — deduped, only one Upsert
+		}},
+	}}
+
+	svc.registerExternalResources(context.Background(), "acme", design)
+
+	if len(reg.calls) != 2 {
+		t.Fatalf("want 2 distinct Upsert calls (ext-a deduped, flaky-api attempted), got %d: %+v", len(reg.calls), reg.calls)
+	}
+	names := map[string]bool{}
+	for _, c := range reg.calls {
+		names[c.name] = true
+		if c.org != "acme" {
+			t.Fatalf("Upsert must carry the acting org, got %q", c.org)
+		}
+	}
+	if !names["ext-a"] || !names["flaky-api"] {
+		t.Fatalf("expected ext-a and flaky-api to be upserted, got %+v", reg.calls)
+	}
+}
+
+func TestRegisterExternalResources_NilDesignIsNoop(t *testing.T) {
+	t.Parallel()
+	svc := newService(&artifactstest.FakeArtifactService{}, nil)
+	svc.SetExternalResourceRegistry(&fakeExternalResourceRegistrar{})
+	svc.registerExternalResources(context.Background(), "acme", nil) // must not panic
+}
+
+// --- UpdateDesignFile: draft autosave is NEVER gated ------------------------
+
+func TestUpdateDesignFile_AutosaveIsNeverGatedByUnresolvedDependencies(t *testing.T) {
+	t.Parallel()
+	// The written content itself carries an unresolved (needsSpec, no
+	// specPath) external dependency — if UpdateDesignFile gated on dependency
+	// resolution the way SaveAndProceed does, this write would have to fail.
+	// It must not: only SaveAndProceed enforces the proceed-gate.
+	fake := happyDraftWriteFake()
+	svc := newService(fake, nil)
+
+	content := designJSONWithExternalDep("hello-api", "ext-api", true, "", "")
+	bundle, err := svc.UpdateDesignFile(context.Background(), "acme", "web", "components/hello-api/design.json", content)
+	if err != nil {
+		t.Fatalf("draft autosave must never be gated by dependency status, got: %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("want a non-nil bundle back")
+	}
+}
+
+// happyDraftWriteFake returns a fake wired for a successful WriteDesignFile +
+// refreshed-bundle read-back (GetDesignBundle → GetDesign → ListDesignFiles +
+// ListDesignVersions), used by the autosave-never-gated test above.
+func happyDraftWriteFake() *artifactstest.FakeArtifactService {
+	return &artifactstest.FakeArtifactService{
+		PutFileFunc: func(_ context.Context, _, _, _, _, _ string) (*artifacts.PutResult, error) {
+			return &artifacts.PutResult{SHA: "sha"}, nil
+		},
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return validDesignFiles(), nil
+		},
+		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+			return nil, nil
+		},
 	}
 }

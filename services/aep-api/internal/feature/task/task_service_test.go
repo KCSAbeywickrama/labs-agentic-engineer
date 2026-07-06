@@ -206,8 +206,8 @@ func TestResolveDesignComponent_FoundAndRemoved(t *testing.T) {
 	fake := &artifactstest.FakeArtifactService{
 		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
 			return map[string]string{
-				artifacts.DesignRootFile:     "# Overview",
-				"components/svc-a/design.md": "---\ncomponentType: service\nlanguage: Go\n---\nbody",
+				artifacts.DesignRootFile:       "# Overview",
+				"components/svc-a/design.json": "{\n  \"name\": \"svc-a\",\n  \"type\": \"service\",\n  \"language\": \"Go\",\n  \"description\": \"body\",\n  \"dependencies\": []\n}\n",
 			}, nil
 		},
 	}

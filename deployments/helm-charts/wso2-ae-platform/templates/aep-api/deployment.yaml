@@ -66,6 +66,11 @@ spec:
             # aepApi.internalHostname HTTPRoute split); otherwise the public URL.
             - name: AGENT_PLATFORM_URL
               value: {{ .Values.bff.internalURL | default .Values.bff.publicURL | quote }}
+            # The BFF's own base URL as reached by agents-service (in-cluster
+            # Service DNS) for the internal MCP discovery surface. Enables the
+            # `mcp` bundle handed to agents-service in the architect request.
+            - name: AEP_API_INTERNAL_BASE_URL
+              value: "http://aep-api.{{ .Release.Namespace }}:{{ .Values.aepApi.port }}"
 
             # ── Identity Provider (OC Thunder) ────────────────────────────────
             - name: JWKS_URL

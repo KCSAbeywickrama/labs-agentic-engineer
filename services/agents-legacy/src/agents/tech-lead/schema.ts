@@ -18,14 +18,54 @@
 
 import { z } from "zod";
 
+// One external-resource dependency's planning context — name + human blurb.
+// The planner references these in a task's rationale to explain the
+// value-collection gate; it must NOT emit a separate config-collection task
+// (the platform authors those when persisting the task batch).
+export const ExternalResourceContext = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+});
+export type ExternalResourceContext = z.infer<typeof ExternalResourceContext>;
+
+// One platform-resource dependency's planning context — name + resource type.
+// Referenced in rationale to explain the resource-provisioning gate; the
+// planner must NOT emit a resource-provisioning task (platform-authored).
+export const PlatformResourceContext = z.object({
+  name: z.string(),
+  resourceType: z.string().optional(),
+  description: z.string().optional(),
+});
+export type PlatformResourceContext = z.infer<typeof PlatformResourceContext>;
+
+// One org-service (cross-project) dependency's planning context. The provider
+// lives in another project, so it is never a batch `dependsOn` title; it is
+// surfaced so the planner can note the cross-project binding in rationale.
+export const OrgServiceContext = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+});
+export type OrgServiceContext = z.infer<typeof OrgServiceContext>;
+
 // Slim component shape passed to the planner. Mirrors DesignComponent without
 // the OpenAPI YAML payload — the planner reasons about topology and roles, not
 // contracts. Detail phase gets the full design entry per task.
+//
+// `dependsOn` carries sibling-component (kind: "component") deps only — the
+// build-order topology (aep-api's ComponentDependsOn()). The three optional
+// arrays carry the OTHER unified-dependency kinds as planning context.
+// ADDITIVE + OPTIONAL: aep-api's current client (`internal/clients/agents/
+// client.go` buildPlanRequest) sends only `{name, componentType, language,
+// dependsOn}` — "still named DependsOn — a later task owns that contract" —
+// so this round-trips unchanged until a future aep-api task widens the wire.
 export const SlimDesignComponent = z.object({
   name: z.string(),
   componentType: z.string(),
   language: z.string(),
   dependsOn: z.array(z.string()),
+  externalResources: z.array(ExternalResourceContext).optional(),
+  platformResources: z.array(PlatformResourceContext).optional(),
+  orgServiceDependencies: z.array(OrgServiceContext).optional(),
 });
 
 export type SlimDesignComponent = z.infer<typeof SlimDesignComponent>;
@@ -56,11 +96,13 @@ export const PlanItemSchema = z.object({
     ),
   rationale: z
     .string()
-    .describe("One sentence explaining why this task exists."),
+    .describe(
+      "One sentence explaining why this task exists. When the component has external or platform-resource dependencies, note that the task is gated on the platform-authored value-collection / resource-provisioning of those resources.",
+    ),
   dependsOn: z
     .array(z.string())
     .describe(
-      "Titles of other plans in this batch this depends on. Omit titles of already-merged tasks.",
+      "Titles of other plans in this batch this depends on (consumers list their providers). Omit titles of already-merged tasks.",
     ),
 });
 
@@ -115,7 +157,7 @@ export const TechLeadDetailItem = z.object({
   title: z.string(),
   rationale: z.string(),
   // The component's design entry assembled from
-  // `specs/design/components/<name>/{design.md,openapi.yaml}` and shipped
+  // `specs/design/components/<name>/{design.json,openapi.yaml}` and shipped
   // as a JSON slice for the prompt. Includes openAPISpec, appPath,
   // buildpack, etc. — the model only renders references, never inlines YAML.
   designSlice: z.string(),

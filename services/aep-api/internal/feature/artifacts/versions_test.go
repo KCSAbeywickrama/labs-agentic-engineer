@@ -111,7 +111,7 @@ func TestGetDesignAtTag_RecursiveNestedPaths(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
 		"specs/design/design.md":                        "root design\n",
-		"specs/design/components/user-api/design.md":    "component design\n",
+		"specs/design/components/user-api/design.json":  "component design\n",
 		"specs/design/components/user-api/openapi.yaml": "openapi: 3.0.0\n",
 	})
 	r.remote.Tag(t, "v1-1", "design v1-1")
@@ -123,7 +123,7 @@ func TestGetDesignAtTag_RecursiveNestedPaths(t *testing.T) {
 	}
 	want := map[string]string{
 		"design.md":                        "root design\n",
-		"components/user-api/design.md":    "component design\n",
+		"components/user-api/design.json":  "component design\n",
 		"components/user-api/openapi.yaml": "openapi: 3.0.0\n",
 	}
 	if len(got) != len(want) {

@@ -24,11 +24,14 @@ import type { ArchitectOutput, SlimComponent } from "./schema.js";
 const slim = (overrides: Partial<SlimComponent> = {}): SlimComponent => ({
   name: "todo-api",
   componentType: "service",
+  version: "0.1.0",
   language: "Go",
-  dependsOn: [],
+  dependencies: [],
   entrypoint: "deployment/service",
   buildpack: "docker",
   appPath: "todo-api",
+  exposure: "internet",
+  description: "Stores and serves todo items.",
   componentAgentInstructions: "implement a Go service",
   ...overrides,
 });
@@ -144,18 +147,78 @@ test("setLanguage invalidates openapi", () => {
   assert.equal(doc.getComponent("todo-api").openapi, null);
 });
 
-test("addDependency invalidates openapi; idempotent", () => {
+test("upsertDependency (kind: component) invalidates openapi; idempotent on name", () => {
   const doc = new DesignDoc();
   doc.addComponent(slim());
   doc.addComponent(slim({ name: "notif" }));
   doc.setOpenApi("todo-api", yamlA);
-  doc.addDependency("todo-api", "notif");
+  doc.upsertDependency("todo-api", { kind: "component", name: "notif" });
   assert.equal(doc.getComponent("todo-api").openapi, null);
-  assert.deepEqual(doc.getComponent("todo-api").slim.dependsOn, ["notif"]);
-  // Re-adding doesn't grow the array.
+  assert.deepEqual(doc.getComponent("todo-api").slim.dependencies, [
+    { kind: "component", name: "notif" },
+  ]);
+  // Re-adding the same name REPLACES (upsert), not append.
   doc.setOpenApi("todo-api", yamlA);
-  doc.addDependency("todo-api", "notif");
-  assert.deepEqual(doc.getComponent("todo-api").slim.dependsOn, ["notif"]);
+  doc.upsertDependency("todo-api", { kind: "component", name: "notif" });
+  assert.deepEqual(doc.getComponent("todo-api").slim.dependencies, [
+    { kind: "component", name: "notif" },
+  ]);
+});
+
+test("upsertDependency (kind: external) does NOT invalidate openapi", () => {
+  const doc = new DesignDoc();
+  doc.addComponent(slim());
+  doc.setOpenApi("todo-api", yamlA);
+  doc.upsertDependency("todo-api", {
+    kind: "external",
+    name: "openweather",
+    description: "weather API",
+    config: [{ key: "OPENWEATHER_API_KEY", secret: true }],
+  });
+  assert.equal(doc.getComponent("todo-api").openapi, yamlA);
+  assert.deepEqual(doc.getComponent("todo-api").slim.dependencies, [
+    {
+      kind: "external",
+      name: "openweather",
+      description: "weather API",
+      config: [{ key: "OPENWEATHER_API_KEY", secret: true }],
+    },
+  ]);
+});
+
+test("removeDependency removes by name (any kind); invalidates openapi only for kind:component", () => {
+  const doc = new DesignDoc();
+  doc.addComponent(slim());
+  doc.addComponent(slim({ name: "notif" }));
+  doc.upsertDependency("todo-api", { kind: "component", name: "notif" });
+  doc.upsertDependency("todo-api", {
+    kind: "external",
+    name: "stripe",
+    description: "payments",
+    config: [{ key: "STRIPE_API_KEY", secret: true }],
+  });
+  doc.setOpenApi("todo-api", yamlA);
+
+  // Removing the external dep does not invalidate openapi.
+  doc.removeDependency("todo-api", "stripe");
+  assert.equal(doc.getComponent("todo-api").openapi, yamlA);
+  assert.deepEqual(
+    doc.getComponent("todo-api").slim.dependencies.map((d) => d.name),
+    ["notif"],
+  );
+
+  // Removing the component dep invalidates openapi.
+  doc.removeDependency("todo-api", "notif");
+  assert.equal(doc.getComponent("todo-api").openapi, null);
+  assert.deepEqual(doc.getComponent("todo-api").slim.dependencies, []);
+});
+
+test("removeDependency is a no-op when the name is absent", () => {
+  const doc = new DesignDoc();
+  doc.addComponent(slim());
+  doc.setOpenApi("todo-api", yamlA);
+  doc.removeDependency("todo-api", "nonexistent");
+  assert.equal(doc.getComponent("todo-api").openapi, yamlA);
 });
 
 test("setAgentInstructions does NOT invalidate openapi", () => {

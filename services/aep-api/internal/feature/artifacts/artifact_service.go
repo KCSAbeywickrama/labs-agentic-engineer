@@ -80,7 +80,7 @@ const (
 	RequirementsDir = "specs/requirements"
 	// DesignDir is the working-tree directory holding all design files. The
 	// architecture artifact is multi-file: a root `design.md` plus
-	// `components/<name>/design.md` (+ optional `openapi.yaml`) per component.
+	// `components/<name>/design.json` (+ optional `openapi.yaml`) per component.
 	// Versioned as a single artifact under `v<N>-<M>` tags.
 	DesignDir = "specs/design"
 	// requirementsMainFile is the canonical "main" requirements document.
@@ -166,6 +166,13 @@ type ArtifactService interface {
 	ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	DeleteDesignFile(ctx context.Context, orgID, projectID, sub string) error
 	DeleteDesignDirectory(ctx context.Context, orgID, projectID, sub string) error
+
+	// CommitDesignFile lands a single file under `specs/design/` on remote
+	// main directly via the Git Data API — no version tag. Used for internal
+	// durability writes (e.g. SetComponentOrgPublished) where minting a new
+	// design version would be wrong. Returns ("", nil) when the content
+	// already matches main (no-op, no commit). See commit_design_file.go.
+	CommitDesignFile(ctx context.Context, orgID, projectID, subPath, content, message string) (string, error)
 
 	// Save / Discard.
 	SaveRequirements(ctx context.Context, orgID, projectID string, req SaveRequest) (*RequirementsSaveResult, error)
@@ -260,9 +267,10 @@ func validateRelPath(relPath string) error {
 var allowedRequirementExts = []string{".md", ".excalidraw", ".dsl"}
 
 // allowedDesignExts is the set of file extensions recognised inside
-// `specs/design/`. Markdown holds prose + frontmatter for component design;
-// YAML is for OpenAPI specs.
-var allowedDesignExts = []string{".md", ".yaml", ".yml"}
+// `specs/design/`. Markdown holds the root design prose + frontmatter; JSON is
+// the authored per-component design (`components/<name>/design.json`); YAML is
+// for OpenAPI specs.
+var allowedDesignExts = []string{".md", ".json", ".yaml", ".yml"}
 
 func hasAllowedDesignExt(name string) bool {
 	lower := strings.ToLower(name)
@@ -313,7 +321,7 @@ func RequirementFilePath(name string) (string, error) {
 }
 
 // validateDesignSubPath validates a path relative to `specs/design/`. The
-// path may contain forward slashes (e.g. `components/user-api/design.md`)
+// path may contain forward slashes (e.g. `components/user-api/design.json`)
 // but must not have backslashes, traversal segments, or trailing slashes.
 // The leaf must end in an allowed design extension.
 func validateDesignSubPath(sub string) error {
@@ -568,7 +576,7 @@ func (s *artifactService) SaveRequirements(ctx context.Context, orgID, projectID
 }
 
 // SaveDesign stages every file under `specs/design/` (root `design.md` plus
-// per-component `design.md` and optional `openapi.yaml`), pushes the
+// per-component `design.json` and optional `openapi.yaml`), pushes the
 // changeset to remote main via the GitHub Git Data API, then creates the
 // next `v<N>-<M>` annotated tag where N is the latest requirements version.
 // See docs/design/artifact-store-v2.md.

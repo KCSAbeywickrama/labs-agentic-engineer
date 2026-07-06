@@ -225,6 +225,11 @@ func RegisterTask(
 		}
 		res, err := dispatchSvc.RetryTask(ctx, in.TaskID)
 		if err != nil {
+			// A system task (config-collection / resource-provisioning) has no
+			// coding-agent run to re-trigger — reject as a 400, not a 500.
+			if errors.Is(err, contracts.ErrTaskNotRetriable) {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
 			return nil, huma.Error500InternalServerError("failed to retry task")
 		}
 		return &dispatchResultOutput{Body: res}, nil

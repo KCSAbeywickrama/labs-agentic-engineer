@@ -278,6 +278,91 @@ func TestOnHoldWatcher_Sweep_DeferredFilterAndPerProjectDedup(t *testing.T) {
 }
 
 // ============================================================================
+// ResourceWatcher.sweep
+// ============================================================================
+
+// bindingsMock builds a moq ResourceClient answering GetBinding from a
+// bindingName → binding map; unmapped names return (nil, nil) (the OC 404 shape
+// — binding not created yet), so a wrongly-selected row is treated as not-ready.
+func bindingsMock(bindings map[string]*openchoreo.ResourceReleaseBinding) *ocmocks.ResourceClientMock {
+	return &ocmocks.ResourceClientMock{
+		GetBindingFunc: func(_ context.Context, _, name string) (*openchoreo.ResourceReleaseBinding, error) {
+			return bindings[name], nil
+		},
+	}
+}
+
+func rrbReady() *openchoreo.ResourceReleaseBinding {
+	return &openchoreo.ResourceReleaseBinding{
+		Status: &openchoreo.ResourceReleaseBindingStatus{
+			Conditions: []openchoreo.OCCondition{{Type: "Ready", Status: "True"}},
+		},
+	}
+}
+func rrbTerminalFailed() *openchoreo.ResourceReleaseBinding {
+	return &openchoreo.ResourceReleaseBinding{
+		Status: &openchoreo.ResourceReleaseBindingStatus{
+			Conditions: []openchoreo.OCCondition{{Type: "ResourcesReady", Status: "False", Reason: "Failed"}},
+		},
+	}
+}
+func rrbProgressing() *openchoreo.ResourceReleaseBinding {
+	return &openchoreo.ResourceReleaseBinding{
+		Status: &openchoreo.ResourceReleaseBindingStatus{
+			Conditions: []openchoreo.OCCondition{{Type: "ResourcesReady", Status: "False", Reason: "ResourcesProgressing"}},
+		},
+	}
+}
+
+// TestResourceWatcher_Sweep_SelectionAndTerminalEvents proves the row-selection
+// SQL (type=resource-provisioning AND status=building) and the completion routing
+// through the projector: a ready binding → resource_ready, a terminal-failed
+// binding → provision_failed, a mid-provision (CNPG) binding → NO event, and
+// rows of the wrong type/status are never polled.
+func TestResourceWatcher_Sweep_SelectionAndTerminalEvents(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+
+	// Selected: resource-provisioning + building. seedTask defaults ProjectID=demo,
+	// so the binding name is demo-<resource>-development.
+	seedTask(t, db, models.ComponentTask{ID: taskA, Type: models.TaskTypeResourceProvisioning, Status: string(models.TaskStatusBuilding), ResourceName: "db-ready"})
+	seedTask(t, db, models.ComponentTask{ID: taskB, Type: models.TaskTypeResourceProvisioning, Status: string(models.TaskStatusBuilding), ResourceName: "db-failed"})
+	seedTask(t, db, models.ComponentTask{ID: taskC, Type: models.TaskTypeResourceProvisioning, Status: string(models.TaskStatusBuilding), ResourceName: "db-progressing"})
+	// NOT selected: resource-provisioning but wrong status.
+	seedTask(t, db, models.ComponentTask{ID: taskD, Type: models.TaskTypeResourceProvisioning, Status: string(models.TaskStatusPending), ResourceName: "db-pending"})
+	// NOT selected: building but wrong type (a component build task).
+	seedTask(t, db, models.ComponentTask{ID: taskE, Status: string(models.TaskStatusBuilding), LastBuildRunName: "run-x"})
+
+	rc := bindingsMock(map[string]*openchoreo.ResourceReleaseBinding{
+		"demo-db-ready-development":       rrbReady(),
+		"demo-db-failed-development":      rrbTerminalFailed(),
+		"demo-db-progressing-development": rrbProgressing(),
+		// db-pending's binding is intentionally absent — it must never be polled.
+	})
+	proj := &fakeProjector{}
+	w := NewResourceWatcher(db, rc, proj, nil)
+
+	w.sweep(ctx)
+
+	if ev := proj.applyEventsFor(taskA); len(ev) != 1 || ev[0] != contracts.TaskEventResourceReady {
+		t.Fatalf("taskA (ready) events = %v; want [resource_ready]", ev)
+	}
+	if ev := proj.applyEventsFor(taskB); len(ev) != 1 || ev[0] != contracts.TaskEventProvisionFailed {
+		t.Fatalf("taskB (terminal) events = %v; want [provision_failed]", ev)
+	}
+	if ev := proj.applyEventsFor(taskC); len(ev) != 0 {
+		t.Fatalf("taskC (mid-provision) must apply NO event, got %v", ev)
+	}
+	if ev := proj.applyEventsFor(taskD); len(ev) != 0 {
+		t.Fatalf("taskD (pending, wrong status) must not be processed, got %v", ev)
+	}
+	if ev := proj.applyEventsFor(taskE); len(ev) != 0 {
+		t.Fatalf("taskE (wrong type) must not be processed, got %v", ev)
+	}
+}
+
+// ============================================================================
 // FOR UPDATE SKIP LOCKED — the concurrency claim the watchers rely on
 // ============================================================================
 
@@ -357,6 +442,7 @@ func TestWatcherClaimQueries_KeepSkipLocked(t *testing.T) {
 		"buildWatcherClaimSQL":       buildWatcherClaimSQL,
 		"codingAgentWatcherClaimSQL": codingAgentWatcherClaimSQL,
 		"onHoldWatcherClaimSQL":      onHoldWatcherClaimSQL,
+		"resourceWatcherClaimSQL":    resourceWatcherClaimSQL,
 	} {
 		if !strings.Contains(q, "FOR UPDATE SKIP LOCKED") {
 			t.Errorf("%s lost its FOR UPDATE SKIP LOCKED clause — two replicas would double-claim rows", name)

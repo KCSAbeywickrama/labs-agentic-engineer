@@ -75,6 +75,23 @@ export function loadRepoSkills(skillsDir: string): Skill[] {
 }
 
 /**
+ * Read one skill's `SKILL.md` untouched — full raw bytes, frontmatter and
+ * all — as opposed to `loadRepoSkills`'s `Skill.content`, which is trimmed
+ * and frontmatter-stripped for the `loadSkill` progressive-disclosure wire
+ * shape (ADR-0002). The task-planner's `taskBreakdownSkill.body` is NOT that
+ * wire shape: aep-api pushes the embedded task-breakdown SKILL.md's raw bytes
+ * (see services/aep-api/internal/feature/task/planner_skill.go), so the
+ * playground must read the same raw bytes rather than reuse the
+ * frontmatter-stripped `content` a caller resolved for the skill catalog.
+ * Returns `undefined` when `<skillsDir>/<dirId>/SKILL.md` doesn't exist.
+ */
+export function readSkillRaw(skillsDir: string, dirId: string): string | undefined {
+  const path = join(skillsDir, dirId, "SKILL.md");
+  if (!existsSync(path)) return undefined;
+  return readFileSync(path, "utf8");
+}
+
+/**
  * Read `references/*.md` for one skill dir into a path→body map keyed
  * `references/<file>` (the wire shape `loadSkillReference` addresses).
  * Returns undefined — not an empty map — when the dir is absent or empty, so a

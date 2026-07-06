@@ -94,18 +94,18 @@ func TestDiffWorkingTreeAgainstHEAD_NestedDesignPathPreserved(t *testing.T) {
 	// NOT collapse onto its basename ("design.md"). Swapping the subdir-prefix
 	// strip for filepath.Base breaks the multi-file design layout and this test.
 	r := newRig(t, map[string]string{
-		"specs/design/design.md":                "root\n",
-		"specs/design/components/foo/design.md": "foo\n",
+		"specs/design/design.md":                  "root\n",
+		"specs/design/components/foo/design.json": "foo\n",
 	})
-	r.writeWT("specs/design/components/foo/design.md", "foo changed\n")
+	r.writeWT("specs/design/components/foo/design.json", "foo changed\n")
 
 	rows, err := diffWorkingTreeAgainstHEAD(context.Background(), r.clonePath, DesignDir)
 	if err != nil {
 		t.Fatalf("diff: %v", err)
 	}
 	got := statusOf(rows)
-	if got["components/foo/design.md"] != "M" {
-		t.Errorf("want M at nested key %q, got %v", "components/foo/design.md", got)
+	if got["components/foo/design.json"] != "M" {
+		t.Errorf("want M at nested key %q, got %v", "components/foo/design.json", got)
 	}
 	if _, collapsed := got["design.md"]; collapsed {
 		t.Error("nested path was collapsed onto its basename design.md (filepath.Base regression)")
