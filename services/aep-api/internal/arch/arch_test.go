@@ -80,6 +80,12 @@ var featureEdgeAllowlist = map[string][]string{
 	"organization":  {},
 	"orgcreds":      {"gitrepo"},
 	"project":       {"artifacts", "gitrepo"},
+	// provisioning is the dependency-provisioning coordinator (dependency-management
+	// §3.6): it drives the provisioner cores (dependencies/resources) and GitHub gate
+	// issues (gitrepo). Every other collaborator — the executions store, the funnel
+	// Reevaluate hook, the design reader, the repo locator — is a consumer-side port
+	// wired at the composition root, so it holds only these two feature edges.
+	"provisioning":  {"dependencies/resources", "gitrepo"},
 	"requirements":  {"artifacts"},
 	"runtimeconfig": {"artifacts"},
 	"skills":        {"artifacts", "gitrepo"},

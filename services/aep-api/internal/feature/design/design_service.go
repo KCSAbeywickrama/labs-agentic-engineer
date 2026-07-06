@@ -85,6 +85,16 @@ type designService struct {
 	artifactSvc         artifacts.ArtifactService
 	taskSvc             taskReconciler            // for SaveAndProceed reconciliation; may be nil in tests
 	externalResourceReg externalResourceRegistrar // for SaveAndProceed external-resource registration; may be nil
+	provisionMinter     provisionIssueMinter      // for SaveAndProceed aep:provision gate minting; may be nil
+}
+
+// provisionIssueMinter is design_service's narrow consumer port for the
+// provisioning feature: on a design tag-cut it ensures one aep:provision gate
+// issue per distinct external / platform-resource dependency exists
+// (dependency-management §3.6). *provisioning.Service satisfies it. Wired via
+// SetProvisionIssueMinter at the composition root; nil is a no-op.
+type provisionIssueMinter interface {
+	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) error
 }
 
 // externalResourceRegistrar is design_service's narrow consumer port for the
@@ -124,6 +134,13 @@ func (s *designService) SetTaskService(taskSvc taskReconciler) {
 // registry is a documented no-op (mirrors SetTaskService).
 func (s *designService) SetExternalResourceRegistry(reg externalResourceRegistrar) {
 	s.externalResourceReg = reg
+}
+
+// SetProvisionIssueMinter wires the provisioning feature so external /
+// platform-resource dependency gate issues are minted (best-effort) whenever a
+// design is tagged. A nil minter is a documented no-op.
+func (s *designService) SetProvisionIssueMinter(m provisionIssueMinter) {
+	s.provisionMinter = m
 }
 
 // registerExternalResources best-effort upserts every distinct `external`
@@ -389,6 +406,15 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 	// Register every distinct `external` dependency in the tagged design into the
 	// org's external-resource catalog (best-effort; never fails the save).
 	s.registerExternalResources(ctx, orgID, designFile)
+
+	// Mint one aep:provision gate issue per distinct external / platform-resource
+	// dependency so consumer coding tasks hold until each is provisioned
+	// (best-effort; never fails the save).
+	if s.provisionMinter != nil {
+		if merr := s.provisionMinter.EnsureProvisionIssues(ctx, orgID, projectID, res.Tag); merr != nil {
+			slog.WarnContext(ctx, "provision issue minting after design save failed", "error", merr)
+		}
+	}
 
 	if s.taskSvc != nil {
 		if rerr := s.taskSvc.ReconcilePendingForDesignChange(ctx, orgID, projectID); rerr != nil {

@@ -24,6 +24,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -60,6 +61,19 @@ func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID s
 	return names, nil
 }
 
+// ReadDesignComponents exposes the project's authored design components at HEAD.
+// Satisfies provisioning.DesignReader (and dependencies/resources.DesignReader).
+func (d designComponents) ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error) {
+	design, err := d.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if design == nil {
+		return nil, nil
+	}
+	return design.Components, nil
+}
+
 // ProvisionDepNames exposes each component's provisioning dependencies (external
 // + platform-resource) for the funnel's dependency-kind-aware gate. Satisfies
 // execution.DesignReader.
@@ -78,6 +92,26 @@ func (d designComponents) ProvisionDepNames(ctx context.Context, orgID, projectI
 		}
 	}
 	return out, nil
+}
+
+// repoNamer resolves an org+project to its GitHub repo full name ("owner/name")
+// — the provision Execution row's Repo must equal the gate issue's repo full
+// name so the funnel gate resolves the run. Satisfies provisioning.RepoLocator.
+type repoNamer struct{ repos repositories.RepoRepository }
+
+func (r repoNamer) RepoFullName(ctx context.Context, orgID, projectID string) (string, error) {
+	gr, err := r.repos.GetByOrgAndProjectID(ctx, orgID, projectID)
+	if err != nil {
+		return "", err
+	}
+	if gr == nil {
+		return "", gitrepo.ErrRepoNotFound
+	}
+	owner, name, err := gitrepo.ParseOwnerRepo(gr.RepoURL)
+	if err != nil {
+		return "", err
+	}
+	return owner + "/" + name, nil
 }
 
 // repoLister enumerates ready project repos for the reconciliation sweep.

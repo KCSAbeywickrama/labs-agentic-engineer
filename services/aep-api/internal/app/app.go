@@ -58,6 +58,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -763,6 +764,31 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// design never imports repositories concretely.
 	designService.SetExternalResourceRegistry(externalResourceRepo)
 
+	// Dependency provisioning (dependency-management Phase 6): the value/param
+	// collection surface + the aep:provision gate funnel. The provisioner cores
+	// author the OC Resource model; the service drives gate issues + provision
+	// Executions (Kind=provision) and closes each issue with a no-secrets
+	// reference; the readiness watcher observes platform-resource bindings'
+	// native Ready condition out-of-band and releases gated consumer tasks.
+	externalProvisioner := resources.NewExternalResourceProvisioner(externalResourceRepo, resourceClient, smWriter)
+	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)
+	provisioningSvc := provisioning.NewService(
+		issueService,
+		executionRepo,
+		funnel,
+		designComponents{store: artifactStore},
+		repoNamer{repos: repoRepo},
+		externalResourceRepo,
+		externalProvisioner,
+		platformProvisioner,
+		resourceClient,
+	)
+	params.HumaDeps.ProvisioningSvc = provisioningSvc
+	// Mint aep:provision gate issues on design approval (before planning gates any
+	// consumer coding task on them).
+	designService.SetProvisionIssueMinter(provisioningSvc)
+	resourceWatcher := provisioning.NewResourceWatcher(provisioningSvc, asServiceIdentity, 0)
+
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 
 	handler := api.NewHandler(params)
@@ -776,6 +802,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	watchers := []Watcher{
 		sweep,
 		execWatcher,
+		// Resource-readiness watcher: turns platform-resource bindings going Ready
+		// into provision-Execution terminals + gate-issue closes, releasing gated
+		// consumer tasks (dependency-management §3.6).
+		resourceWatcher,
 		// Periodic credential validator — walks every active org_credentials row
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised credentials.

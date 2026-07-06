@@ -34,6 +34,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -52,6 +53,7 @@ type HumaDeps struct {
 	RequirementsSvc   requirements.RequirementsService
 	CollabRepo        gitrepo.RepoService
 	DesignSvc         design.DesignService
+	ProvisioningSvc   *provisioning.Service
 	TaskReads         *task.Reads
 	TaskCommands      *task.Commands
 	TaskPlan          *task.PlanService
@@ -84,6 +86,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	requirements.RegisterRequirements(api, d.RequirementsSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
 	design.RegisterDesign(api, d.DesignSvc)
+	provisioning.RegisterResources(api, d.ProvisioningSvc)
 	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
 	execution.RegisterProgress(api, d.ExecProgress)
 	idp.RegisterIDP(api, d.IDPSvc)
