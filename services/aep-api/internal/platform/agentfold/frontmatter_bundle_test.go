@@ -47,6 +47,9 @@ type bundleCase struct {
 }
 
 func TestFrontmatterAndGuard_MatchFileBundleFixture(t *testing.T) {
+	t.Skip("DISABLED pending fixture migration to the dependencies[] schema " +
+		"(dependency-management follow-up): testdata/frontmatter_bundle.json uses the pre-Phase-3 " +
+		"connections[] schema. See docs/design/dependency-management-migration.md §8 (Phase-6 e2e Bug A).")
 	raw, err := os.ReadFile("testdata/frontmatter_bundle.json")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)

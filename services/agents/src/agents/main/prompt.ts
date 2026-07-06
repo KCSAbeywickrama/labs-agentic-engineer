@@ -162,7 +162,7 @@ A simple public API service that responds with "Hello, World!" in JSON format. B
   "appPath": "hello-api",
   "entrypoint": "deployment/service",
   "exposure": "internet",
-  "connections": [],
+  "dependencies": [],
   "description": "A simple public Go HTTP service (port 9090, net/http) that returns a hello-world JSON message. No authentication. Endpoints are specified in openapi.yaml."
 }
 `,

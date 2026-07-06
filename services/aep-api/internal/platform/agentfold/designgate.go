@@ -45,18 +45,28 @@ type designProblem struct {
 var (
 	designStringFields  = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
 	exposureValues      = map[string]bool{"internet": true, "intranet": true}
-	connectionTypes     = map[string]bool{"http": true, "datastore": true, "connector": true}
-	connectionKnownKeys = map[string]bool{"to": true, "type": true, "onPlatform": true}
-	designKnownKeys     = map[string]bool{
+	dependencyKinds     = map[string]bool{"component": true, "org-service": true, "external": true, "platform-resource": true}
+	dependencyKnownKeys = map[string]bool{
+		"kind": true, "name": true, "description": true, "needsSpec": true,
+		"specPath": true, "specUrl": true, "config": true, "resourceType": true,
+		"parameters": true, "candidates": true,
+	}
+	designKnownKeys = map[string]bool{
 		"name": true, "type": true, "version": true, "language": true,
 		"buildpack": true, "appPath": true, "entrypoint": true,
-		"exposure": true, "connections": true, "description": true,
+		"exposure": true, "dependencies": true, "description": true,
+		"exposesAPI": true, "callerIdentity": true, "componentAgentInstructions": true,
 	}
 )
 
-// validateComponentDesign mirrors the zod componentDesignSchema.safeParse plus
-// the name-equals-directory rule. Only the FIRST problem is reported (the
-// accept/reject outcome is what parity needs).
+// validateComponentDesign mirrors the zod componentDesignSchema.safeParse
+// (dependencies[] — the kind-discriminated successor to the legacy connections[])
+// plus the name-equals-directory rule. Only the FIRST problem is reported (the
+// accept/reject outcome is what parity needs). It is deliberately AT MOST as
+// strict as the TS zod gate (which the FileBundle runs first), so a zod-passing
+// write always folds here: the top-level shape + each dependency's kind/name and
+// strict-key set are enforced; the optional platform-owned blocks (exposesAPI /
+// callerIdentity / componentAgentInstructions) are type-checked only.
 func validateComponentDesign(content, dirName string) *designProblem {
 	var parsed any
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
@@ -85,34 +95,13 @@ func validateComponentDesign(content, dirName string) *designProblem {
 	if !ok || !exposureValues[exposure] {
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("exposure: %q is not an allowed value", obj["exposure"])}
 	}
-	conns, ok := obj["connections"].([]any)
+	deps, ok := obj["dependencies"].([]any)
 	if !ok {
-		return &designProblem{code: ErrSchemaViolation, message: "connections: must be an array"}
+		return &designProblem{code: ErrSchemaViolation, message: "dependencies: must be an array"}
 	}
-	for i, c := range conns {
-		conn, ok := c.(map[string]any)
-		if !ok {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("connections[%d]: must be an object", i)}
-		}
-		to, ok := conn["to"].(string)
-		if !ok || to == "" {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("connections[%d].to: must be a non-empty string", i)}
-		}
-		ct, ok := conn["type"].(string)
-		if !ok || !connectionTypes[ct] {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("connections[%d].type: %q is not an allowed value", i, conn["type"])}
-		}
-		if op, present := conn["onPlatform"]; present {
-			if _, ok := op.(bool); !ok {
-				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("connections[%d].onPlatform: must be a boolean", i)}
-			}
-		}
-		// z.strictObject (Phase-5 reconciliation): unknown connection
-		// properties reject, matching the published schema + save gate.
-		for k := range conn {
-			if !connectionKnownKeys[k] {
-				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("connections[%d]: unknown property %s", i, k)}
-			}
+	for i, d := range deps {
+		if p := validateDependency(i, d); p != nil {
+			return p
 		}
 	}
 	if name := obj["name"].(string); name != dirName {
@@ -120,6 +109,31 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			code:    ErrSchemaViolation,
 			message: fmt.Sprintf("name %q must equal the component directory name %q", name, dirName),
 		}
+	}
+	return nil
+}
+
+// validateDependency mirrors the zod dependencySchema.strictObject: a
+// kind-discriminated edge whose kind + name are required and whose keys are a
+// closed set (unknown keys — notably the read-time-computed status/reason, which
+// the agent must NEVER author — reject).
+func validateDependency(i int, d any) *designProblem {
+	dep, ok := d.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d]: must be an object", i)}
+	}
+	for k := range dep {
+		if !dependencyKnownKeys[k] {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d]: unknown property %s", i, k)}
+		}
+	}
+	kind, ok := dep["kind"].(string)
+	if !ok || !dependencyKinds[kind] {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].kind: %q is not an allowed value", i, dep["kind"])}
+	}
+	name, ok := dep["name"].(string)
+	if !ok || name == "" {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].name: must be a non-empty string", i)}
 	}
 	return nil
 }
