@@ -789,6 +789,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	designService.SetProvisionIssueMinter(provisioningSvc)
 	resourceWatcher := provisioning.NewResourceWatcher(provisioningSvc, asServiceIdentity, 0)
 
+	// ADR-0004 declarative wiring: at coding dispatch the platform resolves the
+	// component's dependency targets (org-service + sibling endpoints, external +
+	// platform-resource binding outputs) and posts them as a comment the coding
+	// agent copies into workload.yaml — the platform never patches the CR.
+	codingExecutor.WithDependencyWiring(provisioning.NewWiringResolver(
+		designComponents{store: artifactStore}, orgEndpointCatalog, resourceClient, issueService))
+
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 
 	handler := api.NewHandler(params)

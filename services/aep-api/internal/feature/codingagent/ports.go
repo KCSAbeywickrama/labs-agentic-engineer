@@ -42,6 +42,17 @@ type Identities interface {
 	IdentityFor(ctx context.Context, ocOrgID string) (name, email, login string, err error)
 }
 
+// DependencyWiring posts the ADR-0004 "Platform-resolved dependencies" comment on
+// a coding Task's issue at dispatch: the platform resolves the component's
+// dependency targets (sibling / org-service endpoints, external +
+// platform-resource binding outputs) and posts them for the coding agent to copy
+// into workload.yaml. The platform NEVER patches the Workload CR. Wired from the
+// provisioning feature at the composition root; nil → skipped. Uses primitives so
+// this feature holds no provisioning import.
+type DependencyWiring interface {
+	PostResolvedDeps(ctx context.Context, orgID, projectID string, issueNumber int, component string) error
+}
+
 // AnthropicProvisioner materializes the per-org Anthropic key Secret on the
 // workflow plane and returns its ref. Best-effort at dispatch. Wired from
 // orgcreds.AnthropicCredentialService.

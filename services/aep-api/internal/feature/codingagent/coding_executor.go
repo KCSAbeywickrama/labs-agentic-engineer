@@ -72,6 +72,10 @@ type CodingExecutor struct {
 	// components ensures the OpenChoreo Component CR exists as a coding-dispatch
 	// pre-flight, so the merged-PR build has a Component to build (nil → skipped).
 	components ComponentEnsurer
+
+	// wiring posts the ADR-0004 "Platform-resolved dependencies" comment on the
+	// coding issue at dispatch (nil → skipped). Best-effort — it never fails the run.
+	wiring DependencyWiring
 }
 
 // NewCodingExecutor wires the ClusterWorkflow-path executor. anthropic may be
@@ -121,6 +125,13 @@ func (e *CodingExecutor) WithBuildSecrets(stager BuildSecretStager, authRetryBud
 // Returns the receiver for chained construction.
 func (e *CodingExecutor) WithComponentEnsurer(c ComponentEnsurer) *CodingExecutor {
 	e.components = c
+	return e
+}
+
+// WithDependencyWiring enables the ADR-0004 declarative-wiring comment at coding
+// dispatch (nil → skipped). Returns the receiver for chained construction.
+func (e *CodingExecutor) WithDependencyWiring(w DependencyWiring) *CodingExecutor {
+	e.wiring = w
 	return e
 }
 
@@ -174,6 +185,17 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 		return fmt.Errorf("mint runner bearer: %w", err)
 	}
 	prompt := buildPrompt(t.IssueURL, t.IssueNumber)
+
+	// ADR-0004 declarative wiring: post the "Platform-resolved dependencies"
+	// comment on the coding issue so the agent copies it into workload.yaml. The
+	// gate held this consumer until its deps deployed, so their targets/outputs
+	// resolve now. Best-effort — the platform never patches the CR, and a wiring
+	// failure must not fail the dispatch.
+	if e.wiring != nil {
+		if werr := e.wiring.PostResolvedDeps(ctx, t.OrgID, t.ProjectID, t.IssueNumber, t.Component); werr != nil {
+			slog.WarnContext(ctx, "coding executor: post resolved-deps comment failed", "issue", t.IssueNumber, "error", werr)
+		}
+	}
 
 	// Proxy path first (what local uses). Falls back to ClusterWorkflow when the
 	// proxy dispatcher / SM-API triplets are not fully configured.
