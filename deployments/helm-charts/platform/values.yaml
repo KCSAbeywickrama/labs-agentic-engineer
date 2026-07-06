@@ -1,0 +1,79 @@
+aepApi:
+  replicas: 1
+  image:
+    repository: docker.io/senithkay/ae
+    tag: aep-api
+    pullPolicy: Always
+  port: 9090
+  logLevel: "info"
+  deploymentTier: "dev"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+  serviceAuth:
+    clientId: "aep-api-client"
+  publicURL: "http://aep-api.openchoreo.localhost:8080"
+
+aepAgents:
+  replicas: 1
+  image:
+    repository: docker.io/senithkay/ae
+    tag: agents
+    pullPolicy: Always
+  port: 9090
+  logLevel: "info"
+  model: "claude-sonnet-5"
+  maxSteps: 20
+  bodyLimit: "10mb"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+
+
+console:
+  replicas: 1
+  image:
+    repository: docker.io/senithkay/ae
+    tag: console
+    pullPolicy: Always
+  port: 3000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+  publicURL: "http://console.openchoreo.localhost:8080"
+  thunderPublicURL: "http://thunder.openchoreo.localhost:8080"
+  thunder:
+    clientId: "aep-console-client"
+    scopes: "openid profile email"
+
+taskSigning:
+  issuer: "aep-bff"
+  audience: "git-service"
+
+observer:
+  clientId: "openchoreo-observer-resource-reader-client"
+
+postgres:
+  version: "16"
+  database: aep
+  user: aep
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"

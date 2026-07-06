@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-agents
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: aep-agents
+    app.kubernetes.io/managed-by: {{ .Release.Service}}
+    app.kubernetes.io/part-of: aep
+spec:
+  replicas: {{ .Values.aepAgents.replicas | default 1 }}
+  selector: 
+    matchLabels: 
+      app: aep-agents
+  template:
+    metadata:
+      labels: 
+        app: aep-agents
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      serviceAccountName: aep-agents
+      containers:
+        - name: aep-agents
+          image: "{{ .Values.aepAgents.image.repository }}:{{ .Values.aepAgents.image.tag }}"
+          imagePullPolicy: {{ .Values.aepAgents.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.aepAgents.port }}
+              name: http
+          resources: {{ toYaml .Values.aepAgents.resources | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ .Values.aepAgents.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.aepAgents.logLevel | quote }}
+            - name: AGENT_MODEL
+              value: {{ .Values.aepAgents.model | quote }}
+            - name: AGENT_MAX_STEPS
+              value: {{ .Values.aepAgents.maxSteps | quote }}
+            - name: AGENT_BODY_LIMIT
+              value: {{ .Values.aepAgents.bodyLimit | quote }}
+
+            # secrets
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aep-agents-secrets
+                  key: ANTHROPIC_API_KEY

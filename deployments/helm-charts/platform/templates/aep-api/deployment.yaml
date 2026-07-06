@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: aep-api
+    app.kubernetes.io/managed-by: {{ .Release.Service}}
+    app.kubernetes.io/part-of: aep
+spec:
+  replicas: {{ .Values.aepApi.replicas | default 1 }}
+  selector: 
+    matchLabels: 
+      app: aep-api
+  template:
+    metadata:
+      labels: 
+        app: aep-api
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      serviceAccountName: aep-api
+      containers:
+        - name: aep-api
+          image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
+          imagePullPolicy: {{ .Values.aepApi.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.aepApi.port }}
+              name: http
+          resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
+          env:
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.aepApi.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.aepApi.logLevel | quote }}
+            - name: DEPLOYMENT_TIER
+              value: {{ .Values.aepApi.deploymentTier | quote }}
+            - name: TEST_MODE
+              value: "false"
+            - name: LOCAL_OPENBAO_REPAIR
+              value: "false"
+            - name: JWT_AUDIENCE
+              value: "aep-*"
+            - name: SERVICE_AUTH_CLIENT_ID
+              value: {{ .Values.aepApi.serviceAuth.clientId | quote }}
+            - name: SERVICE_AUTH_HOST_HEADER
+              value: ""
+            - name: BFF_TASK_SIGNING_KEY_PATH
+              value: "/app/keys/task-signing.pem"
+            - name: BFF_TASK_TOKEN_ISSUER
+              value: {{ .Values.taskSigning.issuer | quote }}
+            - name: BFF_TASK_TOKEN_AUDIENCE
+              value: {{ .Values.taskSigning.audience | quote }}
+            - name: BFF_PUBLIC_URL
+              value: {{ .Values.aepApi.publicURL | quote }}
+            - name: OBSERVER_OAUTH_CLIENT_ID
+              value: {{ .Values.observer.clientId | quote }}
+            - name: OBSERVER_OAUTH_HOST_HEADER
+              value: ""
+            - name: PLATFORM_API_SERVICE_BASE_URL
+              valueFrom: 
+                configMapKeyRef:
+                  name: platform-configs
+                  key: PLATFORM_API_SERVICE_BASE_URL
+
+            # secrets
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}"
+          volumeMounts:
+            - name: task-signing-key
+              mountPath: /app/keys
+              readOnly: true
+      volumes:
+        - name: task-signing-key
+          secret:
+            secretName: aep-task-signing-key

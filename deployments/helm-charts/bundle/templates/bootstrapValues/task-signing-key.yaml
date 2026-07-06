@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aep-task-signing-key
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+type: Opaque
+stringData:
+  task-signing.pem: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDldF2v6CQ7ub7X
+    4M9BkJxIqdhnaMwzT6xFqPOMQiBHoj31gHhf+tkYQA7qVhibzZ895Lo8BW6aXk8W
+    MG8ZJQxw4f5+iDXoeCUJoXWuZ7V6YA6AzrSPfnpvJGpCMZlD12H7d+19LpAm+mp/
+    7xMLPnMjQzyR+d3Dibb2DsfDSEl5FUbSR487PJG5+6zDlwgOvU0HnzzgtE3O8mKu
+    uCSa0n8HVsVPA+jC2/dzPj/fai1nLHlcxLkRVrKDD1nRQQbv1MKVXWlOP5hmz+Rg
+    OHHurjMJvsFLkonnMq+Sq82G1zG73w/Y/sgq+F8OIplDEpYrrqW0C7gH6YAPaqSB
+    0w7vh8snAgMBAAECggEAIdVUQS1iNlpPrSZNeTX5DW/Z5Hmb7o73cHgWnV5cwyNF
+    ro8IcOKco0pCyMP0MfkSW36ABXypj+KLF9MBdrwzRuvT6lVsWYBpua9QmmxZYpeK
+    W+zey+/S3tOIRYVpu4qlPH61ConUoKK5FG8sqDJHqPHvmvi0ffIvA74vL3jXuJ4m
+    h5vd4SYvhVPEH67PRzRL/2xYV5L+IAlyU5/h/4Dsf/9hxcqn3ToevyJXW/NDd3WQ
+    ycwitGVWzPGJGas0f2ISjOx3XasVcIq/ANL/LNZEdr+OzxedJ965bzCndsQB9qLI
+    sLmrVLgk+zro9HxrLchYO9lTrk5eFnTZJFHXCPz4tQKBgQD5b1YXoG1LfPa6eOJp
+    Gvd5VsJMX8AqSiwP55tsx7zwX9zkyBrYYrbrHwASz18Q6poEgSS297Z1ENzmlWfZ
+    1ufC0gZKKziK+fzU5vpPz2QHG+JU1MJ6/0E07riy5JxOsVPZN12eBDokUfNs1hau
+    1t+ik8BQd8U/0CAzioLIlmKuzQKBgQDrfmeDa2NlkGuFyMRODAl0RrCFAOzINxLL
+    ZDNrAJyfrVIRBzk8dd48vEW9UGauXnoasqvZjdsgEqWUrH6+RKKBxRabeIetwt0c
+    3Pg/t7JNLOxeuW1v8dCEAeYvdUZaAqtWwIJQWt2abOy9yXgNJ92EDgpT2ZMYDRdZ
+    lTrBHTU5wwKBgQCAPWuHziUi8GZxTIErBIBDVAWk+n1zwJqSusK/1JkhBEgvH2od
+    4fKlQ1ToVtFLgzIYKsVThFu8KCVKL3orF0Ake5JcQ4hYe1ovo2kB62BD/2QHtTMf
+    xWgi7LDs2Hg8RRMU1FA/U3EJB1EdnZwf270yesAfHtS8kCZeGVJQCnFF6QKBgB05
+    aZUojYQ8IOvQV3QsEDxKzXsj+z55fy6Yd70OrWEvfCC62cKEChlVb/4nbSa0eMi5
+    ZZQxA4F+buf9ZBkuoVAjakPO+F968D+1uGUH4eur6IV003zx8GOBbNR05E8lR6gT
+    adiY/ik83UBMMUbIrLfHmkZ/mL6CWWR3nXv7qPBLAoGAPmaSNtaWFTR6csa+bP+7
+    RuUKhcbpy2ViSubhQx08tONzmvb9rlJCP6HnUjb7tAiQvoIvsFuQQf++XVBrpr+Q
+    hO85lpp6wwblr0RXjJUKHTB4UsdHhbP2Ox1lG/L1VWLsanPMznmWlLHW39+7njWj
+    18QK8eK7zr8Hmh/+fiG/fzw=
+    -----END PRIVATE KEY-----
