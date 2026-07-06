@@ -71,6 +71,13 @@ func (f *Funnel) OnExecuteIntent(ctx context.Context, repoFullName string, issue
 		f.consumeExecute(ctx, orgID, projectID, issueNumber)
 		return nil
 	}
+	if facts.Class == taskmeta.ClassProvision {
+		// aep:provision gate issues are driven by the drawer action + the
+		// readiness watcher (dependency-management §3.6), never by aep:execute.
+		// Consume a stray execute label so it does not linger; do not admit a row.
+		f.consumeExecute(ctx, orgID, projectID, issueNumber)
+		return nil
+	}
 
 	// Retry semantics (§7 "retry = a new row of that kind"): if the latest coding
 	// Execution succeeded into a MERGED PR whose latest build FAILED, an execute
@@ -276,10 +283,19 @@ func (f *Funnel) gate(ctx context.Context, facts TaskFacts, row *models.Executio
 	return f.dispatch(ctx, facts, row, "Dispatch failed: ")
 }
 
-// depsGate resolves the dependency gate for a Task. It returns the unmet
-// dependency components (not yet deployed) and, if the component graph among the
-// project's Tasks contains a cycle reachable from this Task's component, the
-// cycle path. Deps are component names, never issue numbers (the phase-5 lesson).
+// depsGate resolves the dependency-kind-aware gate for a Task (§5,
+// dependency-management §3.6). It returns the unmet dependency names (not yet
+// deployed) and, if the component graph among the project's Tasks contains a
+// cycle reachable from this Task's component, the cycle path. Two dependency
+// families are gated: (1) the block's dependsOn (sibling components — the
+// phase-5 lesson: names, never issue numbers), each resolved to its latest
+// component Task; (2) the design's provisioning deps (external +
+// platform-resource) for this component, each resolved to its aep:provision gate
+// issue. A dep is satisfied iff its resolving Task/issue derives deployed
+// (a succeeded provision run derives deployed via the ops/provision arm of
+// Derive). org-service deps are absent here — they are gated at proceed. An
+// unknown or missing dep (no Task/issue yet) counts as unmet, so a consumer
+// holds until its provision issue is minted AND deploys.
 func (f *Funnel) depsGate(ctx context.Context, facts TaskFacts, view *projectView) (unmet []string, cycle []string) {
 	if facts.Component == "" {
 		return nil, nil // ops Tasks carry operation, not component deps in v1
@@ -287,23 +303,44 @@ func (f *Funnel) depsGate(ctx context.Context, facts TaskFacts, view *projectVie
 	if cyc := detectCycle(facts.Component, view.latestByComponent); len(cyc) > 0 {
 		return nil, cyc
 	}
-	for _, dep := range facts.DependsOn {
-		depTask, ok := view.latestByComponent[strings.ToLower(dep)]
-		if !ok {
-			unmet = append(unmet, dep)
-			continue
+	seen := map[string]bool{}
+	check := func(dep string) {
+		key := strings.ToLower(dep)
+		if key == "" || seen[key] {
+			return
 		}
-		execs, err := f.store.LatestPerKind(ctx, depTask.Repo, depTask.IssueNumber)
-		if err != nil {
-			slog.WarnContext(ctx, "funnel deps: load dep executions failed", "dep", dep, "error", err)
-			unmet = append(unmet, dep)
-			continue
-		}
-		if deriveStatus(depTask, execs) != taskmeta.StatusDeployed {
+		seen[key] = true
+		if !f.depDeployed(ctx, view, key) {
 			unmet = append(unmet, dep)
 		}
 	}
+	for _, dep := range facts.DependsOn {
+		check(dep)
+	}
+	for _, dep := range view.provisionDepsByComponent[strings.ToLower(facts.Component)] {
+		check(dep)
+	}
 	return unmet, nil
+}
+
+// depDeployed reports whether a dependency (by lowercased name) resolves to a
+// Task or aep:provision gate issue that derives deployed. A component dep
+// resolves via latestByComponent; a provisioning dep via provisionByDep. An
+// unresolvable name (no Task/issue) is not deployed.
+func (f *Funnel) depDeployed(ctx context.Context, view *projectView, key string) bool {
+	depTask, ok := view.latestByComponent[key]
+	if !ok {
+		depTask, ok = view.provisionByDep[key]
+	}
+	if !ok {
+		return false
+	}
+	execs, err := f.store.LatestPerKind(ctx, depTask.Repo, depTask.IssueNumber)
+	if err != nil {
+		slog.WarnContext(ctx, "funnel deps: load dep executions failed", "dep", key, "error", err)
+		return false
+	}
+	return deriveStatus(depTask, execs) == taskmeta.StatusDeployed
 }
 
 // consumeExecute removes the edge-triggered aep:execute label (best-effort).
@@ -328,10 +365,16 @@ func (f *Funnel) flagAttention(ctx context.Context, facts TaskFacts, msg string)
 // projectView is the funnel's snapshot of a project's Tasks read live from
 // GitHub: every Task issue by number, plus the latest Task per component
 // (highest issue number wins — the same latest-per-component rule the agents
-// service uses for cycle edges).
+// service uses for cycle edges). provisionByDep indexes the project's
+// aep:provision gate issues by dependency name (their block Component), and
+// provisionDepsByComponent maps each component to its provisioning dependencies
+// read from the design — together they drive the dependency-kind-aware gate
+// (dependency-management §3.6).
 type projectView struct {
-	byNumber          map[int]TaskFacts
-	latestByComponent map[string]TaskFacts
+	byNumber                 map[int]TaskFacts
+	latestByComponent        map[string]TaskFacts
+	provisionByDep           map[string]TaskFacts
+	provisionDepsByComponent map[string][]string
 }
 
 // TaskFactsFor resolves one Task's live facts by repo full name + issue number
@@ -357,19 +400,42 @@ func (f *Funnel) loadProject(ctx context.Context, orgID, projectID, repoFullName
 	if err != nil {
 		return nil, fmt.Errorf("list task issues: %w", err)
 	}
-	v := &projectView{byNumber: map[int]TaskFacts{}, latestByComponent: map[string]TaskFacts{}}
+	v := &projectView{
+		byNumber:          map[int]TaskFacts{},
+		latestByComponent: map[string]TaskFacts{},
+		provisionByDep:    map[string]TaskFacts{},
+	}
 	for _, issue := range issues {
 		facts, _, ok := factsFromIssue(issue, orgID, projectID, repoFullName)
 		if !ok {
 			continue
 		}
 		v.byNumber[facts.IssueNumber] = facts
-		if facts.Component != "" {
-			key := strings.ToLower(facts.Component)
-			if cur, exists := v.latestByComponent[key]; !exists || facts.IssueNumber > cur.IssueNumber {
-				v.latestByComponent[key] = facts
-			}
+		key := strings.ToLower(facts.Component)
+		if key == "" {
+			continue
 		}
+		// aep:provision gate issues index by dependency name in their own map;
+		// coding/ops Tasks index by component. Keeping them apart stops a
+		// provision issue from shadowing a real component of the same name in the
+		// cycle graph / component dep gate.
+		if facts.Class == taskmeta.ClassProvision {
+			if cur, exists := v.provisionByDep[key]; !exists || facts.IssueNumber > cur.IssueNumber {
+				v.provisionByDep[key] = facts
+			}
+			continue
+		}
+		if cur, exists := v.latestByComponent[key]; !exists || facts.IssueNumber > cur.IssueNumber {
+			v.latestByComponent[key] = facts
+		}
+	}
+	// Per-component provisioning deps from the design at HEAD — the second half of
+	// the dependency-kind-aware gate. Best-effort: a design read error leaves the
+	// map nil, degrading to component-only gating rather than blocking dispatch.
+	if deps, derr := f.design.ProvisionDepNames(ctx, orgID, projectID); derr != nil {
+		slog.WarnContext(ctx, "funnel loadProject: read provision deps failed", "project", projectID, "error", derr)
+	} else {
+		v.provisionDepsByComponent = deps
 	}
 	return v, nil
 }

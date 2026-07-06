@@ -30,12 +30,18 @@ const (
 	// KindOps: a platform operation (create a DB, provision an IDP). No
 	// PR/build; executor TBD (§11).
 	KindOps ExecutionKind = "ops"
+	// KindProvision: a dependency-provisioning run (external value collection or
+	// platform-resource provisioning). No PR/build; admitted+started by the
+	// ProvisioningService from the drawer action and Finished by the
+	// resource-readiness watcher (dependency-management §3.6). A succeeded
+	// provision run derives StatusDeployed, satisfying dependent coding tasks.
+	KindProvision ExecutionKind = "provision"
 )
 
 // Valid reports whether k is a known execution kind.
 func (k ExecutionKind) Valid() bool {
 	switch k {
-	case KindCoding, KindBuild, KindOps:
+	case KindCoding, KindBuild, KindOps, KindProvision:
 		return true
 	}
 	return false

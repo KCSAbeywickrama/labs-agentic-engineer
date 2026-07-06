@@ -82,11 +82,26 @@ type Block struct {
 	Component string   // coding tasks; empty for ops
 	Operation string   // ops tasks; empty for coding
 	DependsOn []string // component names, never issue numbers
-	Origin    Origin   // spec-plan | incident | manual
-	SpecTag   string   // lineage
-	DesignTag string   // lineage; idempotency baseline (replaces batch_id)
-	Key       string   // idempotency key (see Key)
+	// GateKind classifies a provision Task (dependency-management §3.6):
+	// config-collection | resource-provisioning | org-publish. Empty for
+	// coding/ops. Component names the dependency (external/platform-resource) or,
+	// for org-publish, the provider component being published.
+	GateKind  string
+	Origin    Origin // spec-plan | incident | manual
+	SpecTag   string // lineage
+	DesignTag string // lineage; idempotency baseline (replaces batch_id)
+	Key       string // idempotency key (see Key)
 }
+
+// Provision gate kinds carried in Block.GateKind (dependency-management §3.6).
+const (
+	// GateConfigCollection: collect an external dependency's config/secret values.
+	GateConfigCollection = "config-collection"
+	// GateResourceProvisioning: provision a platform-resource (e.g. postgres-cnpg).
+	GateResourceProvisioning = "resource-provisioning"
+	// GateOrgPublish: publish a provider component org-wide (namespace visibility).
+	GateOrgPublish = "org-publish"
+)
 
 // Human is the human-editable remainder of a Task issue body: the rationale
 // line the planner writes and the free-form markdown scope/body.
@@ -176,6 +191,7 @@ func (b Block) Serialize() string {
 		sb.WriteString(flowList(b.DependsOn))
 		sb.WriteByte('\n')
 	}
+	writeField("gateKind", b.GateKind)
 	writeField("origin", string(b.Origin))
 	writeField("specTag", b.SpecTag)
 	writeField("designTag", b.DesignTag)
@@ -303,6 +319,8 @@ func parsePayload(payload string) (Block, error) {
 			b.Component = parseScalar(val)
 		case "operation":
 			b.Operation = parseScalar(val)
+		case "gatekind":
+			b.GateKind = parseScalar(val)
 		case "origin":
 			b.Origin = Origin(parseScalar(val))
 		case "spectag":

@@ -73,6 +73,13 @@ type DesignReader interface {
 	// ComponentNames returns the lowercased set of component names present in
 	// the project's design at HEAD, or nil when the project has no design yet.
 	ComponentNames(ctx context.Context, orgID, projectID string) (map[string]bool, error)
+	// ProvisionDepNames returns, per component (lowercased name), the names of
+	// that component's provisioning dependencies (external + platform-resource) —
+	// the deps the funnel's dependency-kind-aware gate holds a consumer coding
+	// task on until each dep's aep:provision issue derives deployed
+	// (dependency-management §3.6). org-service deps are excluded (proceed-gated).
+	// Returns nil when the project has no design yet.
+	ProvisionDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
 }
 
 // ExecutionStore is the executions rows repository (repositories.ExecutionRepository).

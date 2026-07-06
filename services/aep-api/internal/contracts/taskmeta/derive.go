@@ -83,9 +83,11 @@ type GitHubFacts struct {
 //     active retry, and a rejected PR still beats a merely FAILED retry.
 //
 // Chosen defaults (§13, revised): a canceled latest execution derives pending
-// (a cancel is not a failure); a succeeded ops execution derives deployed (ops
-// has no PR/build); a succeeded coding execution with no linked PR yet derives
-// pending (transient, between run end and PR link).
+// (a cancel is not a failure); a succeeded ops OR provision execution derives
+// deployed (neither has a PR/build — a provision gate issue reaching deployed is
+// how dependent coding tasks unblock, dependency-management §3.6); a succeeded
+// coding execution with no linked PR yet derives pending (transient, between run
+// end and PR link).
 func Derive(f GitHubFacts, execs []ExecutionFact) DerivedStatus {
 	// A held Task is on_hold regardless of anything else — hold is a command,
 	// honored not derived.
@@ -132,12 +134,12 @@ func Derive(f GitHubFacts, execs []ExecutionFact) DerivedStatus {
 		return StatusRejected
 	}
 
-	// Otherwise fall back to the latest coding/ops Execution outcome.
+	// Otherwise fall back to the latest coding/ops/provision Execution outcome.
 	if latest != nil {
 		switch {
 		case latest.Status == ExecFailed:
 			return StatusFailed
-		case latest.Status == ExecSucceeded && latest.Kind == KindOps:
+		case latest.Status == ExecSucceeded && (latest.Kind == KindOps || latest.Kind == KindProvision):
 			return StatusDeployed
 		}
 	}

@@ -60,6 +60,26 @@ func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID s
 	return names, nil
 }
 
+// ProvisionDepNames exposes each component's provisioning dependencies (external
+// + platform-resource) for the funnel's dependency-kind-aware gate. Satisfies
+// execution.DesignReader.
+func (d designComponents) ProvisionDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error) {
+	design, err := d.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if design == nil {
+		return nil, nil
+	}
+	out := make(map[string][]string, len(design.Components))
+	for _, c := range design.Components {
+		if deps := c.ProvisionDependsOn(); len(deps) > 0 {
+			out[strings.ToLower(c.Name)] = deps
+		}
+	}
+	return out, nil
+}
+
 // repoLister enumerates ready project repos for the reconciliation sweep.
 // Satisfies execution.RepoLister.
 type repoLister struct{ repos repositories.RepoRepository }

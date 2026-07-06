@@ -34,9 +34,14 @@ const (
 	// LabelMarker makes an issue a Task; the funnel ignores issues without it.
 	LabelMarker = "aep:task"
 
-	// LabelCoding / LabelOps are the executor-class labels (exactly one).
-	LabelCoding = "aep:coding"
-	LabelOps    = "aep:ops"
+	// LabelCoding / LabelOps / LabelProvision are the executor-class labels
+	// (exactly one). LabelProvision marks a provisioning gate issue
+	// (dependency-management §3.6): config-collection / resource-provisioning /
+	// org-publish work, driven by the drawer + readiness watcher, not the coding
+	// agent.
+	LabelCoding    = "aep:coding"
+	LabelOps       = "aep:ops"
+	LabelProvision = "aep:provision"
 
 	// LabelOriginPrefix is prepended to an Origin to form its label.
 	LabelOriginPrefix = "aep:origin/"
@@ -62,10 +67,17 @@ type ExecutorClass string
 const (
 	ClassCoding ExecutorClass = "coding"
 	ClassOps    ExecutorClass = "ops"
+	// ClassProvision fulfils a dependency-provisioning gate (external value
+	// collection, platform-resource provisioning, org-publish). It produces no
+	// PR; it is driven by the drawer action + the resource-readiness watcher
+	// (dependency-management §3.6), never dispatched from the aep:execute funnel.
+	ClassProvision ExecutorClass = "provision"
 )
 
 // Valid reports whether c is a known executor class.
-func (c ExecutorClass) Valid() bool { return c == ClassCoding || c == ClassOps }
+func (c ExecutorClass) Valid() bool {
+	return c == ClassCoding || c == ClassOps || c == ClassProvision
+}
 
 // ClassLabel returns the routing label for an executor class ("aep:coding" /
 // "aep:ops").
@@ -105,7 +117,7 @@ func Classify(label string) LabelKind {
 	switch {
 	case label == LabelMarker:
 		return KindMarker
-	case label == LabelCoding || label == LabelOps:
+	case label == LabelCoding || label == LabelOps || label == LabelProvision:
 		return KindClass
 	case label == LabelExecute:
 		return KindExecute
@@ -138,6 +150,15 @@ type ParsedLabels struct {
 	StatusSet      bool
 }
 
+// setClass records a class label, flagging ClassAmbiguous when a different
+// class was already seen; the last one seen wins Class.
+func (p *ParsedLabels) setClass(c ExecutorClass) {
+	if p.ClassSet && p.Class != c {
+		p.ClassAmbiguous = true
+	}
+	p.Class, p.ClassSet = c, true
+}
+
 // ParseLabels reads an issue's label list into ParsedLabels. Two class labels
 // (mangled state) set ClassAmbiguous; the last one seen wins Class.
 func ParseLabels(labels []string) ParsedLabels {
@@ -147,15 +168,11 @@ func ParseLabels(labels []string) ParsedLabels {
 		case l == LabelMarker:
 			p.IsTask = true
 		case l == LabelCoding:
-			if p.ClassSet && p.Class != ClassCoding {
-				p.ClassAmbiguous = true
-			}
-			p.Class, p.ClassSet = ClassCoding, true
+			p.setClass(ClassCoding)
 		case l == LabelOps:
-			if p.ClassSet && p.Class != ClassOps {
-				p.ClassAmbiguous = true
-			}
-			p.Class, p.ClassSet = ClassOps, true
+			p.setClass(ClassOps)
+		case l == LabelProvision:
+			p.setClass(ClassProvision)
 		case l == LabelExecute:
 			p.Execute = true
 		case l == LabelHold:
