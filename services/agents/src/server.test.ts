@@ -291,6 +291,25 @@ test("400 on an unknown toolset value", async () => {
   }
 });
 
+test("400 on a malformed mcp value (missing/wrong-typed url or token)", async () => {
+  const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n" });
+  const { baseUrl, close } = await boot(mockModel([{ kind: "text", text: "ok" }]), root);
+  try {
+    const token = await mintToken();
+    const post = (mcp: unknown) =>
+      fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, turnPost(wsBody({ mcp }), { token, org: WS_ORG }));
+
+    for (const bad of [{ url: "http://x" }, { token: "t" }, { url: 1, token: "t" }, "not-an-object", null]) {
+      const res = await post(bad);
+      assert.equal(res.status, 400);
+      assert.match(((await res.json()) as { error: string }).error, /mcp must be/);
+    }
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('toolset "task-plan" registers the task tools; a planTask streams a tool-result, no file tools', async () => {
   // The read-only context: the seed design (hello-api is a known component). The
   // §12 turn filter keeps the .md/design.json context files.

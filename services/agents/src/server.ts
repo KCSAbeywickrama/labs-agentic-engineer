@@ -46,7 +46,7 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, TOOLSETS, isToolset, type StreamPart, type Toolset } from "@aep/agent-stream";
+import { SSE_DONE, TOOLSETS, isToolset, type McpConfig, type StreamPart, type Toolset } from "@aep/agent-stream";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
@@ -66,6 +66,13 @@ export interface CreateAppDeps {
   keepAliveMs?: number;
   /** The shared workspaces mount (default `config.workspaceMountRoot`); tests/evals point it at a fixture tree. */
   workspaceMountRoot?: string;
+}
+
+/** Runtime guard for an untrusted `mcp` value (the server's pre-stream 400 check). */
+function isMcpConfig(v: unknown): v is McpConfig {
+  if (typeof v !== "object" || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return typeof c.url === "string" && c.url !== "" && typeof c.token === "string" && c.token !== "";
 }
 
 function startSSE(res: Response): void {
@@ -115,6 +122,7 @@ export function createApp(deps: CreateAppDeps): Express {
       filesChangedExternally?: unknown;
       skills?: unknown;
       toolset?: unknown;
+      mcp?: unknown;
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
@@ -172,6 +180,19 @@ export function createApp(deps: CreateAppDeps): Express {
       toolset = body.toolset;
     }
 
+    // mcp (optional, dependency-management migration Phase 5): the BFF-minted
+    // discovery endpoint + short-lived bearer for this turn. Absent → no MCP
+    // discovery (byte-identical to today). Present but malformed → a clean 400
+    // rather than a confusing best-effort empty-tools no-op mid-stream.
+    let mcp: McpConfig | undefined;
+    if (body.mcp !== undefined) {
+      if (!isMcpConfig(body.mcp)) {
+        res.status(400).json({ error: "mcp must be { url: string, token: string }" });
+        return;
+      }
+      mcp = body.mcp;
+    }
+
     // Build the per-turn model from the request key (fail as a pre-stream 500).
     let model: LanguageModel;
     try {
@@ -221,6 +242,7 @@ export function createApp(deps: CreateAppDeps): Express {
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,
         ...(toolset ? { toolset } : {}),
+        ...(mcp ? { mcp } : {}),
         model,
         store: deps.store,
         guard,

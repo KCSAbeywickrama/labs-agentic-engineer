@@ -169,6 +169,34 @@ export type LoadSkillReferenceResult =
   | { ok: true; name: string; path: string; content: string }
   | { ok: false; name: string; path: string; error: string; available: string[] };
 
+// --- MCP discovery (caller-supplied, dependency-management migration Phase 5) -
+//
+// The org's dependency-discovery MCP server (aep-api
+// `internal/feature/dependencies/mcp_server.go`, mounted at `POST
+// /internal/v1/mcp`) lists read-only tools (list_external_resources,
+// get_external_resource_schema, list_org_endpoints,
+// list_platform_resource_types) so the main agent proposes `dependencies`
+// entries that reuse resources/endpoints already registered in the org instead
+// of inventing new names/shapes. Mirrors `WorkspaceRef`: the CALLER (the BFF)
+// resolves the endpoint and mints a short-lived, org-bound bearer token, and
+// pushes both in the turn payload; the service never reads either from its own
+// env. Omitted → no `tools/list` fetch and no discovery tools registered
+// (byte-identical to a turn without `mcp`).
+
+/** Caller-supplied MCP discovery endpoint for this turn. */
+export interface McpConfig {
+  /** The MCP JSON-RPC endpoint (aep-api's `/internal/v1/mcp`, org-bound). */
+  url: string;
+  /**
+   * Bearer token for that endpoint. Short-lived (minted per call, ~5 min TTL on
+   * the aep-api side, `AudienceMCP`/`aep-api-mcp`) — a turn that outlives it sees
+   * the discovery tools 401 partway through; `loadMcpTools` degrades that to "no
+   * tools" up front, but a mid-turn `tools/call` 401 surfaces as a failed tool
+   * call (best-effort, not retried).
+   */
+  token: string;
+}
+
 // --- The reviewable change (§7) ---------------------------------------------
 
 /**
@@ -244,6 +272,14 @@ export interface TurnRequest {
    * mutates it. See `contracts/task-tools.ts`.
    */
   toolset?: Toolset;
+  /**
+   * Caller-supplied MCP discovery endpoint for this turn (dependency-management
+   * migration Phase 5). Present → the turn loop fetches `tools/list` from it
+   * (best-effort) and registers each as a dynamic tool, merged under a
+   * shadow-guard so a discovered tool can never shadow a built-in one. Omitted →
+   * no fetch, no discovery tools (byte-identical to an mcp-free turn).
+   */
+  mcp?: McpConfig;
 }
 
 /** The registrable tool sets a turn may request (`TurnRequest.toolset`). */

@@ -30,7 +30,7 @@
  */
 
 import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
-import { FileBundle, type StreamPart, type Toolset } from "@aep/agent-stream";
+import { FileBundle, type McpConfig, type StreamPart, type Toolset } from "@aep/agent-stream";
 import { runTurn } from "../agents/main/run-turn.js";
 import { buildFileTools, ASK_QUESTION } from "../agents/main/tools/files.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
@@ -40,6 +40,7 @@ import type { SkillSource } from "../agents/main/skill-source.js";
 import { buildManifestPart } from "./manifest.js";
 import { config } from "../shared/config.js";
 import { modelProviderOptions } from "../shared/model.js";
+import { loadMcpTools } from "../shared/mcp-client.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
 
 /** Thrown when a second turn starts for an id whose turn is still in flight (→ HTTP 409). */
@@ -110,6 +111,14 @@ export interface RunConversationTurnInput {
    * `planTask`/`updateTask` over a read-only snapshot, no file tools.
    */
   toolset?: Toolset;
+  /**
+   * Caller-supplied MCP discovery endpoint for this turn (dependency-management
+   * migration Phase 5). Present → `tools/list` is fetched (best-effort) and
+   * merged into the tool set as dynamic tools, under a shadow-guard so a
+   * discovered tool can never shadow a built-in one. Omitted → no fetch, no
+   * merge (byte-identical to today).
+   */
+  mcp?: McpConfig;
   /** Injected at the composition root (createModel is called ONCE there, not per turn). */
   model: LanguageModel;
   store: ConversationStore;
@@ -146,6 +155,23 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       bundle = new FileBundle(input.files);
       tools = buildFileTools(bundle, skills);
       instructions = buildInstructions(skills);
+    }
+
+    // 3b. MCP discovery (dependency-management migration Phase 5): best-effort —
+    //     a caller-supplied `mcp` merges the org's dependency-discovery tools
+    //     (list_external_resources, etc.) into the tool set for this turn.
+    //     `loadMcpTools` never throws (server down/401/malformed → `{}`, logged),
+    //     so a turn with `mcp` never fails ON ITS ACCOUNT. Omitted `mcp`, or a
+    //     failed/empty load, means `tools` IS the base set (no wrapping object)
+    //     — byte-identical to an mcp-free turn. `baseTools` (the `tools` set
+    //     already built above) spreads LAST — the shadow-guard — so a
+    //     discovered tool can never shadow a core file-mutation/task-plan/
+    //     loadSkill tool of the same name.
+    if (input.mcp) {
+      const mcpTools = await loadMcpTools(input.mcp);
+      if (Object.keys(mcpTools).length > 0) {
+        tools = { ...mcpTools, ...tools };
+      }
     }
 
     // 4. one generic turn. The instructions append the skill catalog at the END

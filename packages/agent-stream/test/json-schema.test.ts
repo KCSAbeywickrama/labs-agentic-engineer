@@ -69,7 +69,7 @@ test("the schema is a strict object exposing the ComponentDesign fields", () => 
   };
   assert.equal(schema.type, "object");
   assert.equal(schema.additionalProperties, false, "strictObject → additionalProperties:false for the BFF gate");
-  for (const key of ["name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "exposure", "connections", "description"]) {
+  for (const key of ["name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "exposure", "dependencies", "description"]) {
     assert.ok(schema.properties && key in schema.properties, `missing property ${key}`);
     assert.ok(schema.required?.includes(key), `expected ${key} required`);
   }

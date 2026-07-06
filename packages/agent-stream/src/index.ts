@@ -45,6 +45,7 @@ export type {
   Change,
   TurnRequest,
   WorkspaceRef,
+  McpConfig,
   ManifestPart,
   Toolset,
   AgentSseEventType,
