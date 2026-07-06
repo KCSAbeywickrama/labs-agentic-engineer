@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createMcpResolver } from "./mcp.js";
+import { createMcpResolver, readMcpEnv, DEFAULT_MCP_URL } from "./mcp.js";
 import { listen0 } from "../src/shared/listen.js";
 
 type Handler = (req: IncomingMessage, res: ServerResponse, body: unknown) => void;
@@ -50,6 +50,12 @@ function jsonOk(res: ServerResponse, payload: unknown): void {
 test("neither AEP_MCP_URL nor AEP_MCP_TOKEN set → resolves undefined, no fetch attempted", async () => {
   const resolver = createMcpResolver({}, () => assert.fail("must not warn"));
   assert.equal(await resolver.resolve(), undefined);
+});
+
+test("readMcpEnv: AEP_MCP_URL unset → defaults to the local stack; empty string disables", () => {
+  assert.equal(readMcpEnv({}).url, DEFAULT_MCP_URL);
+  assert.equal(readMcpEnv({ AEP_MCP_URL: "" }).url, "");
+  assert.equal(readMcpEnv({ AEP_MCP_URL: "http://other:1/mcp" }).url, "http://other:1/mcp");
 });
 
 test("AEP_MCP_TOKEN set wins verbatim — never mints, even when a mint endpoint is reachable", async () => {
