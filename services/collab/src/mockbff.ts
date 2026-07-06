@@ -30,15 +30,16 @@
 //     from the room ID. The real BFF splits `spec-<org>-<project>` using the
 //     caller's org; the mock uses its configured org ("acme" by default).
 // - GET /api/v1/projects/{project}/spec
-//     200 with the demo-shop fixture bundle for any known project
-//     ("demo-shop" by default); 404 otherwise.
+//     200 with the fixture bundle. Like the console's MSW layer, every
+//     project gets the same demo bundle unless `projects` overrides it —
+//     the mock oracle is org-permissive, so the bundle must be too.
 
 import http from "node:http";
 import type { SpecFile } from "./bff.js";
 import { devSpecBundle } from "./fixtures.js";
 
 export interface MockBffOptions {
-  /** Projects that have a spec bundle; others 404. */
+  /** Per-project bundle overrides; unlisted projects get the dev bundle. */
   projects?: Record<string, SpecFile[]>;
   /** The org used to split room IDs, like the real oracle does. */
   org?: string;
@@ -100,8 +101,7 @@ export function createMockBff(options: MockBffOptions = {}): http.Server {
     if (specMatch) {
       if (!token) return json(res, 401, { title: "Unauthorized" });
       const project = decodeURIComponent(specMatch[1] ?? "");
-      const files = projects[project];
-      if (!files) return json(res, 404, { title: "project not found" });
+      const files = projects[project] ?? devSpecBundle;
       return json(res, 200, { files });
     }
 

@@ -89,7 +89,8 @@ test("spec bundle: served for known projects through the real client", async () 
   assert.equal(files[0]?.path, "requirements/prd.md");
 });
 
-test("spec bundle: 404 for unknown projects", async () => {
+test("spec bundle: unlisted projects get the dev bundle (org-permissive, like the console mocks)", async () => {
   const bff = createBffClient(base);
-  await assert.rejects(bff.fetchSpecBundle("opaque-token", "nope"), /404/);
+  const files = await bff.fetchSpecBundle("opaque-token", "any-other-project");
+  assert.equal(files.length, devSpecBundle.length);
 });

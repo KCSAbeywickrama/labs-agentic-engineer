@@ -89,20 +89,29 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
       return document;
     }
 
-    // Real path: read the spec bundle as the first joiner. Requires the
-    // `project` ws parameter (the room ID alone can't be split, see room.ts).
+    // Real path: read the spec bundle as the first joiner (the oracle
+    // resolved the room into context.projectName).
     if (!deps.bff || !context.token || !context.projectName) {
       deps.log?.(
         `cannot seed ${documentName}: missing bff/token/project — opening empty`,
       );
       return document;
     }
-    const files = await deps.bff.fetchSpecBundle(
-      context.token,
-      context.projectName,
-    );
-    seedDocument(document, files);
-    deps.log?.(`seeded ${documentName} (${files.length} files) from BFF`);
+    // A failed seed must not kill the room: access was already authorized
+    // by the oracle, and an unseeded-but-live doc beats a dead connection
+    // (transient BFF errors would otherwise hard-fail every join).
+    try {
+      const files = await deps.bff.fetchSpecBundle(
+        context.token,
+        context.projectName,
+      );
+      seedDocument(document, files);
+      deps.log?.(`seeded ${documentName} (${files.length} files) from BFF`);
+    } catch (err) {
+      deps.log?.(
+        `seed failed for ${documentName} (${String(err)}) — opening empty`,
+      );
+    }
     return document;
   };
 }

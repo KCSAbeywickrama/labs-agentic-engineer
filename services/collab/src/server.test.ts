@@ -164,6 +164,27 @@ test("load seeds from the BFF bundle with the joiner's token", async () => {
   assert.equal(filesMap(doc).get("requirements/prd.md")?.toString(), "hi");
 });
 
+test("load opens an unseeded doc when the bundle fetch fails (room must survive)", async () => {
+  const load = buildLoadDocumentHook(prodConfig, {
+    bff: fakeBff({
+      fetchSpecBundle: async () => {
+        throw new Error("bundle fetch exploded (404)");
+      },
+    }),
+  });
+  const doc = new Y.Doc() as Document;
+  await load({
+    document: doc,
+    documentName: "spec-acme-shop",
+    context: {
+      user: { name: "Jo", email: "j", kind: "user" },
+      token: "t",
+      projectName: "shop",
+    },
+  });
+  assert.equal(filesMap(doc).size, 0);
+});
+
 test("load opens an empty doc when the oracle gave no project (pre-phase-2 BFF)", async () => {
   const load = buildLoadDocumentHook(prodConfig, { bff: fakeBff() });
   const doc = new Y.Doc() as Document;
