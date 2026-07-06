@@ -63,6 +63,7 @@ type playgroundTokenResponse struct {
 func NewPlaygroundTokenHandler(tokens *auth.TaskTokenManager) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req playgroundTokenRequest
+		r.Body = http.MaxBytesReader(w, r.Body, 4<<10) // tiny contract; cap the buffer
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
