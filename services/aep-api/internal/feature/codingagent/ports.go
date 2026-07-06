@@ -62,6 +62,17 @@ type DeployObserver interface {
 	OnComponentDeployed(ctx context.Context, orgID, projectID, component string) error
 }
 
+// RunnerSecretResolver resolves the coding runner's per-run external-resource
+// secret bundles for a component (SM-API vault path + secret keys) — the
+// dispatcher materialises each into a per-run ExternalSecret so the agent can
+// integration-test against the live external service. Wired from the
+// provisioning feature at the composition root; nil → the runner gets no
+// external-resource secrets. Returns the codingagent input type so this feature
+// holds no provisioning/resources import.
+type RunnerSecretResolver interface {
+	ResolveRunnerSecrets(ctx context.Context, orgID, projectID, component, env string) ([]ExternalResourceSecretInputs, error)
+}
+
 // AnthropicProvisioner materializes the per-org Anthropic key Secret on the
 // workflow plane and returns its ref. Best-effort at dispatch. Wired from
 // orgcreds.AnthropicCredentialService.

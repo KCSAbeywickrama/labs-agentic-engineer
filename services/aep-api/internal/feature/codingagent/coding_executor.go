@@ -76,6 +76,10 @@ type CodingExecutor struct {
 	// wiring posts the ADR-0004 "Platform-resolved dependencies" comment on the
 	// coding issue at dispatch (nil → skipped). Best-effort — it never fails the run.
 	wiring DependencyWiring
+
+	// runnerSecrets resolves the component's external-resource secret bundles so
+	// the proxy dispatch mounts them into the runner (nil → none). Best-effort.
+	runnerSecrets RunnerSecretResolver
 }
 
 // NewCodingExecutor wires the ClusterWorkflow-path executor. anthropic may be
@@ -132,6 +136,14 @@ func (e *CodingExecutor) WithComponentEnsurer(c ComponentEnsurer) *CodingExecuto
 // dispatch (nil → skipped). Returns the receiver for chained construction.
 func (e *CodingExecutor) WithDependencyWiring(w DependencyWiring) *CodingExecutor {
 	e.wiring = w
+	return e
+}
+
+// WithRunnerSecrets enables mounting the component's external-resource secrets
+// into the coding runner via per-run ExternalSecrets (nil → none). Returns the
+// receiver for chained construction.
+func (e *CodingExecutor) WithRunnerSecrets(r RunnerSecretResolver) *CodingExecutor {
+	e.runnerSecrets = r
 	return e
 }
 
@@ -329,12 +341,25 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.Dis
 		Bearer:            bearer,
 		PublisherTokenURL: publisherTokenURL,
 	}
+	// Resolve the component's external-resource secret bundles so the dispatcher
+	// materialises each into a per-run ExternalSecret the runner mounts (the agent
+	// integration-tests against the live service). Best-effort: on failure the run
+	// dispatches without them (identical to no secret-bearing external deps).
+	var extResSRs []ExternalResourceSecretInputs
+	if e.runnerSecrets != nil {
+		if srs, rerr := e.runnerSecrets.ResolveRunnerSecrets(ctx, t.OrgID, t.ProjectID, t.Component, "development"); rerr != nil {
+			slog.WarnContext(ctx, "coding executor: resolve external-resource runner secrets failed — dispatching without", "component", t.Component, "error", rerr)
+		} else {
+			extResSRs = srs
+		}
+	}
 	rn, err := e.proxy.Dispatch(ctx, Inputs{
 		OrgUUID:                orgUUID,
 		Job:                    job,
 		AnthropicSR:            SecretRef{SecretRefName: derefStr(anthropicRow.SMAPISecretRefName), KVPath: derefStr(anthropicRow.SMAPIKVPath), Property: derefStr(anthropicRow.SMAPIProperty)},
 		GitHubSR:               SecretRef{SecretRefName: derefStr(githubRow.SMAPISecretRefName), KVPath: derefStr(githubRow.SMAPIKVPath), Property: derefStr(githubRow.SMAPIProperty)},
 		PublisherSR:            publisherSR,
+		ExternalResourceSRs:    extResSRs,
 		ClusterSecretStoreName: e.clusterSecretStore,
 	})
 	if err != nil {

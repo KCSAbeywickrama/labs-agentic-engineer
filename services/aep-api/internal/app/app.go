@@ -743,7 +743,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// mounted behind the AgentsScopedVerifier; wire real backends for its four
 	// read-only tools: the org external-resource catalog (DB) and the org
 	// published endpoints + platform resource types (OC Resource-model client).
-	// Provisioning (value/param collection + issue funnel) stays unwired until Phase 6.
+	// The provisioning surface (value/param collection + the aep:provision issue
+	// funnel) is wired in the Phase-6 block further below.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
 	orgEndpointCatalog := endpoints.NewCatalog(resourceClient)
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
@@ -801,6 +802,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// agent copies into workload.yaml — the platform never patches the CR.
 	codingExecutor.WithDependencyWiring(provisioning.NewWiringResolver(
 		designComponents{store: artifactStore}, orgEndpointCatalog, resourceClient, issueService))
+	// Mount the component's external-resource secrets into the coding runner so
+	// the agent can integration-test against the live service.
+	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
 	// Grant pending cross-project access when a provider component deploys.
 	execWatcher.WithDeployObserver(provisioningSvc)
 

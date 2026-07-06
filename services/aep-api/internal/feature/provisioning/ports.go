@@ -104,10 +104,16 @@ type ProjectLister interface {
 }
 
 // ExternalProvisioner authors the OC external Resource model + writes secrets to
-// SM-API. *resources.ExternalResourceProvisioner satisfies it.
+// SM-API, and resolves the per-run secret bundles for the coding runner.
+// *resources.ExternalResourceProvisioner satisfies it.
 type ExternalProvisioner interface {
 	Provision(ctx context.Context, orgHandle, ocOrgID, projectName string, er *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error)
 	Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error
+	// ResolveRunnerSecrets returns the SM-API vault path + secret-key list for
+	// each named external resource, read back off its per-env binding — the
+	// inputs the coding dispatcher materialises into per-run ExternalSecrets so
+	// the agent can integration-test against the live service.
+	ResolveRunnerSecrets(ctx context.Context, orgHandle, projectName, env string, names []string) ([]resources.ExternalResourceRunnerSecret, error)
 }
 
 // PlatformProvisioner authors the OC Resource model for a platform-resource dep

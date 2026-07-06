@@ -24,10 +24,11 @@
 //   - dependencies/resources — the external systems and platform-provisioned
 //     resources this component consumes.
 //
-// This parent package holds no code of its own beyond the doc comment; it
-// exists so the two families share one addressable umbrella in the feature
-// tree. An MCP discovery surface that lets agents query the graph at build
-// time arrives in a later task.
+// This parent package hosts the authenticated MCP discovery server
+// (mcp_server.go / mcp_tools.go / ports.go) — the four read-only tools
+// (list_external_resources / get_external_resource_schema / list_org_endpoints /
+// list_platform_resource_types) the design agent queries BEFORE inventing a
+// dependency — and composes the two child families beneath it.
 //
 // Invariant (F3): dependency names — external AND platform-resource — share ONE
 // OpenChoreo Resource namespace per project and are matched project-wide (the

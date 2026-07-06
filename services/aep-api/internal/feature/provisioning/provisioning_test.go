@@ -180,6 +180,13 @@ func (f *fakeExtProv) Deprovision(_ context.Context, _, _, name string, _ []stri
 	f.deprovisioned = append(f.deprovisioned, name)
 	return nil
 }
+func (f *fakeExtProv) ResolveRunnerSecrets(_ context.Context, _, _, _ string, names []string) ([]resources.ExternalResourceRunnerSecret, error) {
+	out := make([]resources.ExternalResourceRunnerSecret, 0, len(names))
+	for _, n := range names {
+		out = append(out, resources.ExternalResourceRunnerSecret{KVPath: "vault/" + n, Keys: []string{"API_KEY"}})
+	}
+	return out, nil
+}
 
 type fakePlatProv struct {
 	calls         int
@@ -637,6 +644,31 @@ func TestGrant_OnProviderDeploy(t *testing.T) {
 	// A deploy with no pending access is a no-op (does not error).
 	if err := svc.OnComponentDeployed(context.Background(), "org", "warehouse", "other"); err != nil {
 		t.Fatalf("no-op deploy grant: %v", err)
+	}
+}
+
+func TestResolveComponentRunnerSecrets(t *testing.T) {
+	ext := &fakeExtProv{}
+	svc := NewService(Deps{
+		Issues:  newFakeIssues(nil),
+		Execs:   &fakeExecStore{},
+		Design:  fakeDesign{comps: designWithDeps()}, // orders has external "stripe"
+		Repos:   fakeRepos{},
+		ExtProv: ext,
+	})
+	srs, err := svc.ResolveComponentRunnerSecrets(context.Background(), "org", "proj", "orders", "")
+	if err != nil {
+		t.Fatalf("ResolveComponentRunnerSecrets: %v", err)
+	}
+	// Only the external dep (stripe) yields a runner secret; the platform-resource
+	// dep (orders-db) does not.
+	if len(srs) != 1 || srs[0].KVPath != "vault/stripe" {
+		t.Fatalf("want one runner secret for stripe, got %+v", srs)
+	}
+	// A component with no external deps yields none.
+	none, err := svc.ResolveComponentRunnerSecrets(context.Background(), "org", "proj", "nonexistent", "")
+	if err != nil || len(none) != 0 {
+		t.Fatalf("unknown component: want no secrets, got %+v (err %v)", none, err)
 	}
 }
 

@@ -25,7 +25,6 @@ import (
 	"context"
 
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // externalResourceLookup is the slice of the org-level external-resource
@@ -45,32 +44,20 @@ type SecretWriter interface {
 	WriteExternalResourceSecret(ctx context.Context, ocOrgID, projectName, entityName string, data map[string]string) (vaultKey, secretRefName string, err error)
 }
 
-// NOTE (dependency-management migration, Phase 2): the task-coupled ports that
-// the value/resource services used — TaskStore (read the component_tasks repo),
+// NOTE (dependency-management migration): the task-coupled ports the
+// value/resource services used — TaskStore (read the component_tasks repo),
 // TaskCompleter (drive ComponentTask.Status through the projector) and
-// RedispatchFunc — were removed here at the merge. Their only consumers
-// (external_values.go / resources_service.go) are `git rm`'d until Phase 6, where
-// they are rebuilt on our GitHub-native `aep:provision` funnel; the completion
-// port they actually need there is "close the provision issue + Funnel.Reevaluate",
-// not a component_tasks projector. Trimming them keeps this file compiling with
-// component_tasks (and the internal/contracts task seam) gone.
+// RedispatchFunc — were removed here at the merge along with their only
+// consumers (external_values.go / resources_service.go, git-rm'd). Phase 6
+// rebuilt the value/param surface in internal/feature/provisioning on our
+// GitHub-native aep:provision funnel; the completion port it uses there is
+// "close the provision issue + Funnel.Reevaluate", not a component_tasks
+// projector. The org-level external-resource catalog (list/delete + the
+// consumer scan for the in-use delete guard) also lives there now
+// (provisioning.ExternalResourceCatalog + the design-scan consumers), reading
+// *repositories.ExternalResourceRepository directly.
 
-// ExternalResourceRegistry is the slice of the org-level external-resource
-// catalog the HTTP surface reads and prunes: the listing (with per-entry
-// consumers for the in-use delete guard) and the guarded delete.
-// *repositories.ExternalResourceRepository satisfies it directly — per the
-// C2 decision there is NO registry wrapper service; repositories is the flat
-// shared kernel (not a feature package), so naming its consumer DTO here
-// keeps the package's feature-edge allowlist row empty.
-type ExternalResourceRegistry interface {
-	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)
-	Consumers(ctx context.Context, orgID, name string) ([]repositories.ExternalResourceConsumer, error)
-	Delete(ctx context.Context, orgID, name string) error
-}
-
-var _ ExternalResourceRegistry = (*repositories.ExternalResourceRepository)(nil)
-
-// DesignReader is the slice of the design store the ResourceService reads:
+// DesignReader is the slice of the design store the resource provisioner reads:
 // the project's authored design components, whose platform-resource entries
 // carry the ClusterResourceType to provision. It deliberately returns ONLY
 // models-typed data — NOT artifacts.DesignFile — so this package keeps its

@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
@@ -91,6 +92,24 @@ func (d designComponents) ProvisionDepNames(ctx context.Context, orgID, projectI
 		if deps := c.ProvisionDependsOn(); len(deps) > 0 {
 			out[strings.ToLower(c.Name)] = deps
 		}
+	}
+	return out, nil
+}
+
+// runnerSecretResolver adapts provisioning.Service.ResolveComponentRunnerSecrets
+// onto the codingagent.RunnerSecretResolver port, mapping the resources DTO to
+// the codingagent input type (so codingagent holds no provisioning/resources
+// import). Satisfies codingagent.RunnerSecretResolver.
+type runnerSecretResolver struct{ svc *provisioning.Service }
+
+func (r runnerSecretResolver) ResolveRunnerSecrets(ctx context.Context, orgID, projectID, component, env string) ([]codingagent.ExternalResourceSecretInputs, error) {
+	srs, err := r.svc.ResolveComponentRunnerSecrets(ctx, orgID, projectID, component, env)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]codingagent.ExternalResourceSecretInputs, 0, len(srs))
+	for _, s := range srs {
+		out = append(out, codingagent.ExternalResourceSecretInputs{KVPath: s.KVPath, Keys: s.Keys})
 	}
 	return out, nil
 }

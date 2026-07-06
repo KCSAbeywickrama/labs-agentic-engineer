@@ -146,26 +146,12 @@ func (s *Service) GrantByProviderComponent(ctx context.Context, orgID, providerP
 	return nil
 }
 
-// RejectByProviderTask flips every still-open rider on a provider org-publish
-// issue to rejected — the provider declined to publish.
-func (s *Service) RejectByProviderTask(ctx context.Context, providerTaskID string) error {
-	if s.access == nil {
-		return nil
-	}
-	rows, err := s.access.ListByProviderTask(ctx, providerTaskID)
-	if err != nil {
-		return fmt.Errorf("provisioning: list riders for reject: %w", err)
-	}
-	for i := range rows {
-		if rows[i].Status == models.AccessRequestStatusGranted || rows[i].Status == models.AccessRequestStatusRejected {
-			continue
-		}
-		if uerr := s.access.UpdateStatus(ctx, rows[i].ID, models.AccessRequestStatusRejected); uerr != nil {
-			slog.WarnContext(ctx, "provisioning: reject access request failed", "id", rows[i].ID, "error", uerr)
-		}
-	}
-	return nil
-}
+// NOTE: the reject cascade (flip open riders to rejected when a provider
+// declines to publish) is a tracked follow-up — it needs a "declined" signal on
+// our model (an org-publish gate issue is not a PR, so there is no
+// PR-closed-unmerged webhook to key on). The AccessRequestStatusRejected state +
+// the grant path's skip-rejected guard are already in place for when it lands;
+// see docs/design/dependency-management-migration.md §8 Phase-6 follow-up (c).
 
 // createOrgPublishIssue mints the provider-side aep:provision org-publish gate
 // issue. It carries no secrets — only the component name being published.

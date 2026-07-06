@@ -360,7 +360,7 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		return nil, artifacts.ErrDesignNotFound
 	}
 
-	// TODO(Phase 6): auto-fetch-on-save. Before the gate, each `external`
+	// TODO(spec-commit follow-up): auto-fetch-on-save. Before the gate, each `external`
 	// dependency the architect flagged with a specUrl hint but no specPath yet
 	// should be fetched (artifacts.FetchSpecFromURL — SSRF-guarded), stored via
 	// StoreConsumedSpec, and have its specPath recorded so the needs-spec gate

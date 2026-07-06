@@ -117,23 +117,6 @@ func (r *ExternalResourceRepository) List(ctx context.Context, orgID string) ([]
 	return out, nil
 }
 
-// Consumers returns the components that depend on an external resource.
-//
-// TODO(Phase 6, dependency-management migration §3.2 item 7): re-implement by
-// SCANNING committed design artifacts — the components whose design.json declares
-// an `external`-kind dependency named `name` — instead of the dropped
-// component_tasks table (our GitHub-native model has no such table). Until the
-// provisioning/delete surface is rebuilt on the `aep:provision` funnel (Phase 6),
-// this returns no consumers; nothing calls it yet (resources_huma, its only caller
-// via the in-use delete guard, is absent until Phase 6), so it exists only to
-// satisfy the ExternalResourceRegistry port assertion.
-func (r *ExternalResourceRepository) Consumers(ctx context.Context, orgID, name string) ([]ExternalResourceConsumer, error) {
-	if orgID == "" || name == "" {
-		return nil, fmt.Errorf("external_resources: orgID and name required")
-	}
-	return nil, nil
-}
-
 // Delete removes an external resource's org-level registration. It does NOT
 // check consumers — the caller (the delete endpoint) enforces the "not in
 // use" guard so it can return a precise error. The shared, immutable OC

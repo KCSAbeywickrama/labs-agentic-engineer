@@ -23,7 +23,7 @@
 //     and return the component-relative path it will live at. In the
 //     committed-truth model this store has no single-file commit surface
 //     (SaveDesign only reads + tags; all writes land via the Files API), so the
-//     commit is deferred — see the TODO(Phase 6) in StoreConsumedSpec.
+//     commit is deferred — see the spec-commit TODO in StoreConsumedSpec.
 
 package artifacts
 
@@ -217,7 +217,7 @@ func ConsumedSpecPath(depName string) string {
 // `specs/design/components/<component>/dependencies/<depName>.openapi.yaml`
 // is deferred.
 //
-// TODO(Phase 6): commit the normalized spec through the committed-truth file
+// TODO(spec-commit follow-up): commit the normalized spec through the committed-truth file
 // path (files.Apply / the Workspace mutate surface) and record the specPath on
 // the dependency, so the proceed-gate's external-needs-spec condition clears
 // after a collect. Until then the returned `normalized` blob is discarded.
@@ -240,10 +240,10 @@ func (s *ArtifactStore) StoreConsumedSpec(ctx context.Context, orgID, projectID,
 		return "", fmt.Errorf("normalize spec: %w", err)
 	}
 	specPath := ConsumedSpecPath(depName)
-	// TODO(Phase 6): commit the normalized blob at
+	// TODO(spec-commit follow-up): commit the normalized blob at
 	// componentDirPrefix+component+"/"+specPath via the committed-truth write
 	// path and record specPath on the dependency.
-	slog.DebugContext(ctx, "StoreConsumedSpec: validated + normalized (commit deferred to Phase 6)",
+	slog.DebugContext(ctx, "StoreConsumedSpec: validated + normalized (commit deferred (spec-commit follow-up))",
 		"org", orgID, "project", projectID, "component", component, "dependency", depName, "specPath", specPath)
 	return specPath, nil
 }
