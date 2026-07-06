@@ -60,9 +60,9 @@ export const DESIGN_DOCUMENT_TYPES: DesignDocumentType[] = [
     extension: '.md',
     unique: true,
     protected: true,
-    // No generation skill for the root — it's part of the whole-design
-    // architect generation. The "Regenerate" button on the page invokes
-    // `POST /design/generate` which redoes the whole tree.
+    // No per-file generation skill for the root — it's authored as part of the
+    // whole-design generation. The "Regenerate" button runs a single
+    // design-generate turn (unified turn endpoint) that redoes the whole tree.
   },
   {
     id: 'component-design',

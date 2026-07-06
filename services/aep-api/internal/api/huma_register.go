@@ -25,14 +25,17 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 
 	"github.com/wso2/aep/aep-api/internal/feature/component"
-	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
-	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
+	"github.com/wso2/aep/aep-api/internal/feature/files"
+	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -44,42 +47,34 @@ import (
 // registration list in one place (RegisterAllHuma) is what keeps the served
 // handler, the spec artifact, and the tests in lockstep.
 type HumaDeps struct {
-	ProjectSvc          project.ProjectService
-	OrgSvc              organization.OrganizationService
-	ComponentSvc        component.ComponentService
-	ConfigSvc           component.ConfigService
-	RequirementsSvc     requirements.RequirementsService
-	RequirementsChatSvc requirements.RequirementsChatService
-	CollabRepo          gitrepo.RepoService
-	DesignSvc           design.DesignService
-	TaskSvc             task.TaskService
-	TaskDispatcher      task.TaskDispatcher
-	TaskProgress        task.ProgressReader
-	ComponentClient     openchoreo.ComponentClient
-	BoardSvc            task.BoardService
-	IDPSvc              idp.IDPService
-	CredentialSvc       *orgcreds.CredentialService
-	DisconnectSvc       *orgcreds.OrgDisconnectService
-	BearerSvc           *orgcreds.BearerService
-	AnthropicSvc        *orgcreds.AnthropicCredentialService
-	TaskTokens          *auth.TaskTokenManager
-	// Dependencies/resources surface (external-resource catalog + values,
-	// platform-resource provision/status). Wired by the composition root in a
-	// later task; zero values nil-guard to 503 at the handlers.
-	ExternalResourceRegistry resources.ExternalResourceRegistry
-	ExternalResourceValues   *resources.ValueService
-	ResourceSvc              *resources.ResourceService
-	ResourceClient           openchoreo.ResourceClient
-	// AccessSvc owns the cross-project access-request state machine
-	// (dependencies/endpoints). Wired by the composition root in a later task;
-	// a zero value nil-guards to 503 at the handlers.
-	AccessSvc *endpoints.AccessService
-	SkillSvc                 *skills.SkillService
-	SkillMutationSvc         *skills.SkillMutationService
-	SkillImportSvc           *skills.SkillImportService
-	GitHubAppSlug            string
-	BFFPublicURL             string
-	GitHubAppClientID        string
+	ProjectSvc        project.ProjectService
+	OrgSvc            organization.OrganizationService
+	ComponentSvc      component.ComponentService
+	ConfigSvc         component.ConfigService
+	RequirementsSvc   requirements.RequirementsService
+	CollabRepo        gitrepo.RepoService
+	DesignSvc         design.DesignService
+	ProvisioningSvc   *provisioning.Service
+	TaskReads         *task.Reads
+	TaskCommands      *task.Commands
+	TaskPlan          *task.PlanService
+	ExecProgress      *execution.ProgressService
+	ComponentClient   openchoreo.ComponentClient
+	IDPSvc            idp.IDPService
+	CredentialSvc     *orgcreds.CredentialService
+	DisconnectSvc     *orgcreds.OrgDisconnectService
+	BearerSvc         *orgcreds.BearerService
+	AnthropicSvc      *orgcreds.AnthropicCredentialService
+	OrgConfigSvc      *orgconfig.Service
+	TaskTokens        *auth.TaskTokenManager
+	SkillSvc          *skills.SkillService
+	SkillMutationSvc  *skills.SkillMutationService
+	SkillImportSvc    *skills.SkillImportService
+	FilesSvc          files.FilesService
+	GenAISvc          genai.GenAIService
+	GitHubAppSlug     string
+	BFFPublicURL      string
+	GitHubAppClientID string
 }
 
 // RegisterAllHuma registers every migrated feature's operations on the Huma API.
@@ -91,17 +86,15 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	component.RegisterComponent(api, d.ComponentSvc)
 	component.RegisterConfig(api, d.ConfigSvc)
 	requirements.RegisterRequirements(api, d.RequirementsSvc)
-	requirements.RegisterRequirementsChat(api, d.RequirementsChatSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
 	design.RegisterDesign(api, d.DesignSvc)
-	resources.RegisterResources(api, d.ExternalResourceRegistry, d.ExternalResourceValues, d.ResourceSvc, d.ResourceClient)
-	endpoints.RegisterAccess(api, d.AccessSvc)
-	task.RegisterTask(api, d.TaskSvc, d.TaskDispatcher, d.TaskProgress, d.ComponentClient)
-	task.RegisterBoard(api, d.BoardSvc)
-	idp.RegisterIDP(api, d.IDPSvc)
-	orgcreds.RegisterOrgGitHub(api, d.CredentialSvc, d.DisconnectSvc, d.BearerSvc, d.GitHubAppSlug, d.BFFPublicURL, d.GitHubAppClientID)
-	orgcreds.RegisterOrgAnthropic(api, d.AnthropicSvc)
+	provisioning.RegisterResources(api, d.ProvisioningSvc)
+	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
+	execution.RegisterProgress(api, d.ExecProgress)
+	orgconfig.RegisterConfig(api, d.OrgConfigSvc)
 	skills.RegisterSkill(api, d.SkillSvc, d.SkillMutationSvc, d.SkillImportSvc)
+	files.RegisterFiles(api, d.FilesSvc)
+	genai.RegisterGenAI(api, d.GenAISvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)

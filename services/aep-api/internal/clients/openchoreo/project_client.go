@@ -74,7 +74,13 @@ func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit 
 	for i, p := range resp.JSON200.Items {
 		items[i] = projectToModel(p)
 	}
-	return &models.ProjectList{Items: items}, nil
+	out := &models.ProjectList{Items: items}
+	// Surface OC's continuation token verbatim (absent = last page); the
+	// console pages on it.
+	if nc := resp.JSON200.Pagination.NextCursor; nc != nil {
+		out.NextCursor = *nc
+	}
+	return out, nil
 }
 
 func (c *projectClient) GetProject(ctx context.Context, orgName, projectName string) (*models.Project, error) {

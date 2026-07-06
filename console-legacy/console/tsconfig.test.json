@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"],
+    // Node tests must exercise the CURRENT workspace-package sources: the
+    // `file:` deps materialize as hardlink copies in this island's pnpm store,
+    // so their `dist/` snapshots go stale the moment the source packages
+    // change. tsx honors these paths (TSX_TSCONFIG_PATH=tsconfig.test.json).
+    "paths": {
+      "@aep/agent-stream": ["../../packages/agent-stream/src/index.ts"],
+      "@aep/design-projection": ["../../packages/design-projection/src/index.ts"],
+      "@aep/sse-cassette": ["../../packages/sse-cassette/src/index.ts"]
+    }
+  },
+  "include": ["src", "test"]
+}

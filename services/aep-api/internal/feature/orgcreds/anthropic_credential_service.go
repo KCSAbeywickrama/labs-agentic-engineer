@@ -156,14 +156,7 @@ type AnthropicConnectRequest struct {
 // lazily on first dispatch via ApplyWPSecret.
 func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string, req AnthropicConnectRequest) (*AnthropicProjection, error) {
 	key := strings.TrimSpace(req.APIKey)
-	if key == "" {
-		return nil, &ValidationError{Code: "anthropic_key_missing", Message: "apiKey is required"}
-	}
-	if !looksLikeAnthropicKey(key) {
-		return nil, &ValidationError{Code: "anthropic_key_invalid", Message: "API key does not look like an Anthropic key (expected prefix 'sk-ant-')"}
-	}
-
-	if err := s.validateAnthropicKey(ctx, key); err != nil {
+	if err := s.ValidateKey(ctx, key); err != nil {
 		return nil, err
 	}
 
@@ -231,6 +224,25 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 
 	slog.InfoContext(ctx, "anthropic.connected", "ocOrgId", ocOrgID, "keyPrefix", prefix)
 	return projectionFromAnthropicRow(&row), nil
+}
+
+// ValidateKey runs the connect-time validation for an Anthropic key WITHOUT
+// persisting anything: the shape checks plus the live /v1/messages probe.
+//
+// It is the probe-only seam the /config PATCH orchestrator calls in its
+// pre-persist phase, so a bad key in one section fails the whole atomic patch
+// before any section is written (docs/design/org-config-consolidation.md §4).
+// Connect calls it too, so the validation logic lives in exactly one place and
+// the two paths can't drift.
+func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, apiKey string) error {
+	key := strings.TrimSpace(apiKey)
+	if key == "" {
+		return &ValidationError{Code: "anthropic_key_missing", Message: "apiKey is required"}
+	}
+	if !looksLikeAnthropicKey(key) {
+		return &ValidationError{Code: "anthropic_key_invalid", Message: "API key does not look like an Anthropic key (expected prefix 'sk-ant-')"}
+	}
+	return s.validateAnthropicKey(ctx, key)
 }
 
 // ----------------------------------------------------------------------------

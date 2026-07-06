@@ -17,12 +17,15 @@
  */
 
 /**
- * Typed client for /api/v1/org/credentials/anthropic. The active org is derived from the
- * verified JWT server-side — no {orgHandle} path segment.
+ * Typed client for the org's LLM connection, exposed as the `llm` section of the
+ * consolidated GET/PATCH /api/v1/config resource (docs/design/org-config-consolidation.md).
+ * The active org is derived from the verified JWT server-side — no {orgHandle}
+ * path segment.
  *
- * The console's Org Settings → Anthropic Integration page reads from
- * GET .../anthropic (projection — prefix + last4, status, validation) and
- * writes via POST .../anthropic (single key body) or DELETE .../anthropic.
+ * This wrapper preserves its original public surface (getStatus/connect/disconnect
+ * returning OrgAnthropicProjection) so the Org Settings → Anthropic page is
+ * unchanged; internally it reads/writes the `llm` section of /config. A null
+ * `llm` section maps back to the {status:"not_connected"} shape the UI expects.
  *
  * The raw key is never echoed back; the projection deliberately omits it.
  *
@@ -58,6 +61,10 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
       const parsed = JSON.parse(body);
       if (parsed.message) message = parsed.message;
       if (parsed.error) message = parsed.error;
+      // RFC-9457 problem (the /config surface): prefer the section-pointed
+      // errors[] message, else the top-level detail.
+      if (parsed.detail) message = parsed.detail;
+      if (parsed.errors?.[0]?.message) message = parsed.errors[0].message;
       if (parsed.code) code = parsed.code;
     } catch {
       /* use raw body */
@@ -77,7 +84,6 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 export type AnthropicStatus = 'active' | 'invalid' | 'disconnected' | 'not_connected';
 
 export interface OrgAnthropicProjection {
-  ocOrgId: string;
   status: AnthropicStatus;
   keyPrefix?: string;
   keyLast4?: string;
@@ -86,46 +92,69 @@ export interface OrgAnthropicProjection {
   validationError?: string;
 }
 
+// The `llm` section of GET/PATCH /config (null = not connected).
+interface ConfigLLMSection {
+  kind: string;
+  keyPrefix?: string;
+  keyLast4?: string;
+  status: AnthropicStatus;
+  connectedAt?: string;
+  lastValidatedAt?: string;
+  validationError?: string;
+}
+
+interface ConfigProjection {
+  llm: ConfigLLMSection | null;
+}
+
+function projectionFromLLM(llm: ConfigLLMSection | null): OrgAnthropicProjection {
+  if (!llm) return { status: 'not_connected' };
+  return {
+    status: llm.status,
+    keyPrefix: llm.keyPrefix,
+    keyLast4: llm.keyLast4,
+    connectedAt: llm.connectedAt,
+    lastValidatedAt: llm.lastValidatedAt,
+    validationError: llm.validationError,
+  };
+}
+
 // ----------------------------------------------------------------------------
 // API surface
 // ----------------------------------------------------------------------------
 
 export const orgAnthropicApi = {
   /**
-   * Read the projection for the org's Anthropic connection. Returns
-   * {status:"not_connected"} (no key fields) when no row exists.
+   * Read the org's LLM connection projection. Returns {status:"not_connected"}
+   * (no key fields) when the `llm` section of /config is null.
    */
   async getStatus(): Promise<OrgAnthropicProjection> {
-    const raw = await fetchJSON<OrgAnthropicProjection | { data: OrgAnthropicProjection }>(
-      `/api/v1/org/credentials/anthropic`,
-    );
-    const inner = (raw as { data?: OrgAnthropicProjection }).data ?? (raw as OrgAnthropicProjection);
-    return inner;
+    const config = await fetchJSON<ConfigProjection>(`/api/v1/config`);
+    return projectionFromLLM(config.llm);
   },
 
   /**
-   * Connect or replace the org's Anthropic API key. The validation chain
-   * runs server-side; field-level error codes (`anthropic_key_invalid`,
-   * `anthropic_unreachable`) are surfaced on ApiError.code.
+   * Connect or replace the org's Anthropic API key via PATCH /config {llm}. The
+   * validation chain runs server-side; a probe failure is a 422 pointing at
+   * body.llm, surfaced on ApiError.message.
    */
   async connect(apiKey: string): Promise<OrgAnthropicProjection> {
-    const raw = await fetchJSON<OrgAnthropicProjection | { data: OrgAnthropicProjection }>(
-      `/api/v1/org/credentials/anthropic`,
-      { method: 'POST', body: JSON.stringify({ apiKey }) },
-    );
-    const inner = (raw as { data?: OrgAnthropicProjection }).data ?? (raw as OrgAnthropicProjection);
-    return inner;
+    const config = await fetchJSON<ConfigProjection>(`/api/v1/config`, {
+      method: 'PATCH',
+      body: JSON.stringify({ llm: { kind: 'anthropic', apiKey } }),
+    });
+    return projectionFromLLM(config.llm);
   },
 
   /**
-   * Disconnect — removes the encrypted key bytes from org_secrets, the
-   * metadata row, and the per-org WP Secret. In-flight WorkflowRuns are
-   * NOT cancelled.
+   * Disconnect via PATCH /config {llm:null} — removes the encrypted key bytes
+   * from org_secrets, the metadata row, and the per-org WP Secret. In-flight
+   * WorkflowRuns are NOT cancelled.
    */
   async disconnect(): Promise<void> {
-    await fetchJSON<void>(
-      `/api/v1/org/credentials/anthropic`,
-      { method: 'DELETE' },
-    );
+    await fetchJSON<ConfigProjection>(`/api/v1/config`, {
+      method: 'PATCH',
+      body: JSON.stringify({ llm: null }),
+    });
   },
 };

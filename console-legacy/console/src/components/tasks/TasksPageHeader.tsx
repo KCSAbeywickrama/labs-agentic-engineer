@@ -26,35 +26,36 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
   Menu,
   MenuItem,
   Stack,
   Tooltip,
   Typography,
 } from '@wso2/oxygen-ui';
-import { AlertCircle, ChevronDown, Cloud, ExternalLink, Github, Laptop, Play, Sparkles } from '@wso2/oxygen-ui-icons-react';
+import { AlertCircle, ChevronDown, Cloud, ExternalLink, Laptop, Play, RefreshCw, Sparkles } from '@wso2/oxygen-ui-icons-react';
 import { useOrgAnthropic } from '../../hooks/useOrgAnthropic';
 
 interface TasksPageHeaderProps {
   projectId: string;
   totalTasks: number;
-  isGenerating: boolean;
-  isDispatching: boolean;
-  githubProjectUrl: string | null;
-  hideGenerateButton: boolean;
-  onGenerate: () => void;
-  onStartImplementation: () => void;
+  isPlanning: boolean;
+  isExecutingAll: boolean;
+  isRefreshing: boolean;
+  onPlan: () => void;
+  onExecuteAll: () => void;
+  onRefresh: () => void;
 }
 
 export function TasksPageHeader({
   projectId,
   totalTasks,
-  isGenerating,
-  isDispatching,
-  githubProjectUrl,
-  hideGenerateButton,
-  onGenerate,
-  onStartImplementation,
+  isPlanning,
+  isExecutingAll,
+  isRefreshing,
+  onPlan,
+  onExecuteAll,
+  onRefresh,
 }: TasksPageHeaderProps) {
   const [implMenuAnchor, setImplMenuAnchor] = useState<HTMLElement | null>(null);
   const [showLocalGuide, setShowLocalGuide] = useState(false);
@@ -65,7 +66,7 @@ export function TasksPageHeader({
 
   const handleRemoteImplementation = () => {
     setImplMenuAnchor(null);
-    onStartImplementation();
+    onExecuteAll();
   };
 
   const handleLocalImplementation = () => {
@@ -81,36 +82,42 @@ export function TasksPageHeader({
             Tasks
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Fetched from GitHub Project · {projectId}
+            Live from GitHub issues · {projectId}
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1} alignItems="center">
-          {!hideGenerateButton && (
-            <Button
-              variant={totalTasks === 0 ? 'contained' : 'outlined'}
-              size="small"
-              startIcon={isGenerating ? <CircularProgress size={14} color="inherit" /> : <Sparkles size={15} />}
-              disabled={isGenerating}
-              onClick={onGenerate}
-            >
-              {isGenerating ? 'Generating…' : 'Generate Tasks'}
-            </Button>
-          )}
+          <Tooltip title="Refresh">
+            <span>
+              <IconButton size="small" onClick={onRefresh} disabled={isRefreshing || isPlanning}>
+                {isRefreshing ? <CircularProgress size={16} /> : <RefreshCw size={16} />}
+              </IconButton>
+            </span>
+          </Tooltip>
+
+          <Button
+            variant={totalTasks === 0 ? 'contained' : 'outlined'}
+            size="small"
+            startIcon={isPlanning ? <CircularProgress size={14} color="inherit" /> : <Sparkles size={15} />}
+            disabled={isPlanning}
+            onClick={onPlan}
+          >
+            {isPlanning ? 'Planning…' : totalTasks === 0 ? 'Plan Tasks' : 'Re-plan'}
+          </Button>
 
           {totalTasks > 0 && (
             <>
               <Button
                 variant="contained"
                 size="small"
-                startIcon={isDispatching ? <CircularProgress size={14} color="inherit" /> : <Play size={14} />}
-                endIcon={!isDispatching && <ChevronDown size={14} />}
-                disabled={isDispatching}
+                startIcon={isExecutingAll ? <CircularProgress size={14} color="inherit" /> : <Play size={14} />}
+                endIcon={!isExecutingAll && <ChevronDown size={14} />}
+                disabled={isExecutingAll || isPlanning}
                 onClick={(e) => setImplMenuAnchor(e.currentTarget)}
                 aria-haspopup="menu"
                 aria-expanded={Boolean(implMenuAnchor)}
               >
-                {isDispatching ? 'Starting…' : 'Execute all'}
+                {isExecutingAll ? 'Starting…' : 'Execute all'}
               </Button>
               <Menu
                 anchorEl={implMenuAnchor}
@@ -139,10 +146,10 @@ export function TasksPageHeader({
                         {anthropicReady ? <Cloud size={20} /> : <AlertCircle size={20} color="var(--color-warning, #d97706)" />}
                       </Box>
                       <Box>
-                        <Typography variant="body2" fontWeight={600}>Implement via Remote Agents</Typography>
+                        <Typography variant="body2" fontWeight={600}>Execute via Remote Agents</Typography>
                         <Typography variant="caption" color="text.secondary">
                           {anthropicReady
-                            ? 'Platform spawns Coding agents on the host to work on every task.'
+                            ? 'Stamps every eligible task for execution; the funnel dispatches coding agents in dependency order.'
                             : (
                               <>
                                 Anthropic API key required —{' '}
@@ -164,33 +171,12 @@ export function TasksPageHeader({
                   <Box>
                     <Typography variant="body2" fontWeight={600}>Implement Locally</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Use the Platform plugin in your own Coding Agent session.
+                      Work the GitHub issues yourself in a local Claude Code session.
                     </Typography>
                   </Box>
                 </MenuItem>
               </Menu>
             </>
-          )}
-
-          {githubProjectUrl && (
-            <Button
-              variant="outlined"
-              size="small"
-              component="a"
-              href={githubProjectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              startIcon={<Github size={16} />}
-              endIcon={<ExternalLink size={14} />}
-              sx={{
-                textTransform: 'none',
-                fontWeight: 500,
-                '& .MuiButton-startIcon': { mr: 0.75 },
-                '& .MuiButton-endIcon': { ml: 0.5 },
-              }}
-            >
-              GitHub Project
-            </Button>
           )}
         </Stack>
       </Stack>
@@ -204,25 +190,24 @@ export function TasksPageHeader({
         </DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ mb: 2 }}>
-            Each task above has a corresponding GitHub issue (open the{' '}
+            Each task above is a GitHub issue (open the{' '}
             <Box component="span" sx={{ display: 'inline-flex', verticalAlign: 'middle', mx: 0.5 }}>
               <ExternalLink size={12} />
             </Box>
-            {' '}link on a row), a feature branch, and a draft PR already prepared. Work directly on
-            GitHub from a regular Claude Code session — no platform plugin needed.
+            {' '}link on a row). Work directly on GitHub from a regular Claude Code session — no platform plugin needed.
           </Typography>
 
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>1. Clone the repo and check out the task branch</Typography>
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>1. Clone the repo and create a task branch</Typography>
           <Box
             component="pre"
             sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1, fontSize: '0.8rem', overflowX: 'auto', fontFamily: 'monospace', m: 0 }}
           >
 {`gh repo clone <repo>
 cd <repo>
-git checkout <task-branch>`}
+git checkout -b task-<issue-number>`}
           </Box>
 
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>2. Implement, push, and mark the PR ready</Typography>
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>2. Implement, then open a PR that closes the issue</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Run Claude Code in the repo. When the work is done:
           </Typography>
@@ -231,12 +216,11 @@ git checkout <task-branch>`}
             sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1, fontSize: '0.8rem', overflowX: 'auto', fontFamily: 'monospace', m: 0 }}
           >
 {`git push origin HEAD
-gh pr ready <pr-number>`}
+gh pr create --fill --body "Closes #<issue-number>"`}
           </Box>
 
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-            GitHub webhooks drive task status here — readying the PR advances the task; merging it kicks
-            off the build automatically.
+            GitHub webhooks drive task status here — opening the PR ends the coding execution; merging it spawns the build automatically.
           </Typography>
         </DialogContent>
         <DialogActions>

@@ -19,9 +19,10 @@
 // jwt.WithClaims seam → orgensure → Huma parsing/validation → the tenant gate
 // in ENFORCE → mapDesignError — driven in-process via the componenttest
 // harness. The store is the REAL artifacts.NewArtifactStore decorator; only its
-// out-of-process artifact service (git) is faked at the interface. The agents
-// client is nil here: the streaming generate op is an SSE side-effect proven at
-// the unit tier (design_service_more_test.go), not an on-wire JSON contract.
+// out-of-process artifact service (git) is faked at the interface. Per the
+// GitHub-direct rework the read + save + version surface is all that remains
+// (per-file PUT/DELETE, component delete, and the architect generate stream are
+// gone), so only those routes are exercised here.
 //
 // Body shapes are asserted against the harvested goldens (testdata/harvest/
 // golden/) by FIELD SET — the low-maintenance contract, values scrubbed. Both
@@ -44,12 +45,10 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/api"
-	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 const goldenDir = "../../../testdata/harvest/golden"
@@ -57,30 +56,14 @@ const goldenDir = "../../../testdata/harvest/golden"
 // validDesignTree is a well-formed working-tree map the REAL store assembles.
 func validDesignTree() map[string]string {
 	return map[string]string{
-		artifacts.DesignRootFile:            "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
-		"components/hello-api/design.json":  "{\n  \"name\": \"hello-api\",\n  \"type\": \"service\",\n  \"language\": \"Go\",\n  \"description\": \"Build it.\",\n  \"dependencies\": []\n}\n",
-		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
-	}
-}
-
-// designTreeWithUnresolvedDep is a working-tree map whose sole component
-// carries one `external` dependency that declares needsSpec with no
-// specPath — the shape the artifacts package's assembleDependencies computes
-// as Status "unresolved" at read time, which SaveAndProceed's proceed-gate
-// (B4) must block on with a 409.
-func designTreeWithUnresolvedDep() map[string]string {
-	return map[string]string{
 		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
-		"components/hello-api/design.json": `{
-  "name": "hello-api",
-  "type": "service",
-  "language": "Go",
-  "description": "Build it.",
-  "dependencies": [
-    {"kind": "external", "name": "ext-api", "description": "an external API", "needsSpec": true}
-  ]
-}
-`,
+		"components/hello-api/design.json": "{\n" +
+			"  \"name\": \"hello-api\",\n" +
+			"  \"type\": \"service\",\n" +
+			"  \"language\": \"Go\",\n" +
+			"  \"description\": \"Build it.\",\n" +
+			"  \"dependencies\": []\n" +
+			"}\n",
 		"components/hello-api/openapi.yaml": "openapi: 3.0.3\n",
 	}
 }
@@ -102,13 +85,11 @@ func happyReads() *artifactstest.FakeArtifactService {
 	}
 }
 
-// newHarness assembles the real chain around the REAL design service; the
-// agents client is nil (SSE generate is unit-tier), only the artifact service
-// (git) is faked.
+// newHarness assembles the real chain around the REAL design service; only the
+// out-of-process artifact service (git) is faked.
 func newHarness(t *testing.T, fake *artifactstest.FakeArtifactService) *componenttest.Harness {
 	t.Helper()
-	var agentsClient agents.Client // nil — generate op not exercised here
-	svc := design.NewDesignService(artifacts.NewArtifactStore(fake), agentsClient, fake)
+	svc := design.NewDesignService(artifacts.NewArtifactStore(fake), fake)
 	return componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{DesignSvc: svc}})
 }
 
@@ -131,26 +112,6 @@ func assertFieldSetMatchesGolden(t *testing.T, body, goldenName string) {
 	want := dropSchema(componenttest.GoldenFieldSet(t, filepath.Join(goldenDir, goldenName)))
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("%s field set drifted from golden:\n got %v\nwant %v", goldenName, got, want)
-	}
-}
-
-func TestDesignComponent_GetMatchesGoldenFieldSet(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, happyReads())
-
-	resp := h.AsOrg("acme").Get("/api/v1/projects/hello-world-api/design")
-	if resp.Code != 200 {
-		t.Fatalf("get design: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	assertFieldSetMatchesGolden(t, resp.Body.String(), "get_design.json")
-
-	// Semantics: an approved, tagged design with no unsaved drift.
-	var got map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got["status"] != "approved" || got["sourceSpec"] != "v1" || got["hasUnsavedChanges"] != false {
-		t.Fatalf("get design semantics drifted: %s", resp.Body.String())
 	}
 }
 
@@ -205,56 +166,6 @@ func TestDesignComponent_VersionsMatchesGolden(t *testing.T) {
 	}
 }
 
-func TestDesignComponent_UpdateFileHappyAndValidation(t *testing.T) {
-	t.Parallel()
-	fake := happyReads()
-	fake.PutFileFunc = func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-		return &artifacts.PutResult{SHA: "sha"}, nil
-	}
-	h := newHarness(t, fake)
-
-	// Happy: writing a file returns the refreshed bundle.
-	resp := h.AsOrg("acme").Put(
-		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.json",
-		`{"content":"# hello-api\n\nnew body"}`,
-	)
-	if resp.Code != 200 {
-		t.Fatalf("update file: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if fs := dropSchema(componenttest.FieldSet(t, resp.Body.String())); strings.Join(fs, ",") != "design,files" {
-		t.Fatalf("update-file must return the bundle {design,files}, got %v", fs)
-	}
-
-	// Validation: the body's `content` is a required schema property — a body
-	// missing it is a Huma 422 that never reaches the service.
-	resp = h.AsOrg("acme").Put(
-		"/api/v1/projects/hello-world-api/design/files/components/hello-api/design.json",
-		`{}`,
-	)
-	if resp.Code != 422 {
-		t.Fatalf("missing content: want 422, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	p := componenttest.DecodeProblem(t, resp.Body.String())
-	if len(p.Errors) == 0 || !strings.Contains(p.Errors[0].Message, "expected required property content to be present") {
-		t.Fatalf("422 shape drifted: %s", resp.Body.String())
-	}
-}
-
-func TestDesignComponent_DeleteComponentHappy(t *testing.T) {
-	t.Parallel()
-	fake := happyReads()
-	fake.DeleteDesignDirectoryFunc = func(context.Context, string, string, string) error { return nil }
-	h := newHarness(t, fake)
-
-	resp := h.AsOrg("acme").Delete("/api/v1/projects/hello-world-api/design/components/hello-api")
-	if resp.Code != 200 {
-		t.Fatalf("delete component: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if fs := dropSchema(componenttest.FieldSet(t, resp.Body.String())); strings.Join(fs, ",") != "design,files" {
-		t.Fatalf("delete-component must return the bundle {design,files}, got %v", fs)
-	}
-}
-
 // TestDesignComponent_ErrorMapping drives every design error branch that maps
 // to an HTTP status through the real chain:
 //   - the two mapDesignError branches (opaque→500, ErrDesignNotFound→404), and
@@ -274,7 +185,7 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 				return nil, errors.New("pg: connection refused")
 			},
 		}
-		resp := newHarness(t, fake).AsOrg("acme").Get("/api/v1/projects/web/design")
+		resp := newHarness(t, fake).AsOrg("acme").Get("/api/v1/projects/web/design/bundle")
 		if resp.Code != 500 {
 			t.Fatalf("want 500, got %d body=%s", resp.Code, resp.Body.String())
 		}
@@ -309,7 +220,7 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 				return validDesignTree(), nil
 			},
 			SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
-				return nil, errors.New("save failed: no requirements baseline exists")
+				return nil, artifacts.ErrNoRequirementsBaseline
 			},
 		}
 		resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")
@@ -318,22 +229,6 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 		}
 		if p := componenttest.DecodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "no v<N> baseline") {
 			t.Fatalf("409 detail drifted: %q", p.Detail)
-		}
-	})
-
-	t.Run("save with an unresolved dependency is 409", func(t *testing.T) {
-		t.Parallel()
-		fake := &artifactstest.FakeArtifactService{
-			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-				return designTreeWithUnresolvedDep(), nil
-			},
-		}
-		resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")
-		if resp.Code != 409 {
-			t.Fatalf("want 409, got %d body=%s", resp.Code, resp.Body.String())
-		}
-		if p := componenttest.DecodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "unresolved") {
-			t.Fatalf("409 detail must name the unresolved dependency gate: %q", p.Detail)
 		}
 	})
 
@@ -354,175 +249,45 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 	})
 }
 
-// sampleOpenAPISpecComponentTest is a minimal valid OpenAPI 3.x document used
-// by the collect-dependency-spec route tests below.
-const sampleOpenAPISpecComponentTest = `openapi: 3.0.3
-info:
-  title: External API
-  version: "1.0"
-paths:
-  /items:
-    get:
-      summary: List items
-      responses:
-        "200":
-          description: OK
-`
-
-// TestDesignComponent_CollectDependencySpec drives the real handler chain for
-// POST .../components/{componentName}/dependencies/{depName}/spec: the 400
-// (neither/both of rawSpec+specUrl) and 200 (rawSpec paste, stores the spec
-// and clears the needsSpec gate) paths, plus the 502 fetch-failure mapping.
-func TestDesignComponent_CollectDependencySpec(t *testing.T) {
+// The publish flow pins the commit its files-apply just created: the save's
+// pre-gate read must hit that exact commit (GetDesignAtCommit — never the
+// HEAD-resolving ListDesignFiles, whose ref read can lag the apply) and the
+// artifact save must receive the same sha to gate + tag.
+func TestDesignComponent_Save_CommitShaPinsReadAndTag(t *testing.T) {
 	t.Parallel()
-
-	const path = "/api/v1/projects/web/components/hello-api/dependencies/ext-api/spec"
-
-	t.Run("neither rawSpec nor specUrl is 400", func(t *testing.T) {
-		t.Parallel()
-		resp := newHarness(t, &artifactstest.FakeArtifactService{}).AsOrg("acme").Post(path, `{}`)
-		if resp.Code != 400 {
-			t.Fatalf("want 400, got %d body=%s", resp.Code, resp.Body.String())
-		}
-	})
-
-	t.Run("both rawSpec and specUrl is 400", func(t *testing.T) {
-		t.Parallel()
-		body, err := json.Marshal(map[string]string{
-			"rawSpec": sampleOpenAPISpecComponentTest,
-			"specUrl": "https://api.example.com/openapi.yaml",
-		})
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
-		resp := newHarness(t, &artifactstest.FakeArtifactService{}).AsOrg("acme").Post(path, string(body))
-		if resp.Code != 400 {
-			t.Fatalf("want 400, got %d body=%s", resp.Code, resp.Body.String())
-		}
-	})
-
-	t.Run("a bad fetch URL is 502", func(t *testing.T) {
-		t.Parallel()
-		body, err := json.Marshal(map[string]string{"specUrl": "http://insecure.example.com/openapi.yaml"})
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
-		// The dep target must resolve so validation passes and the fetch runs.
-		fake := &artifactstest.FakeArtifactService{
-			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-				return designTreeWithUnresolvedDep(), nil
-			},
-		}
-		resp := newHarness(t, fake).AsOrg("acme").Post(path, string(body))
-		if resp.Code != 502 {
-			t.Fatalf("want 502, got %d body=%s", resp.Code, resp.Body.String())
-		}
-	})
-
-	t.Run("rawSpec paste stores the spec and returns 200", func(t *testing.T) {
-		t.Parallel()
-		written := map[string]string{}
-		fake := &artifactstest.FakeArtifactService{
-			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-				return designTreeWithUnresolvedDep(), nil
-			},
-			PutFileFunc: func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
-				written[relPath] = content
-				return &artifacts.PutResult{SHA: "sha"}, nil
-			},
-		}
-		body, err := json.Marshal(map[string]string{"rawSpec": sampleOpenAPISpecComponentTest})
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
-		resp := newHarness(t, fake).AsOrg("acme").Post(path, string(body))
-		if resp.Code != 200 {
-			t.Fatalf("want 200, got %d body=%s", resp.Code, resp.Body.String())
-		}
-		var out struct {
-			SpecPath string `json:"specPath"`
-		}
-		if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if out.SpecPath != "dependencies/ext-api.openapi.yaml" {
-			t.Fatalf("specPath = %q", out.SpecPath)
-		}
-		if len(written) == 0 {
-			t.Fatal("expected the spec blob + updated design.json to be written")
-		}
-	})
-
-	t.Run("unknown dep is 404 and stores nothing", func(t *testing.T) {
-		t.Parallel()
-		putCalled := false
-		fake := &artifactstest.FakeArtifactService{
-			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-				return designTreeWithUnresolvedDep(), nil // only ext-api exists
-			},
-			PutFileFunc: func(_ context.Context, _, _, _, _, _ string) (*artifacts.PutResult, error) {
-				putCalled = true
-				return &artifacts.PutResult{SHA: "sha"}, nil
-			},
-		}
-		body, _ := json.Marshal(map[string]string{"rawSpec": sampleOpenAPISpecComponentTest})
-		resp := newHarness(t, fake).AsOrg("acme").
-			Post("/api/v1/projects/web/components/hello-api/dependencies/ghost/spec", string(body))
-		if resp.Code != 404 {
-			t.Fatalf("want 404, got %d body=%s", resp.Code, resp.Body.String())
-		}
-		if putCalled {
-			t.Fatal("unknown dep must not store an orphan spec blob")
-		}
-	})
-
-	t.Run("wrong-kind dep is 400 naming both kinds and stores nothing", func(t *testing.T) {
-		t.Parallel()
-		putCalled := false
-		fake := &artifactstest.FakeArtifactService{
-			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-				return map[string]string{
-					artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview prose.\n",
-					"components/hello-api/design.json": `{
-  "name": "hello-api",
-  "type": "service",
-  "language": "Go",
-  "description": "Build it.",
-  "dependencies": [
-    {"kind": "platform-resource", "name": "maindb", "resourceType": "postgres-cnpg"}
-  ]
-}
-`,
-				}, nil
-			},
-			PutFileFunc: func(_ context.Context, _, _, _, _, _ string) (*artifacts.PutResult, error) {
-				putCalled = true
-				return &artifacts.PutResult{SHA: "sha"}, nil
-			},
-		}
-		body, _ := json.Marshal(map[string]string{"rawSpec": sampleOpenAPISpecComponentTest})
-		resp := newHarness(t, fake).AsOrg("acme").
-			Post("/api/v1/projects/web/components/hello-api/dependencies/maindb/spec", string(body))
-		if resp.Code != 400 {
-			t.Fatalf("want 400, got %d body=%s", resp.Code, resp.Body.String())
-		}
-		p := componenttest.DecodeProblem(t, resp.Body.String())
-		for _, want := range []string{models.DependencyKindExternal, models.DependencyKindPlatformResource} {
-			if !strings.Contains(p.Detail, want) {
-				t.Errorf("400 detail must name kind %q: %q", want, p.Detail)
-			}
-		}
-		if putCalled {
-			t.Fatal("wrong-kind dep must not store an orphan spec blob")
-		}
-	})
+	const sha = "1362ed59a59033f2f066c5bb7720c9880fa35ec0"
+	var readAt, savedAt string
+	fake := &artifactstest.FakeArtifactService{
+		GetDesignAtCommitFunc: func(_ context.Context, _, _, commitSHA string) (map[string]string, error) {
+			readAt = commitSHA
+			return validDesignTree(), nil
+		},
+		SaveDesignFunc: func(_ context.Context, _, _ string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+			savedAt = req.CommitSHA
+			return &artifacts.DesignSaveResult{Status: "approved", Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}, nil
+		},
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			t.Error("save with commitSha must not resolve HEAD (ListDesignFiles called)")
+			return validDesignTree(), nil
+		},
+		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
+			return nil, nil
+		},
+	}
+	resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", `{"commitSha":"`+sha+`"}`)
+	if resp.Code != 200 {
+		t.Fatalf("save with commitSha: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if readAt != sha || savedAt != sha {
+		t.Fatalf("pinned sha lost: pre-gate read at %q, artifact save got %q, want %q", readAt, savedAt, sha)
+	}
 }
 
 func TestDesignComponent_NoClaimsDeniedByEnforceGate(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, happyReads())
 
-	resp := h.NoAuth().Get("/api/v1/projects/hello-world-api/design")
+	resp := h.NoAuth().Get("/api/v1/projects/hello-world-api/design/bundle")
 	if resp.Code != 401 {
 		t.Fatalf("no-claims: want the gate's ENFORCE 401, got %d body=%s", resp.Code, resp.Body.String())
 	}
@@ -562,4 +327,39 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// TestDesignComponent_Save_UnresolvedDependencyIs409 drives the REAL handler
+// chain: a design whose only component carries an `external` dependency flagged
+// needsSpec but with no collected spec must fail the tag-cut with 409
+// (ErrUnresolvedDependency → Error409Conflict), and SaveDesign must never be
+// reached.
+func TestDesignComponent_Save_UnresolvedDependencyIs409(t *testing.T) {
+	t.Parallel()
+	tree := map[string]string{
+		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview.\n",
+		"components/consumer/design.json": "{\n" +
+			"  \"name\": \"consumer\",\n" +
+			"  \"type\": \"service\",\n" +
+			"  \"language\": \"Go\",\n" +
+			"  \"description\": \"Consumes an external API.\",\n" +
+			"  \"dependencies\": [{\"kind\": \"external\", \"name\": \"stripe\", \"needsSpec\": true}]\n" +
+			"}\n",
+	}
+	fake := &artifactstest.FakeArtifactService{
+		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
+			return tree, nil
+		},
+		SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+			t.Error("proceed-gate should have blocked before SaveDesign was reached")
+			return nil, errors.New("SaveDesign must not be called")
+		},
+	}
+	resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")
+	if resp.Code != 409 {
+		t.Fatalf("unresolved dependency: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if p := componenttest.DecodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "unresolved") {
+		t.Fatalf("409 detail drifted: %q", p.Detail)
+	}
 }

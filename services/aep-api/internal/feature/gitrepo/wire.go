@@ -19,13 +19,15 @@ package gitrepo
 import (
 	"errors"
 	"fmt"
+
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 )
 
 // The request/response DTOs exchanged across the git-provider ports (ports.go).
 // They are part of the port contract: any provider implementation
 // (clients/github today) marshals its wire format to and from these types, and
-// consumers (artifacts, skills, orgcreds) read them. Kept provider-neutral —
-// only the fields our code actually consumes.
+// consumers (gitrepo services, orgcreds, task) read them. Kept
+// provider-neutral — only the fields our code actually consumes.
 
 // ----- Repo / issue -----
 
@@ -65,6 +67,18 @@ type IssueInfo struct {
 	Labels []string
 }
 
+// CompareResult is the per-file change summary between two refs the lineage
+// diff consumes (§6) — produced by the Workspace engine's local
+// `git diff base...head` (Workspace.Diff). Alias of the gitfs definition
+// (identical fields). Truncated is always false there (a local diff never
+// truncates); the field survives from the retired GitHub compare shape.
+type CompareResult = gitfs.CompareResult
+
+// ChangedFile is one entry of a compare's files[] list. Alias of the gitfs
+// definition. Status vocabulary is GitHub-compatible: added | removed |
+// modified | renamed | copied | changed | unchanged.
+type ChangedFile = gitfs.ChangedFile
+
 // ----- Account / App installation -----
 
 // GitHubUser is the subset of GET /user we consume.
@@ -98,97 +112,21 @@ type AppInstallationSummary struct {
 	AccountType    string `json:"accountType"`
 }
 
-// ----- Git data objects -----
+// ----- Git identity -----
 
-// GitIdentity mirrors GitHub's author/committer/tagger object. Date is
-// optional; GitHub defaults to the request time when omitted. Named with the
+// GitIdentity mirrors a git author/committer/tagger identity. Date is
+// optional (defaults to the commit/tag time when omitted). Named with the
 // `Git` prefix to avoid collision with the `Identity` type already declared
-// in credential_service.go.
-type GitIdentity struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Date  string `json:"date,omitempty"`
-}
+// in credential_service.go. Alias of the gitfs definition — consumers keep
+// importing gitrepo.GitIdentity while the engine owns the type.
+type GitIdentity = gitfs.GitIdentity
 
-// CommitObject is the subset of GET /git/commits we consume.
-type CommitObject struct {
-	SHA     string
-	TreeSHA string
-	Parents []string
-	Message string
-}
-
-// TreeEntry is the wire shape for POST /git/trees entries. SHA is empty for
-// deletions (we serialise as `sha: null` on the wire).
-type TreeEntry struct {
-	Path string
-	Mode string // "100644" file, "100755" exec, "040000" dir, "160000" submodule, "120000" symlink
-	Type string // "blob" | "tree" | "commit"
-	SHA  string // empty → deletion (sha:null)
-}
-
-// TreeObject is the subset of GET /git/trees we consume.
-type TreeObject struct {
-	SHA     string
-	Entries []TreeEntryResult
-}
-
-// TreeEntryResult is one row of a tree listing. Size is only set for blobs.
-type TreeEntryResult struct {
-	Path string `json:"path"`
-	Mode string `json:"mode"`
-	Type string `json:"type"`
-	SHA  string `json:"sha"`
-	Size int64  `json:"size,omitempty"`
-}
-
-// CreateCommitRequest is the body of POST /git/commits.
-type CreateCommitRequest struct {
-	Message   string
-	TreeSHA   string
-	Parents   []string
-	Author    *GitIdentity
-	Committer *GitIdentity
-}
-
-// CreateTagObjectRequest is the body of POST /git/tags.
-type CreateTagObjectRequest struct {
-	Tag     string
-	Message string
-	Object  string // commit SHA
-	Type    string // typically "commit"
-	Tagger  *GitIdentity
-}
-
-// MatchingRef is one row of GET /git/matching-refs/<prefix>.
-type MatchingRef struct {
-	Ref string `json:"ref"` // e.g. "refs/tags/v1"
-	SHA string // pulled out of the nested .object.sha
-}
-
-// ----- Project board -----
-
-// LabelInfo holds a label's name and hex color (without the leading #).
-type LabelInfo struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
-}
-
-// BoardItem is a single item on a project board.
-type BoardItem struct {
-	ID       string
-	Title    string
-	URL      string
-	Body     string
-	Assignee string
-	Labels   []LabelInfo
-	Status   string
-}
-
-// ProjectBoardResult holds all items fetched from a project board.
-type ProjectBoardResult struct {
-	URL   string
-	Items []BoardItem
+// PullRequestState is the subset of a pull request the sweep's PR-state
+// reconciliation reads (§5): open/closed + merged + the merge commit SHA.
+type PullRequestState struct {
+	State          string // "open" | "closed"
+	Merged         bool
+	MergeCommitSHA string
 }
 
 // ----- Status errors -----

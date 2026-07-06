@@ -41,8 +41,8 @@ func newWebhookSvcOnStub(t *testing.T, stub *gittest.Stub, strategy credentials.
 	repo.preload(&models.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: "https://github.com/acme/widgets"})
 	resolver := fakeResolver{cred: fakeCred{strategy: strategy}}
 	gh := githubclient.NewClient(githubclient.WithAPIBase(stub.URL))
-	issueSvc := gitrepo.NewIssueService(repo, nil, nil, resolver)
-	repoSvc := gitrepo.NewRepoService(repo, gh, resolver, "public", t.TempDir())
+	issueSvc := gitrepo.NewIssueService(repo, nil, resolver)
+	repoSvc := gitrepo.NewRepoService(repo, gh, resolver, "public")
 
 	wh := gitrepo.NewWebhookService(
 		repo,
@@ -90,8 +90,8 @@ func TestWebhookRegister_HappyPathSendsHookPayloadAndPersistsID(t *testing.T) {
 	if body.Name != "web" || !body.Active {
 		t.Fatalf("hook = {name:%q active:%v}, want {web true}", body.Name, body.Active)
 	}
-	if strings.Join(body.Events, ",") != "pull_request,push,issue_comment" {
-		t.Fatalf("events = %v, want [pull_request push issue_comment]", body.Events)
+	if strings.Join(body.Events, ",") != "pull_request,push,issue_comment,issues" {
+		t.Fatalf("events = %v, want [pull_request push issue_comment issues]", body.Events)
 	}
 	if body.Config["url"] != "https://webhook.example/deliver" || body.Config["secret"] != "s3cr3t" {
 		t.Fatalf("config url/secret = %q/%q", body.Config["url"], body.Config["secret"])
@@ -128,8 +128,8 @@ func TestWebhookRegister_MissingConfigErrors(t *testing.T) {
 	t.Parallel()
 	issRepo := newFakeRepoRepo()
 	issRepo.preload(&models.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: "https://github.com/acme/widgets"})
-	issueSvc := gitrepo.NewIssueService(issRepo, nil, nil, fakeResolver{})
-	repoSvc := gitrepo.NewRepoService(issRepo, githubclient.NewClient(), fakeResolver{}, "public", t.TempDir())
+	issueSvc := gitrepo.NewIssueService(issRepo, nil, fakeResolver{})
+	repoSvc := gitrepo.NewRepoService(issRepo, githubclient.NewClient(), fakeResolver{}, "public")
 	// Empty delivery URL + secret.
 	wh := gitrepo.NewWebhookService(issRepo, githubclient.NewClient(), repoSvc, issueSvc, "", "")
 
@@ -172,7 +172,7 @@ func TestWebhookRegister_NonResolvingIssueServiceErrorsNotPanics(t *testing.T) {
 	wh := gitrepo.NewWebhookService(
 		repo,
 		githubclient.NewClient(),
-		gitrepo.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "public", t.TempDir()),
+		gitrepo.NewRepoService(repo, githubclient.NewClient(), fakeResolver{}, "public"),
 		nonResolvingIssueSvc{},
 		"https://webhook.example/deliver",
 		"s3cr3t",

@@ -15,10 +15,11 @@
 // under the License.
 
 // UNIT tier: the reconcile.go branches repo_store_test.go doesn't reach. That
-// file proves seed-on-first-read, rewrite-of-a-missing-builtin, and the no-op.
-// This file adds: version-bump overwrite (embed.version > repo.version), the
-// purge of a retired built-in the embed no longer ships, the UpdatesAvailable
-// rows (stale + absent), loadEmbeddedBuiltins, and the EnsureProvisioned guards.
+// file proves seed-on-first-read (built-ins + flow), rewrite-of-a-missing
+// skill, and the no-op. This file adds: version-bump overwrite (embed.version
+// > repo.version), the purge of a retired built-in the embed no longer ships,
+// the UpdatesAvailable rows (stale + absent), the embedded loaders for both
+// kinds, and the EnsureProvisioned guards.
 package skills
 
 import (
@@ -46,14 +47,13 @@ func versionOf(t *testing.T, skills []Skill, name string) int {
 
 func TestReconcile_OverwritesStaleBuiltin(t *testing.T) {
 	t.Parallel()
-	svc, gh := newTestStore()
+	svc, host := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil { // seed at embed versions (go=2)
 		t.Fatalf("seed: %v", err)
 	}
 	// Plant an older `go` (v1) in the repo, then reconcile — embed (v2) is newer.
-	gh.writeAtHead(skillRepoPath("builtin", "go"), goBuiltinAtVersion("1"))
-	svc.cache.evict("org1")
+	host.writeAtHead("org1", skillRepoPath("builtin", "go"), goBuiltinAtVersion("1"))
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
@@ -70,16 +70,15 @@ func TestReconcile_OverwritesStaleBuiltin(t *testing.T) {
 
 func TestReconcile_PurgesRetiredBuiltin(t *testing.T) {
 	t.Parallel()
-	svc, gh := newTestStore()
+	svc, host := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// A built-in the embed no longer ships lingers in the repo — reconcile must
 	// delete it, or it would keep getting inlined into agent prompts forever.
-	gh.writeAtHead(skillRepoPath("builtin", "retired-legacy"),
+	host.writeAtHead("org1", skillRepoPath("builtin", "retired-legacy"),
 		"---\nname: retired-legacy\ndescription: No longer shipped.\nmetadata:\n  aep.version: \"1\"\n---\n\ngone\n")
-	svc.cache.evict("org1")
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
@@ -103,13 +102,12 @@ func TestUpdatesAvailable_ReportsStaleAndAbsent(t *testing.T) {
 
 	t.Run("stale built-in surfaces repo vs embed versions", func(t *testing.T) {
 		t.Parallel()
-		svc, gh := newTestStore()
+		svc, host := newTestStore(t)
 		ctx := context.Background()
 		if _, err := svc.List(ctx, "org1"); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		gh.writeAtHead(skillRepoPath("builtin", "go"), goBuiltinAtVersion("1"))
-		svc.cache.evict("org1")
+		host.writeAtHead("org1", skillRepoPath("builtin", "go"), goBuiltinAtVersion("1"))
 
 		ups, err := svc.UpdatesAvailable(ctx, "org1")
 		if err != nil {
@@ -122,13 +120,12 @@ func TestUpdatesAvailable_ReportsStaleAndAbsent(t *testing.T) {
 
 	t.Run("absent built-in reports repoVersion -1", func(t *testing.T) {
 		t.Parallel()
-		svc, gh := newTestStore()
+		svc, host := newTestStore(t)
 		ctx := context.Background()
 		if _, err := svc.List(ctx, "org1"); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		gh.removeAtHead(skillRepoPath("builtin", "go"))
-		svc.cache.evict("org1")
+		host.removeAtHead("org1", skillRepoPath("builtin", "go"))
 
 		ups, err := svc.UpdatesAvailable(ctx, "org1")
 		if err != nil {
@@ -142,6 +139,26 @@ func TestUpdatesAvailable_ReportsStaleAndAbsent(t *testing.T) {
 		}
 		if goUpdate == nil || goUpdate.RepoVersion != -1 || goUpdate.EmbeddedVersion != 2 {
 			t.Fatalf("absent-go update = %+v, want {repo -1, embed 2}", goUpdate)
+		}
+	})
+
+	t.Run("a missing flow skill never surfaces on the badge", func(t *testing.T) {
+		t.Parallel()
+		svc, host := newTestStore(t)
+		ctx := context.Background()
+		if _, err := svc.List(ctx, "org1"); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		// Flow skills re-reconcile via Reconcile, but the user-facing badge is
+		// built-ins only — the skills page hides flow skills entirely.
+		host.removeAtHead("org1", skillRepoPath("flow", "task-planning"))
+
+		ups, err := svc.UpdatesAvailable(ctx, "org1")
+		if err != nil {
+			t.Fatalf("UpdatesAvailable: %v", err)
+		}
+		if len(ups) != 0 {
+			t.Fatalf("badge must ignore flow skills, got %+v", ups)
 		}
 	})
 }
@@ -177,6 +194,35 @@ func TestLoadEmbeddedBuiltins(t *testing.T) {
 	}
 }
 
+func TestLoadEmbeddedFlow(t *testing.T) {
+	t.Parallel()
+	got, err := loadEmbeddedFlow()
+	if err != nil {
+		t.Fatalf("loadEmbeddedFlow: %v", err)
+	}
+	by := nameSet(got)
+	// The four vendored flow skills (go:generate-copied from repo-root skills/).
+	for _, name := range []string{"high-level-architecture", "excalidraw-wireframes", "openapi-conventions", "task-planning"} {
+		sk, ok := by[name]
+		if !ok {
+			t.Fatalf("embedded flow skill %q missing; got %v", name, keysOf(by))
+		}
+		if sk.Kind != "flow" {
+			t.Fatalf("%q kind = %q, want flow", name, sk.Kind)
+		}
+		if sk.ContentSHA == "" || sk.SkillMD == "" || sk.Description == "" {
+			t.Fatalf("%q has empty body/sha/description", name)
+		}
+	}
+	// References ride along where the source tree has them.
+	if got := by["openapi-conventions"].References["references/wso2-rest-api-design-guidelines.md"]; got == "" {
+		t.Fatalf("openapi-conventions reference missing: %v", keysOfStr(by["openapi-conventions"].References))
+	}
+	if got := by["excalidraw-wireframes"].References["references/wireframes-dsl-example.md"]; got == "" {
+		t.Fatalf("excalidraw-wireframes reference missing: %v", keysOfStr(by["excalidraw-wireframes"].References))
+	}
+}
+
 func TestEnsureProvisioned_Guards(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -190,7 +236,7 @@ func TestEnsureProvisioned_Guards(t *testing.T) {
 	if err := NewSkillService(nil, nil).EnsureProvisioned(ctx, "org1"); err != nil {
 		t.Fatalf("nil repos: %v", err)
 	}
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	if err := svc.EnsureProvisioned(ctx, ""); err != nil {
 		t.Fatalf("empty org: %v", err)
 	}

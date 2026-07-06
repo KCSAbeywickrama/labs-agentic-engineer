@@ -29,6 +29,9 @@ type Project struct {
 
 type ProjectList struct {
 	Items []Project `json:"items"`
+	// NextCursor is the OpenChoreo continuation token for the next page,
+	// surfaced verbatim; empty/absent on the last page. The console pages on it.
+	NextCursor string `json:"nextCursor,omitempty" doc:"Cursor for the next page; absent on the last page."`
 }
 
 type CreateProjectRequest struct {

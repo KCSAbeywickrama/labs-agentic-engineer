@@ -14,15 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// credential_huma_errors.go — Huma-side error mapping + small marshalling
-// helpers shared by the orggithub_huma.go and organthropic_huma.go register
-// functions. mapCredentialError translates the credential services' typed
-// errors into RFC 9457 problem responses.
+// credential_huma_errors.go — mapCredentialError translates the credential
+// services' typed errors (ValidationError / ConflictError / UpstreamError /
+// NotFoundError) into RFC 9457 problem responses. The public org-scoped GitHub
+// and Anthropic routes that once called it were consolidated into the /config
+// surface (docs/design/org-config-consolidation.md), which maps the same error
+// taxonomy to section-pointered problems via orgconfig.sectionErrorFrom; this
+// mapper is retained as the unit-tested reference for that taxonomy.
 
 package orgcreds
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -56,20 +58,4 @@ func mapCredentialError(err error) error {
 		return huma.Error503ServiceUnavailable(err.Error())
 	}
 	return huma.Error500InternalServerError("internal error")
-}
-
-// structToMap round-trips a value through JSON into a flat map so a typed
-// projection can be returned through a map-bodied output that ALSO carries a
-// differently-shaped "not connected" payload — without changing the on-wire
-// JSON shape of either branch (legacy parity).
-func structToMap(v any) (map[string]any, error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	return m, nil
 }

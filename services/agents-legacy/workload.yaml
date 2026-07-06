@@ -1,9 +1,0 @@
-apiVersion: openchoreo.dev/v1alpha1
-metadata:
-  name: aep-agents-service
-endpoints:
-  - name: http
-    type: HTTP
-    port: 3400
-    visibility:
-      - project

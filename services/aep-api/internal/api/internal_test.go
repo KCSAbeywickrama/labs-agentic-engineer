@@ -34,8 +34,9 @@ func TestGenerateInternalOpenAPIYAML(t *testing.T) {
 	for _, want := range []string{
 		"runner-skills",
 		"runner-refresh-credentials",
-		"/internal/v1/tasks/{taskId}/skills",
-		"/internal/v1/tasks/{taskId}/credentials/refresh",
+		// Runner S2S re-keyed from task to execution (tasks-github-native §9.2).
+		"/internal/v1/executions/{executionId}/skills",
+		"/internal/v1/executions/{executionId}/credentials/refresh",
 		"taskJWT",
 		"publisherCC",
 	} {

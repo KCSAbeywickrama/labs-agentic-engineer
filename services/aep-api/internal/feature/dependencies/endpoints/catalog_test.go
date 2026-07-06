@@ -26,11 +26,10 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 )
 
-// Structural compile-time check: *Catalog satisfies artifacts.OrgServiceResolver
-// (IsNamespaceVisible + ExistsAnyVisibility) without either package importing
-// the other's feature edge — this file is a _test.go file, so it is invisible
-// to the arch test's plain (non -test) `go list`, and this package itself
-// takes on no non-test dependency on artifacts.
+// Structural compile-time check (dependency-management Phase 5): *Catalog is the
+// concrete provider the composition root wires as the read-time org-service
+// resolver (artifacts.SetOrgServiceResolver), so it must satisfy the artifacts
+// consumer-side port.
 var _ artifacts.OrgServiceResolver = (*Catalog)(nil)
 
 func sampleEndpoints() []openchoreo.WorkloadEndpointInfo {

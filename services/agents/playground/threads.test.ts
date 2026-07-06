@@ -29,9 +29,13 @@ function reset(): void {
   ensureThread(NAME);
 }
 
-test("name validation rejects path escapes", () => {
+test("name validation rejects path escapes and conversation-id delimiters", () => {
   assert.ok(isValidThreadName("my-spec.1_v2"));
-  for (const bad of ["..", ".", "a/b", "a\\b", "a b", ""]) assert.equal(isValidThreadName(bad), false);
+  // `--` is the namespaced conversation-id segment delimiter (§12); dot-led
+  // names would be skipped by the snapshot walk.
+  for (const bad of ["..", ".", "a/b", "a\\b", "a b", "", "my--spec", ".hidden"]) {
+    assert.equal(isValidThreadName(bad), false);
+  }
 });
 
 test("readSnapshot reads text recursively, skips dot-entries and binary", () => {

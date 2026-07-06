@@ -38,7 +38,7 @@ import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
-import { pullTaskSkills } from "./lib/skills_pull.js";
+import { pullTaskSkillsWithRetry } from "./lib/skills_pull.js";
 import { materializeSkills } from "./lib/skills_materializer.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
 
@@ -131,7 +131,7 @@ async function main(): Promise<number> {
   const platformURL = process.env.AEP_PLATFORM_URL ?? "";
   if (platformURL) {
     const base = platformURL.endsWith("/") ? platformURL.slice(0, -1) : platformURL;
-    req.refreshUrl = `${base}/internal/v1/tasks/${encodeURIComponent(req.taskId)}/credentials/refresh`;
+    req.refreshUrl = `${base}/internal/v1/executions/${encodeURIComponent(req.taskId)}/credentials/refresh`;
   }
 
   // When publisher cc is in play, pre-mint a token and stuff it into req.bearer.
@@ -168,17 +168,20 @@ async function main(): Promise<number> {
   emit({ kind: "phase", phase: "workspace_ready" });
 
   // Per-task skills — pull snapshotted SKILL.md bodies from the BFF,
-  // materialise into the AgentSkills plugin tree under
-  // .aep/skills-plugin/. Best-effort: failures log + continue
-  // (empty pull means runner loads the base aep plugin only).
+  // materialise into the AgentSkills plugin tree under .aep/skills-plugin/.
+  // The pull is bounded-retried (cold-start network races the host bridge);
+  // only after all attempts fail do we log LOUDLY and continue without the
+  // per-task plugin (runner falls back to the base aep plugin only).
   // See docs/design/skills-system.md > "Coding agent".
   let preloadBuiltinNames: string[] = [];
   let skillsPluginDir: string | undefined;
   if (platformURL) {
     try {
       const skillsBearer = ccProvider ? await ccProvider.getToken() : req.bearer;
-      const skills = await pullTaskSkills({
+      const skills = await pullTaskSkillsWithRetry({
         platformURL,
+        // req.taskId is AEP_TASK_ID, which the BFF now stamps with the coding
+        // Execution's id; the skills endpoint is execution-keyed (§9.2).
         taskId: req.taskId,
         bearer: skillsBearer,
         correlationId: req.correlationId,
@@ -195,7 +198,9 @@ async function main(): Promise<number> {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn("[oneshot] skill pull/materialize failed — continuing without per-task plugin:", msg);
+      console.warn(
+        `[oneshot] ⚠️  SKILLS UNAVAILABLE after retries — coding agent proceeding WITHOUT its per-task skill plugin (guidance degraded; if this project has skills the output may be wrong): ${msg}`,
+      );
     }
   } else {
     console.log("[oneshot] AEP_PLATFORM_URL not set — skipping per-task skills pull");

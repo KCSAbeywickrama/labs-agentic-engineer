@@ -1,0 +1,187 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package reaper
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// fakeDisk pins the statfs seam to a fixed picture.
+func fakeDisk(total, avail uint64) func(string) (uint64, uint64, error) {
+	return func(string) (uint64, uint64, error) { return total, avail, nil }
+}
+
+// TestQuotaEvictsSnapshotsFirstThenMirrorsLRU drives the global watermark
+// path end to end: 90% used (high 85, low 70) → target 200 bytes. All
+// snapshots go first (oldest first), then the LRU mirror — and eviction
+// stops once the estimate clears the LOW watermark, keeping the fresher
+// mirror.
+func TestQuotaEvictsSnapshotsFirstThenMirrorsLRU(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 100) // used 900 = 90% > 85; low 70 → free ≥ 200
+
+	now := time.Now()
+	r1 := mkSlugDir(t, root, "o1", "p1", "r1")
+	snapA := mkSnapshot(t, r1, fakeSha(1), 80, now.Add(-4*time.Hour)) // oldest snapshot
+	snapB := mkSnapshot(t, r1, fakeSha(2), 60, now.Add(-2*time.Hour))
+	r1Git := mkGitDir(t, r1, 100, now.Add(-3*time.Hour)) // LRU mirror
+
+	r2 := mkSlugDir(t, root, "o1", "p1", "r2")
+	snapC := mkSnapshot(t, r2, fakeSha(3), 40, now.Add(-30*time.Minute))
+	r2Git := mkGitDir(t, r2, 100, now.Add(-1*time.Hour)) // fresher mirror
+
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforce quota: %v", err)
+	}
+
+	// Snapshots first: A+B+C = 180 < 200 → all evicted...
+	mustNotExist(t, snapA)
+	mustNotExist(t, snapB)
+	mustNotExist(t, snapC)
+	// ...then mirrors LRU: r1 (older git/ mtime) tops the estimate up to
+	// 280 ≥ 200 → stop. r2 survives — the low watermark bound held.
+	mustNotExist(t, r1)
+	_ = r1Git
+	mustExist(t, r2Git)
+	if got := trashEntries(t, root); len(got) != 4 {
+		t.Fatalf("want 4 trash entries (3 snapshots + 1 mirror), got %v", got)
+	}
+}
+
+// TestQuotaNeverEvictsLockedMirror: the LRU candidate whose repo.lock is
+// EX-held (live use) is skipped; eviction moves on to the next candidate.
+func TestQuotaNeverEvictsLockedMirror(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 100) // target 200
+
+	now := time.Now()
+	r1 := mkSlugDir(t, root, "o1", "p1", "r1")
+	mkGitDir(t, r1, 150, now.Add(-3*time.Hour)) // LRU — but busy
+	r2 := mkSlugDir(t, root, "o1", "p1", "r2")
+	mkGitDir(t, r2, 150, now.Add(-1*time.Hour))
+
+	lock, err := os.OpenFile(filepath.Join(r1, "repo.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("flock: %v", err)
+	}
+
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforce quota: %v", err)
+	}
+	mustExist(t, r1)    // held lock → never evicted, despite being LRU
+	mustNotExist(t, r2) // the next candidate went instead
+}
+
+// TestPerOrgQuota: an org over OrgQuotaBytes sheds snapshots first and stops
+// once back under quota (mirror intact); other orgs are untouched.
+func TestPerOrgQuota(t *testing.T) {
+	cfg := testCfg()
+	cfg.OrgQuotaBytes = 100
+	r, root := newSyntheticReaper(t, cfg, staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 900) // 10% used — global watermark quiet
+
+	now := time.Now()
+	over := mkSlugDir(t, root, "o1", "p1", "r1") // org usage 150 > 100
+	overSnap := mkSnapshot(t, over, fakeSha(1), 60, now.Add(-2*time.Hour))
+	overGit := mkGitDir(t, over, 90, now.Add(-1*time.Hour))
+
+	under := mkSlugDir(t, root, "o2", "p1", "r1") // org usage 50 ≤ 100
+	underSnap := mkSnapshot(t, under, fakeSha(2), 20, now.Add(-2*time.Hour))
+	underGit := mkGitDir(t, under, 30, now.Add(-1*time.Hour))
+
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforce quota: %v", err)
+	}
+	mustNotExist(t, overSnap) // snapshot eviction (60) clears the 50-byte excess
+	mustExist(t, overGit)     // mirror survives — snapshots-first sufficed
+	mustExist(t, underSnap)
+	mustExist(t, underGit)
+}
+
+// TestQuotaNeverEvictsCurrentHeadSnapshot: under disk pressure the snapshot the
+// mirror HEAD points at is protected (a running turn reads it lazily), even
+// though it is old and large enough to satisfy the target on its own — an
+// evictable non-HEAD snapshot is shed instead.
+func TestQuotaNeverEvictsCurrentHeadSnapshot(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 100) // 90% used → target 200
+
+	now := time.Now()
+	slug := mkSlugDir(t, root, "o1", "p1", "r1")
+	headSha := fakeSha(1)
+	headSnap := mkSnapshot(t, slug, headSha, 300, now.Add(-2*time.Hour)) // aged, but HEAD
+	evictSnap := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-3*time.Hour))
+	writeGitHead(t, mkGitDir(t, slug, 50, now.Add(-2*time.Hour)), headSha)
+
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforce quota: %v", err)
+	}
+	mustExist(t, headSnap)     // current HEAD → never evicted despite pressure
+	mustNotExist(t, evictSnap) // the aged non-HEAD snapshot went instead
+	mustExist(t, slug)         // mirror untouched — the 250-byte snapshot sufficed
+}
+
+// TestQuotaNeverEvictsSnapshotYoungerThanFloor: a snapshot younger than
+// snapshotEvictMinAge is protected (it may be feeding an in-flight turn) even
+// when not the HEAD; an aged sibling is evicted to clear the target instead.
+func TestQuotaNeverEvictsSnapshotYoungerThanFloor(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 100) // target 200
+
+	now := time.Now()
+	slug := mkSlugDir(t, root, "o1", "p1", "r1")
+	young := mkSnapshot(t, slug, fakeSha(1), 300, now.Add(-time.Minute)) // < 30m floor
+	aged := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-2*time.Hour))  // evictable
+	mkGitDir(t, slug, 50, now.Add(-2*time.Hour))                         // no HEAD file → isHead false
+
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforce quota: %v", err)
+	}
+	mustExist(t, young)   // younger than the floor → protected
+	mustNotExist(t, aged) // aged non-HEAD → evicted, clears the target
+	mustExist(t, slug)    // mirror untouched
+}
+
+// TestQuotaEvictsAgedNonHeadSnapshot: the base case — an aged, non-HEAD
+// snapshot (aged via os.Chtimes) is evictable, while the older HEAD snapshot
+// beside it stays protected.
+func TestQuotaEvictsAgedNonHeadSnapshot(t *testing.T) {
+	r, root := newSyntheticReaper(t, testCfg(), staticLister(nil))
+	r.diskUsage = fakeDisk(1000, 100) // target 200
+
+	now := time.Now()
+	slug := mkSlugDir(t, root, "o1", "p1", "r1")
+	headSha := fakeSha(1)
+	head := mkSnapshot(t, slug, headSha, 40, now.Add(-3*time.Hour)) // oldest, but HEAD
+	aged := mkSnapshot(t, slug, fakeSha(2), 250, now.Add(-2*time.Hour))
+	writeGitHead(t, mkGitDir(t, slug, 50, now.Add(-2*time.Hour)), headSha)
+
+	if err := r.enforceQuota(context.Background()); err != nil {
+		t.Fatalf("enforce quota: %v", err)
+	}
+	mustNotExist(t, aged) // aged + not HEAD → evicted
+	mustExist(t, head)    // HEAD protected regardless of age
+}

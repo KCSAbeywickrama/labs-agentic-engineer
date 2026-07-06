@@ -1,0 +1,17 @@
+{
+ "type": "manifest",
+ "files": {
+  "specs/design/components/notification-service/design.json": "3f0d352bfe9bfe9e0332294515c9c5bd1e8b2e90c8416723eedbc433716c4197",
+  "specs/design/components/notification-service/openapi.yaml": "2822f303cbb085942153db46c867ed0f1ec35801b0bc53023f5204b4da82e26a",
+  "specs/design/components/project-task-service/design.json": "a64d4555c4dda567abd55f32009caa6b31b2c3a22349c34d786990b54239d8bc",
+  "specs/design/components/project-task-service/openapi.yaml": "79055679297c78ed840775c6cc8be452ff80372ed1955a5ea6b610464271c2de",
+  "specs/design/components/reporting-service/design.json": "53b66c274ae7f718c999315dc1bfb9be5ffaf71366a8d01adebbe638a23de71f",
+  "specs/design/components/reporting-service/openapi.yaml": "d499ec0f8eda8dc26bb42cecead9db50c11741145ebc2bc780fe174ff552a9cd",
+  "specs/design/components/task-management-webapp/design.json": "a181b60f2239925b930c9d2d701832ceecfc03a1355f465488f1bcec20aa4a01",
+  "specs/design/components/task-management-webapp/wireframes.dsl": "54772aa0e418c8efce6b0d2e781abb81cac4b2de76ae4d7dd32a44539db11546",
+  "specs/design/components/user-auth-service/design.json": "406db6c39ea0ddc86c976f1938eee830736ea0cfb88d4f6af13e36d48a59e98d",
+  "specs/design/components/user-auth-service/openapi.yaml": "39c37c510fb63c6da5392b35e3b315eaf6b0a710b4448aab4a2e12c29546d435",
+  "specs/design/design.md": "a66588854544ea1ae5787a7d0e50112117747e3b18f6e01088746c42200f4dce"
+ },
+ "deleted": []
+}

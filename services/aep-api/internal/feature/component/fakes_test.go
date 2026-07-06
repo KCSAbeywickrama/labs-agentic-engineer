@@ -107,6 +107,9 @@ func (s *stubComponentSvc) ListComponents(context.Context, string, string, int, 
 func (s *stubComponentSvc) GetComponent(context.Context, string, string, string) (*models.Component, error) {
 	panic("stubComponentSvc: GetComponent not expected")
 }
+func (s *stubComponentSvc) EnsureComponent(context.Context, string, string, string) error {
+	return nil
+}
 func (s *stubComponentSvc) CreateComponent(context.Context, string, string, *models.CreateComponentRequest) (*models.Component, error) {
 	panic("stubComponentSvc: CreateComponent not expected")
 }

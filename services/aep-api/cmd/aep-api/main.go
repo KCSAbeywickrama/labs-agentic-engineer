@@ -47,15 +47,17 @@ func main() {
 
 	setupLogger(cfg.LogLevel)
 
-	// Database. ComponentTask + ComponentConfig + webhook + push-rendezvous
-	// tables. org_credentials lives in git-service — the BFF does not
+	// Database. Executions + ComponentConfig + webhook tables. Tasks are GitHub
+	// issues now (no component_tasks table — dropped by the tasks-github-native
+	// migration). org_credentials lives in git-service — the BFF does not
 	// auto-migrate or read it locally.
 	db, err := database.Open(cfg.DatabaseURL,
-		&models.ComponentTask{},
 		&models.ComponentConfig{},
 		&models.WebhookDelivery{},
 		&models.WebhookPayload{},
 		&models.Organization{},
+		&models.Execution{},
+		&models.AgentTurn{},
 	)
 	if err != nil {
 		slog.Error("database init failed", "error", err)

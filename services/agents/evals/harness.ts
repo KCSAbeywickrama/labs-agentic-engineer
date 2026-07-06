@@ -24,28 +24,41 @@
  * `FileBundle` (`applyToolCall`, §7) — reusing the canonical ops, so it
  * reproduces the server's state with no second matcher. Then it scores the
  * reconstruction + the harvested `OpResult`s. Report-not-gate.
+ *
+ * Fixtures run the workspace shape — the only turn shape (§12/D9): each turn's
+ * files are materialized into a per-sample fixture mount (`EvalWorkspace`) the
+ * server reads via `WORKSPACE_MOUNT_ROOT`, skills land in a `_skills` snapshot,
+ * and the fold/score run over the server's FILTERED view of the snapshot.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LanguageModel, ModelMessage } from "ai";
-import type { McpConfig, OpResult, Skill } from "../src/contracts/sse-events.js";
+import {
+  FileBundle,
+  applyToolCall,
+  isFileMutationTool,
+  streamTurn,
+  type OpResult,
+  type StreamPart,
+  type TurnRequest,
+} from "@aep/agent-stream";
 import { createApp } from "../src/server.js";
 import { listen0 } from "../src/shared/listen.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
-import { FileBundle } from "../src/agents/main/bundle.js";
-import { applyToolCall, isFileMutationTool } from "../src/agents/main/change.js";
-import type { StreamPart } from "../src/agents/main/stream-types.js";
-import { streamTurn, type TurnRequest } from "./sse-client.js";
+import { filterTurnSnapshot } from "../src/conversation/load-workspace.js";
+import { EVAL_AUTH, evalTurnHeaders } from "./auth.js";
+import { EvalWorkspace, EVAL_ORG, evalConversationId } from "./workspace.js";
 import { scoreExpect, allPass, type CheckResult } from "./scoring.js";
 import { writePreview } from "./preview.js";
 import type { Fixture } from "./fixture.js";
+import type { RepoSkill } from "./skills.js";
 
 export interface EvalSuite {
   agent: string;
   fixturesDir: string;
   defaultSeed: Record<string, string>;
-  /** Repo-root `skills/` dir whose whole library is pushed on every turn (ADR-0002). */
+  /** Repo-root `skills/` dir whose whole library lands in the fixture `_skills` snapshot (ADR-0002/§12). */
   skillsDir?: string;
 }
 
@@ -76,24 +89,36 @@ export interface SuiteResult {
 export interface RunOptions {
   model: LanguageModel;
   samples: number;
+  /**
+   * The Anthropic key sent as `X-Anthropic-Key` (like any caller). The in-process
+   * server injects `model` directly, so the value only has to satisfy the
+   * required-header gate; defaults to a placeholder for the mock-model tests.
+   */
+  apiKey?: string;
   /** When set, dump the reconstructed snapshot per turn (k === 0 only). */
   writePreviewDir?: string;
-  /** The whole skill library, pushed in every turn body (ADR-0002). */
-  skills?: Skill[];
-  /** MCP discovery endpoint (Task E2), pushed in every turn body when set. */
-  mcp?: McpConfig;
+  /** The whole skill library, materialized into the fixture `_skills` snapshot (ADR-0002/§12). */
+  skills?: RepoSkill[];
   onLog?: (msg: string) => void;
 }
 
-interface Booted {
+export interface Booted {
   store: InMemoryConversationStore;
   baseUrl: string;
   close: () => Promise<void>;
 }
 
-async function boot(model: LanguageModel): Promise<Booted> {
+export async function boot(model: LanguageModel, workspaceMountRoot?: string): Promise<Booted> {
   const store = new InMemoryConversationStore();
-  const app = createApp({ store, model });
+  // The in-process server injects the (mock or real) model directly; the M2M gate
+  // still runs on the shared-secret path, so turns carry an eval-minted token.
+  // `workspaceMountRoot` points the §12 snapshot reads at the fixture tree.
+  const app = createApp({
+    store,
+    buildModel: () => model,
+    auth: { audience: EVAL_AUTH.audience, secret: EVAL_AUTH.secret },
+    ...(workspaceMountRoot ? { workspaceMountRoot } : {}),
+  });
   const { baseUrl, close } = await listen0(app.listen(0));
   return { store, baseUrl, close };
 }
@@ -119,26 +144,48 @@ function reconstruct(seed: Record<string, string>, toolCalls: StreamPart[]): Rec
   return bundle.snapshot();
 }
 
-function turnBody(
-  prompt: string,
-  files: Record<string, string>,
-  changed: boolean,
-  skills?: Skill[],
-  mcp?: McpConfig,
-): TurnRequest {
+/**
+ * The per-fixture request driver: the per-sample workspace mount (conversation
+ * id, headers, per-turn body, the server's filtered view of a snapshot) behind
+ * one seam, shared by `runSample` and `recordFixture`.
+ */
+interface ShapeDriver {
+  id: string;
+  headers: Record<string, string>;
+  /** The mount root to boot the server with. */
+  mountRoot: string;
+  /** What the SERVER will see of a raw files map (the §12 turn filter). */
+  view(files: Record<string, string>): Record<string, string>;
+  body(prompt: string, turnIndex: number, rawFiles: Record<string, string>, changed: boolean): TurnRequest;
+  cleanup(): void;
+}
+
+async function makeDriver(fixture: Fixture, apiKey: string, skills: RepoSkill[]): Promise<ShapeDriver> {
+  const ws = new EvalWorkspace();
+  const id = evalConversationId(fixture.name);
   return {
-    instruction: prompt,
-    files,
-    ...(changed ? { filesChangedExternally: true } : {}),
-    ...(skills && skills.length > 0 ? { skills } : {}),
-    ...(mcp ? { mcp } : {}),
+    id,
+    headers: await evalTurnHeaders(apiKey, EVAL_ORG),
+    mountRoot: ws.root,
+    view: (files) => filterTurnSnapshot(files),
+    body: (prompt, i, rawFiles, changed) => ({
+      instruction: prompt,
+      workspace: ws.workspaceRef(id, i, rawFiles, skills),
+      ...(changed ? { filesChangedExternally: true } : {}),
+    }),
+    cleanup: () => ws.cleanup(),
   };
 }
 
 /** Drive one turn over HTTP and collect every raw StreamPart frame. */
-async function collectTurn(baseUrl: string, id: string, body: TurnRequest): Promise<StreamPart[]> {
+export async function collectTurn(
+  baseUrl: string,
+  id: string,
+  body: TurnRequest,
+  headers: Record<string, string>,
+): Promise<StreamPart[]> {
   const parts: StreamPart[] = [];
-  for await (const part of streamTurn(baseUrl, id, body)) parts.push(part);
+  for await (const part of streamTurn(baseUrl, id, body, { headers })) parts.push(part);
   return parts;
 }
 
@@ -150,25 +197,28 @@ async function runSample(
   k: number,
 ): Promise<SampleResult> {
   const seed = fixture.seed ?? suite.defaultSeed;
-  const { store, baseUrl, close } = await boot(opts.model);
+  const driver = await makeDriver(fixture, opts.apiKey ?? "eval", opts.skills ?? []);
+  const { store, baseUrl, close } = await boot(opts.model, driver.mountRoot);
   try {
-    const id = fixture.name;
-    let current = seed;
+    const id = driver.id;
+    // Fold + score over the SERVER'S view of the seed (the §12 turn filter).
+    let current = driver.view(seed);
 
     if (fixture.messages && fixture.messages.length > 0) {
       // Captured-trace continuation: pre-seed the store + reconstruct the pre-turn files.
       const now = new Date();
       await store.save({ id, messages: fixture.messages, status: "done", createdAt: now, updatedAt: now });
-      current = reconstruct(seed, toolCallsFromMessages(fixture.messages));
+      current = reconstruct(current, toolCallsFromMessages(fixture.messages));
     }
 
     const turns: TurnResult[] = [];
     for (let i = 0; i < fixture.turns.length; i++) {
       const turn = fixture.turns[i]!;
-      const files = turn.files ?? current;
+      const raw = turn.files ?? current;
+      const files = driver.view(raw);
 
-      const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, opts.skills, opts.mcp);
-      const parts = await collectTurn(baseUrl, id, body);
+      const body = driver.body(turn.prompt, i, raw, turn.filesChangedExternally === true);
+      const parts = await collectTurn(baseUrl, id, body, driver.headers);
 
       const toolCalls = parts.filter((p) => p.type === "tool-call");
       const toolNames = toolCalls.map((p) => p.toolName ?? "");
@@ -199,13 +249,36 @@ async function runSample(
     return { pass: turns.every((t) => t.pass), turns };
   } finally {
     await close();
+    driver.cleanup();
   }
 }
 
-export async function runFixture(suite: EvalSuite, fixture: Fixture, opts: RunOptions): Promise<FixtureResult> {
+/** The fixture metadata the generic sampler copies into a `FixtureResult`. */
+export interface FixtureMeta {
+  name: string;
+  description?: string;
+  difficulty?: string;
+}
+
+/** What the generic K-sampling drivers need from any suite's `RunOptions`. */
+export interface SamplerOptions {
+  samples: number;
+  onLog?: (msg: string) => void;
+}
+
+/**
+ * The generic K-sampling driver: run `runSample` K times over one fixture and
+ * aggregate the pass rate. Shared by every eval harness (the task-plan harness
+ * consumes it too) — only the per-sample runner differs.
+ */
+export async function sampleFixture<F extends FixtureMeta>(
+  fixture: F,
+  opts: SamplerOptions,
+  runSample: (fixture: F, k: number) => Promise<SampleResult>,
+): Promise<FixtureResult> {
   const sampleResults: SampleResult[] = [];
   for (let k = 0; k < opts.samples; k++) {
-    const result = await runSample(suite, fixture, opts, k);
+    const result = await runSample(fixture, k);
     sampleResults.push(result);
     opts.onLog?.(`  ${fixture.name} [sample ${k + 1}/${opts.samples}] ${result.pass ? "PASS" : "FAIL"}`);
   }
@@ -222,13 +295,27 @@ export async function runFixture(suite: EvalSuite, fixture: Fixture, opts: RunOp
   return result;
 }
 
-export async function runSuite(suite: EvalSuite, fixtures: Fixture[], opts: RunOptions): Promise<SuiteResult> {
+/** `sampleFixture` over a whole suite. */
+export async function sampleSuite<F extends FixtureMeta>(
+  agent: string,
+  fixtures: F[],
+  opts: SamplerOptions,
+  runSample: (fixture: F, k: number) => Promise<SampleResult>,
+): Promise<SuiteResult> {
   const results: FixtureResult[] = [];
   for (const fixture of fixtures) {
     opts.onLog?.(`▶ ${fixture.name}`);
-    results.push(await runFixture(suite, fixture, opts));
+    results.push(await sampleFixture(fixture, opts, runSample));
   }
-  return { agent: suite.agent, fixtures: results };
+  return { agent, fixtures: results };
+}
+
+export async function runFixture(suite: EvalSuite, fixture: Fixture, opts: RunOptions): Promise<FixtureResult> {
+  return sampleFixture(fixture, opts, (f, k) => runSample(suite, f, opts, k));
+}
+
+export async function runSuite(suite: EvalSuite, fixtures: Fixture[], opts: RunOptions): Promise<SuiteResult> {
+  return sampleSuite(suite.agent, fixtures, opts, (f, k) => runSample(suite, f, opts, k));
 }
 
 /**
@@ -240,24 +327,27 @@ export async function recordFixture(
   suite: EvalSuite,
   fixture: Fixture,
   model: LanguageModel,
-  skills?: Skill[],
-  mcp?: McpConfig,
+  skills?: RepoSkill[],
+  apiKey?: string,
 ): Promise<ModelMessage[]> {
   const seed = fixture.seed ?? suite.defaultSeed;
-  const { store, baseUrl, close } = await boot(model);
+  const driver = await makeDriver(fixture, apiKey ?? "eval", skills ?? []);
+  const { store, baseUrl, close } = await boot(model, driver.mountRoot);
   try {
-    const id = fixture.name;
-    let current = seed;
-    for (const turn of fixture.turns) {
-      const files = turn.files ?? current;
-      const body = turnBody(turn.prompt, files, turn.filesChangedExternally === true, skills, mcp);
-      const parts = await collectTurn(baseUrl, id, body);
-      current = reconstruct(files, parts.filter((p) => p.type === "tool-call"));
+    const id = driver.id;
+    let current = driver.view(seed);
+    for (let i = 0; i < fixture.turns.length; i++) {
+      const turn = fixture.turns[i]!;
+      const raw = turn.files ?? current;
+      const body = driver.body(turn.prompt, i, raw, turn.filesChangedExternally === true);
+      const parts = await collectTurn(baseUrl, id, body, driver.headers);
+      current = reconstruct(driver.view(raw), parts.filter((p) => p.type === "tool-call"));
     }
     const conv = await store.get(id);
     return conv?.messages ?? [];
   } finally {
     await close();
+    driver.cleanup();
   }
 }
 

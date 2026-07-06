@@ -23,7 +23,7 @@
  */
 
 import { stdout } from "node:process";
-import type { StreamPart } from "../src/agents/main/stream-types.js";
+import type { StreamPart } from "@aep/agent-stream";
 import type { FileChange } from "./threads.js";
 
 // Color only on a real terminal — otherwise raw escapes litter piped/redirected output.
@@ -32,10 +32,11 @@ const dim = color("2");
 const green = color("32");
 const red = color("31");
 
-/** The path/name a tool acted on (file tools carry `path`; loadSkill carries `name`). */
+/** The path/name a tool acted on (file tools carry `path`; loadSkill carries `names`). */
 function inputLabel(input: unknown): string {
   const v = (input ?? {}) as Record<string, unknown>;
   if (typeof v.path === "string") return v.path;
+  if (Array.isArray(v.names)) return v.names.filter((n) => typeof n === "string").join(", ");
   if (typeof v.name === "string") return v.name;
   return "";
 }

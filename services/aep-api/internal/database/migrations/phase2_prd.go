@@ -40,6 +40,9 @@ import (
 //
 // Idempotent — re-running is a no-op once both columns exist.
 func RunPhase2PRD(db *gorm.DB) error {
+	if !tableExists(db, "component_tasks") {
+		return nil // component_tasks dropped (tasks-github-native) — nothing to migrate
+	}
 	stmts := []struct {
 		check string
 		ddl   string

@@ -36,9 +36,13 @@ import {
   type ModelMessage,
   type LanguageModel,
   type LanguageModelUsage,
+  type ToolLoopAgentSettings,
   type ToolSet,
 } from "ai";
-import type { StreamPart } from "./stream-types.js";
+import type { StreamPart } from "@aep/agent-stream";
+
+/** Provider-specific per-call options (`ai` doesn't export the type directly). */
+export type ProviderOptions = NonNullable<ToolLoopAgentSettings["providerOptions"]>;
 
 export interface RunTurnInput {
   model: LanguageModel;
@@ -57,6 +61,18 @@ export interface RunTurnInput {
   onEvent?: (part: StreamPart) => void;
   abortSignal?: AbortSignal;
   maxSteps?: number;
+  /**
+   * Per-step output-token ceiling. Left unset the provider applies a low default
+   * (~4096) that truncates a large file mid-`addFile`, so the tool call never
+   * closes and nothing folds. Pass a generous value for spec/design generations.
+   */
+  maxOutputTokens?: number;
+  /**
+   * Provider-specific call options (e.g. Anthropic reasoning effort), built by
+   * the provider-aware model seam and passed through opaquely — runTurn stays
+   * provider-agnostic.
+   */
+  providerOptions?: ProviderOptions;
 }
 
 export interface RunTurnResult {
@@ -74,6 +90,8 @@ export async function runTurn(input: RunTurnInput): Promise<RunTurnResult> {
     instructions: input.instructions,
     tools: input.tools,
     stopWhen: input.stopWhen ?? [isStepCount(input.maxSteps ?? 20)],
+    ...(input.maxOutputTokens ? { maxOutputTokens: input.maxOutputTokens } : {}),
+    ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
   });
 
   const result = await agent.stream({

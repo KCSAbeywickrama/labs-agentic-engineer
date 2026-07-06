@@ -24,9 +24,7 @@ package resources
 import (
 	"context"
 
-	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // externalResourceLookup is the slice of the org-level external-resource
@@ -46,44 +44,20 @@ type SecretWriter interface {
 	WriteExternalResourceSecret(ctx context.Context, ocOrgID, projectName, entityName string, data map[string]string) (vaultKey, secretRefName string, err error)
 }
 
-// TaskStore is the slice of the component-task repo the value service needs
-// to FIND the config-collection task to complete. repositories.TaskRepository
-// satisfies it. Completion itself goes through TaskCompleter — this package
-// never writes ComponentTask.Status.
-type TaskStore interface {
-	ListByProjectID(ctx context.Context, orgID, projectID string) ([]models.ComponentTask, error)
-}
+// NOTE (dependency-management migration): the task-coupled ports the
+// value/resource services used — TaskStore (read the component_tasks repo),
+// TaskCompleter (drive ComponentTask.Status through the projector) and
+// RedispatchFunc — were removed here at the merge along with their only
+// consumers (external_values.go / resources_service.go, git-rm'd). Phase 6
+// rebuilt the value/param surface in internal/feature/provisioning on our
+// GitHub-native aep:provision funnel; the completion port it uses there is
+// "close the provision issue + Funnel.Reevaluate", not a component_tasks
+// projector. The org-level external-resource catalog (list/delete + the
+// consumer scan for the in-use delete guard) also lives there now
+// (provisioning.ExternalResourceCatalog + the design-scan consumers), reading
+// *repositories.ExternalResourceRepository directly.
 
-// TaskCompleter applies a contracts task event to a task. Its shape matches
-// task.Projector.ApplyBuildResult exactly, so the composition root wires the
-// projector directly — the ONLY legal way to move ComponentTask.Status (the
-// source's direct status UPDATE is deliberately not ported).
-type TaskCompleter interface {
-	ApplyBuildResult(ctx context.Context, taskID string, event contracts.TaskEvent, errMsg string) error
-}
-
-// RedispatchFunc re-runs the dispatch gating loop after a config-collection
-// task completes, so component tasks gated on the external resource get
-// dispatched. Wraps the dispatch service in the composition root (avoids a
-// package dependency on the dispatcher's result type).
-type RedispatchFunc func(ctx context.Context, orgID, projectID string) error
-
-// ExternalResourceRegistry is the slice of the org-level external-resource
-// catalog the HTTP surface reads and prunes: the listing (with per-entry
-// consumers for the in-use delete guard) and the guarded delete.
-// *repositories.ExternalResourceRepository satisfies it directly — per the
-// C2 decision there is NO registry wrapper service; repositories is the flat
-// shared kernel (not a feature package), so naming its consumer DTO here
-// keeps the package's feature-edge allowlist row empty.
-type ExternalResourceRegistry interface {
-	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)
-	Consumers(ctx context.Context, orgID, name string) ([]repositories.ExternalResourceConsumer, error)
-	Delete(ctx context.Context, orgID, name string) error
-}
-
-var _ ExternalResourceRegistry = (*repositories.ExternalResourceRepository)(nil)
-
-// DesignReader is the slice of the design store the ResourceService reads:
+// DesignReader is the slice of the design store the resource provisioner reads:
 // the project's authored design components, whose platform-resource entries
 // carry the ClusterResourceType to provision. It deliberately returns ONLY
 // models-typed data — NOT artifacts.DesignFile — so this package keeps its

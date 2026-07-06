@@ -18,151 +18,109 @@ package skills
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
+	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// ---- in-memory fake git server --------------------------------------------
+// ---- engine-backed test host -------------------------------------------------
 
-// memGit models a single repo as a sequence of commit snapshots so the store's
-// real GetRef→GetCommit→GetTree→GetBlob reads and CreateBlob→CreateTree→
-// CreateCommit→UpdateRef writes round-trip against actual data.
-type memGit struct {
-	gitrepo.GitData // embedded: unimplemented methods would panic (untouched by these tests)
+// testGitHost is the workspacetest-backed fixture these tests run against: one
+// gitfs engine rooted in t.TempDir() plus one REAL bare file:// origin per org,
+// provisioned lazily by EnsureBareRepo exactly like production provisions the
+// GitHub repo (it supersedes the old in-memory git-host fake — the store now
+// drives genuine git plumbing end to end). It implements gitrepo.RepoService
+// (the row store) and hands out origins for arrange/assert.
+type testGitHost struct {
+	gitrepo.RepoService // embedded: unimplemented methods panic (untouched by these tests)
 
-	mu          sync.Mutex
-	snapshots   map[string]map[string]string // commitSHA → {path: content}
-	trees       map[string]map[string]string // treeSHA → {path: content}
-	blobs       map[string]string            // blobSHA → content
-	head        string
-	seq         int
-	getRefCalls int
+	t       *testing.T
+	engine  *gitfs.Engine
+	mu      sync.Mutex // models the DB's concurrency safety (the real GetRepo/EnsureBareRepo are serialized by Postgres)
+	rows    map[string]*models.GitRepository
+	origins map[string]*gittest.Remote
 }
 
-func newMemGit() *memGit {
-	return &memGit{
-		snapshots: map[string]map[string]string{"c0": {"README.md": "init"}},
-		trees:     map[string]map[string]string{},
-		blobs:     map[string]string{},
-		head:      "c0",
+func newTestGitHost(t *testing.T) *testGitHost {
+	return &testGitHost{
+		t:       t,
+		engine:  workspacetest.NewEngine(t),
+		rows:    map[string]*models.GitRepository{},
+		origins: map[string]*gittest.Remote{},
 	}
 }
 
-func cloneMap(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
+func (h *testGitHost) GetRepo(_ context.Context, orgID, _ string) (*models.GitRepository, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if r, ok := h.rows[orgID]; ok {
+		return r, nil
 	}
-	return out
+	return nil, gitrepo.ErrRepoNotFound
 }
 
-func (m *memGit) GetRef(_ context.Context, _, _ string, _ credentials.Credential, _ string) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.getRefCalls++
-	return m.head, nil
-}
-
-func (m *memGit) GetCommit(_ context.Context, _, _ string, _ credentials.Credential, sha string) (*gitrepo.CommitObject, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	treeSHA := "t-" + sha
-	m.trees[treeSHA] = cloneMap(m.snapshots[sha])
-	return &gitrepo.CommitObject{SHA: sha, TreeSHA: treeSHA}, nil
-}
-
-func (m *memGit) GetTree(_ context.Context, _, _ string, _ credentials.Credential, treeSHA string, _ bool) (*gitrepo.TreeObject, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	files := m.trees[treeSHA]
-	entries := make([]gitrepo.TreeEntryResult, 0, len(files))
-	for path, content := range files {
-		bSHA := "b|" + treeSHA + "|" + path
-		m.blobs[bSHA] = content
-		entries = append(entries, gitrepo.TreeEntryResult{Path: path, Type: "blob", SHA: bSHA, Mode: "100644"})
+func (h *testGitHost) EnsureBareRepo(_ context.Context, orgID, projectID, repoName string) (*models.GitRepository, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if r, ok := h.rows[orgID]; ok {
+		return r, nil
 	}
-	return &gitrepo.TreeObject{SHA: treeSHA, Entries: entries}, nil
-}
-
-func (m *memGit) GetBlob(_ context.Context, _, _ string, _ credentials.Credential, sha string) ([]byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	content, ok := m.blobs[sha]
-	if !ok {
-		return nil, fmt.Errorf("memGit: blob %q not found", sha)
+	origin := workspacetest.NewOrigin(h.t, nil)
+	r := &models.GitRepository{
+		OrgID:         orgID,
+		ProjectID:     projectID,
+		RepoURL:       origin.URL(),
+		DefaultBranch: "main",
+		Status:        "ready",
+		// Production persists models.SlugForURL(cloneURL); file:// URLs have no
+		// owner/repo shape, so the tests pin the stable repo name as the slug —
+		// the path key the engine derives the mirror location from.
+		RepoSlug: repoName,
 	}
-	return []byte(content), nil
+	h.origins[orgID] = origin
+	h.rows[orgID] = r
+	return r, nil
 }
 
-func (m *memGit) CreateBlob(_ context.Context, _, _ string, _ credentials.Credential, content []byte) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	bSHA := fmt.Sprintf("nb%d", m.seq)
-	m.seq++
-	m.blobs[bSHA] = string(content)
-	return bSHA, nil
+// origin returns the org's provisioned bare origin for arrange/assert (nil
+// before the first read provisions it).
+func (h *testGitHost) origin(orgID string) *gittest.Remote {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.origins[orgID]
 }
 
-func (m *memGit) CreateTree(_ context.Context, _, _ string, _ credentials.Credential, baseTree string, entries []gitrepo.TreeEntry) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	files := cloneMap(m.trees[baseTree])
-	for _, e := range entries {
-		if e.SHA == "" {
-			delete(files, e.Path) // sha:null → deletion
-			continue
-		}
-		files[e.Path] = m.blobs[e.SHA]
-	}
-	newTree := fmt.Sprintf("t%d", m.seq)
-	m.seq++
-	m.trees[newTree] = files
-	return newTree, nil
+// writeAtHead / removeAtHead commit content changes directly on the ORIGIN
+// (advancing main) the way an external writer would — the store's branch-tip
+// reads must observe them on the very next read (no cache to evict).
+func (h *testGitHost) writeAtHead(orgID, path, content string) {
+	h.origin(orgID).Seed(h.t, map[string]string{path: content}, "test write "+path)
 }
 
-func (m *memGit) CreateCommit(_ context.Context, _, _ string, _ credentials.Credential, req gitrepo.CreateCommitRequest) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c := fmt.Sprintf("c%d", m.seq)
-	m.seq++
-	m.snapshots[c] = cloneMap(m.trees[req.TreeSHA])
-	return c, nil
+func (h *testGitHost) removeAtHead(orgID, path string) {
+	h.origin(orgID).Remove(h.t, "test remove "+path, path)
 }
 
-func (m *memGit) UpdateRef(_ context.Context, _, _ string, _ credentials.Credential, _, sha string, _ bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.head = sha
-	return nil
+// mirrorGitDir is the engine-side bare mirror location for the org's skills repo.
+func (h *testGitHost) mirrorGitDir(orgID string) (string, error) {
+	h.mu.Lock()
+	row := h.rows[orgID]
+	h.mu.Unlock()
+	return gitfs.GitDir(h.engine.Root(), gitrepo.WorkspaceRefFor(orgID, row, nil))
 }
 
-// removeAtHead drops a path by recording a NEW commit (advancing HEAD) — the
-// way real git surfaces a content change, so the store's HEAD-sha revalidation
-// detects it.
-func (m *memGit) removeAtHead(path string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	next := cloneMap(m.snapshots[m.head])
-	delete(next, path)
-	newHead := fmt.Sprintf("c-rm%d", m.seq)
-	m.seq++
-	m.snapshots[newHead] = next
-	m.head = newHead
-}
-
-func (m *memGit) refCalls() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.getRefCalls
-}
-
-// ---- fake credential + gitops + repo svc -----------------------------------
+// ---- fake credential + resolver ----------------------------------------------
 
 type fakeCred struct{}
 
@@ -179,55 +137,13 @@ func (fakeResolver) Resolve(context.Context, string) (credentials.Credential, er
 	return fakeCred{}, nil
 }
 
-type fakeGitOps struct {
-	gitrepo.GitOpsService
-	gh *memGit
-}
-
-func (f *fakeGitOps) GitData() gitrepo.GitData       { return f.gh }
-func (f *fakeGitOps) Resolver() credentials.Resolver { return fakeResolver{} }
-func (f *fakeGitOps) ResolveSaveIdentities(credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity) {
-	gi := &gitrepo.GitIdentity{Name: "Bot", Email: "bot@aep.dev"}
-	return gi, gi
-}
-
-type fakeRepoSvc struct {
-	gitrepo.RepoService
-	mu    sync.Mutex // models the DB's concurrency safety (the real GetRepo/EnsureBareRepo are serialized by Postgres)
-	repos map[string]*models.GitRepository
-}
-
-func (f *fakeRepoSvc) GetRepo(_ context.Context, orgID, _ string) (*models.GitRepository, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if r, ok := f.repos[orgID]; ok {
-		return r, nil
-	}
-	return nil, gitrepo.ErrRepoNotFound
-}
-
-func (f *fakeRepoSvc) EnsureBareRepo(_ context.Context, orgID, projectID, repoName string) (*models.GitRepository, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if r, ok := f.repos[orgID]; ok {
-		return r, nil
-	}
-	r := &models.GitRepository{
-		OrgID:         orgID,
-		ProjectID:     projectID,
-		RepoURL:       "https://github.com/test-org/" + repoName,
-		DefaultBranch: "main",
-		Status:        "ready",
-	}
-	f.repos[orgID] = r
-	return r, nil
-}
-
-func newTestStore() (*SkillService, *memGit) {
-	gh := newMemGit()
-	gitops := &fakeGitOps{gh: gh}
-	repos := &fakeRepoSvc{repos: map[string]*models.GitRepository{}}
-	return NewSkillService(gitops, repos), gh
+// newTestStore builds a REAL SkillService over the engine-backed host: the
+// production gitrepo.NewGitOpsService gateway with the workspacetest engine
+// as the Workspace port.
+func newTestStore(t *testing.T) (*SkillService, *testGitHost) {
+	host := newTestGitHost(t)
+	svc := NewSkillService(gitrepo.NewGitOpsService(fakeResolver{}, host.engine), host)
+	return svc, host
 }
 
 func nameSet(skills []Skill) map[string]Skill {
@@ -238,10 +154,24 @@ func nameSet(skills []Skill) map[string]Skill {
 	return out
 }
 
+// gitDirOut runs one git plumbing command against a bare repo dir (an origin
+// or an engine mirror) for integrity assertions.
+func gitDirOut(t *testing.T, gitDir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"--git-dir", gitDir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, gitDir, err, out)
+	}
+	return string(out)
+}
+
 // ---- tests -----------------------------------------------------------------
 
 func TestList_SeedsBuiltinsOnFirstRead(t *testing.T) {
-	svc, _ := newTestStore()
+	t.Parallel()
+	svc, _ := newTestStore(t)
 	got, err := svc.List(context.Background(), "org1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -261,14 +191,62 @@ func TestList_SeedsBuiltinsOnFirstRead(t *testing.T) {
 	}
 }
 
+func TestFreshOrgProvisioning_SeedsBuiltinsAndFlow(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+
+	// A brand-new org lists the built-ins with zero Postgres skill state —
+	// the first read provisions the repo and seeds both embedded kinds.
+	summaries, err := svc.ListSummaries(ctx, "org1")
+	if err != nil {
+		t.Fatalf("ListSummaries: %v", err)
+	}
+	byName := map[string]SkillSummary{}
+	for _, s := range summaries {
+		byName[s.Name] = s
+	}
+	if _, ok := byName["go"]; !ok {
+		t.Fatalf("fresh org must list built-ins, got %v", summaries)
+	}
+	// Flow skills are seeded but NEVER surface on the skills page.
+	for _, flowName := range []string{"high-level-architecture", "excalidraw-wireframes", "openapi-conventions", "task-planning"} {
+		if _, ok := byName[flowName]; ok {
+			t.Fatalf("flow skill %q leaked into the user-facing list", flowName)
+		}
+	}
+
+	// The internal catalog carries them as kind=flow, references included.
+	all, _ := svc.List(ctx, "org1")
+	by := nameSet(all)
+	hla, ok := by["high-level-architecture"]
+	if !ok || hla.Kind != "flow" {
+		t.Fatalf("internal catalog must carry flow skills; got %+v", hla)
+	}
+	oapi := by["openapi-conventions"]
+	if oapi.References["references/wso2-rest-api-design-guidelines.md"] == "" {
+		t.Fatalf("flow skill references not seeded: %v", keysOfStr(oapi.References))
+	}
+
+	// And they are genuinely IN the repo tree on origin under skills/flow/.
+	origin := host.origin("org1")
+	if got := origin.FileAt(t, "main", "skills/flow/high-level-architecture/SKILL.md"); !strings.Contains(got, "name: high-level-architecture") {
+		t.Fatalf("flow SKILL.md not committed to origin:\n%s", got)
+	}
+	if got := origin.FileAt(t, "main", "skills/flow/excalidraw-wireframes/references/wireframes-dsl-example.md"); got == "" {
+		t.Fatal("flow reference file not committed to origin")
+	}
+}
+
 func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
-	svc, gh := newTestStore()
+	t.Parallel()
+	svc, host := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil { // triggers seed
 		t.Fatalf("seed: %v", err)
 	}
 	// Simulate the `go` built-in being deleted from the repo.
-	gh.removeAtHead(skillRepoPath("builtin", "go"))
+	host.removeAtHead("org1", skillRepoPath("builtin", "go"))
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
@@ -283,8 +261,39 @@ func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
 	}
 }
 
+func TestReconcile_ReseedsMissingFlowSkillAndPrunesStaleRefs(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Plant a stale reference under a flow skill, then delete its SKILL.md —
+	// the reconcile must re-seed the skill AND replace the whole dir, so the
+	// stale reference does not linger.
+	host.writeAtHead("org1", "skills/flow/task-planning/references/stale.md", "stale")
+	host.removeAtHead("org1", skillRepoPath("flow", "task-planning"))
+
+	n, err := svc.Reconcile(ctx, "org1")
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("Reconcile changed %d, want 1 (task-planning re-seed)", n)
+	}
+	got, _ := svc.List(ctx, "org1")
+	tp, ok := nameSet(got)["task-planning"]
+	if !ok || tp.Kind != "flow" {
+		t.Fatalf("task-planning should be restored as flow, got %+v", tp)
+	}
+	if _, lingers := tp.References["references/stale.md"]; lingers {
+		t.Fatalf("stale reference survived the dir-replacing re-seed: %v", keysOfStr(tp.References))
+	}
+}
+
 func TestReconcile_NoopWhenUpToDate(t *testing.T) {
-	svc, _ := newTestStore()
+	t.Parallel()
+	svc, _ := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -306,7 +315,8 @@ func TestReconcile_NoopWhenUpToDate(t *testing.T) {
 }
 
 func TestCreateAndDeleteCustomSkill(t *testing.T) {
-	svc, _ := newTestStore()
+	t.Parallel()
+	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
@@ -359,7 +369,8 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 }
 
 func TestDeleteBuiltinIsForbidden(t *testing.T) {
-	svc, _ := newTestStore()
+	t.Parallel()
+	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
@@ -370,23 +381,65 @@ func TestDeleteBuiltinIsForbidden(t *testing.T) {
 	}
 }
 
-func TestCache_SecondReadServedFromCache(t *testing.T) {
-	svc, gh := newTestStore()
+func TestFlowSkillInvisibleButNameReserved(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestStore(t)
+	mut := NewSkillMutationService(svc)
 	ctx := context.Background()
-	if _, err := svc.List(ctx, "org1"); err != nil { // seeds + warms cache
+	if _, err := svc.List(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Flow skills are invisible to the by-name user surface…
+	if sk, _ := svc.Resolve(ctx, "org1", "task-planning"); sk != nil {
+		t.Fatalf("Resolve must not surface flow skills, got %+v", sk)
+	}
+	if _, err := mut.Update(ctx, "org1", "tester", "task-planning", UpdateSkillInput{SkillMD: skillMDNamed("task-planning", "")}); !errors.Is(err, ErrSkillNotFound) {
+		t.Fatalf("update flow err = %v, want ErrSkillNotFound", err)
+	}
+	if err := mut.Delete(ctx, "org1", "tester", "task-planning"); !errors.Is(err, ErrSkillNotFound) {
+		t.Fatalf("delete flow err = %v, want ErrSkillNotFound", err)
+	}
+
+	// …but their names stay reserved: creating a same-named custom skill would
+	// shadow the flow skill in the catalog and duplicate it in Phase-4
+	// snapshots, so the collision check sees flow kinds.
+	_, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{
+		Name:    "task-planning",
+		SkillMD: skillMDNamed("task-planning", ""),
+	})
+	if !errors.Is(err, ErrSkillNameCollision) {
+		t.Fatalf("create over flow name err = %v, want ErrSkillNameCollision", err)
+	}
+}
+
+// TestRead_SeesExternalOriginCommitImmediately pins the cache-less freshness
+// contract that replaced the old soft-TTL catalog cache: reads address the branch
+// tip, so a commit landed on origin by ANOTHER writer (another replica, a
+// human) is visible on the very next read.
+func TestRead_SeesExternalOriginCommitImmediately(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // provision + seed
 		t.Fatalf("List: %v", err)
 	}
-	before := gh.refCalls()
-	if _, err := svc.List(ctx, "org1"); err != nil { // within soft TTL → cache, no GetRef
+
+	host.writeAtHead("org1", skillRepoPath("custom", "external-skill"), skillMDNamed("external-skill", ""))
+
+	got, err := svc.List(ctx, "org1")
+	if err != nil {
 		t.Fatalf("List 2: %v", err)
 	}
-	if got := gh.refCalls(); got != before {
-		t.Fatalf("second List made %d extra GetRef calls, want 0 (soft-TTL cache)", got-before)
+	sk, ok := nameSet(got)["external-skill"]
+	if !ok || sk.Kind != "custom" {
+		t.Fatalf("externally committed skill not visible on next read: %v", keysOf(nameSet(got)))
 	}
 }
 
 func TestConcurrentReads_ProvisionOnceConsistently(t *testing.T) {
-	svc, _ := newTestStore()
+	t.Parallel()
+	svc, _ := newTestStore(t)
 	ctx := context.Background()
 	const n = 8
 	var wg sync.WaitGroup
@@ -410,7 +463,80 @@ func TestConcurrentReads_ProvisionOnceConsistently(t *testing.T) {
 	}
 }
 
+// TestCommitFiles_ConcurrentCommitsSerialize pins the Phase-1 exit gate: two
+// concurrent commitFiles for one org are serialized by the per-repo flock +
+// origin push-CAS — both land (or one surfaces a clean non-fast-forward
+// conflict), the origin history stays linear, and `git fsck` is clean on both
+// the origin and the engine's mirror.
+func TestCommitFiles_ConcurrentCommitsSerialize(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // provision + seed
+		t.Fatalf("seed: %v", err)
+	}
+	repo, err := svc.ensureSkillsRepo(ctx, "org1")
+	if err != nil {
+		t.Fatalf("ensureSkillsRepo: %v", err)
+	}
+
+	names := []string{"raced-one", "raced-two"}
+	errs := make([]error, len(names))
+	var wg sync.WaitGroup
+	wg.Add(len(names))
+	for i, name := range names {
+		go func(i int, name string) {
+			defer wg.Done()
+			writes := map[string][]byte{skillRepoPath("custom", name): []byte(skillMDNamed(name, ""))}
+			_, errs[i] = svc.commitFiles(ctx, "org1", repo, "add "+name, writes, nil)
+		}(i, name)
+	}
+	wg.Wait()
+
+	landed := 0
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			landed++
+			// A landed write must be visible in the catalog.
+			sk, rerr := svc.Resolve(ctx, "org1", names[i])
+			if rerr != nil || sk == nil {
+				t.Fatalf("landed skill %q not resolvable: %v / %v", names[i], sk, rerr)
+			}
+		case errors.Is(err, gitrepo.ErrRefNotFastForward):
+			// The one acceptable failure mode: a clean CAS conflict.
+		default:
+			t.Fatalf("commit %q failed with a non-conflict error: %v", names[i], err)
+		}
+	}
+	if landed == 0 {
+		t.Fatal("neither concurrent commit landed")
+	}
+
+	// Origin history stays linear (no merge commits) and fsck-clean.
+	origin := host.origin("org1")
+	if merges := strings.TrimSpace(gitDirOut(t, origin.Dir(), "rev-list", "--merges", "--count", "main")); merges != "0" {
+		t.Fatalf("origin history not linear: %s merge commits", merges)
+	}
+	gitDirOut(t, origin.Dir(), "fsck", "--strict")
+
+	// Engine mirror fsck-clean too.
+	mirror, err := host.mirrorGitDir("org1")
+	if err != nil {
+		t.Fatalf("mirrorGitDir: %v", err)
+	}
+	gitDirOut(t, mirror, "fsck", "--strict")
+}
+
 func keysOf(m map[string]Skill) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func keysOfStr(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

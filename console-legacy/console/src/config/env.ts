@@ -24,6 +24,7 @@ interface RuntimeEnv {
   VITE_SIGN_IN_REDIRECT_URL?: string;
   VITE_SIGN_OUT_REDIRECT_URL?: string;
   VITE_DEV_BYPASS_AUTH?: string;
+  VITE_COLLAB_ENABLED?: string;
   BILLING_API_BASE_URL?: string;
 }
 
@@ -51,5 +52,12 @@ export const env = {
   VITE_SIGN_IN_REDIRECT_URL: getEnv('VITE_SIGN_IN_REDIRECT_URL') || undefined,
   VITE_SIGN_OUT_REDIRECT_URL: getEnv('VITE_SIGN_OUT_REDIRECT_URL') || undefined,
   VITE_DEV_BYPASS_AUTH: getEnv('VITE_DEV_BYPASS_AUTH') === 'true',
+  // Yjs realtime collab is DISABLED by default: its collab server is no longer
+  // in the compose stack (the working-tree/clone it read died in the generation
+  // migration; re-pointing it to the GitHub-direct file model is a deferred work
+  // item — agents-generation-migration §5). Off ⇒ no WebSocket connection and no
+  // collab-session pre-flight are ever attempted; editors run standalone. Flip
+  // to "true" only once the collab backend is re-pointed.
+  VITE_COLLAB_ENABLED: getEnv('VITE_COLLAB_ENABLED') === 'true',
   BILLING_API_BASE_URL: getEnv('BILLING_API_BASE_URL') || '',
 } as const;

@@ -59,6 +59,9 @@ import (
 // Backfill ordering matters — `body` is created and populated BEFORE
 // `agent_instructions` is dropped.
 func RunPhase3TechLead(db *gorm.DB) error {
+	if !tableExists(db, "component_tasks") {
+		return nil // component_tasks dropped (tasks-github-native) — nothing to migrate
+	}
 	// Step 1: add `body` and backfill from `agent_instructions` (if present).
 	if err := addColumnIfMissing(db, "component_tasks", "body", `ALTER TABLE component_tasks ADD COLUMN body TEXT`); err != nil {
 		return err

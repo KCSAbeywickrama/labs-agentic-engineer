@@ -80,7 +80,27 @@ func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
 		ctxStep("git_repositories_composite_unique", RunGitRepoCompositeUnique),
 		dbStep("phase7_skills", RunPhase7Skills),
 		ctxStep("phase8_idp_sm_api_columns", RunPhase8IDPSMAPIColumns),
+		// Executions table (AutoMigrated from the model) gains its partial
+		// admission-mutex unique index, which AutoMigrate cannot express.
+		ctxStep("executions", RunExecutions),
+		// agent_turns table (AutoMigrated from the model) gains the D18
+		// one-active-turn-per-project partial unique index.
+		ctxStep("agent_turns", RunAgentTurns),
+		// tasks-github-native cutover: drop component_tasks + the
+		// git_repositories.github_project_id cache column (both AutoMigrate-only,
+		// now gone). Runs LAST — after every legacy component_tasks migration and
+		// the git_repositories AutoMigrate. Idempotent (IF EXISTS).
+		dbStep("tasks_github_native", RunTasksGitHubNative),
+		// dependency-management (§3.6): the external-resource catalog +
+		// cross-project access-request tables. Two idempotent CREATE TABLEs only —
+		// no component_tasks ALTER (dependency gating lives on aep:provision GitHub
+		// issues + the funnel depsGate, not DB columns).
 		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
+		// coding_agent_logs (GitHub-native): create the JobWatcher's final-log
+		// sidecar keyed to executions(id). Runs after `executions` (FK target) and
+		// `tasks_github_native` (cascade-drops any legacy component_tasks-keyed
+		// table). Supersedes the guarded phase3_coding_agent_logs no-op above.
+		ctxStep("coding_agent_logs", RunCodingAgentLogs),
 	}
 
 	for _, s := range steps {

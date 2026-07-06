@@ -19,75 +19,27 @@ package requirements
 // UNIT tier (bff-component-testing.md §2): the REAL requirementsService with its
 // ports faked — no HTTP, no DB. The store seam is the REAL artifacts.ArtifactStore
 // decorator wrapping a FakeArtifactService (Pilot A pattern), so the store's
-// requirements.md-protection and file-map logic stay real while the git/agents
-// I/O is faked. Proves the bundle-assembly branches (draft/approved/
-// has-unsaved-changes), the mutating ops' git-client-not-configured guards and
-// sentinel translation, the versioning mapping, withLock delegation, and — per
-// the SSE rule (§7) — StreamGenerate's COMPLETION + persisted side-effect only,
-// never stream framing. The HTTP contract lives in requirements_component_test.go;
-// the advisory locker lives in requirements_dbtest_test.go.
+// file-map logic stays real while the git I/O is faked. Per the GitHub-direct
+// rework (docs/design/agents-generation-migration.md §5) this service is now the
+// read + version surface only: it proves the bundle-assembly branches
+// (draft/approved/has-unsaved-changes), the mutating ops' git-client-not-configured
+// guards and sentinel translation, and the versioning mapping. The HTTP contract
+// lives in requirements_component_test.go.
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/clients/agents"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 )
 
-// --- agents.Client hand fake --------------------------------------------------
-// agents.Client is a narrow, in-process port (an interface), so it is hand-faked
-// here rather than mocked at the wire (bff-component-testing.md §6 — the
-// out-of-process boundary is agents-service's HTTP surface, which the client
-// owns; the service under test only sees this interface). Unset funcs panic,
-// moq-style, so a test that reaches an unexpected method fails loudly.
-type fakeAgents struct {
-	StreamDocumentGenerationFunc func(ctx context.Context, orgID, skillID string, req agents.DocumentGenerationRequest) (io.ReadCloser, error)
-	StreamRequirementsChatFunc   func(ctx context.Context, orgID string, req agents.RequirementsChatRequest) (io.ReadCloser, error)
-	RenderDslFunc                func(ctx context.Context, kind, dsl string) (string, error)
-}
-
-var _ agents.Client = (*fakeAgents)(nil)
-
-func (f *fakeAgents) StreamDocumentGeneration(ctx context.Context, orgID, skillID string, req agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-	if f.StreamDocumentGenerationFunc == nil {
-		panic("fakeAgents: StreamDocumentGeneration not set")
-	}
-	return f.StreamDocumentGenerationFunc(ctx, orgID, skillID, req)
-}
-func (f *fakeAgents) StreamRequirementsChat(ctx context.Context, orgID string, req agents.RequirementsChatRequest) (io.ReadCloser, error) {
-	if f.StreamRequirementsChatFunc == nil {
-		panic("fakeAgents: StreamRequirementsChat not set")
-	}
-	return f.StreamRequirementsChatFunc(ctx, orgID, req)
-}
-func (f *fakeAgents) RenderDsl(ctx context.Context, kind, dsl string) (string, error) {
-	if f.RenderDslFunc == nil {
-		panic("fakeAgents: RenderDsl not set")
-	}
-	return f.RenderDslFunc(ctx, kind, dsl)
-}
-func (f *fakeAgents) StreamArchitect(context.Context, string, agents.ArchitectRequest) (io.ReadCloser, error) {
-	panic("fakeAgents: StreamArchitect not expected in requirements tests")
-}
-func (f *fakeAgents) StreamTechLeadPlan(context.Context, string, agents.TechLeadPlanRequest) (io.ReadCloser, error) {
-	panic("fakeAgents: StreamTechLeadPlan not expected in requirements tests")
-}
-func (f *fakeAgents) StreamTechLeadDetail(context.Context, string, agents.TechLeadDetailRequest) (io.ReadCloser, error) {
-	panic("fakeAgents: StreamTechLeadDetail not expected in requirements tests")
-}
-
 // newReqSvc wires the REAL requirementsService: the real ArtifactStore decorator
-// over `fake` (so store logic runs), the same fake as the direct artifactSvc
-// seam, and `ag` (nil when a test never streams). No locker → withLock runs the
-// closure inline (the lock's real behavior is dbtest-tier).
-func newReqSvc(fake *artifactstest.FakeArtifactService, ag agents.Client) *requirementsService {
-	return NewRequirementsService(artifacts.NewArtifactStore(fake), ag, fake)
+// over `fake` (so store logic runs) is also the direct artifactSvc seam.
+func newReqSvc(fake *artifactstest.FakeArtifactService) *requirementsService {
+	return NewRequirementsService(artifacts.NewArtifactStore(fake), fake)
 }
 
 // --- GetRequirements ---------------------------------------------------------
@@ -101,7 +53,7 @@ func TestGetRequirements_EmptyDirIsDraftWithNoVersions(t *testing.T) {
 			return map[string]string{}, nil
 		},
 	}
-	b, err := newReqSvc(fake, nil).GetRequirements(context.Background(), "acme", "web")
+	b, err := newReqSvc(fake).GetRequirements(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -125,7 +77,7 @@ func TestGetRequirements_ApprovedWithVersions(t *testing.T) {
 			return map[string]string{"requirements.md": "# R\n"}, nil
 		},
 	}
-	b, err := newReqSvc(fake, nil).GetRequirements(context.Background(), "acme", "web")
+	b, err := newReqSvc(fake).GetRequirements(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -150,7 +102,7 @@ func TestGetRequirements_HasUnsavedChangesWhenWorkingTreeDiffersFromTag(t *testi
 			return map[string]string{"requirements.md": "# original\n"}, nil
 		},
 	}
-	b, err := newReqSvc(fake, nil).GetRequirements(context.Background(), "acme", "web")
+	b, err := newReqSvc(fake).GetRequirements(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -171,7 +123,7 @@ func TestGetRequirements_VersionListErrorDegradesToDraft(t *testing.T) {
 			return nil, errors.New("git wedged")
 		},
 	}
-	b, err := newReqSvc(fake, nil).GetRequirements(context.Background(), "acme", "web")
+	b, err := newReqSvc(fake).GetRequirements(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("versions error must be swallowed, got %v", err)
 	}
@@ -187,7 +139,7 @@ func TestGetRequirements_ListErrorPropagates(t *testing.T) {
 			return nil, errors.New("boom")
 		},
 	}
-	if _, err := newReqSvc(fake, nil).GetRequirements(context.Background(), "acme", "web"); err == nil {
+	if _, err := newReqSvc(fake).GetRequirements(context.Background(), "acme", "web"); err == nil {
 		t.Fatal("a working-tree list failure must propagate")
 	}
 }
@@ -202,7 +154,7 @@ func TestGetRequirements_NilArtifactSvcSkipsVersioning(t *testing.T) {
 			return map[string]string{"requirements.md": "# R\n"}, nil
 		},
 	}
-	svc := NewRequirementsService(artifacts.NewArtifactStore(fake), nil, nil)
+	svc := NewRequirementsService(artifacts.NewArtifactStore(fake), nil)
 	b, err := svc.GetRequirements(context.Background(), "acme", "web")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -227,7 +179,7 @@ func TestGetRequirementsAtTag(t *testing.T) {
 				return map[string]string{"requirements.md": "# R\n"}, nil
 			},
 		}
-		b, err := newReqSvc(fake, nil).GetRequirementsAtTag(context.Background(), "acme", "web", "v1")
+		b, err := newReqSvc(fake).GetRequirementsAtTag(context.Background(), "acme", "web", "v1")
 		if err != nil {
 			t.Fatalf("get-at-tag: %v", err)
 		}
@@ -243,7 +195,7 @@ func TestGetRequirementsAtTag(t *testing.T) {
 				return nil, artifacts.ErrArtifactNotFound
 			},
 		}
-		_, err := newReqSvc(fake, nil).GetRequirementsAtTag(context.Background(), "acme", "web", "v9")
+		_, err := newReqSvc(fake).GetRequirementsAtTag(context.Background(), "acme", "web", "v9")
 		if !errors.Is(err, artifacts.ErrSpecNotFound) {
 			t.Fatalf("want ErrSpecNotFound, got %v", err)
 		}
@@ -251,91 +203,11 @@ func TestGetRequirementsAtTag(t *testing.T) {
 
 	t.Run("nil artifactSvc is git-client-not-configured", func(t *testing.T) {
 		t.Parallel()
-		svc := NewRequirementsService(nil, nil, nil)
+		svc := NewRequirementsService(nil, nil)
 		if _, err := svc.GetRequirementsAtTag(context.Background(), "acme", "web", "v1"); err == nil {
 			t.Fatal("want an error when the git client is not configured")
 		}
 	})
-}
-
-// --- UpdateRequirementFile / DeleteRequirementFile ---------------------------
-
-func TestUpdateRequirementFile_WritesThenReturnsBundle(t *testing.T) {
-	t.Parallel()
-	var wroteName, wroteContent string
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
-			wroteName, wroteContent = relPath, content
-			return &artifacts.PutResult{SHA: "sha1"}, nil
-		},
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"functional.md": "body"}, nil
-		},
-		// GetRequirements re-runs after the write; with files present it consults
-		// the versions seam — return none so the refresh stays at draft.
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	b, err := newReqSvc(fake, nil).UpdateRequirementFile(context.Background(), "acme", "web", "functional.md", "body")
-	if err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	if !strings.HasSuffix(wroteName, "functional.md") || wroteContent != "body" {
-		t.Fatalf("PutFile args: path=%q content=%q", wroteName, wroteContent)
-	}
-	if b == nil || len(b.Files) != 1 {
-		t.Fatalf("post-write bundle: %+v", b)
-	}
-}
-
-func TestUpdateRequirementFile_WriteErrorPropagates(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(context.Context, string, string, string, string, string) (*artifacts.PutResult, error) {
-			return nil, errors.New("disk full")
-		},
-	}
-	if _, err := newReqSvc(fake, nil).UpdateRequirementFile(context.Background(), "acme", "web", "functional.md", "x"); err == nil {
-		t.Fatal("a write failure must propagate")
-	}
-}
-
-func TestDeleteRequirementFile_HappyPath(t *testing.T) {
-	t.Parallel()
-	deleted := ""
-	fake := &artifactstest.FakeArtifactService{
-		DeleteRequirementFileFunc: func(_ context.Context, _, _, name string) error {
-			deleted = name
-			return nil
-		},
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# R\n"}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	if _, err := newReqSvc(fake, nil).DeleteRequirementFile(context.Background(), "acme", "web", "functional.md"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if deleted != "functional.md" {
-		t.Fatalf("deleted file: got %q", deleted)
-	}
-}
-
-func TestDeleteRequirementFile_MainFileIsProtected(t *testing.T) {
-	t.Parallel()
-	// The store refuses to delete requirements.md; the underlying artifactSvc
-	// delete must never be reached (its unset func would panic if it were).
-	fake := &artifactstest.FakeArtifactService{}
-	_, err := newReqSvc(fake, nil).DeleteRequirementFile(context.Background(), "acme", "web", artifacts.RequirementsMainFile)
-	if err == nil {
-		t.Fatalf("deleting %s must be rejected", artifacts.RequirementsMainFile)
-	}
-	if !strings.Contains(err.Error(), artifacts.RequirementsMainFile) {
-		t.Fatalf("error should name the protected file, got %v", err)
-	}
 }
 
 // --- SaveAndProceed / DiscardChanges -----------------------------------------
@@ -361,7 +233,7 @@ func TestSaveAndProceed(t *testing.T) {
 				return map[string]string{"requirements.md": "# R\n"}, nil
 			},
 		}
-		b, err := newReqSvc(fake, nil).SaveAndProceed(context.Background(), "acme", "web")
+		b, err := newReqSvc(fake).SaveAndProceed(context.Background(), "acme", "web", "")
 		if err != nil {
 			t.Fatalf("save: %v", err)
 		}
@@ -377,14 +249,14 @@ func TestSaveAndProceed(t *testing.T) {
 				return nil, errors.New("git push rejected")
 			},
 		}
-		if _, err := newReqSvc(fake, nil).SaveAndProceed(context.Background(), "acme", "web"); err == nil {
+		if _, err := newReqSvc(fake).SaveAndProceed(context.Background(), "acme", "web", ""); err == nil {
 			t.Fatal("a save failure must propagate")
 		}
 	})
 
 	t.Run("nil artifactSvc is git-client-not-configured", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewRequirementsService(nil, nil, nil).SaveAndProceed(context.Background(), "acme", "web"); err == nil {
+		if _, err := NewRequirementsService(nil, nil).SaveAndProceed(context.Background(), "acme", "web", ""); err == nil {
 			t.Fatal("want an error when the git client is not configured")
 		}
 	})
@@ -408,7 +280,7 @@ func TestDiscardChanges(t *testing.T) {
 				return nil, nil
 			},
 		}
-		if _, err := newReqSvc(fake, nil).DiscardChanges(context.Background(), "acme", "web"); err != nil {
+		if _, err := newReqSvc(fake).DiscardChanges(context.Background(), "acme", "web"); err != nil {
 			t.Fatalf("discard: %v", err)
 		}
 		if !discarded {
@@ -416,22 +288,22 @@ func TestDiscardChanges(t *testing.T) {
 		}
 	})
 
-	t.Run("nothing-to-revert sentinel becomes a friendly error", func(t *testing.T) {
+	t.Run("discard error propagates wrapped", func(t *testing.T) {
 		t.Parallel()
 		fake := &artifactstest.FakeArtifactService{
 			DiscardRequirementsFunc: func(context.Context, string, string) (map[string]string, error) {
 				return nil, artifacts.ErrArtifactNotFound
 			},
 		}
-		_, err := newReqSvc(fake, nil).DiscardChanges(context.Background(), "acme", "web")
-		if err == nil || !strings.Contains(err.Error(), "no saved version") {
-			t.Fatalf("want a 'no saved version' error, got %v", err)
+		_, err := newReqSvc(fake).DiscardChanges(context.Background(), "acme", "web")
+		if err == nil || !strings.Contains(err.Error(), "discard requirements") {
+			t.Fatalf("want the discard error propagated, got %v", err)
 		}
 	})
 
 	t.Run("nil artifactSvc is git-client-not-configured", func(t *testing.T) {
 		t.Parallel()
-		if _, err := NewRequirementsService(nil, nil, nil).DiscardChanges(context.Background(), "acme", "web"); err == nil {
+		if _, err := NewRequirementsService(nil, nil).DiscardChanges(context.Background(), "acme", "web"); err == nil {
 			t.Fatal("want an error when the git client is not configured")
 		}
 	})
@@ -452,7 +324,7 @@ func TestListVersions(t *testing.T) {
 				}, nil
 			},
 		}
-		vs, err := newReqSvc(fake, nil).ListVersions(context.Background(), "acme", "web")
+		vs, err := newReqSvc(fake).ListVersions(context.Background(), "acme", "web")
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -463,7 +335,7 @@ func TestListVersions(t *testing.T) {
 
 	t.Run("nil artifactSvc returns nil, nil", func(t *testing.T) {
 		t.Parallel()
-		vs, err := NewRequirementsService(nil, nil, nil).ListVersions(context.Background(), "acme", "web")
+		vs, err := NewRequirementsService(nil, nil).ListVersions(context.Background(), "acme", "web")
 		if err != nil || vs != nil {
 			t.Fatalf("nil artifactSvc: want (nil,nil), got (%v,%v)", vs, err)
 		}
@@ -476,7 +348,7 @@ func TestListVersions(t *testing.T) {
 				return nil, errors.New("boom")
 			},
 		}
-		if _, err := newReqSvc(fake, nil).ListVersions(context.Background(), "acme", "web"); err == nil {
+		if _, err := newReqSvc(fake).ListVersions(context.Background(), "acme", "web"); err == nil {
 			t.Fatal("a list failure must propagate")
 		}
 	})
@@ -512,236 +384,5 @@ func TestFileMapsEqual(t *testing.T) {
 				t.Fatalf("fileMapsEqual(%v,%v)=%v, want %v", tc.a, tc.b, got, tc.want)
 			}
 		})
-	}
-}
-
-// --- withLock delegation ------------------------------------------------------
-
-func TestWithLock_NilLockerRunsInline(t *testing.T) {
-	t.Parallel()
-	svc := NewRequirementsService(nil, nil, nil) // no locker
-	ran := false
-	err := svc.withLock(context.Background(), "acme", "web", func(context.Context) error {
-		ran = true
-		return nil
-	})
-	if err != nil || !ran {
-		t.Fatalf("nil locker must run fn inline: ran=%v err=%v", ran, err)
-	}
-}
-
-func TestWithLocker_ChainsAndDelegates(t *testing.T) {
-	t.Parallel()
-	svc := NewRequirementsService(nil, nil, nil)
-	// WithLocker returns the receiver for chaining and mutates it. A locker with
-	// no DB degrades to running fn without a real lock (the lock's contention
-	// semantics are dbtest-tier); this proves the delegation seam is wired.
-	if got := svc.WithLocker(NewRequirementsDirLocker(nil)); got != svc {
-		t.Fatal("WithLocker must return the receiver for chaining")
-	}
-	ran := false
-	err := svc.withLock(context.Background(), "acme", "web", func(context.Context) error {
-		ran = true
-		return nil
-	})
-	if err != nil || !ran {
-		t.Fatalf("no-DB locker must still run fn: ran=%v err=%v", ran, err)
-	}
-}
-
-// --- StreamGenerate (SSE rule: completion + persisted side-effect only) -------
-
-// sseStream builds an io.ReadCloser over the given SSE lines, as agents-service
-// would return. Each line is emitted verbatim followed by a newline.
-func sseStream(lines ...string) io.ReadCloser {
-	return io.NopCloser(strings.NewReader(strings.Join(lines, "\n") + "\n"))
-}
-
-func TestStreamGenerate_PreStreamValidation(t *testing.T) {
-	t.Parallel()
-	svc := newReqSvc(&artifactstest.FakeArtifactService{}, &fakeAgents{})
-	var out bytes.Buffer
-	noflush := func() {}
-
-	if err := svc.StreamGenerate(context.Background(), "acme", "web", "functional.md", "", nil, "", &out, noflush); err == nil {
-		t.Fatal("empty skillID must be rejected before streaming")
-	}
-	if err := svc.StreamGenerate(context.Background(), "acme", "web", "", "skill-x", nil, "", &out, noflush); err == nil {
-		t.Fatal("empty target filename must be rejected before streaming")
-	}
-}
-
-func TestStreamGenerate_HappyPathPersistsAccumulatedContent(t *testing.T) {
-	t.Parallel()
-	var wrotePath, wroteContent string
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
-			wrotePath, wroteContent = relPath, content
-			return &artifacts.PutResult{SHA: "sha1"}, nil
-		},
-	}
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return sseStream(
-				`data: {"type":"text-delta","delta":"Hello "}`,
-				`data: {"type":"text-delta","delta":"World"}`,
-				`data: {"type":"finish"}`,
-				`data: [DONE]`,
-			), nil
-		},
-	}
-	var out bytes.Buffer
-	err := newReqSvc(fake, ag).StreamGenerate(context.Background(), "acme", "web", "functional.md", "skill-x", nil, "prompt", &out, func() {})
-	if err != nil {
-		t.Fatalf("stream: %v", err)
-	}
-	// SSE rule: assert the persisted side-effect (accumulated content written to
-	// the target file), not the framing forwarded to `out`.
-	if !strings.HasSuffix(wrotePath, "functional.md") || wroteContent != "Hello World" {
-		t.Fatalf("persisted file: path=%q content=%q", wrotePath, wroteContent)
-	}
-}
-
-func TestStreamGenerate_ReplaceResetsAccumulator(t *testing.T) {
-	t.Parallel()
-	// A text-delta with replace:true discards everything accumulated so far and
-	// persists only the replacement payload (wireframes/domain-model post-process).
-	var wroteContent string
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(_ context.Context, _, _, _, content, _ string) (*artifacts.PutResult, error) {
-			wroteContent = content
-			return &artifacts.PutResult{SHA: "sha1"}, nil
-		},
-	}
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return sseStream(
-				`data: {"type":"text-delta","delta":"draft-to-discard"}`,
-				`data: {"type":"text-delta","delta":"FINAL","replace":true}`,
-				`data: {"type":"finish"}`,
-			), nil
-		},
-	}
-	var out bytes.Buffer
-	if err := newReqSvc(fake, ag).StreamGenerate(context.Background(), "acme", "web", "wireframes.dsl", "skill-x", nil, "", &out, func() {}); err != nil {
-		t.Fatalf("stream: %v", err)
-	}
-	if wroteContent != "FINAL" {
-		t.Fatalf("replace must reset the accumulator, persisted %q", wroteContent)
-	}
-}
-
-func TestStreamGenerate_ErrorFrameSurfacedNoWrite(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		// PutFile intentionally unset — any write attempt panics the test.
-	}
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return sseStream(
-				`data: {"type":"text-delta","delta":"partial"}`,
-				`data: {"type":"error","errorText":"model refused"}`,
-			), nil
-		},
-	}
-	var out bytes.Buffer
-	err := newReqSvc(fake, ag).StreamGenerate(context.Background(), "acme", "web", "functional.md", "skill-x", nil, "", &out, func() {})
-	if err == nil || !strings.Contains(err.Error(), "model refused") {
-		t.Fatalf("want the upstream error surfaced, got %v", err)
-	}
-}
-
-func TestStreamGenerate_NoFinishIsAnError(t *testing.T) {
-	t.Parallel()
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return sseStream(`data: {"type":"text-delta","delta":"unterminated"}`), nil
-		},
-	}
-	var out bytes.Buffer
-	err := newReqSvc(&artifactstest.FakeArtifactService{}, ag).StreamGenerate(context.Background(), "acme", "web", "functional.md", "skill-x", nil, "", &out, func() {})
-	if err == nil || !strings.Contains(err.Error(), "without finishing") {
-		t.Fatalf("want a no-finish error, got %v", err)
-	}
-}
-
-func TestStreamGenerate_EmptyContentIsAnError(t *testing.T) {
-	t.Parallel()
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return sseStream(`data: {"type":"finish"}`), nil
-		},
-	}
-	var out bytes.Buffer
-	err := newReqSvc(&artifactstest.FakeArtifactService{}, ag).StreamGenerate(context.Background(), "acme", "web", "functional.md", "skill-x", nil, "", &out, func() {})
-	if err == nil || !strings.Contains(err.Error(), "no content") {
-		t.Fatalf("want a no-content error, got %v", err)
-	}
-}
-
-func TestStreamGenerate_UpstreamOpenErrorPropagates(t *testing.T) {
-	t.Parallel()
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return nil, errors.New("agents-service 503")
-		},
-	}
-	var out bytes.Buffer
-	err := newReqSvc(&artifactstest.FakeArtifactService{}, ag).StreamGenerate(context.Background(), "acme", "web", "functional.md", "skill-x", nil, "", &out, func() {})
-	if err == nil || !strings.Contains(err.Error(), "agents service request") {
-		t.Fatalf("want the upstream open error wrapped, got %v", err)
-	}
-}
-
-// TestStreamGenerate_SiblingFilesPersisted covers the finish-frame sibling
-// loop (review gap): companion files (e.g. .excalidraw sources) are written
-// alongside the primary file, a sibling whose name equals the primary is
-// skipped (the accumulated stream content wins, never the sibling payload),
-// and a failing sibling write is warn-and-continue — it must not fail the
-// generation.
-func TestStreamGenerate_SiblingFilesPersisted(t *testing.T) {
-	t.Parallel()
-	type write struct{ path, content string }
-	var writes []write
-	fake := &artifactstest.FakeArtifactService{
-		PutFileFunc: func(_ context.Context, _, _, relPath, content, _ string) (*artifacts.PutResult, error) {
-			writes = append(writes, write{relPath, content})
-			if strings.HasSuffix(relPath, "broken.dsl") {
-				return nil, errors.New("git wedged")
-			}
-			return &artifacts.PutResult{SHA: "sha1"}, nil
-		},
-	}
-	ag := &fakeAgents{
-		StreamDocumentGenerationFunc: func(context.Context, string, string, agents.DocumentGenerationRequest) (io.ReadCloser, error) {
-			return sseStream(
-				`data: {"type":"text-delta","delta":"PRIMARY"}`,
-				`data: {"type":"finish","siblings":{"functional.md":"SELF-MUST-BE-SKIPPED","wireframes.excalidraw":"{\"kind\":\"excalidraw\"}","broken.dsl":"payload"}}`,
-			), nil
-		},
-	}
-	var out bytes.Buffer
-	err := newReqSvc(fake, ag).StreamGenerate(context.Background(), "acme", "web", "functional.md", "skill-x", nil, "", &out, func() {})
-	if err != nil {
-		t.Fatalf("a failing sibling write must be best-effort, got %v", err)
-	}
-
-	var primary, selfDup int
-	var gotSibling bool
-	for _, w := range writes {
-		switch {
-		case strings.HasSuffix(w.path, "functional.md") && w.content == "PRIMARY":
-			primary++
-		case strings.HasSuffix(w.path, "functional.md"):
-			selfDup++
-		case strings.HasSuffix(w.path, "wireframes.excalidraw"):
-			gotSibling = w.content == `{"kind":"excalidraw"}`
-		}
-	}
-	if primary != 1 || selfDup != 0 {
-		t.Fatalf("primary write: got %d primary + %d self-sibling overwrites, want exactly 1 + 0 (writes=%v)", primary, selfDup, writes)
-	}
-	if !gotSibling {
-		t.Fatalf("sibling file was not persisted with its payload: %v", writes)
 	}
 }

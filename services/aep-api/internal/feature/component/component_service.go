@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -43,6 +44,12 @@ type ComponentService interface {
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*models.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*models.Component, error)
 	CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*models.Component, error)
+	// EnsureComponent idempotently provisions the OpenChoreo Component CR for a
+	// design component (by friendly name), so a merged-PR build has a Component to
+	// build. It is the coding-dispatch pre-flight (tasks-github-native): the CR
+	// must exist by merge/build time or the build fails "Component not found".
+	// Idempotent — CreateComponent is 409-safe, so re-dispatch is a no-op.
+	EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error
 	UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error
 
 	// Deploy (read-only — autoDeploy on the Component drives the chain)
@@ -115,6 +122,90 @@ func (s *componentService) CreateComponent(ctx context.Context, orgName, project
 		return nil, err
 	}
 	return comp, nil
+}
+
+// EnsureComponent provisions the OpenChoreo Component CR (one per design
+// component) needed for the build to fire when the merge push arrives. Ported
+// from the legacy dispatch service's ensureOCComponent pre-flight (the piece the
+// tasks-github-native rebuild dropped): AutoBuild=false (every build is driven by
+// the BFF pinning a WorkflowRun to the merge SHA), AutoDeploy=true (OC's
+// controller creates the ReleaseBinding into the first pipeline environment once
+// the build posts a Workload). Idempotent — the OC client refetches on 409, so a
+// re-dispatch of the same component is a no-op. Reads the design facts (app path,
+// component type, api-security) via the artifact store and the repo row via
+// repoSvc; both are the existing feature ports.
+func (s *componentService) EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error {
+	if s.artifactStore == nil {
+		return fmt.Errorf("ensure component: artifact store not configured")
+	}
+	if s.repoSvc == nil {
+		return fmt.Errorf("ensure component: repo service not configured")
+	}
+	comp, err := artifacts.ResolveDesignComponent(ctx, s.artifactStore, orgName, projectName, componentName)
+	if err != nil {
+		return fmt.Errorf("ensure component: resolve design component %q: %w", componentName, err)
+	}
+	repo, err := s.repoSvc.GetRepo(ctx, orgName, projectName)
+	if err != nil || repo == nil {
+		return fmt.Errorf("ensure component: resolve project repo for %s/%s: %w", orgName, projectName, err)
+	}
+
+	k8sName := k8sname.ToK8sName(comp.Name)
+	// Dockerfile context/path: the component's app path (repo-relative), or the
+	// repo root when unset. Mirrors the legacy pre-flight.
+	dockerContext := comp.AppPath
+	dockerFilePath := "Dockerfile"
+	if dockerContext != "" {
+		dockerFilePath = dockerContext + "/Dockerfile"
+	} else {
+		dockerContext = "."
+	}
+	branch := repo.DefaultBranch
+	if branch == "" {
+		branch = "main"
+	}
+	// api-configuration trait derived from design.md's exposesAPI.auth (none →
+	// no trait). Set at create time; per-env reconcile is the trait_sync path's job.
+	apiSecurityEnabled := models.ResolveAPISecurityEnabled(*comp)
+	traits, _ := DesiredAPIConfigurationTrait(k8sName, apiSecurityEnabled)
+
+	// repository.secretRef stays empty: build credentials are pre-staged per
+	// WorkflowRun (build-credential-injection.md), so the Component's workflow
+	// param carries no SecretReference.
+	if _, err := s.CreateComponent(ctx, orgName, projectName, &models.CreateComponentRequest{
+		Name:        k8sName,
+		DisplayName: comp.Name,
+		Description: comp.Name,
+		Type:        ocEntrypoint(comp.ComponentType),
+		AutoBuild:   false,
+		AutoDeploy:  true,
+		Workflow: &models.ComponentWorkflowSpec{
+			Kind: "ClusterWorkflow",
+			Name: "dockerfile-builder",
+			Parameters: &models.ComponentWorkflowParameters{
+				Repository: &models.WorkflowRepository{
+					URL:       repo.RepoURL,
+					SecretRef: "",
+					AppPath:   comp.AppPath,
+					Revision:  &models.WorkflowRevision{Branch: branch},
+				},
+				Docker: &models.DockerParameters{Context: dockerContext, FilePath: dockerFilePath},
+			},
+		},
+		Traits: traits,
+	}); err != nil {
+		return fmt.Errorf("ensure component: create OC component %q: %w", k8sName, err)
+	}
+	slog.InfoContext(ctx, "ensure component: OC Component ensured", "org", orgName, "project", projectName, "component", k8sName)
+	return nil
+}
+
+// ocEntrypoint maps a design component type to its OC Component entrypoint type.
+func ocEntrypoint(componentType string) string {
+	if strings.EqualFold(componentType, "web-app") {
+		return "deployment/web-application"
+	}
+	return "deployment/service"
 }
 
 // UpdateWorkflowEnvVars writes per-component env vars onto each of the

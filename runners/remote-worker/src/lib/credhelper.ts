@@ -50,7 +50,8 @@ export function credHelperScript(params: CredHelperParams): string {
   return `#!/usr/bin/env bash
 # Git credential helper for AEP platform-managed repos.
 # Two auth modes (WS2.6 — both call the path-scoped endpoint
-# POST /internal/v1/tasks/{taskId}/credentials/refresh, which accepts either token):
+# POST /internal/v1/executions/{executionId}/credentials/refresh, which accepts
+# either token; the bound id below is the execution id, §9.2):
 #   (a) publisher cc — when PUBLISHER_CLIENT_ID/SECRET/TOKEN_URL are set,
 #       mint a Thunder access token via client_credentials.
 #   (b) legacy TaskJWT — read the per-task bearer from \$AEP_BEARER_FILE.
@@ -90,12 +91,12 @@ if [ -n "$PUBLISHER_CLIENT_ID" ] && [ -n "$PUBLISHER_CLIENT_SECRET" ] && [ -n "$
     bearer="$(echo "$cc_resp" | sed -n 's/.*"access_token":"\\([^"]*\\)".*/\\1/p')"
   fi
   if [ -n "$bearer" ]; then
-    refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/tasks/$expected_task_id/credentials/refresh"
+    refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/executions/$expected_task_id/credentials/refresh"
   fi
 fi
 if [ -z "$bearer" ]; then
   bearer="$(cat "$AEP_BEARER_FILE" 2>/dev/null || true)"
-  refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/tasks/$expected_task_id/credentials/refresh"
+  refresh_url="\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/executions/$expected_task_id/credentials/refresh"
 fi
 if [ -z "$bearer" ]; then
   exit 1
@@ -214,7 +215,7 @@ if [ -n "$bearer" ]; then
     -H "Content-Type: application/json" \\
     "\${corr_header[@]}" \\
     -d '{}' \\
-    "\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/tasks/$expected_task_id/credentials/refresh" 2>/dev/null || true)"
+    "\${AEP_PLATFORM_URL:-$AEP_GIT_SERVICE_URL}/internal/v1/executions/$expected_task_id/credentials/refresh" 2>/dev/null || true)"
   if [ -n "$resp" ]; then
     token=""
     login=""

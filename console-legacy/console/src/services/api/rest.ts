@@ -28,22 +28,19 @@ import type {
   CollabSession,
   Design,
   DesignBundle,
-  DesignComponent,
   ComponentDefinition,
   ComponentOpenAPI,
   CreateProjectInput,
   Build,
   BuildLogs,
   Deployment,
-  ComponentTask,
   ComponentConfig,
   EnvVar,
   ProjectStatus,
   ArtifactVersion,
-  Tasks,
   Organization,
-  ProjectBoard,
-  TaskStatusResponse,
+  TaskView,
+  TaskDetail,
   TaskProgressResponse,
 } from './types';
 
@@ -53,9 +50,12 @@ const BASE = env.VITE_CORE_API_BASE_URL;
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Machine error code from the response envelope (e.g. `plan_in_progress`), when present. */
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    if (code !== undefined) this.code = code;
   }
 }
 
@@ -107,7 +107,8 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
     } catch { /* use raw body */ }
     throw new ApiError(res.status, message);
   }
-  if (res.status === 204) return undefined as T;
+  // 204 (hold/unhold) and 202 (execute — async accept) carry no body.
+  if (res.status === 204 || res.status === 202) return undefined as T;
   return res.json();
 }
 
@@ -157,6 +158,17 @@ function slugify(input: string): string {
     .replace(/[^a-z0-9-]/g, '')   // strip non-RFC-1123 chars
     .replace(/-+/g, '-')          // collapse consecutive hyphens
     .replace(/^-|-$/g, '');       // trim leading/trailing hyphens
+}
+
+// The contract types `dependsOn`/`attention`/`executions` as nullable; coerce
+// to the always-present shapes the UI reads so callers never null-guard them.
+function normalizeTaskView<T extends TaskView>(raw: T): T {
+  return {
+    ...raw,
+    dependsOn: raw.dependsOn ?? [],
+    attention: raw.attention ?? [],
+    executions: raw.executions ?? {},
+  };
 }
 
 export const restApi = {
@@ -254,44 +266,20 @@ export const restApi = {
     }
   },
 
-  async updateRequirementFile(
-    projectId: string,
-    filename: string,
-    content: string,
-  ): Promise<RequirementsBundle | undefined> {
-    try {
-      return await fetchJSON<RequirementsBundle>(
-        `${projectPrefix(projectId)}/requirements/files/${encodeURIComponent(filename)}`,
-        { method: 'PUT', body: JSON.stringify({ content }) },
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  async deleteRequirementFile(
-    projectId: string,
-    filename: string,
-  ): Promise<RequirementsBundle | undefined> {
-    try {
-      return await fetchJSON<RequirementsBundle>(
-        `${projectPrefix(projectId)}/requirements/files/${encodeURIComponent(filename)}`,
-        { method: 'DELETE' },
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  async saveRequirements(projectId: string): Promise<RequirementsBundle | undefined> {
-    try {
-      return await fetchJSON<RequirementsBundle>(
-        `${projectPrefix(projectId)}/requirements/save`,
-        { method: 'POST' },
-      );
-    } catch {
-      return undefined;
-    }
+  /**
+   * Cut the requirements version tag. The `commitSha` pin is OPTIONAL and
+   * vestigial now: the backend resolves HEAD from its own git mirror (the
+   * shared-volume workspace), so the GitHub ref-read lag that once made the
+   * pin load-bearing is gone. Pass it when a just-landed apply naturally
+   * provides a fresh sha; call unpinned otherwise. Let ApiError bubble —
+   * Publish must stop (show the message) when the tag fails, not navigate on
+   * as if it succeeded.
+   */
+  async saveRequirements(projectId: string, commitSha?: string): Promise<RequirementsBundle> {
+    return fetchJSON<RequirementsBundle>(`${projectPrefix(projectId)}/requirements/save`, {
+      method: 'POST',
+      body: JSON.stringify(commitSha ? { commitSha } : {}),
+    });
   },
 
   async discardRequirements(projectId: string): Promise<RequirementsBundle | undefined> {
@@ -328,331 +316,6 @@ export const restApi = {
     }
   },
 
-  /**
-   * Stream document generation for a specific requirement file via the
-   * skill-routed endpoint. The skill ID, source filenames, and optional
-   * user prompt are looked up by the caller from the document-types registry.
-   *
-   * `onDelta` receives each text-delta as it arrives. Skills with a
-   * post-processor (wireframes / domain-model) emit a final delta with
-   * `opts.replace = true` carrying the persisted payload — callers should
-   * reset their accumulator and use the delta verbatim.
-   */
-  async generateRequirementFile(
-    projectId: string,
-    filename: string,
-    body: { skillId: string; sources?: string[]; prompt?: string },
-    onDelta: (delta: string, opts?: { replace?: boolean }) => void,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/requirements/files/${encodeURIComponent(filename)}/generate`,
-      { method: 'POST', headers, body: JSON.stringify(body), signal },
-    );
-    if (!res.ok || !res.body) return false;
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let errored = false;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const chunk = JSON.parse(payload);
-            if (chunk.type === 'text-delta' && typeof chunk.delta === 'string') {
-              onDelta(chunk.delta, chunk.replace ? { replace: true } : undefined);
-            } else if (chunk.type === 'error') {
-              errored = true;
-            }
-          } catch {
-            /* ignore non-JSON */
-          }
-        }
-      }
-    }
-
-    return !errored;
-  },
-
-  /**
-   * Stream a single chat turn against the requirements directory. The BFF
-   * returns SSE frames covering free-form text, structured tool events,
-   * and a final turn-finish — see docs/design/requirements-chat.md §4.2.
-   *
-   * Resolves to true if the stream ran to completion (data-finish or
-   * [DONE]). false on transport error / fatal `error` frame; the caller
-   * sees individual `error` frames via `onError`.
-   */
-  async streamRequirementsChat(
-    projectId: string,
-    body: {
-      message: string;
-      history?: { role: 'user' | 'assistant'; content: string }[];
-      files?: string[]; // in-scope filenames; empty means all
-      mode?: 'edit' | 'ask';
-      requestSessionBaseline?: boolean;
-    },
-    handlers: {
-      onTurnStarted?: (turnId: string, startedMs: number) => void;
-      onSessionBaseline?: (snapshotId: string) => void;
-      onText?: (delta: string) => void;
-      onToolStarted?: (e: {
-        id: string;
-        name: string;
-        filename: string;
-        summary?: string;
-      }) => void;
-      onToolResult?: (e: {
-        id: string;
-        filename: string;
-        content?: string;
-        siblings?: Record<string, string>;
-        diff?: { added: number; removed: number; preview: string };
-      }) => void;
-      onToolError?: (e: {
-        id?: string;
-        name?: string;
-        filename?: string;
-        errorCode?: string;
-        message?: string;
-      }) => void;
-      onValidationFailed?: (issues: { filename?: string; message: string }[]) => void;
-      onFinish?: (e: { summary?: string; touched?: string[] }) => void;
-      onError?: (e: { errorCode?: string; errorText?: string }) => void;
-    },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/requirements/chat`,
-      { method: 'POST', headers, body: JSON.stringify(body), signal },
-    );
-    if (!res.ok || !res.body) {
-      handlers.onError?.({ errorText: `chat request failed: ${res.status}` });
-      return false;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let sawFinish = false;
-    let sawFatal = false;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-
-          let chunk: { type?: string; delta?: string; data?: Record<string, unknown>; errorCode?: string; errorText?: string };
-          try {
-            chunk = JSON.parse(payload);
-          } catch {
-            continue;
-          }
-
-          switch (chunk.type) {
-            case 'text-delta':
-              if (typeof chunk.delta === 'string') handlers.onText?.(chunk.delta);
-              break;
-            case 'data-turn-started': {
-              const d = chunk.data as { turnId?: string; started?: number } | undefined;
-              if (d?.turnId) handlers.onTurnStarted?.(d.turnId, d.started ?? Date.now());
-              break;
-            }
-            case 'data-session-baseline': {
-              const d = chunk.data as { snapshotId?: string } | undefined;
-              if (d?.snapshotId) handlers.onSessionBaseline?.(d.snapshotId);
-              break;
-            }
-            case 'data-tool-started': {
-              const d = chunk.data as { id?: string; name?: string; filename?: string; summary?: string } | undefined;
-              if (d?.id && d.name && d.filename !== undefined) {
-                handlers.onToolStarted?.({
-                  id: d.id,
-                  name: d.name,
-                  filename: d.filename,
-                  summary: d.summary,
-                });
-              }
-              break;
-            }
-            case 'data-tool-result': {
-              const d = chunk.data as {
-                id?: string;
-                filename?: string;
-                content?: string;
-                siblings?: Record<string, string>;
-                diff?: { added: number; removed: number; preview: string };
-              } | undefined;
-              if (d?.id && d.filename) {
-                handlers.onToolResult?.({
-                  id: d.id,
-                  filename: d.filename,
-                  content: d.content,
-                  siblings: d.siblings,
-                  diff: d.diff,
-                });
-              }
-              break;
-            }
-            case 'data-tool-error': {
-              const d = chunk.data as {
-                id?: string;
-                name?: string;
-                filename?: string;
-                errorCode?: string;
-                message?: string;
-              } | undefined;
-              if (d) handlers.onToolError?.(d);
-              break;
-            }
-            case 'data-validation-failed': {
-              const d = chunk.data as { issues?: { filename?: string; message: string }[] } | undefined;
-              if (d?.issues) handlers.onValidationFailed?.(d.issues);
-              break;
-            }
-            case 'data-finish': {
-              sawFinish = true;
-              const d = chunk.data as { summary?: string; touched?: string[] } | undefined;
-              handlers.onFinish?.(d ?? {});
-              break;
-            }
-            case 'error':
-              sawFatal = true;
-              handlers.onError?.({
-                errorCode: chunk.errorCode,
-                errorText: chunk.errorText,
-              });
-              break;
-            default:
-              // Forward-compatible: ignore unknown frame types silently.
-              break;
-          }
-        }
-      }
-    }
-
-    return sawFinish && !sawFatal;
-  },
-
-  /**
-   * Undo a single chat turn. Restores the working tree to the snapshot the
-   * BFF captured at turn start.
-   */
-  async undoChatTurn(
-    projectId: string,
-    turnId: string,
-  ): Promise<{ files: Record<string, string> } | undefined> {
-    try {
-      return await fetchJSON<{ files: Record<string, string> }>(
-        `${projectPrefix(projectId)}/requirements/chat/turns/${encodeURIComponent(turnId)}/undo`,
-        { method: 'POST' },
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  /**
-   * Read a single file's content from the chat session's baseline
-   * snapshot. Drives the "View original" dialog. `existed=false` means
-   * the file did not exist at baseline (the agent created it) — Revert
-   * deletes the working-tree file.
-   */
-  async getRequirementsBaselineFile(
-    projectId: string,
-    baselineId: string,
-    filename: string,
-  ): Promise<{ snapshotId: string; filename: string; existed: boolean; content: string } | undefined> {
-    try {
-      return await fetchJSON(
-        `${projectPrefix(projectId)}/requirements/chat/baseline/${encodeURIComponent(baselineId)}/files/${encodeURIComponent(filename)}`,
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  /**
-   * Revert a single requirement file back to its content at the session
-   * baseline. Held under the requirements dir lock so it serialises with
-   * concurrent chat / manual writes.
-   */
-  async revertRequirementsBaselineFile(
-    projectId: string,
-    baselineId: string,
-    filename: string,
-  ): Promise<boolean> {
-    try {
-      await fetchJSON<void>(
-        `${projectPrefix(projectId)}/requirements/chat/baseline/${encodeURIComponent(baselineId)}/files/${encodeURIComponent(filename)}/revert`,
-        { method: 'POST' },
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  /**
-   * Drop the session-baseline snapshot. The console calls this once the
-   * modified-files set becomes empty after Accepts.
-   */
-  async dropRequirementsBaseline(
-    projectId: string,
-    baselineId: string,
-  ): Promise<boolean> {
-    try {
-      await fetchJSON<void>(
-        `${projectPrefix(projectId)}/requirements/chat/baseline/${encodeURIComponent(baselineId)}`,
-        { method: 'DELETE' },
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
   // -- Collaboration (still scoped to the requirements editor session) ------
   async getCollabSession(projectId: string): Promise<CollabSession | undefined> {
     try {
@@ -666,155 +329,14 @@ export const restApi = {
 
   // -- Designs (real backend) ------------------------------------------------
 
-  async getDesign(projectId: string): Promise<Design | undefined> {
-    try {
-      const data = await fetchJSON<Design | null>(`${projectPrefix(projectId)}/design`);
-      return data ?? undefined;
-    } catch {
-      return undefined;
-    }
-  },
-
-  /**
-   * Stream architecture generation from the BFF. The response is a UI Message
-   * Stream (SSE) emitting custom data-* frames as the design is built:
-   *   data-overview                    — { text }
-   *   data-requirements                — { items }
-   *   data-component-added             — { component } (slim — no openAPISpec yet)
-   *   data-component-updated           — { name, patch, openapiInvalidated }
-   *                                       emitted when shape fields change on
-   *                                       an existing component
-   *   data-component-removed           — { name }
-   *   data-component-spec-updating     — { name }
-   *                                       fires when the architect calls
-   *                                       set_openapi for a component (the UI
-   *                                       shows a spinner until data-finish)
-   *   data-finish                      — { design } with the full validated output
-   *
-   * Resolves to true when the stream completes successfully.
-   */
-  async generateDesignStream(
-    projectId: string,
-    handlers: {
-      onOverview?: (overview: string) => void;
-      onRequirements?: (requirements: string[]) => void;
-      onComponentAdded?: (component: DesignComponent) => void;
-      onComponentUpdated?: (
-        name: string,
-        patch: Partial<DesignComponent>,
-        openapiInvalidated: boolean,
-      ) => void;
-      onComponentRemoved?: (name: string) => void;
-      onComponentSpecUpdating?: (name: string) => void;
-      onFinish?: (design: {
-        overview: string;
-        requirements: string[];
-        components: DesignComponent[];
-      }) => void;
-    },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/design/generate`,
-      {
-        method: 'POST',
-        headers,
-        body: '{}',
-        signal,
-      },
-    );
-    if (!res.ok || !res.body) return false;
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let errored = false;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const chunk = JSON.parse(payload);
-            switch (chunk.type) {
-              case 'data-overview':
-                // New shape: { text }. Tolerate the legacy { overview } key
-                // for one rolling-deploy window.
-                if (typeof chunk.data?.text === 'string')
-                  handlers.onOverview?.(chunk.data.text);
-                else if (typeof chunk.data?.overview === 'string')
-                  handlers.onOverview?.(chunk.data.overview);
-                break;
-              case 'data-requirements':
-                if (Array.isArray(chunk.data?.items))
-                  handlers.onRequirements?.(chunk.data.items);
-                else if (Array.isArray(chunk.data?.requirements))
-                  handlers.onRequirements?.(chunk.data.requirements);
-                break;
-              case 'data-component-added':
-                if (chunk.data?.component)
-                  handlers.onComponentAdded?.(
-                    chunk.data.component as DesignComponent,
-                  );
-                break;
-              case 'data-component-updated':
-                if (typeof chunk.data?.name === 'string')
-                  handlers.onComponentUpdated?.(
-                    chunk.data.name,
-                    (chunk.data.patch ?? {}) as Partial<DesignComponent>,
-                    Boolean(chunk.data.openapiInvalidated),
-                  );
-                break;
-              case 'data-component-removed':
-                if (typeof chunk.data?.name === 'string')
-                  handlers.onComponentRemoved?.(chunk.data.name);
-                break;
-              case 'data-component-spec-updating':
-                if (typeof chunk.data?.name === 'string')
-                  handlers.onComponentSpecUpdating?.(chunk.data.name);
-                break;
-              case 'data-finish':
-                if (chunk.data?.design) handlers.onFinish?.(chunk.data.design);
-                break;
-              case 'error':
-                errored = true;
-                break;
-            }
-          } catch {
-            // ignore non-JSON data line
-          }
-        }
-      }
-    }
-
-    return !errored;
-  },
-
-  async saveAndProceedDesign(projectId: string): Promise<Design> {
+  /** `commitSha` pin: optional-and-vestigial, see saveRequirements. */
+  async saveAndProceedDesign(projectId: string, commitSha?: string): Promise<Design> {
     // Let ApiError bubble — Publish needs to surface the server's error
     // message (e.g. missing requirements baseline, save-via-API failures)
     // rather than collapsing every failure into a generic toast.
     return fetchJSON<Design>(`${projectPrefix(projectId)}/design/save`, {
       method: 'POST',
+      body: JSON.stringify(commitSha ? { commitSha } : {}),
     });
   },
 
@@ -849,53 +371,6 @@ export const restApi = {
     try {
       return await fetchJSON<DesignBundle>(
         `${projectPrefix(projectId)}/design/versions/${encodeURIComponent(tag)}/bundle`,
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  async updateDesignFile(
-    projectId: string,
-    path: string,
-    content: string,
-  ): Promise<DesignBundle | undefined> {
-    try {
-      return await fetchJSON<DesignBundle>(
-        `${projectPrefix(projectId)}/design/files/${path}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
-        },
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  async deleteDesignFile(
-    projectId: string,
-    path: string,
-  ): Promise<DesignBundle | undefined> {
-    try {
-      return await fetchJSON<DesignBundle>(
-        `${projectPrefix(projectId)}/design/files/${path}`,
-        { method: 'DELETE' },
-      );
-    } catch {
-      return undefined;
-    }
-  },
-
-  async deleteDesignComponent(
-    projectId: string,
-    componentName: string,
-  ): Promise<DesignBundle | undefined> {
-    try {
-      return await fetchJSON<DesignBundle>(
-        `${projectPrefix(projectId)}/design/components/${encodeURIComponent(componentName)}`,
-        { method: 'DELETE' },
       );
     } catch {
       return undefined;
@@ -978,263 +453,63 @@ export const restApi = {
     }
   },
 
-  // -- Tasks (implementation agents) -------------------------------------------
+  // -- Tasks (GitHub-native issues ⋈ executions) -------------------------------
+  //
+  // Plan generation is a raw-StreamPart SSE handled in `./plan.ts` (the BFF taps
+  // the stream to create/update issues; the FE renders the tool frames live).
+  // Reads here are live GitHub ⋈ executions — no cache, no board.
 
-  async dispatchTasks(projectId: string): Promise<any[]> {
-    return await fetchJSON<any[]>(`${projectPrefix(projectId)}/tasks/dispatch`, {
-      method: 'POST',
-    });
-  },
-
-  /**
-   * Streams task generation as SSE. The two-phase tech-lead agent emits:
-   *   data-plan-item            — { tempId, componentName, title, rationale, dependsOn }
-   *   data-plan-complete        — { items[] }
-   *   data-task-issued          — { tempId, taskId, issueUrl, issueNumber }
-   *   data-task-issue-failed    — { tempId, errorText }
-   *   data-task-body-delta      — { taskId, delta }
-   *   data-task-body-complete   — { taskId, body }
-   *   data-task-rejected        — { taskId, reason }
-   *   data-finish               — { batchId, taskCount }
-   *   error                     — { scope: 'plan'|'detail', errorText, taskId?, tempId?, issues? }
-   *
-   * Resolves to true when the stream completed successfully (no error frames).
-   */
-  async streamGenerateTasks(
-    projectId: string,
-    handlers: {
-      onPlanItem?: (item: {
-        tempId: string;
-        componentName: string;
-        title: string;
-        rationale: string;
-        dependsOn: string[];
-      }) => void;
-      onPlanComplete?: (items: unknown[]) => void;
-      onTaskIssued?: (e: {
-        tempId: string;
-        taskId: string;
-        issueUrl: string;
-        issueNumber: number;
-      }) => void;
-      onTaskIssueFailed?: (e: { tempId: string; errorText: string }) => void;
-      onTaskBodyDelta?: (e: { taskId: string; delta: string }) => void;
-      onTaskBodyComplete?: (e: { taskId: string; body: string }) => void;
-      onTaskRejected?: (e: { taskId: string; reason: string }) => void;
-      onError?: (e: {
-        scope?: string;
-        errorText?: string;
-        tempId?: string;
-        taskId?: string;
-        issues?: unknown;
-      }) => void;
-      onFinish?: (e: { batchId?: string; taskCount?: number }) => void;
-    },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/tasks/generate`,
-      { method: 'POST', headers, body: '{}', signal },
-    );
-    if (!res.ok || !res.body) return false;
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let errored = false;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const chunk = JSON.parse(payload);
-            const data = chunk.data ?? {};
-            switch (chunk.type) {
-              case 'data-plan-item':
-                handlers.onPlanItem?.(data);
-                break;
-              case 'data-plan-complete':
-                handlers.onPlanComplete?.(data.items ?? []);
-                break;
-              case 'data-task-issued':
-                handlers.onTaskIssued?.(data);
-                break;
-              case 'data-task-issue-failed':
-                handlers.onTaskIssueFailed?.(data);
-                break;
-              case 'data-task-body-delta':
-                handlers.onTaskBodyDelta?.(data);
-                break;
-              case 'data-task-body-complete':
-                handlers.onTaskBodyComplete?.(data);
-                break;
-              case 'data-task-rejected':
-                handlers.onTaskRejected?.(data);
-                break;
-              case 'data-finish':
-                handlers.onFinish?.(data);
-                break;
-              case 'error':
-                errored = true;
-                handlers.onError?.(data);
-                break;
-            }
-          } catch {
-            // ignore non-JSON data line
-          }
-        }
-      }
-    }
-    return !errored;
-  },
-
-  async regenerateTaskBody(
-    projectId: string,
-    taskId: string,
-    handlers: {
-      onTaskBodyDelta?: (e: { taskId: string; delta: string }) => void;
-      onTaskBodyComplete?: (e: { taskId: string; body: string }) => void;
-      onError?: (e: { errorText?: string }) => void;
-      onFinish?: () => void;
-    },
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    };
-    if (_getAccessToken) {
-      const token = await _getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-    const res = await fetch(
-      `${BASE}${projectPrefix(projectId)}/tasks/${taskId}/regenerate-body`,
-      { method: 'POST', headers, body: '{}', signal },
-    );
-    if (!res.ok || !res.body) return false;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let errored = false;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (payload === '[DONE]') continue;
-          try {
-            const chunk = JSON.parse(payload);
-            const data = chunk.data ?? {};
-            switch (chunk.type) {
-              case 'data-task-body-delta':
-                handlers.onTaskBodyDelta?.(data);
-                break;
-              case 'data-task-body-complete':
-                handlers.onTaskBodyComplete?.(data);
-                break;
-              case 'data-finish':
-                handlers.onFinish?.();
-                break;
-              case 'error':
-                errored = true;
-                handlers.onError?.(data);
-                break;
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-    return !errored;
-  },
-
-  async getTasks(projectId: string): Promise<Tasks | undefined> {
+  /** List a project's Tasks. `state` filters open/closed/all (default open). */
+  async listTasks(projectId: string, state?: 'open' | 'closed' | 'all'): Promise<TaskView[]> {
+    const q = state ? `?state=${state}` : '';
     try {
-      const data = await fetchJSON<Tasks | null>(`${projectPrefix(projectId)}/tasks/generated`);
-      return data ?? undefined;
-    } catch {
-      return undefined;
-    }
-  },
-
-  async getProjectBoard(projectId: string): Promise<ProjectBoard> {
-    const empty: ProjectBoard = { todo: [], inProgress: [], done: [], onHold: [], failed: [], url: '' };
-    try {
-      const data = await fetchJSON<ProjectBoard>(`${projectPrefix(projectId)}/board`);
-      return data ?? empty;
-    } catch {
-      return empty;
-    }
-  },
-
-  async listTasks(projectId: string): Promise<ComponentTask[]> {
-    try {
-      return await fetchJSON<ComponentTask[]>(`${projectPrefix(projectId)}/tasks`);
+      const data = await fetchJSON<TaskView[] | null>(`${projectPrefix(projectId)}/tasks${q}`);
+      return (data ?? []).map(normalizeTaskView);
     } catch {
       return [];
     }
   },
 
-  // Operator-driven retry for a `failed` task. Re-dispatches a fresh
-  // WorkflowRun against the same component / issue / branch with a newly
-  // minted per-task bearer.
-  async retryTask(projectId: string, taskId: string): Promise<void> {
-    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${taskId}/retry`, {
+  /** One Task with its full Execution history, keyed by GitHub issue number. */
+  async getTask(projectId: string, issueNumber: number): Promise<TaskDetail> {
+    const data = await fetchJSON<TaskDetail>(`${projectPrefix(projectId)}/tasks/${issueNumber}`);
+    return {
+      ...normalizeTaskView(data),
+      executionHistory: data.executionHistory ?? [],
+    };
+  },
+
+  // Execute stamps `aep:execute`; the funnel does the rest (doubles as retry).
+  // 202 on success. Lets ApiError bubble so callers can surface the server's
+  // message for a 409 (issue closed) or an already-active no-op.
+  async executeTask(projectId: string, issueNumber: number): Promise<void> {
+    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${issueNumber}/execute`, {
       method: 'POST',
     });
   },
 
-  async getTask(projectId: string, taskId: string): Promise<ComponentTask> {
-    return fetchJSON<ComponentTask>(`${projectPrefix(projectId)}/tasks/${taskId}`);
+  // Hold / unhold toggle the level-triggered `aep:hold` label (idempotent, 204).
+  async holdTask(projectId: string, issueNumber: number): Promise<void> {
+    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${issueNumber}/hold`, {
+      method: 'POST',
+    });
   },
 
-  async getTaskStatus(projectId: string, taskId: string): Promise<TaskStatusResponse> {
-    return fetchJSON<TaskStatusResponse>(`${projectPrefix(projectId)}/tasks/${taskId}/status`);
+  async unholdTask(projectId: string, issueNumber: number): Promise<void> {
+    await fetchJSON<void>(`${projectPrefix(projectId)}/tasks/${issueNumber}/hold`, {
+      method: 'DELETE',
+    });
   },
 
-  async getTaskAgentProgress(
-    projectId: string, taskId: string,
-    sinceMillis: number, limit?: number,
-  ): Promise<TaskProgressResponse> {
-    const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
-    if (limit) q.set('limit', String(limit));
-    return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/tasks/${taskId}/progress/agent?${q.toString()}`,
-    );
-  },
-
-  async getTaskBuildProgress(
-    projectId: string, taskId: string,
-    sinceMillis: number,
+  // Unified execution progress feed keyed by execution id (kind selects the
+  // source server-side). Same cursor/NDJSON contract as the legacy per-task
+  // progress endpoints, so `useCursorPolling` drives it unchanged.
+  async getExecutionProgress(
+    projectId: string, executionId: string, sinceMillis: number,
   ): Promise<TaskProgressResponse> {
     const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
     return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/tasks/${taskId}/progress/build?${q.toString()}`,
+      `${projectPrefix(projectId)}/executions/${executionId}/progress?${q.toString()}`,
     );
   },
 

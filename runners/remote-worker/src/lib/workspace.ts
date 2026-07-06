@@ -70,9 +70,10 @@ export interface ProvisionRequest {
   gitServiceUrl: string;
   correlationId?: string;
   // WS2.6 — full refresh URL, set by oneshot.ts to the path-scoped
-  // `${platformUrl}/internal/v1/tasks/{taskId}/credentials/refresh` (accepts
-  // both publisher-cc and legacy Task-JWT). Falls back to a path-scoped URL
-  // built from gitServiceUrl below when unset.
+  // `${platformUrl}/internal/v1/executions/{executionId}/credentials/refresh`
+  // (accepts both publisher-cc and legacy Task-JWT; taskId carries the
+  // execution id, §9.2). Falls back to a path-scoped URL built from
+  // gitServiceUrl below when unset.
   refreshUrl?: string;
 }
 
@@ -115,7 +116,7 @@ async function resolvePATForClone(
   } else {
     url = new URL(req.gitServiceUrl);
     if (!url.pathname.endsWith("/")) url.pathname += "/";
-    url.pathname += `internal/v1/tasks/${encodeURIComponent(req.taskId)}/credentials/refresh`;
+    url.pathname += `internal/v1/executions/${encodeURIComponent(req.taskId)}/credentials/refresh`;
   }
 
   const headers: Record<string, string> = {

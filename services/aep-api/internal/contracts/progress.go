@@ -16,24 +16,15 @@
 
 package contracts
 
-import "errors"
+// Progress DTOs are the cross-feature wire shapes for feature/execution's
+// unified GET /projects/{p}/executions/{id}/progress endpoint. They live here
+// (the dependency-free leaf) so any package — feature or client — can speak
+// the shape without importing a feature package, keeping contracts a
+// stdlib-only leaf.
 
-// Progress DTOs are the cross-feature wire shapes for the BFF's /progress/*
-// endpoints. They live here (the dependency-free leaf) so codingagent can
-// PRODUCE them and task's HTTP edge can CONSUME them via a task-local
-// ProgressReader port — without task importing the codingagent feature
-// concretely (which would re-open the task↔codingagent cycle, §4 / arch_test).
-//
-// ProgressEvent could not be hosted in models: models already re-exports the
-// task-state algebra FROM contracts (models.TaskStatus = contracts.TaskStatus),
-// so contracts→models is a cycle. As a pure scalar value type it belongs here
-// directly, keeping contracts a stdlib-only leaf. clients/observer aliases this
-// type (it owns the wire parser ParseProgressLine that produces it).
-
-// ProgressEvent is the unified shape returned to /progress/agent and
-// /progress/build callers. Optional fields use omitempty so JSON payloads
-// stay compact. schemaVersion=1 mirrors the TS source-of-truth at
-// remote-worker/src/lib/progress/schema.ts.
+// ProgressEvent is the unified shape returned to progress callers. Optional
+// fields use omitempty so JSON payloads stay compact. schemaVersion=1 mirrors
+// the TS source-of-truth at remote-worker/src/lib/progress/schema.ts.
 type ProgressEvent struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	Ts            string `json:"ts"`
@@ -68,9 +59,9 @@ type ProgressEvent struct {
 	Message     string `json:"message,omitempty"`
 }
 
-// ProgressResponse is the shape returned by both /progress/agent and
-// /progress/build. Schema-versioned so the console can branch on future
-// envelope changes without flag-flipping.
+// ProgressResponse is the envelope the progress endpoint returns.
+// Schema-versioned so the console can branch on future envelope changes
+// without flag-flipping.
 type ProgressResponse struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	Lines         []ProgressEvent `json:"lines"`
@@ -79,8 +70,3 @@ type ProgressResponse struct {
 	Truncated     bool            `json:"truncated,omitempty"`
 	Final         bool            `json:"final"`
 }
-
-// ErrProgressUnavailable signals that the Observer is not reachable. The
-// progress service returns it; the HTTP edge maps it to 503. Hosted here so
-// the task controller can errors.Is against it without importing codingagent.
-var ErrProgressUnavailable = errors.New("progress unavailable")

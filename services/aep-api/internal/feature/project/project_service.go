@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -41,7 +42,7 @@ var (
 
 // ProjectService handles business logic for project operations.
 type ProjectService interface {
-	ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error)
+	ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*models.ProjectList, error)
 	GetProject(ctx context.Context, orgName, projectName string) (*models.Project, error)
 	CreateProject(ctx context.Context, orgName string, req *models.CreateProjectRequest) (*models.Project, error)
 	DeleteProject(ctx context.Context, orgName, projectName string) error
@@ -49,15 +50,23 @@ type ProjectService interface {
 }
 
 type projectService struct {
-	client          openchoreo.ProjectClient
-	repoSvc         gitrepo.RepoService
-	webhookSvc      gitrepo.WebhookService
-	artifactSvc     artifacts.ArtifactService
-	store           *artifacts.ArtifactStore
-	taskRepo        repositories.TaskRepository
-	skillsProv      skillsProvisioner
-	resourceProv    resourceDeprovisioner
-	externalResProv externalResourceDeprovisioner
+	client        openchoreo.ProjectClient
+	repoSvc       gitrepo.RepoService
+	webhookSvc    gitrepo.WebhookService
+	artifactSvc   artifacts.ArtifactService
+	store         *artifacts.ArtifactStore
+	execs         repositories.ExecutionRepository
+	skillsProv    skillsProvisioner
+	deprovisioner resourceDeprovisioner // dependency provisioning teardown; may be nil
+}
+
+// resourceDeprovisioner is project_service's narrow consumer port for the
+// dependency-provisioning teardown: on project delete it deprovisions the
+// project's OC Resource model (external + platform resources), which the OC
+// Project delete does not cascade. *provisioning.Service satisfies it. Wired via
+// SetResourceDeprovisioner at the composition root; nil is a no-op.
+type resourceDeprovisioner interface {
+	DeprovisionProject(ctx context.Context, orgID, projectID string) error
 }
 
 // skillsProvisioner is the narrow port for eagerly provisioning the org's
@@ -69,34 +78,13 @@ type skillsProvisioner interface {
 
 func (s *projectService) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
 
-// resourceDeprovisioner is the narrow port for tearing down a project's
-// platform-resource databases (P5) on delete. *resources.OCNativeProvisioner
-// satisfies it. Defined here so project doesn't import the resources package.
-type resourceDeprovisioner interface {
-	Deprovision(ctx context.Context, orgHandle, projectName, depName string, envs []string) error
-}
-
-func (s *projectService) SetResourceDeprovisioner(p resourceDeprovisioner) { s.resourceProv = p }
-
-// externalResourceDeprovisioner is the narrow port for tearing down a
-// project's external-resource OC Resource models on delete.
-// *resources.ExternalResourceProvisioner satisfies it. Defined here so project
-// doesn't import the resources package.
-type externalResourceDeprovisioner interface {
-	Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error
-}
-
-func (s *projectService) SetExternalResourceDeprovisioner(p externalResourceDeprovisioner) {
-	s.externalResProv = p
-}
-
 func NewProjectService(
 	client openchoreo.ProjectClient,
 	repoSvc gitrepo.RepoService,
 	webhookSvc gitrepo.WebhookService,
 	artifactSvc artifacts.ArtifactService,
 	store *artifacts.ArtifactStore,
-	taskRepo repositories.TaskRepository,
+	execs repositories.ExecutionRepository,
 ) *projectService {
 	return &projectService{
 		client:      client,
@@ -104,14 +92,29 @@ func NewProjectService(
 		webhookSvc:  webhookSvc,
 		artifactSvc: artifactSvc,
 		store:       store,
-		taskRepo:    taskRepo,
+		execs:       execs,
 	}
 }
 
-func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error) {
+func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*models.ProjectList, error) {
 	list, err := s.client.ListProjects(ctx, orgName, limit, cursor)
 	if err != nil {
 		return nil, translateHTTPError(err)
+	}
+	// The search filter is applied Go-side over the FETCHED PAGE only — the
+	// OpenChoreo list API takes just (limit, cursor), so a match on a later
+	// page is not pulled forward; the caller pages via nextCursor and filters
+	// each page. Acceptable for the console's org-sized project counts.
+	if search != "" {
+		needle := strings.ToLower(search)
+		filtered := make([]models.Project, 0, len(list.Items))
+		for _, p := range list.Items {
+			if strings.Contains(strings.ToLower(p.Name), needle) ||
+				strings.Contains(strings.ToLower(p.DisplayName), needle) {
+				filtered = append(filtered, p)
+			}
+		}
+		list.Items = filtered
 	}
 	return list, nil
 }
@@ -174,7 +177,23 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 	return project, nil
 }
 
+// SetResourceDeprovisioner wires the dependency-provisioning teardown so a
+// project delete deprovisions its OC Resource model. A nil deprovisioner is a
+// documented no-op.
+func (s *projectService) SetResourceDeprovisioner(d resourceDeprovisioner) {
+	s.deprovisioner = d
+}
+
 func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName string) error {
+	// Deprovision the project's OC Resource model FIRST — while its design (the
+	// dependency inventory) is still readable and before the OC Project delete,
+	// which does not cascade the logically-owned Resources/bindings. Best-effort.
+	if s.deprovisioner != nil {
+		if err := s.deprovisioner.DeprovisionProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to deprovision project resources", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
 	if err := translateHTTPError(s.client.DeleteProject(ctx, orgName, projectName)); err != nil {
 		return err
 	}
@@ -186,54 +205,13 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 		}
 	}
 
-	// Tear down the project's platform-resource databases (P5) and its
-	// external resources' OC Resource models BEFORE deleting the task rows
-	// that name them. The OC Project delete above does NOT cascade to these:
-	// the Resource/binding carry only a logical spec.owner.projectName, not a
-	// k8s ownerReference, so without this the OC Resource + ResourceReleaseBinding
-	// (and, for platform resources, the provisioned backing instance) orphan on
-	// the cluster. Best-effort — the OC project + repo are already gone; a stuck
-	// deprovision must not block the delete.
-	if (s.resourceProv != nil || s.externalResProv != nil) && s.taskRepo != nil {
-		tasks, err := s.taskRepo.ListByProjectID(ctx, orgName, projectName)
-		if err != nil {
-			slog.ErrorContext(ctx, "failed to list tasks for resource teardown on project delete",
-				"org", orgName, "project", projectName, "error", err)
-		} else {
-			if s.resourceProv != nil {
-				for _, t := range tasks {
-					if t.Type == models.TaskTypeResourceProvisioning && t.ResourceName != "" {
-						if derr := s.resourceProv.Deprovision(ctx, orgName, projectName, t.ResourceName, []string{"development"}); derr != nil {
-							slog.ErrorContext(ctx, "failed to deprovision platform-resource on project delete",
-								"org", orgName, "project", projectName, "resource", t.ResourceName, "error", derr)
-						}
-					}
-				}
-			}
-			if s.externalResProv != nil {
-				deprovisioned := make(map[string]bool)
-				for _, t := range tasks {
-					if t.Type != models.TaskTypeConfigCollection || t.ExternalResourceName == "" || deprovisioned[t.ExternalResourceName] {
-						continue
-					}
-					deprovisioned[t.ExternalResourceName] = true
-					if derr := s.externalResProv.Deprovision(ctx, orgName, projectName, t.ExternalResourceName, []string{"development"}); derr != nil {
-						slog.ErrorContext(ctx, "failed to deprovision external resource on project delete",
-							"org", orgName, "project", projectName, "resource", t.ExternalResourceName, "error", derr)
-					}
-				}
-			}
-		}
-	}
-
-	// Clean up the project's task rows. Without this, deleted projects leave
-	// orphaned component_tasks behind that the trait_sync watcher keeps
-	// re-reconciling forever (observed as reconcile churn after every demo
-	// teardown). Best-effort like the repo cleanup — the project itself is
-	// already gone upstream.
-	if s.taskRepo != nil {
-		if err := s.taskRepo.DeleteByProjectID(ctx, orgName, projectName); err != nil {
-			slog.ErrorContext(ctx, "failed to delete task rows for project", "org", orgName, "project", projectName, "error", err)
+	// Tasks are GitHub issues (deleted with the repo). The platform-owned
+	// executions rows for the project ARE purged here — they are keyed to the
+	// project and would otherwise orphan (no FK to cascade). Best-effort, like
+	// the repo cleanup.
+	if s.execs != nil {
+		if err := s.execs.DeleteByProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to purge executions for project", "org", orgName, "project", projectName, "error", err)
 		}
 	}
 
@@ -302,19 +280,11 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 		return status, nil
 	}
 
-	// Check tasks.
-	tasks, err := s.taskRepo.ListByProjectID(ctx, orgName, projectName)
-	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
-	}
-	status.HasTasks = len(tasks) > 0
-
-	if !status.HasTasks {
-		status.Phase = "tasks"
-		return status, nil
-	}
-
-	status.Phase = "components"
+	// Tasks are GitHub issues now (no component_tasks table). The status phase
+	// stops at "tasks" once a design exists; the console derives per-Task detail
+	// live from the tasks API (§8). HasTasks is left false here — a live GitHub
+	// count on every status poll is not worth the request.
+	status.Phase = "tasks"
 	return status, nil
 }
 

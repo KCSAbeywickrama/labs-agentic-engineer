@@ -16,11 +16,18 @@
  * under the License.
  */
 
-// Client for /api/v1/org/idp (org derived from the verified JWT). Backs the
-// Org Settings → IDP Integration page. Read-only in v1 (the BFF
-// provisions everything from `api.security: required` on a component's
-// design.md). Phase 7 adds a `kind` picker that flips a row into
-// asgardeo / custom and re-issues keymanager entries.
+// Client for the org's IDP profile, exposed as the `idp` section of the
+// consolidated GET/PATCH /api/v1/config resource plus its discovery + client-
+// secret action routes (docs/design/org-config-consolidation.md). Org derived
+// from the verified JWT. Backs the Org Settings → IDP Integration page.
+//
+// This wrapper preserves its public surface (getProfile/updateProfile/
+// discoverIssuer/rotateSecret returning OrgIDPProfile) so the page is
+// unchanged; internally it reads/writes the `idp` section of /config. Unlike
+// the legacy PUT (empty-means-keep), PATCH /config replaces the section
+// wholesale — the page already round-trips all three fields, so this is
+// transparent. The idp section is always present (platform default), so the
+// legacy kind=null "no profile yet" state no longer occurs.
 
 import { env } from '../../config/env';
 import { ApiError } from './rest';
@@ -51,6 +58,10 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
       const parsed = JSON.parse(body);
       if (parsed.message) message = parsed.message;
       if (parsed.error) message = parsed.error;
+      // RFC-9457 problem (the /config surface): prefer the section-pointed
+      // errors[] message, else the top-level detail.
+      if (parsed.detail) message = parsed.detail;
+      if (parsed.errors?.[0]?.message) message = parsed.errors[0].message;
       if (parsed.code) code = parsed.code;
     } catch {
       /* use raw body */
@@ -64,19 +75,14 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface OrgIDPProfile {
-  id?: string;
-  orgId: string;
+  orgId?: string;
   kind?: 'platform' | 'asgardeo' | 'custom' | null;
   issuer?: string;
   jwksUrl?: string;
   publisherClientId?: string;
-  publisherSecretRef?: string;
-  adminCredsSecretRef?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  // "No profile yet" path — the BFF returns
-  // {orgId, kind:null, message:"..."} and the page renders a
-  // pre-provisioning explanatory state.
+  hasClientSecret?: boolean;
+  // Legacy "no profile yet" field — the /config idp section is always present
+  // (platform default), so this is no longer populated.
   message?: string;
 }
 
@@ -95,47 +101,64 @@ export interface DiscoverIssuerResponse {
   jwksUrl: string;
 }
 
+// The `idp` section of GET/PATCH /config (always present).
+interface ConfigIDPSection {
+  kind: 'platform' | 'asgardeo' | 'custom';
+  issuer: string;
+  jwksUrl: string;
+  publisherClientId: string;
+  hasClientSecret: boolean;
+}
+
+interface ConfigProjection {
+  idp: ConfigIDPSection;
+}
+
+function profileFromIDP(idp: ConfigIDPSection): OrgIDPProfile {
+  return {
+    kind: idp.kind,
+    issuer: idp.issuer,
+    jwksUrl: idp.jwksUrl,
+    publisherClientId: idp.publisherClientId,
+    hasClientSecret: idp.hasClientSecret,
+  };
+}
+
 export const orgIDPApi = {
-  /** Read the org's IDP profile. Always succeeds — empty profile is
-   * represented by kind=null. */
+  /** Read the org's IDP profile (the `idp` section of /config, always present). */
   async getProfile(): Promise<OrgIDPProfile> {
-    const raw = await fetchJSON<OrgIDPProfile | { data: OrgIDPProfile }>(
-      `/api/v1/org/idp`,
-    );
-    return (raw as { data?: OrgIDPProfile }).data ?? (raw as OrgIDPProfile);
+    const config = await fetchJSON<ConfigProjection>(`/api/v1/config`);
+    return profileFromIDP(config.idp);
   },
 
-  /** Update kind / issuer / jwksUrl. Empty fields leave existing
-   * values unchanged. Switching kind invalidates the publisher app —
-   * next protected-component reconcile provisions a fresh one in the
-   * new IDP. */
+  /** Update kind / issuer / jwksUrl via PATCH /config {idp}. The section is
+   * replaced wholesale (kind=platform restores the cluster defaults). Switching
+   * kind invalidates the publisher app — next protected-component reconcile
+   * provisions a fresh one in the new IDP. */
   async updateProfile(req: UpdateProfileRequest): Promise<OrgIDPProfile> {
-    const raw = await fetchJSON<OrgIDPProfile | { data: OrgIDPProfile }>(
-      `/api/v1/org/idp`,
-      { method: 'PUT', body: JSON.stringify(req) },
-    );
-    return (raw as { data?: OrgIDPProfile }).data ?? (raw as OrgIDPProfile);
+    const config = await fetchJSON<ConfigProjection>(`/api/v1/config`, {
+      method: 'PATCH',
+      body: JSON.stringify({ idp: { kind: req.kind, issuer: req.issuer, jwksUrl: req.jwksUrl } }),
+    });
+    return profileFromIDP(config.idp);
   },
 
   /** OIDC discovery helper — given an issuer URL, returns the JWKS URL
    * from /.well-known/openid-configuration. Used by the BYO-IDP form
    * to auto-populate the JWKS URL field. */
   async discoverIssuer(issuer: string): Promise<DiscoverIssuerResponse> {
-    const raw = await fetchJSON<DiscoverIssuerResponse | { data: DiscoverIssuerResponse }>(
-      `/api/v1/org/idp/discovery?issuer=${encodeURIComponent(issuer)}`,
+    return fetchJSON<DiscoverIssuerResponse>(
+      `/api/v1/config/idp/discovery?issuer=${encodeURIComponent(issuer)}`,
     );
-    return (raw as { data?: DiscoverIssuerResponse }).data ?? (raw as DiscoverIssuerResponse);
   },
 
-  /** Rotate the publisher client secret. Returns the new secret — the
-   * caller is responsible for surfacing it once and reminding the
-   * operator to copy it (subsequent GETs only show has-secret state).
-   */
+  /** Rotate the publisher client secret via POST /config/idp/client-secret.
+   * Returns the new secret — the caller surfaces it once (subsequent GETs only
+   * show has-secret state). */
   async rotateSecret(): Promise<RotateSecretResponse> {
-    const raw = await fetchJSON<RotateSecretResponse | { data: RotateSecretResponse }>(
-      `/api/v1/org/idp/rotate`,
+    return fetchJSON<RotateSecretResponse>(
+      `/api/v1/config/idp/client-secret`,
       { method: 'POST' },
     );
-    return (raw as { data?: RotateSecretResponse }).data ?? (raw as RotateSecretResponse);
   },
 };

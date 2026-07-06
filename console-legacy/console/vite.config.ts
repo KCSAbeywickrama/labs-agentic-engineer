@@ -28,6 +28,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
+    // Scope vitest to the component/unit suites under `src/`. The `test/`
+    // directory is the node:test SSE-cassette suite (run via `test:cassettes`,
+    // a separate runner) — vitest must NOT collect those.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
     server: {
       deps: {
         // @wso2/oxygen-ui uses prismjs with CJS extension-less imports that

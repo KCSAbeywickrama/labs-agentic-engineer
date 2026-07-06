@@ -362,3 +362,13 @@ func TestSplitAssembleDesign_ComponentRoundTrip(t *testing.T) {
 		t.Fatalf("dependency round-trip drifted: %+v", got.Dependencies)
 	}
 }
+
+// keysOf returns the (unsorted) keys of a file map — a test helper for
+// diagnostics when an expected path is missing.
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

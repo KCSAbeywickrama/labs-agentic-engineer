@@ -170,6 +170,28 @@ func TestRepoRepository_ListAllReady(t *testing.T) {
 	}
 }
 
+// TestRepoRepository_ListAll returns every row across orgs and ALL statuses —
+// the disk reaper's orphan pass must see pending/error rows too, or their
+// dirs would be misread as orphans.
+func TestRepoRepository_ListAll(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := repositories.NewRepoRepository(db)
+	ctx := context.Background()
+
+	mkRepo(t, repo, &models.GitRepository{OrgID: "orga", ProjectID: "p1", RepoURL: "https://github.com/a/p1", Status: "ready"})
+	mkRepo(t, repo, &models.GitRepository{OrgID: "orgb", ProjectID: "p2", RepoURL: "https://github.com/b/p2", Status: "pending"})
+	mkRepo(t, repo, &models.GitRepository{OrgID: "orga", ProjectID: "p3", RepoURL: "https://github.com/a/p3", Status: "error"})
+
+	got, err := repo.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want all 3 rows regardless of status; got %d (%+v)", len(got), got)
+	}
+}
+
 // TestRepoRepository_Update round-trips a full-row Save.
 func TestRepoRepository_Update(t *testing.T) {
 	t.Parallel()
@@ -179,7 +201,7 @@ func TestRepoRepository_Update(t *testing.T) {
 
 	r := mkRepo(t, repo, &models.GitRepository{OrgID: "orga", ProjectID: "proj", RepoURL: "https://github.com/a/proj", Status: "pending"})
 	r.Status = "ready"
-	r.ClonePath = "/data/clones/a-proj"
+	r.DefaultBranch = "trunk"
 	if err := repo.Update(ctx, r); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -187,7 +209,7 @@ func TestRepoRepository_Update(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("reload: %v / %v", got, err)
 	}
-	if got.Status != "ready" || got.ClonePath != "/data/clones/a-proj" {
+	if got.Status != "ready" || got.DefaultBranch != "trunk" {
 		t.Fatalf("Update did not persist: %+v", got)
 	}
 }

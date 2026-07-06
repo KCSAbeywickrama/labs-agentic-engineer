@@ -35,11 +35,12 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 
 	wantOps := []string{
 		"list-projects", "list-organizations", "list-components", "get-component-config",
-		"get-requirements", "get-collab-session", "get-design", "list-tasks", "get-board",
-		"get-idp-profile", "get-github-status", "get-anthropic-status", "collect-dependency-spec",
-		"list-external-resources", "delete-external-resource", "save-external-resource-values",
-		"provision-dependency", "get-dependency-status",
-		"create-access-request", "list-access-requests",
+		"get-requirements", "get-collab-session", "get-design-bundle",
+		// Tasks-github-native surface (§9.1): the board/dispatch/retry ops are gone.
+		"list-tasks", "get-task", "plan-tasks", "execute-task", "hold-task", "unhold-task",
+		"get-execution-progress",
+		// Consolidated org-config surface (replaces the Anthropic/GitHub/IDP tag groups).
+		"get-config", "update-config", "list-skills",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {

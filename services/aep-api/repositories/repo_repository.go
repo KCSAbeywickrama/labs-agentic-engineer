@@ -36,6 +36,12 @@ type RepoRepository interface {
 	// arrives. Bounded by the table size; not paginated because the
 	// caller bounds concurrency separately.
 	ListAllReady(ctx context.Context) ([]models.GitRepository, error)
+	// ListAll returns every repo row across all orgs and ALL statuses. The
+	// disk reaper's orphan reconciliation set-differences the on-disk mirror
+	// tree against this — pending/error rows must be included so their dirs
+	// are not misread as orphans. Bounded by the table size, like
+	// ListAllReady.
+	ListAll(ctx context.Context) ([]models.GitRepository, error)
 	Create(ctx context.Context, repo *models.GitRepository) error
 	Update(ctx context.Context, repo *models.GitRepository) error
 	// DeleteByOrgAndProjectID deletes the repo row scoped to (ocOrgID,
@@ -91,6 +97,14 @@ func (r *repoRepository) ListAllReady(ctx context.Context) ([]models.GitReposito
 	if err := r.db.WithContext(ctx).
 		Where("status = ?", "ready").
 		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *repoRepository) ListAll(ctx context.Context) ([]models.GitRepository, error) {
+	var rows []models.GitRepository
+	if err := r.db.WithContext(ctx).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil

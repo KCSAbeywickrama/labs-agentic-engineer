@@ -34,7 +34,7 @@ export const mainSuite: EvalSuite = {
   fixturesDir: join(here, "fixtures"),
   defaultSeed: SEED_FILES,
   // Repo-root `skills/` (services/agents/evals/main → up four). The harness reads
-  // the whole library and pushes it on every turn (ADR-0002).
+  // the whole library and materializes it into the fixture `_skills` snapshot (§12).
   skillsDir: join(here, "..", "..", "..", "..", "skills"),
 };
 

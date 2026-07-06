@@ -34,40 +34,9 @@ import {
 import { ArrowLeft, Clock, PlugZap } from '@wso2/oxygen-ui-icons-react';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '../services/api';
-import type { ComponentDefinition, ComponentTask, Project } from '../services/api';
+import type { ComponentDefinition, TaskView, Project } from '../services/api';
 import { componentDetailPath, organizationOverviewPath, projectArchitecturePath } from '../lib/paths';
-
-// ---------------------------------------------------------------------------
-// Status helpers (compute display status from pipeline sub-statuses)
-// ---------------------------------------------------------------------------
-
-type ChipColor = 'default' | 'primary' | 'warning' | 'success' | 'error' | 'info';
-
-function computeDisplayStatus(task: ComponentTask): { label: string; color: ChipColor } {
-  switch (task.status) {
-    case 'failed':
-      return { label: 'Failed', color: 'error' };
-    case 'rejected':
-      return { label: 'Rejected', color: 'error' };
-    case 'deployed':
-      return { label: 'Deployed', color: 'success' };
-    case 'building':
-      return { label: 'Building', color: 'primary' };
-    case 'merged':
-      return { label: 'Merged', color: 'primary' };
-    case 'ready_for_review':
-      return { label: 'Ready for Review', color: 'info' };
-    case 'in_progress':
-      return { label: 'Implementing', color: 'warning' };
-    case 'pending':
-      return { label: 'Pending', color: 'default' };
-  }
-  return { label: 'Unknown', color: 'default' };
-}
-
-const ocStatusConfig: Record<string, { label: string; color: ChipColor }> = {
-  created: { label: 'Created', color: 'default' },
-};
+import { displayStatus, IN_FLIGHT_TASK_STATUSES } from '../components/tasks/types';
 
 // ---------------------------------------------------------------------------
 // Last Updated cell
@@ -103,7 +72,7 @@ export default function ProjectComponentsPage({ statusBanner }: ProjectComponent
 
   const [project, setProject] = useState<Project | undefined>();
   const [components, setComponents] = useState<ComponentDefinition[]>([]);
-  const [tasks, setTasks] = useState<ComponentTask[]>([]);
+  const [tasks, setTasks] = useState<TaskView[]>([]);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
@@ -126,13 +95,7 @@ export default function ProjectComponentsPage({ statusBanner }: ProjectComponent
 
   // Poll while any task is active in the pipeline
   useEffect(() => {
-    const hasActive = tasks.some((t) =>
-      t.status === 'pending' ||
-      t.status === 'in_progress' ||
-      t.status === 'ready_for_review' ||
-      t.status === 'merged' ||
-      t.status === 'building'
-    );
+    const hasActive = tasks.some((t) => IN_FLIGHT_TASK_STATUSES.has(t.derivedStatus));
     if (hasActive) {
       intervalRef.current = setInterval(async () => {
         if (!projectId) return;
@@ -146,9 +109,9 @@ export default function ProjectComponentsPage({ statusBanner }: ProjectComponent
   }, [tasks, projectId, routeOrgId]);
 
   // Build maps: componentName → task, componentName → OC component
-  const taskMap = new Map<string, ComponentTask>();
+  const taskMap = new Map<string, TaskView>();
   for (const t of tasks) {
-    taskMap.set(t.componentName, t);
+    if (t.component) taskMap.set(t.component, t);
   }
   const componentMap = new Map<string, ComponentDefinition>();
   for (const c of components) {
@@ -157,7 +120,7 @@ export default function ProjectComponentsPage({ statusBanner }: ProjectComponent
 
   // Merge: rows for all unique component names from both tasks and OC components.
   const allNames = new Set<string>();
-  for (const t of tasks) allNames.add(t.componentName);
+  for (const t of tasks) if (t.component) allNames.add(t.component);
   for (const c of components) allNames.add(c.name);
   const rows = Array.from(allNames).map((name) => ({
     name,
@@ -251,12 +214,10 @@ export default function ProjectComponentsPage({ statusBanner }: ProjectComponent
 
             <ListingTable.Body>
               {rows.map(({ name, task, component }) => {
-                const displayStatus = task
-                  ? computeDisplayStatus(task)
-                  : ocStatusConfig[component?.status ?? ''] ?? { label: 'Created', color: 'default' as const };
+                const statusChip = displayStatus(task?.derivedStatus ?? component?.status ?? 'created');
                 const summary = component?.responsibilities ?? '';
                 const techStack = component?.techStack ?? '';
-                const updatedAt = task?.updatedAt ?? component?.updatedAt;
+                const updatedAt = component?.updatedAt;
 
                 return (
                   <ListingTable.Row
@@ -306,8 +267,8 @@ export default function ProjectComponentsPage({ statusBanner }: ProjectComponent
 
                     <ListingTable.Cell>
                       <Chip
-                        label={displayStatus.label}
-                        color={displayStatus.color}
+                        label={statusChip.label}
+                        color={statusChip.color}
                         size="small"
                         variant="outlined"
                       />

@@ -139,7 +139,7 @@ export function App() {
           <Route path="requirements" element={<ProjectRequirementsPage />} />
           <Route path="architecture" element={<ProjectArchitecturePage />} />
           <Route path="tasks" element={<ProjectTasksPage />} />
-          <Route path="tasks/:taskId" element={<TaskDetailPage />} />
+          <Route path="tasks/:issueNumber" element={<TaskDetailPage />} />
           <Route path="implementation-plan" element={<Navigate to="../tasks" replace />} />
           <Route path="implementation" element={<Navigate to="../tasks" replace />} />
           <Route path="spec" element={<Navigate to="../requirements" replace />} />

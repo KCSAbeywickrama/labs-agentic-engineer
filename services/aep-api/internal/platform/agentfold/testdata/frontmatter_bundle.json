@@ -1,0 +1,979 @@
+[
+ {
+  "name": "set-new-string",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: Hello\n---\nBody text.\n",
+  "args": [
+   "status",
+   "draft"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: Hello\nstatus: draft\n---\nBody text.\n"
+ },
+ {
+  "name": "replace-existing",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: Hello\nstatus: old\n---\nBody text.\n",
+  "args": [
+   "status",
+   "new"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: Hello\nstatus: new\n---\nBody text.\n"
+ },
+ {
+  "name": "preserve-order",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\nb: 2\na: 1\nc: 3\n---\nBody text.\n",
+  "args": [
+   "a",
+   "mid"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\nb: 2\na: mid\nc: 3\n---\nBody text.\n"
+ },
+ {
+  "name": "set-array",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "skillsApplied",
+   [
+    "high-level-architecture",
+    "openapi-conventions"
+   ]
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nskillsApplied:\n  - high-level-architecture\n  - openapi-conventions\n---\nBody text.\n"
+ },
+ {
+  "name": "replace-array",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntags:\n  - a\n  - b\n---\nBody text.\n",
+  "args": [
+   "tags",
+   [
+    "x"
+   ]
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntags:\n  - x\n---\nBody text.\n"
+ },
+ {
+  "name": "set-empty-array",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "tags",
+   []
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\ntags: []\n---\nBody text.\n"
+ },
+ {
+  "name": "set-number-int",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "version",
+   3
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nversion: 3\n---\nBody text.\n"
+ },
+ {
+  "name": "set-number-float",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "version",
+   2.5
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nversion: 2.5\n---\nBody text.\n"
+ },
+ {
+  "name": "set-bool",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "stable",
+   true
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nstable: true\n---\nBody text.\n"
+ },
+ {
+  "name": "set-string-true",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "flag",
+   "true"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nflag: \"true\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-string-int",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "id",
+   "042"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nid: \"042\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-empty-string",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   ""
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: \"\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-colon-string",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "a: b"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: \"a: b\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-lead-space",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "  padded"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: \"  padded\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-quotes",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "it's a \"note\""
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: it's a \"note\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-multiline",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "line one\nline two"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: |-\n  line one\n  line two\n---\nBody text.\n"
+ },
+ {
+  "name": "set-crlf-value",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "a\r\nb"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: \"a\\r\\nb\"\n---\nBody text.\n"
+ },
+ {
+  "name": "set-long-value",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "description",
+   "The quick brown fox jumps over the lazy dog and keeps going through the forest at pace"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\ndescription: The quick brown fox jumps over the lazy dog and keeps going through\n  the forest at pace\n---\nBody text.\n"
+ },
+ {
+  "name": "normalizes-quoted-source",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: 'Hello: World'\ncount: 0x1A\nempty:\n---\nBody text.\n",
+  "args": [
+   "x",
+   "y"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: \"Hello: World\"\ncount: 26\nempty: null\nx: y\n---\nBody text.\n"
+ },
+ {
+  "name": "normalizes-flow-seq",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntags: [a, b]\n---\nBody text.\n",
+  "args": [
+   "x",
+   "y"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntags:\n  - a\n  - b\nx: y\n---\nBody text.\n"
+ },
+ {
+  "name": "source-literal-block",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\nnote: |\n  line one\n  line two\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "x",
+   "y"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\nnote: |\n  line one\n  line two\ntitle: T\nx: y\n---\nBody text.\n"
+ },
+ {
+  "name": "source-anchored-scalar",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\na: &anc hello\nb: *anc\n---\nBody text.\n",
+  "args": [
+   "x",
+   "y"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\na: hello\nb: hello\nx: y\n---\nBody text.\n"
+ },
+ {
+  "name": "empty-fence",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\n\n---\nBody text.\n",
+  "args": [
+   "only",
+   "field"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\nonly: field\n---\nBody text.\n"
+ },
+ {
+  "name": "scalar-fence-replaced",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\njust a scalar\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\nk: v\n---\nBody text.\n"
+ },
+ {
+  "name": "null-fence-replaced",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\n~\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\nk: v\n---\nBody text.\n"
+ },
+ {
+  "name": "proto-key-dropped",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "__proto__",
+   "x"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\n---\nBody text.\n"
+ },
+ {
+  "name": "no-frontmatter",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "# Just markdown\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "code": "NO_FRONTMATTER",
+   "message": "specs/requirements/requirements.md has no leading --- frontmatter fence; use editFile instead."
+  },
+  "after": "# Just markdown\n"
+ },
+ {
+  "name": "fence-not-leading",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "\n---\na: 1\n---\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "code": "NO_FRONTMATTER",
+   "message": "specs/requirements/requirements.md has no leading --- frontmatter fence; use editFile instead."
+  },
+  "after": "\n---\na: 1\n---\n"
+ },
+ {
+  "name": "crlf-fence-canonicalized",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\r\ntitle: T\r\n---\r\nBody.\r\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nk: v\n---\nBody.\n"
+ },
+ {
+  "name": "invalid-fence-yaml",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\na: [unclosed\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "code": "INVALID_YAML",
+   "message": "existing frontmatter is not valid YAML: Flow sequence in block collection must be sufficiently indented and end with a ] at line 1, column 13:\n\na: [unclosed\n            ^\n"
+  },
+  "after": "---\na: [unclosed\n---\nBody text.\n"
+ },
+ {
+  "name": "dup-keys-fence",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\na: 1\na: 2\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "code": "INVALID_YAML",
+   "message": "existing frontmatter is not valid YAML: Map keys must be unique at line 2, column 1:\n\na: 1\na: 2\n^\n"
+  },
+  "after": "---\na: 1\na: 2\n---\nBody text.\n"
+ },
+ {
+  "name": "tab-indent-fence",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\na:\n\tb: 1\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "code": "INVALID_YAML",
+   "message": "existing frontmatter is not valid YAML: Tabs are not allowed as indentation at line 2, column 1:\n\na:\n\tb: 1\n^\n"
+  },
+  "after": "---\na:\n\tb: 1\n---\nBody text.\n"
+ },
+ {
+  "name": "nested-map-source",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\nmeta:\n  owner: me\n  level: 2\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\nmeta:\n  owner: me\n  level: 2\nk: v\n---\nBody text.\n"
+ },
+ {
+  "name": "unicode-value",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "🎉 fête"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: 🎉 fête\n---\nBody text.\n"
+ },
+ {
+  "name": "UNSUPPORTED-seq-fence",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\n- a\n- b\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\n- a\n- b\n---\nBody text.\n"
+ },
+ {
+  "name": "UNSUPPORTED-longline-multiline",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "note",
+   "short\nword word word word word word word word word word word word word word word word word word word word word word word word word end"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\ntitle: T\nnote: >-\n  short\n\n  word word word word word word word word word word word word word word word\n  word word word word word word word word word word end\n---\nBody text.\n"
+ },
+ {
+  "name": "UNSUPPORTED-int-key",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "7",
+   "x"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\n\"7\": x\ntitle: T\n---\nBody text.\n"
+ },
+ {
+  "name": "UNSUPPORTED-int-key-in-source",
+  "path": "specs/requirements/requirements.md",
+  "op": "frontmatter",
+  "content": "---\n0: zero\nz: last\n---\nBody text.\n",
+  "args": [
+   "k",
+   "v"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/requirements/requirements.md",
+   "op": "frontmatter",
+   "status": "applied"
+  },
+  "after": "---\n\"0\": zero\nz: last\nk: v\n---\nBody text.\n"
+ },
+ {
+  "name": "guard-add-valid-yaml",
+  "path": "specs/design/components/x/openapi.yaml",
+  "op": "add",
+  "content": null,
+  "args": [
+   "openapi: 3.0.0\ninfo:\n  title: X\n"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/design/components/x/openapi.yaml",
+   "op": "add",
+   "status": "applied"
+  },
+  "after": "openapi: 3.0.0\ninfo:\n  title: X\n"
+ },
+ {
+  "name": "guard-add-invalid-yaml",
+  "path": "specs/design/components/x/openapi.yaml",
+  "op": "add",
+  "content": null,
+  "args": [
+   "openapi: [unclosed\n"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/x/openapi.yaml",
+   "op": "add",
+   "code": "INVALID_YAML",
+   "message": "specs/design/components/x/openapi.yaml would not be valid YAML: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:\n\nopenapi: [unclosed\n\n^\n"
+  },
+  "after": null
+ },
+ {
+  "name": "guard-add-dup-keys",
+  "path": "x.yaml",
+  "op": "add",
+  "content": null,
+  "args": [
+   "a: 1\na: 2\n"
+  ],
+  "result": {
+   "ok": false,
+   "path": "x.yaml",
+   "op": "add",
+   "code": "INVALID_YAML",
+   "message": "x.yaml would not be valid YAML: Map keys must be unique at line 2, column 1:\n\na: 1\na: 2\n^\n"
+  },
+  "after": null
+ },
+ {
+  "name": "guard-add-multidoc",
+  "path": "x.yaml",
+  "op": "add",
+  "content": null,
+  "args": [
+   "a: 1\n---\nb: 2\n"
+  ],
+  "result": {
+   "ok": false,
+   "path": "x.yaml",
+   "op": "add",
+   "code": "INVALID_YAML",
+   "message": "x.yaml would not be valid YAML: Source contains multiple documents; please use YAML.parseAllDocuments() at line 2, column 1:\n\na: 1\n---\n^\n"
+  },
+  "after": null
+ },
+ {
+  "name": "guard-add-tab-indent",
+  "path": "x.yaml",
+  "op": "add",
+  "content": null,
+  "args": [
+   "a:\n\tb: 1\n"
+  ],
+  "result": {
+   "ok": false,
+   "path": "x.yaml",
+   "op": "add",
+   "code": "INVALID_YAML",
+   "message": "x.yaml would not be valid YAML: Tabs are not allowed as indentation at line 2, column 1:\n\na:\n\tb: 1\n^\n"
+  },
+  "after": null
+ },
+ {
+  "name": "guard-edit-breaks-fence",
+  "path": "doc.md",
+  "op": "edit",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "title: T",
+   "title: [broken"
+  ],
+  "result": {
+   "ok": false,
+   "path": "doc.md",
+   "op": "edit",
+   "code": "INVALID_YAML",
+   "message": "Edit rejected — result would not be valid YAML: Flow sequence in block collection must be sufficiently indented and end with a ] at line 1, column 15:\n\ntitle: [broken\n              ^\n. The file is unchanged; fix the indentation of newString and retry."
+  },
+  "after": "---\ntitle: T\n---\nBody text.\n"
+ },
+ {
+  "name": "guard-edit-valid-fence",
+  "path": "doc.md",
+  "op": "edit",
+  "content": "---\ntitle: T\n---\nBody text.\n",
+  "args": [
+   "title: T",
+   "title: Updated"
+  ],
+  "result": {
+   "ok": true,
+   "path": "doc.md",
+   "op": "edit",
+   "status": "applied"
+  },
+  "after": "---\ntitle: Updated\n---\nBody text.\n"
+ },
+ {
+  "name": "guard-md-body-not-yaml-checked",
+  "path": "doc.md",
+  "op": "edit",
+  "content": "# no fence\n",
+  "args": [
+   "no fence",
+   "not yaml: [unclosed here"
+  ],
+  "result": {
+   "ok": true,
+   "path": "doc.md",
+   "op": "edit",
+   "status": "applied"
+  },
+  "after": "# not yaml: [unclosed here\n"
+ },
+ {
+  "name": "gate-design-valid",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "status": "applied"
+  },
+  "after": "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+ },
+ {
+  "name": "gate-design-invalid-json",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{ not json"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "INVALID_JSON",
+   "message": "specs/design/components/api-service/design.json is not valid JSON: Expected property name or '}' in JSON at position 2 (line 1 column 3). Re-emit the whole file."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-missing-field",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — entrypoint: Invalid input: expected string, received undefined."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-unknown-field",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\",\n  \"extra\": \"x\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — (root): Unrecognized key: \"extra\"."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-empty-field",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — language: Too small: expected string to have >=1 characters."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-bad-enum",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"public\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — exposure: Invalid option: expected one of \"internet\"|\"intranet\"."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-bad-connection",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"grpc\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — connections.0.type: Invalid option: expected one of \"http\"|\"datastore\"|\"connector\"."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-conn-extra-field",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"api-service\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true,\n      \"via\": \"x\"\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — connections.0: Unrecognized key: \"via\"."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-name-mismatch",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{\n  \"name\": \"other-name\",\n  \"type\": \"service\",\n  \"version\": \"1.0\",\n  \"language\": \"go\",\n  \"buildpack\": \"go\",\n  \"appPath\": \".\",\n  \"entrypoint\": \"main.go\",\n  \"exposure\": \"internet\",\n  \"connections\": [\n    {\n      \"to\": \"db\",\n      \"type\": \"datastore\",\n      \"onPlatform\": true\n    }\n  ],\n  \"description\": \"The API.\"\n}"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json: \"name\" must equal the component directory (\"api-service\"), got \"other-name\"."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-root-array",
+  "path": "specs/design/components/api-service/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "[1,2]"
+  ],
+  "result": {
+   "ok": false,
+   "path": "specs/design/components/api-service/design.json",
+   "op": "add",
+   "code": "SCHEMA_VIOLATION",
+   "message": "specs/design/components/api-service/design.json violates the ComponentDesign schema — (root): Invalid input: expected object, received array."
+  },
+  "after": null
+ },
+ {
+  "name": "gate-design-non-component-path",
+  "path": "specs/design/design.json",
+  "op": "add",
+  "content": null,
+  "args": [
+   "{ \"free\": \"form\" }"
+  ],
+  "result": {
+   "ok": true,
+   "path": "specs/design/design.json",
+   "op": "add",
+   "status": "applied"
+  },
+  "after": "{ \"free\": \"form\" }"
+ }
+]

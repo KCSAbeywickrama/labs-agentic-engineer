@@ -2,7 +2,7 @@
 
 A lighter alternative to `deployments-v2/` (which uses WSO2 Cloud's Flux/kustomize layered model). v1 runs the same code, but:
 
-- **Long-lived services** (BFF, git-service, agents-service, console, postgres, smee-client) run in `docker compose`.
+- **Long-lived services** (BFF, agents, console, postgres, smee-client) run in `docker compose`.
 - **Coding-agent** runs as one-shot pods via the same `aep-coding-agent` ClusterWorkflow as v2 (`manifests/aep-coding-agent.yaml`).
 - **Builds** use the `dockerfile-builder` ClusterWorkflow (`manifests/docker-build-workflow.yaml`); the build pod's `generate-workload-cr` step exchanges OAuth tokens at Thunder via the `openchoreo-workload-publisher-client` we bootstrap.
 - **OpenChoreo + Thunder + OpenBao + ESO + kgateway** are installed via direct `helm install`s — no Flux.
@@ -27,8 +27,8 @@ bash scripts/start.sh
 
 ```
 ┌─────────────────────── docker compose ───────────────────────┐
-│ console (nginx)  aep-api  git-service  agents-service       │
-│        :8090         :9090       :3300           :3400        │
+│ console (nginx)  aep-api  agents                             │
+│        :8090         :9090     :4000                          │
 │                                                               │
 │ postgres :5433  smee-client (relays smee.io → aep-api)      │
 └───────────────────────────┬───────────────────────────────────┘

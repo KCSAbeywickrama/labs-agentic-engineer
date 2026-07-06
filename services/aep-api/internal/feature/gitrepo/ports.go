@@ -36,61 +36,13 @@ import (
 // never cross a service boundary. All ports/types are stateless and
 // concurrency-safe.
 //
-// The sentinels the implementations must return (ErrRefNotFastForward,
-// ErrTagAlreadyExists, ErrRepoNameConflict, ...) and the wire DTOs
-// (TreeEntry, IssueResult, CommitObject, ...) are part of this contract —
-// see errors.go and wire.go. conflict_retry.go and the orgcreds validator key
-// off the sentinels, so any provider impl MUST reproduce them.
-
-// GitData is the git-object surface (blobs / trees / commits / refs / tags)
-// that the artifacts save flow drives. GitLab's Repository/Commits/Refs APIs
-// map onto it directly. Consumed via gitOpsService's GitData() accessor by
-// feature/artifacts (save_via_api) and feature/skills (repo_store).
-type GitData interface {
-	// GetRef returns the tip SHA of a ref. `ref` is the ref name without
-	// "refs/" prefix (e.g. "heads/main" or "tags/v1").
-	GetRef(ctx context.Context, owner, repo string, cred credentials.Credential, ref string) (string, error)
-
-	// GetCommit returns the tree SHA and parents of a commit object.
-	GetCommit(ctx context.Context, owner, repo string, cred credentials.Credential, sha string) (*CommitObject, error)
-
-	// GetTree returns the entries of a tree object. `recursive=true` walks
-	// nested trees in one call (capped by GitHub at ~100k entries).
-	GetTree(ctx context.Context, owner, repo string, cred credentials.Credential, treeSHA string, recursive bool) (*TreeObject, error)
-
-	// GetBlob returns the raw (decoded) content of a blob object by SHA.
-	// Returns an HTTPStatusError wrapping 404 when the blob is absent.
-	GetBlob(ctx context.Context, owner, repo string, cred credentials.Credential, sha string) ([]byte, error)
-
-	// CreateBlob stores raw content as a blob and returns its SHA.
-	CreateBlob(ctx context.Context, owner, repo string, cred credentials.Credential, content []byte) (string, error)
-
-	// CreateTree assembles a tree from `baseTree` plus a partial overlay of
-	// entries. Entries with empty SHA represent deletions (sha: null on the
-	// wire); GitHub returns 422 if the deleted path is absent in baseTree.
-	CreateTree(ctx context.Context, owner, repo string, cred credentials.Credential, baseTree string, entries []TreeEntry) (string, error)
-
-	// CreateCommit creates a commit object pointing at the given tree.
-	CreateCommit(ctx context.Context, owner, repo string, cred credentials.Credential, req CreateCommitRequest) (string, error)
-
-	// UpdateRef atomically advances a ref to `sha`. With `force=false` the
-	// call is fast-forward-only — non-FF moves return ErrRefNotFastForward.
-	UpdateRef(ctx context.Context, owner, repo string, cred credentials.Credential, ref, sha string, force bool) error
-
-	// CreateTagObject creates an annotated tag object pointing at `objectSHA`
-	// (typically a commit). Returns the tag object's SHA; the caller still
-	// needs CreateTagRef to make the tag visible.
-	CreateTagObject(ctx context.Context, owner, repo string, cred credentials.Credential, req CreateTagObjectRequest) (string, error)
-
-	// CreateTagRef creates the refs/tags/<name> ref pointing at the supplied
-	// tag-object SHA. Returns ErrTagAlreadyExists if another writer has
-	// claimed the name.
-	CreateTagRef(ctx context.Context, owner, repo string, cred credentials.Credential, tagName, tagObjectSHA string) error
-
-	// ListMatchingRefs lists all refs under the given prefix (e.g. "tags/v").
-	// Returns an empty slice (not 404) when no refs match.
-	ListMatchingRefs(ctx context.Context, owner, repo string, cred credentials.Credential, prefix string) ([]MatchingRef, error)
-}
+// The sentinels the implementations must return (ErrRepoNameConflict,
+// HTTPStatusError codes, ...) and the wire DTOs (IssueResult, IssueInfo,
+// GitHubUser, ...) are part of this contract — see errors.go and wire.go.
+// The orgcreds validator keys off the sentinels, so any provider impl MUST
+// reproduce them. Repo CONTENT (blobs/trees/commits/refs/tags) never goes
+// through these ports: it runs on the Workspace engine (workspace.go /
+// internal/platform/gitfs).
 
 // RepoAdmin is the repository-lifecycle surface. Consumed by repoService
 // (CreateRepo / EnsureBareRepo). Repo delete/get are DB operations in
@@ -118,6 +70,24 @@ type IssueOps interface {
 	// Used by the tech-lead detail phase to write the LLM-authored body
 	// after the placeholder issue was created.
 	EditIssueBody(ctx context.Context, owner, repo string, cred credentials.Credential, number int, body string) error
+	// EditIssueTitle replaces the issue title via PATCH /issues/{number}.
+	// Used by the plan tap when a planned Task is renamed (updateTask).
+	EditIssueTitle(ctx context.Context, owner, repo string, cred credentials.Credential, number int, title string) error
+	// AddIssueLabels adds labels to an existing issue (merges with current;
+	// adding a present label is a no-op). Used to stamp aep:status/* projection
+	// and aep:attention flags.
+	AddIssueLabels(ctx context.Context, owner, repo string, cred credentials.Credential, number int, labels []string) error
+	// RemoveIssueLabel removes one label from an issue. A 404 (already absent)
+	// is treated as success. Used to consume the aep:execute command label and
+	// clear stale aep:status/* projections.
+	RemoveIssueLabel(ctx context.Context, owner, repo string, cred credentials.Credential, number int, label string) error
+	// SetIssueLabels replaces the issue's entire label set (labels absent from
+	// the slice are removed). Used by block-repair projection when the full set
+	// must be authoritative.
+	SetIssueLabels(ctx context.Context, owner, repo string, cred credentials.Credential, number int, labels []string) error
+	// GetPullRequest returns a pull request's live state (open/closed + merged +
+	// merge SHA) for the sweep's PR-state reconciliation (§5).
+	GetPullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) (*PullRequestState, error)
 }
 
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.
@@ -125,23 +95,12 @@ type WebhookOps interface {
 	// RegisterWebhook installs a repository webhook delivering to deliveryURL,
 	// signed with hmacSecret. Returns the host-assigned hook ID.
 	RegisterWebhook(ctx context.Context, owner, repo string, cred credentials.Credential, deliveryURL, hmacSecret string, events []string) (hookID int64, err error)
-}
-
-// BoardOps is the project-board surface (GitHub Projects v2). On GitHub this is
-// GraphQL, folded inside the same client as an implementation detail — the
-// REST-vs-GraphQL split does not leak past this port. Consumed by issueService
-// (lazy board create + add issue) and repoBoardService (read + move).
-//
-// The `pat` string signatures are preserved from the original v2 client
-// (behavior-preserving); the caller mints the token and passes it through.
-type BoardOps interface {
-	// GetOrgID returns the node ID for a GitHub organization (required for project mutations).
-	GetOrgID(ctx context.Context, org, pat string) (nodeID string, err error)
-	CreateGitHubV2Project(ctx context.Context, orgID, pat, title string) (projectID string, err error)
-	LinkProjectToRepository(ctx context.Context, githubProjectID, owner, repo, pat string) error
-	GetProjectBoard(ctx context.Context, githubProjectID, pat string) (*ProjectBoardResult, error)
-	AddIssueToProject(ctx context.Context, githubProjectID, issueNodeID, pat string) error
-	MoveProjectItemToStatus(ctx context.Context, githubProjectID, issueURL, targetStatus, pat string) error
+	// UpdateWebhookEvents replaces the subscribed-event list of an existing repo
+	// webhook (PATCH /hooks/{id}). RegisterWebhook's already-exists path returns
+	// a pre-existing hook without touching its events, so a hook created before
+	// "issues" joined the subscription must be PATCHed to add it
+	// (docs/design/tasks-github-native.md §9.2 cutover).
+	UpdateWebhookEvents(ctx context.Context, owner, repo string, cred credentials.Credential, hookID int64, events []string) error
 }
 
 // AppInstallOps is the GitHub-App installation lifecycle + credential-account
@@ -195,10 +154,8 @@ type AppInstallOps interface {
 // GIT_PROVIDER and threads it into each domain service, where it narrows to the
 // port that service consumes. clients/github's *Client satisfies Host.
 type Host interface {
-	GitData
 	RepoAdmin
 	IssueOps
 	WebhookOps
-	BoardOps
 	AppInstallOps
 }

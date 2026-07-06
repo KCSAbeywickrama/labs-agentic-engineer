@@ -14,11 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package skills embeds the bundled built-in SKILL.md files into the BFF
-// binary so SkillBootstrap.Run() can UPSERT them into the `skills` table
-// at startup without depending on a checked-out source tree.
+// Package skills embeds the platform-bundled skill sources shipped in the
+// aep-api binary — the shipping vehicle; each org's `org-skills` repo is the
+// live store they are seeded + version-reconciled into (skills-repo-storage.md
+// §6/§10, shared-volume-clone-architecture.md §17.8):
 //
-// See docs/design/skills-system.md > "Bootstrap".
+//   - builtin/  — coding-agent skills (kind "builtin"), listed on the skills
+//     page, SKILL.md only.
+//   - flow/     — generation flow skills (kind "flow"), hidden from the skills
+//     page; SKILL.md + references/*.md. Vendored from the repo-root skills/
+//     directory (the single source of truth, which cannot be go:embed-ed
+//     across the module boundary) — keep in sync via `go generate`. The genai
+//     feature carries its own vendored copy (internal/feature/genai/assets)
+//     that it pushes inline until Phase 4 reads everything from _skills
+//     snapshots.
 package skills
 
 import "embed"
@@ -26,15 +35,6 @@ import "embed"
 //go:embed builtin/*/SKILL.md
 var BuiltinFS embed.FS
 
-// PlannerFS carries the planner-facing built-in skills that are NOT part of the
-// design-attachable catalogue and are never bootstrapped into the `skills`
-// table. Today this is the `task-breakdown` skill the BFF pushes on every
-// task-planner plan/detail call (mirrors how BuiltinFS backs the architect's
-// builtins, but pushed on the wire directly rather than via the DB catalogue).
-// See docs/design/skills-system.md and skills/task-breakdown/SKILL.md.
-//
-//go:embed planner/task-breakdown/SKILL.md
-var PlannerFS embed.FS
-
-// TaskBreakdownSkillPath is the embedded path of the task-breakdown SKILL.md.
-const TaskBreakdownSkillPath = "planner/task-breakdown/SKILL.md"
+//go:generate sh -c "rm -rf flow && cp -R ../../../skills flow"
+//go:embed flow
+var FlowFS embed.FS
