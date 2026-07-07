@@ -24,6 +24,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 	"github.com/wso2/aep/aep-api/internal/platform/ocerr"
 	"github.com/wso2/aep/aep-api/internal/platform/validate"
@@ -160,6 +161,8 @@ func mapProjectError(err error) error {
 		return huma.Error404NotFound("project not found")
 	case errors.Is(err, ErrForbidden):
 		return huma.Error403Forbidden("insufficient permissions to perform this action")
+	case gitrepo.IsRepoNameConflict(err):
+		return huma.Error409Conflict("a repository with this name already exists — choose another repository name")
 	}
 	if status, ok := ocerr.Status(err); ok {
 		return humakit.ErrorFromStatus(status, err.Error())

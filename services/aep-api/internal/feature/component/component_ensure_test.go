@@ -33,7 +33,7 @@ type ensureRepoSvc struct{ repo *models.GitRepository }
 func (r ensureRepoSvc) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
 	return r.repo, nil
 }
-func (ensureRepoSvc) CreateRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+func (ensureRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
 	panic("CreateRepo not expected")
 }
 func (ensureRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {

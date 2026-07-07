@@ -36,7 +36,7 @@ func TestCreateRepo_HappyPathMarksReady(t *testing.T) {
 	repo := newFakeRepoRepo()
 	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
-	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project")
+	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project", "")
 	if err != nil {
 		t.Fatalf("CreateRepo: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCreateRepo_IsIdempotentOnExistingRow(t *testing.T) {
 	stub := gittest.NewStub(t) // no create route registered — must NOT be hit
 	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
-	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project")
+	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project", "")
 	if err != nil {
 		t.Fatalf("CreateRepo: %v", err)
 	}
@@ -95,12 +95,62 @@ func TestCreateRepo_ErrorPropagatesAndCreatesNoRow(t *testing.T) {
 	repo := newFakeRepoRepo()
 	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
-	_, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project")
+	_, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project", "")
 	if err == nil || !strings.Contains(err.Error(), "create github repo") || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("err = %v, want a create-github-repo 403 error", err)
 	}
 	if r, _ := repo.GetByOrgAndProjectID(testContext(), "org1", "proj1"); r != nil {
 		t.Fatalf("a repo row was created despite the GitHub failure: %+v", r)
+	}
+}
+
+func TestCreateRepo_ExplicitRepoNameUsedVerbatim(t *testing.T) {
+	t.Parallel()
+	stub := gittest.NewStub(t)
+	stub.On(http.MethodPost, "/orgs/test-org/repos", http.StatusCreated,
+		`{"clone_url":"https://github.com/test-org/exact-repo.git"}`)
+
+	repo := newFakeRepoRepo()
+	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
+
+	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project", "exact-repo")
+	if err != nil {
+		t.Fatalf("CreateRepo: %v", err)
+	}
+	if got.RepoURL != "https://github.com/test-org/exact-repo.git" {
+		t.Fatalf("row url = %q, want the exact-name clone_url", got.RepoURL)
+	}
+
+	// A user-chosen repo name is used VERBATIM — no random suffix.
+	req := onlyRequest(t, stub.Requests(), http.MethodPost, "/orgs/test-org/repos")
+	var body struct {
+		Name string `json:"name"`
+	}
+	decodeBody(t, req.Body, &body)
+	if body.Name != "exact-repo" {
+		t.Fatalf("repo name = %q, want exact-repo verbatim", body.Name)
+	}
+}
+
+func TestCreateRepo_ExplicitRepoNameConflictFailsWithoutRetry(t *testing.T) {
+	t.Parallel()
+	stub := gittest.NewStub(t)
+	stub.On(http.MethodPost, "/orgs/test-org/repos", http.StatusUnprocessableEntity,
+		`{"message":"name already exists on this account"}`)
+
+	repo := newFakeRepoRepo()
+	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
+
+	_, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project", "taken-repo")
+	if !gitrepo.IsRepoNameConflict(err) {
+		t.Fatalf("err = %v, want the ErrRepoNameConflict sentinel to survive", err)
+	}
+	// The name was chosen by the user — retrying with suffixes would betray it.
+	if n := len(stub.Requests()); n != 1 {
+		t.Fatalf("GitHub called %d times, want exactly 1 (no suffix retries)", n)
+	}
+	if r, _ := repo.GetByOrgAndProjectID(testContext(), "org1", "proj1"); r != nil {
+		t.Fatalf("a repo row was created despite the conflict: %+v", r)
 	}
 }
 

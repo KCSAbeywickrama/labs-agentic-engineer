@@ -31,7 +31,11 @@ import (
 
 // RepoService manages git repository lifecycle (create, get, delete).
 type RepoService interface {
-	CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error)
+	// CreateRepo provisions the project's GitHub repo. repoName == "" derives
+	// the name from projectName plus a random suffix (retrying on conflict);
+	// a non-empty repoName is user-chosen and used VERBATIM — a name conflict
+	// fails with ErrRepoNameConflict instead of being suffixed away.
+	CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error)
 	// EnsureBareRepo idempotently provisions a private repo with a STABLE name
 	// (no random suffix) and NO local clone — used for the per-org skills repo
 	// (sentinel projectID, e.g. "_skills"). AutoInit gives it a `main` branch +
@@ -91,8 +95,8 @@ func NewRepoService(
 	return s
 }
 
-func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error) {
-	slog.InfoContext(ctx, "creating repository", "org", orgID, "project", projectID, "name", projectName)
+func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
+	slog.InfoContext(ctx, "creating repository", "org", orgID, "project", projectID, "name", projectName, "repoName", repoName)
 	if orgID == "" {
 		return nil, fmt.Errorf("orgID is required")
 	}
@@ -116,10 +120,22 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 		return nil, fmt.Errorf("resolve credential for org %q: %w", orgID, err)
 	}
 
-	slug := slugifyProjectName(projectName)
 	description := fmt.Sprintf("WSO2 Labs Agentic Engineer project %s", projectName)
 
-	repoName, cloneURL, err := s.createGitHubRepoWithRetry(ctx, cred, slug, description)
+	var cloneURL string
+	if repoName != "" {
+		// User-chosen name: create it VERBATIM. A conflict propagates
+		// (ErrRepoNameConflict survives the wrap) — suffixing a name the user
+		// picked would silently betray it.
+		cloneURL, err = s.github.CreateOrgRepo(ctx, cred, CreateOrgRepoRequest{
+			Name:        repoName,
+			Private:     strings.EqualFold(s.repoVis, "private"),
+			AutoInit:    true,
+			Description: description,
+		})
+	} else {
+		repoName, cloneURL, err = s.createGitHubRepoWithRetry(ctx, cred, slugifyProjectName(projectName), description)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create github repo: %w", err)
 	}

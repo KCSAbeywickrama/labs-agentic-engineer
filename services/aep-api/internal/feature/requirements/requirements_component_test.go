@@ -74,7 +74,7 @@ func (f *fakeCollabRepos) GetRepo(ctx context.Context, orgID, projectID string) 
 	}
 	return f.GetRepoFunc(ctx, orgID, projectID)
 }
-func (f *fakeCollabRepos) CreateRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+func (f *fakeCollabRepos) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
 	panic("fakeCollabRepos: CreateRepo not expected")
 }
 func (f *fakeCollabRepos) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
