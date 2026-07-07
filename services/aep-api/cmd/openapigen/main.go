@@ -14,15 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command openapigen writes the code-first OpenAPI documents. Same code path
-// as the live GET /openapi.yaml routes. Run via `make openapi` (wired into the
-// root `make gen`); paths are relative to services/aep-api.
-//
-//   - The PUBLIC spec (/api/v1) goes to packages/contracts/api/v1/openapi.yaml
-//     and is COMMITTED — it is the published contract consumers codegen from.
-//     `make openapi-check` fails if the committed copy drifts from the code.
-//   - The INTERNAL (S2S) spec goes to build/ (gitignored) — offline tooling
-//     only, not a published contract.
 package main
 
 import (
