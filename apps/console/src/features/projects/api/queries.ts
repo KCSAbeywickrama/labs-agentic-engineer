@@ -147,17 +147,15 @@ export function useCreateProject() {
 }
 
 // The connected GitHub org, for the repo-URL preview in the create flow.
-// get-github-status is untyped in the contract (issue #72 asks the BFF to
-// firm this up), so the org is read defensively from the likely fields.
+// Read from the consolidated org-config projection (GET /config replaced
+// /org/credentials/github when the contract consolidated org config).
 export function useGithubOrg() {
   return useQuery({
     queryKey: githubKeys.status,
     queryFn: async () => {
-      const { data, error } = await client.GET("/org/credentials/github");
+      const { data, error } = await client.GET("/config");
       if (error || !data) return null;
-      const status = data as Record<string, unknown>;
-      const org = status.org ?? status.owner ?? status.login;
-      return typeof org === "string" && org ? org : null;
+      return data.gitProvider.githubLogin ?? null;
     },
     staleTime: 5 * 60_000,
     retry: false,
