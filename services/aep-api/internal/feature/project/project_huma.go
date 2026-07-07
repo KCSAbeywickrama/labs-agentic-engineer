@@ -26,6 +26,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 	"github.com/wso2/aep/aep-api/internal/platform/ocerr"
+	"github.com/wso2/aep/aep-api/internal/platform/validate"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -85,6 +86,14 @@ func RegisterProject(api huma.API, svc ProjectService) {
 	}, func(ctx context.Context, in *createProjectInput) (*projectOutput, error) {
 		if in.Body.Name == "" {
 			return nil, huma.Error400BadRequest("name is required")
+		}
+		// repoName becomes a GitHub repo name verbatim — enforce the slug rule
+		// here so GitHub can't silently normalize it into a repo whose actual
+		// name diverges from what we store.
+		if in.Body.RepoName != "" {
+			if err := validate.Slug(in.Body.RepoName); err != nil {
+				return nil, huma.Error400BadRequest("repoName: " + err.Error())
+			}
 		}
 		p, err := svc.CreateProject(ctx, in.OrgHandle, &in.Body)
 		if err != nil {

@@ -149,7 +149,11 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 
 	// Provision + clone the platform-owned git repo (async — polling via GetRepoStatus).
 	if s.repoSvc != nil {
-		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, req.Name)
+		repoName := req.Name
+		if req.RepoName != "" {
+			repoName = req.RepoName
+		}
+		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, repoName)
 		if createErr != nil {
 			slog.ErrorContext(ctx, "failed to provision repo", "project", project.Name, "error", createErr)
 			// Don't fail project creation — clone happens async and can be retried.

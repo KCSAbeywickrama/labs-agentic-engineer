@@ -284,6 +284,32 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 	}
 }
 
+func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{
+		CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
+			return &models.Project{Name: req.Name, NamespaceName: org}, nil
+		},
+	}
+	var repoProject, repoName string
+	repoSvc := &fakeRepoSvc{
+		CreateRepoFunc: func(_ context.Context, _, projectID, projectName string) (*models.GitRepository, error) {
+			repoProject, repoName = projectID, projectName
+			return &models.GitRepository{Status: "ready"}, nil
+		},
+	}
+	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{}, nil, nil, nil)
+
+	req := &models.CreateProjectRequest{Name: "gym", RepoName: "gym-repo", Prompt: "a workout tracker"}
+	if _, err := svc.CreateProject(context.Background(), "acme", req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The OC project keeps the project name; only the git repo gets the override.
+	if repoProject != "gym" || repoName != "gym-repo" {
+		t.Fatalf("CreateRepo args: got (project=%q repo=%q), want (gym, gym-repo)", repoProject, repoName)
+	}
+}
+
 func TestCreateProject_OCErrorShortCircuits(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ProjectClientMock{

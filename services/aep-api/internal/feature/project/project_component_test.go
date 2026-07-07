@@ -153,6 +153,31 @@ func TestProjectComponent_CreateValidationAndHappyPath(t *testing.T) {
 	if len(calls) != 1 || calls[0].OrgName != "acme" || calls[0].Req.Name != "web" {
 		t.Fatalf("OC create call: got %+v", calls)
 	}
+
+	// prompt + repoName are contract fields the console sends (issue #72 /
+	// #98): huma must accept them, and they must survive into the service's
+	// request. prompt is not consumed yet; repoName overrides the provisioned
+	// repo's name (asserted at the service tier).
+	resp = h.AsOrg("acme").Post("/api/v1/projects",
+		`{"name":"gym","prompt":"a workout tracker","repoName":"gym-repo"}`)
+	if resp.Code != 201 {
+		t.Fatalf("create with prompt+repoName: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	calls = oc.CreateProjectCalls()
+	last := calls[len(calls)-1]
+	if last.Req.Prompt != "a workout tracker" || last.Req.RepoName != "gym-repo" {
+		t.Fatalf("prompt/repoName lost in transit: got %+v", last.Req)
+	}
+
+	// repoName that isn't a DNS-label slug → the handler guard's 400 (GitHub
+	// would otherwise silently normalize it, diverging from the stored name).
+	resp = h.AsOrg("acme").Post("/api/v1/projects", `{"name":"web2","repoName":"Bad Name!"}`)
+	if resp.Code != 400 {
+		t.Fatalf("bad repoName: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if p := decodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "repoName") {
+		t.Fatalf("400 detail should name repoName: got %q", p.Detail)
+	}
 }
 
 func TestProjectComponent_GetMapsNotFoundToGoldenProblem(t *testing.T) {
