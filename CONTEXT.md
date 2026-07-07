@@ -64,7 +64,7 @@ is out of scope today).
 **Caller identity** — _retired_:
 Formerly an implicit per-component flag describing who calls a service's API.
 Superseded by the explicit Thunder application dependency: a design.json still
-carrying the field is rejected on write, not silently migrated.
+carrying the field is rejected on parse, not silently migrated.
 _Avoid_: reviving `callerIdentity` as a design.json key — it no longer parses.
 
 ## Tasks

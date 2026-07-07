@@ -19,6 +19,7 @@ compile error, not a runtime surprise.
 | `services/` | long-lived deployables (Go + TS) | yes |
 | `runners/` | one-shot / job images | as jobs |
 | `packages/` | shared libraries (`contracts`, `core`, `ui`, `clients`, `agent`) | no |
+| `operators/` | Kubernetes operators (`thunder-app-operator`) | yes (in-cluster) |
 | `deployments/` | canonical local setup (k3d + docker-compose) | n/a |
 
 ## Data & contract ownership
