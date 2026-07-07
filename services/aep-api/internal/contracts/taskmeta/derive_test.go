@@ -33,6 +33,9 @@ func TestDerive(t *testing.T) {
 	ops := func(s ExecutionStatus, mins int) ExecutionFact {
 		return ExecutionFact{Kind: KindOps, Status: s, CreatedAt: at(mins)}
 	}
+	provision := func(s ExecutionStatus, mins int) ExecutionFact {
+		return ExecutionFact{Kind: KindProvision, Status: s, CreatedAt: at(mins)}
+	}
 
 	tests := []struct {
 		name  string
@@ -91,6 +94,19 @@ func TestDerive(t *testing.T) {
 		{"ops running", GitHubFacts{IssueOpen: true}, []ExecutionFact{ops(ExecRunning, 0)}, StatusInProgress},
 		{"ops failed", GitHubFacts{IssueOpen: true}, []ExecutionFact{ops(ExecFailed, 0)}, StatusFailed},
 		{"ops succeeded is deployed", GitHubFacts{IssueOpen: true}, []ExecutionFact{ops(ExecSucceeded, 0)}, StatusDeployed},
+
+		// provision gate issues — the aep:provision issue is CLOSED on success by
+		// the readiness watcher (§3.6), so a closed issue backed by a succeeded
+		// provision must derive DEPLOYED, not abandoned. This is what unblocks a
+		// dependent coding Task's dispatch gate; the earlier bug returned abandoned
+		// (closed-check fired first) and hung the consumer forever.
+		{"open provision succeeded is deployed", GitHubFacts{IssueOpen: true}, []ExecutionFact{provision(ExecSucceeded, 0)}, StatusDeployed},
+		{"CLOSED provision succeeded is deployed (gate closed-on-success, §3.6)", GitHubFacts{IssueOpen: false}, []ExecutionFact{provision(ExecSucceeded, 0)}, StatusDeployed},
+		{"CLOSED ops succeeded is deployed", GitHubFacts{IssueOpen: false}, []ExecutionFact{ops(ExecSucceeded, 0)}, StatusDeployed},
+		// a declined provision (issue closed WITHOUT a succeeded run) is still abandoned.
+		{"closed provision with no succeeded run is abandoned", GitHubFacts{IssueOpen: false}, []ExecutionFact{provision(ExecFailed, 0)}, StatusAbandoned},
+		// hold still wins over a succeeded provision.
+		{"hold beats deployed provision", GitHubFacts{IssueOpen: false, HoldPresent: true}, []ExecutionFact{provision(ExecSucceeded, 0)}, StatusOnHold},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

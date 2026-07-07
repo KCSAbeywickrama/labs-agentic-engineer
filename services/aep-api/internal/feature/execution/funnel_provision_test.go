@@ -87,6 +87,32 @@ func TestFunnel_ProvisionDepDeployed_Dispatches(t *testing.T) {
 	}
 }
 
+// The readiness watcher CLOSES the aep:provision gate issue on success (§3.6
+// close-with-reference), so the dispatch gate must still see a CLOSED issue
+// backed by a succeeded provision as deployed. The earlier bug derived a closed
+// issue as abandoned (never deployed), hanging the consumer's dispatch forever —
+// caught live on a fresh cluster, not by the "open"-issue test above.
+func TestFunnel_ProvisionDepDeployed_ClosedIssue_Dispatches(t *testing.T) {
+	store := newFakeStore()
+	markProvisionDeployed(store, 1, "orders-db") // platform resource provisioned + issue closed
+
+	issues := newFakeIssues([]gitrepo.IssueInfo{
+		provisionIssue(1, "orders-db", taskmeta.GateResourceProvisioning, "closed"),
+		taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open"),
+	})
+	exec := &fakeExecutor{store: store, startOK: true}
+	f := newTestFunnelP(store, issues,
+		map[string]bool{"order-service": true},
+		map[string][]string{"order-service": {"orders-db"}}, exec)
+
+	if err := f.OnExecuteIntent(context.Background(), "o/r", 2); err != nil {
+		t.Fatalf("OnExecuteIntent: %v", err)
+	}
+	if len(exec.got) != 1 {
+		t.Fatalf("a CLOSED provision issue backed by a succeeded run must still dispatch the consumer, got %d", len(exec.got))
+	}
+}
+
 func TestFunnel_ProvisionDepPending_Queues(t *testing.T) {
 	store := newFakeStore()
 	// The provision issue exists but is NOT deployed (no succeeded provision row).
