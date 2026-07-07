@@ -1,0 +1,94 @@
+# thunder-app — sample platform-resource ClusterResourceType (P5).
+#
+# Installed by the local deployments/ scripts (acting as the cluster PE would);
+# app-factory's BFF only DISCOVERS and REFERENCES this type — it never authors a
+# ClusterResourceType (see p5-constraints "app-factory authors only the Resource +
+# binding"). This is the concrete `resourceType` an architect's platform-resource
+# dependency names (resourceType == ClusterResourceType.metadata.name == "thunder-app").
+#
+# It renders a `ThunderApplication` (aep.wso2.com/v1alpha1) — a namespaced CR the
+# thunder-app-operator reconciles into a real OAuth app on the platform Thunder
+# IdP. On success the operator writes a ConfigMap `<cr-name>-oauth` with key
+# `client_id` and sets `status.ready=true`. The Resource model resolves
+# `${metadata.name}` to a hashed render name (e.g. `r-<binding>-<hash>`); the
+# operator names the `-oauth` ConfigMap off that same object name, so the
+# `${metadata.name}-oauth` output ref lines up.
+#
+# CEL context (per OC 1.1.1 ResourceType CRD docs): readyWhen/outputs are evaluated
+# against metadata.*, parameters.*, environmentConfigs.*, dataplane.*, and — once the
+# manifest is applied — applied.<id>.status.* (the rendered object's live status).
+---
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterResourceType
+metadata:
+  name: thunder-app
+spec:
+  retainPolicy: Delete
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        displayName:
+          type: string
+          default: ""
+        scopes:
+          type: string
+          # Space-separated OAuth scopes (the operator forwards them verbatim to
+          # Thunder). Defaults to the standard OIDC set.
+          default: "openid profile email"
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        redirectUris:
+          type: string
+          # Comma-separated allowed redirect URIs; platform-managed (the BFF fills
+          # this per environment). Defaults to empty so an unset env config renders
+          # a bare "" rather than erroring on the ${environmentConfigs.redirectUris}
+          # substitution.
+          default: ""
+  resources:
+    - id: app
+      # readyWhen gates the binding's ResourcesReady/Ready on the operator having
+      # actually minted the OAuth app on Thunder — not merely on a successful
+      # apply. OC 1.1.1's getUnknownResourceHealth returns `Healthy`
+      # UNCONDITIONALLY for unknown Kinds (a foreign CRD like ThunderApplication),
+      # so WITHOUT this gate the binding flips Ready=True at APPLY time — before
+      # the client_id exists — and a consumer would bind against an OAuth app that
+      # is not yet registered.
+      #
+      # OC 1.1.1 copies the foreign CRD's live `status` into `applied.<id>.status`
+      # every reconcile, so `applied.app.status.ready` is available once the
+      # operator writes it. The `has()` chain makes both the pre-APPLY window (the
+      # `applied.app` key does not exist yet) and the pre-READY window (status
+      # object exists but `.ready` not yet written) evaluate to `false` cleanly —
+      # fail-closed until the operator reports ready.
+      readyWhen: '${has(applied.app) && has(applied.app.status) && has(applied.app.status.ready) && applied.app.status.ready}'
+      template:
+        apiVersion: aep.wso2.com/v1alpha1
+        kind: ThunderApplication
+        metadata:
+          name: ${metadata.name}
+          namespace: ${metadata.namespace}
+          labels: ${metadata.labels}
+        spec:
+          displayName: ${parameters.displayName}
+          scopes: ${parameters.scopes}
+          redirectUris: ${environmentConfigs.redirectUris}
+  outputs:
+    # client_id is resolved from the operator-written `<cr-name>-oauth` ConfigMap
+    # as a reference (the data-plane agent reads the ConfigMap via its EXISTING
+    # core-group grant — no explicit configmaps grant is added in the RBAC file).
+    - name: client_id
+      configMapKeyRef:
+        name: ${metadata.name}-oauth
+        key: client_id
+    # Plain coordinates — exposed as values (the BFF surfaces them un-masked). The
+    # issuer/jwks_url are the browser-reachable Thunder addresses (they match the
+    # compose PLATFORM_IDP_ISSUER host thunder.openchoreo.localhost:8080).
+    - name: issuer
+      value: http://thunder.openchoreo.localhost:8080
+    - name: jwks_url
+      value: http://thunder.openchoreo.localhost:8080/oauth2/jwks
+    - name: scopes
+      value: ${parameters.scopes}

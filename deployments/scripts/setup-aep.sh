@@ -571,6 +571,17 @@ helm upgrade --install thunder-app-operator \
     --set image.pullPolicy=Never
 echo "✅ thunder-app-operator installed (ns: thunder-app-operator-system)"
 
+# ── Sample platform-resource: thunder-app ClusterResourceType (P5) ──────────
+# Companion to the operator above: the type an architect's platform-resource
+# dependency names to get an OAuth app. thunder-app renders a `ThunderApplication`
+# (aep.wso2.com/v1alpha1) which the operator reconciles into a real Thunder app;
+# its RBAC grant lets OC's data-plane agent apply that foreign CRD into the `dp-*`
+# namespace (without it, provisioning fails with a
+# `thunderapplications.aep.wso2.com is forbidden` denial).
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/thunder-app-rbac.yaml"
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/thunder-app-resourcetype.yaml"
+echo "✅ ClusterResourceType 'thunder-app' + thunder-app data-plane RBAC created"
+
 # ── Per-org NAMESPACED ComponentTypes (local stand-in for cloud's
 #    platform-api ProvisionOrgUnit) ────────────────────────────────────────
 # The BFF references the per-org namespaced ComponentType (kind=ComponentType),
