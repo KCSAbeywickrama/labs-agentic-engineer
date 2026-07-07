@@ -163,7 +163,9 @@ export interface SkillSyncResponse {
 // ----------------------------------------------------------------------------
 
 function orgSkills(): string {
-  return `/api/v1/org/skills`;
+  // The org is implicit from the JWT — the org-config consolidation dropped the
+  // redundant /org prefix across the surface (docs/design/org-config-consolidation.md §2a).
+  return `/api/v1/skills`;
 }
 
 export const orgSkillsApi = {

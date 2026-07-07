@@ -1,22 +1,20 @@
 {
   "name": "apply-skill",
-  "description": "Progressive disclosure: agent loads the relevant skill and derives a component per its convention (ADR-0002).",
+  "description": "Progressive disclosure: agent loads the architecture skill and derives a component per its design.json convention (ADR-0002, post-#70).",
   "difficulty": "medium",
   "turns": [
     {
-      "prompt": "Derive a new backend component named `notifier` — a Go service that sends user notifications. Follow our component architecture skill for where the spec lives and what frontmatter it needs."
+      "prompt": "Derive a new backend component named `notifier` — a Go service that sends notification emails to users. Follow our architecture skill for where a component's structured facts live and what they must contain."
     }
   ],
   "expect": {
     "toolsUsed": ["loadSkill"],
-    "filesContain": [
-      { "path": "specs/design/components/notifier/design.md", "text": "type: service" },
-      { "path": "specs/design/components/notifier/design.md", "text": "buildpack: docker" }
-    ],
     "fileMatches": [
-      { "path": "specs/design/components/notifier/design.md", "pattern": "language:\\s*Go" }
+      { "path": "specs/design/components/notifier/design.json", "pattern": "\"name\"\\s*:\\s*\"notifier\"" },
+      { "path": "specs/design/components/notifier/design.json", "pattern": "\"type\"\\s*:\\s*\"service\"" },
+      { "path": "specs/design/components/notifier/design.json", "pattern": "\"buildpack\"\\s*:\\s*\"docker\"" },
+      { "path": "specs/design/components/notifier/design.json", "pattern": "\"language\"\\s*:\\s*\"Go\"" }
     ],
-    "touched": ["specs/design/components/notifier/design.md"],
-    "noToolErrors": true
+    "touched": ["specs/design/components/notifier/design.json"]
   }
 }

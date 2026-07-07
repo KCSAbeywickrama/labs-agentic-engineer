@@ -17,17 +17,12 @@
 package gitrepo
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/models"
@@ -54,26 +49,46 @@ type RepoService interface {
 }
 
 type repoService struct {
-	repo         repositories.RepoRepository
-	github       RepoAdmin
-	resolver     credentials.Resolver
-	repoVis      string
-	repoBasePath string
+	repo     repositories.RepoRepository
+	github   RepoAdmin
+	resolver credentials.Resolver
+	repoVis  string
+	// workspaceTrash, when set (from the composition root), renames the
+	// repo's on-disk workspace subtree into trash after the DB row is
+	// deleted — phase 1 of the two-phase disk delete (design §14/D12).
+	// Best-effort by contract: it returns nothing and must never fail the
+	// caller; the reaper's orphan pass is the correctness backstop.
+	workspaceTrash func(ctx context.Context, orgID, projectID, repoSlug string)
+}
+
+// RepoServiceOption customizes NewRepoService wiring without churning its
+// positional signature.
+type RepoServiceOption func(*repoService)
+
+// WithWorkspaceTrash installs the best-effort disk-trash hook DeleteRepo
+// fires after a successful DB delete. nil-safe (a nil fn leaves the hook
+// unset).
+func WithWorkspaceTrash(fn func(ctx context.Context, orgID, projectID, repoSlug string)) RepoServiceOption {
+	return func(s *repoService) { s.workspaceTrash = fn }
 }
 
 func NewRepoService(
 	repo repositories.RepoRepository,
 	github RepoAdmin,
 	resolver credentials.Resolver,
-	repoVisibility, repoBasePath string,
+	repoVisibility string,
+	opts ...RepoServiceOption,
 ) RepoService {
-	return &repoService{
-		repo:         repo,
-		github:       github,
-		resolver:     resolver,
-		repoVis:      repoVisibility,
-		repoBasePath: repoBasePath,
+	s := &repoService{
+		repo:     repo,
+		github:   github,
+		resolver: resolver,
+		repoVis:  repoVisibility,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error) {
@@ -109,8 +124,6 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 		return nil, fmt.Errorf("create github repo: %w", err)
 	}
 
-	clonePath := filepath.Join(s.repoBasePath, orgID, projectID)
-
 	// Compute the per-repo slug from the GitHub clone URL — used by
 	// StageBuildSecret to validate (ocOrgId, repoSlug) ownership. The
 	// build credential itself is now pre-staged per WorkflowRun directly
@@ -119,13 +132,16 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 	// name is computed here; OcSecretRefName is left nil on new rows.
 	repoSlug := models.SlugForURL(cloneURL)
 
+	// The repo is ready the moment GitHub has it: reads/writes/tags go through
+	// the Git Data API (docs/design/agents-generation-migration.md §5), so there
+	// is no local clone to warm and no "cloning" state to wait through.
 	gitRepo := &models.GitRepository{
-		OrgID:     orgID,
-		ProjectID: projectID,
-		RepoURL:   cloneURL,
-		ClonePath: clonePath,
-		Status:    "cloning",
-		RepoSlug:  repoSlug,
+		OrgID:         orgID,
+		ProjectID:     projectID,
+		RepoURL:       cloneURL,
+		DefaultBranch: "main", // AutoInit gives the repo a main branch + base tree
+		Status:        "ready",
+		RepoSlug:      repoSlug,
 	}
 
 	if err := s.repo.Create(ctx, gitRepo); err != nil {
@@ -134,8 +150,6 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 
 	slog.InfoContext(ctx, "created platform repo",
 		"owner", cred.RepoOwner(), "name", repoName, "project", projectID, "org", orgID)
-
-	go s.performClone(orgID, projectID, cloneURL, clonePath)
 
 	return gitRepo, nil
 }
@@ -250,126 +264,17 @@ func (s *repoService) DeleteRepo(ctx context.Context, orgID, projectID string) e
 		return ErrRepoNotFound
 	}
 
-	if repo.ClonePath != "" {
-		if err := os.RemoveAll(repo.ClonePath); err != nil {
-			slog.ErrorContext(ctx, "failed to remove clone directory", "path", repo.ClonePath, "error", err)
-		}
-	}
-
 	if err := s.repo.DeleteByOrgAndProjectID(ctx, orgID, projectID); err != nil {
 		return fmt.Errorf("delete repo record: %w", err)
 	}
+
+	// Best-effort disk cleanup AFTER the DB delete succeeded: rename the
+	// workspace subtree into trash (O(1); open fds keep working — design
+	// §14). The hook logs its own failures and never fails this call.
+	if s.workspaceTrash != nil {
+		s.workspaceTrash(ctx, orgID, projectID, repo.WorkspaceSlug())
+	}
 	return nil
-}
-
-func (s *repoService) performClone(orgID, projectID, repoURL, clonePath string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	slog.Info("cloning repository", "project", projectID, "url", repoURL, "path", clonePath)
-
-	if err := os.MkdirAll(filepath.Dir(clonePath), 0o755); err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("create directory: %v", err))
-		return
-	}
-
-	cred, err := s.resolver.Resolve(ctx, orgID)
-	if err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("resolve credential: %v", err))
-		return
-	}
-	token, _, err := cred.Token(ctx)
-	if err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("token: %v", err))
-		return
-	}
-
-	askPassScript, err := createAskPassScript(token)
-	if err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("create askpass script: %v", err))
-		return
-	}
-	defer os.Remove(askPassScript)
-
-	cmd := exec.CommandContext(ctx, "git", "clone", repoURL, clonePath)
-	cmd.Env = append(os.Environ(),
-		"GIT_ASKPASS="+askPassScript,
-		"GIT_TERMINAL_PROMPT=0",
-	)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := stderr.String()
-		if strings.Contains(errMsg, "Authentication") || strings.Contains(errMsg, "could not read Username") {
-			s.updateRepoStatus(orgID, projectID, "error", "authentication failed — check platform PAT")
-		} else {
-			s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("clone failed: %s", errMsg))
-		}
-		return
-	}
-
-	defaultBranch := detectDefaultBranch(clonePath)
-
-	repo, err := s.repo.GetByOrgAndProjectID(context.Background(), orgID, projectID)
-	if err != nil || repo == nil {
-		slog.Error("failed to update repo after clone", "project", projectID, "error", err)
-		return
-	}
-
-	repo.Status = "ready"
-	repo.DefaultBranch = defaultBranch
-	if err := s.repo.Update(context.Background(), repo); err != nil {
-		slog.Error("failed to update repo status", "project", projectID, "error", err)
-	}
-
-	slog.Info("repository cloned successfully", "project", projectID, "branch", defaultBranch)
-}
-
-func (s *repoService) updateRepoStatus(orgID, projectID, status, errorMsg string) {
-	repo, err := s.repo.GetByOrgAndProjectID(context.Background(), orgID, projectID)
-	if err != nil || repo == nil {
-		slog.Error("failed to find repo for status update", "project", projectID, "error", err)
-		return
-	}
-	repo.Status = status
-	repo.ErrorMessage = errorMsg
-	if err := s.repo.Update(context.Background(), repo); err != nil {
-		slog.Error("failed to update repo status", "project", projectID, "error", err)
-	}
-}
-
-func createAskPassScript(pat string) (string, error) {
-	f, err := os.CreateTemp("", "git-askpass-*.sh")
-	if err != nil {
-		return "", err
-	}
-	_, err = f.WriteString(fmt.Sprintf("#!/bin/sh\necho '%s'\n", pat))
-	if err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	f.Close()
-	if err := os.Chmod(f.Name(), 0o700); err != nil {
-		os.Remove(f.Name())
-		return "", err
-	}
-	return f.Name(), nil
-}
-
-func detectDefaultBranch(repoPath string) string {
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return "main"
-	}
-	branch := strings.TrimSpace(string(out))
-	if branch == "" {
-		return "main"
-	}
-	return branch
 }
 
 var repoSlugInvalid = regexp.MustCompile(`[^a-z0-9-]+`)

@@ -17,16 +17,16 @@
  */
 
 /**
- * Requirements-chat panel. Replaces the v0 hardcoded mock with a real SSE
- * consumer that streams turns from the BFF (POST /requirements/chat).
+ * Requirements-chat panel — committed-truth model (shared-volume-clone D13/D16).
  *
- * Responsibilities:
- *   - Send chat turn + render assistant text deltas + tool cards.
- *   - Persist history to localStorage via chatStore (per project).
- *   - Publish file-write events to ProjectRequirementsPage via the page
- *     event bus so the editor refreshes from the BFF-authoritative
- *     content on each tool result.
- *   - Surface per-turn Undo on the user bubble.
+ * A multi-turn conversation against the resumable turn endpoints. Each send is
+ * `startTurn` (instruction only — no file payload; the backend snapshots HEAD)
+ * followed by `attachTurnStream`, whose display-only fold streams assistant
+ * text and tool cards into this panel and live file snapshots onto the
+ * turn-activity bus (the requirements page mirrors them). When the terminal
+ * `turn-committed` event lands, the page refetches the server tree — the
+ * commit is the backend's, the fold here is cosmetic. Undo is gone: every
+ * turn commits to `main`; reverting is the Discard (revert) endpoint's job.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -42,37 +42,39 @@ import {
   Typography,
   useTheme,
 } from '@wso2/oxygen-ui';
-import {
-  ArrowUp,
-  Check,
-  Loader2,
-  RotateCcw,
-  Sparkles,
-  Wrench,
-  X,
-} from '@wso2/oxygen-ui-icons-react';
+import { ArrowUp, Check, Sparkles, Wrench, X } from '@wso2/oxygen-ui-icons-react';
 import {
   type ChatMessage,
+  type ProjectKey,
   type ToolMessage,
   type UserMessage,
   appendAssistantText,
   appendErrorMessage,
   appendUserMessage,
-  asChatHistory,
+  dropTurnMessages,
+  getChatConversationId,
   getChatMessages,
-  getSessionBaseline,
-  markFileModified,
-  markTurnUndone,
-  publishRequirementsPageEvent,
+  nextId,
+  opDisplayLabel,
+  publishTurnActivity,
+  setChatConversationId,
+  setChatMessages,
   setChatPanelOpen,
-  setSessionBaseline,
   setTurnStatus,
-  setUserTurnId,
   subscribeChatStore,
-  toolDisplayLabel,
   upsertToolMessage,
 } from '../services/chatStore';
-import { api } from '../services/api';
+import {
+  attachTurnStream,
+  getActiveTurn,
+  getConversation,
+  newConversationId,
+  startTurn,
+  turnErrorMessage,
+  type ConversationMessage,
+  type TurnResult,
+} from '../services/api/turns';
+import { readTree } from '../services/api/files';
 
 // ---------------------------------------------------------------------------
 // Tab routing — chat is wired for the requirements tab only in v1.
@@ -95,21 +97,33 @@ function resolveTabKey(pathname: string): string {
   return 'overview';
 }
 
+/** Map a rehydrated `ModelMessage[]` to the display log (user/assistant text only). */
+function toDisplayMessages(messages: ConversationMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    const text =
+      typeof m.content === 'string'
+        ? m.content
+        : m.content
+            .map((p) => (p.type === 'text' ? (p.text ?? '') : ''))
+            .join('')
+            .trim();
+    if (!text) continue;
+    if (m.role === 'user') {
+      out.push({ id: nextId('u'), role: 'user', content: text, timestamp: Date.now(), turnStatus: 'completed' });
+    } else {
+      out.push({ id: nextId('a'), role: 'assistant', content: text, timestamp: Date.now() });
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Message bubbles
 // ---------------------------------------------------------------------------
 
-function UserBubble({
-  message,
-  onUndo,
-  canUndo,
-  isUndoing,
-}: {
-  message: UserMessage;
-  onUndo: () => void;
-  canUndo: boolean;
-  isUndoing: boolean;
-}) {
+function UserBubble({ message }: { message: UserMessage }) {
   const theme = useTheme();
   return (
     <Stack alignItems="flex-end" sx={{ mb: 1.5 }} gap={0.5}>
@@ -121,40 +135,21 @@ function UserBubble({
           borderRadius: '16px 16px 4px 16px',
           bgcolor: theme.vars?.palette.primary.main ?? 'primary.main',
           color: theme.vars?.palette.primary.contrastText ?? '#fff',
-          textDecoration: message.turnStatus === 'undone' ? 'line-through' : undefined,
-          opacity: message.turnStatus === 'undone' ? 0.65 : 1,
         }}
       >
         <Typography variant="body2" sx={{ lineHeight: 1.6, fontSize: '0.8125rem' }}>
           {message.content}
         </Typography>
       </Box>
-      {canUndo && (
-        <Chip
-          size="small"
-          icon={isUndoing ? <CircularProgress size={10} /> : <RotateCcw size={12} />}
-          label={isUndoing ? 'Undoing...' : 'Undo this turn'}
-          onClick={isUndoing ? undefined : onUndo}
-          sx={{
-            height: 22,
-            fontSize: '0.7rem',
-            cursor: isUndoing ? 'default' : 'pointer',
-          }}
-          data-testid="undo-turn"
-        />
-      )}
     </Stack>
   );
 }
 
 function renderMarkdownLite(text: string): React.ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
+  return parts.map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part,
+  );
 }
 
 function AssistantBubble({ content }: { content: string }) {
@@ -193,21 +188,16 @@ function AssistantBubble({ content }: { content: string }) {
   );
 }
 
+/** A folded file mutation, projected from one `tool-result` frame. */
 function ToolCard({ msg }: { msg: ToolMessage }) {
   const theme = useTheme();
-  const [open, setOpen] = useState(false);
-  const isRunning = msg.toolStatus === 'running';
   const isError = msg.toolStatus === 'error';
   const borderColor = isError
     ? theme.vars?.palette.error?.main ?? 'error.main'
-    : isRunning
-      ? theme.vars?.palette.warning?.main ?? 'warning.main'
-      : theme.vars?.palette.success?.main ?? 'success.main';
-  const bg = isError
-    ? 'rgba(244, 67, 54, 0.06)'
-    : isRunning
-      ? 'rgba(255, 152, 0, 0.06)'
-      : 'rgba(76, 175, 80, 0.06)';
+    : theme.vars?.palette.success?.main ?? 'success.main';
+  const bg = isError ? 'rgba(244, 67, 54, 0.06)' : 'rgba(76, 175, 80, 0.06)';
+  // Show the leaf filename; the full spec path is the tooltip.
+  const leaf = msg.path.split('/').pop() || msg.path;
 
   return (
     <Stack
@@ -217,76 +207,28 @@ function ToolCard({ msg }: { msg: ToolMessage }) {
       sx={{ mb: 1.5 }}
       data-testid="tool-card"
       data-tool-name={msg.toolName}
-      data-tool-filename={msg.toolFilename}
+      data-tool-path={msg.path}
       data-tool-status={msg.toolStatus}
     >
       <Box sx={{ width: 28, flexShrink: 0 }} />
-      <Box
-        sx={{
-          width: '100%',
-          border: '1px solid',
-          borderColor,
-          borderRadius: 2,
-          overflow: 'hidden',
-        }}
-      >
-        <Stack
-          direction="row"
-          alignItems="center"
-          gap={1}
-          sx={{
-            px: 1.5,
-            py: 1,
-            bgcolor: bg,
-            cursor: msg.toolDiffPreview ? 'pointer' : 'default',
-          }}
-          onClick={() => msg.toolDiffPreview && setOpen((v) => !v)}
-        >
-          {isRunning ? (
-            <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-          ) : isError ? (
-            <X size={14} color={theme.vars?.palette.error?.main as string ?? '#e53935'} />
+      <Box sx={{ width: '100%', border: '1px solid', borderColor, borderRadius: 2, overflow: 'hidden' }}>
+        <Stack direction="row" alignItems="center" gap={1} sx={{ px: 1.5, py: 1, bgcolor: bg }}>
+          {isError ? (
+            <X size={14} color={(theme.vars?.palette.error?.main as string) ?? '#e53935'} />
           ) : (
-            <Check size={14} color={theme.vars?.palette.success?.main as string ?? '#4caf50'} />
+            <Check size={14} color={(theme.vars?.palette.success?.main as string) ?? '#4caf50'} />
           )}
           <Wrench size={12} style={{ opacity: 0.5 }} />
           <Typography variant="caption" fontWeight={600} sx={{ fontSize: '0.75rem' }}>
-            {toolDisplayLabel(msg.toolName)}
+            {opDisplayLabel(msg.op)}
           </Typography>
           <Chip
-            label={msg.toolFilename}
+            title={msg.path}
+            label={leaf}
             size="small"
             sx={{ height: 18, fontSize: '0.65rem', '& .MuiChip-label': { px: 0.5 } }}
           />
-          {msg.toolDiffStats && (
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
-              +{msg.toolDiffStats.added}/-{msg.toolDiffStats.removed}
-            </Typography>
-          )}
         </Stack>
-        {msg.toolSummary && (
-          <Box sx={{ px: 1.5, py: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-              {msg.toolSummary}
-            </Typography>
-          </Box>
-        )}
-        {open && msg.toolDiffPreview && (
-          <Box sx={{ px: 1.5, py: 0.75, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
-            <Box
-              component="pre"
-              sx={{
-                m: 0,
-                fontSize: '0.7rem',
-                fontFamily: 'monospace',
-                whiteSpace: 'pre-wrap',
-                lineHeight: 1.4,
-              }}
-            >
-              {msg.toolDiffPreview}
-            </Box>
-          </Box>
-        )}
         {isError && msg.toolErrorText && (
           <Box sx={{ px: 1.5, py: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
             <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem' }}>
@@ -351,17 +293,10 @@ function ThinkingIndicator() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Greeting / suggestions
-// ---------------------------------------------------------------------------
-
 function getGreeting(tab: string): string {
-  switch (tab) {
-    case 'requirements':
-      return 'I can refine the requirements bundle — ask me to add features, tighten FRs, or extend the wireframes.';
-    default:
-      return 'Chat is currently available on the requirements tab.';
-  }
+  return tab === 'requirements'
+    ? 'I can refine the requirements bundle — ask me to add features, tighten FRs, or extend the wireframes.'
+    : 'Chat is currently available on the requirements tab.';
 }
 
 // ---------------------------------------------------------------------------
@@ -377,20 +312,16 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
 
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [mode, setMode] = useState<'edit' | 'ask'>('edit');
-  const [undoingTurn, setUndoingTurn] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const tabLabel = resolveTabLabel(location.pathname);
   const tabKey = resolveTabKey(location.pathname);
-
-  // Only the requirements tab gets a real chat session in v1.
   const isChatEnabledTab = tabKey === 'requirements';
 
   const effectiveOrgId = orgId ?? '';
   const effectiveProjectId = projectId ?? '';
-  const projectKey = useMemo(
+  const projectKey = useMemo<ProjectKey>(
     () => ({ orgId: effectiveOrgId, projectId: effectiveProjectId }),
     [effectiveOrgId, effectiveProjectId],
   );
@@ -404,10 +335,27 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
   );
   useEffect(() => {
     setMessages(getChatMessages(effectiveOrgId, effectiveProjectId));
-    return subscribeChatStore(() =>
-      setMessages(getChatMessages(effectiveOrgId, effectiveProjectId)),
-    );
+    return subscribeChatStore(() => setMessages(getChatMessages(effectiveOrgId, effectiveProjectId)));
   }, [effectiveOrgId, effectiveProjectId]);
+
+  // Rehydrate history from the server when local history is empty but a
+  // conversation exists (refresh recovery — server truth, no local draft).
+  useEffect(() => {
+    if (!effectiveOrgId || !effectiveProjectId) return;
+    if (getChatMessages(effectiveOrgId, effectiveProjectId).length > 0) return;
+    const convId = getChatConversationId(projectKey);
+    if (!convId) return;
+    let cancelled = false;
+    (async () => {
+      const server = await getConversation(effectiveProjectId, convId);
+      if (cancelled) return;
+      const display = toDisplayMessages(server);
+      if (display.length > 0) setChatMessages(projectKey, display);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveOrgId, effectiveProjectId, projectKey]);
 
   useEffect(() => {
     setChatPanelOpen(true);
@@ -422,13 +370,81 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  const latestTurnId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role === 'user' && m.turnStatus === 'completed') return m.turnId;
-    }
-    return undefined;
-  }, [messages]);
+  /**
+   * Attach one turn's stream and drive the chat display: assistant text, tool
+   * cards, live file snapshots (published on the turn-activity bus so the
+   * requirements page mirrors them), and the terminal outcome. `displayTurnId`
+   * is the local message-log id (NOT the server turn id).
+   */
+  const streamChatTurn = useCallback(
+    async (serverTurnId: string, displayTurnId: string, signal?: AbortSignal) => {
+      publishTurnActivity({ kind: 'turnStarted', orgId: effectiveOrgId, projectId: effectiveProjectId });
+      let result: TurnResult;
+      try {
+        // The display fold replays on top of the CURRENT server tree — the
+        // committed truth the backend snapshotted for the turn.
+        const seed = await readTree(effectiveProjectId, 'specs/')
+          .then((t) => t.files)
+          .catch(() => ({}) as Record<string, string>);
+        result = await attachTurnStream(effectiveProjectId, serverTurnId, {
+          from: 0,
+          seed,
+          signal,
+          handlers: {
+            onText: (delta) => appendAssistantText(projectKey, displayTurnId, delta),
+            onSnapshot: (files) =>
+              publishTurnActivity({
+                kind: 'turnSnapshot',
+                orgId: effectiveOrgId,
+                projectId: effectiveProjectId,
+                files,
+              }),
+            onChange: (change) => {
+              const res = change.result;
+              upsertToolMessage(projectKey, {
+                id: change.toolCallId || nextId('tool'),
+                role: 'tool',
+                content: '',
+                timestamp: Date.now(),
+                turnId: displayTurnId,
+                toolName: change.toolName,
+                op: change.op,
+                path: change.path,
+                toolStatus: res.ok ? 'done' : 'error',
+                toolErrorText: res.ok ? undefined : res.message,
+                toolErrorCode: res.ok ? undefined : res.code,
+              });
+            },
+          },
+        });
+      } catch (err) {
+        if (signal?.aborted) {
+          // Unmount/StrictMode abort: the turn keeps running server-side; a
+          // remount's active-turn check re-attaches. Not an outcome.
+          publishTurnActivity({ kind: 'turnEnded', orgId: effectiveOrgId, projectId: effectiveProjectId, committed: false });
+          return;
+        }
+        result = {
+          ok: false,
+          code: 'request_failed',
+          message: err instanceof Error && err.message ? err.message : 'The chat turn failed.',
+        };
+      }
+      publishTurnActivity({
+        kind: 'turnEnded',
+        orgId: effectiveOrgId,
+        projectId: effectiveProjectId,
+        committed: result.ok,
+      });
+      if (result.ok) {
+        setTurnStatus(projectKey, displayTurnId, 'completed');
+      } else {
+        appendErrorMessage(projectKey, displayTurnId, turnErrorMessage(result), result.code);
+        setTurnStatus(projectKey, displayTurnId, 'failed');
+      }
+    },
+    [effectiveOrgId, effectiveProjectId, projectKey],
+  );
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -437,206 +453,69 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
 
     setInput('');
     setIsSending(true);
-    const userMsg = appendUserMessage(projectKey, trimmed);
 
-    const historyMessages = asChatHistory(getChatMessages(effectiveOrgId, effectiveProjectId)).slice(0, -1);
-
-    let currentTurnId: string | undefined;
-    let touchedThisTurn = new Set<string>();
-
-    const finishTurn = (status: UserMessage['turnStatus']) => {
-      if (currentTurnId) {
-        setTurnStatus(projectKey, currentTurnId, status);
-        publishRequirementsPageEvent({
-          kind: 'turnEnded',
-          turnId: currentTurnId,
-          orgId: effectiveOrgId,
-          projectId: effectiveProjectId,
-        });
-      }
-      setIsSending(false);
-    };
-
-    // Session baseline policy: the BFF holds one snapshot per chat
-    // session. The console asks for a fresh capture only when it has none
-    // yet (first turn of a session, or after Accept-all dropped it).
-    const baselineNow = getSessionBaseline(effectiveOrgId, effectiveProjectId);
-    const requestSessionBaseline = !baselineNow;
-
-    const ok = await api.streamRequirementsChat(
-      effectiveProjectId,
-      {
-        message: trimmed,
-        history: historyMessages,
-        mode,
-        requestSessionBaseline,
-      },
-      {
-        onTurnStarted: (turnId) => {
-          currentTurnId = turnId;
-          setUserTurnId(projectKey, userMsg.id, turnId);
-          publishRequirementsPageEvent({
-            kind: 'turnStarted',
-            turnId,
-            orgId: effectiveOrgId,
-            projectId: effectiveProjectId,
-          });
-        },
-        onSessionBaseline: (snapshotId) => {
-          // Persist the baseline id so subsequent turns leave the flag
-          // off, and so Accept / Revert (per-file) can reach the snapshot.
-          setSessionBaseline(projectKey, snapshotId);
-        },
-        onText: (delta) => {
-          appendAssistantText(projectKey, currentTurnId, delta);
-        },
-        onToolStarted: (e) => {
-          touchedThisTurn.add(e.filename);
-          publishRequirementsPageEvent({
-            kind: 'busyPathsChanged',
-            paths: new Set(touchedThisTurn),
-            orgId: effectiveOrgId,
-            projectId: effectiveProjectId,
-          });
-          upsertToolMessage(projectKey, {
-            id: e.id,
-            role: 'tool',
-            content: '',
-            timestamp: Date.now(),
-            turnId: currentTurnId,
-            toolName: e.name as ToolMessage['toolName'],
-            toolStatus: 'running',
-            toolFilename: e.filename,
-            toolSummary: e.summary,
-          });
-        },
-        onToolResult: (e) => {
-          // Track primary + sibling writes in the session's modified-set
-          // so the banner appears on each affected file (e.g. canvas DSL
-          // writes touch both `*.dsl` and the rendered `*.excalidraw`).
-          const touched = [e.filename, ...Object.keys(e.siblings ?? {})];
-          markFileModified(projectKey, touched, currentTurnId);
-          publishRequirementsPageEvent({
-            kind: 'fileWritten',
-            filename: e.filename,
-            content: e.content,
-            siblings: e.siblings,
-          });
-          upsertToolMessage(projectKey, {
-            id: e.id,
-            role: 'tool',
-            content: '',
-            timestamp: Date.now(),
-            turnId: currentTurnId,
-            // toolName is not on the result frame; keep whatever was set by tool-started
-            // (upsert overwrites — we need to preserve the name).
-            toolName: (
-              getChatMessages(effectiveOrgId, effectiveProjectId).find(
-                (m) => m.id === e.id && m.role === 'tool',
-              ) as ToolMessage | undefined
-            )?.toolName ?? 'str_replace',
-            toolStatus: 'done',
-            toolFilename: e.filename,
-            toolSummary: (
-              getChatMessages(effectiveOrgId, effectiveProjectId).find(
-                (m) => m.id === e.id && m.role === 'tool',
-              ) as ToolMessage | undefined
-            )?.toolSummary,
-            toolDiffStats: e.diff
-              ? { added: e.diff.added, removed: e.diff.removed }
-              : undefined,
-            toolDiffPreview: e.diff?.preview,
-          });
-        },
-        onToolError: (e) => {
-          if (!e.id) {
-            appendErrorMessage(projectKey, currentTurnId, e.message ?? 'Tool failed', e.errorCode);
-            return;
-          }
-          const prior = getChatMessages(effectiveOrgId, effectiveProjectId).find(
-            (m) => m.id === e.id,
-          ) as ToolMessage | undefined;
-          upsertToolMessage(projectKey, {
-            id: e.id,
-            role: 'tool',
-            content: '',
-            timestamp: Date.now(),
-            turnId: currentTurnId,
-            toolName: prior?.toolName ?? (e.name as ToolMessage['toolName']) ?? 'str_replace',
-            toolStatus: 'error',
-            toolFilename: e.filename ?? prior?.toolFilename ?? '',
-            toolSummary: prior?.toolSummary,
-            toolErrorText: e.message,
-            toolErrorCode: e.errorCode,
-          });
-        },
-        onValidationFailed: (issues) => {
-          appendErrorMessage(
-            projectKey,
-            currentTurnId,
-            `Validation: ${issues.map((i) => `${i.filename ? `${i.filename}: ` : ''}${i.message}`).join('; ')}`,
-            'validation',
-          );
-        },
-        onFinish: () => {
-          finishTurn('completed');
-        },
-        onError: (e) => {
-          appendErrorMessage(
-            projectKey,
-            currentTurnId,
-            e.errorText ?? 'Chat error',
-            e.errorCode,
-          );
-          finishTurn('failed');
-        },
-      },
-    );
-    if (!ok && isSending) {
-      finishTurn('failed');
+    // One conversation id across the whole chat session.
+    let convId = getChatConversationId(projectKey);
+    if (!convId) {
+      convId = newConversationId();
+      setChatConversationId(projectKey, convId);
     }
-  }, [
-    input,
-    isSending,
-    isChatEnabledTab,
-    effectiveOrgId,
-    effectiveProjectId,
-    projectKey,
-    mode,
-  ]);
+
+    const turnId = nextId('t');
+    appendUserMessage(projectKey, trimmed, turnId);
+
+    const start = await startTurn(effectiveProjectId, convId, {
+      useCase: 'requirements-chat',
+      instruction: trimmed,
+    });
+    if (!start.ok) {
+      // One active turn per project (D18): a 409 here means some other
+      // generation is running — the pages own the viewer attach; chat just
+      // reports it.
+      appendErrorMessage(projectKey, turnId, turnErrorMessage(start), start.code);
+      setTurnStatus(projectKey, turnId, 'failed');
+      setIsSending(false);
+      return;
+    }
+    await streamChatTurn(start.turnId, turnId);
+    setIsSending(false);
+  }, [input, isSending, isChatEnabledTab, effectiveOrgId, effectiveProjectId, projectKey, streamChatTurn]);
+
+  // Refresh-mid-chat recovery (D16): a running requirements-chat turn is
+  // re-attached from index 0. Any partial output persisted before the refresh
+  // is dropped first — the replay re-streams the same frames.
+  useEffect(() => {
+    if (!effectiveOrgId || !effectiveProjectId) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    (async () => {
+      const active = await getActiveTurn(effectiveProjectId).catch(() => null);
+      if (cancelled || !active || active.status !== 'running') return;
+      if (active.useCase !== 'requirements-chat') return;
+      const inFlight = [...getChatMessages(effectiveOrgId, effectiveProjectId)]
+        .reverse()
+        .find((m): m is UserMessage => m.role === 'user' && m.turnStatus === 'in_flight');
+      const displayTurnId = inFlight?.turnId ?? nextId('t');
+      if (inFlight?.turnId) dropTurnMessages(projectKey, inFlight.turnId);
+      setIsSending(true);
+      try {
+        await streamChatTurn(active.turnId, displayTurnId, controller.signal);
+      } finally {
+        if (!cancelled) setIsSending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [effectiveOrgId, effectiveProjectId, projectKey, streamChatTurn]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
-
-  const handleUndo = useCallback(
-    async (turnId: string) => {
-      if (!effectiveOrgId || !effectiveProjectId) return;
-      setUndoingTurn(turnId);
-      try {
-        const result = await api.undoChatTurn(effectiveProjectId, turnId);
-        if (result?.files) {
-          markTurnUndone(projectKey, turnId);
-          // Tell the page to refresh from the restored snapshot.
-          for (const [filename, content] of Object.entries(result.files)) {
-            publishRequirementsPageEvent({
-              kind: 'fileWritten',
-              filename,
-              content,
-            });
-          }
-        } else {
-          appendErrorMessage(projectKey, turnId, 'Undo failed', 'undo_failed');
-        }
-      } finally {
-        setUndoingTurn(null);
-      }
-    },
-    [effectiveOrgId, effectiveProjectId, projectKey],
-  );
 
   const showGreeting = messages.length === 0;
 
@@ -717,21 +596,7 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
           )}
 
           {messages.map((msg) => {
-            if (msg.role === 'user') {
-              const canUndo =
-                msg.turnId !== undefined &&
-                msg.turnStatus === 'completed' &&
-                msg.turnId === latestTurnId;
-              return (
-                <UserBubble
-                  key={msg.id}
-                  message={msg}
-                  canUndo={canUndo}
-                  isUndoing={undoingTurn === msg.turnId}
-                  onUndo={() => msg.turnId && handleUndo(msg.turnId)}
-                />
-              );
-            }
+            if (msg.role === 'user') return <UserBubble key={msg.id} message={msg} />;
             if (msg.role === 'assistant') return <AssistantBubble key={msg.id} content={msg.content} />;
             if (msg.role === 'tool') return <ToolCard key={msg.id} msg={msg} />;
             if (msg.role === 'error') return <ErrorBubble key={msg.id} message={msg} />;
@@ -766,16 +631,6 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
               variant="outlined"
               sx={{ height: 20, fontSize: '0.65rem', fontWeight: 600, '& .MuiChip-label': { px: 0.75 } }}
             />
-            {isChatEnabledTab && (
-              <Chip
-                label={mode === 'edit' ? 'mode: edit' : 'mode: ask'}
-                size="small"
-                variant="outlined"
-                onClick={() => setMode((m) => (m === 'edit' ? 'ask' : 'edit'))}
-                sx={{ height: 20, fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer', '& .MuiChip-label': { px: 0.75 } }}
-                data-testid="mode-toggle"
-              />
-            )}
           </Stack>
           <Stack direction="row" alignItems="flex-end" gap={1}>
             <TextField
@@ -785,9 +640,7 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
               onKeyDown={handleKeyDown}
               placeholder={
                 isChatEnabledTab
-                  ? mode === 'edit'
-                    ? 'Describe a change to the requirements...'
-                    : 'Ask a question about the requirements...'
+                  ? 'Describe a change to the requirements...'
                   : 'Chat is currently available on the requirements tab.'
               }
               disabled={!isChatEnabledTab || isSending}
@@ -807,7 +660,7 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
             />
             <IconButton
               color="primary"
-              onClick={handleSend}
+              onClick={() => void handleSend()}
               disabled={!input.trim() || isSending || !isChatEnabledTab}
               data-testid="chat-send"
               sx={{
@@ -815,9 +668,16 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
                 color: input.trim() && !isSending ? (theme.vars?.palette.primary.contrastText ?? '#fff') : undefined,
                 width: 36,
                 height: 36,
-                '&:hover': input.trim() && !isSending
-                  ? { bgcolor: theme.vars?.palette.primary.dark ?? 'primary.dark' }
-                  : {},
+                // Never let the fullWidth input squeeze the button below its
+                // 36px hit target next to the multiline field.
+                flexShrink: 0,
+                // Lift the button in its own stacking context so it always wins
+                // the hit-test at its coordinates (MUI ButtonBase is already
+                // position:relative, so zIndex applies without changing layout —
+                // unlike putting position on the panel wrapper, which shifted it).
+                position: 'relative',
+                zIndex: 1,
+                '&:hover': input.trim() && !isSending ? { bgcolor: theme.vars?.palette.primary.dark ?? 'primary.dark' } : {},
               }}
             >
               {isSending ? <CircularProgress size={16} /> : <ArrowUp size={18} />}

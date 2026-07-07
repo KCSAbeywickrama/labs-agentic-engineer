@@ -30,10 +30,7 @@
  * (`run-conversation-turn.ts`) merges these into the tool set so the main agent
  * can look up the org's already-registered external resources / org endpoints /
  * platform resource types before proposing a `dependencies` entry — reusing an
- * existing name + schema instead of inventing one. PORT of lab-app-factory
- * `agents/src/shared/mcp-client.ts`; adapted here to carry a bearer token (the
- * source server had no auth) and to this service's AI SDK v7 (`dynamicTool` /
- * `jsonSchema` still ship from `ai`, unchanged from the source's v6/v7 shim).
+ * existing name + schema instead of inventing one.
  *
  * Best-effort throughout: the server being unreachable, unauthorized (401 — the
  * token outlived its TTL), or returning a malformed response all degrade to an
@@ -42,7 +39,7 @@
  */
 
 import { dynamicTool, jsonSchema, type ToolSet } from "ai";
-import type { McpConfig } from "../contracts/sse-events.js";
+import type { McpConfig } from "@aep/agent-stream";
 
 export type { McpConfig };
 

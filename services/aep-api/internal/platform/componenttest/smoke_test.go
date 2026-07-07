@@ -32,7 +32,7 @@ import (
 // the real chain + ENFORCE gate.)
 type fakeProjectService struct{}
 
-func (fakeProjectService) ListProjects(_ context.Context, _ string, _ int, _ string) (*models.ProjectList, error) {
+func (fakeProjectService) ListProjects(_ context.Context, _ string, _ int, _, _ string) (*models.ProjectList, error) {
 	return &models.ProjectList{Items: []models.Project{{Name: "demo"}}}, nil
 }
 func (fakeProjectService) GetProject(_ context.Context, _, name string) (*models.Project, error) {

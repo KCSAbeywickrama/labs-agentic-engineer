@@ -9,7 +9,7 @@ dependencies:
   version: 0.0.0-dev
 description: >
   Single-command install of WSO2 Agentic Engineer on an OpenChoreo cluster.
-  Deploys AEP platform services (aep-api, agents-service, aep-console) as
+  Deploys AEP platform services (aep-api, agents, aep-console) as
   plain Kubernetes Deployments in the OC control-plane namespace (wso2-ae), exposed
   via the OC control-plane gateway. Reuses OC's existing Thunder for identity.
   Registers all AEP OAuth clients in OC Thunder via a post-install bootstrap job.

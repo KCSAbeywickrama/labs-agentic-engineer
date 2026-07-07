@@ -63,10 +63,9 @@ type AppParams struct {
 	// InternalDeps carries the services for the internal S2S Huma surface
 	// (runner skills + path-scoped credentials refresh). NewHandler builds the
 	// internal Huma API on its own mux and registers them via RegisterAllInternal;
-	// each op authenticates by construction via auth.RunnerScopedInput.
+	// each op authenticates by construction via auth.ExecutionScopedInput.
 	InternalDeps InternalDeps
 
-	TaskRepo   repositories.TaskRepository
 	ConfigRepo repositories.ConfigRepository
 
 	// OrganizationService backs the JIT org-provisioning middleware. nil

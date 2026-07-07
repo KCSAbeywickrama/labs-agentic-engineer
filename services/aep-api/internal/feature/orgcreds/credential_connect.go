@@ -83,25 +83,8 @@ func (s *CredentialService) Connect(ctx context.Context, ocOrgID string, req Con
 }
 
 func (s *CredentialService) connectPAT(ctx context.Context, tx *gorm.DB, ocOrgID string, hadRow bool, existing *models.OrgCredential, req ConnectRequest) (*Projection, error) {
-	if req.PAT == "" {
-		return nil, &ValidationError{Code: "pat_missing", Message: "PAT is required"}
-	}
-	if req.GitHubLogin == "" {
-		return nil, &ValidationError{Code: "github_login_missing", Message: "githubLogin is required"}
-	}
-
-	// Validation chain — phase2.md §6.5.
-	identity, err := s.fetchPATIdentity(ctx, req.PAT)
+	identity, err := s.validatePAT(ctx, req.PAT, req.GitHubLogin)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.validatePATMembership(ctx, req.PAT, req.GitHubLogin, identity.Login); err != nil {
-		return nil, err
-	}
-	// Repo-read probe is best-effort: if no repos exist under githubLogin
-	// yet, skip the probe; first real repo create surfaces failure.
-	if err := s.probePATRepoRead(ctx, req.PAT, req.GitHubLogin); err != nil {
-		// Wrap as 400 with a cause string.
 		return nil, err
 	}
 
@@ -207,6 +190,43 @@ func (s *CredentialService) connectPAT(ctx context.Context, tx *gorm.DB, ocOrgID
 	slog.InfoContext(ctx, "credentials.replaced", "ocOrgId", ocOrgID, "kind", "user-pat", "identityLogin", identity.Login, "drift", identity.Login != existing.IdentityLogin)
 	s.mirrorPATToSMAPI(ctx, ocOrgID, req.PAT)
 	return projectionFromRow(row), nil
+}
+
+// validatePAT runs the full PAT validation chain (phase2.md §6.5) WITHOUT
+// persisting: required-field checks, the GET /user identity fetch, the org
+// membership probe, and the best-effort repo-read probe. It returns the
+// resolved GitHub identity so connectPAT can persist it. Extracted so the
+// probe-only public seam (ValidatePAT) and the connect path share one chain.
+func (s *CredentialService) validatePAT(ctx context.Context, pat, githubLogin string) (*ghIdentity, error) {
+	if pat == "" {
+		return nil, &ValidationError{Code: "pat_missing", Message: "PAT is required"}
+	}
+	if githubLogin == "" {
+		return nil, &ValidationError{Code: "github_login_missing", Message: "githubLogin is required"}
+	}
+	identity, err := s.fetchPATIdentity(ctx, pat)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validatePATMembership(ctx, pat, githubLogin, identity.Login); err != nil {
+		return nil, err
+	}
+	// Repo-read probe is best-effort: if no repos exist under githubLogin
+	// yet, skip the probe; first real repo create surfaces failure.
+	if err := s.probePATRepoRead(ctx, pat, githubLogin); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
+// ValidatePAT is the probe-only seam (mirrors AnthropicCredentialService.
+// ValidateKey): it runs the full PAT validation chain without persisting, so
+// the /config PATCH orchestrator can pre-flight the gitProvider section in its
+// atomic pre-persist phase (org-config-consolidation.md §4). Connect reuses the
+// same private validatePAT, so the two paths can't drift.
+func (s *CredentialService) ValidatePAT(ctx context.Context, pat, githubLogin string) error {
+	_, err := s.validatePAT(ctx, pat, githubLogin)
+	return err
 }
 
 // mirrorPATToSMAPI fires the SM-API write best-effort after a Connect.

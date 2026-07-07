@@ -24,11 +24,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // RegisterInstallationHandlers wires the handlers for App-mode lifecycle
@@ -45,22 +42,23 @@ import (
 //   - installation.unsuspend    → flip status='active' on the row
 //   - installation_repositories.added   → JSON-merge selected_repos
 //   - installation_repositories.removed → JSON-merge selected_repos + cascade
+//
+// workspaceTrash is the disconnect cascade's Phase-F disk hook (trash the
+// org's workspace subtree, design §14/D12) — this package builds its own
+// OrgDisconnectService, so the hook must be threaded through here too.
+// nil-safe (nil = no disk hook).
 func RegisterInstallationHandlers(
 	router *Router,
 	db *gorm.DB,
 	credSvc *orgcreds.CredentialService,
 	issueSvc gitrepo.IssueService,
-	taskRepo repositories.TaskRepository,
+	workspaceTrash func(ctx context.Context, ocOrgID string),
 ) {
 	h := &installationHandler{
-		db:       db,
-		credSvc:  credSvc,
-		issueSvc: issueSvc,
-		taskRepo: taskRepo,
-		disconnect: orgcreds.NewOrgDisconnectService(taskRepo, db, credSvc, issueSvc,
-			func(s models.TaskStatus) (models.TaskStatus, error) {
-				return contracts.ApplyTaskEvent(s, contracts.TaskEventOrgDisconnected)
-			}),
+		db:         db,
+		credSvc:    credSvc,
+		issueSvc:   issueSvc,
+		disconnect: orgcreds.NewOrgDisconnectService(db, credSvc, issueSvc).WithWorkspaceTrash(workspaceTrash),
 	}
 	router.Register("installation", "created", EventHandlerFunc(h.handleCreated))
 	router.Register("installation", "deleted", EventHandlerFunc(h.handleDeleted))
@@ -74,7 +72,6 @@ type installationHandler struct {
 	db         *gorm.DB
 	credSvc    *orgcreds.CredentialService
 	issueSvc   gitrepo.IssueService
-	taskRepo   repositories.TaskRepository
 	disconnect *orgcreds.OrgDisconnectService
 }
 
@@ -234,107 +231,12 @@ func (h *installationHandler) handleReposRemoved(ctx context.Context, _ string, 
 	if err := h.credSvc.MergeSelectedRepos(ctx, p.Installation.ID, nil, removed); err != nil {
 		return err
 	}
-	slog.InfoContext(ctx, "webhook: installation_repositories.removed Phase A merged",
+	slog.InfoContext(ctx, "webhook: installation_repositories.removed merged",
 		"installationId", p.Installation.ID, "removed", removed)
 
-	// --- Phase B — confirm via GitHub, then cascade. ---
-
-	// Confirm: ask GitHub directly via git-service. The install's actual
-	// repo list is the authoritative signal — a forged webhook payload
-	// removing a repo that's still selected on GitHub will hit this
-	// confirmation step and stop here.
-	currentRepos, err := h.credSvc.ListInstallationRepos(ctx, p.Installation.ID)
-	if err != nil {
-		// Confirmation failed (network/GitHub transient). Skip cascade —
-		// next webhook redelivery or the periodic validator catches it.
-		slog.WarnContext(ctx, "webhook: reach reconciliation Phase B confirm failed; skipping cascade",
-			"installationId", p.Installation.ID, "error", err)
-		return nil
-	}
-	stillSelected := make(map[string]struct{}, len(currentRepos))
-	for _, r := range currentRepos {
-		stillSelected[r] = struct{}{}
-	}
-	confirmed := make([]string, 0, len(removed))
-	for _, r := range removed {
-		if _, ok := stillSelected[r]; !ok {
-			confirmed = append(confirmed, r)
-		}
-	}
-	if len(confirmed) == 0 {
-		slog.InfoContext(ctx, "webhook: reach reconciliation Phase B no confirmed removals (forged event or already re-added)",
-			"installationId", p.Installation.ID, "claimed", removed)
-		return nil
-	}
-
-	// Resolve removed repo full_names → (orgID, projectID) via git_repositories.
-	// We key by the (org, project) tuple, not project_id alone: project_id is a
-	// per-org slug reused across orgs, so a project_id-only match would cascade
-	// the abandon onto another org's tasks that share the slug.
-	orgProjectPairs := make([][]any, 0, len(confirmed))
-	for _, r := range confirmed {
-		orgID, pid, err := repositories.LookupOrgProjectByRepoURL(h.db.WithContext(ctx), r)
-		if err != nil || pid == "" {
-			// No project for this repo on our side — nothing to cascade.
-			continue
-		}
-		orgProjectPairs = append(orgProjectPairs, []any{orgID, pid})
-	}
-	if len(orgProjectPairs) == 0 {
-		slog.InfoContext(ctx, "webhook: reach reconciliation Phase B confirmed but no matching projects",
-			"installationId", p.Installation.ID, "confirmed", confirmed)
-		return nil
-	}
-
-	// List non-terminal tasks under the affected projects. The org-scoped
-	// lock has been released; per-task locks are acquired by the projector.
-	var tasks []models.ComponentTask
-	terminal := []string{
-		string(models.TaskStatusDeployed),
-		string(models.TaskStatusRejected),
-		string(models.TaskStatusFailed),
-		string(models.TaskStatusAbandoned),
-	}
-	if err := h.db.WithContext(ctx).
-		Where("(org_id, project_id) IN ? AND status NOT IN ?", orgProjectPairs, terminal).
-		Find(&tasks).Error; err != nil {
-		slog.ErrorContext(ctx, "webhook: reach reconciliation Phase B list tasks failed",
-			"installationId", p.Installation.ID, "error", err)
-		return nil
-	}
-	if len(tasks) == 0 {
-		slog.InfoContext(ctx, "webhook: reach reconciliation Phase B no in-flight tasks",
-			"installationId", p.Installation.ID, "confirmed", confirmed)
-		return nil
-	}
-
-	// Cascade per task — comment best-effort, then projector apply.
-	abandoned := 0
-	for i := range tasks {
-		t := &tasks[i]
-		if t.IssueNumber > 0 && t.ProjectID != "" {
-			if err := h.issueSvc.CommentIssue(ctx, t.OrgID, t.ProjectID, t.IssueNumber, "abandoned: repo unselected on GitHub App install"); err != nil {
-				slog.WarnContext(ctx, "reach reconciliation: comment failed", "taskId", t.ID, "error", err)
-			}
-		}
-		next, err := contracts.ApplyTaskEvent(models.TaskStatus(t.Status), contracts.TaskEventRepoUnselected)
-		if err != nil {
-			slog.WarnContext(ctx, "reach reconciliation: invalid transition (race with terminal)",
-				"taskId", t.ID, "fromStatus", t.Status, "error", err)
-			continue
-		}
-		t.Status = string(next)
-		if next.IsTerminal() {
-			cause := "repo.unselected"
-			t.Cause = &cause
-		}
-		if err := h.taskRepo.Update(ctx, t); err != nil {
-			slog.ErrorContext(ctx, "reach reconciliation: update failed", "taskId", t.ID, "error", err)
-			continue
-		}
-		abandoned++
-	}
-	slog.InfoContext(ctx, "webhook: reach reconciliation Phase B cascade complete",
-		"installationId", p.Installation.ID, "confirmed", confirmed, "tasksAbandoned", abandoned)
+	// Tasks are GitHub issues now (the Task/Execution split): there are no task
+	// rows to abandon on repo-unselect. Unselecting a repo severs the install's
+	// reach, so its issues become inert to the router (no valid delivery) — the
+	// same effect the old per-task cascade produced, now for free.
 	return nil
 }

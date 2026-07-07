@@ -16,14 +16,22 @@
 
 package gitrepo
 
-import "errors"
+import (
+	"errors"
 
-// Sentinel errors. Those a git-provider implementation must return are part of
-// the port contract (ports.go): conflict_retry.go keys off ErrRefNotFastForward
-// and ErrTagAlreadyExists to drive CAS/tag-collision retries, and repoService
-// keys off ErrRepoNameConflict. Any Host impl (clients/github today) MUST
-// reproduce them, and IsRepoNameConflict / IsHTTPStatus (wire.go) are the
-// caller-side checks.
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+)
+
+// Sentinel errors. Workspace.Mutate and the artifacts tag loop key off
+// ErrRefNotFastForward and ErrTagAlreadyExists to drive CAS/tag-collision
+// retries, and repoService keys off ErrRepoNameConflict (a Host impl —
+// clients/github today — MUST reproduce it; IsRepoNameConflict /
+// IsHTTPStatus (wire.go) are the caller-side checks).
+//
+// ErrTagAlreadyExists / ErrRefNotFastForward are aliases of the gitfs values
+// (docs/design/shared-volume-clone-architecture.md D1): the message strings
+// survived the REST→mount migration unchanged, so `errors.Is` checks and log
+// lines stayed stable.
 var (
 	// ErrRepoNotFound is a gitrepo-domain error (no repo row) returned by
 	// repoService/issueService lookups.
@@ -31,12 +39,15 @@ var (
 	// ErrRepoNotReady is a gitrepo-domain error (repo row not in "ready" state).
 	ErrRepoNotReady = errors.New("repository is not ready")
 
-	// ErrTagAlreadyExists — port contract: CreateTagRef returns it on a 422
-	// tag-collision so the save flow recomputes the next tag.
-	ErrTagAlreadyExists = errors.New("tag already exists")
-	// ErrRefNotFastForward — port contract: UpdateRef(force=false) returns it
-	// when the ref tip moved between read and write so conflict_retry re-anchors.
-	ErrRefNotFastForward = errors.New("github ref: update is not a fast-forward")
+	// ErrTagAlreadyExists — Workspace.Tag (taken name / rejected push)
+	// returns it so the save flow recomputes the next tag.
+	// Message: "tag already exists".
+	ErrTagAlreadyExists = gitfs.ErrTagAlreadyExists
+	// ErrRefNotFastForward — Workspace.Mutate (push-lease rejection, retries
+	// exhausted) returns it when the ref tip moved between read and write so
+	// the caller re-anchors. Message: "github ref: update is not a
+	// fast-forward" (historical wording kept for log-line stability).
+	ErrRefNotFastForward = gitfs.ErrRefNotFastForward
 	// ErrRepoNameConflict — port contract: CreateOrgRepo returns it when the
 	// requested repo name is already taken (repoService retries with a fresh suffix).
 	ErrRepoNameConflict = errors.New("repo name already taken")

@@ -17,19 +17,12 @@
  */
 
 import type { Stage } from '@aep/project-status';
-import type { ComponentTask, ProjectStatus } from '../services/api';
-
-const ACTIVE_TASK_STATUSES = new Set([
-  'pending',
-  'on_hold',
-  'in_progress',
-  'ready_for_review',
-  'merged',
-]);
+import type { TaskView, ProjectStatus } from '../services/api';
+import { ACTIVE_TASK_STATUSES } from '../components/tasks/types';
 
 export function buildProjectStages(
   status: ProjectStatus | undefined,
-  tasks: ComponentTask[],
+  tasks: TaskView[],
 ): Stage[] {
   const specStatus = status?.specStatus ?? '';
   const designStatus = status?.designStatus ?? '';
@@ -73,10 +66,14 @@ export function buildProjectStages(
   };
 
   const tasksTotal = tasks.length;
-  const tasksDone = tasks.filter((t) => t.status === 'merged' || t.status === 'deployed').length;
-  const tasksFailed = tasks.some((t) => t.status === 'failed' || t.status === 'rejected');
-  const tasksActive = tasks.some((t) => ACTIVE_TASK_STATUSES.has(t.status));
-  const tasksAllDeployed = tasksTotal > 0 && tasks.every((t) => t.status === 'deployed');
+  // "Done" = merged and everything downstream of it (building, deployed), so the
+  // "X / N done" headline never dips as a task moves merged → building → deployed.
+  const tasksDone = tasks.filter(
+    (t) => t.derivedStatus === 'merged' || t.derivedStatus === 'building' || t.derivedStatus === 'deployed',
+  ).length;
+  const tasksFailed = tasks.some((t) => t.derivedStatus === 'failed' || t.derivedStatus === 'rejected');
+  const tasksActive = tasks.some((t) => ACTIVE_TASK_STATUSES.has(t.derivedStatus));
+  const tasksAllDeployed = tasksTotal > 0 && tasks.every((t) => t.derivedStatus === 'deployed');
 
   const tasksStage: Stage = {
     id: 'tasks',
@@ -100,9 +97,11 @@ export function buildProjectStages(
       : `${tasksTotal - tasksDone} task(s) left — review and ship the remaining work`,
   };
 
-  const deployedCount = tasks.filter((t) => t.status === 'deployed').length;
-  const buildingCount = tasks.filter((t) => t.status === 'building').length;
-  const buildFailed = tasks.some((t) => t.status === 'failed');
+  const deployedCount = tasks.filter((t) => t.derivedStatus === 'deployed').length;
+  const buildingCount = tasks.filter((t) => t.derivedStatus === 'building').length;
+  // Only a FAILED BUILD execution blocks the Deployment stage — a coding-only
+  // failure (no build execution yet) belongs to the Tasks stage, not here.
+  const buildFailed = tasks.some((t) => t.executions?.build?.status === 'failed');
 
   const deployment: Stage = {
     id: 'deployment',

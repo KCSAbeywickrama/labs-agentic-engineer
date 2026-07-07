@@ -1,4 +1,4 @@
-.PHONY: build test test-db check-no-legacy-creds gen-oc-client gen-oc-client-check gen-mocks openapi openapi-check
+.PHONY: build test test-db cover check-no-legacy-creds gen-oc-client gen-oc-client-check gen-mocks openapi openapi-check
 
 build:
 	go build ./...
@@ -29,6 +29,19 @@ openapi-check: openapi
 # plain unit/component runs need no Docker.
 test: check-no-legacy-creds
 	go test -short ./...
+
+# ── Coverage (local convenience; no CI exists) ───────────────────────────────
+# Fast lane (-short skips the DB tier, so no Docker needed). Writes coverage.out
+# and prints the total statement coverage. The generated OpenChoreo client and
+# its mocks are excluded so the number reflects hand-written code. Run `test-db`
+# separately for the DB tier — this target intentionally stays hermetic.
+COVER_PKGS = $(shell go list ./... | grep -vE '/internal/clients/openchoreo/(gen|mocks)$$')
+cover:
+	@go test -short -coverprofile=coverage.out $(COVER_PKGS); status=$$?; \
+		echo ""; \
+		echo "── total ──────────────────────────────────────────────"; \
+		go tool cover -func=coverage.out | tail -1; \
+		exit $$status
 
 # Full run including the DB tier. Requires Docker (Colima etc.): dbtest.New
 # starts a throwaway postgres:17 via testcontainers, migrates a template once

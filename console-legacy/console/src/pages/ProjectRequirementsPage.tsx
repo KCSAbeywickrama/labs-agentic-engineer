@@ -16,6 +16,20 @@
  * under the License.
  */
 
+/**
+ * Requirements page — committed-truth model (shared-volume-clone D13–D20).
+ *
+ * There is no client-side draft: the server tree at HEAD (`readTree`) is the
+ * COMPLETE truth. Generation runs server-side (`startTurn` → 202 → resumable
+ * stream); the fold here is display-only live preview, and on the terminal
+ * `turn-committed` event the page refetches HEAD. Unsaved EDITOR buffers are
+ * transient UI state, flushed through one `files/apply` commit at Publish;
+ * file add/delete/rename of committed files are one commit each. Refresh
+ * mid-generation re-attaches to the running turn (D16); a concurrent turn
+ * attaches as a viewer (D18); editing is guarded while a requirements turn
+ * writes this subtree (D20).
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -29,30 +43,26 @@ import {
   Typography,
 } from '@wso2/oxygen-ui';
 import { GitCompare, GitHub, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
-import { MdDiffViewer, countLineChanges, type CollabConfig } from '@aep/md-editor';
+import type { CollabConfig } from '@aep/md-editor';
 import { Explorer, type ExplorerRef, type AddFileMenuItem } from '@aep/explorer';
 import { api, ApiError } from '../services/api';
 import type { ArtifactVersion } from '../services/api';
+import { applyFiles, readTree, type ApplyDelete, type ApplyWrite } from '../services/api/files';
+import {
+  attachTurnStream,
+  getActiveTurn,
+  getTurn,
+  newConversationId,
+  startTurn,
+  turnErrorMessage,
+} from '../services/api/turns';
+import { computeDerivedArtifacts, derivedPathsFor } from '../lib/derivedArtifacts';
 import { projectArchitecturePath } from '../lib/paths';
 import { useCollabEditor } from '../hooks/useCollabEditor';
 import CollabAwarenessBar from '../components/CollabAwarenessBar';
+import { env } from '../config/env';
 import VersionSelector from '../components/VersionSelector';
-import {
-  clearAllDrafts,
-  clearDraft,
-  loadDrafts,
-  saveDraft,
-} from '../lib/requirementsDraftStorage';
-import {
-  type ModifiedFileEntry,
-  clearSessionBaseline,
-  getModifiedFiles,
-  getSessionBaseline,
-  removeModifiedFile,
-  subscribeChatStore,
-  subscribeRequirementsPageEvent,
-} from '../services/chatStore';
-import ChatModifiedBanner from '../components/ChatModifiedBanner';
+import { subscribeTurnActivity } from '../services/chatStore';
 import {
   DOCUMENT_TYPES,
   documentTypeForFile,
@@ -61,22 +71,39 @@ import {
   toTitleCase,
   type DocumentType,
 } from '../lib/documentTypes';
-import { tryDslToExcalidraw, type DslKind } from '@aep/excalidraw-dsl';
 
-type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error';
-
-const AUTO_SAVE_DEBOUNCE_MS = 1500;
 const REQUIREMENTS_MAIN_FILE = 'requirements.md';
+const REQ_PREFIX = 'specs/requirements/';
+// The turn-seed read spans the whole spec tree — the display fold must replay
+// on the same view the agents service reads (see `attachTurnStream`'s seed).
+const SPECS_PREFIX = 'specs/';
 
-function formatRelative(ts: number): string {
-  const diff = Math.max(0, Date.now() - ts);
-  const min = Math.round(diff / 60000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
-  const day = Math.round(hr / 24);
-  return `${day} day${day === 1 ? '' : 's'} ago`;
+/** filename (bundle key) ↔ full `specs/requirements/…` path (server/turn/apply). */
+const toFull = (name: string): string => `${REQ_PREFIX}${name}`;
+const toName = (full: string): string =>
+  full.startsWith(REQ_PREFIX) ? full.slice(REQ_PREFIX.length) : full;
+
+/** Project a full-path map to the filename-keyed map the Explorer renders. */
+function filesAsFilenames(files: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [full, content] of Object.entries(files)) out[toName(full)] = content;
+  return out;
+}
+
+/** Machine-derived views (`.excalidraw` scenes, `*.gen.json` projections). */
+function isDerivedPath(path: string): boolean {
+  return /\.excalidraw$/i.test(path) || /\.gen\.json$/i.test(path);
+}
+
+/** The one banner both spec pages show when an apply hits a CAS conflict. */
+export const APPLY_CONFLICT_MESSAGE =
+  'changed on the server since you loaded them. Reload to get the latest — your unsaved local edits will be discarded.';
+
+/** A running turn the page is attached to (own generation or viewer, D16/D18). */
+interface ActiveGen {
+  turnId: string;
+  useCase: string;
+  viewer: boolean;
 }
 
 export default function ProjectRequirementsPage() {
@@ -88,10 +115,26 @@ export default function ProjectRequirementsPage() {
   const streamPrompt = (location.state as { streamPrompt?: string } | null)?.streamPrompt ?? null;
 
   const [loading, setLoading] = useState(!streamPrompt);
-  // Saved (server-known) file map. liveContents tracks editor buffers.
-  const [savedFiles, setSavedFiles] = useState<Record<string, string>>({});
-  const [liveContents, setLiveContents] = useState<Record<string, string>>({});
-  const [activePath, setActivePath] = useState<string | null>(null);
+  const [activePath, setActivePath] = useState<string | null>(null); // filename space
+
+  // -- Server truth (committed HEAD) + transient editor buffers --------------
+  const [serverFiles, setServerFiles] = useState<Record<string, string>>({});
+  const serverFilesRef = useRef<Record<string, string>>({});
+  // Blob shas at HEAD (the apply `baseSha`s) — read synchronously by handlers.
+  const serverShasRef = useRef<Record<string, string>>({});
+  // Unsaved editor buffers (full-path keys). Transient UI state only — flushed
+  // via files/apply at Publish; refs stay in sync for synchronous handlers.
+  const [buffers, setBuffersState] = useState<Record<string, string>>({});
+  const buffersRef = useRef<Record<string, string>>({});
+  const updateBuffers = useCallback(
+    (fn: (prev: Record<string, string>) => Record<string, string>) => {
+      const next = fn(buffersRef.current);
+      if (next === buffersRef.current) return;
+      buffersRef.current = next;
+      setBuffersState(next);
+    },
+    [],
+  );
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [generatingFile, setGeneratingFile] = useState<string | null>(null);
@@ -102,64 +145,64 @@ export default function ProjectRequirementsPage() {
   const [currentVersion, setCurrentVersion] = useState(0);
   const [viewingHistorical, setViewingHistorical] = useState(false);
   const [historicalFiles, setHistoricalFiles] = useState<Record<string, string> | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Live streamed snapshot (full-path keys) while a turn runs — lets the
+  // explorer/editor mount and show content growing BEFORE the backend commits
+  // (on a fresh project HEAD is empty, so without this the page sits on the
+  // "Generating requirements…" placeholder until the very end).
+  const [liveFiles, setLiveFiles] = useState<Record<string, string> | null>(null);
+  const [serverUnsaved, setServerUnsaved] = useState(false); // HEAD ahead of last tag
   const [isDiscarding, setIsDiscarding] = useState(false);
   const [lastTaggedActive, setLastTaggedActive] = useState<string | null>(null);
   const [repoUrl, setRepoUrl] = useState<string>('');
   const [userName, setUserName] = useState<string | undefined>(undefined);
   const [publishing, setPublishing] = useState(false);
-
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  // Files waiting for their first content delta after the user added them
-  // (or clicked Generate). Sidebar surfaces these with a spinner + label.
-  const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
-  // Files the chat agent is currently editing this turn. Drives the
-  // soft-lock readOnly state on the editor + a busy dot in the explorer.
-  const [chatBusyPaths, setChatBusyPaths] = useState<Set<string>>(new Set());
-  const [chatTurnInFlight, setChatTurnInFlight] = useState(false);
-  // Files in the chat session's modified set (sourced from chatStore).
-  // Triggers the chat-modified banner on the active file.
-  const [chatModifiedFiles, setChatModifiedFiles] = useState<Record<string, ModifiedFileEntry>>({});
-  // Per-file Revert in flight — used to disable the banner action.
-  const [revertingPaths, setRevertingPaths] = useState<Set<string>>(new Set());
-  /**
-   * Baseline content per chat-modified file, keyed by filename. Populated
-   * lazily as files enter the modified set so the inline diff view can
-   * render without flicker on file-switch. `null` is a sentinel for
-   * "fetched and the file did not exist at baseline" (tombstone — diff
-   * shows everything as additions).
-   */
-  const [baselineContents, setBaselineContents] = useState<Record<string, string | null>>({});
   const [showDiff, setShowDiff] = useState(false);
-  const [restorePromptFor, setRestorePromptFor] = useState<{
-    filename: string;
-    localDraft: string;
-    serverContent: string;
-    savedAt: number;
-  } | null>(null);
+  // Files awaiting their first content this turn (add/generate) — sidebar spinner.
+  const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
+  // A chat turn is writing this project — pause the collab save loop + guard.
+  const [chatTurnInFlight, setChatTurnInFlight] = useState(false);
+  // The running turn this page is attached to (generation, resume, or viewer).
+  const [activeGen, setActiveGen] = useState<ActiveGen | null>(null);
+  const [viewerNotice, setViewerNotice] = useState<string | null>(null);
+  // A files/apply CAS conflict (409): the conflicting paths + reload affordance.
+  const [applyConflict, setApplyConflict] = useState<string[] | null>(null);
 
   const editorRef = useRef<ExplorerRef>(null);
-  const userTypedRef = useRef(false);
-  const restoreCheckedRef = useRef(false);
-  const startedRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // The create-flow prompt, captured ONCE at first render: the router state is
+  // cleared (navigate-replace) as soon as the bootstrap starts, and reading it
+  // live would re-run — and therefore abort — the in-flight bootstrap effect.
+  const [initialPrompt] = useState(() => streamPrompt);
+  // Serializes locally-started generation turns (the server's one-turn-per-
+  // project guard would 409 the second anyway; don't even send it).
+  const generatingRef = useRef(false);
 
-  // -- Collab (scoped to the active file's content) -------------------------
+  // -- Chat-turn lifecycle (the chat panel streams; this page mirrors) -------
+  useEffect(() => {
+    if (!projectId) return;
+    return subscribeTurnActivity((e) => {
+      if (e.orgId !== routeOrgId || e.projectId !== projectId) return;
+      if (e.kind === 'turnStarted') {
+        setChatTurnInFlight(true);
+      } else if (e.kind === 'turnSnapshot') {
+        setLiveFiles((prev) => ({ ...(prev ?? {}), ...e.files }));
+      } else if (e.kind === 'turnEnded') {
+        setChatTurnInFlight(false);
+        setLiveFiles(null);
+        if (e.committed) void refreshServer();
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeOrgId, projectId]);
 
+  // -- Collab: save flows into the transient editor buffer -------------------
   const handleCollabSave = useCallback(
     async (val: string) => {
-      if (!projectId || !activePath) return;
-      const updated = await api.updateRequirementFile(projectId, activePath, val);
-      if (updated?.files) {
-        setSavedFiles(updated.files);
-        setHasUnsavedChanges(updated.hasUnsavedChanges ?? false);
-        if (updated.versions) setVersions(updated.versions);
-        setCurrentVersion(updated.version ?? 0);
-      }
+      if (!activePath) return;
+      setBuffer(toFull(activePath), val);
     },
-    [routeOrgId, projectId, activePath],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activePath],
   );
-
   const handleSeedRequested = useCallback((markdown: string) => {
     editorRef.current?.setActiveMarkdown(markdown);
   }, []);
@@ -173,9 +216,6 @@ export default function ProjectRequirementsPage() {
     onSeedRequested: handleSeedRequested,
     isEditing: true,
     userName,
-    // While a chat turn writes to the working tree, the BFF holds an
-    // advisory lock and any concurrent PUT (the collab save loop's tick)
-    // will 409 anyway — suppress the call.
     paused: chatTurnInFlight,
   });
 
@@ -184,354 +224,235 @@ export default function ProjectRequirementsPage() {
     return { ydoc, provider, user };
   }, [ydoc, provider, user]);
 
-  // -- Chat → page sync ----------------------------------------------------
-  // Subscribe to the requirementsPageEvent bus the chat panel publishes
-  // to. We mirror file writes into savedFiles + liveContents (so the
-  // editor refreshes from BFF-authoritative content), track busy paths
-  // (for the explorer's spinner + the editor's soft lock), and toggle
-  // `chatTurnInFlight` (which pauses the Yjs save loop).
-  useEffect(() => {
-    if (!projectId) return;
-    return subscribeRequirementsPageEvent((event) => {
-      if (event.kind === 'turnStarted') {
-        if (event.orgId !== routeOrgId || event.projectId !== projectId) return;
-        setChatTurnInFlight(true);
-      } else if (event.kind === 'turnEnded') {
-        if (event.orgId !== routeOrgId || event.projectId !== projectId) return;
-        setChatTurnInFlight(false);
-        setChatBusyPaths(new Set());
-      } else if (event.kind === 'busyPathsChanged') {
-        if (event.orgId !== routeOrgId || event.projectId !== projectId) return;
-        setChatBusyPaths(event.paths);
-      } else if (event.kind === 'fileWritten') {
-        // BFF persisted a tool's edit; mirror into both maps so the
-        // active editor refreshes from disk.
-        const update = (prev: Record<string, string>): Record<string, string> => {
+  /** Buffer one editor value; a buffer that matches the server content is dropped. */
+  const setBuffer = useCallback(
+    (full: string, content: string) => {
+      updateBuffers((prev) => {
+        if (serverFilesRef.current[full] === content) {
+          if (!(full in prev)) return prev;
           const next = { ...prev };
-          if (event.content === undefined) {
-            // Delete: drop the key entirely.
-            delete next[event.filename];
-          } else {
-            next[event.filename] = event.content;
-          }
-          if (event.siblings) {
-            for (const [k, v] of Object.entries(event.siblings)) {
-              next[k] = v;
-            }
-          }
+          delete next[full];
           return next;
-        };
-        setSavedFiles(update);
-        setLiveContents(update);
-        // Reseed the active editor buffer if the active file changed
-        // (otherwise the in-buffer Yjs state would shadow the new disk
-        // content on the next save tick).
-        if (activePath === event.filename && event.content !== undefined) {
-          editorRef.current?.setActiveMarkdown(event.content);
         }
-      }
-    });
-  }, [routeOrgId, projectId, activePath]);
-
-  // Mirror chatStore's modified-files map so the chat-modified banner
-  // re-renders when the chat agent writes a file or the user
-  // Accepts / Reverts.
-  useEffect(() => {
-    if (!projectId) return;
-    const apply = () => setChatModifiedFiles(getModifiedFiles(routeOrgId, projectId));
-    apply();
-    return subscribeChatStore(apply);
-  }, [routeOrgId, projectId]);
-
-  // ---- Chat-modified handlers --------------------------------------------
-
-  // Lazily fetch the baseline content for every file in the chat-modified
-  // set. We cache by filename so switching between files doesn't re-fetch
-  // (the snapshot is immutable for the session). Tombstone files (created
-  // by chat) cache as `null` — the diff viewer treats that as "all added".
-  useEffect(() => {
-    if (!projectId) return;
-    const baseline = getSessionBaseline(routeOrgId, projectId);
-    if (!baseline) return;
-    const pending = Object.keys(chatModifiedFiles).filter(
-      (filename) => baselineContents[filename] === undefined,
-    );
-    if (pending.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const fetched = await Promise.all(
-        pending.map(async (filename) => {
-          const file = await api.getRequirementsBaselineFile(
-            projectId,
-            baseline.snapshotId,
-            filename,
-          );
-          return [filename, file?.existed ? file.content : null] as const;
-        }),
-      );
-      if (cancelled) return;
-      setBaselineContents((prev) => {
-        const next = { ...prev };
-        for (const [filename, content] of fetched) {
-          next[filename] = content;
-        }
-        return next;
+        if (prev[full] === content) return prev;
+        return { ...prev, [full]: content };
       });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [routeOrgId, projectId, chatModifiedFiles, baselineContents]);
+    },
+    [updateBuffers],
+  );
 
-  // Garbage-collect baselineContents when files leave the modified set
-  // (Accept / Revert / clear). Keeps the map honest so a stale entry
-  // can't survive a session reset.
-  useEffect(() => {
-    setBaselineContents((prev) => {
+  // -- Server sync (committed HEAD; versions/metadata) ------------------------
+  const refreshServer = useCallback(async () => {
+    if (!projectId) return;
+    const [tree, bundle, session] = await Promise.all([
+      readTree(projectId, REQ_PREFIX).catch(() => ({
+        files: {} as Record<string, string>,
+        shas: {} as Record<string, string>,
+      })),
+      api.getRequirements(projectId),
+      // Skip the collab-session pre-flight while collab is disabled — no roomId
+      // is set, so no WebSocket is opened and the awareness bar stays hidden.
+      env.VITE_COLLAB_ENABLED ? api.getCollabSession(projectId) : Promise.resolve(undefined),
+    ]);
+    serverFilesRef.current = tree.files;
+    serverShasRef.current = tree.shas;
+    setServerFiles(tree.files);
+    // Buffers that now match the committed content are no longer edits.
+    updateBuffers((prev) => {
       let changed = false;
-      const next: Record<string, string | null> = {};
-      for (const [filename, value] of Object.entries(prev)) {
-        if (chatModifiedFiles[filename]) {
-          next[filename] = value;
-        } else {
+      const next = { ...prev };
+      for (const [p, c] of Object.entries(prev)) {
+        if (tree.files[p] === c) {
+          delete next[p];
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [chatModifiedFiles]);
-
-  // Per-file +N/-M counts for the explorer tree. Recomputed only when
-  // the modified set, the cached baselines, or the live content of those
-  // files changes. Skipped entries (`undefined` baseline = still
-  // fetching) are simply omitted so the sidebar chip shows nothing
-  // until the diff is computable.
-  const chatModifiedCounts = useMemo(() => {
-    const map = new Map<string, { added: number; removed: number }>();
-    for (const filename of Object.keys(chatModifiedFiles)) {
-      const baseline = baselineContents[filename];
-      if (baseline === undefined) continue;
-      const current = liveContents[filename] ?? savedFiles[filename] ?? '';
-      const counts = countLineChanges(baseline ?? '', current);
-      map.set(filename, counts);
-    }
-    return map;
-  }, [chatModifiedFiles, baselineContents, liveContents, savedFiles]);
-
-  /**
-   * Renders the inline diff view for files in the chat-modified set, in
-   * place of the default markdown editor. Both the baseline and the
-   * current content are markdown-only — canvas-backed files (`.excalidraw`)
-   * fall back to the regular editor pipeline.
-   */
-  const renderChatModifiedFile = useCallback(
-    (path: string): React.ReactNode | undefined => {
-      const entry = chatModifiedFiles[path];
-      if (!entry) return undefined;
-      if (/\.excalidraw$/i.test(path)) return undefined;
-      // Render the diff live: every subsequent tool result re-fires
-      // `fileWritten`, which updates `liveContents[path]`, which flows
-      // into MdDiffViewer's `newMarkdown` and recomputes the diff doc.
-      // Each tool inside a turn lands atomically (no mid-write content),
-      // so the user sees the cumulative diff grow as the agent works.
-      const baseline = baselineContents[path];
-      const current = liveContents[path] ?? savedFiles[path] ?? '';
-      if (baseline === undefined) {
-        return (
-          <Box
-            sx={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 1.5,
-              color: 'text.secondary',
-            }}
-          >
-            <CircularProgress size={18} />
-            <Typography variant="body2">Loading diff…</Typography>
-          </Box>
-        );
-      }
-      return (
-        <Box
-          data-testid="chat-diff-view"
-          data-filename={path}
-          sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2, bgcolor: 'background.default' }}
-        >
-          <MdDiffViewer oldMarkdown={baseline ?? ''} newMarkdown={current} />
-        </Box>
-      );
-    },
-    [chatModifiedFiles, baselineContents, liveContents, savedFiles],
-  );
-
-  const handleAcceptChatFile = useCallback((filename: string) => {
-    if (!projectId) return;
-    const key = { orgId: routeOrgId, projectId };
-    removeModifiedFile(key, filename);
-    // If this was the last file in the modified set, drop the baseline
-    // snapshot on the server side too. Read the fresh state after the
-    // remove (cache is updated synchronously inside removeModifiedFile).
-    const remaining = getModifiedFiles(routeOrgId, projectId);
-    if (Object.keys(remaining).length === 0) {
-      const baseline = getSessionBaseline(routeOrgId, projectId);
-      if (baseline) {
-        void api.dropRequirementsBaseline(projectId, baseline.snapshotId);
-        clearSessionBaseline(key);
-      }
-    }
-  }, [routeOrgId, projectId]);
-
-  const handleRevertChatFile = useCallback(async (filename: string) => {
-    if (!projectId) return;
-    const baseline = getSessionBaseline(routeOrgId, projectId);
-    if (!baseline) {
-      // Without a baseline we can't revert — fall through to Accept-style
-      // clear so the banner doesn't hang.
-      handleAcceptChatFile(filename);
-      return;
-    }
-    setRevertingPaths((prev) => {
-      const next = new Set(prev);
-      next.add(filename);
-      return next;
-    });
-    try {
-      const ok = await api.revertRequirementsBaselineFile(
-        projectId,
-        baseline.snapshotId,
-        filename,
-      );
-      if (!ok) {
-        setPublishError(`Failed to revert ${filename} — see chat logs.`);
-        return;
-      }
-      // Refresh the bundle so the editor + sidebar reflect the rollback.
-      const bundle = await api.getRequirements(projectId);
-      if (bundle?.files) {
-        setSavedFiles(bundle.files);
-        setLiveContents(bundle.files);
-        if (bundle.versions) setVersions(bundle.versions);
-        setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-      }
-      // Reseed the editor if the user was viewing the reverted file.
-      if (activePath === filename) {
-        const fresh = bundle?.files?.[filename];
-        if (fresh !== undefined) editorRef.current?.setActiveMarkdown(fresh);
-      }
-      // Clear from modified set; if last, drop baseline.
-      handleAcceptChatFile(filename);
-    } finally {
-      setRevertingPaths((prev) => {
-        if (!prev.has(filename)) return prev;
-        const next = new Set(prev);
-        next.delete(filename);
-        return next;
-      });
-    }
-  }, [routeOrgId, projectId, activePath, handleAcceptChatFile]);
-
-  // After a turn ends, refresh the bundle so version + has-unsaved indicators
-  // re-derive from the new working tree.
-  useEffect(() => {
-    if (chatTurnInFlight) return;
-    if (!projectId) return;
-    // Best-effort: pull the latest bundle on turn end. No-op if nothing
-    // changed.
-    void refreshAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatTurnInFlight]);
-
-  // -- Initial load + streaming bootstrap ----------------------------------
-
-  useEffect(() => {
-    if (!projectId) return;
-
-    if (streamPrompt && !startedRef.current) {
-      startedRef.current = true;
-      navigate(location.pathname, { replace: true });
-      setStreamError(null);
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-      // Streaming bootstrap creates `requirements.md` if missing and writes
-      // the streamed content into it.
-      let accumulated = '';
-      api
-        .generateRequirementFile(
-          projectId,
-          REQUIREMENTS_MAIN_FILE,
-          { skillId: 'requirements-from-prompt', prompt: streamPrompt },
-          (delta) => {
-            if (!delta) return;
-            accumulated += delta;
-            setLiveContents((prev) => ({ ...prev, [REQUIREMENTS_MAIN_FILE]: accumulated }));
-            setSavedFiles((prev) => ({ ...prev, [REQUIREMENTS_MAIN_FILE]: accumulated }));
-            setActivePath(REQUIREMENTS_MAIN_FILE);
-          },
-          controller.signal,
-        )
-        .then(async (ok) => {
-          if (controller.signal.aborted) return;
-          setStreamingMain(false);
-          if (ok) {
-            await refreshAll();
-          } else {
-            setStreamError('Failed to generate requirements. Please try again.');
-          }
-        })
-        .catch(() => {
-          if (controller.signal.aborted) return;
-          setStreamingMain(false);
-          setStreamError('Failed to generate requirements. Please try again.');
-        });
-      return;
-    }
-
-    (async () => {
-      await refreshAll();
-      setLoading(false);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamPrompt, routeOrgId, projectId, navigate, location.pathname]);
-
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  // Reset per-project refs when the route changes.
-  useEffect(() => {
-    restoreCheckedRef.current = false;
-    userTypedRef.current = false;
-    setSaveStatus('idle');
-    setShowDiff(false);
-    setRestorePromptFor(null);
-    setActivePath(null);
-  }, [routeOrgId, projectId]);
-
-  const refreshAll = useCallback(async () => {
-    if (!projectId) return;
-    const [bundle, session] = await Promise.all([
-      api.getRequirements(projectId),
-      api.getCollabSession(projectId),
-    ]);
     if (bundle) {
-      setSavedFiles(bundle.files ?? {});
-      setLiveContents(bundle.files ?? {});
-      setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
+      setServerUnsaved(bundle.hasUnsavedChanges ?? false);
       setCurrentVersion(bundle.version ?? 0);
       if (bundle.versions) setVersions(bundle.versions);
-      // Activate `requirements.md` by default; fall back to first file.
-      setActivePath((prev) => {
-        if (prev && (bundle.files ?? {})[prev] !== undefined) return prev;
-        if ((bundle.files ?? {})[REQUIREMENTS_MAIN_FILE] !== undefined) return REQUIREMENTS_MAIN_FILE;
-        const keys = Object.keys(bundle.files ?? {});
-        return keys[0] ?? null;
-      });
     }
     if (session?.roomId) setRoomId(session.roomId);
     if (session) setUserName(session.userName || session.email || 'Anonymous');
-  }, [routeOrgId, projectId]);
+  }, [projectId, updateBuffers]);
+
+  // -- Turn attach (generation, refresh-resume, viewer) -----------------------
+
+  /**
+   * Attach to a turn's stream, drive the live preview, and on the terminal
+   * `turn-committed` event refetch the server tree. `viewer` shows the D18
+   * "in-progress generation" notice.
+   */
+  const attachGen = useCallback(
+    async (
+      turnId: string,
+      useCase: string,
+      o: {
+        viewer?: boolean;
+        signal?: AbortSignal;
+        editorTarget?: string;
+        pendingFile?: string;
+      } = {},
+    ) => {
+      if (!projectId) return;
+      setActiveGen({ turnId, useCase, viewer: o.viewer ?? false });
+      if (o.viewer) setViewerNotice('A generation is already in progress — viewing it live.');
+      try {
+        // The fold's seed is the CURRENT server tree (whole spec subtree — the
+        // same view the agents service reads). Replayed parts re-apply on top;
+        // a resumed replay may briefly diverge from the final committed state,
+        // which the terminal event + refetch reconcile.
+        const seed = await readTree(projectId, SPECS_PREFIX)
+          .then((t) => t.files)
+          .catch(() => ({}) as Record<string, string>);
+        const result = await attachTurnStream(projectId, turnId, {
+          from: 0,
+          seed,
+          signal: o.signal,
+          handlers: {
+            onSnapshot: (files) => {
+              setLiveFiles((prev) => ({ ...(prev ?? {}), ...files }));
+              if (o.pendingFile && files[toFull(o.pendingFile)] !== undefined) {
+                clearPending(o.pendingFile);
+              }
+              if (o.editorTarget) {
+                const md = files[toFull(o.editorTarget)];
+                if (md !== undefined) editorRef.current?.setActiveMarkdown(md);
+              }
+            },
+          },
+        });
+        if (o.signal?.aborted) return;
+        if (result.ok) {
+          await refreshServer();
+        } else {
+          setStreamError(turnErrorMessage(result));
+        }
+      } catch (err) {
+        if (o.signal?.aborted) return;
+        setStreamError(
+          err instanceof Error && err.message ? err.message : 'Generation failed.',
+        );
+      } finally {
+        if (!o.signal?.aborted) {
+          setActiveGen(null);
+          setLiveFiles(null);
+          setViewerNotice(null);
+        }
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, refreshServer],
+  );
+
+  /** 409 turn_in_progress → attach to the running turn as a viewer (D18). */
+  const attachToActive = useCallback(
+    async (activeTurnId: string, signal?: AbortSignal) => {
+      if (!projectId) return;
+      const status = await getTurn(projectId, activeTurnId).catch(() => null);
+      if (signal?.aborted) return;
+      await attachGen(activeTurnId, status?.useCase ?? 'requirements-generate', {
+        viewer: true,
+        signal,
+      });
+    },
+    [projectId, attachGen],
+  );
+
+  const bootstrapFromPrompt = useCallback(
+    async (prompt: string, controller: AbortController) => {
+      if (!projectId) return;
+      setStreamError(null);
+      setStreamingMain(true);
+      setActivePath(REQUIREMENTS_MAIN_FILE);
+      try {
+        // Seed the page from HEAD (empty on a fresh project) before streaming.
+        await refreshServer();
+        if (controller.signal.aborted) return;
+        const start = await startTurn(projectId, newConversationId(), {
+          useCase: 'requirements-generate',
+          instruction: prompt,
+        });
+        if (controller.signal.aborted) return;
+        if (!start.ok) {
+          if (start.code === 'turn_in_progress' && start.activeTurnId) {
+            await attachToActive(start.activeTurnId, controller.signal);
+          } else {
+            setStreamError(turnErrorMessage(start));
+          }
+          return;
+        }
+        await attachGen(start.turnId, 'requirements-generate', {
+          signal: controller.signal,
+          editorTarget: REQUIREMENTS_MAIN_FILE,
+        });
+      } catch (err) {
+        // An abort (unmount, StrictMode's throwaway first mount) is not an
+        // error; anything else must SURFACE — swallowing it wedges the page
+        // on the generating state with no way out.
+        if (controller.signal.aborted) return;
+        setStreamError(
+          err instanceof Error && err.message ? err.message : 'Requirements generation failed.',
+        );
+      } finally {
+        // A superseded attempt must not clobber the live attempt's UI state.
+        if (!controller.signal.aborted) {
+          setStreamingMain(false);
+          setLoading(false);
+        }
+      }
+    },
+    [projectId, refreshServer, attachGen, attachToActive],
+  );
+
+  // -- Initial load + streaming bootstrap ------------------------------------
+  //
+  // Start-on-mount / abort-on-cleanup so it survives StrictMode's dev-mode
+  // mount→unmount→remount: the first (throwaway) attempt is aborted before its
+  // POST is sent and the remount starts a fresh one.
+  useEffect(() => {
+    if (!projectId) return;
+
+    if (initialPrompt) {
+      // Clear the router state so a refresh doesn't re-trigger a generation
+      // (the captured `initialPrompt` keeps this effect's input stable).
+      navigate(location.pathname, { replace: true });
+      const controller = new AbortController();
+      void bootstrapFromPrompt(initialPrompt, controller);
+      return () => controller.abort();
+    }
+
+    // Normal load + refresh-mid-generation recovery (D16): a running
+    // requirements turn is re-attached from index 0 in live mode.
+    const controller = new AbortController();
+    (async () => {
+      await refreshServer();
+      if (controller.signal.aborted) return;
+      setLoading(false);
+      const active = await getActiveTurn(projectId).catch(() => null);
+      if (controller.signal.aborted) return;
+      if (active && active.status === 'running' && active.useCase.startsWith('requirements')) {
+        setViewerNotice('A generation is in progress — showing it live.');
+        await attachGen(active.turnId, active.useCase, { viewer: true, signal: controller.signal });
+      }
+    })();
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt, projectId]);
+
+  // Retry a failed cold-start bootstrap. `initialPrompt` is retained across the
+  // router-state clear, so the same prompt can be re-run without leaving the page.
+  const retryCtrlRef = useRef<AbortController | null>(null);
+  useEffect(() => () => retryCtrlRef.current?.abort(), []);
+  const retryBootstrap = useCallback(() => {
+    if (!initialPrompt) return;
+    retryCtrlRef.current?.abort();
+    const controller = new AbortController();
+    retryCtrlRef.current = controller;
+    void bootstrapFromPrompt(initialPrompt, controller);
+  }, [initialPrompt, bootstrapFromPrompt]);
 
   // Repo URL banner.
   useEffect(() => {
@@ -539,467 +460,390 @@ export default function ProjectRequirementsPage() {
     let cancelled = false;
     (async () => {
       const status = await api.getProjectStatus(projectId);
-      if (!cancelled && status?.repoUrl) {
-        setRepoUrl(status.repoUrl);
-      }
+      if (!cancelled && status?.repoUrl) setRepoUrl(status.repoUrl);
     })();
     return () => {
       cancelled = true;
     };
-  }, [routeOrgId, projectId]);
+  }, [projectId]);
 
-  // Fetch the active file's content at the latest tag for diffing.
+  // Fetch the active file's content at the latest tag for the diff view.
   useEffect(() => {
-    if (!projectId || !activePath || !hasUnsavedChanges || versions.length === 0) {
+    if (!projectId || !activePath || versions.length === 0) {
       setLastTaggedActive(null);
       return;
     }
     const latest = Math.max(...versions.map((v) => v.version));
-    const latestTag = `v${latest}`;
     let cancelled = false;
     (async () => {
-      const at = await api.getRequirementsAtVersion(projectId, latestTag);
+      const at = await api.getRequirementsAtVersion(projectId, `v${latest}`);
       if (!cancelled) setLastTaggedActive(at?.files?.[activePath] ?? null);
     })();
     return () => {
       cancelled = true;
     };
-  }, [routeOrgId, projectId, activePath, hasUnsavedChanges, versions]);
+  }, [projectId, activePath, versions]);
 
-  // Restore-on-mount draft check (per-file).
-  useEffect(() => {
-    if (restoreCheckedRef.current) return;
-    if (!projectId || loading || streamingMain) return;
-    restoreCheckedRef.current = true;
-
-    const drafts = loadDrafts(routeOrgId, projectId);
-    const filenames = Object.keys(drafts);
-    for (const filename of filenames) {
-      // Canvas-backed files (wireframes / domain-model) are view-only on
-      // this page — the user can only update them via Generate. Any
-      // draft that survived in localStorage is a relic of the spurious
-      // initial Excalidraw onChange (pre-readOnly-gate); discard it so
-      // it can't shadow a fresh generation on the next page load.
-      if (/\.excalidraw$/i.test(filename)) {
-        clearDraft(routeOrgId, projectId, filename);
-        continue;
-      }
-      const local = drafts[filename]!;
-      const serverContent = savedFiles[filename] ?? '';
-      if (local.draft === serverContent) {
-        clearDraft(routeOrgId, projectId, filename);
-        continue;
-      }
-      if (local.baseServerContent !== serverContent) {
-        // Pop the prompt for the first divergent draft we find. Multi-file
-        // conflict resolution is left intentionally simple: one file at a
-        // time.
-        setRestorePromptFor({
-          filename,
-          localDraft: local.draft,
-          serverContent,
-          savedAt: local.savedAt,
-        });
-        break;
-      }
-      // Server still at the snapshot we last saw — restore silently and replay PUT.
-      userTypedRef.current = true;
-      setLiveContents((prev) => ({ ...prev, [filename]: local.draft }));
-      if (filename === activePath) editorRef.current?.setActiveMarkdown(local.draft);
-      setSaveStatus('saving');
-      api
-        .updateRequirementFile(projectId, filename, local.draft)
-        .then((bundle) => {
-          if (bundle?.files) {
-            setSavedFiles(bundle.files);
-            setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-            if (bundle.versions) setVersions(bundle.versions);
-          }
-          saveDraft(routeOrgId, projectId, filename, {
-            draft: local.draft,
-            baseServerContent: local.draft,
-            savedAt: Date.now(),
-          });
-          setSaveStatus('saved');
-        })
-        .catch(() => setSaveStatus('error'));
-    }
-  }, [routeOrgId, projectId, loading, streamingMain, savedFiles, activePath]);
-
-  // Auto-save: debounced PUT for the active file when its buffer differs from saved.
-  useEffect(() => {
-    if (!projectId || !activePath) return;
-    if (streamingMain || viewingHistorical) return;
-    if (!userTypedRef.current) return;
-    const buf = liveContents[activePath] ?? '';
-    const saved = savedFiles[activePath] ?? '';
-
-    saveDraft(routeOrgId, projectId, activePath, {
-      draft: buf,
-      baseServerContent: saved,
-      savedAt: Date.now(),
-    });
-
-    if (buf === saved) return;
-    if (connected) return; // collab loop owns the save when connected
-
-    setSaveStatus('unsaved');
-    const t = setTimeout(async () => {
-      setSaveStatus('saving');
-      try {
-        await api.updateRequirementFile(projectId, activePath, buf);
-        setSavedFiles((prev) => ({ ...prev, [activePath]: buf }));
-        const bundle = await api.getRequirements(projectId);
-        if (bundle) {
-          setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-          if (bundle.versions) setVersions(bundle.versions);
-          setCurrentVersion(bundle.version ?? 0);
-        }
-        saveDraft(routeOrgId, projectId, activePath, {
-          draft: buf,
-          baseServerContent: buf,
-          savedAt: Date.now(),
-        });
-        setSaveStatus('saved');
-      } catch {
-        setSaveStatus('error');
-      }
-    }, AUTO_SAVE_DEBOUNCE_MS);
-    return () => clearTimeout(t);
-  }, [
-    liveContents,
-    savedFiles,
-    activePath,
-    streamingMain,
-    viewingHistorical,
-    connected,
-    routeOrgId,
-    projectId,
-  ]);
-
-  // beforeunload — native dialog when leaving with unsaved/saving work.
-  useEffect(() => {
-    const dirty = saveStatus === 'unsaved' || saveStatus === 'saving';
-    if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [saveStatus]);
-
-  // -- Version + discard ---------------------------------------------------
-
-  const handleVersionSelect = async (version: number) => {
-    if (!projectId) return;
-    const latestVersion = versions.length > 0 ? Math.max(...versions.map((v) => v.version)) : 0;
-    if (version === latestVersion) {
-      await refreshAll();
-      setHistoricalFiles(null);
-      setViewingHistorical(false);
-    } else {
-      const at = await api.getRequirementsAtVersion(projectId, `v${version}`);
-      if (at?.files) {
-        setHistoricalFiles(at.files);
-        setCurrentVersion(version);
-        setViewingHistorical(true);
-        // Snap active to a file that exists in the snapshot.
-        const keys = Object.keys(at.files);
-        if (!activePath || at.files[activePath] === undefined) {
-          setActivePath(keys.includes(REQUIREMENTS_MAIN_FILE) ? REQUIREMENTS_MAIN_FILE : (keys[0] ?? null));
-        }
-      }
-    }
-  };
-
-  const handleDiscard = async () => {
-    if (!projectId) return;
-    setIsDiscarding(true);
-    const bundle = await api.discardRequirements(projectId);
-    if (bundle) {
-      setSavedFiles(bundle.files ?? {});
-      setLiveContents(bundle.files ?? {});
-      setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-      if (bundle.versions) setVersions(bundle.versions);
-      setCurrentVersion(bundle.version ?? 0);
-      userTypedRef.current = false;
-      clearAllDrafts(routeOrgId, projectId);
-      setSaveStatus('idle');
-    }
-    setIsDiscarding(false);
-  };
-
-  const handleRestoreLocal = async () => {
-    if (!projectId || !restorePromptFor) return;
-    const { filename, localDraft } = restorePromptFor;
-    setRestorePromptFor(null);
-    userTypedRef.current = true;
-    setLiveContents((prev) => ({ ...prev, [filename]: localDraft }));
-    if (filename === activePath) editorRef.current?.setActiveMarkdown(localDraft);
-    setSaveStatus('saving');
-    try {
-      await api.updateRequirementFile(projectId, filename, localDraft);
-      setSavedFiles((prev) => ({ ...prev, [filename]: localDraft }));
-      saveDraft(routeOrgId, projectId, filename, {
-        draft: localDraft,
-        baseServerContent: localDraft,
-        savedAt: Date.now(),
-      });
-      setSaveStatus('saved');
-    } catch {
-      setSaveStatus('error');
-    }
-  };
-
-  const handleDiscardLocal = () => {
-    if (!projectId || !restorePromptFor) return;
-    clearDraft(routeOrgId, projectId, restorePromptFor.filename);
-    setRestorePromptFor(null);
-  };
-
-  // -- File operations: add / rename / delete ------------------------------
-
-  const addFileMenuItems: AddFileMenuItem[] = useMemo(() => {
-    // Each artifact type appears in the picker at most once. As soon as
-    // the user adds it, the type drops out of the list so the picker
-    // doesn't grow stale with already-added options.
-    const existingTypeIds = new Set(
-      Object.keys(savedFiles)
-        .map((n) => documentTypeForFile(n)?.id)
-        .filter((id): id is NonNullable<typeof id> => Boolean(id)),
-    );
-    return DOCUMENT_TYPES
-      .filter((t) => !t.protected && !existingTypeIds.has(t.id))
-      .map((t) => ({
-        id: t.id,
-        label: t.label,
-        description: t.description,
-      }));
-  }, [savedFiles]);
-
-  const handleAddFile = useCallback(
-    (typeId?: string) => {
-      if (!projectId || !typeId) return undefined;
-      const type = getDocumentType(typeId);
-      if (!type) return undefined;
-      const filename = nextFilenameFor(type, Object.keys(savedFiles));
-      const willAutoGenerate = !!type.generationSkillId;
-      // Optimistically create with starter content; server PUT happens via auto-save when user types.
-      // Markdown gets a heading + hint; canvas-backed types start blank
-      // because the editor parses empty string as a blank scene and any
-      // markdown placeholder would be invalid JSON. When we auto-generate
-      // (the common case from the Add document dialog) seed the markdown
-      // body empty too so the generated stream is the first content the
-      // user ever sees on this file.
-      const initial = type.extension === '.excalidraw'
-        ? ''
-        : willAutoGenerate
-          ? ''
-          : `# ${type.label}\n\nGenerate from existing documents using the Sparkles button above.`;
-      setLiveContents((prev) => ({ ...prev, [filename]: initial }));
-      setSavedFiles((prev) => ({ ...prev, [filename]: '' }));
-      setActivePath(filename);
-      // Mark pending up-front so the spinner shows from the click — no
-      // gap between "file appears in sidebar" and "generation starts".
-      if (willAutoGenerate) markPending(filename);
-      // Persist the empty file so the directory exists on disk, then kick
-      // off generation immediately.
-      api
-        .updateRequirementFile(projectId, filename, initial)
-        .then((bundle) => {
-          if (bundle?.files) {
-            setSavedFiles(bundle.files);
-            if (bundle.versions) setVersions(bundle.versions);
-            setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-          }
-          if (willAutoGenerate) void generateFor(filename, type);
-        });
-      return filename;
-    },
-    [routeOrgId, projectId, savedFiles],
-  );
-
-  const handleDelete = useCallback(
-    async (path: string) => {
-      if (!projectId) return;
-      if (path === REQUIREMENTS_MAIN_FILE) return;
-      const bundle = await api.deleteRequirementFile(projectId, path);
-      if (bundle?.files) {
-        setSavedFiles(bundle.files);
-        setLiveContents(bundle.files);
-        if (bundle.versions) setVersions(bundle.versions);
-        setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-      }
-      if (activePath === path) {
-        setActivePath(REQUIREMENTS_MAIN_FILE);
-      }
-      clearDraft(routeOrgId, projectId, path);
-    },
-    [routeOrgId, projectId, activePath],
-  );
-
-  const handleRename = useCallback(
-    async (oldPath: string, newPath: string) => {
-      if (!projectId) return;
-      if (oldPath === REQUIREMENTS_MAIN_FILE) return; // protected
-      if (oldPath === newPath) return;
-      const content = liveContents[oldPath] ?? savedFiles[oldPath] ?? '';
-      // Rename = create new + delete old, atomically from the user's view.
-      // The auto-tag flow on save will commit both moves as one tag bump.
-      await api.updateRequirementFile(projectId, newPath, content);
-      await api.deleteRequirementFile(projectId, oldPath);
-      const bundle = await api.getRequirements(projectId);
-      if (bundle?.files) {
-        setSavedFiles(bundle.files);
-        setLiveContents(bundle.files);
-        if (bundle.versions) setVersions(bundle.versions);
-        setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
-      }
-      if (activePath === oldPath) setActivePath(newPath);
-      clearDraft(routeOrgId, projectId, oldPath);
-    },
-    [routeOrgId, projectId, liveContents, savedFiles, activePath],
-  );
-
-  // -- Generate-from-sources for the active file ---------------------------
-
-  const activeDocType: DocumentType | undefined =
-    activePath ? documentTypeForFile(activePath) : undefined;
-
-  const markPending = useCallback((path: string) => {
+  // -- Pending-path helpers (sidebar spinner) ---------------------------------
+  const markPending = useCallback((name: string) => {
+    setPendingPaths((prev) => (prev.has(name) ? prev : new Set(prev).add(name)));
+  }, []);
+  const clearPending = useCallback((name: string) => {
     setPendingPaths((prev) => {
-      if (prev.has(path)) return prev;
+      if (!prev.has(name)) return prev;
       const next = new Set(prev);
-      next.add(path);
+      next.delete(name);
       return next;
     });
   }, []);
 
-  const clearPending = useCallback((path: string) => {
-    setPendingPaths((prev) => {
-      if (!prev.has(path)) return prev;
-      const next = new Set(prev);
-      next.delete(path);
-      return next;
-    });
-  }, []);
+  // -- Per-file generation turns ----------------------------------------------
 
   const generateFor = useCallback(
     async (filename: string, docType: DocumentType) => {
       if (!projectId || !docType.generationSkillId) return;
+      if (generatingRef.current) return; // a generation is already in flight
+      generatingRef.current = true;
       setGeneratingFile(filename);
       markPending(filename);
       setStreamError(null);
-
-      const skillId = docType.generationSkillId;
-      // Excalidraw-backed skills (wireframes / domain-model) stream a tiny DSL
-      // and emit a final `replace:true` delta with the converted JSON. While
-      // the DSL is in flight we run the same conversion client-side for a
-      // best-effort live preview on the canvas — partial DSL that doesn't
-      // parse yet just leaves the canvas at its previous state.
-      const excalidrawKind: DslKind | null =
-        filename.toLowerCase().endsWith('.excalidraw')
-          ? docType.id === 'wireframes'
-            ? 'wireframes'
-            : docType.id === 'domain-model'
-              ? 'domain-model'
-              : null
-          : null;
-      let accumulated = '';
-      // First *visible* delta clears the pending spinner. For excalidraw
-      // it's the first DSL frame that parses; for markdown it's the first
-      // non-empty delta.
-      let firstContent = false;
-      const noteFirstContent = () => {
-        if (!firstContent) {
-          firstContent = true;
-          clearPending(filename);
-        }
-      };
-      const ok = await api.generateRequirementFile(
-        projectId,
-        filename,
-        {
-          skillId,
-          sources: docType.generationSourceFiles,
-        },
-        (delta, opts) => {
-          if (!delta) return;
-          if (opts?.replace) {
-            accumulated = delta;
+      // Show the target row immediately; the stream fills it in.
+      setLiveFiles((prev) => ({ ...(prev ?? {}), [toFull(filename)]: '' }));
+      try {
+        const start = await startTurn(projectId, newConversationId(), {
+          useCase: 'requirements-generate',
+          instruction: `Generate the ${docType.label} for this project.`,
+          target: filename,
+        });
+        if (!start.ok) {
+          if (start.code === 'turn_in_progress' && start.activeTurnId) {
+            await attachToActive(start.activeTurnId);
           } else {
-            accumulated += delta;
+            setStreamError(turnErrorMessage(start));
+            setLiveFiles(null);
           }
-          if (excalidrawKind) {
-            if (opts?.replace) {
-              // Final converted Excalidraw JSON from the agents-service.
-              setLiveContents((prev) => ({ ...prev, [filename]: delta }));
-              noteFirstContent();
-            } else {
-              const attempt = tryDslToExcalidraw(excalidrawKind, accumulated);
-              if (attempt.ok) {
-                setLiveContents((prev) => ({ ...prev, [filename]: attempt.json }));
-                noteFirstContent();
-              }
-            }
-            return;
-          }
-          setLiveContents((prev) => ({ ...prev, [filename]: accumulated }));
-          editorRef.current?.setActiveMarkdown(accumulated);
-          noteFirstContent();
-        },
-      );
-      setGeneratingFile(null);
-      clearPending(filename);
-      if (ok) {
-        const bundle = await api.getRequirements(projectId);
-        if (bundle?.files) {
-          setSavedFiles(bundle.files);
-          if (bundle.versions) setVersions(bundle.versions);
-          setHasUnsavedChanges(bundle.hasUnsavedChanges ?? false);
+          return;
         }
-      } else {
-        setStreamError(`Failed to generate ${filename}.`);
+        const isCanvas = docType.extension === '.excalidraw';
+        await attachGen(start.turnId, 'requirements-generate', {
+          pendingFile: filename,
+          editorTarget: isCanvas ? undefined : filename,
+        });
+      } finally {
+        setGeneratingFile(null);
+        clearPending(filename);
+        generatingRef.current = false;
       }
     },
-    [routeOrgId, projectId, markPending, clearPending],
+    [projectId, markPending, clearPending, attachGen, attachToActive],
   );
+
+  const activeDocType: DocumentType | undefined =
+    activePath ? documentTypeForFile(activePath) : undefined;
 
   const generateActive = () => {
     if (!activePath || !activeDocType) return;
     void generateFor(activePath, activeDocType);
   };
 
-  // -- Publish (Save & Proceed) --------------------------------------------
+  // -- File operations: add / delete / rename ---------------------------------
+  //
+  // Committed truth: mutations of committed files are one `files/apply` commit
+  // each; a brand-new manual doc starts life as an editor buffer and commits
+  // with the Publish flush.
 
+  const addFileMenuItems: AddFileMenuItem[] = useMemo(() => {
+    const filenames = Object.keys(filesAsFilenames({ ...serverFiles, ...buffers }));
+    const existingTypeIds = new Set(
+      filenames.map((n) => documentTypeForFile(n)?.id).filter((id): id is NonNullable<typeof id> => Boolean(id)),
+    );
+    return DOCUMENT_TYPES.filter((t) => !t.protected && !existingTypeIds.has(t.id)).map((t) => ({
+      id: t.id,
+      label: t.label,
+      description: t.description,
+    }));
+  }, [serverFiles, buffers]);
+
+  const handleAddFile = useCallback(
+    (typeId?: string) => {
+      if (!projectId || !typeId) return undefined;
+      const type = getDocumentType(typeId);
+      if (!type) return undefined;
+      const names = Object.keys(
+        filesAsFilenames({ ...serverFilesRef.current, ...buffersRef.current }),
+      );
+      const filename = nextFilenameFor(type, names);
+      if (type.generationSkillId) {
+        // The generation turn authors + commits the file server-side.
+        setActivePath(filename);
+        void generateFor(filename, type);
+        return filename;
+      }
+      const initial =
+        type.extension === '.excalidraw'
+          ? ''
+          : `# ${type.label}\n\nGenerate from existing documents using the Sparkles button above.`;
+      updateBuffers((prev) => ({ ...prev, [toFull(filename)]: initial }));
+      setActivePath(filename);
+      return filename;
+    },
+    [projectId, generateFor, updateBuffers],
+  );
+
+  /** Surface a failed apply (non-409) on the shared error banner. */
+  const reportApplyError = useCallback((err: unknown, fallback: string) => {
+    setPublishError(err instanceof ApiError && err.message ? err.message : fallback);
+  }, []);
+
+  const handleDelete = useCallback(
+    (name: string) => {
+      if (!projectId || name === REQUIREMENTS_MAIN_FILE) return; // protected root
+      const full = toFull(name);
+      updateBuffers((prev) => {
+        if (!(full in prev)) return prev;
+        const next = { ...prev };
+        delete next[full];
+        return next;
+      });
+      if (activePath === name) setActivePath(REQUIREMENTS_MAIN_FILE);
+      if (!(full in serverFilesRef.current)) return; // buffer-only — nothing committed
+      // One commit per delete. A derived/source sibling dies with the file
+      // (the `.dsl` source and its `.excalidraw` view are one document).
+      const deletes: ApplyDelete[] = [{ path: full, baseSha: serverShasRef.current[full] }];
+      const sibling = /\.excalidraw$/i.test(full)
+        ? full.replace(/\.excalidraw$/i, '.dsl')
+        : /\.dsl$/i.test(full)
+          ? full.replace(/\.dsl$/i, '.excalidraw')
+          : null;
+      if (sibling && sibling in serverFilesRef.current) {
+        deletes.push({ path: sibling, baseSha: serverShasRef.current[sibling] });
+      }
+      void (async () => {
+        try {
+          const res = await applyFiles(projectId, { deletes, message: `Delete ${name}` });
+          if (!res.ok) setApplyConflict(res.conflicts.map((c) => c.path));
+          await refreshServer();
+        } catch (err) {
+          reportApplyError(err, 'Failed to delete the file.');
+        }
+      })();
+    },
+    [projectId, activePath, updateBuffers, refreshServer, reportApplyError],
+  );
+
+  const handleRename = useCallback(
+    (oldName: string, newName: string) => {
+      if (!projectId || oldName === REQUIREMENTS_MAIN_FILE || oldName === newName) return;
+      const oldFull = toFull(oldName);
+      const newFull = toFull(newName);
+      const content = buffersRef.current[oldFull] ?? serverFilesRef.current[oldFull] ?? '';
+      const committed = oldFull in serverFilesRef.current;
+      updateBuffers((prev) => {
+        const next = { ...prev };
+        delete next[oldFull];
+        if (!committed) next[newFull] = content; // buffer-only file: local rename
+        return next;
+      });
+      if (activePath === oldName) setActivePath(newName);
+      if (!committed) return;
+      void (async () => {
+        try {
+          const res = await applyFiles(projectId, {
+            writes: [{ path: newFull, content }],
+            deletes: [{ path: oldFull, baseSha: serverShasRef.current[oldFull] }],
+            message: `Rename ${oldName} to ${newName}`,
+          });
+          if (!res.ok) setApplyConflict(res.conflicts.map((c) => c.path));
+          await refreshServer();
+        } catch (err) {
+          reportApplyError(err, 'Failed to rename the file.');
+        }
+      })();
+    },
+    [projectId, activePath, updateBuffers, refreshServer, reportApplyError],
+  );
+
+  // -- Publish (flush buffers → apply → save-tag → architecture) --------------
   const handlePublish = async () => {
     if (!projectId) return;
-    // Flush the active file's buffer so the server has the very latest content.
+    // Flush the active editor buffer first.
     if (activePath) {
-      const md = editorRef.current?.getActiveMarkdown() ?? liveContents[activePath] ?? '';
-      if (md) {
-        await api.updateRequirementFile(projectId, activePath, md);
-      }
+      const md = editorRef.current?.getActiveMarkdown();
+      if (md !== undefined) setBuffer(toFull(activePath), md);
     }
     setPublishing(true);
     setPublishError(null);
+    setApplyConflict(null);
     try {
-      await api.saveRequirements(projectId);
-      clearAllDrafts(routeOrgId, projectId);
-      setSaveStatus('idle');
-      const existingDesign = await api.getDesign(projectId);
-      const regenerate = !!existingDesign && existingDesign.status !== 'none';
-      navigate(projectArchitecturePath(routeOrgId, projectId), {
-        state: { fromRequirements: true, regenerate },
-      });
+      const server = serverFilesRef.current;
+      const shas = serverShasRef.current;
+      const merged = { ...server, ...buffersRef.current };
+      // Recompute the derived views (`.dsl → .excalidraw`) so sources never
+      // commit alongside stale views; prune derived files whose source is gone.
+      const sources: Record<string, string> = {};
+      for (const [p, c] of Object.entries(merged)) if (!isDerivedPath(p)) sources[p] = c;
+      const derived = computeDerivedArtifacts(projectId, sources);
+      const keep = derivedPathsFor(sources);
+      const finalTree: Record<string, string> = { ...sources };
+      for (const [p, c] of Object.entries(derived.files)) if (keep.has(p)) finalTree[p] = c;
+
+      const writes: ApplyWrite[] = [];
+      for (const [p, c] of Object.entries(finalTree)) {
+        if (!p.startsWith(REQ_PREFIX)) continue;
+        if (server[p] === c) continue;
+        writes.push(shas[p] ? { path: p, content: c, baseSha: shas[p] } : { path: p, content: c });
+      }
+      const deletes: ApplyDelete[] = [];
+      for (const p of Object.keys(server)) {
+        if (!isDerivedPath(p) || keep.has(p)) continue;
+        deletes.push({ path: p, baseSha: shas[p] });
+      }
+
+      // The {commitSha} pin on save is optional now (the backend reads its own
+      // mirror — no GitHub read-lag): pass it when the apply just minted one,
+      // save unpinned otherwise (tags HEAD).
+      let commitSha: string | undefined;
+      if (writes.length > 0 || deletes.length > 0) {
+        const res = await applyFiles(projectId, { writes, deletes, message: 'Update requirements' });
+        if (!res.ok) {
+          setApplyConflict(res.conflicts.map((c) => c.path));
+          setPublishing(false);
+          return;
+        }
+        commitSha = res.commitSha;
+      }
+      await api.saveRequirements(projectId, commitSha);
+      updateBuffers(() => ({}));
+      navigate(projectArchitecturePath(routeOrgId, projectId));
     } catch (err) {
       setPublishError(err instanceof ApiError ? err.message : 'Failed to publish. Please try again.');
       setPublishing(false);
     }
   };
 
-  // -- Render --------------------------------------------------------------
+  // -- Discard (server-side revert to the last tag) ----------------------------
+  const handleDiscard = async () => {
+    if (!projectId) return;
+    setIsDiscarding(true);
+    try {
+      await api.discardRequirements(projectId);
+      updateBuffers(() => ({}));
+      await refreshServer();
+    } finally {
+      setIsDiscarding(false);
+    }
+  };
+
+  /** The apply-conflict "Reload" affordance: adopt server truth, drop buffers. */
+  const reloadFromServer = useCallback(async () => {
+    updateBuffers(() => ({}));
+    setApplyConflict(null);
+    await refreshServer();
+  }, [updateBuffers, refreshServer]);
+
+  // -- Versions ------------------------------------------------------------
+  const handleVersionSelect = async (version: number) => {
+    if (!projectId) return;
+    const latestVersion = versions.length > 0 ? Math.max(...versions.map((v) => v.version)) : 0;
+    if (version === latestVersion) {
+      setHistoricalFiles(null);
+      setViewingHistorical(false);
+      await refreshServer();
+    } else {
+      const at = await api.getRequirementsAtVersion(projectId, `v${version}`);
+      if (at?.files) {
+        setHistoricalFiles(at.files);
+        setCurrentVersion(version);
+        setViewingHistorical(true);
+      }
+    }
+  };
+
+  // -- Derived render state ------------------------------------------------
+
+  // D20 edit guard: a requirements turn (generate or chat) is writing this
+  // subtree — freeze the editor + Publish; unrelated pages stay editable.
+  const reqTurnActive =
+    streamingMain ||
+    generatingFile !== null ||
+    chatTurnInFlight ||
+    (activeGen?.useCase.startsWith('requirements') ?? false);
+
+  const bufferDirty = Object.entries(buffers).some(([p, c]) => serverFiles[p] !== c);
+  const dirty = bufferDirty || serverUnsaved;
+
+  // Display = committed HEAD + unsaved buffers (+ live overlay while a turn
+  // streams). The live fold spans the whole spec tree — only this page's
+  // subtree is shown here.
+  const displayFull = useMemo(() => {
+    const out: Record<string, string> = { ...serverFiles, ...buffers };
+    if (liveFiles) {
+      for (const [p, c] of Object.entries(liveFiles)) {
+        if (p.startsWith(REQ_PREFIX)) out[p] = c;
+      }
+    }
+    return out;
+  }, [serverFiles, buffers, liveFiles]);
+
+  // Derived VIEW overlay: the `.excalidraw` scenes are recomputed from their
+  // `.dsl` sources for display (the committed ones can be stale right after a
+  // generation commit; Publish recommits fresh ones). Identity-stabilized on
+  // the source subset so a markdown keystroke never recompiles a DSL.
+  const dslSourceRef = useRef<Record<string, string> | null>(null);
+  const dslSource = useMemo<Record<string, string>>(() => {
+    const subset: Record<string, string> = {};
+    for (const [p, c] of Object.entries(displayFull)) {
+      if (/\.dsl$/i.test(p)) subset[p] = c;
+    }
+    const prev = dslSourceRef.current;
+    if (prev) {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(subset);
+      if (prevKeys.length === nextKeys.length && nextKeys.every((p) => prev[p] === subset[p])) {
+        return prev;
+      }
+    }
+    dslSourceRef.current = subset;
+    return subset;
+  }, [displayFull]);
+  const derivedView = useMemo<Record<string, string> | null>(() => {
+    if (Object.keys(dslSource).length === 0) return null;
+    return computeDerivedArtifacts(projectId ?? '', dslSource).files;
+  }, [dslSource, projectId]);
+  const displayWithDerived = useMemo(
+    () => (derivedView ? { ...displayFull, ...derivedView } : displayFull),
+    [displayFull, derivedView],
+  );
+
+  // Hide `.dsl` sources; the user only sees the rendered `.excalidraw`.
+  const hideDsl = (m: Record<string, string>): Record<string, string> =>
+    Object.fromEntries(Object.entries(m).filter(([k]) => !/\.dsl$/i.test(k)));
+  const explorerFiles = hideDsl(
+    viewingHistorical && historicalFiles ? historicalFiles : filesAsFilenames(displayWithDerived),
+  );
+
+  // Default the active file to requirements.md (or the first available).
+  useEffect(() => {
+    setActivePath((prev) => {
+      const names = Object.keys(explorerFiles);
+      if (prev && names.includes(prev)) return prev;
+      if (names.includes(REQUIREMENTS_MAIN_FILE)) return REQUIREMENTS_MAIN_FILE;
+      return names[0] ?? null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverFiles, buffers, liveFiles, viewingHistorical, historicalFiles]);
+
+  const getFileLabel = (path: string): string | undefined => {
+    const type = documentTypeForFile(path);
+    const label = type ? type.label : toTitleCase(path);
+    return pendingPaths.has(path) ? `${label} — generating…` : label;
+  };
+  const getFileSortKey = (path: string): number | undefined => {
+    const type = documentTypeForFile(path);
+    if (!type) return undefined;
+    const idx = DOCUMENT_TYPES.findIndex((t) => t.id === type.id);
+    return idx < 0 ? undefined : idx;
+  };
 
   if (loading) {
     return (
@@ -1012,50 +856,10 @@ export default function ProjectRequirementsPage() {
     );
   }
 
-  // Files presented to the explorer:
-  //   - viewingHistorical → snapshot at selected version
-  //   - otherwise → the live buffers (fall back to savedFiles for un-typed files)
-  // The `.dsl` sibling files persisted alongside wireframes / domain-model
-  // canvases are an internal source format; hide them from the sidebar so
-  // the user only sees the rendered `.excalidraw`.
-  const hideDsl = (m: Record<string, string>): Record<string, string> =>
-    Object.fromEntries(Object.entries(m).filter(([k]) => !/\.dsl$/i.test(k)));
-  const explorerFiles = hideDsl(
-    viewingHistorical && historicalFiles
-      ? historicalFiles
-      : Object.fromEntries(
-          Object.keys(savedFiles).map((k) => [k, liveContents[k] ?? savedFiles[k] ?? '']),
-        ),
-  );
+  const generatingWholePage =
+    streamingMain || activeGen?.useCase === 'requirements-generate';
 
-  const getFileLabel = (path: string): string | undefined => {
-    const type = documentTypeForFile(path);
-    const base = type ? type.label : toTitleCase(path);
-    // Surface a "generating…" tag in the sidebar while the file is
-    // waiting for its first content delta (auto-generate on add, or
-    // explicit Generate). Spinner from `pendingPaths` covers the icon
-    // slot; this suffixes the label so users can read the state at a
-    // glance.
-    if (pendingPaths.has(path)) return `${base} — generating…`;
-    return base;
-  };
-
-  // Sort the sidebar by registered document order — keeps `requirements.md`
-  // at the top and lays out the generated docs (functional → NFR → stories
-  // → wireframes → domain model) the way the user added them. Anything not
-  // in the registry falls back to alphabetical at the end.
-  const getFileSortKey = (path: string): number | undefined => {
-    const type = documentTypeForFile(path);
-    if (!type) return undefined;
-    const idx = DOCUMENT_TYPES.findIndex((t) => t.id === type.id);
-    return idx < 0 ? undefined : idx;
-  };
-
-  // Streaming bootstrap (fresh project from a prompt): the first delta hasn't
-  // landed yet, so there are no files for the Explorer to render. Show a
-  // dedicated "Generating…" state instead of the Explorer chrome — otherwise
-  // the sidebar briefly flashes "No files" until the first delta arrives.
-  if (Object.keys(explorerFiles).length === 0 && streamingMain) {
+  if (Object.keys(explorerFiles).length === 0 && generatingWholePage) {
     return (
       <PageContent>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 12 }}>
@@ -1066,14 +870,29 @@ export default function ProjectRequirementsPage() {
     );
   }
 
-  if (Object.keys(explorerFiles).length === 0 && !streamingMain && !connected) {
+  if (Object.keys(explorerFiles).length === 0 && !generatingWholePage && !connected) {
+    // A failed cold-start bootstrap lands here (empty tree, not streaming).
+    // Surface the error inline with a Retry instead of the bare empty state, so
+    // a transient pre-flight failure isn't a dead end.
     return (
       <PageContent>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 12 }}>
-          <Typography variant="h6" color="text.secondary">No requirements generated yet.</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Go to the prompt page to generate requirements from a description.
-          </Typography>
+          {streamError && initialPrompt ? (
+            <>
+              <Typography variant="h6" color="error">Couldn't start generation.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, maxWidth: 480, textAlign: 'center' }}>
+                {streamError}
+              </Typography>
+              <Button variant="contained" onClick={retryBootstrap}>Retry</Button>
+            </>
+          ) : (
+            <>
+              <Typography variant="h6" color="text.secondary">No requirements generated yet.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Go to the prompt page to generate requirements from a description.
+              </Typography>
+            </>
+          )}
         </Box>
       </PageContent>
     );
@@ -1082,41 +901,26 @@ export default function ProjectRequirementsPage() {
   const editorCollab: CollabConfig | undefined =
     connected && !viewingHistorical ? collabConfig : undefined;
 
-  // Diff is markdown-only — the underlying MdEditor renders inline diff
-  // decorations, which don't apply to canvas-backed (.excalidraw) files.
   const isCanvasFile = activePath?.toLowerCase().endsWith('.excalidraw') ?? false;
   const canShowDiff =
-    hasUnsavedChanges &&
-    lastTaggedActive !== null &&
-    !viewingHistorical &&
-    !streamingMain &&
-    !isCanvasFile;
+    dirty && lastTaggedActive !== null && !viewingHistorical && !reqTurnActive && !isCanvasFile;
   const renderDiff = showDiff && canShowDiff;
-
-  const generateLabel = activeDocType?.generationSourceFiles?.length
-    ? `Generate from ${activeDocType.generationSourceFiles.join(', ')}`
-    : 'Generate';
 
   const showGenerate =
     !!activeDocType?.generationSkillId &&
     !viewingHistorical &&
     !streamingMain &&
-    activeDocType.id !== 'requirements'; // bootstrap is only via the prompt flow
+    activeDocType.id !== 'requirements';
+  const generateLabel = activeDocType?.generationSourceFiles?.length
+    ? `Generate from ${activeDocType.generationSourceFiles.join(', ')}`
+    : 'Generate';
 
   return (
     <PageContent fullWidth noPadding sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header / toolbar */}
       <Box
         sx={{
-          px: 3,
-          py: 1.5,
-          borderBottom: 1,
-          borderColor: 'divider',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          bgcolor: 'background.paper',
-          flexShrink: 0,
+          px: 3, py: 1.5, borderBottom: 1, borderColor: 'divider',
+          display: 'flex', alignItems: 'center', gap: 2, bgcolor: 'background.paper', flexShrink: 0,
         }}
       >
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
@@ -1128,7 +932,7 @@ export default function ProjectRequirementsPage() {
                 currentVersion={currentVersion}
                 onVersionSelect={handleVersionSelect}
                 isHistorical={viewingHistorical}
-                hasUnsavedChanges={hasUnsavedChanges}
+                hasUnsavedChanges={dirty}
                 onDiscard={handleDiscard}
                 isDiscarding={isDiscarding}
               />
@@ -1145,24 +949,27 @@ export default function ProjectRequirementsPage() {
                 Diff
               </Button>
             )}
-            {streamingMain && (
-              <Typography variant="caption" color="text.secondary">
-                Generating requirements from your specification...
+            {chatTurnInFlight && (
+              <Typography variant="caption" color="text.secondary">The assistant is editing…</Typography>
+            )}
+            {viewerNotice && !chatTurnInFlight && (
+              <Typography variant="caption" color="text.secondary" data-testid="viewer-notice">
+                {viewerNotice}
               </Typography>
             )}
           </Stack>
         </Box>
 
         {showGenerate && (
-          <Tooltip title={generateLabel}>
+          <Tooltip title={reqTurnActive ? 'A generation is writing the requirements — wait for it to finish.' : generateLabel}>
             <span>
               <Button
                 variant="outlined"
                 size="small"
-                startIcon={
-                  generatingFile === activePath ? <CircularProgress size={14} /> : <Sparkles size={16} />
-                }
-                disabled={generatingFile === activePath}
+                startIcon={generatingFile === activePath ? <CircularProgress size={14} /> : <Sparkles size={16} />}
+                // One active turn per project (D18): any running turn blocks a
+                // new start, so don't offer one.
+                disabled={reqTurnActive || activeGen !== null}
                 onClick={generateActive}
               >
                 {generatingFile === activePath ? 'Generating...' : 'Generate'}
@@ -1185,74 +992,39 @@ export default function ProjectRequirementsPage() {
         {!viewingHistorical && !streamingMain && (
           <>
             <Divider orientation="vertical" flexItem />
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={publishing ? <CircularProgress size={14} color="inherit" /> : <Rocket size={16} />}
-              disabled={publishing || Object.keys(explorerFiles).length === 0}
-              onClick={handlePublish}
-            >
-              {publishing ? 'Publishing...' : 'Publish'}
-            </Button>
+            <Tooltip title={reqTurnActive ? 'A generation is writing the requirements — publishing is disabled until it finishes.' : ''}>
+              <span>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={publishing ? <CircularProgress size={14} color="inherit" /> : <Rocket size={16} />}
+                  disabled={publishing || Object.keys(explorerFiles).length === 0 || reqTurnActive}
+                  onClick={handlePublish}
+                >
+                  {publishing ? 'Publishing...' : 'Publish'}
+                </Button>
+              </span>
+            </Tooltip>
           </>
-        )}
-        {streamingMain && (
-          <Stack direction="row" alignItems="center" gap={1}>
-            <CircularProgress size={16} />
-            <Typography variant="body2" color="text.secondary">
-              Generating...
-            </Typography>
-          </Stack>
         )}
       </Box>
 
-      {(streamError || publishError) && (
+      {(streamError || publishError || applyConflict) && (
         <Box sx={{ px: 3, py: 1, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
-          {streamError && (
-            <Typography variant="body2" color="error">{streamError}</Typography>
-          )}
-          {publishError && (
-            <Typography variant="body2" color="error">{publishError}</Typography>
+          {streamError && <Typography variant="body2" color="error">{streamError}</Typography>}
+          {publishError && <Typography variant="body2" color="error">{publishError}</Typography>}
+          {applyConflict && (
+            <Stack direction="row" alignItems="center" gap={1.5} data-testid="apply-conflict">
+              <Typography variant="body2" color="error">
+                {applyConflict.join(', ')} {APPLY_CONFLICT_MESSAGE}
+              </Typography>
+              <Button size="small" variant="outlined" onClick={() => void reloadFromServer()}>
+                Reload
+              </Button>
+            </Stack>
           )}
         </Box>
       )}
-
-      {restorePromptFor && (
-        <Box
-          sx={{
-            px: 3,
-            py: 1.25,
-            borderBottom: 1,
-            borderColor: 'divider',
-            bgcolor: 'warning.lighter',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 2,
-            flexShrink: 0,
-          }}
-        >
-          <Typography variant="body2" sx={{ flexGrow: 1 }}>
-            Found an unsaved local draft of <strong>{restorePromptFor.filename}</strong> from{' '}
-            {formatRelative(restorePromptFor.savedAt)} that diverges from the latest server content.
-          </Typography>
-          <Button size="small" variant="outlined" onClick={handleDiscardLocal}>Discard local</Button>
-          <Button size="small" variant="contained" onClick={handleRestoreLocal}>Use local</Button>
-        </Box>
-      )}
-
-      {activePath &&
-        chatModifiedFiles[activePath] &&
-        !viewingHistorical &&
-        !streamingMain && (
-          <ChatModifiedBanner
-            filename={activePath}
-            busy={chatTurnInFlight}
-            pending={revertingPaths.has(activePath)}
-            counts={chatModifiedCounts.get(activePath)}
-            onAccept={() => handleAcceptChatFile(activePath)}
-            onRevert={() => void handleRevertChatFile(activePath)}
-          />
-        )}
 
       <Box sx={{ flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -1260,9 +1032,8 @@ export default function ProjectRequirementsPage() {
             files={explorerFiles}
             activePath={activePath}
             onActivePathChange={setActivePath}
-            onFileChange={(path: string, md: string) => {
-              userTypedRef.current = true;
-              setLiveContents((prev) => ({ ...prev, [path]: md }));
+            onFileChange={(name: string, md: string) => {
+              setBuffer(toFull(name), md);
             }}
             onAddFile={handleAddFile}
             addFileMenu={{ items: addFileMenuItems }}
@@ -1270,19 +1041,9 @@ export default function ProjectRequirementsPage() {
             onRename={handleRename}
             getFileLabel={getFileLabel}
             getFileSortKey={getFileSortKey}
-            pendingPaths={
-              chatBusyPaths.size === 0
-                ? pendingPaths
-                : new Set([...pendingPaths, ...chatBusyPaths])
-            }
-            chatModifiedPaths={chatModifiedCounts}
-            getFileRenderer={renderChatModifiedFile}
+            pendingPaths={pendingPaths}
             editorProps={{
-              readOnly:
-                viewingHistorical ||
-                streamingMain ||
-                generatingFile === activePath ||
-                (activePath !== null && chatBusyPaths.has(activePath)),
+              readOnly: viewingHistorical || reqTurnActive || activeGen !== null,
               showToolbar: !viewingHistorical && !streamingMain,
               toolbarRightContent: roomId ? (
                 <CollabAwarenessBar connected={connected} peers={peers} inToolbar />
@@ -1294,7 +1055,6 @@ export default function ProjectRequirementsPage() {
           />
         </Box>
       </Box>
-
     </PageContent>
   );
 }

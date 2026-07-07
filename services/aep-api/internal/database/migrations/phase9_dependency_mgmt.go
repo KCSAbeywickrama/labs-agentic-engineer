@@ -35,27 +35,25 @@ import (
 //  2. CREATE TABLE access_requests — the cross-project access-request
 //     tracking rows (models.AccessRequest, P3.5): a consumer asking a
 //     provider project to publish an org service cross-project.
-//  3. component_tasks gains the typed-task-graph columns: `type`
-//     (discriminates component / config-collection / resource-provisioning /
-//     org-publish tasks), the three JSONB dependency lists
-//     (depends_on_external_resources, depends_on_org_services,
-//     depends_on_resources), and the two single-target columns
-//     (external_resource_name, resource_name) set only on the task kinds that
-//     own one dependency each.
 //
-// Raw SQL runs for all three so the column/constraint shapes above (JSONB
-// defaults, uniqueness, CHECK-free simple defaults) are authoritative
-// regardless of what GORM's own struct-tag inference would have produced —
-// per the house migration rule (see phase3_tech_lead.go / phase6_api_platform_idp.go).
-// Every step is existence-guarded, so the migration is idempotent.
+// The upstream PR #85 third step — an ALTER TABLE component_tasks adding the
+// typed-task-graph columns (type + three JSONB depends_on_* lists + two
+// single-target columns) — is deliberately DROPPED: our GitHub-native task model
+// has NO component_tasks table (see docs/design/dependency-management-migration.md
+// §3.5/§3.6). Dependency gating lives on `aep:provision` GitHub issues + the
+// execution funnel's depsGate, not DB columns. Only the two net-new CREATE TABLEs
+// are ported.
+//
+// Raw SQL runs for both so the column/constraint shapes above (JSONB defaults,
+// uniqueness, CHECK-free simple defaults) are authoritative regardless of what
+// GORM's own struct-tag inference would have produced — per the house migration
+// rule (see phase3_tech_lead.go / phase6_api_platform_idp.go). Every step is
+// existence-guarded, so the migration is idempotent.
 func RunPhase9DependencyMgmt(ctx context.Context, db *gorm.DB) error {
 	if err := runPhase9ExternalResourcesTable(ctx, db); err != nil {
 		return err
 	}
 	if err := runPhase9AccessRequestsTable(ctx, db); err != nil {
-		return err
-	}
-	if err := runPhase9ComponentTaskColumns(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -123,50 +121,5 @@ func runPhase9AccessRequestsTable(ctx context.Context, db *gorm.DB) error {
 		}
 	}
 	slog.Info("phase9_dependency_mgmt migration: created table", "table", "access_requests")
-	return nil
-}
-
-// runPhase9ComponentTaskColumns adds the typed-task-graph columns to
-// component_tasks. Guarded per-column via addColumnIfMissing (phase3_tech_lead.go)
-// so a partially-applied prior run is safe to retry.
-//
-// NOTE: on a FRESH database these six columns are already created by boot-time
-// AutoMigrate — cmd/aep-api/main.go's database.Open AutoMigrates the
-// models.ComponentTask struct, whose tags declare them, and that runs BEFORE
-// RunAll invokes this section. So on a fresh DB this function is effectively
-// documentation of the column shapes (each addColumnIfMissing is a no-op). It
-// still matters for an EXISTING DB upgraded before ComponentTask carried these
-// fields. The real fix — reorder AutoMigrate after RunAll, or drop ComponentTask
-// from the Open AutoMigrate set so the raw-SQL DDL here is authoritative — is a
-// tracked follow-up (PROGRESS.md "Open follow-ups"); no behavior change here.
-func runPhase9ComponentTaskColumns(ctx context.Context, db *gorm.DB) error {
-	scoped := db.WithContext(ctx)
-	adds := []struct {
-		name string
-		ddl  string
-	}{
-		{"type", `ALTER TABLE component_tasks ADD COLUMN type TEXT NOT NULL DEFAULT 'component'`},
-		{"depends_on_external_resources", `ALTER TABLE component_tasks ADD COLUMN depends_on_external_resources JSONB NOT NULL DEFAULT '[]'::jsonb`},
-		{"depends_on_org_services", `ALTER TABLE component_tasks ADD COLUMN depends_on_org_services JSONB NOT NULL DEFAULT '[]'::jsonb`},
-		{"depends_on_resources", `ALTER TABLE component_tasks ADD COLUMN depends_on_resources JSONB NOT NULL DEFAULT '[]'::jsonb`},
-		{"external_resource_name", `ALTER TABLE component_tasks ADD COLUMN external_resource_name TEXT NOT NULL DEFAULT ''`},
-		{"resource_name", `ALTER TABLE component_tasks ADD COLUMN resource_name TEXT NOT NULL DEFAULT ''`},
-	}
-	for _, a := range adds {
-		if err := addColumnIfMissing(scoped, "component_tasks", a.name, a.ddl); err != nil {
-			return fmt.Errorf("phase9_dependency_mgmt: %w", err)
-		}
-	}
-
-	indexes := []string{
-		`CREATE INDEX IF NOT EXISTS idx_component_tasks_type ON component_tasks (type)`,
-		`CREATE INDEX IF NOT EXISTS idx_component_tasks_external_resource_name ON component_tasks (external_resource_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_component_tasks_resource_name ON component_tasks (resource_name)`,
-	}
-	for _, stmt := range indexes {
-		if err := scoped.Exec(stmt).Error; err != nil {
-			return fmt.Errorf("phase9_dependency_mgmt: create index: %w", err)
-		}
-	}
 	return nil
 }

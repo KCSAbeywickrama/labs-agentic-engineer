@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { OpResult } from "../src/contracts/sse-events.js";
+import type { OpResult } from "@aep/agent-stream";
 import { scoreExpect, allPass } from "./scoring.js";
 
 const SEED = { "a.yaml": "x: 1\n", "b.md": "Hello, World!\n" };

@@ -1,0 +1,33 @@
+{
+  "name": "@aep/agent-stream",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Client-side consumption surface for the spec agent's turn stream: wire contracts, the FileBundle fold (with the component design.json write-gate), the SSE reader, and the published JSON Schema. Zero server-side deps.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gen": "tsx scripts/generate-json-schema.ts",
+    "lint": "eslint .",
+    "test": "tsx --test \"test/**/*.test.ts\"",
+    "dev": "echo \"@aep/agent-stream: no dev server\""
+  },
+  "dependencies": {
+    "yaml": "^2.8.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

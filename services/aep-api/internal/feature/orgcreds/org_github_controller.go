@@ -90,11 +90,19 @@ func NewOrgGitHubController(
 	}
 }
 
-// connectCallbackPath is the single GitHub-side callback URL configured
+// ConnectCallbackPath is the single GitHub-side callback URL configured
 // in both the App's "Setup URL" and "Callback URL" fields. Constant so
 // the OAuth authorize URL and the redirect_uri in the code exchange
 // always match (GitHub enforces exact equality).
-const connectCallbackPath = humakit.APIV1 + "/org/credentials/github/connect/callback"
+//
+// It is deliberately NOT renamed by the org-config consolidation: the callback
+// is authed by a signed connect-state JWT on the OUTER mux (not the user-JWT
+// /config surface), so it stays put while the org-scoped routes drop /org. The
+// new POST /config/git-provider/connect-sessions handler references it so the
+// authorize URL's redirect_uri still points here (org-config-consolidation.md
+// §2). Exported so that handler, in the sibling orgconfig package, can build
+// the same redirect_uri.
+const ConnectCallbackPath = humakit.APIV1 + "/org/credentials/github/connect/callback"
 
 // HandleConnectCallback is the single callback for every App-mode connect
 // roundtrip. Three shapes arrive at this endpoint:
@@ -138,7 +146,7 @@ func (c *orgGitHubController) HandleConnectCallback(w http.ResponseWriter, r *ht
 // count. When claims.InstallationID is non-zero (picker re-OAuth), verifies
 // the pinned install is in the candidates before binding.
 func (c *orgGitHubController) handleOAuthCallback(w http.ResponseWriter, r *http.Request, claims *ConnectStateClaims, code, settingsURL string) {
-	redirectURI := c.publicURL + connectCallbackPath
+	redirectURI := c.publicURL + ConnectCallbackPath
 	candidates, err := c.credentialSvc.ResolveUserInstallations(r.Context(), claims.OcOrgID, code, redirectURI)
 	if err != nil {
 		if errors.Is(err, ErrAppBindNotConfigured) {

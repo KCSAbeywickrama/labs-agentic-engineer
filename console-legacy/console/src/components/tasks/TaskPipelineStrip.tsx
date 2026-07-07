@@ -35,6 +35,16 @@ const FAILURE_STATUSES: TaskStatus[] = ['rejected', 'failed', 'abandoned'];
 // Terminal success statuses: all stages should render as done (green, no pulse).
 const TERMINAL_SUCCESS_STATUSES: TaskStatus[] = ['deployed'];
 
+// Which stage a failure status FAILED AT. Stages before it are completed
+// (green), that stage is red, and later stages stay neutral — a build failure
+// must not paint the already-completed Dispatched/In Progress/Ready/Merged
+// stages red.
+const FAILED_STAGE_INDEX: Partial<Record<TaskStatus, number>> = {
+  abandoned: 1, // issue closed without merge — abandoned during In Progress
+  rejected: 2,  // PR closed unmerged — failed at Ready (review)
+  failed: 4,    // build failed — failed at Building
+};
+
 function stageIndex(status: TaskStatus | undefined): number {
   if (!status) return 0;
   if (status === 'pending' || status === 'on_hold') return 0;
@@ -52,14 +62,20 @@ export function TaskPipelineStrip({ status }: { status: TaskStatus | undefined }
   const failed = status && FAILURE_STATUSES.includes(status);
   const allDone = status !== undefined && TERMINAL_SUCCESS_STATUSES.includes(status);
   const idx = stageIndex(status);
+  const failIdx = status ? (FAILED_STAGE_INDEX[status] ?? -1) : -1;
 
   return (
     <Stack direction="row" spacing={0.75} alignItems="center" sx={{ py: 1 }}>
       {STAGES.map((stage, i) => {
-        const isCurrent = !allDone && i === idx;
+        const isCurrent = !allDone && !failed && i === idx;
         const isDone = allDone || i < idx;
         const tone = failed
-          ? theme.palette.error.main
+          // Completed stages green, the failing stage red, later stages neutral.
+          ? (i < failIdx
+              ? theme.palette.success.main
+              : i === failIdx
+                ? theme.palette.error.main
+                : theme.palette.text.disabled)
           : isCurrent
             ? theme.palette.primary.main
             : isDone

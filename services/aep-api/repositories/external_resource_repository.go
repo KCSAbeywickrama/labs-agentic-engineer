@@ -18,7 +18,6 @@ package repositories
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -114,44 +113,6 @@ func (r *ExternalResourceRepository) List(ctx context.Context, orgID string) ([]
 	var out []models.ExternalResource
 	if err := r.db.WithContext(ctx).Where("org_id = ?", orgID).Order("name").Find(&out).Error; err != nil {
 		return nil, fmt.Errorf("external_resources: list org %q: %w", orgID, err)
-	}
-	return out, nil
-}
-
-// Consumers returns the components that depend on an external resource —
-// every component-type ComponentTask whose `depends_on_external_resources`
-// includes `name`, deduplicated by (project, component). Empty ⇒ no
-// project/component uses it, so the resource is safe to delete. (Component
-// tasks are removed with their project, so a stale registration from a
-// deleted project reports no consumers.)
-func (r *ExternalResourceRepository) Consumers(ctx context.Context, orgID, name string) ([]ExternalResourceConsumer, error) {
-	if orgID == "" || name == "" {
-		return nil, fmt.Errorf("external_resources: orgID and name required")
-	}
-	var tasks []models.ComponentTask
-	// jsonb containment: depends_on_external_resources @> ["name"] — exact
-	// element match (won't false-positive `openweather` against `openweathermap`).
-	// The containment value is JSON-encoded (not string-concatenated) so a name
-	// containing `"` or `\` still produces valid JSON.
-	containment, err := json.Marshal([]string{name})
-	if err != nil {
-		return nil, fmt.Errorf("external_resources: encode containment value for %q: %w", name, err)
-	}
-	if err := r.db.WithContext(ctx).
-		Where("org_id = ? AND type = ? AND depends_on_external_resources @> ?::jsonb",
-			orgID, models.TaskTypeComponent, string(containment)).
-		Find(&tasks).Error; err != nil {
-		return nil, fmt.Errorf("external_resources: consumers of %q: %w", name, err)
-	}
-	seen := make(map[string]struct{}, len(tasks))
-	out := make([]ExternalResourceConsumer, 0, len(tasks))
-	for i := range tasks {
-		k := tasks[i].ProjectID + "/" + tasks[i].ComponentName
-		if _, ok := seen[k]; ok {
-			continue
-		}
-		seen[k] = struct{}{}
-		out = append(out, ExternalResourceConsumer{ProjectID: tasks[i].ProjectID, ComponentName: tasks[i].ComponentName})
 	}
 	return out, nil
 }

@@ -17,19 +17,23 @@
  */
 
 import { useState } from 'react';
-import { alpha, Box, Collapse, IconButton, Tooltip, Typography } from '@wso2/oxygen-ui';
-import { ChevronDown, ChevronRight, Github, OctagonAlert } from '@wso2/oxygen-ui-icons-react';
-import { TaskDetailPanel } from './TaskDetailPanel';
-import { LabelList } from './LabelList';
-import { TaskStatusInline } from './TaskStatusInline';
-import type { Task } from '../../services/api';
-import type { SectionConfig } from './types';
+import { useNavigate } from 'react-router-dom';
+import { alpha, Box, Button, CircularProgress, Collapse, IconButton, Tooltip, Typography } from '@wso2/oxygen-ui';
+import { ChevronDown, ChevronRight, Github, Pause, Play } from '@wso2/oxygen-ui-icons-react';
+import ReactMarkdown from 'react-markdown';
+import { api, ApiError } from '../../services/api';
+import type { TaskView } from '../../services/api';
+import { projectTaskDetailPath } from '../../lib/paths';
+import { FlagChip, TaskStatusPill } from './TaskStatusPill';
+import { EXECUTABLE_STATUSES, HOLDABLE_STATUSES, type SectionConfig } from './types';
 
 interface TaskRowProps {
-  task: Task;
+  task: TaskView;
   section: SectionConfig;
   orgId: string;
   projectId: string;
+  /** Ask the page to re-list after an execute/hold action lands. */
+  onChanged: () => void;
   index: number;
 }
 
@@ -41,86 +45,37 @@ const CARD_ANIMATION = {
   },
 } as const;
 
-export function TaskRow({ task, section, orgId, projectId, index }: TaskRowProps) {
+export function TaskRow({ task, section, orgId, projectId, onChanged, index }: TaskRowProps) {
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState<null | 'execute' | 'hold'>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const lifecycle = task.lifecycleStatus ?? 'gh_issue_created';
-  const isWaiting = lifecycle === 'gh_issue_waiting';
-  const isSyncing = lifecycle === 'gh_issue_syncing';
-  const isFailed  = lifecycle === 'gh_issue_failed';
+  const status = task.derivedStatus;
+  const isFailed = status === 'failed' || status === 'rejected' || status === 'abandoned';
 
-  const animationDelay = `${index * 0.045}s`;
+  const runAction = async (kind: 'execute' | 'hold', fn: () => Promise<void>) => {
+    setBusy(kind);
+    setActionError(null);
+    try {
+      await fn();
+      onChanged();
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Action failed');
+    } finally {
+      setBusy(null);
+    }
+  };
 
-  // Full set of gates an on_hold task is waiting on, across every dep kind —
-  // not just sibling components. Resource/external-resource gates carry the
-  // action needed so the reason doubles as a hint (provision / configure).
-  const waitingFor =
-    task.status === 'on_hold'
-      ? [
-          ...(task.dependsOnComponents ?? []),
-          ...(task.dependsOnResources ?? []).map((r) => `${r} (needs provisioning)`),
-          ...(task.dependsOnExternalResources ?? []).map((r) => `${r} (needs configuration)`),
-          ...(task.dependsOnOrgServices ?? []).map((o) => `${o} (org-service)`),
-        ]
-      : [];
-
-  if (isWaiting || isSyncing) {
-    return (
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1.5,
-          px: 2,
-          py: 1.5,
-          borderRadius: 1.25,
-          border: '1px solid',
-          borderColor: 'divider',
-          bgcolor: 'background.paper',
-          opacity: 0.55,
-          ...CARD_ANIMATION,
-          animationDelay,
-          '@keyframes taskFadeIn': {
-            from: { opacity: 0, transform: 'translateY(5px)' },
-            to:   { opacity: 0.55, transform: 'translateY(0)' },
-          },
-        }}
-      >
-        {/* Pulsing dot */}
-        <Box sx={{ flexShrink: 0, width: 8, height: 8, position: 'relative' }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'text.disabled', position: 'relative', zIndex: 1 }} />
-          <Box
-            aria-hidden
-            sx={{
-              position: 'absolute',
-              inset: 0,
-              borderRadius: '50%',
-              bgcolor: 'text.disabled',
-              opacity: 0.5,
-              animation: 'ping 1.4s ease-out infinite',
-              '@keyframes ping': {
-                '0%':   { transform: 'scale(1)',   opacity: 0.5 },
-                '100%': { transform: 'scale(2.8)', opacity: 0   },
-              },
-            }}
-          />
-        </Box>
-
-        <Typography variant="body2" sx={{ flex: 1, fontWeight: 450, color: 'text.disabled', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic' }}>
-          Task created — syncing with project board…
-        </Typography>
-      </Box>
-    );
-  }
+  const showExecute = !task.hold && EXECUTABLE_STATUSES.has(status);
+  const canHold = HOLDABLE_STATUSES.has(status);
 
   return (
     <Box
       sx={{
         borderRadius: 1.25,
         border: '1px solid',
-        borderColor: isFailed
-          ? 'error.main'
-          : expanded ? 'primary.main' : 'divider',
+        borderColor: isFailed ? 'error.main' : expanded ? 'primary.main' : 'divider',
         ...(isFailed && { borderLeft: '3px solid', borderLeftColor: 'error.main' }),
         ...(!isFailed && section.borderColor && { borderLeft: '3px solid', borderLeftColor: section.borderColor }),
         ...(!isFailed && section.isPrimary && { borderLeft: '3px solid', borderLeftColor: 'primary.main' }),
@@ -128,17 +83,13 @@ export function TaskRow({ task, section, orgId, projectId, index }: TaskRowProps
         overflow: 'hidden',
         transition: 'border-color 0.15s, background-color 0.15s, box-shadow 0.15s',
         boxShadow: expanded ? (t) => `0 1px 3px ${alpha(t.palette.text.primary, 0.06)}` : 'none',
-        '&:hover': {
-          borderColor: isFailed
-            ? 'error.dark'
-            : expanded ? 'primary.main' : (t) => alpha(t.palette.text.primary, 0.13),
-        },
+        '&:hover': { borderColor: isFailed ? 'error.dark' : expanded ? 'primary.main' : (t) => alpha(t.palette.text.primary, 0.13) },
         ...CARD_ANIMATION,
-        animationDelay,
+        animationDelay: `${index * 0.045}s`,
       }}
     >
       <Box
-        onClick={() => setExpanded(p => !p)}
+        onClick={() => setExpanded((p) => !p)}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -147,41 +98,11 @@ export function TaskRow({ task, section, orgId, projectId, index }: TaskRowProps
           py: 1.5,
           cursor: 'pointer',
           transition: 'background-color 0.15s',
-          '&:hover': {
-            bgcolor: isFailed
-              ? (t) => alpha(t.palette.error.main, 0.07)
-              : (t) => alpha(t.palette.text.primary, 0.02),
-          },
+          '&:hover': { bgcolor: (t) => alpha(t.palette.text.primary, 0.02) },
         }}
       >
-        {/* Status dot */}
-        <Box sx={{ flexShrink: 0, width: 8, height: 8, position: 'relative' }}>
-          {section.dotColor && !isFailed && (
-            <>
-              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: section.isPrimary ? 'primary.main' : section.dotColor, position: 'relative', zIndex: 1 }} />
-              {section.isPrimary && (
-                <Box
-                  aria-hidden
-                  sx={{
-                    position: 'absolute',
-                    inset: 0,
-                    borderRadius: '50%',
-                    bgcolor: 'primary.main',
-                    opacity: 0.6,
-                    animation: 'ping 1.4s ease-out infinite',
-                    '@keyframes ping': {
-                      '0%':   { transform: 'scale(1)',   opacity: 0.6 },
-                      '100%': { transform: 'scale(2.8)', opacity: 0   },
-                    },
-                  }}
-                />
-              )}
-            </>
-          )}
-        </Box>
-
-        {/* Title (+ "Waiting on" subline for on_hold tasks) */}
-        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* Title + deps / attention sublines */}
+        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
           <Typography
             variant="body2"
             sx={{
@@ -193,52 +114,73 @@ export function TaskRow({ task, section, orgId, projectId, index }: TaskRowProps
               minWidth: 0,
             }}
           >
+            <Box component="span" sx={{ color: 'text.disabled', mr: 0.75 }}>#{task.issueNumber}</Box>
             {task.title}
           </Typography>
-          {waitingFor.length > 0 && (
-            <Typography
-              variant="caption"
-              sx={{
-                color: 'warning.main',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Waiting for: {waitingFor.join(', ')}
+          {(status === 'pending' || status === 'on_hold') && task.dependsOn.length > 0 && (
+            <Typography variant="caption" sx={{ color: 'warning.main', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Waiting for: {task.dependsOn.join(', ')}
             </Typography>
+          )}
+          {actionError && (
+            <Typography variant="caption" sx={{ color: 'error.main' }}>{actionError}</Typography>
           )}
         </Box>
 
-        {/* Inline execution status + Live progress button — only shows
-            once the task has been dispatched. */}
-        <TaskStatusInline
-          status={task.status}
-          dispatchedAt={task.dispatchedAt}
-          componentTaskId={task.componentTaskId}
-          orgId={orgId}
-          projectId={projectId}
-        />
+        {/* Standing flags */}
+        {task.hold && <FlagChip label="On hold" tone="warning" />}
+        {task.attention.map((flag) => (
+          <FlagChip key={flag} label={flag} tone="error" />
+        ))}
 
-        {/* Labels */}
-        {task.labels && task.labels.length > 0 && (
-          <Box sx={{ flexShrink: 0 }}>
-            <LabelList labels={task.labels} />
-          </Box>
-        )}
+        {/* Derived status pill */}
+        <TaskStatusPill status={status} live={section.isPrimary} />
 
-        {/* GitHub link or issue-failed indicator */}
-        {isFailed ? (
-          <Tooltip title="GitHub issue creation failed">
-            <Box sx={{ display: 'flex', color: 'error.main', p: 0.5 }}>
-              <OctagonAlert size={14} />
-            </Box>
-          </Tooltip>
-        ) : task.url ? (
-          <Tooltip title="Open in GitHub">
+        {/* Actions */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          {showExecute && (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={busy === 'execute' ? <CircularProgress size={12} color="inherit" /> : <Play size={12} />}
+              disabled={busy !== null}
+              onClick={() => runAction('execute', () => api.executeTask(projectId, task.issueNumber))}
+              sx={{ minWidth: 0, px: 1.25, py: 0.25, fontSize: '0.7rem', textTransform: 'none' }}
+            >
+              {status === 'failed' || status === 'rejected' ? 'Retry' : 'Execute'}
+            </Button>
+          )}
+          {task.hold ? (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={busy === 'hold' ? <CircularProgress size={12} color="inherit" /> : <Play size={12} />}
+              disabled={busy !== null}
+              onClick={() => runAction('hold', () => api.unholdTask(projectId, task.issueNumber))}
+              sx={{ minWidth: 0, px: 1.25, py: 0.25, fontSize: '0.7rem', textTransform: 'none' }}
+            >
+              Unhold
+            </Button>
+          ) : canHold ? (
+            <Tooltip title="Hold — stop new dispatches for this task">
+              <IconButton
+                size="small"
+                disabled={busy !== null}
+                onClick={() => runAction('hold', () => api.holdTask(projectId, task.issueNumber))}
+                sx={{ p: 0.5, color: 'text.disabled', '&:hover': { color: 'warning.main' } }}
+              >
+                {busy === 'hold' ? <CircularProgress size={14} color="inherit" /> : <Pause size={14} />}
+              </IconButton>
+            </Tooltip>
+          ) : null}
+        </Box>
+
+        {/* GitHub issue link */}
+        {task.issueUrl && (
+          <Tooltip title="Open issue in GitHub">
             <IconButton
               component="a"
-              href={task.url}
+              href={task.issueUrl}
               target="_blank"
               rel="noopener noreferrer"
               size="small"
@@ -248,7 +190,7 @@ export function TaskRow({ task, section, orgId, projectId, index }: TaskRowProps
               <Github size={14} />
             </IconButton>
           </Tooltip>
-        ) : null}
+        )}
 
         {/* Expand indicator */}
         <Box sx={{ flexShrink: 0, color: 'text.disabled', display: 'flex' }}>
@@ -256,13 +198,110 @@ export function TaskRow({ task, section, orgId, projectId, index }: TaskRowProps
         </Box>
       </Box>
 
+      {/* Inline body panel — the GitHub issue body (machine block stripped) */}
       <Collapse in={expanded} timeout={220} unmountOnExit>
-        <TaskDetailPanel
-          task={task}
-          orgId={orgId}
-          projectId={projectId}
-          onClose={() => setExpanded(false)}
-        />
+        <Box
+          onClick={(e) => e.stopPropagation()}
+          sx={{
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            px: 2,
+            py: 1.75,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1.5,
+            bgcolor: (t) => alpha(t.palette.text.primary, 0.015),
+          }}
+        >
+          {task.rationale && (
+            <Typography
+              variant="caption"
+              sx={{
+                color: 'text.disabled',
+                fontStyle: 'italic',
+                borderLeft: '3px solid',
+                borderColor: 'divider',
+                pl: 1.25,
+              }}
+            >
+              {task.rationale}
+            </Typography>
+          )}
+          {task.body ? (
+            <Box
+              sx={{
+                maxHeight: 360,
+                overflowY: 'auto',
+                pr: 0.5,
+                '&::-webkit-scrollbar': { width: 4 },
+                '&::-webkit-scrollbar-track': { bgcolor: 'transparent' },
+                '&::-webkit-scrollbar-thumb': {
+                  bgcolor: (t) => alpha(t.palette.text.primary, 0.15),
+                  borderRadius: 0.5,
+                },
+                '& .md-body': {
+                  fontSize: '0.78rem',
+                  color: 'text.secondary',
+                  lineHeight: 1.65,
+                  '& h1, & h2, & h3, & h4': {
+                    fontSize: '0.84rem',
+                    fontWeight: 600,
+                    color: 'text.primary',
+                    mt: 1.25,
+                    mb: 0.5,
+                  },
+                  '& p': { m: 0, mb: 0.75 },
+                  '& ul, & ol': { pl: 2.25, m: 0, mb: 0.75 },
+                  '& li': { mb: 0.25 },
+                  '& code': {
+                    fontFamily: 'monospace',
+                    fontSize: '0.72rem',
+                    bgcolor: (t) => alpha(t.palette.text.primary, 0.06),
+                    px: 0.5,
+                    py: 0.125,
+                    borderRadius: 0.75,
+                  },
+                  '& pre': {
+                    bgcolor: (t) => alpha(t.palette.text.primary, 0.04),
+                    p: 1,
+                    borderRadius: 1.5,
+                    overflowX: 'auto',
+                    mb: 0.75,
+                    '& code': { bgcolor: 'transparent', p: 0 },
+                  },
+                  '& strong': { fontWeight: 600, color: 'text.primary' },
+                  '& a': { color: 'primary.main' },
+                  '& blockquote': {
+                    borderLeft: '3px solid',
+                    borderColor: 'divider',
+                    pl: 1.25,
+                    ml: 0,
+                    color: 'text.disabled',
+                  },
+                },
+              }}
+            >
+              <Box className="md-body">
+                <ReactMarkdown>{task.body}</ReactMarkdown>
+              </Box>
+            </Box>
+          ) : (
+            <Typography variant="caption" color="text.disabled">
+              No description on this task.
+            </Typography>
+          )}
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="text"
+              size="small"
+              endIcon={<ChevronRight size={12} />}
+              onClick={() => navigate(projectTaskDetailPath(orgId, projectId, String(task.issueNumber)))}
+              sx={{ px: 1, py: 0.25, fontSize: '0.7rem', textTransform: 'none' }}
+            >
+              View details
+            </Button>
+          </Box>
+        </Box>
       </Collapse>
     </Box>
   );

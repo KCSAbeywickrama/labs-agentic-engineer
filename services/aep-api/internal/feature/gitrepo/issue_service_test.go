@@ -30,17 +30,16 @@ import (
 
 // newIssueSvcOnStub wires a REAL issueService (and REAL REST client) at the
 // stub. The repo resolves (org1, proj1) → github.com/acme/widgets, so every
-// GitHub call lands under /repos/acme/widgets on the stub. githubV2 is nil and
-// the repo carries a GithubProjectID, so board (GraphQL) ops are skipped.
+// GitHub call lands under /repos/acme/widgets on the stub. Tasks are plain
+// GitHub issues now (Projects v2 dropped) — no board ops on creation.
 func newIssueSvcOnStub(t *testing.T, stub *gittest.Stub) gitrepo.IssueService {
 	t.Helper()
 	repo := newFakeRepoRepo()
 	repo.preload(&models.GitRepository{
 		OrgID: "org1", ProjectID: "proj1",
-		RepoURL:         "https://github.com/acme/widgets",
-		GithubProjectID: "existing-board",
+		RepoURL: "https://github.com/acme/widgets",
 	})
-	return gitrepo.NewIssueService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), nil, fakeResolver{})
+	return gitrepo.NewIssueService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{})
 }
 
 func TestCreateIssue_SendsTitleBodyLabelsAndParsesResult(t *testing.T) {
@@ -110,7 +109,7 @@ func TestCreateIssue_TitleRequired(t *testing.T) {
 func TestCreateIssue_RepoNotFound(t *testing.T) {
 	t.Parallel()
 	// A repo with no row → resolveRepoAndCredential surfaces ErrRepoNotFound.
-	svc := gitrepo.NewIssueService(newFakeRepoRepo(), githubclient.NewClient(githubclient.WithAPIBase(gittest.NewStub(t).URL)), nil, fakeResolver{})
+	svc := gitrepo.NewIssueService(newFakeRepoRepo(), githubclient.NewClient(githubclient.WithAPIBase(gittest.NewStub(t).URL)), fakeResolver{})
 	_, err := svc.CreateIssue(testContext(), "org1", "proj1", gitrepo.CreateIssueRequest{Title: "x"})
 	if !errors.Is(err, gitrepo.ErrRepoNotFound) {
 		t.Fatalf("err = %v, want ErrRepoNotFound", err)

@@ -52,7 +52,6 @@ The parametrized routes used ids discovered from their parent list responses:
 | param | value | source |
 |---|---|---|
 | project | `hello-world-api` | seeded |
-| task id | `26de64b5-beb8-445d-9acf-de0811552744` | `get_tasks` |
 | component | `hello-api` | `get_components` |
 | requirements tag | `v1` | `get_requirements_versions` |
 | design tag | `v1-1` | `get_design_versions` |

@@ -21,19 +21,22 @@
 // OpenChoreo cluster resource type, e.g. a database or cache). It is the
 // resources half of OpenChoreo's Workload.spec.dependencies.resources[].
 //
+// This package holds the provisioner CORES only — the value/param-collection
+// services + the HTTP surface were git-rm'd at the dependency-management merge
+// and REBUILT on our GitHub-native aep:provision funnel in
+// internal/feature/provisioning (dependency-management §3.6). What lives here:
+//
 // External-resource machinery (external_*.go, naming.go):
 //
-//   - ValueService (external_values.go) — per-env value submission: split by
-//     the registered schema, provision, complete the config-collection task
-//     via the contracts state machine, re-dispatch gated tasks.
 //   - ExternalResourceProvisioner (external_provisioner.go) — authors the OC
 //     Resource model (ResourceType → Resource → pinned per-env bindings) with
 //     secret values routed through SM-API; Deprovision and
-//     ResolveRunnerSecrets for the dispatch path.
+//     ResolveRunnerSecrets (the per-run ExternalSecret inputs for the coding
+//     runner).
 //   - naming.go — ExternalResourceName / ExternalResourceBindingName, the
-//     single source of truth for the OC CR names.
+//     single source of truth for the OC CR names (shared with the platform half).
 //
-// Platform-resource machinery (platform_*.go, resources_service.go):
+// Platform-resource machinery (platform_*.go):
 //
 //   - ResourceTypeCatalog (platform_catalog.go) — read-only discovery of the
 //     installed cluster-scoped ClusterResourceTypes (AEP never authors them).
@@ -41,19 +44,13 @@
 //     authors the OC Resource model for a platform-resource dep against a
 //     DISCOVERED ClusterResourceType (never EnsureResourceType), async: it
 //     pins the per-env bindings and returns without waiting for readiness.
-//   - ResourceService (resources_service.go) — design read → kind policy →
-//     provision → move the resource-provisioning task pending→building via
-//     the contracts TaskEventProvisionStarted event through the TaskCompleter.
 //
-// HTTP surface (resources_huma.go, org-implicit paths):
-//
-//	GET    /dependencies/external-resources
-//	DELETE /dependencies/external-resources/{name}
-//	POST   /projects/{p}/dependencies/external-resources/{name}/values
-//	POST   /projects/{p}/components/{c}/dependencies/{dep}/provision   (202)
-//	GET    /projects/{p}/components/{c}/dependencies/{dep}/status
+// The value/param collection surface, the aep:provision gate issues, the
+// provision-Execution lifecycle and the readiness watcher that DRIVE these cores
+// live in internal/feature/provisioning (ValueService / ResourceService /
+// ResourceWatcher / resources_huma there).
 //
 // The package holds NO feature imports (empty arch-allowlist row): the org
-// catalog, SM-API writer, task repo, task projector and design reader are
-// consumer-side ports in ports.go, wired concretely in the composition root.
+// catalog, SM-API writer and OC client are consumer-side ports in ports.go,
+// wired concretely in the composition root.
 package resources

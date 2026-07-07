@@ -19,19 +19,20 @@
 import { Accordion, AccordionDetails, AccordionSummary, Box, Typography, useTheme } from '@wso2/oxygen-ui';
 import { ChevronDown } from '@wso2/oxygen-ui-icons-react';
 import { TaskRow } from './TaskRow';
-import type { Task } from '../../services/api';
+import type { TaskView } from '../../services/api';
 import type { SectionConfig } from './types';
 
 interface TaskSectionProps {
   section: SectionConfig;
-  tasks: Task[];
+  tasks: TaskView[];
   orgId: string;
   projectId: string;
+  onChanged: () => void;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
 }
 
-export function TaskSection({ section, tasks, orgId, projectId, expanded, onExpandedChange }: TaskSectionProps) {
+export function TaskSection({ section, tasks, orgId, projectId, onChanged, expanded, onExpandedChange }: TaskSectionProps) {
   const theme = useTheme();
 
   const labelColor = section.isPrimary ? theme.palette.primary.main : theme.palette.text.secondary;
@@ -72,11 +73,12 @@ export function TaskSection({ section, tasks, orgId, projectId, expanded, onExpa
         {tasks.length > 0 ? (
           tasks.map((task, i) => (
             <TaskRow
-              key={task.id}
+              key={task.issueNumber}
               task={task}
               section={section}
               orgId={orgId}
               projectId={projectId}
+              onChanged={onChanged}
               index={i}
             />
           ))

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "component": {
+      "type": "string",
+      "description": "The design component this Task implements. Must be one of the known components (a directory under specs/design/components/)."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short human-facing title; must be unique across planned and existing Tasks."
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Component names this Task depends on (never issue numbers). Empty when it has no dependencies."
+    },
+    "origin": {
+      "description": "Where the Task came from; omit for the default 'spec-plan'.",
+      "type": "string",
+      "enum": [
+        "spec-plan",
+        "incident",
+        "manual"
+      ]
+    },
+    "rationale": {
+      "type": "string",
+      "description": "One sentence: why this Task exists."
+    }
+  },
+  "required": [
+    "component",
+    "title",
+    "dependsOn",
+    "rationale"
+  ],
+  "additionalProperties": false
+}

@@ -42,7 +42,7 @@ LICENSE_FILES = $(shell git ls-files | \
 	grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/')
 
-.PHONY: install gen build dev test test-console-legacy lint typecheck license license-check tools clean eval
+.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover
 
 install:
 	$(PNPM) install
@@ -51,6 +51,8 @@ install:
 gen:
 	$(TURBO) run gen
 	@for d in $(GO_MODULE_DIRS); do echo ">> go generate $$d"; ( cd "$$d" && go generate ./... ); done
+	@echo ">> openapi export (aep-api public spec → packages/contracts/api/v1)"
+	@$(MAKE) -C services/aep-api openapi
 
 build: gen
 	$(TURBO) run build
@@ -62,17 +64,25 @@ dev:
 test: gen
 	$(TURBO) run test
 	@for d in $(GO_MODULE_DIRS); do echo ">> go test $$d"; ( cd "$$d" && go test ./... ); done
+	@echo ">> console-legacy tests (own pnpm workspace — not in the root turbo graph)"
+	@cd console-legacy/console && $(PNPM) test
 
 # Model eval for @aep/agents (report-not-gate; spends tokens, skips without a key).
 # Not a turbo task — kept out of the CI `test` graph.
 eval:
 	$(PNPM) --filter @aep/agents eval
 
-# console-legacy tests. NOT chained into `make test`: console-legacy/console is a
-# separate pnpm workspace being decommissioned post-cutover, so its suite runs
-# on demand (and from the PR checklist) rather than in the main test graph.
-test-console-legacy:
-	cd console-legacy/console && $(PNPM) install --frozen-lockfile && $(PNPM) run test
+# Local coverage summary (there is no CI). Go: the aep-api module's fast-lane
+# cover target (-short, no Docker). TS: @aep/agents via node:test's
+# --experimental-test-coverage. Report-only — the TS side never fails the verb,
+# and spends no tokens. Extend module-by-module as other packages grow tests.
+cover:
+	@echo ">> Go coverage — services/aep-api (fast lane, -short)"
+	@$(MAKE) -C services/aep-api cover || true
+	@echo ""
+	@echo ">> TS coverage — @aep/agents (node:test --experimental-test-coverage)"
+	@$(PNPM) --filter @aep/agents exec node --experimental-test-coverage --import tsx --test "src/**/*.test.ts" 2>/dev/null \
+		| grep -E '^# (tests|pass|fail|all files)' || echo "  (TS coverage unavailable — run 'pnpm --filter @aep/agents test' to debug)"
 
 lint:
 	$(TURBO) run lint

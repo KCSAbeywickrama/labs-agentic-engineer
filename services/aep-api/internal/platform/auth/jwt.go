@@ -99,8 +99,14 @@ func JWTMiddleware(cfg JWTConfig) func(http.Handler) http.Handler {
 		return verifier(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tc := jwtassertion.GetTokenClaims(r.Context())
 			if tc != nil {
+				// tc.Sub, not tc.Subject: TokenClaims declares its own
+				// `Sub string json:"sub"` at depth 0, which shadows the
+				// embedded jwt.RegisteredClaims.Subject (same tag, deeper) —
+				// encoding/json decodes ONLY the shallower field, so the
+				// promoted Subject is always empty on this edge (found via
+				// e2e: turn commits fell back to the credential identity).
 				ctx := WithClaims(r.Context(), &Claims{
-					Subject:  tc.Subject,
+					Subject:  tc.Sub,
 					ClientID: tc.ClientID,
 					OuHandle: tc.OuHandle,
 					OuName:   tc.OuName,

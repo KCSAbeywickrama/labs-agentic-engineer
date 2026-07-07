@@ -18,7 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkComponentDesign } from "./component-design.js";
+import { checkComponentDesign } from "@aep/agent-stream";
 
 const PATH = "specs/design/components/checkout/design.json";
 

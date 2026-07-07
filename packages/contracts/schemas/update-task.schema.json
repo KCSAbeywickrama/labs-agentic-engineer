@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "issueNumber": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "issueNumber"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "Target: { issueNumber } for an existing Task from context, or { title } for a Task planned earlier this turn."
+    },
+    "set": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "description": "New title (must stay unique).",
+          "type": "string"
+        },
+        "dependsOn": {
+          "description": "Replacement dependency component names.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rationale": {
+          "description": "New one-sentence rationale.",
+          "type": "string"
+        },
+        "body": {
+          "description": "The full Task body markdown: scope, acceptance criteria, references into the spec/design.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The fields to patch; omit a field to leave it unchanged."
+    }
+  },
+  "required": [
+    "ref",
+    "set"
+  ],
+  "additionalProperties": false
+}

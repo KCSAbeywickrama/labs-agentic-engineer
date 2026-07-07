@@ -30,7 +30,7 @@ import (
 // request ever reaches it in this file.
 type fakeSpecProjectService struct{}
 
-func (fakeSpecProjectService) ListProjects(context.Context, string, int, string) (*models.ProjectList, error) {
+func (fakeSpecProjectService) ListProjects(context.Context, string, int, string, string) (*models.ProjectList, error) {
 	return nil, nil
 }
 func (fakeSpecProjectService) GetProject(context.Context, string, string) (*models.Project, error) {

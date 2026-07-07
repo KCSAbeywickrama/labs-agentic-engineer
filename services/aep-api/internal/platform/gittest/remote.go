@@ -16,21 +16,16 @@
 
 // Package gittest is the real-git test harness
 // (docs/design/aep-api-target-structure.md — "Git testing (the gittest tier)").
-// It gives gitrepo/artifacts tests a real git origin and a faithful Git Data
-// API server without Docker or network, so the save/discard/versioning flows
-// run against genuine git object-store semantics in the fast `make test` lane.
+// It gives git-flow tests a real git origin without Docker or network, so the
+// save/discard/versioning flows run against genuine git object-store
+// semantics in the fast `make test` lane.
 //
-// Three pieces:
+// Two pieces (the Git-Data HTTP fake was retired with the REST git-object
+// path — the gitfs Workspace engine + workspacetest supersede it):
 //
 //   - NewRemote(t): a bare repo in t.TempDir() acting as a file:// origin
 //     (clone/fetch/push work unchanged; GIT_ASKPASS never fires on file
 //     remotes). Seed/Tag/read helpers arrange and assert via git plumbing.
-//   - GitDataServer(t, r): an httptest.Server implementing exactly the Git Data
-//     API endpoints the gitrepo client drives (refs/commits/trees/blobs/tags/
-//     matching-refs), backed by the SAME bare repo. Because it runs real
-//     plumbing, a non-fast-forward UpdateRef is a real 422 and a taken tag ref
-//     a real 422 — conflict_retry.go's CAS + tag-collision paths run against
-//     genuine git semantics, not simulated errors.
 //   - NewStub(t): a route-registry httptest fake for the plain JSON endpoints
 //     (repos/issues/webhooks/GraphQL) where a git-backed fake would be
 //     over-engineering.
@@ -59,15 +54,12 @@ const defaultBranch = "main"
 
 const (
 	// defaultActorName/Email identify the harness's own commits and tags.
-	// GitDataServer's CreateCommit/CreateTagObject override these per request
-	// from the wire payload.
 	defaultActorName  = "gittest"
 	defaultActorEmail = "gittest@aep.test"
 
 	// fixedDate keeps the harness's own commits deterministic (git raw format:
 	// "<unix-seconds> <tz>"), so seeded commit SHAs are stable across runs.
-	// 1767225600 == 2026-01-01T00:00:00Z. Request-driven commits carry their
-	// own date when the payload supplies one.
+	// 1767225600 == 2026-01-01T00:00:00Z.
 	fixedDate = "1767225600 +0000"
 )
 
@@ -134,6 +126,26 @@ func (r *Remote) Seed(t *testing.T, files map[string]string, msg string) string 
 	t.Helper()
 	parent := r.HeadSHA(t)
 	sha := r.commit(t, parent, files, msg)
+	r.mustExec(t, nil, nil, "update-ref", "refs/heads/"+defaultBranch, sha)
+	return sha
+}
+
+// Remove commits a deletion of the given blob paths onto main directly in the
+// bare repo (temp index; deletes staged via `update-index --index-info` mode 0,
+// the bare-repo-safe form) and returns the new commit SHA.
+func (r *Remote) Remove(t *testing.T, msg string, paths ...string) string {
+	t.Helper()
+	parent := r.HeadSHA(t)
+	idx := filepath.Join(t.TempDir(), "index")
+	idxEnv := map[string]string{"GIT_INDEX_FILE": idx}
+	r.mustExec(t, idxEnv, nil, "read-tree", parent)
+	var stdin strings.Builder
+	for _, p := range paths {
+		stdin.WriteString("0 0000000000000000000000000000000000000000\t" + p + "\n")
+	}
+	r.mustExec(t, idxEnv, []byte(stdin.String()), "update-index", "--index-info")
+	tree := strings.TrimSpace(r.mustExec(t, idxEnv, nil, "write-tree"))
+	sha := strings.TrimSpace(r.mustExec(t, nil, nil, "commit-tree", tree, "-p", parent, "-m", msg))
 	r.mustExec(t, nil, nil, "update-ref", "refs/heads/"+defaultBranch, sha)
 	return sha
 }
@@ -206,7 +218,7 @@ func (r *Remote) commit(t *testing.T, parent string, files map[string]string, ms
 
 // exec runs a git plumbing command against the bare repo (GIT_DIR set), with
 // `env` overlaid on the hermetic base env. It never touches *testing.T, so
-// GitDataServer handlers can map its error onto an HTTP status.
+// callers that need the raw error (expected-failure probes) can map it.
 func (r *Remote) exec(env map[string]string, stdin []byte, args ...string) (string, error) {
 	full := map[string]string{"GIT_DIR": r.dir}
 	for k, v := range env {

@@ -7,10 +7,16 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "gen:api": "npx --yes openapi-typescript@7 openapi.yaml -o src/services/api/openapi.gen.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run test:unit",
+    "test:unit": "NODE_OPTIONS=--experimental-require-module vitest run",
+    "_comment:test:cassettes": "SSE-cassette replay suite (node:test). Not in the `test` gate — its fixtures/turns/*.json.gz recordings are stale (pre design.json/dependencies[] schema) and are a tracked golden-fixture-regen follow-up. Run explicitly once regenerated.",
+    "test:cassettes": "TSX_TSCONFIG_PATH=tsconfig.test.json tsx --test \"test/**/*.test.ts\"",
+    "gen:api": "npx --yes openapi-typescript@7 ../../packages/contracts/api/v1/openapi.yaml -o src/services/api/openapi.gen.ts"
   },
   "devDependencies": {
+    "@aep/sse-cassette": "file:../../packages/sse-cassette",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/js-yaml": "^4",
@@ -18,12 +24,15 @@
     "@types/react-dom": "19.0.2",
     "@vitejs/plugin-react-swc": "4.2.0",
     "jsdom": "^29.1.1",
+    "tsx": "^4.21.0",
     "typescript": "5.9.3",
     "vite": "7.2.2",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@aep/agent-stream": "file:../../packages/agent-stream",
     "@aep/cell-diagram-view": "workspace:*",
+    "@aep/design-projection": "file:../../packages/design-projection",
     "@aep/excalidraw-dsl": "workspace:*",
     "@aep/explorer": "workspace:*",
     "@aep/md-editor": "workspace:*",

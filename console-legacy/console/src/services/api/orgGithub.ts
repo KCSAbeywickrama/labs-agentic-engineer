@@ -17,14 +17,17 @@
  */
 
 /**
- * Typed client for /api/v1/org/credentials/github*. The active org is derived from the
+ * Typed client for the org's git-provider connection, exposed as the
+ * `gitProvider` section of the consolidated GET/PATCH /api/v1/config resource
+ * plus its App-mode connect/disconnect action routes
+ * (docs/design/org-config-consolidation.md). The active org is derived from the
  * verified JWT server-side — no {orgHandle} path segment.
  *
- * The console's Org Settings → GitHub Integration page reads from
- * GET .../github (projection — kind, identity, status, etc.) and writes
- * via POST .../github/connect/start (App-mode, OAuth-driven) or
- * POST .../github/pat. The PAT is never echoed back; the projection
- * endpoint deliberately omits it.
+ * This wrapper preserves its original public surface (getStatus/startConnect/
+ * connectPAT/disconnect returning OrgGithubProjection) so the Org Settings →
+ * GitHub page and the connect components are unchanged; internally it maps the
+ * `gitProvider` section (kind=github + mode=pat|app) back to the legacy
+ * kind=user-pat|app-installation shape. The PAT is never echoed back.
  */
 
 import { env } from '../../config/env';
@@ -60,6 +63,10 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
       const parsed = JSON.parse(body);
       if (parsed.message) message = parsed.message;
       if (parsed.error) message = parsed.error;
+      // RFC-9457 problem (the /config surface): prefer the section-pointed
+      // errors[] message, else the top-level detail.
+      if (parsed.detail) message = parsed.detail;
+      if (parsed.errors?.[0]?.message) message = parsed.errors[0].message;
       if (parsed.code) code = parsed.code;
     } catch {
       /* use raw body */
@@ -79,7 +86,6 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 export type ConnectionKind = 'app-installation' | 'user-pat' | '';
 
 export interface OrgGithubProjection {
-  ocOrgId: string;
   kind: ConnectionKind | 'not_connected';
   githubLogin?: string;
   identityName?: string;
@@ -92,6 +98,47 @@ export interface OrgGithubProjection {
   lastValidatedAt?: string;
   identityChangedAt?: string;
   prevIdentityLogin?: string;
+}
+
+// The `gitProvider` section of GET/PATCH /config (null = not connected). The
+// role-named kind=github + mode=pat|app is mapped back to the legacy kind for
+// the UI (which branches on 'app-installation' vs 'user-pat').
+interface ConfigGitProviderSection {
+  kind: string; // "github"
+  mode: 'app' | 'pat';
+  githubLogin?: string;
+  identityName?: string;
+  identityEmail?: string;
+  identityLogin?: string;
+  installationId?: number;
+  selectedRepos?: string[];
+  status: OrgGithubProjection['status'];
+  connectedAt?: string;
+  lastValidatedAt?: string;
+  identityChangedAt?: string;
+  prevIdentityLogin?: string;
+}
+
+interface ConfigProjection {
+  gitProvider: ConfigGitProviderSection | null;
+}
+
+function projectionFromGitProvider(gp: ConfigGitProviderSection | null): OrgGithubProjection {
+  if (!gp) return { kind: 'not_connected', status: 'not_connected' };
+  return {
+    kind: gp.mode === 'app' ? 'app-installation' : 'user-pat',
+    githubLogin: gp.githubLogin,
+    identityName: gp.identityName,
+    identityEmail: gp.identityEmail,
+    identityLogin: gp.identityLogin,
+    installationId: gp.installationId,
+    selectedRepos: gp.selectedRepos,
+    status: gp.status,
+    connectedAt: gp.connectedAt,
+    lastValidatedAt: gp.lastValidatedAt,
+    identityChangedAt: gp.identityChangedAt,
+    prevIdentityLogin: gp.prevIdentityLogin,
+  };
 }
 
 /**
@@ -115,56 +162,55 @@ export interface ConnectStartResponse {
 
 export const orgGithubApi = {
   /**
-   * Read the projection for the org's GitHub connection.
+   * Read the projection for the org's GitHub connection (the `gitProvider`
+   * section of /config, mapped back to the legacy projection shape).
    */
   async getStatus(): Promise<OrgGithubProjection> {
-    const data = await fetchJSON<OrgGithubProjection>(
-      `/api/v1/org/credentials/github`,
-    );
-    return data;
+    const config = await fetchJSON<ConfigProjection>(`/api/v1/config`);
+    return projectionFromGitProvider(config.gitProvider);
   },
 
   /**
-   * Start the App-mode connect flow. Returns the GitHub OAuth authorize
-   * URL the caller should perform a full-page redirect to. The
-   * connect-state JWT (15-min TTL) carries (ocOrgId, installationId,
-   * actor) through the round-trip; installationId is 0 for the initial
-   * connect and non-zero when re-entering from the picker for a chosen
-   * candidate.
+   * Start the App-mode connect flow via the connect-sessions action route.
+   * Returns the GitHub OAuth authorize URL the caller should perform a
+   * full-page redirect to. The connect-state JWT (15-min TTL) carries
+   * (ocOrgId, installationId, actor) through the round-trip; installationId is
+   * 0 for the initial connect and non-zero when re-entering from the picker.
    */
   async startConnect(installationId?: number): Promise<ConnectStartResponse> {
-    const data = await fetchJSON<ConnectStartResponse | { data: ConnectStartResponse }>(
-      `/api/v1/org/credentials/github/connect/start`,
+    return fetchJSON<ConnectStartResponse>(
+      `/api/v1/config/git-provider/connect-sessions`,
       {
         method: 'POST',
         body: JSON.stringify(installationId ? { installationId } : {}),
       },
     );
-    const inner = (data as { data?: ConnectStartResponse }).data ?? (data as ConnectStartResponse);
-    return inner;
   },
 
   /**
-   * Connect or replace via PAT. Surfaces field-level errors from the
-   * git-service validation chain (caller maps `code` to UI placement).
+   * Connect or replace via PAT through PATCH /config {gitProvider}. Surfaces
+   * field-level errors from the git-service validation chain as a 422 pointing
+   * at body.gitProvider.
    */
   async connectPAT(pat: string, githubLogin: string): Promise<OrgGithubProjection> {
-    return fetchJSON<OrgGithubProjection>(
-      `/api/v1/org/credentials/github/pat`,
-      { method: 'POST', body: JSON.stringify({ pat, githubLogin }) },
-    );
+    const config = await fetchJSON<ConfigProjection>(`/api/v1/config`, {
+      method: 'PATCH',
+      body: JSON.stringify({ gitProvider: { kind: 'github', mode: 'pat', pat, githubLogin } }),
+    });
+    return projectionFromGitProvider(config.gitProvider);
   },
 
   /**
-   * Disconnect — runs the cascade Phases A–D synchronously, plus Phase E
-   * (GitHub-side App uninstall) when uninstall is true. uninstall
-   * defaults true for App-mode connections; PAT mode ignores the flag.
+   * Disconnect via the disconnect action route — runs the cascade Phases A–D
+   * synchronously, plus Phase E (GitHub-side App uninstall) when uninstall is
+   * true. uninstall defaults true for App-mode connections; PAT mode ignores
+   * the flag.
    */
   async disconnect(uninstall: boolean = true): Promise<void> {
     const qs = uninstall ? '' : '?uninstall=false';
-    await fetchJSON<void>(
-      `/api/v1/org/credentials/github${qs}`,
-      { method: 'DELETE' },
+    await fetchJSON<{ status: string }>(
+      `/api/v1/config/git-provider/disconnect${qs}`,
+      { method: 'POST', body: '{}' },
     );
   },
 };

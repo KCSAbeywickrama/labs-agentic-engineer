@@ -150,6 +150,22 @@ func (c DesignComponent) OrgServiceDependsOn() []string {
 	return out
 }
 
+// ProvisionDependsOn returns the names of this component's dependencies that
+// gate dispatch on a provisioning run (dependency-management §3.6): external
+// (config-collection) and platform-resource (resource-provisioning). org-service
+// is gated at PROCEED, not dispatch, so it is excluded. Used by the funnel's
+// dependency-kind-aware gate to hold a consumer coding task until each provision
+// dependency's aep:provision issue derives deployed.
+func (c DesignComponent) ProvisionDependsOn() []string {
+	out := make([]string, 0, len(c.Dependencies))
+	for _, d := range c.Dependencies {
+		if d.Kind == DependencyKindExternal || d.Kind == DependencyKindPlatformResource {
+			out = append(out, d.Name)
+		}
+	}
+	return out
+}
+
 // ExternalDependencies returns the external + org-service dependencies — the
 // resource-bearing entries. Used to surface context into issue bodies and to
 // drive value collection.

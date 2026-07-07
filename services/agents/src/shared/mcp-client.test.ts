@@ -18,11 +18,11 @@
 
 /**
  * Unit tests for the MCP client shim against a FAKE JSON-RPC http server (not
- * the eval mock in `evals/mocks/mcp-server.ts` — that one is the deterministic
- * catalog for the eval tree; this one is a minimal stand-in so `src/` stays
- * filesystem/eval-free). Covers the three failure modes the turn loop relies on
- * being best-effort: a clean list/call round-trip, 401 (expired/short-TTL
- * token), and a malformed response — none of them may throw.
+ * a fixture for the eval tree — this one is a minimal stand-in so `src/` stays
+ * filesystem/eval-free). Covers the failure modes the turn loop relies on being
+ * best-effort: a clean list/call round-trip, 401 (expired/short-TTL token), a
+ * malformed response, a malformed descriptor, and an `isError:true` result —
+ * none of them may throw the turn.
  */
 
 import { test } from "node:test";

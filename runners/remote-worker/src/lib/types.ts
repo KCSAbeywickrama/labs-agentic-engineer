@@ -43,8 +43,9 @@ export interface DispatchRequest {
   /**
    * WS2.6 — full URL for the credentials/refresh endpoint used during
    * workspace bootstrap. oneshot.ts sets it to the path-scoped
-   * `${platformUrl}/internal/v1/tasks/{taskId}/credentials/refresh`, which
-   * accepts both publisher-cc and legacy Task-JWT bearers.
+   * `${platformUrl}/internal/v1/executions/{executionId}/credentials/refresh`
+   * (taskId carries the execution id, §9.2), which accepts both publisher-cc
+   * and legacy Task-JWT bearers.
    */
   refreshUrl?: string;
   /**

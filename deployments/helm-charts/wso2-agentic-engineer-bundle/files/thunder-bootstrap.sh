@@ -256,12 +256,6 @@ ensure_confidential \
     "${THUNDER_SYSTEM_CLIENT_SECRET}"
 
 ensure_confidential \
-    "AEP BFF to agents-service" \
-    "BFF outbound service JWT, audience: agents-service" \
-    "aep-bff-to-agents-service" \
-    "aep-bff-to-agents-service-secret"
-
-ensure_confidential \
     "AEP BFF to git-service" \
     "BFF outbound service JWT, audience: git-service" \
     "aep-bff-to-git-service" \

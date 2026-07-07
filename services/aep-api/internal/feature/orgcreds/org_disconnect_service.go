@@ -25,8 +25,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ErrOrgNotFound surfaces from OrgDisconnectService when no credential
@@ -44,50 +42,43 @@ var ErrOrgNotFound = errors.New("org credentials: not found")
 //     straight to 'disconnected' in Phase D (phase2.md §6.7's staged
 //     intermediate state was never wired).
 //
-// Phase B (best-effort issue comments — async, no lock):
-//   - Per task, post `gh issue comment "abandoned: org disconnected"` via
-//     the existing git-service issue API. Failures are logged.
-//
-// Phase C (per-task projector apply):
-//   - Per task, run the ApplyTaskEvent transition with cause
-//     "org.disconnected" and persist the new status.
-//
 // Phase D (org-scoped finalize — git-service GC):
 //   - DELETE /internal/credentials/orgs/{ocOrgId} on git-service. Git-service
 //     marks status='disconnected' and best-effort GCs OpenBao keys.
 //
-// Phases A and D run synchronously; B and C run inline (the disconnect
-// endpoint stays sub-second because Phase A is the only blocking step
-// from the user's perspective in the dialog confirmation flow).
+// Under the tasks-github-native model Tasks are GitHub issues (no
+// component_tasks rows to abandon): the old Phase B/C task cascade is gone.
+// Severing the credential makes the org's issues inert to the webhook router
+// (no valid delivery), which is the disconnect effect.
 type OrgDisconnectService struct {
-	taskRepo repositories.TaskRepository
 	db       *gorm.DB
 	credSvc  *CredentialService
 	issueSvc gitrepo.IssueService
-	// applyDisconnect runs the pure task-state transition for the
-	// org-disconnected event. Injected (rather than calling ApplyTaskEvent
-	// directly) so this service doesn't import the task state machine — the
-	// composition root wires it to
-	// contracts.ApplyTaskEvent(_, contracts.TaskEventOrgDisconnected).
-	applyDisconnect func(current models.TaskStatus) (models.TaskStatus, error)
+	// workspaceTrash, when set (from the composition root), is Phase F:
+	// rename the org's whole repos/<orgId>/ workspace subtree (all projects
+	// incl. _skills) into trash (design §14/D12). Best-effort by contract —
+	// it returns nothing and never fails the cascade.
+	workspaceTrash func(ctx context.Context, ocOrgID string)
 }
 
-// NewOrgDisconnectService constructs the cascade orchestrator. applyDisconnect
-// is the injected task-state transition (see the struct field).
+// NewOrgDisconnectService constructs the cascade orchestrator.
 func NewOrgDisconnectService(
-	taskRepo repositories.TaskRepository,
 	db *gorm.DB,
 	credSvc *CredentialService,
 	issueSvc gitrepo.IssueService,
-	applyDisconnect func(current models.TaskStatus) (models.TaskStatus, error),
 ) *OrgDisconnectService {
 	return &OrgDisconnectService{
-		taskRepo:        taskRepo,
-		db:              db,
-		credSvc:         credSvc,
-		issueSvc:        issueSvc,
-		applyDisconnect: applyDisconnect,
+		db:       db,
+		credSvc:  credSvc,
+		issueSvc: issueSvc,
 	}
+}
+
+// WithWorkspaceTrash installs the Phase-F disk-trash hook (nil-safe).
+// Returns s for chaining at the construction sites.
+func (s *OrgDisconnectService) WithWorkspaceTrash(fn func(ctx context.Context, ocOrgID string)) *OrgDisconnectService {
+	s.workspaceTrash = fn
+	return s
 }
 
 // Disconnect runs the cascade synchronously. `cause` is recorded on each
@@ -122,42 +113,6 @@ func (s *OrgDisconnectService) Disconnect(ctx context.Context, ocOrgID, cause st
 		return nil
 	}
 
-	// Phase B + C — enumerate non-terminal tasks under the org. Best-effort:
-	// the issue-comment write is allowed to fail without blocking the cascade
-	// (the task still cascades to abandoned).
-	tasks, err := s.taskRepo.ListNonTerminalByOrgID(ctx, ocOrgID)
-	if err != nil {
-		slog.ErrorContext(ctx, "disconnect: list tasks failed", "ocOrgId", ocOrgID, "error", err)
-		// Continue to Phase D — the GitHub issue comments are nice-to-have,
-		// but the credential teardown is load-bearing.
-		tasks = nil
-	}
-
-	for i := range tasks {
-		t := &tasks[i]
-		// Phase B — best-effort comment.
-		if t.IssueNumber > 0 && t.ProjectID != "" {
-			if err := s.issueSvc.CommentIssue(ctx, t.OrgID, t.ProjectID, t.IssueNumber, "abandoned: org disconnected"); err != nil {
-				slog.WarnContext(ctx, "disconnect Phase B: comment failed", "taskId", t.ID, "error", err)
-			}
-		}
-		// Phase C — projector apply. cause overrides the default
-		// EventCause("org.disconnected") so callers can distinguish
-		// manual.disconnect, validator.unauthorized, installation.deleted, etc.
-		if newStatus, err := s.applyDisconnect(models.TaskStatus(t.Status)); err == nil {
-			t.Status = string(newStatus)
-			if newStatus.IsTerminal() {
-				cc := cause
-				t.Cause = &cc
-			}
-			if err := s.taskRepo.Update(ctx, t); err != nil {
-				slog.ErrorContext(ctx, "disconnect Phase C: update failed", "taskId", t.ID, "error", err)
-			}
-		} else {
-			slog.WarnContext(ctx, "disconnect Phase C: invalid transition", "taskId", t.ID, "fromStatus", t.Status, "error", err)
-		}
-	}
-
 	// Phase D — finalize on git-service: status flip + OpenBao GC.
 	if err := s.credSvc.Disconnect(ctx, ocOrgID); err != nil {
 		var nfe *NotFoundError
@@ -177,6 +132,16 @@ func (s *OrgDisconnectService) Disconnect(ctx context.Context, ocOrgID, cause st
 		}
 	}
 
-	slog.InfoContext(ctx, "disconnect: cascade complete", "ocOrgId", ocOrgID, "tasksAbandoned", len(tasks), "uninstallApp", uninstallApp)
+	// Phase F — best-effort disk cleanup: rename the org's whole workspace
+	// subtree (all projects incl. _skills) into trash. The hook logs its own
+	// failures and never fails the cascade; a missed trash here just leaves
+	// dirs whose git_repositories rows still exist, and the disconnected org
+	// has no credential to re-fetch with — the reaper's quota/LRU pass
+	// eventually reclaims the cold mirrors.
+	if s.workspaceTrash != nil {
+		s.workspaceTrash(ctx, ocOrgID)
+	}
+
+	slog.InfoContext(ctx, "disconnect: cascade complete", "ocOrgId", ocOrgID, "uninstallApp", uninstallApp)
 	return nil
 }

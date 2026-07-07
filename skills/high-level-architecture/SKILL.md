@@ -177,6 +177,11 @@ the sources. Declare the intent (kind + name + fields above) and let the
 platform resolve it. An `external` dependency should almost always carry at
 least one `config` key — the value-collection gate needs something to collect.
 
+Every dependency carries a one-line `description`: what the target is and how
+the component uses it (for an `external`, which endpoints/SDK and auth scheme;
+for a `platform-resource`, what it stores). The console shows it in the
+dependency drawer and the coding agent relies on it to integrate correctly.
+
 One component per directory. Every `service` gets an `openapi.yaml`
 (load `openapi-conventions` before writing it); every `webapp` gets a
 `wireframes.dsl` (load `excalidraw-wireframes` before writing it). Other

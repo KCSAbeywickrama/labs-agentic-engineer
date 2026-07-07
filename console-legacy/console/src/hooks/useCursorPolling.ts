@@ -54,10 +54,9 @@ interface CursorPollingResult {
 }
 
 // useCursorPolling is the shared cursor + accumulator + final-flag
-// scaffolding behind useTaskAgentProgress and useTaskBuildProgress. Both
-// flows are NDJSON deltas keyed on `cursorMillis`; the only differences
-// are the API endpoint, the live-phase predicate, and whether `phase`
-// is tracked.
+// scaffolding behind useExecutionProgress (and any future progress feed).
+// The flow is NDJSON deltas keyed on `cursorMillis`; callers differ only in
+// the API endpoint, the live-phase predicate, and whether `phase` is tracked.
 //
 // The cursor lives in a ref so each refetch (driven by React Query's
 // `refetchInterval`) fires `fetcher(cursorRef.current)` with the latest

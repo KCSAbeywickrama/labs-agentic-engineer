@@ -86,6 +86,16 @@ type IDPService interface {
 	// jwtauth_v1 block, then re-run setup-prerequisites. Keymanager
 	// registration is a manual ops step.
 	UpdateProfile(ctx context.Context, orgID, actor string, req UpdateProfileRequest) (*models.OrganizationIDPProfile, error)
+
+	// SetProfile wholesale-replaces the org's IDP configuration behind
+	// PATCH /config {idp}: kind + issuer + jwksURL are written exactly as
+	// given, with NONE of UpdateProfile's field-level "empty means keep"
+	// carry-over (org-config-consolidation.md §4 kills that quirk — the
+	// console round-trips the whole idp section from GET). kind=platform
+	// restores the cluster platform defaults (a platform IDP's issuer/JWKS
+	// are cluster config, not per-org data). A kind switch cascades the same
+	// publisher revoke UpdateProfile does. Audit-logged.
+	SetProfile(ctx context.Context, orgID, actor, kind, issuer, jwksURL string) (*models.OrganizationIDPProfile, error)
 }
 
 // UpdateProfileRequest is the input for IDPService.UpdateProfile.
@@ -477,6 +487,72 @@ func (s *idpService) UpdateProfile(ctx context.Context, orgID, actor string, req
 	slog.InfoContext(ctx, "idp_service: UpdateProfile",
 		"orgID", orgID, "kindChanged", kindChanged,
 		"newKind", req.Kind, "newIssuer", req.Issuer)
+	return after, nil
+}
+
+// SetProfile is the wholesale-replace write path behind PATCH /config {idp}.
+// See the IDPService interface doc: kind/issuer/jwksURL are all written as
+// given (no empty-means-keep), kind=platform restores cluster defaults, and a
+// kind switch cascades the publisher revoke. Map-based Updates writes every
+// column including empty strings, so an omitted jwksURL genuinely clears it —
+// the field-level behavior org-config-consolidation.md §4/E4 pins.
+func (s *idpService) SetProfile(ctx context.Context, orgID, actor, kind, issuer, jwksURL string) (*models.OrganizationIDPProfile, error) {
+	if orgID == "" {
+		return nil, fmt.Errorf("orgID required")
+	}
+	switch kind {
+	case "platform", "asgardeo", "custom":
+		// ok
+	default:
+		return nil, fmt.Errorf("invalid kind %q (must be platform|asgardeo|custom)", kind)
+	}
+	// A platform IDP's issuer/JWKS are cluster config — reset to the
+	// platform defaults regardless of anything the caller sent.
+	if kind == "platform" {
+		issuer = s.platform.Issuer
+		jwksURL = s.platform.JWKSURL
+	}
+
+	existing, err := s.GetOrCreateProfile(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	beforeJSON, _ := json.Marshal(profileSummary(existing))
+
+	kindChanged := kind != existing.Kind
+
+	updates := map[string]interface{}{
+		"kind":       kind,
+		"issuer":     issuer,
+		"jwks_url":   jwksURL,
+		"updated_at": time.Now().UTC(),
+	}
+	// Clear publisher state when kind switches — the existing publisher app
+	// belongs to the previous IDP (see UpdateProfile).
+	if kindChanged {
+		if existing.Kind == "platform" && existing.PublisherClientID != "" && s.thunder != nil {
+			if _, derr := s.thunder.DeletePublisherApp(ctx, orgID); derr != nil {
+				slog.WarnContext(ctx, "idp_service.SetProfile: Thunder publisher cleanup failed (ignored)",
+					"orgID", orgID, "error", derr)
+			}
+		}
+		updates["publisher_client_id"] = ""
+		updates["publisher_client_secret"] = ""
+		updates["publisher_secret_ref"] = ""
+	}
+
+	if err := s.db.WithContext(ctx).Model(existing).
+		Where("org_id = ?", orgID).
+		Updates(updates).Error; err != nil {
+		s.audit(ctx, orgID, models.IDPAuditUpdateProfile, actor, beforeJSON, nil, err)
+		return nil, fmt.Errorf("idp_service.SetProfile persist: %w", err)
+	}
+
+	after, _ := s.GetProfile(ctx, orgID)
+	afterJSON, _ := json.Marshal(profileSummary(after))
+	s.audit(ctx, orgID, models.IDPAuditUpdateProfile, actor, beforeJSON, afterJSON, nil)
+	slog.InfoContext(ctx, "idp_service: SetProfile",
+		"orgID", orgID, "kindChanged", kindChanged, "newKind", kind)
 	return after, nil
 }
 

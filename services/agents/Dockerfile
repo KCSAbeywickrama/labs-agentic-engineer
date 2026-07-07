@@ -14,51 +14,39 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# @aep/agents — interactive spec agents SSE service (Vercel AI SDK). The
-# composition root at src/main.ts listens on $PORT (default 4000;
-# docker-compose and the helm chart inject PORT=3400).
-#
-# BUILD CONTEXT: this package depends on sibling pnpm-workspace packages that
-# live OUTSIDE this directory (@aep/excalidraw-dsl, @aep/design-projection
-# under packages/*), so the build context is the REPO ROOT, not
-# services/agents/. deployments/docker-compose.yml's agents-service sets
-# `context: .. / dockerfile: services/agents/Dockerfile` accordingly. To build
-# by hand, run from the repo root:
-#
-#   docker build -f services/agents/Dockerfile -t agents-service .
-#
+# NEW file-mutation agents service (services/agents). Built from the REPO ROOT
+# context (docker-compose sets `context: ..`) because @aep/agents imports the
+# workspace package @aep/agent-stream — pnpm must see the whole workspace to
+# resolve it. (@aep/excalidraw-dsl and @aep/design-projection are devDependencies
+# used only by the playground/evals, never by src/main.ts, so the running service
+# needs neither installed nor built.)
 FROM node:22-bookworm-slim
 
-WORKDIR /app
 RUN corepack enable
+WORKDIR /repo
 
-# Manifests only first (layer caching): the workspace root plus every
-# workspace member `@aep/agents` depends on via `workspace:*`, and its own
-# manifest. pnpm needs each workspace member's package.json on disk to
-# resolve the `--filter` graph below; source follows in the next COPY once
-# deps are installed, so an install-only change doesn't invalidate it.
+# Workspace manifests first for install-layer caching. tsconfig.base.json is the
+# shared base @aep/agent-stream's tsconfig extends — needed for the tsc build below.
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
-COPY packages/excalidraw-dsl/package.json packages/excalidraw-dsl/package.json
-COPY packages/design-projection/package.json packages/design-projection/package.json
-COPY services/agents/package.json services/agents/package.json
+# The agents package plus the workspace packages it depends on.
+COPY packages ./packages
+COPY services/agents ./services/agents
 
-RUN corepack pnpm install --filter @aep/agents...
+# Install @aep/agents + its workspace deps. This also installs the workspace ROOT
+# project's devDependencies (pnpm always installs the root's deps) — so `typescript`
+# is present to compile @aep/agent-stream in the next step. (@types/node and tsx
+# ride in via @aep/agents' own dependencies.)
+RUN pnpm install --frozen-lockfile --filter @aep/agents...
 
-# Now the real sources.
-COPY packages/excalidraw-dsl packages/excalidraw-dsl
-COPY packages/design-projection packages/design-projection
-COPY services/agents services/agents
+# @aep/agents runs from TypeScript source via tsx (no build of its own), but it
+# imports @aep/agent-stream as a package whose `exports` resolve to ./dist — so
+# that package MUST be compiled before the service can start. Without this step
+# the container crashes at boot with "Cannot find module .../@aep/agent-stream/dist".
+RUN pnpm --filter @aep/agent-stream build
 
-# @aep/agents itself runs from source via tsx (no build step — see CMD below),
-# but its two workspace deps are consumed as COMPILED packages (each
-# package.json's `main` points at `./dist/index.js`), so build them explicitly.
-RUN corepack pnpm --filter @aep/excalidraw-dsl --filter @aep/design-projection run build
+WORKDIR /repo/services/agents
 
-WORKDIR /app/services/agents
 USER 1000
-
-# src/main.ts reads $PORT; compose/helm inject PORT=3400.
-ENV PORT=3400
-EXPOSE 3400
-
-CMD ["corepack", "pnpm", "start"]
+EXPOSE 4000
+# The service listens on PORT (default 4000) and serves GET /healthz.
+CMD ["pnpm", "start"]

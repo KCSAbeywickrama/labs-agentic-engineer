@@ -49,6 +49,15 @@ type Config struct {
 	// The destructive BFF migrations refuse to run unless tier=dev.
 	DeploymentTier string
 
+	// PlaygroundTokenEnabled gates POST /internal/v1/mcp/playground-token — a
+	// caller-auth-free endpoint that mints a short-lived MCP token so a human
+	// can drive the services/agents playground CLI against a live aep-api
+	// without a caller-auth story (an open decision this endpoint deliberately
+	// does not prejudge). Defaults false, so the route is ABSENT (404, not
+	// 403) everywhere except deployments/docker-compose.yml, which opts in for
+	// local dev. Read from PLAYGROUND_TOKEN_ENABLED.
+	PlaygroundTokenEnabled bool
+
 	// TenantGateMode controls the central per-route tenant gate (§6.1b).
 	// ENFORCE BY DEFAULT (zero-config): "enforce" 404s a path-vs-JWT org
 	// mismatch (closes IDOR-1..5). Set TENANT_GATE_MODE=log to downgrade to
@@ -95,8 +104,9 @@ type Config struct {
 	PlatformIDP PlatformIDPDefaults
 
 	Observability ObservabilityConfig
-	AgentsService AgentsServiceConfig
+	AgentsSvc     AgentsSvcConfig
 	ServiceAuth   ServiceAuthConfig
+	Workspace     WorkspaceConfig
 
 	// AgentPlatformURL is the URL the coding-agent runner pod uses to call
 	// back to the BFF (every former git-service endpoint is served by the
@@ -130,8 +140,6 @@ type Config struct {
 	// and only supported value today is "github". Validate() rejects anything
 	// else with a boot error.
 	GitProvider string
-
-	RepoBasePath string
 
 	GitHubRepoVisibility string
 	GitHubCommitterName  string
@@ -237,10 +245,44 @@ type ServiceAuthConfig struct {
 	HostHeader   string // Thunder Host header for k3d routing
 }
 
-// AgentsServiceConfig holds connection settings for the aep-agents-service
-// (AI SDK v6-based; BA, architect, tech-lead).
-type AgentsServiceConfig struct {
-	BaseURL string
+// AgentsSvcConfig holds connection + M2M settings for the file-mutation agents
+// service (services/agents) — the requirements/design/chat generation flows AND
+// the tasks-github-native plan turns (toolset:"task-plan"). The legacy AI-SDK
+// agents service and its config are gone. The BFF mints a per-call HS256 M2M
+// bearer from JWTSecret with aud=JWTAudience (the service's AGENT_JWT_SECRET /
+// AGENT_JWT_AUDIENCE).
+type AgentsSvcConfig struct {
+	BaseURL     string
+	JWTSecret   string
+	JWTAudience string
+	JWTIssuer   string
+}
+
+// WorkspaceConfig holds the shared git-workspaces mount settings
+// (docs/design/shared-volume-clone-architecture.md §13–§14): the mount root
+// where bare repo mirrors + per-SHA snapshots live, plus the disk-lifecycle
+// (reaper) knobs. aep-api is the sole writer of the mount; the agents service
+// consumes read-only snapshots from the same volume.
+type WorkspaceConfig struct {
+	// Root is the workspace mount root (AEP_WORKSPACE_ROOT). Layout under it:
+	// repos/<orgId>/<projectId>/<repoSlug>/{git,repo.lock,snapshots/<sha>},
+	// trash/<ulid>, tmp/.
+	Root string
+	// ReapInterval is the background reaper sweep cadence (trash purge,
+	// snapshot age-reap, orphan reconciliation, quota/LRU eviction).
+	ReapInterval time.Duration
+	// SnapshotMaxAge — snapshots/<sha> dirs older than this and not the
+	// repo's current HEAD are reaped.
+	SnapshotMaxAge time.Duration
+	// TrashMaxAge — trash/<ulid> entries (phase 1 of the two-phase delete)
+	// older than this are purged.
+	TrashMaxAge time.Duration
+	// OrgQuotaBytes is the per-org disk quota before LRU eviction kicks in.
+	OrgQuotaBytes int64
+	// DiskHighPct / DiskLowPct are the statfs water marks (%): usage above
+	// high triggers eviction, which runs until usage drops below low.
+	DiskHighPct int
+	DiskLowPct  int
 }
 
 // ObservabilityConfig holds connection settings for the OpenChoreo Observer

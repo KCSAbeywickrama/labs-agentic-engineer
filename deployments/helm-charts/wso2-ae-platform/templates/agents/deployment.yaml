@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agents
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: agents
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-agentic-engineer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agents
+  template:
+    metadata:
+      labels:
+        app: agents
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      securityContext:
+        # Snapshots on the shared workspaces PVC stay readable for the
+        # non-root runtime user (uid 1000) via the pod's fsGroup.
+        fsGroup: 1000
+      containers:
+        - name: agents
+          image: "{{ .Values.agents.image.repository }}:{{ .Values.agents.image.tag }}"
+          imagePullPolicy: {{ .Values.agents.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.agents.port }}
+              name: http
+          resources: {{ toYaml .Values.agents.resources | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ .Values.agents.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.agents.logLevel | quote }}
+            - name: AGENT_MODEL
+              value: {{ .Values.agents.model | quote }}
+            - name: AGENT_MAX_OUTPUT_TOKENS
+              value: {{ .Values.agents.maxOutputTokens | quote }}
+            - name: AGENT_KEEPALIVE_MS
+              value: {{ .Values.agents.keepAliveMs | quote }}
+
+            # ── Conversation store (shared postgres; TTL-swept) ───────────────
+            {{- if .Values.postgres.url }}
+            - name: DATABASE_URL
+              value: {{ .Values.postgres.url | quote }}
+            {{- else }}
+            - name: DATABASE_URL
+              value: "postgres://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@aep-db:5432/{{ .Values.postgres.auth.database }}?sslmode=disable"
+            {{- end }}
+            - name: CONVERSATIONS_TTL_MS
+              value: {{ .Values.agents.conversations.ttlMs | quote }}
+            - name: CONVERSATIONS_SWEEP_MS
+              value: {{ .Values.agents.conversations.sweepMs | quote }}
+
+            # ── M2M inbound auth — HS256 shared secret. The BFF mints a matching
+            #    bearer (aep-api env AGENTS_SVC_JWT_SECRET); aud must match the
+            #    BFF's AGENTS_SVC_JWT_AUDIENCE. The gate is always on: the service
+            #    refuses to boot with neither a secret nor a JWKS configured.
+            - name: AGENT_JWT_SECRET
+              value: {{ .Values.agents.m2mSecret | quote }}
+            - name: AGENT_JWT_AUDIENCE
+              value: {{ .Values.agents.jwtAudience | quote }}
+
+            # ── Shared git workspaces (RWX PVC aep-workspaces) ────────────────
+            # Read-only per-SHA snapshots written by aep-api; the readOnly
+            # mount enforces the reader-only contract structurally (D3).
+            - name: WORKSPACE_MOUNT_ROOT
+              value: "/workspaces"
+
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+              readOnly: true
+
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces

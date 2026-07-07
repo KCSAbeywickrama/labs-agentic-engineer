@@ -17,7 +17,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -328,11 +328,14 @@ function ConnectedPATPanel({
   onDisconnect: () => void;
   onReplaceSuccess: (p: OrgGithubProjection) => void;
 }) {
+  // The org handle comes from the route now (the projection dropped ocOrgId);
+  // it only namespaces the drift-banner's per-org localStorage dismissal key.
+  const { orgId } = useParams();
   return (
     <Stack gap={2}>
       {projection.identityChangedAt && (
         <IdentityDriftBanner
-          ocOrgId={projection.ocOrgId}
+          ocOrgId={orgId ?? ''}
           identityChangedAt={projection.identityChangedAt}
           prevIdentityLogin={projection.prevIdentityLogin}
           identityLogin={projection.identityLogin ?? ''}

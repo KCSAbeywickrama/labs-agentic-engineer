@@ -32,7 +32,7 @@ import (
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
 	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
-	runnerImageVersion = "v4"
+	runnerImageVersion = "v5"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
@@ -62,6 +62,7 @@ func Load() (Config, error) {
 		TestMode:                  r.readOptionalBool("TEST_MODE", false),
 		LocalOpenBaoRepairEnabled: r.readOptionalBool("LOCAL_OPENBAO_REPAIR", false),
 		DeploymentTier:            r.readOptionalString("DEPLOYMENT_TIER", "dev"),
+		PlaygroundTokenEnabled:    r.readOptionalBool("PLAYGROUND_TOKEN_ENABLED", false),
 		TenantGateMode:            r.readOptionalString("TENANT_GATE_MODE", "enforce"),
 		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
 		BFFPublicURL:              r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
@@ -89,8 +90,20 @@ func Load() (Config, error) {
 			ClientSecret: r.readOptionalString("OBSERVER_OAUTH_CLIENT_SECRET", ""),
 			HostHeader:   r.readOptionalString("OBSERVER_OAUTH_HOST_HEADER", ""),
 		},
-		AgentsService: AgentsServiceConfig{
-			BaseURL: r.readOptionalString("AGENTS_SERVICE_BASE_URL", ""),
+		AgentsSvc: AgentsSvcConfig{
+			BaseURL:     r.readOptionalString("AGENTS_SVC_BASE_URL", ""),
+			JWTSecret:   r.readOptionalString("AGENTS_SVC_JWT_SECRET", ""),
+			JWTAudience: r.readOptionalString("AGENTS_SVC_JWT_AUDIENCE", "agents-service"),
+			JWTIssuer:   r.readOptionalString("AGENTS_SVC_JWT_ISSUER", "aep-bff"),
+		},
+		Workspace: WorkspaceConfig{
+			Root:           r.readOptionalString("AEP_WORKSPACE_ROOT", "/workspaces"),
+			ReapInterval:   r.readOptionalDuration("AEP_WORKSPACE_REAP_INTERVAL", 5*time.Minute),
+			SnapshotMaxAge: r.readOptionalDuration("AEP_WORKSPACE_SNAPSHOT_MAX_AGE", 24*time.Hour),
+			TrashMaxAge:    r.readOptionalDuration("AEP_WORKSPACE_TRASH_MAX_AGE", 24*time.Hour),
+			OrgQuotaBytes:  r.readOptionalInt64("AEP_WORKSPACE_ORG_QUOTA_BYTES", 5<<30),
+			DiskHighPct:    r.readOptionalInt("AEP_WORKSPACE_DISK_HIGH_PCT", 85),
+			DiskLowPct:     r.readOptionalInt("AEP_WORKSPACE_DISK_LOW_PCT", 70),
 		},
 		AgentPlatformURL:   r.readOptionalString("AGENT_PLATFORM_URL", ""),
 		AEPInternalBaseURL: r.readOptionalString("AEP_API_INTERNAL_BASE_URL", ""),
@@ -104,7 +117,6 @@ func Load() (Config, error) {
 		// Git-service config. Uses the same env-var names git-service used so
 		// existing local .env files / release-bindings keep working.
 		GitProvider:                 r.readOptionalString("GIT_PROVIDER", "github"),
-		RepoBasePath:                r.readOptionalString("REPO_BASE_PATH", "/tmp/aep-repos"),
 		GitHubRepoVisibility:        r.readOptionalString("GITHUB_REPO_VISIBILITY", "public"),
 		GitHubCommitterName:         r.readOptionalString("GIT_COMMITTER_NAME", "AEP Bot"),
 		GitHubCommitterEmail:        r.readOptionalString("GIT_COMMITTER_EMAIL", "bot@aep.dev"),
@@ -214,6 +226,21 @@ func (r *configReader) readOptionalInt(key string, defaultVal int) int {
 		return defaultVal
 	}
 	n, err := strconv.Atoi(val)
+	if err != nil {
+		r.errors = append(r.errors, fmt.Errorf("%s must be an integer: %w", key, err))
+		return defaultVal
+	}
+	return n
+}
+
+// readOptionalInt64 parses base-10 int64 values (byte sizes); falls back to
+// defaultVal on empty input, records an error on unparseable input.
+func (r *configReader) readOptionalInt64(key string, defaultVal int64) int64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
 	if err != nil {
 		r.errors = append(r.errors, fmt.Errorf("%s must be an integer: %w", key, err))
 		return defaultVal

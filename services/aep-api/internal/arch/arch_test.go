@@ -31,13 +31,8 @@
 //     anchors), and the deliberately-flat models/ + repositories/ kernel.
 //
 // The feature and platform package lists are discovered from disk
-// (os.ReadDir), so a new package is policed the moment it exists. Feature
-// discovery recurses one level into a top-level feature dir when it hosts a
-// NESTED umbrella (e.g. dependencies/{endpoints,resources}, mirroring
-// OpenChoreo's Workload.spec.dependencies split): each child that is itself a
-// buildable Go package becomes its own "<parent>/<child>" feature key,
-// policed exactly like a flat feature — including its own allowlist row.
-// Runs under plain `go test` — no extra tooling.
+// (os.ReadDir), so a new package is policed the moment it exists. Runs under
+// plain `go test` — no extra tooling.
 package arch
 
 import (
@@ -59,42 +54,51 @@ const mod = "github.com/wso2/aep/aep-api"
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
 	"artifacts": {"gitrepo"},
-	// codingagent's dispatch path imports dependencies/endpoints +
-	// dependencies/resources ONLY for their pure naming helpers
-	// (endpoints.OrgServiceURLEnv, resources.ExternalResourceName/BindingName) —
-	// the single source of truth for the dispatch-time consumer-wiring env-var +
-	// ref derivation, so the issue-comment renderer and the provisioners can't
-	// diverge. No state or types beyond those funcs cross the edge; every
-	// collaborator (org-service resolver, binding reader, external-resource secret
-	// resolver, access granter) is a consumer-side port wired at the composition
-	// root. resources.ExternalResourceRunnerSecret rides the same edge as the
-	// resolver port's return type.
-	"codingagent": {"artifacts", "component", "dependencies/endpoints", "dependencies/resources", "gitrepo", "orgcreds"},
+	// codingagent is the funnel's one registered executor: it implements the
+	// execution.Executor port (hence the execution edge) and reaches every other
+	// service — identities, anthropic, repos, OC — through consumer ports wired
+	// at the composition root, so it holds no other feature edge.
+	"codingagent": {"execution"},
 	"component":   {"artifacts", "gitrepo"},
-	// dependencies is the nested umbrella for a design component's external
-	// dependency graph (OpenChoreo Workload.spec.dependencies.{endpoints[],
-	// resources[]}); the parent may import its own children ONLY — anything
-	// wider is a design decision for a later task, added here with rationale.
-	"dependencies":           {"dependencies/endpoints", "dependencies/resources"},
-	// dependencies/endpoints owns the single cross-project access-request state
-	// machine. It calls gitrepo's pure issue-body builders
-	// (BuildOrgPublishIssueBody / BuildIssueBody) rather than duplicating them,
-	// so it imports gitrepo — the one permitted feature edge. Every other
-	// collaborator (access store, catalog, design reader, task creator,
-	// org-published marker) is a consumer-side port wired at the composition root.
-	"dependencies/endpoints": {"gitrepo"},
-	"dependencies/resources": {},
-	"design":                 {"artifacts"},
-	"gitrepo":                {},
-	"idp":                    {"orgcreds"},
-	"organization":           {},
-	"orgcreds":               {"gitrepo"},
-	"project":                {"artifacts", "gitrepo"},
-	"requirements":           {"artifacts"},
-	"runtimeconfig":          {"artifacts"},
-	"skills":                 {"artifacts", "gitrepo"},
-	"task":                   {"artifacts", "gitrepo"},
-	"webhook":                {"gitrepo", "orgcreds"},
+	// dependencies is the dependency-management feature: the parent package (MCP
+	// discovery server + endpoints catalog) composes its own resources subpackage
+	// (external/platform provisioner cores). endpoints/ and resources/ hold no
+	// cross-feature edges of their own — every other collaborator (OC client,
+	// external-resource repo, secret writer, design reader) is a consumer-side
+	// port wired at the composition root, keeping the feature edge surface minimal.
+	"dependencies": {"dependencies/resources"},
+	"design":       {"artifacts"},
+	// execution is the platform-owned half of the Task/Execution split: it reads
+	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
+	// (artifacts). It NEVER imports feature/task — the §1 split is a package
+	// boundary (enforced by the absence of "task" here and below).
+	"execution":    {"artifacts", "gitrepo"},
+	"files":        {"gitrepo"},
+	"genai":        {"gitrepo"},
+	"gitrepo":      {},
+	"idp":          {"orgcreds"},
+	"organization": {},
+	// orgconfig is the consolidated /config surface (org-config-consolidation.md):
+	// one orchestrator over the reused Anthropic/GitHub (orgcreds) and IDP (idp)
+	// services. These two edges ARE the feature — it assembles GET /config and runs
+	// the atomic multi-section PATCH across both services — so the concrete edges
+	// are the deliberate design, not incidental coupling.
+	"orgconfig":    {"idp", "orgcreds"},
+	"orgcreds":     {"gitrepo"},
+	"project":      {"artifacts", "gitrepo"},
+	// provisioning is the dependency-provisioning coordinator (dependency-management
+	// §3.6): it drives the provisioner cores (dependencies/resources) and GitHub gate
+	// issues (gitrepo). Every other collaborator — the executions store, the funnel
+	// Reevaluate hook, the design reader, the repo locator — is a consumer-side port
+	// wired at the composition root, so it holds only these two feature edges.
+	"provisioning":  {"dependencies/resources", "gitrepo"},
+	"requirements":  {"artifacts"},
+	"runtimeconfig": {"artifacts"},
+	"skills":        {"artifacts", "gitrepo"},
+	// task is the GitHub-facing half: it never imports feature/execution (the §1
+	// split) — the funnel is reached through the task.Dispatcher consumer port.
+	"task":    {"artifacts", "gitrepo"},
+	"webhook": {"gitrepo", "orgcreds"},
 }
 
 // depCache memoizes each package's transitive import set so the boundary
@@ -159,79 +163,11 @@ func listDir(t *testing.T, rel string) []string {
 	return names
 }
 
-// hasGoFiles reports whether dir (relative to this test file) contains at
-// least one top-level .go file, i.e. whether it is itself a buildable Go
-// package rather than a pure directory-only grouping. `go list` FATALs on a
-// directory with no .go files, so callers must check this before treating a
-// dir as a feature.
-func hasGoFiles(t *testing.T, dir string) bool {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
-			return true
-		}
-	}
-	return false
-}
-
-// listFeatures discovers every feature KEY under internal/feature: each
-// top-level dir, plus one level of recursion into a NESTED umbrella. A child
-// dir only becomes its own "<parent>/<child>" key when it is itself a
-// buildable Go package (dependencies/{endpoints,resources}); a child named
-// EXACTLY "<top>test" (e.g. artifacts/artifactstest) is a hand-fake package,
-// not a feature, and is skipped — the same exception
-// TestPlatformAndContractsAreFeatureFree carves out for componenttest. The
-// match is exact rather than a "*test" suffix so a future real feature named,
-// say, "latest" isn't mistaken for one of these hand-fakes. This keeps
-// recursion from sweeping up ordinary test-support packages as if they were
-// siblings of the feature that owns them.
-func listFeatures(t *testing.T) []string {
-	t.Helper()
-	var keys []string
-	for _, top := range listDir(t, "../feature") {
-		keys = append(keys, top)
-		topDir := filepath.Join("..", "feature", top)
-		for _, sub := range listDir(t, topDir) {
-			if sub == top+"test" {
-				continue
-			}
-			if !hasGoFiles(t, filepath.Join(topDir, sub)) {
-				continue
-			}
-			keys = append(keys, top+"/"+sub)
-		}
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// featureKeyForImport maps a path relative to internal/feature/ (e.g.
-// "dependencies/resources" or, for a deeper import inside a nested feature,
-// "dependencies/resources/foo") to the feature KEY that owns it. It matches
-// the LONGEST known feature key that is a prefix of rel, so an import of
-// internal/feature/dependencies/resources registers as an edge to
-// "dependencies/resources", never the shorter "dependencies".
-func featureKeyForImport(features []string, rel string) (string, bool) {
-	best := ""
-	for _, f := range features {
-		if rel == f || strings.HasPrefix(rel, f+"/") {
-			if len(f) > len(best) {
-				best = f
-			}
-		}
-	}
-	return best, best != ""
-}
-
 // TestNoFlatServicesOrControllers asserts there are no flat layers: no
 // feature, platform leaf, or wiring package imports the deleted services/ or
 // controllers/ packages.
 func TestNoFlatServicesOrControllers(t *testing.T) {
-	for _, f := range listFeatures(t) {
+	for _, f := range listDir(t, "../feature") {
 		pkg := mod + "/internal/feature/" + f
 		if imports(t, pkg, mod+"/services") {
 			t.Errorf("%s imports the flat services package (should be gone)", f)
@@ -266,16 +202,9 @@ func TestFlatPackagesDeleted(t *testing.T) {
 // exactly featureEdgeAllowlist — new coupling fails loudly, and a stale
 // allowlist entry fails too so the list stays honest. This subsumes the old
 // 4-edge denylist (task↔codingagent, design→task/component are simply not on
-// the list). One exception to "stale": a nested umbrella's parent→own-child
-// row (dependencies → dependencies/endpoints|resources) is a scope boundary,
-// not a claim of current usage, so it doesn't need a real import yet to stay
-// off the stale list — see the loop below.
+// the list).
 func TestFeatureEdgeAllowlist(t *testing.T) {
-	features := listFeatures(t)
-	featureSet := map[string]bool{}
-	for _, f := range features {
-		featureSet[f] = true
-	}
+	features := listDir(t, "../feature")
 
 	// Every on-disk feature must have an allowlist row (even an empty one) —
 	// a brand-new feature gets policed the moment it exists.
@@ -303,44 +232,40 @@ func TestFeatureEdgeAllowlist(t *testing.T) {
 		for _, e := range featureEdgeAllowlist[f] {
 			allowed[e] = true
 		}
-		// De-dupe through a set: a nested feature (e.g. dependencies) can
-		// have several direct imports that all resolve to the same child
-		// edge, and counting the same edge twice would falsely re-trigger
-		// the "not on the allowlist" check on its second occurrence.
-		actual := map[string]bool{}
+		var actual []string
 		for _, imp := range directImports(t, featPrefix+f) {
-			if !strings.HasPrefix(imp, featPrefix) {
-				continue
+			if strings.HasPrefix(imp, featPrefix) {
+				actual = append(actual, strings.TrimPrefix(imp, featPrefix))
 			}
-			rel := strings.TrimPrefix(imp, featPrefix)
-			edge, ok := featureKeyForImport(features, rel)
-			if !ok {
-				t.Errorf("%s imports %s, which is under internal/feature/ but matches no known feature key — is a new feature missing from listFeatures or the allowlist?", f, imp)
-				continue
-			}
-			actual[edge] = true
 		}
-		for edge := range actual {
+		for _, edge := range actual {
 			if !allowed[edge] {
 				t.Errorf("NEW feature edge %s → %s is not on the allowlist — prefer a consumer-side port; if the concrete edge is a deliberate design decision, add it to featureEdgeAllowlist with rationale in the PR", f, edge)
 			}
 			delete(allowed, edge)
 		}
 		for stale := range allowed {
-			// A parent→own-child row inside a nested umbrella (e.g.
-			// dependencies → dependencies/endpoints) is a standing scope
-			// boundary — "the parent MAY reach into its children" — not a
-			// claim that it currently does, so it's exempt from staleness
-			// even with no import yet (declare-before-use). But the exemption
-			// only holds while that child still exists on disk: if the child
-			// feature is deleted, the row is real rot (a stale reference to a
-			// feature that no longer exists) and must still be caught, so we
-			// additionally require the child to be a member of featureSet.
-			if strings.HasPrefix(stale, f+"/") && featureSet[stale] {
-				continue
-			}
 			t.Errorf("allowlist edge %s → %s no longer exists — remove it so the list stays honest", f, stale)
 		}
+	}
+}
+
+// TestTaskExecutionSplit asserts the §1 Task/Execution split is a package
+// boundary (docs/design/tasks-github-native.md §10): feature/task (the
+// GitHub-facing half) and feature/execution (the platform-owned half) never
+// import each other — they communicate only through the pure taskmeta encoding
+// and the executions rows (the shared kernel). task reaches the funnel through
+// the task.Dispatcher consumer port; execution never needs task at all. This
+// is subsumed by TestFeatureEdgeAllowlist but stated explicitly because the
+// split is the design's load-bearing invariant.
+func TestTaskExecutionSplit(t *testing.T) {
+	const task = mod + "/internal/feature/task"
+	const execution = mod + "/internal/feature/execution"
+	if imports(t, task, execution) {
+		t.Error("feature/task imports feature/execution — the Task/Execution split is a package boundary; reach the funnel through the task.Dispatcher port")
+	}
+	if imports(t, execution, task) {
+		t.Error("feature/execution imports feature/task — the Task/Execution split is a package boundary")
 	}
 }
 
@@ -378,6 +303,41 @@ func TestContractsIsLeaf(t *testing.T) {
 		}
 		if d != mod+"/internal/contracts" {
 			t.Errorf("contracts imports %s — contracts must import nothing module-internal", d)
+		}
+	}
+}
+
+// TestTaskmetaIsPure asserts internal/contracts/taskmeta is a pure domain leaf
+// (docs/design/tasks-github-native.md §10): the machine-block codec, label
+// vocabulary, and derived-status algebra that both halves of the Task/Execution
+// split import. Modeled on TestContractsIsLeaf but for the subpackage:
+//
+//   - it imports NOTHING module-internal (features import taskmeta, never the
+//     reverse — the encoding is shared truth, re-implemented nowhere);
+//   - no ORM or network stack anywhere in its transitive closure (gorm / net/http);
+//   - no direct filesystem/process import (os).
+//
+// The os / gorm / net-http bans are meaningful here because taskmeta performs
+// no IO. os is checked at the DIRECT-import granularity, not transitively: fmt
+// and crypto/sha256 both pull os into any package's closure, so a transitive os
+// ban is impossible — the intent is "taskmeta never touches the filesystem
+// itself", which a direct-import check captures exactly.
+func TestTaskmetaIsPure(t *testing.T) {
+	const pkg = mod + "/internal/contracts/taskmeta"
+	for d := range deps(t, pkg) {
+		if strings.HasPrefix(d, mod) && d != pkg {
+			t.Errorf("taskmeta imports module-internal %s — it must stay a pure domain leaf (features import it, never the reverse)", d)
+		}
+		if strings.Contains(d, "gorm.io/") {
+			t.Errorf("taskmeta pulls in %s — the machine-block/label/derive domain must not depend on gorm", d)
+		}
+		if d == "net/http" {
+			t.Errorf("taskmeta pulls in net/http — the domain layer performs no IO")
+		}
+	}
+	for _, imp := range directImports(t, pkg) {
+		if imp == "os" {
+			t.Errorf("taskmeta directly imports os — the domain layer touches no filesystem")
 		}
 	}
 }

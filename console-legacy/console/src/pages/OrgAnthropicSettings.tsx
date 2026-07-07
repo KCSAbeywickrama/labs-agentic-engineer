@@ -113,7 +113,7 @@ export default function OrgAnthropicSettings() {
     setError(null);
     try {
       await orgAnthropicApi.disconnect();
-      setProjection({ ocOrgId: orgHandle, status: 'not_connected' });
+      setProjection({ status: 'not_connected' });
       setShowDisconnect(false);
     } catch (err) {
       setError((err as Error).message || 'Failed to disconnect');

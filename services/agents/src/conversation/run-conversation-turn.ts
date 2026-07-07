@@ -20,7 +20,8 @@
  * The single per-turn orchestration the SSE route calls: load-or-lazy-create →
  * mark active → fresh throwaway WorkingBundle from the passed snapshot →
  * `runTurn` (prepending a one-line CURRENT-STATE-authoritative note ONLY when
- * the FE flagged an external edit) → set status → persist the whole aggregate.
+ * the FE flagged an external edit) → set status → persist the whole aggregate
+ * → emit the terminal manifest part (D14; success only — never after a throw).
  *
  * Files NEVER touch the store; the passed `files` snapshot is both the inlined
  * CURRENT STATE and (when diverged) the basis of the note. History is
@@ -29,13 +30,16 @@
  */
 
 import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
-import type { McpConfig, Skill } from "../contracts/sse-events.js";
+import { FileBundle, type McpConfig, type StreamPart, type Toolset } from "@aep/agent-stream";
 import { runTurn } from "../agents/main/run-turn.js";
-import { buildTools, ASK_QUESTION } from "../agents/main/tool.js";
-import { FileBundle } from "../agents/main/bundle.js";
-import { buildInstructions, buildPrompt } from "../agents/main/prompt.js";
-import type { StreamPart } from "../agents/main/stream-types.js";
+import { buildFileTools, ASK_QUESTION } from "../agents/main/tools/files.js";
+import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
+import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
+import { buildInstructions, buildTaskPlanInstructions, buildPrompt } from "../agents/main/prompt.js";
+import type { SkillSource } from "../agents/main/skill-source.js";
+import { buildManifestPart } from "./manifest.js";
 import { config } from "../shared/config.js";
+import { modelProviderOptions } from "../shared/model.js";
 import { loadMcpTools } from "../shared/mcp-client.js";
 import type { Conversation, ConversationStore } from "../store/conversation-store.js";
 
@@ -95,15 +99,24 @@ export interface RunConversationTurnInput {
   /** Optional FE flag (default false): prepend the CURRENT-STATE-authoritative note (§10). */
   filesChangedExternally?: boolean;
   /**
-   * Candidate skills for this turn (ADR-0002), resolved by the caller. Their
-   * name+description form the catalog at the end of the system prompt; the agent
-   * pulls a body via `loadSkill`. Omitted/empty → no catalog, no `loadSkill`.
+   * The turn's skill supply (§12, ADR-0002): a lazy, disk-backed source over the
+   * turn's `_skills` snapshot. Its name+description catalog lands at the end of
+   * the system prompt; the agent pulls a body via `loadSkill`. Omitted/empty →
+   * no catalog, no `loadSkill`.
    */
-  skills?: Skill[];
+  skillSource?: SkillSource;
   /**
-   * Caller-supplied MCP discovery endpoint for this turn (Task E2). Present →
-   * `tools/list` is fetched (best-effort) and merged into the tool set as
-   * dynamic tools. Omitted → no fetch, no merge (byte-identical to today).
+   * Which tool set to register (tasks-github-native §9.3). Default/absent →
+   * `files` (today's file-mutation tools, byte-identical). `task-plan` →
+   * `planTask`/`updateTask` over a read-only snapshot, no file tools.
+   */
+  toolset?: Toolset;
+  /**
+   * Caller-supplied MCP discovery endpoint for this turn (dependency-management
+   * migration Phase 5). Present → `tools/list` is fetched (best-effort) and
+   * merged into the tool set as dynamic tools, under a shadow-guard so a
+   * discovered tool can never shadow a built-in one. Omitted → no fetch, no
+   * merge (byte-identical to today).
    */
   mcp?: McpConfig;
   /** Injected at the composition root (createModel is called ONCE there, not per turn). */
@@ -123,34 +136,58 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 2. mark active (in memory; not saved mid-turn — the guard handles concurrency)
     conv.status = "active";
 
-    // 3. throwaway WorkingBundle from the passed snapshot; ask_question DISABLED.
-    //    `loadSkill` is registered only when the caller pushed skills (ADR-0002).
-    const bundle = new FileBundle(input.files);
-    const baseTools = buildTools(bundle, input.skills);
+    // 3. select the tool set from `toolset` (default `files`). Both build a
+    //    throwaway per-turn accumulator from the passed snapshot; the skill
+    //    catalog + `loadSkill` are registered identically (only when skills were
+    //    supplied, ADR-0002); ask_question stays DISABLED. The FileBundle is
+    //    held by name: it is the source of the terminal manifest (D14).
+    const toolset: Toolset = input.toolset ?? "files";
+    const skills = input.skillSource;
+    let bundle: FileBundle | undefined;
+    let tools: ToolSet;
+    let instructions: string;
+    if (toolset === "task-plan") {
+      // Read-only context: `files` mutates nothing; the accumulator validates
+      // planTask/updateTask against it (known components + existing Tasks).
+      tools = buildTaskPlanTools(new TaskPlan(input.files), skills);
+      instructions = buildTaskPlanInstructions(skills);
+    } else {
+      bundle = new FileBundle(input.files);
+      tools = buildFileTools(bundle, skills);
+      instructions = buildInstructions(skills);
+    }
 
-    // MCP discovery (Task E2): best-effort — a caller-supplied `mcp` merges the
-    // org's dependency-discovery tools (list_external_resources, etc.) into the
-    // tool set for this turn. `loadMcpTools` never throws (server down/401/
-    // malformed → `{}`, logged), so a turn with `mcp` never fails ON ITS
-    // ACCOUNT. Omitted `mcp`, or a failed/empty load, means `tools` IS
-    // `baseTools` (no wrapping object) — byte-identical to an mcp-free turn.
-    // `baseTools` spreads LAST so a discovered tool can never shadow a core
-    // file-mutation/loadSkill tool of the same name.
-    const mcpTools: ToolSet = input.mcp ? await loadMcpTools(input.mcp) : {};
-    const tools = Object.keys(mcpTools).length > 0 ? { ...mcpTools, ...baseTools } : baseTools;
+    // 3b. MCP discovery (dependency-management migration Phase 5): best-effort —
+    //     a caller-supplied `mcp` merges the org's dependency-discovery tools
+    //     (list_external_resources, etc.) into the tool set for this turn.
+    //     `loadMcpTools` never throws (server down/401/malformed → `{}`, logged),
+    //     so a turn with `mcp` never fails ON ITS ACCOUNT. Omitted `mcp`, or a
+    //     failed/empty load, means `tools` IS the base set (no wrapping object)
+    //     — byte-identical to an mcp-free turn. `baseTools` (the `tools` set
+    //     already built above) spreads LAST — the shadow-guard — so a
+    //     discovered tool can never shadow a core file-mutation/task-plan/
+    //     loadSkill tool of the same name.
+    if (input.mcp) {
+      const mcpTools = await loadMcpTools(input.mcp);
+      if (Object.keys(mcpTools).length > 0) {
+        tools = { ...mcpTools, ...tools };
+      }
+    }
 
-    // 4. one generic turn. buildInstructions appends the skill catalog at the END
+    // 4. one generic turn. The instructions append the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
     //    divergence note ONLY when the FE flagged an external edit (append-only).
     const note = input.filesChangedExternally ? DIVERGENCE_NOTE : "";
     const startLen = conv.messages.length;
     const res = await runTurn({
       model: input.model,
-      instructions: buildInstructions(input.skills),
+      instructions,
       prompt: note + buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
       tools,
       stopWhen: [isStepCount(config.maxSteps) /*, hasToolCall("ask_question") */],
+      maxOutputTokens: config.maxOutputTokens,
+      providerOptions: modelProviderOptions(),
       onEvent: input.onEvent,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     });
@@ -168,6 +205,12 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
 
     // 7. persist the whole aggregate (history is append-only)
     await input.store.save(conv);
+
+    // 8. terminal manifest (D14) — emitted LAST, only on full success (any
+    //    throw above skips it, so a severed/failed stream carries no manifest
+    //    and the aep-api fold refuses to commit). Mutated-paths-only from the
+    //    turn's bundle; empty for chat-only and task-plan turns.
+    input.onEvent(buildManifestPart(bundle));
     return conv;
   } finally {
     input.guard.release(input.id);

@@ -17,13 +17,9 @@
 package gitrepo_test
 
 import (
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	githubclient "github.com/wso2/aep/aep-api/internal/clients/github"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -31,25 +27,25 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-func TestCreateRepo_HappyPathClonesAndMarksReady(t *testing.T) {
+func TestCreateRepo_HappyPathMarksReady(t *testing.T) {
 	t.Parallel()
-	remote := gittest.NewRemote(t, gittest.WithSeed(map[string]string{"README.md": "hi"}, "seed"))
 	stub := gittest.NewStub(t)
-	// The GitHub create returns a clone_url pointing at our local bare repo, so
-	// the subsequent async clone runs against real git.
 	stub.On(http.MethodPost, "/orgs/test-org/repos", http.StatusCreated,
-		fmt.Sprintf(`{"clone_url":%q}`, remote.URL()))
+		`{"clone_url":"https://github.com/test-org/my-project123.git"}`)
 
 	repo := newFakeRepoRepo()
-	base := t.TempDir()
-	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private", base)
+	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
 	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project")
 	if err != nil {
 		t.Fatalf("CreateRepo: %v", err)
 	}
-	if got.RepoURL != remote.URL() || got.Status != "cloning" {
-		t.Fatalf("initial row = {url:%q status:%q}, want {%q cloning}", got.RepoURL, got.Status, remote.URL())
+	// The repo is ready the moment GitHub has it — no clone, no "cloning" state.
+	if got.Status != "ready" || got.DefaultBranch != "main" {
+		t.Fatalf("row = {status:%q branch:%q}, want {ready main}", got.Status, got.DefaultBranch)
+	}
+	if got.RepoURL != "https://github.com/test-org/my-project123.git" {
+		t.Fatalf("row url = %q, want the GitHub clone_url", got.RepoURL)
 	}
 
 	// The create request carried the visibility + auto_init + a slug-derived name.
@@ -70,19 +66,6 @@ func TestCreateRepo_HappyPathClonesAndMarksReady(t *testing.T) {
 	if !strings.Contains(body.Description, "My Project") {
 		t.Fatalf("description = %q, want it to mention the project name", body.Description)
 	}
-
-	// The async clone lands and flips status to ready.
-	clonePath := filepath.Join(base, "org1", "proj1")
-	waitFor(t, 15*time.Second, "clone to reach ready", func() bool {
-		r, _ := repo.GetByOrgAndProjectID(testContext(), "org1", "proj1")
-		return r != nil && r.Status == "ready"
-	})
-	if _, err := os.Stat(filepath.Join(clonePath, ".git")); err != nil {
-		t.Fatalf(".git missing after clone: %v", err)
-	}
-	if b, _ := os.ReadFile(filepath.Join(clonePath, "README.md")); string(b) != "hi" {
-		t.Fatalf("cloned README.md = %q, want %q", b, "hi")
-	}
 }
 
 func TestCreateRepo_IsIdempotentOnExistingRow(t *testing.T) {
@@ -91,7 +74,7 @@ func TestCreateRepo_IsIdempotentOnExistingRow(t *testing.T) {
 	existing := &models.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: "https://github.com/test-org/pre", Status: "ready"}
 	repo.preload(existing)
 	stub := gittest.NewStub(t) // no create route registered — must NOT be hit
-	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private", t.TempDir())
+	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
 	got, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project")
 	if err != nil {
@@ -110,7 +93,7 @@ func TestCreateRepo_ErrorPropagatesAndCreatesNoRow(t *testing.T) {
 	stub := gittest.NewStub(t)
 	stub.On(http.MethodPost, "/orgs/test-org/repos", http.StatusForbidden, `{"message":"Forbidden"}`)
 	repo := newFakeRepoRepo()
-	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private", t.TempDir())
+	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
 	_, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project")
 	if err == nil || !strings.Contains(err.Error(), "create github repo") || !strings.Contains(err.Error(), "403") {
@@ -121,35 +104,13 @@ func TestCreateRepo_ErrorPropagatesAndCreatesNoRow(t *testing.T) {
 	}
 }
 
-func TestCreateRepo_CloneFailureRecordsErrorStatus(t *testing.T) {
-	t.Parallel()
-	stub := gittest.NewStub(t)
-	// A create that returns an unclonable clone_url → the async clone fails.
-	stub.On(http.MethodPost, "/orgs/test-org/repos", http.StatusCreated,
-		`{"clone_url":"file:///nonexistent-remote-xyz.git"}`)
-	repo := newFakeRepoRepo()
-	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private", t.TempDir())
-
-	if _, err := svc.CreateRepo(testContext(), "org1", "proj1", "My Project"); err != nil {
-		t.Fatalf("CreateRepo returned sync error: %v", err)
-	}
-	waitFor(t, 15*time.Second, "clone to fail and record error", func() bool {
-		r, _ := repo.GetByOrgAndProjectID(testContext(), "org1", "proj1")
-		return r != nil && r.Status == "error"
-	})
-	r, _ := repo.GetByOrgAndProjectID(testContext(), "org1", "proj1")
-	if !strings.Contains(r.ErrorMessage, "clone failed") {
-		t.Fatalf("error message = %q, want it to mention clone failure", r.ErrorMessage)
-	}
-}
-
 func TestEnsureBareRepo_AdoptsOnNameConflict(t *testing.T) {
 	t.Parallel()
 	stub := gittest.NewStub(t)
 	stub.On(http.MethodPost, "/orgs/test-org/repos", http.StatusUnprocessableEntity,
 		`{"message":"name already exists on this account"}`)
 	repo := newFakeRepoRepo()
-	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private", t.TempDir())
+	svc := gitrepo.NewRepoService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{}, "private")
 
 	got, err := svc.EnsureBareRepo(testContext(), "org1", "_skills", "org-skills")
 	if err != nil {

@@ -32,22 +32,24 @@ type runnerRefreshOutput struct{ Body *RefreshResponse }
 
 // RegisterInternalCredentials registers the path-scoped runner credential
 // refresh on the internal S2S Huma API. Auth (dual-token verify + INT-6 fence)
-// is by construction via auth.RunnerScopedInput. This is the sole refresh
-// endpoint since WS2.6 — the unscoped POST /internal/v1/credentials/refresh
-// (Task-JWT only) was retired once the runner cut over to this path.
+// is by construction via auth.ExecutionScopedInput — the route is keyed by the
+// EXECUTION id the runner bearer is bound to (tasks-github-native §9.2). This
+// is the sole refresh endpoint since WS2.6 — the unscoped POST
+// /internal/v1/credentials/refresh (Task-JWT only) was retired once the runner
+// cut over to this path.
 func RegisterInternalCredentials(api huma.API, svc CredentialsRefreshService) {
 	huma.Register(api, huma.Operation{
 		OperationID: "runner-refresh-credentials",
 		Method:      http.MethodPost,
-		Path:        "/internal/v1/tasks/{taskId}/credentials/refresh",
-		Summary:     "Refresh a task's git credentials (runner callback)",
+		Path:        "/internal/v1/executions/{executionId}/credentials/refresh",
+		Summary:     "Refresh an execution's git credentials (runner callback)",
 		Tags:        []string{"Internal"},
 		Security:    auth.SecurityRunner,
-	}, func(ctx context.Context, in *auth.RunnerScopedInput) (*runnerRefreshOutput, error) {
+	}, func(ctx context.Context, in *auth.ExecutionScopedInput) (*runnerRefreshOutput, error) {
 		if svc == nil {
 			return nil, huma.Error503ServiceUnavailable("credentials refresh not configured")
 		}
-		resp, err := svc.Refresh(ctx, in.TaskID, in.OrgHandle)
+		resp, err := svc.Refresh(ctx, in.ExecutionID, in.OrgHandle)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("failed to refresh credentials")
 		}

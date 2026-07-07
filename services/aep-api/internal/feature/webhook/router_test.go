@@ -133,6 +133,41 @@ func TestRouter_Dispatch_EventHandlerFuncAdapter(t *testing.T) {
 	}
 }
 
+func TestRouter_Dispatch_ChainsMultipleHandlers(t *testing.T) {
+	t.Parallel()
+	r := NewRouter()
+	a := &recordingHandler{}
+	b := &recordingHandler{}
+	// Two features independently subscribe to issues/closed (e.g. task's noop +
+	// provisioning's decline-reject).
+	r.Register("issues", "closed", a)
+	r.Register("issues", "closed", b)
+
+	if err := r.Dispatch(context.Background(), "issues", []byte(`{"action":"closed"}`)); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if len(a.calls) != 1 || len(b.calls) != 1 {
+		t.Fatalf("both registered handlers must fire once; got a=%d b=%d", len(a.calls), len(b.calls))
+	}
+}
+
+func TestRouter_Dispatch_ChainAggregatesErrorsAndRunsAll(t *testing.T) {
+	t.Parallel()
+	r := NewRouter()
+	boom := errors.New("boom")
+	after := &recordingHandler{}
+	r.Register("issues", "closed", &recordingHandler{err: boom})
+	r.Register("issues", "closed", after)
+
+	err := r.Dispatch(context.Background(), "issues", []byte(`{"action":"closed"}`))
+	if !errors.Is(err, boom) {
+		t.Fatalf("aggregate must preserve errors.Is on a failing handler, got %v", err)
+	}
+	if len(after.calls) != 1 {
+		t.Fatalf("a handler error must NOT skip later handlers; got %d", len(after.calls))
+	}
+}
+
 func TestParseAction(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {

@@ -36,7 +36,7 @@ func skillMDNamed(name, extra string) string {
 
 func TestImport_HappyLandsInRepo(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	imp := NewSkillImportService(svc)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil { // seed built-ins first
@@ -76,7 +76,7 @@ func TestImport_HappyLandsInRepo(t *testing.T) {
 
 func TestImport_NameMismatch(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	imp := NewSkillImportService(svc)
 	ctx := context.Background()
 
@@ -91,7 +91,7 @@ func TestImport_NameMismatch(t *testing.T) {
 
 func TestImport_CollisionWithBuiltin(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	imp := NewSkillImportService(svc)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil { // seed so `go` builtin exists
@@ -110,7 +110,7 @@ func TestImport_CollisionWithBuiltin(t *testing.T) {
 
 func TestImport_SurfacesWarnings(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	imp := NewSkillImportService(svc)
 	ctx := context.Background()
 

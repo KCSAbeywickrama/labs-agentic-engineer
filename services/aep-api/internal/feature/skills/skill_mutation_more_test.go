@@ -17,25 +17,24 @@
 // UNIT tier: the read/write-surface branches repo_store_test.go leaves open —
 // ResolveMany (order + missing), the SkillMutationService.Update paths beyond
 // the component tier's 403/404 (happy round-trip, NAME_IMMUTABLE, imported ⇒
-// not-found), the commit CAS retry-on-non-fast-forward, and the read degrade
-// path (a GitHub read error serves cache/empty and never fails the run, §12).
+// not-found), and the read degrade path (an origin outage serves empty and
+// never fails the run, §12). The commit CAS retry/exhaustion behaviour now
+// lives in Workspace.Mutate and is pinned at the gitfs tier (plus the
+// end-to-end concurrent-commit test in repo_store_test.go), so the old
+// fault-injecting git-host fakes are gone with the REST path.
 package skills
 
 import (
 	"bytes"
 	"context"
 	"errors"
-	"strings"
+	"os"
 	"testing"
-
-	"github.com/wso2/aep/aep-api/internal/credentials"
-	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 func TestResolveMany_PreservesOrderAndOmitsMissing(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -53,7 +52,7 @@ func TestResolveMany_PreservesOrderAndOmitsMissing(t *testing.T) {
 
 func TestUpdate_HappyAndGuards(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
@@ -103,7 +102,7 @@ func TestUpdate_HappyAndGuards(t *testing.T) {
 
 func TestUpdate_ImportedNotUpdatable(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestStore()
+	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
 	imp := NewSkillImportService(svc)
 	ctx := context.Background()
@@ -126,100 +125,28 @@ func TestUpdate_ImportedNotUpdatable(t *testing.T) {
 	}
 }
 
-func TestCommit_RetriesOnNonFastForward(t *testing.T) {
-	t.Parallel()
-	flaky := &flakyGit{memGit: newMemGit()}
-	repos := &fakeRepoSvc{repos: map[string]*models.GitRepository{}}
-	svc := NewSkillService(&flakyGitOps{gh: flaky}, repos)
-	mut := NewSkillMutationService(svc)
-	ctx := context.Background()
-	if _, err := svc.List(ctx, "org1"); err != nil { // seed (consumes no NFF budget yet)
-		t.Fatalf("seed: %v", err)
-	}
-
-	// The next commit's UpdateRef reports a lost race once; retryCAS must re-run
-	// the read-modify-write and succeed on the second attempt.
-	flaky.nffOnUpdate = 1
-	created, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{
-		Name:    "raced-skill",
-		SkillMD: skillMDNamed("raced-skill", ""),
-	})
-	if err != nil {
-		t.Fatalf("Create under one lost race: %v", err)
-	}
-	if created == nil || created.Name != "raced-skill" {
-		t.Fatalf("created = %+v", created)
-	}
-	if flaky.nffOnUpdate != 0 {
-		t.Fatalf("expected the NFF to be consumed by a retry, remaining=%d", flaky.nffOnUpdate)
-	}
-	if got, _ := svc.Resolve(ctx, "org1", "raced-skill"); got == nil {
-		t.Fatal("skill not persisted after the CAS retry")
-	}
-}
-
 func TestCatalog_DegradesOnReadError(t *testing.T) {
 	t.Parallel()
-	flaky := &flakyGit{memGit: newMemGit()}
-	repos := &fakeRepoSvc{repos: map[string]*models.GitRepository{}}
-	svc := NewSkillService(&flakyGitOps{gh: flaky}, repos)
+	svc, host := newTestStore(t)
 	ctx := context.Background()
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Simulate a GitHub outage on the read path and drop the fresh cache so the
-	// read actually reaches GitHub. The catalog must degrade (serve empty) rather
+	// Simulate an origin outage: nuke the bare origin so the engine's
+	// branch-tip fetch fails. The catalog must degrade (serve empty) rather
 	// than fail the design/task run (§12).
-	svc.cache.evict("org1")
-	flaky.failGetRef = 1000
+	if err := os.RemoveAll(host.origin("org1").Dir()); err != nil {
+		t.Fatalf("remove origin: %v", err)
+	}
 
 	got, err := svc.List(ctx, "org1")
 	if err != nil {
 		t.Fatalf("List during outage must not error, got %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("cold-cache degrade should serve empty, got %v", namesOf(got))
+		t.Fatalf("outage degrade should serve empty, got %v", namesOf(got))
 	}
-}
-
-// ---- flaky GitHub client (fault injection over the memGit fake) -------------
-
-// flakyGit wraps memGit to inject read/commit faults: `failGetRef` GetRef calls
-// return a generic error (the outage path), and `nffOnUpdate` UpdateRef calls
-// return ErrRefNotFastForward (the lost-race path retryCAS retries).
-type flakyGit struct {
-	*memGit
-	failGetRef  int
-	nffOnUpdate int
-}
-
-func (f *flakyGit) GetRef(ctx context.Context, owner, repo string, cred credentials.Credential, ref string) (string, error) {
-	if f.failGetRef > 0 {
-		f.failGetRef--
-		return "", errors.New("github: 503 service unavailable")
-	}
-	return f.memGit.GetRef(ctx, owner, repo, cred, ref)
-}
-
-func (f *flakyGit) UpdateRef(ctx context.Context, owner, repo string, cred credentials.Credential, ref, sha string, force bool) error {
-	if f.nffOnUpdate > 0 {
-		f.nffOnUpdate--
-		return gitrepo.ErrRefNotFastForward
-	}
-	return f.memGit.UpdateRef(ctx, owner, repo, cred, ref, sha, force)
-}
-
-type flakyGitOps struct {
-	gitrepo.GitOpsService
-	gh gitrepo.GitData
-}
-
-func (f *flakyGitOps) GitData() gitrepo.GitData       { return f.gh }
-func (f *flakyGitOps) Resolver() credentials.Resolver { return fakeResolver{} }
-func (f *flakyGitOps) ResolveSaveIdentities(credentials.Credential) (*gitrepo.GitIdentity, *gitrepo.GitIdentity) {
-	gi := &gitrepo.GitIdentity{Name: "Bot", Email: "bot@aep.dev"}
-	return gi, gi
 }
 
 func namesOf(skills []Skill) []string {
@@ -228,32 +155,4 @@ func namesOf(skills []Skill) []string {
 		out = append(out, sk.Name)
 	}
 	return out
-}
-
-// TestCommit_CASExhaustionSurfacesWrappedError closes the review's retryCAS
-// gap: when EVERY attempt loses the ref race, the commit gives up after
-// casAttempts and surfaces the wrapped non-fast-forward error (not a hang, not
-// a silent success).
-func TestCommit_CASExhaustionSurfacesWrappedError(t *testing.T) {
-	t.Parallel()
-	flaky := &flakyGit{memGit: newMemGit()}
-	repos := &fakeRepoSvc{repos: map[string]*models.GitRepository{}}
-	svc := NewSkillService(&flakyGitOps{gh: flaky}, repos)
-	mut := NewSkillMutationService(svc)
-	ctx := context.Background()
-	if _, err := svc.List(ctx, "org1"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	flaky.nffOnUpdate = casAttempts + 1 // lose every retry
-	_, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{
-		Name:    "doomed-skill",
-		SkillMD: skillMDNamed("doomed-skill", ""),
-	})
-	if err == nil {
-		t.Fatal("exhausted CAS budget must fail the commit")
-	}
-	if !errors.Is(err, gitrepo.ErrRefNotFastForward) || !strings.Contains(err.Error(), "after 4 attempts") {
-		t.Fatalf("want the wrapped NFF exhaustion error, got %v", err)
-	}
 }

@@ -28,17 +28,20 @@ import (
 
 // mountSurfaces wires every HTTP surface onto one outer mux and returns it. This
 // is the single screen that answers "what is exposed and who guards it" — the
-// whole boundary of the BFF in one place. There are five request surfaces plus
+// whole boundary of the BFF in one place. There are four request surfaces plus
 // the unauthenticated discovery endpoints:
 //
 //	Surface        Root                 Guard (who may call)                       Where it lives / spec
 //	───────────────────────────────────────────────────────────────────────────────────────────────────
 //	public         /api/v1              Thunder user JWT + org gate                *_huma.go · humakit.OrgScopedInput
 //	               (jwt → orgensure)    (org from the verified token, never input)  → api/openapi.yaml
-//	internal S2S   /internal/v1/tasks/  BFF Task-JWT or publisher-cc               internal.go · auth.RunnerScopedInput
-//	               (per-op resolver)    (dual-token verify + INT-6 fence)           → api/internal-openapi.yaml (non-public)
+//	internal S2S   /internal/v1/executions/  BFF Task-JWT or publisher-cc          internal.go · auth.ExecutionScopedInput
+//	               (per-op resolver)         (dual-token verify + INT-6 fence)      → api/internal-openapi.yaml (non-public)
 //	internal MCP   /internal/v1/mcp     BFF-signed JWT, aud aep-api-mcp            dependencies/mcp_server.go ·
 //	               (POST, JSON-RPC)     (org from ocOrgId claim, never input)       auth.AgentsScopedVerifier (no spec — JSON-RPC)
+//	               /mcp/playground-token  NONE — flag-gated only                   dependencies/playground_token.go
+//	               (POST, local dev)      (PLAYGROUND_TOKEN_ENABLED, off by         (mounted only when the flag is true —
+//	                                      default; docker-compose sets it)          404 by absence otherwise)
 //	external       /api/v1/webhooks,    per-route bespoke: GitHub HMAC /           webhook_routes.go · org_github_routes.go
 //	               .../github/connect    signed connect-state (org from payload)    (no generated spec; paths kept — Q4)
 //	dev/test       /_dev/v1             none — registration-gated to dev tier      dev.go · RegisterAllDev
@@ -111,32 +114,47 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 		registerConnectCallbackRoute(mux, params.OrgGitHubController)
 	}
 
-	// ── internal S2S surface (/internal/v1/tasks/) ───────────────────────────
+	// ── internal S2S surface ─────────────────────────────────────────────────
 	// Its own Huma API on its own mux, NOT wrapped by the /api/ user-JWT
 	// middleware. Each operation authenticates by construction via
-	// auth.RunnerScopedInput (BFF Task-JWT or publisher-cc) and is never
-	// gateway-advertised. Mounted at /internal/v1/tasks/ so it owns the whole
-	// runner-callback subtree (skills + credentials refresh). See
+	// auth.ExecutionScopedInput (BFF Task-JWT or publisher-cc) and is never
+	// gateway-advertised. All runner callbacks (skills, credentials refresh)
+	// are keyed to the execution id — tasks-github-native §9.2. See
 	// docs/design/internal-s2s-api.md §3.
 	internalMux := http.NewServeMux()
 	internalAPI := newInternalAPI(internalMux)
 	RegisterAllInternal(internalAPI, params.InternalDeps)
-	mux.Handle(internalV1+"/tasks/", internalMux)
+	mux.Handle(internalV1+"/executions/", internalMux)
 
 	// ── internal MCP discovery (POST /internal/v1/mcp) ───────────────────────
-	// A raw (non-Huma) JSON-RPC mount: the MCP server the agent services'
+	// A raw (non-Huma) JSON-RPC mount: the MCP server the agents service's
 	// designing LLM queries for the org's registered external resources,
 	// published endpoints, and platform resource types. Gated by
 	// auth.AgentsScopedVerifier — the caller presents a BFF-signed token with
 	// aud aep-api-mcp and the acting org is bound from its ocOrgId claim, never
 	// from the request. Mounted only when the token manager exists (same
-	// conditional posture as the webhook/connect mounts): without it nothing
-	// could verify a caller, so the path 404s instead of 503-ing forever.
+	// conditional posture as the internal S2S mount): without it nothing could
+	// verify a caller, so the path 404s instead of 503-ing forever. A nil
+	// MCPExternalResources/OrgEndpoints/ResourceTypes degrades the corresponding
+	// tool to an empty result (see dependencies.NewMCPHandler).
 	if params.HumaDeps.TaskTokens != nil {
 		mcpVerifier := auth.NewAgentsScopedVerifier(params.HumaDeps.TaskTokens)
 		mcpHandler := dependencies.NewMCPHandler(
 			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes)
 		mux.Handle("POST "+internalV1+"/mcp", mcpVerifier.Middleware(mcpHandler))
+
+		// ── playground-token mint (POST /internal/v1/mcp/playground-token) ────
+		// LOCAL DEV ONLY, and only when explicitly opted in via
+		// PlaygroundTokenEnabled (docker-compose sets it; nothing else does).
+		// Lets a developer drive the services/agents playground CLI against a
+		// live aep-api without a caller-auth story for this route — production
+		// agent→BFF authentication remains an open decision this endpoint
+		// deliberately does not prejudge. Disabled ⇒ not mounted at all (404 by
+		// absence, matching the MCP mount's own conditional-mount posture).
+		if params.Config.PlaygroundTokenEnabled {
+			mux.Handle("POST "+internalV1+"/mcp/playground-token",
+				dependencies.NewPlaygroundTokenHandler(params.HumaDeps.TaskTokens))
+		}
 	}
 
 	// ── /api/ user-JWT wrapper ───────────────────────────────────────────────
