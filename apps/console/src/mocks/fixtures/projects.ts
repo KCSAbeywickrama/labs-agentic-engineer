@@ -136,9 +136,3 @@ export const duplicateProjectError: ErrorModel = {
   detail: "A project with this name already exists",
 };
 
-// The connected GitHub org surfaced by get-github-status; the create flow
-// derives the repo-URL preview from it (issue #72 confirms the field name).
-export const githubStatus = {
-  connected: true,
-  org: "acme-dev",
-};

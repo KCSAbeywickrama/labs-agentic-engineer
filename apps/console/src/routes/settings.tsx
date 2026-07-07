@@ -16,15 +16,9 @@
  * under the License.
  */
 
-export const projectKeys = {
-  all: ["projects"] as const,
-  lists: () => [...projectKeys.all, "list"] as const,
-  list: (search: string, limit?: number) =>
-    [...projectKeys.lists(), { search, limit }] as const,
-  details: () => [...projectKeys.all, "detail"] as const,
-  detail: (name: string) => [...projectKeys.details(), name] as const,
-  status: (name: string) => [...projectKeys.detail(name), "status"] as const,
-  components: (name: string) =>
-    [...projectKeys.detail(name), "components"] as const,
-  board: (name: string) => [...projectKeys.detail(name), "board"] as const,
-};
+import { createFileRoute } from "@tanstack/react-router";
+import { SettingsPage } from "../features/settings/components/SettingsPage";
+
+export const Route = createFileRoute("/settings")({
+  component: SettingsPage,
+});

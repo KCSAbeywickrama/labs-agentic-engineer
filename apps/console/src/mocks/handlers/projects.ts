@@ -3,7 +3,6 @@ import type { components } from "../../generated/aep-api";
 import {
   duplicateProjectError,
   emptyProjects,
-  githubStatus,
   projectsError,
   PROJECTS_PAGE_SIZE,
   seedProjects,
@@ -99,10 +98,6 @@ export const projectsHandlers = [
     }
     return HttpResponse.json(project);
   }),
-
-  // get-github-status: the create flow reads the connected org for the
-  // repo-URL preview.
-  http.get("*/api/v1/org/credentials/github", () =>
-    HttpResponse.json(githubStatus),
-  ),
+  // GitHub connection status (for the create flow's repo-URL preview) now
+  // comes from GET /config — mocked in mocks/handlers/settings.ts.
 ];
