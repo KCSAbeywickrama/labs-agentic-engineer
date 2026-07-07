@@ -65,6 +65,9 @@ taskSigning:
 observer:
   clientId: "openchoreo-observer-resource-reader-client"
 
+openbao:
+  release: aep-openbao
+
 postgres:
   version: "16"
   database: aep
