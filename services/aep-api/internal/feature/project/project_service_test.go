@@ -312,39 +312,51 @@ func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
 	}
 }
 
-// A user-chosen repo name is a hard requirement: if the Git host already has
-// a repo by that name, the WHOLE create fails (the just-created OC project is
-// compensated away) instead of degrading to the no-repo limbo — retrying the
-// same name can never succeed, so the user must be told immediately.
-func TestCreateProject_ExplicitRepoNameConflictRollsBackProject(t *testing.T) {
+// A repo name conflict is a hard failure whether the name was user-chosen or
+// derived from the project name: the WHOLE create fails (the just-created OC
+// project is compensated away) instead of degrading to the no-repo limbo —
+// retrying the same name can never succeed, so the user must be told
+// immediately to pick another name.
+func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
 	t.Parallel()
-	var deletedProject string
-	oc := &ocmocks.ProjectClientMock{
-		CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
-			return &models.Project{Name: req.Name, NamespaceName: org}, nil
-		},
-		DeleteProjectFunc: func(_ context.Context, _, projectName string) error {
-			deletedProject = projectName
-			return nil
-		},
-	}
-	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
-			return nil, fmt.Errorf("create github repo: %w", gitrepo.ErrRepoNameConflict)
-		},
-	}
-	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
-		t.Error("webhook must not be registered when the repo conflicts")
-		return nil, nil
-	}}, nil, nil, nil)
+	for _, tc := range []struct {
+		name     string
+		repoName string
+	}{
+		{"user-chosen repo name", "taken-repo"},
+		{"derived repo name", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var deletedProject string
+			oc := &ocmocks.ProjectClientMock{
+				CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
+					return &models.Project{Name: req.Name, NamespaceName: org}, nil
+				},
+				DeleteProjectFunc: func(_ context.Context, _, projectName string) error {
+					deletedProject = projectName
+					return nil
+				},
+			}
+			repoSvc := &fakeRepoSvc{
+				CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
+					return nil, fmt.Errorf("create github repo: %w", gitrepo.ErrRepoNameConflict)
+				},
+			}
+			svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
+				t.Error("webhook must not be registered when the repo conflicts")
+				return nil, nil
+			}}, nil, nil, nil)
 
-	req := &models.CreateProjectRequest{Name: "gym", RepoName: "taken-repo"}
-	_, err := svc.CreateProject(context.Background(), "acme", req)
-	if !gitrepo.IsRepoNameConflict(err) {
-		t.Fatalf("err = %v, want the repo-name-conflict sentinel surfaced", err)
-	}
-	if deletedProject != "gym" {
-		t.Fatalf("OC project compensation: deleted %q, want gym", deletedProject)
+			req := &models.CreateProjectRequest{Name: "gym", RepoName: tc.repoName}
+			_, err := svc.CreateProject(context.Background(), "acme", req)
+			if !gitrepo.IsRepoNameConflict(err) {
+				t.Fatalf("err = %v, want the repo-name-conflict sentinel surfaced", err)
+			}
+			if deletedProject != "gym" {
+				t.Fatalf("OC project compensation: deleted %q, want gym", deletedProject)
+			}
+		})
 	}
 }
 

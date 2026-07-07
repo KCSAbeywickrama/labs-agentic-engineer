@@ -151,11 +151,12 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 	if s.repoSvc != nil {
 		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, req.Name, req.RepoName)
 		if createErr != nil {
-			// A user-chosen repo name that already exists can never succeed on
-			// retry — compensate the OC project away and fail the create so
-			// the user picks another name. Every other repo failure stays
-			// best-effort (clone happens async and can be retried).
-			if req.RepoName != "" && gitrepo.IsRepoNameConflict(createErr) {
+			// A repo name that already exists — user-chosen or derived from
+			// the project name — can never succeed on retry: compensate the
+			// OC project away and fail the create so the user picks another
+			// name. Every other repo failure stays best-effort (clone happens
+			// async and can be retried).
+			if gitrepo.IsRepoNameConflict(createErr) {
 				if delErr := s.client.DeleteProject(ctx, orgName, project.Name); delErr != nil {
 					slog.ErrorContext(ctx, "failed to compensate project after repo name conflict",
 						"project", project.Name, "error", delErr)
