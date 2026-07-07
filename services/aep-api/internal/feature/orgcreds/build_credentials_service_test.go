@@ -65,6 +65,9 @@ func (f *fakeRepoRepo) GetByOrgAndProjectID(ctx context.Context, ocOrgID, projec
 func (f *fakeRepoRepo) ListAllReady(context.Context) ([]models.GitRepository, error) {
 	return nil, nil
 }
+func (f *fakeRepoRepo) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	panic("fakeRepoRepo: ListByOrg not expected in orgcreds tests")
+}
 func (f *fakeRepoRepo) ListAll(context.Context) ([]models.GitRepository, error) {
 	return nil, nil
 }

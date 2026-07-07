@@ -3,6 +3,7 @@ import type { components } from "../../generated/aep-api";
 type Project = components["schemas"]["Project"];
 type ProjectList = components["schemas"]["ProjectList"];
 type ErrorModel = components["schemas"]["ErrorModel"];
+type ConfigProjection = components["schemas"]["ConfigProjection"];
 
 // Scenario switch (api-guidelines: mocks must produce empty AND error
 // states). Toggle in the browser devtools:
@@ -18,6 +19,7 @@ export const seedProjects: Project[] = [
     description: "Sample storefront seeded by the mock layer",
     status: "active",
     createdAt: "2026-06-12T09:30:00Z",
+    repoUrl: "https://github.com/acme-dev/demo-shop.git",
   },
   {
     name: "gym-tracker",
@@ -25,7 +27,10 @@ export const seedProjects: Project[] = [
     description: "Track workouts, sets, and progress over time",
     status: "active",
     createdAt: "2026-06-20T14:05:00Z",
+    repoUrl: "https://github.com/acme-dev/gym-tracker.git",
   },
+  // invoice-hub deliberately has NO repoUrl — exercises the delete dialog's
+  // generic-copy variant (failed/absent repo provisioning, #107).
   {
     name: "invoice-hub",
     displayName: "Invoice Hub",
@@ -136,9 +141,37 @@ export const duplicateProjectError: ErrorModel = {
   detail: "A project with this name already exists",
 };
 
-// The connected GitHub org surfaced by get-github-status; the create flow
-// derives the repo-URL preview from it (issue #72 confirms the field name).
-export const githubStatus = {
-  connected: true,
-  org: "acme-dev",
+// Delete-failure scenario (#107): toggle in the browser devtools:
+//   localStorage.setItem('aep:mock:projects:delete', 'error')
+export const deleteProjectError: ErrorModel = {
+  type: "about:blank",
+  status: 500,
+  title: "Internal Server Error",
+  detail: "Mock error scenario for project deletion",
+};
+
+// The org-config projection (GET /config); the create flow derives the
+// repo-URL preview from gitProvider.githubLogin.
+export const orgConfig: ConfigProjection = {
+  gitProvider: {
+    kind: "github",
+    mode: "pat",
+    status: "connected",
+    githubLogin: "acme-dev",
+    connectedAt: "2026-06-01T10:00:00Z",
+  },
+  idp: {
+    kind: "platform",
+    issuer: "http://thunder.local/oauth2/token",
+    jwksUrl: "http://thunder.local/oauth2/jwks",
+    publisherClientId: "aep-console-client",
+    hasClientSecret: false,
+  },
+  llm: {
+    kind: "anthropic",
+    status: "connected",
+    keyPrefix: "sk-ant-",
+    keyLast4: "mock",
+    connectedAt: "2026-06-01T10:00:00Z",
+  },
 };

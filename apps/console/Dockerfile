@@ -1,0 +1,74 @@
+# Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Stage 0: build the SPA inside the ROOT pnpm workspace (apps/console is a
+# member; docker-compose sets `context: ..` accordingly). @aep/console has no
+# workspace runtime deps — the only cross-package input is
+# packages/contracts/api/v1/openapi.yaml, consumed by `pnpm gen`, which MUST
+# run here because src/generated/* is gitignored and absent from a fresh
+# checkout. corepack picks the pnpm version from the root `packageManager`
+# field once package.json is copied in.
+FROM node:22-alpine AS builder
+
+RUN corepack enable
+WORKDIR /repo
+
+# Workspace manifests first for install-layer caching (same shape as
+# services/agents/Dockerfile).
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/console ./apps/console
+
+RUN pnpm install --frozen-lockfile --filter @aep/console...
+
+RUN pnpm --filter @aep/console gen
+RUN pnpm --filter @aep/console build
+
+# Stage 1: serve with nginx (mirrors console-legacy/console/Dockerfile).
+FROM nginx:1.28-alpine
+
+USER root
+
+# Pull latest patched versions of CVE-flagged packages. Scoped (not blanket
+# `apk upgrade`) so alpine-baselayout's pre-upgrade script doesn't try to clean
+# /var/run when this image is built inside a pod that bind-mounts it read-only.
+RUN apk upgrade --no-cache \
+      libcrypto3 libssl3 libexpat libpng libxml2 \
+      musl musl-utils nghttp2-libs zlib
+
+RUN addgroup -g 10001 -S aepuser && \
+    adduser -u 10001 -S aepuser -G aepuser
+
+COPY --chown=10001:10001 apps/console/nginx.conf /etc/nginx/nginx.conf
+COPY --from=builder --chown=10001:10001 /repo/apps/console/dist /usr/share/nginx/html
+
+COPY --chown=10001:10001 apps/console/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+RUN chown -R 10001:10001 /var/cache/nginx && \
+    chown -R 10001:10001 /var/log/nginx && \
+    chown -R 10001:10001 /etc/nginx && \
+    chown -R 10001:10001 /usr/share/nginx/html
+
+USER 10001
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]

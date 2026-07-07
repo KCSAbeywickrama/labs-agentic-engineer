@@ -46,93 +46,58 @@ components:
         - createdAt
         - updatedAt
       type: object
-    ArtifactVersion:
+    ApplyRequest:
       additionalProperties: false
       properties:
-        commitHash:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ApplyRequest.json
+          format: uri
+          readOnly: true
           type: string
-        sourceDesign:
+        deletes:
+          items:
+            $ref: "#/components/schemas/DeleteOp"
+          type:
+            - array
+            - "null"
+        message:
           type: string
-        sourceSpec:
-          type: string
-        tagName:
-          type: string
-        version:
-          format: int64
-          type: integer
-      required:
-        - version
-        - tagName
-        - commitHash
+        writes:
+          items:
+            $ref: "#/components/schemas/WriteOp"
+          type:
+            - array
+            - "null"
       type: object
-    BoardTask:
+    ApplyResult:
       additionalProperties: false
       properties:
-        assignee:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ApplyResult.json
+          format: uri
+          readOnly: true
           type: string
-        componentName:
+        commitSha:
           type: string
-        componentTaskId:
-          type: string
-        dependsOnComponents:
+        files:
           items:
-            type: string
+            $ref: "#/components/schemas/FileMeta"
           type:
             - array
             - "null"
-        dependsOnExternalResources:
+        warnings:
           items:
-            type: string
+            $ref: "#/components/schemas/Warning"
           type:
             - array
             - "null"
-        dependsOnOrgServices:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        dependsOnResources:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        description:
-          type: string
-        dispatchedAt:
-          format: date-time
-          type: string
-        errorMessage:
-          type: string
-        execType:
-          type: string
-        externalResourceName:
-          type: string
-        id:
-          type: string
-        labels:
-          items:
-            $ref: "#/components/schemas/LabelInfo"
-          type:
-            - array
-            - "null"
-        lifecycleStatus:
-          type: string
-        resourceName:
-          type: string
-        status:
-          type: string
-        title:
-          type: string
-        type:
-          type: string
-        url:
-          type: string
       required:
-        - id
-        - title
-        - url
+        - commitSha
+        - files
       type: object
     BuildLogEntry:
       additionalProperties: false
@@ -168,66 +133,68 @@ components:
       required:
         - logs
       type: object
-    ChatHistoryMessage:
+    BuildRequest:
       additionalProperties: false
-      properties:
-        content:
-          type: string
-        role:
-          type: string
-      required:
-        - role
-        - content
       type: object
-    ChatTurnRequest:
+    BuildResponse:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/ChatTurnRequest.json
+            - /api/v1/BuildResponse.json
           format: uri
           readOnly: true
           type: string
-        files:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        history:
-          items:
-            $ref: "#/components/schemas/ChatHistoryMessage"
-          type:
-            - array
-            - "null"
-        message:
+        tag:
           type: string
-        mode:
-          type: string
-        requestSessionBaseline:
-          type: boolean
       required:
-        - message
-        - history
-        - mode
+        - tag
       type: object
-    ChatUndoOutputBody:
+    BuildStatus:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/ChatUndoOutputBody.json
+            - /api/v1/BuildStatus.json
           format: uri
           readOnly: true
           type: string
-        files:
-          additionalProperties:
-            type: string
-          type: object
+        status:
+          enum:
+            - started
+            - in_progress
+            - completed
+            - failed
+          type: string
+        tasks:
+          items:
+            $ref: "#/components/schemas/BuildStatusTask"
+          type:
+            - array
+            - "null"
+        workflow_status:
+          type: string
       required:
-        - files
+        - status
+        - workflow_status
+      type: object
+    BuildStatusTask:
+      additionalProperties: false
+      properties:
+        status:
+          enum:
+            - started
+            - in_progress
+            - completed
+            - failed
+          type: string
+        title:
+          type: string
+      required:
+        - title
+        - status
       type: object
     ClientSecretOutputBody:
       additionalProperties: false
@@ -297,7 +264,7 @@ components:
           readOnly: true
           type: string
         rawSpec:
-          description: Raw OpenAPI YAML/JSON (paste path)
+          description: Raw OpenAPI 3.x YAML/JSON (paste path)
           type: string
         specUrl:
           description: HTTPS URL to fetch the OpenAPI spec from
@@ -433,140 +400,7 @@ components:
         - componentType
         - spec
       type: object
-    ComponentTask:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ComponentTask.json
-          format: uri
-          readOnly: true
-          type: string
-        batchId:
-          type: string
-        body:
-          type: string
-        bodySyncPending:
-          type: boolean
-        branchName:
-          type: string
-        buildAuthRetryCount:
-          format: int64
-          type: integer
-        cause:
-          type: string
-        componentName:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        dependsOnComponents:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        dependsOnExternalResources:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        dependsOnOrgServices:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        dependsOnResources:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        dispatchDeferredAt:
-          format: date-time
-          type: string
-        dispatchedAt:
-          format: date-time
-          type: string
-        errorMessage:
-          type: string
-        execType:
-          type: string
-        externalResourceName:
-          type: string
-        id:
-          type: string
-        issueNumber:
-          format: int64
-          type: integer
-        issueUrl:
-          type: string
-        labels:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        lastBuildRunName:
-          type: string
-        lastBuildSha:
-          type: string
-        lastCodingAgentRunName:
-          type: string
-        lastEventAt:
-          format: date-time
-          type: string
-        lifecycleStatus:
-          type: string
-        mergeCommitSha:
-          type: string
-        order:
-          format: int64
-          type: integer
-        projectId:
-          type: string
-        pullRequestNumber:
-          format: int64
-          type: integer
-        pullRequestUrl:
-          type: string
-        rationale:
-          type: string
-        resourceName:
-          type: string
-        sourceDesignVersion:
-          type: string
-        sourceSpecVersion:
-          type: string
-        status:
-          type: string
-        title:
-          type: string
-        type:
-          type: string
-        updatedAt:
-          format: date-time
-          type: string
-        workspacePath:
-          type: string
-      required:
-        - id
-        - projectId
-        - componentName
-        - title
-        - type
-        - order
-        - status
-        - workspacePath
-        - execType
-        - lifecycleStatus
-        - createdAt
-        - updatedAt
-      type: object
-    ConfigKey:
+    ConfigKeyDTO:
       additionalProperties: false
       properties:
         credentialClass:
@@ -666,6 +500,17 @@ components:
         - gitProvider
         - idp
       type: object
+    ConsumerDTO:
+      additionalProperties: false
+      properties:
+        componentName:
+          type: string
+        projectId:
+          type: string
+      required:
+        - projectId
+        - componentName
+      type: object
     CreateProjectRequest:
       additionalProperties: false
       properties:
@@ -685,7 +530,16 @@ components:
         name:
           type: string
         prompt:
-          description: Optional requirement prompt that kicks off spec derivation (issue #72).
+          description: >-
+            The user's initial requirement — what they want built. Persisted
+            as the project's requirement and kicks off spec derivation for
+            the new project (issue #72). Projects created without a prompt
+            keep today's behavior.
+          type: string
+        repoName:
+          description: >-
+            Repository name for the project's GitHub repo; defaults to the
+            project name, the organization is fixed server-side (issue #71).
           type: string
       required:
         - name
@@ -713,80 +567,29 @@ components:
         - skillMd
         - references
       type: object
-    Dependency:
+    DeleteOp:
       additionalProperties: false
       properties:
-        candidates:
-          items:
-            $ref: "#/components/schemas/DependencyCandidate"
-          type:
-            - array
-            - "null"
-        config:
-          items:
-            $ref: "#/components/schemas/ConfigKey"
-          type:
-            - array
-            - "null"
-        description:
+        baseSha:
           type: string
-        kind:
-          type: string
-        name:
-          type: string
-        needsSpec:
-          type: boolean
-        parameters:
-          additionalProperties:
-            type: string
-          type: object
-        reason:
-          type: string
-        resourceType:
-          type: string
-        specPath:
-          type: string
-        specUrl:
-          type: string
-        status:
+        path:
           type: string
       required:
-        - kind
-        - name
+        - path
       type: object
-    DependencyCandidate:
-      additionalProperties: false
-      properties:
-        description:
-          type: string
-        label:
-          type: string
-        url:
-          type: string
-      required:
-        - label
-      type: object
-    DependencyOutputName:
-      additionalProperties: false
-      properties:
-        name:
-          type: string
-      required:
-        - name
-      type: object
-    DependencyStatusOutputBody:
+    DependencyStatus:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/DependencyStatusOutputBody.json
+            - /api/v1/DependencyStatus.json
           format: uri
           readOnly: true
           type: string
         outputs:
           items:
-            $ref: "#/components/schemas/DependencyOutputName"
+            type: string
           type:
             - array
             - "null"
@@ -797,6 +600,7 @@ components:
       required:
         - status
         - ready
+        - outputs
       type: object
     Deployment:
       additionalProperties: false
@@ -835,129 +639,6 @@ components:
       required:
         - items
       type: object
-    Design:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/Design.json
-          format: uri
-          readOnly: true
-          type: string
-        components:
-          items:
-            $ref: "#/components/schemas/DesignComponent"
-          type:
-            - array
-            - "null"
-        hasUnsavedChanges:
-          type: boolean
-        overview:
-          type: string
-        projectId:
-          type: string
-        sourceSpec:
-          type: string
-        status:
-          type: string
-        version:
-          format: int64
-          type: integer
-        versions:
-          items:
-            $ref: "#/components/schemas/ArtifactVersion"
-          type:
-            - array
-            - "null"
-      required:
-        - projectId
-        - overview
-        - components
-        - status
-        - version
-        - hasUnsavedChanges
-      type: object
-    DesignBundle:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DesignBundle.json
-          format: uri
-          readOnly: true
-          type: string
-        design:
-          $ref: "#/components/schemas/Design"
-        files:
-          additionalProperties:
-            type: string
-          type: object
-      required:
-        - files
-        - design
-      type: object
-    DesignComponent:
-      additionalProperties: false
-      properties:
-        appPath:
-          type: string
-        buildpack:
-          type: string
-        componentAgentInstructions:
-          type: string
-        componentType:
-          type: string
-        dependencies:
-          items:
-            $ref: "#/components/schemas/Dependency"
-          type:
-            - array
-            - "null"
-        description:
-          type: string
-        entrypoint:
-          type: string
-        exposesAPI:
-          $ref: "#/components/schemas/ExposesAPI"
-        exposure:
-          type: string
-        language:
-          type: string
-        name:
-          type: string
-        openAPISpec:
-          type: string
-        version:
-          type: string
-      required:
-        - name
-        - componentType
-        - language
-        - dependencies
-        - entrypoint
-        - buildpack
-        - appPath
-        - openAPISpec
-        - componentAgentInstructions
-      type: object
-    DesignFileInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DesignFileInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        content:
-          description: New file contents
-          type: string
-      required:
-        - content
-      type: object
     DisconnectOutputBody:
       additionalProperties: false
       properties:
@@ -990,31 +671,6 @@ components:
       required:
         - issuer
         - jwksUrl
-      type: object
-    DispatchResult:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DispatchResult.json
-          format: uri
-          readOnly: true
-          type: string
-        componentName:
-          type: string
-        error:
-          type: string
-        runName:
-          type: string
-        status:
-          type: string
-        taskId:
-          type: string
-      required:
-        - taskId
-        - componentName
-        - status
       type: object
     EnvVar:
       additionalProperties: false
@@ -1086,52 +742,46 @@ components:
           format: uri
           type: string
       type: object
-    ExposesAPI:
+    ExecutionView:
       additionalProperties: false
       properties:
-        auth:
+        createdAt:
+          format: date-time
           type: string
-        managed:
-          type: boolean
-        orgPublished:
-          type: boolean
-        userContext:
+        endedAt:
+          format: date-time
           type: string
-      type: object
-    ExternalResourceConfigKeyDTO:
-      additionalProperties: false
-      properties:
-        key:
+        id:
           type: string
-        secret:
-          type: boolean
-      required:
-        - key
-        - secret
-      type: object
-    ExternalResourceConsumer:
-      additionalProperties: false
-      properties:
-        componentName:
+        kind:
           type: string
-        projectId:
+        reason:
+          type: string
+        runName:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
           type: string
       required:
-        - projectId
-        - componentName
+        - id
+        - kind
+        - status
+        - createdAt
       type: object
     ExternalResourceDTO:
       additionalProperties: false
       properties:
-        configKeys:
+        config:
           items:
-            $ref: "#/components/schemas/ExternalResourceConfigKeyDTO"
+            $ref: "#/components/schemas/ConfigKeyDTO"
           type:
             - array
             - "null"
         consumers:
           items:
-            $ref: "#/components/schemas/ExternalResourceConsumer"
+            $ref: "#/components/schemas/ConsumerDTO"
           type:
             - array
             - "null"
@@ -1141,52 +791,43 @@ components:
           type: string
       required:
         - name
-        - configKeys
+        - config
         - consumers
       type: object
-    FormFile:
-      additionalProperties: false
-      properties:
-        ContentType:
-          type: string
-        Filename:
-          type: string
-        IsSet:
-          type: boolean
-        Size:
-          format: int64
-          type: integer
-      required:
-        - ContentType
-        - IsSet
-        - Size
-        - Filename
-      type: object
-    GenerateRequirementFileInputBody:
+    FileContent:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/GenerateRequirementFileInputBody.json
+            - /api/v1/FileContent.json
           format: uri
           readOnly: true
           type: string
-        prompt:
-          description: Optional user prompt (for bootstrap skills)
+        content:
           type: string
-        skillId:
-          description: Document-generation skill ID (required)
+        path:
           type: string
-        sources:
-          description: Optional source filenames to feed the skill
-          items:
-            type: string
-          type:
-            - array
-            - "null"
+        sha:
+          type: string
       required:
-        - skillId
+        - path
+        - content
+        - sha
+      type: object
+    FileMeta:
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+        sha:
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+        - path
+        - sha
       type: object
     GitProviderProjection:
       additionalProperties: false
@@ -1317,35 +958,13 @@ components:
         - status
         - connectedAt
       type: object
-    LabelInfo:
+    Lineage:
       additionalProperties: false
       properties:
-        color:
+        designTag:
           type: string
-        name:
+        specTag:
           type: string
-      required:
-        - name
-        - color
-      type: object
-    ListExternalResourcesOutputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ListExternalResourcesOutputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        externalResources:
-          items:
-            $ref: "#/components/schemas/ExternalResourceDTO"
-          type:
-            - array
-            - "null"
-      required:
-        - externalResources
       type: object
     OrganizationList:
       additionalProperties: false
@@ -1491,62 +1110,15 @@ components:
           type: string
         namespaceName:
           type: string
+        repoUrl:
+          description: Clone URL of the project's Git repository; absent when no repo is provisioned (issue #108).
+          type: string
         status:
           type: string
         uid:
           type: string
       required:
         - name
-      type: object
-    ProjectBoard:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ProjectBoard.json
-          format: uri
-          readOnly: true
-          type: string
-        done:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        failed:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        inProgress:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        onHold:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        todo:
-          items:
-            $ref: "#/components/schemas/BoardTask"
-          type:
-            - array
-            - "null"
-        url:
-          type: string
-      required:
-        - url
-        - todo
-        - inProgress
-        - done
-        - onHold
-        - failed
       type: object
     ProjectList:
       additionalProperties: false
@@ -1565,81 +1137,23 @@ components:
             - array
             - "null"
         nextCursor:
-          description: Opaque cursor for the next page; absent on the last page.
+          description: Cursor for the next page; absent on the last page.
           type: string
       required:
         - items
       type: object
-    ProjectStatus:
+    ProvisionBody:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/ProjectStatus.json
-          format: uri
-          readOnly: true
-          type: string
-        deployStatus:
-          description: >-
-            Result of the latest dev deployment (e.g. in_progress /
-            succeeded / failed); absent when nothing was deployed.
-          type: string
-        deployedVersion:
-          description: >-
-            Version tag currently deployed to the dev environment; absent
-            when nothing deployed.
-          type: string
-        designStatus:
-          type: string
-        hasDesign:
-          type: boolean
-        hasSpec:
-          type: boolean
-        hasTasks:
-          type: boolean
-        phase:
-          type: string
-        repoErrorMessage:
-          type: string
-        repoStatus:
-          type: string
-        repoUrl:
-          type: string
-        specDirty:
-          description: >-
-            True when the spec/design changed after specVersion was
-            published.
-          type: boolean
-        specStatus:
-          type: string
-        specVersion:
-          description: >-
-            Latest published spec version tag (e.g. v1); absent when
-            nothing published.
-          type: string
-      required:
-        - phase
-        - repoStatus
-        - repoUrl
-        - hasSpec
-        - hasDesign
-        - hasTasks
-        - specStatus
-        - designStatus
-      type: object
-    ProvisionDependencyInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ProvisionDependencyInputBody.json
+            - /api/v1/ProvisionBody.json
           format: uri
           readOnly: true
           type: string
         environments:
-          description: Environment names to bind the resource to (e.g. ["development"])
+          description: "Environments to provision (default: [development])"
           items:
             type: string
           type:
@@ -1648,106 +1162,16 @@ components:
         params:
           additionalProperties:
             type: string
-          description: Provisioning parameters (applied to all envs)
+          description: Provisioning parameters (override the design defaults)
           type: object
-      required:
-        - environments
       type: object
-    ProvisionDependencyOutputBody:
+    SaveValuesBody:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/ProvisionDependencyOutputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        status:
-          type: string
-      required:
-        - status
-      type: object
-    ReqFileInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ReqFileInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        content:
-          description: New file content
-          type: string
-      required:
-        - content
-      type: object
-    RequirementsBundle:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/RequirementsBundle.json
-          format: uri
-          readOnly: true
-          type: string
-        files:
-          additionalProperties:
-            type: string
-          type: object
-        hasUnsavedChanges:
-          type: boolean
-        projectId:
-          type: string
-        status:
-          type: string
-        version:
-          format: int64
-          type: integer
-        versions:
-          items:
-            $ref: "#/components/schemas/ArtifactVersion"
-          type:
-            - array
-            - "null"
-      required:
-        - projectId
-        - files
-        - status
-      type: object
-    RequirementsSnapshotFile:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/RequirementsSnapshotFile.json
-          format: uri
-          readOnly: true
-          type: string
-        content:
-          type: string
-        existed:
-          type: boolean
-        filename:
-          type: string
-        snapshotId:
-          type: string
-      required:
-        - snapshotId
-        - filename
-        - existed
-      type: object
-    SaveExternalResourceValuesInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SaveExternalResourceValuesInputBody.json
+            - /api/v1/SaveValuesBody.json
           format: uri
           readOnly: true
           type: string
@@ -1756,25 +1180,10 @@ components:
             additionalProperties:
               type: string
             type: object
-          description: Per-environment key→value map (development required)
+          description: "Per-environment { configKey: value } maps. Secret keys are routed to the secret manager by the registered schema."
           type: object
       required:
         - environments
-      type: object
-    SaveExternalResourceValuesOutputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SaveExternalResourceValuesOutputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        status:
-          type: string
-      required:
-        - status
       type: object
     SkillDetailBody:
       additionalProperties: false
@@ -1826,44 +1235,6 @@ components:
         - contentSha
         - updatedAt
       type: object
-    SpecBundle:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SpecBundle.json
-          format: uri
-          readOnly: true
-          type: string
-        files:
-          items:
-            $ref: "#/components/schemas/SpecFile"
-          type: array
-      required:
-        - files
-      type: object
-    SpecFile:
-      additionalProperties: false
-      properties:
-        content:
-          description: Raw file content, inline.
-          type: string
-        group:
-          description: Which spec-view section the file belongs to.
-          enum:
-            - requirements
-            - designs
-            - validation
-          type: string
-        path:
-          description: File path within the project's spec tree (e.g. requirements/prd.md).
-          type: string
-      required:
-        - path
-        - group
-        - content
-      type: object
     StartConnectInputBody:
       additionalProperties: false
       properties:
@@ -1894,66 +1265,206 @@ components:
       required:
         - authorizeUrl
       type: object
-    TaskStatusResponse:
+    StatusMsg:
       additionalProperties: false
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
           examples:
-            - /api/v1/TaskStatusResponse.json
+            - /api/v1/StatusMsg.json
           format: uri
           readOnly: true
-          type: string
-        buildSteps:
-          items:
-            $ref: "#/components/schemas/WorkflowRunTask"
-          type:
-            - array
-            - "null"
-        task:
-          $ref: "#/components/schemas/ComponentTask"
-      required:
-        - task
-      type: object
-    Tasks:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/Tasks.json
-          format: uri
-          readOnly: true
-          type: string
-        hasUnsavedChanges:
-          type: boolean
-        projectId:
-          type: string
-        sourceDesign:
           type: string
         status:
           type: string
-        tasks:
+      required:
+        - status
+      type: object
+    TagList:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TagList.json
+          format: uri
+          readOnly: true
+          type: string
+        tags:
           items:
-            $ref: "#/components/schemas/ComponentTask"
-          type:
-            - array
-            - "null"
-        version:
-          format: int64
-          type: integer
-        versions:
-          items:
-            $ref: "#/components/schemas/ArtifactVersion"
+            type: string
           type:
             - array
             - "null"
       required:
-        - projectId
-        - tasks
-        - status
-        - version
-        - hasUnsavedChanges
+        - tags
+      type: object
+    TaskDetail:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TaskDetail.json
+          format: uri
+          readOnly: true
+          type: string
+        attention:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        body:
+          type: string
+        component:
+          type: string
+        dependsOn:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        derivedStatus:
+          type: string
+        executionHistory:
+          items:
+            $ref: "#/components/schemas/ExecutionView"
+          type:
+            - array
+            - "null"
+        executions:
+          additionalProperties:
+            $ref: "#/components/schemas/ExecutionView"
+          type: object
+        executorClass:
+          type: string
+        hold:
+          type: boolean
+        issueNumber:
+          format: int64
+          type: integer
+        issueUrl:
+          type: string
+        lineage:
+          $ref: "#/components/schemas/Lineage"
+        operation:
+          type: string
+        origin:
+          type: string
+        rationale:
+          type: string
+        title:
+          type: string
+      required:
+        - executionHistory
+        - issueNumber
+        - title
+        - issueUrl
+        - dependsOn
+        - lineage
+        - derivedStatus
+        - hold
+        - attention
+        - executions
+      type: object
+    TaskView:
+      additionalProperties: false
+      properties:
+        attention:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        body:
+          type: string
+        component:
+          type: string
+        dependsOn:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        derivedStatus:
+          type: string
+        executions:
+          additionalProperties:
+            $ref: "#/components/schemas/ExecutionView"
+          type: object
+        executorClass:
+          type: string
+        hold:
+          type: boolean
+        issueNumber:
+          format: int64
+          type: integer
+        issueUrl:
+          type: string
+        lineage:
+          $ref: "#/components/schemas/Lineage"
+        operation:
+          type: string
+        origin:
+          type: string
+        rationale:
+          type: string
+        title:
+          type: string
+      required:
+        - issueNumber
+        - title
+        - issueUrl
+        - dependsOn
+        - lineage
+        - derivedStatus
+        - hold
+        - attention
+        - executions
+      type: object
+    TurnInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        instruction:
+          description: User message / generation directive
+          type: string
+        target:
+          description: Optional target (e.g. a doc type)
+          type: string
+        useCase:
+          description: Which generation/chat flow
+          enum:
+            - requirements-generate
+            - requirements-chat
+            - design-generate
+          type: string
+      required:
+        - useCase
+        - instruction
+      type: object
+    TurnOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        turnId:
+          description: The started turn's id — poll/attach with it
+          type: string
+      required:
+        - turnId
       type: object
     UpdateConfigBody:
       additionalProperties: false
@@ -1993,6 +1504,20 @@ components:
       required:
         - skillMd
         - references
+      type: object
+    Warning:
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+        - code
+        - message
       type: object
     WorkflowRun:
       additionalProperties: false
@@ -2058,6 +1583,20 @@ components:
       required:
         - name
       type: object
+    WriteOp:
+      additionalProperties: false
+      properties:
+        baseSha:
+          type: string
+        content:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+        - content
+      type: object
+  securitySchemes:
     userJWT:
       bearerFormat: JWT
       description: Thunder end-user JWT (RS256, JWKS-verified)
@@ -2264,7 +1803,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ListExternalResourcesOutputBody"
+                items:
+                  $ref: "#/components/schemas/ExternalResourceDTO"
+                type:
+                  - array
+                  - "null"
           description: OK
         default:
           content:
@@ -2274,19 +1817,19 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List the org's registered external resources with their consuming components
+      summary: List the org's external-resource catalog
       tags:
         - Dependencies
   /dependencies/external-resources/{name}:
     delete:
       operationId: delete-external-resource
       parameters:
-        - description: External resource name to delete
+        - description: External resource name
           in: path
           name: name
           required: true
           schema:
-            description: External resource name to delete
+            description: External resource name
             type: string
       responses:
         "204":
@@ -2299,7 +1842,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Delete a registered external resource (only when no component uses it)
+      summary: Delete an external-resource catalog entry (409 if in use)
       tags:
         - Dependencies
   /organizations:
@@ -2334,6 +1877,20 @@ paths:
           schema:
             description: Opaque pagination cursor
             type: string
+        - description: Case-insensitive substring match on name and displayName
+          explode: false
+          in: query
+          name: search
+          schema:
+            description: Case-insensitive substring match on name and displayName
+            type: string
+        - description: Maximum number of items to return (server default when absent)
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Maximum number of items to return (server default when absent)
+            type: integer
       responses:
         "200":
           content:
@@ -2431,9 +1988,9 @@ paths:
       summary: Get a project
       tags:
         - Projects
-  /projects/{projectName}/board:
-    get:
-      operationId: get-board
+  /projects/{projectName}/build:
+    post:
+      operationId: build-project
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -2442,12 +1999,18 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BuildRequest"
+        required: true
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectBoard"
+                $ref: "#/components/schemas/BuildResponse"
           description: OK
         default:
           content:
@@ -2457,9 +2020,45 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get a project's kanban board
+      summary: Trigger a project build
       tags:
-        - Board
+        - Projects
+  /projects/{projectName}/build/{tag}:
+    get:
+      operationId: get-project-build
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Build tag
+          in: path
+          name: tag
+          required: true
+          schema:
+            description: Build tag
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildStatus"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get project build status
+      tags:
+        - Projects
   /projects/{projectName}/components:
     get:
       operationId: list-components
@@ -2718,7 +2317,7 @@ paths:
         - Config
   /projects/{projectName}/components/{componentName}/dependencies/{depName}/access-request:
     post:
-      operationId: create-access-request
+      operationId: request-org-service-access
       parameters:
         - description: Consumer project name (DNS-label slug)
           in: path
@@ -2727,19 +2326,19 @@ paths:
           schema:
             description: Consumer project name (DNS-label slug)
             type: string
-        - description: Consumer component requesting access
+        - description: Consumer component name
           in: path
           name: componentName
           required: true
           schema:
-            description: Consumer component requesting access
+            description: Consumer component name
             type: string
-        - description: Org-service dependency name (== provider component to publish org-wide)
+        - description: org-service dependency name (the provider component)
           in: path
           name: depName
           required: true
           schema:
-            description: Org-service dependency name (== provider component to publish org-wide)
+            description: org-service dependency name (the provider component)
             type: string
       responses:
         "201":
@@ -2756,12 +2355,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Request cross-project access to a project-only org-service dependency
+      summary: Request access to a cross-project org-service dependency
       tags:
         - Dependencies
   /projects/{projectName}/components/{componentName}/dependencies/{depName}/provision:
     post:
-      operationId: provision-dependency
+      operationId: provision-platform-resource
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -2770,12 +2369,12 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Component name
+        - description: Component the drawer opened on (context only)
           in: path
           name: componentName
           required: true
           schema:
-            description: Component name
+            description: Component the drawer opened on (context only)
             type: string
         - description: Platform-resource dependency name
           in: path
@@ -2788,14 +2387,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProvisionDependencyInputBody"
-        required: true
+              $ref: "#/components/schemas/ProvisionBody"
       responses:
         "202":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProvisionDependencyOutputBody"
+                $ref: "#/components/schemas/StatusMsg"
           description: Accepted
         default:
           content:
@@ -2805,7 +2403,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Author the OC Resource model for a platform-resource dep and mark it in-flight (async)
+      summary: Provision a platform-resource dependency (async)
       tags:
         - Dependencies
   /projects/{projectName}/components/{componentName}/dependencies/{depName}/spec:
@@ -2819,19 +2417,19 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Component name
+        - description: Consumer component name
           in: path
           name: componentName
           required: true
           schema:
-            description: Component name
+            description: Consumer component name
             type: string
-        - description: Dependency name
+        - description: External dependency name
           in: path
           name: depName
           required: true
           schema:
-            description: Dependency name
+            description: External dependency name
             type: string
       requestBody:
         content:
@@ -2868,33 +2466,33 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Component name
+        - description: Component the drawer opened on (context only)
           in: path
           name: componentName
           required: true
           schema:
-            description: Component name
+            description: Component the drawer opened on (context only)
             type: string
-        - description: Platform-resource dependency name
+        - description: Dependency name
           in: path
           name: depName
           required: true
           schema:
-            description: Platform-resource dependency name
+            description: Dependency name
             type: string
-        - description: "Environment name (default: development)"
+        - description: "Environment (default: development)"
           explode: false
           in: query
           name: environment
           schema:
-            description: "Environment name (default: development)"
+            description: "Environment (default: development)"
             type: string
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DependencyStatusOutputBody"
+                $ref: "#/components/schemas/DependencyStatus"
           description: OK
         default:
           content:
@@ -2904,7 +2502,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get the provisioning status and masked outputs for a platform-resource dependency
+      summary: Get a dependency's provisioning status (outputs masked to names)
       tags:
         - Dependencies
   /projects/{projectName}/components/{componentName}/deployments:
@@ -2979,6 +2577,82 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
+  /projects/{projectName}/agents/{conversationId}/messages: #rename from convo
+    get:
+      operationId: get-conversation
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: FE-chosen conversation uuid
+          in: path
+          name: conversationId
+          required: true
+          schema:
+            description: FE-chosen conversation uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Rehydrate a chat conversation (messages only)
+      tags:
+        - GenAI
+    post:
+      operationId: create-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: FE-chosen conversation uuid
+          in: path
+          name: conversationId
+          required: true
+          schema:
+            description: FE-chosen conversation uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TurnInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Start a generation/chat turn (202 — runs detached; attach via the turn stream)
+      tags:
+        - GenAI
   /projects/{projectName}/dependencies/access-requests:
     get:
       operationId: list-access-requests
@@ -3009,12 +2683,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List a project's cross-project access requests
+      summary: List a consumer project's access requests
       tags:
         - Dependencies
   /projects/{projectName}/dependencies/external-resources/{name}/values:
     post:
-      operationId: save-external-resource-values
+      operationId: collect-external-resource-values
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3023,25 +2697,24 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: External resource name (e.g. openweather)
+        - description: External resource (dependency) name
           in: path
           name: name
           required: true
           schema:
-            description: External resource name (e.g. openweather)
+            description: External resource (dependency) name
             type: string
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SaveExternalResourceValuesInputBody"
-        required: true
+              $ref: "#/components/schemas/SaveValuesBody"
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SaveExternalResourceValuesOutputBody"
+                $ref: "#/components/schemas/StatusMsg"
           description: OK
         default:
           content:
@@ -3051,12 +2724,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Save an external resource's per-environment values and provision it
+      summary: Collect an external dependency's values and provision it
       tags:
         - Dependencies
-  /projects/{projectName}/design:
+  /projects/{projectName}/files:
     get:
-      operationId: get-design
+      operationId: list-files
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3065,259 +2738,12 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Design"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the assembled design
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/bundle:
-    get:
-      operationId: get-design-bundle
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
+        - description: Only list paths under this prefix (e.g. specs/design/)
+          explode: false
+          in: query
+          name: prefix
           schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the design bundle (file map + assembled design)
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/components/{componentName}:
-    delete:
-      operationId: delete-design-component
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Component directory name under components/
-          in: path
-          name: componentName
-          required: true
-          schema:
-            description: Component directory name under components/
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a component directory under components/
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/discard:
-    post:
-      operationId: discard-design-changes
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Design"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Discard unsaved design changes
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/files/{path...}:
-    delete:
-      operationId: delete-design-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: File path under specs/design/
-          in: path
-          name: path
-          required: true
-          schema:
-            description: File path under specs/design/
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a single file under specs/design/
-      tags:
-        - Design(Deprecated)
-    put:
-      operationId: update-design-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: File path under specs/design/
-          in: path
-          name: path
-          required: true
-          schema:
-            description: File path under specs/design/
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DesignFileInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Write a single file under specs/design/
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/generate:
-    post:
-      operationId: generate-design
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Generate the design (architect agent, SSE stream)
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/save:
-    post:
-      operationId: save-design
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Design"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Save the design and proceed
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/versions:
-    get:
-      operationId: list-design-versions
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
+            description: Only list paths under this prefix (e.g. specs/design/)
             type: string
       responses:
         "200":
@@ -3325,7 +2751,7 @@ paths:
             application/json:
               schema:
                 items:
-                  $ref: "#/components/schemas/ArtifactVersion"
+                  $ref: "#/components/schemas/FileMeta"
                 type:
                   - array
                   - "null"
@@ -3338,77 +2764,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List design versions
+      summary: List spec files at HEAD
       tags:
-        - Design(Deprecated)
-  /projects/{projectName}/design/versions/{tag}/bundle:
-    get:
-      operationId: get-design-bundle-at-tag
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Design version tag (e.g. v1-2)
-          in: path
-          name: tag
-          required: true
-          schema:
-            description: Design version tag (e.g. v1-2)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DesignBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the design bundle at a tag
-      tags:
-        - Design(Deprecated)
-  /projects/{projectName}/requirements:
-    get:
-      operationId: get-requirements
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the requirements bundle
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat:
+        - Files
+  /projects/{projectName}/files/apply:
     post:
-      operationId: stream-requirements-chat
+      operationId: apply-files
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3421,11 +2782,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ChatTurnRequest"
-              description: Chat turn request (message is required)
+              $ref: "#/components/schemas/ApplyRequest"
+              description: Atomic write/delete batch with per-file baseSha
         required: true
       responses:
         "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyResult"
           description: OK
         default:
           content:
@@ -3435,44 +2800,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Stream a requirements-chat turn (SSE)
+      summary: Atomically apply a batch of writes/deletes (single commit to main)
       tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/baseline/{baselineId}:
-    delete:
-      operationId: drop-requirements-chat-baseline
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Session baseline snapshot identifier
-          in: path
-          name: baselineId
-          required: true
-          schema:
-            description: Session baseline snapshot identifier
-            type: string
-      responses:
-        "204":
-          description: No Content
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Drop the chat-session baseline snapshot
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/baseline/{baselineId}/files/{name}:
+        - Files
+  /projects/{projectName}/files/{path...}:
     get:
-      operationId: get-requirements-chat-baseline-file
+      operationId: read-file
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3481,26 +2814,19 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Session baseline snapshot identifier
+        - description: File path under specs/
           in: path
-          name: baselineId
+          name: path
           required: true
           schema:
-            description: Session baseline snapshot identifier
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
+            description: File path under specs/
             type: string
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RequirementsSnapshotFile"
+                $ref: "#/components/schemas/FileContent"
           description: OK
         default:
           content:
@@ -3510,87 +2836,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get a requirement file as captured in the chat-session baseline
+      summary: Read a spec file at HEAD
       tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/baseline/{baselineId}/files/{name}/revert:
-    post:
-      operationId: revert-requirements-chat-baseline-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Session baseline snapshot identifier
-          in: path
-          name: baselineId
-          required: true
-          schema:
-            description: Session baseline snapshot identifier
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      responses:
-        "204":
-          description: No Content
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Revert a requirement file to the chat-session baseline
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/chat/turns/{turnId}/undo:
-    post:
-      operationId: undo-requirements-chat-turn
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Chat turn identifier to undo
-          in: path
-          name: turnId
-          required: true
-          schema:
-            description: Chat turn identifier to undo
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ChatUndoOutputBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Undo a requirements-chat turn
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/collab-session:
+        - Files
+  /projects/{projectName}/spec/collab-session:
     get:
-      operationId: get-collab-session
+      operationId: get-spec-collab-session
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3620,185 +2871,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get the collaboration session descriptor
+      summary: Get the collaboration session descriptor for the spec workspace
       tags:
         - Collaboration
-  /projects/{projectName}/requirements/discard:
-    post:
-      operationId: discard-requirements
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Discard unsaved requirements changes
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/files/{name}:
-    delete:
-      operationId: delete-requirement-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Delete a requirement file
-      tags:
-        - Requirements(Deprecated)
-    put:
-      operationId: update-requirement-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ReqFileInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Create or update a requirement file
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/files/{name}/generate:
-    post:
-      operationId: generate-requirement-file
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Requirement filename
-          in: path
-          name: name
-          required: true
-          schema:
-            description: Requirement filename
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GenerateRequirementFileInputBody"
-        required: true
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Generate a requirement file via a skill (SSE stream)
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/save:
-    post:
-      operationId: save-requirements
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Save the requirements bundle (cut a new version)
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/versions:
+  /projects/{projectName}/tags:
     get:
-      operationId: list-requirements-versions
+      operationId: list-project-tags
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3812,11 +2890,7 @@ paths:
           content:
             application/json:
               schema:
-                items:
-                  $ref: "#/components/schemas/ArtifactVersion"
-                type:
-                  - array
-                  - "null"
+                $ref: "#/components/schemas/TagList"
           description: OK
         default:
           content:
@@ -3826,101 +2900,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List requirements versions
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/requirements/versions/{tag}:
-    get:
-      operationId: get-requirements-at-version
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Version tag (e.g. v1)
-          in: path
-          name: tag
-          required: true
-          schema:
-            description: Version tag (e.g. v1)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RequirementsBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the requirements bundle at a version tag
-      tags:
-        - Requirements(Deprecated)
-  /projects/{projectName}/spec:
-    get:
-      operationId: get-project-spec
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SpecBundle"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get the project's spec bundle (requirement, design, and validation files)
-      tags:
-        - Spec
-  /projects/{projectName}/status:
-    get:
-      operationId: get-project-status
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProjectStatus"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a project's SDLC status
+      summary: List project build tags
       tags:
         - Projects
   /projects/{projectName}/tasks:
@@ -3934,13 +2914,24 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
+        - description: Which Tasks to return (default open)
+          explode: false
+          in: query
+          name: state
+          schema:
+            description: Which Tasks to return (default open)
+            enum:
+              - open
+              - closed
+              - all
+            type: string
       responses:
         "200":
           content:
             application/json:
               schema:
                 items:
-                  $ref: "#/components/schemas/ComponentTask"
+                  $ref: "#/components/schemas/TaskView"
                 type:
                   - array
                   - "null"
@@ -3953,97 +2944,10 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List a project's tasks
+      summary: List a project's Tasks (live GitHub ⋈ executions → derived status)
       tags:
         - Tasks
-  /projects/{projectName}/tasks/dispatch:
-    post:
-      operationId: dispatch-tasks
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                items:
-                  $ref: "#/components/schemas/DispatchResult"
-                type:
-                  - array
-                  - "null"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Dispatch a project's tasks to the coding agent
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/generate:
-    post:
-      operationId: generate-tasks
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Generate a project's tasks (tech-lead agent, SSE stream)
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/generated:
-    get:
-      operationId: get-generated-tasks
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Tasks"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a project's generated tasks
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}:
+  /projects/{projectName}/tasks/{issueNumber}:
     get:
       operationId: get-task
       parameters:
@@ -4054,19 +2958,20 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: ComponentTask UUID
+        - description: GitHub issue number of the Task
           in: path
-          name: taskId
+          name: issueNumber
           required: true
           schema:
-            description: ComponentTask UUID
-            type: string
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ComponentTask"
+                $ref: "#/components/schemas/TaskDetail"
           description: OK
         default:
           content:
@@ -4076,12 +2981,12 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Get a task
+      summary: Get one Task with its full Execution history
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{taskId}/progress/agent:
+  /projects/{projectName}/tasks/{issueNumber}/log: #old /projects/{projectName}/executions/{executionId}/progress
     get:
-      operationId: get-task-agent-progress
+      operationId: get-execution-progress
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -4090,26 +2995,19 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: ComponentTask UUID
+        - description: Execution id
           in: path
-          name: taskId
+          name: executionId
           required: true
           schema:
-            description: ComponentTask UUID
+            description: Execution id
             type: string
-        - description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
+        - description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
           explode: false
           in: query
           name: sinceMillis
           schema:
-            description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-            type: string
-        - description: Max lines to return (0 ⇒ server default)
-          explode: false
-          in: query
-          name: limit
-          schema:
-            description: Max lines to return (0 ⇒ server default)
+            description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
             type: string
       responses:
         "200":
@@ -4126,161 +3024,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Poll a task's coding-agent progress
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}/progress/build:
-    get:
-      operationId: get-task-build-progress
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
-        - description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-          explode: false
-          in: query
-          name: sinceMillis
-          schema:
-            description: "Cursor: only return lines after this epoch-millis (0 ⇒ initial load)"
-            type: string
-        - description: Max lines to return (0 ⇒ server default)
-          explode: false
-          in: query
-          name: limit
-          schema:
-            description: Max lines to return (0 ⇒ server default)
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProgressResponse"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Poll a task's build progress
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}/regenerate-body:
-    post:
-      operationId: regenerate-task-body
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
-      responses:
-        "200":
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Regenerate a single task's body (Phase 2 detail, SSE stream)
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}/retry:
-    post:
-      operationId: retry-task
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DispatchResult"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Retry a failed task
-      tags:
-        - Tasks
-  /projects/{projectName}/tasks/{taskId}/status:
-    get:
-      operationId: get-task-status
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: ComponentTask UUID
-          in: path
-          name: taskId
-          required: true
-          schema:
-            description: ComponentTask UUID
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TaskStatusResponse"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Get a task's status with build-run steps
+      summary: Poll an Execution's progress (build steps / coding status)
       tags:
         - Tasks
   /skills:
