@@ -112,9 +112,10 @@ tests/e2e/
   refresh it from the new issue.
 - Install with `npm install` on first scaffold (commit the lockfile),
   `npm ci` on later runs.
-- `scripts/generate-report.mjs` is platform-owned: on re-validation
-  runs, re-copy it from references even when it already exists, so the
-  repo always runs the current version.
+- `scripts/generate-report.mjs` is platform-owned: the REPORT step
+  always executes the plugin's copy directly and refreshes this
+  committed copy, which exists only so humans can reproduce the report
+  after checkout.
 
 ### 6. PLAN, then GENERATE
 
@@ -159,11 +160,21 @@ one final full run so `results.json` reflects the authoritative state.
 
 ### 9. REPORT + covered write-back
 
-Generate the report deterministically — never hand-write it:
+Generate the report deterministically — never hand-write it. Run the
+**plugin's** copy of the script (always the current version, regardless
+of what an earlier cycle committed into the repo):
 
 ```bash
-node tests/e2e/scripts/generate-report.mjs \
+node /app/plugin/skills/aep-validation/references/generate-report.mjs \
   --issue <N> --commit "$(git rev-parse HEAD)"
+```
+
+Then refresh the repo's committed copy so a human can reproduce the
+report after checkout:
+
+```bash
+cp /app/plugin/skills/aep-validation/references/generate-report.mjs \
+   tests/e2e/scripts/generate-report.mjs
 ```
 
 This writes `specs/validation/report.md` + `report.json` and sets

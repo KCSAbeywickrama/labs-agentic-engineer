@@ -52,6 +52,7 @@
 // up fixing later.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 const AC_TITLE_RE = /^(AC-\d{3}-[a-z]):/;
@@ -199,12 +200,59 @@ function main() {
     process.exit(2);
   }
 
+  // Heal-log entries must join to criteria — reject free-form shapes
+  // (an entry the report can't attribute is an invisible heal).
   const healByAc = new Map();
-  for (const h of healEntries) {
-    if (!h.criterionId) continue;
+  for (const [i, h] of healEntries.entries()) {
+    if (!h.criterionId || !criteriaById.has(h.criterionId)) {
+      fail(
+        `heal-log entry ${i} has ${h.criterionId ? `unknown criterionId "${h.criterionId}"` : "no criterionId"} — ` +
+          `each entry must be {criterionId, spec, classification, change, commit} with a criterionId from the criteria file`,
+      );
+    }
     const list = healByAc.get(h.criterionId) ?? [];
     list.push(h);
     healByAc.set(h.criterionId, list);
+  }
+
+  // ---- heal visibility ----------------------------------------------------
+  // A spec belonging to an already-covered criterion that was modified
+  // this run is a heal by definition — it MUST have a heal-log entry,
+  // or a silent change (e.g. a weakened assertion) would ship inside a
+  // clean report. Diffed against the origin default branch (committed
+  // and uncommitted changes both count).
+  let healCheckSkipped = false;
+  {
+    let modified = null;
+    for (const base of ["origin/HEAD", "origin/main", "origin/master"]) {
+      try {
+        modified = execFileSync(
+          "git",
+          ["diff", "--name-only", "--diff-filter=M", base, "--"],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+        ).split("\n");
+        break;
+      } catch {
+        // ref missing — try the next candidate
+      }
+    }
+    if (modified === null) {
+      // not a git repo / no origin ref — degrade visibly, never silently
+      healCheckSkipped = true;
+    } else {
+      for (const p of modified) {
+        const m = /(AC-\d{3}-[a-z])\.spec\.[cm]?[tj]sx?$/.exec(p);
+        if (!m) continue;
+        const entry = criteriaById.get(m[1]);
+        if (!entry || entry.criterion.covered !== true) continue;
+        if (!healByAc.has(m[1])) {
+          errors.push(
+            `${p} (covered criterion ${m[1]}) was modified this run but has no heal-log entry — ` +
+              `record the heal in tests/e2e/heal-log.json {criterionId, spec, classification, change, commit} and regenerate`,
+          );
+        }
+      }
+    }
   }
 
   // ---- spec-file conventions (header hard-check, locator lint) -----------
@@ -225,6 +273,9 @@ function main() {
     return null;
   }
   const warnings = [];
+  if (healCheckSkipped) {
+    warnings.push("heal-visibility check skipped (no git origin ref available)");
+  }
   for (const [acId, r] of resultByAc) {
     if (!r.file) continue;
     const abs = resolveSpecPath(r.file);

@@ -63,6 +63,11 @@ validation phase.
 
 ## Record every heal
 
+The heal-log is mechanically enforced: `generate-report.mjs` hard-fails
+when a spec belonging to an already-covered criterion was modified this
+run without a matching heal-log entry. A heal that isn't logged does
+not exist as far as the report is concerned.
+
 One commit per heal, and one entry appended to
 `tests/e2e/heal-log.json` (an array; create it if absent — it is
 gitignored, per-run, and folded into the report by
