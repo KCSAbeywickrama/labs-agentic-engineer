@@ -1,8 +1,6 @@
 ---
 name: high-level-architecture
 description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, or writing a component's design.json.
-metadata:
-  aep.version: "2"
 ---
 
 # High-level architecture
@@ -111,9 +109,9 @@ design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
 
-Do NOT author `exposesAPI`, `callerIdentity`, `componentAgentInstructions`, or
-any dependency `status`/`reason` — those are PLATFORM-owned. If the platform has
-already written them into the file, preserve them verbatim.
+Do NOT author `exposesAPI`, `componentAgentInstructions`, or any dependency
+`status`/`reason` — those are PLATFORM-owned. If the platform has already
+written them into the file, preserve them verbatim.
 
 ### dependencies — the unified dependency edges
 
@@ -140,6 +138,13 @@ kind by WHAT the target is:
   database, cache, object store). Set `resourceType` to a registered type and
   `parameters` for provisioning:
   `{ "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres", "parameters": { "size": "small" } }`.
+  `thunder-app` is the platform's auth resource type: when the spec implies
+  users sign in, declare it on BOTH the SPA and each protected service, using
+  the SAME dependency `name`. For `thunder-app` ONLY, proposing the `scopes`
+  parameter value is allowed (default `openid profile email`); every other
+  resource type keeps the no-invented-parameters rule. Never propose
+  `redirectUris` — they are platform-managed. See the `thunder-authentication`
+  skill for the full rule.
 
 ```json
 "dependencies": [
@@ -178,6 +183,11 @@ web research (the API homepage, a docs page, a spec URL) so the user can verify
 the sources. Declare the intent (kind + name + fields above) and let the
 platform resolve it. An `external` dependency should almost always carry at
 least one `config` key — the value-collection gate needs something to collect.
+
+Every dependency carries a one-line `description`: what the target is and how
+the component uses it (for an `external`, which endpoints/SDK and auth scheme;
+for a `platform-resource`, what it stores). The console shows it in the
+dependency drawer and the coding agent relies on it to integrate correctly.
 
 One component per directory. Every `service` gets an `openapi.yaml`
 (load `openapi-conventions` before writing it); every `webapp` gets a

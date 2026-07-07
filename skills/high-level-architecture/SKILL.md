@@ -109,9 +109,9 @@ design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
 
-Do NOT author `exposesAPI`, `callerIdentity`, `componentAgentInstructions`, or
-any dependency `status`/`reason` — those are PLATFORM-owned. If the platform has
-already written them into the file, preserve them verbatim.
+Do NOT author `exposesAPI`, `componentAgentInstructions`, or any dependency
+`status`/`reason` — those are PLATFORM-owned. If the platform has already
+written them into the file, preserve them verbatim.
 
 ### dependencies — the unified dependency edges
 
@@ -138,6 +138,13 @@ kind by WHAT the target is:
   database, cache, object store). Set `resourceType` to a registered type and
   `parameters` for provisioning:
   `{ "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres", "parameters": { "size": "small" } }`.
+  `thunder-app` is the platform's auth resource type: when the spec implies
+  users sign in, declare it on BOTH the SPA and each protected service, using
+  the SAME dependency `name`. For `thunder-app` ONLY, proposing the `scopes`
+  parameter value is allowed (default `openid profile email`); every other
+  resource type keeps the no-invented-parameters rule. Never propose
+  `redirectUris` — they are platform-managed. See the `thunder-authentication`
+  skill for the full rule.
 
 ```json
 "dependencies": [

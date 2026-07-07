@@ -1,6 +1,6 @@
 ---
 name: thunder-authentication
-description: How the platform's Thunder IDP is wired into SPAs that sign users in. Covers the callerIdentity.mode design field, the per-project Thunder OAuth client (BFF-owned — agent never sees client_id), the window._env_.THUNDER_* key set, and OIDC client wiring with oidc-client-ts. Pairs with react-webapp when the SPA wiring patterns apply. Apply on any project whose spec implies users sign in.
+description: How the platform's Thunder IDP is wired into SPAs that sign users in. Covers the thunder-app platform-resource dependency that triggers auth, the per-dependency Thunder OAuth client (platform-owned — agent never sees client_id), the window._env_.THUNDER_* key set, and OIDC client wiring with oidc-client-ts. Pairs with react-webapp when the SPA wiring patterns apply. Apply on any project whose spec implies users sign in.
 metadata:
   aep.version: "1"
 ---
@@ -17,21 +17,24 @@ sign users in via Authorization Code + PKCE.
 
 ## Platform facts
 
-- A per-project Thunder OAuth client is provisioned automatically when
-  ANY component in the project declares `callerIdentity.mode: end-user`.
-  The agent never sees the `client_id`, `client_secret`, or redirect
-  URIs — they live in BFF code (`services/idp_service.go`).
-- The redirect URI is computed by the BFF from the SPA's external URL.
-- The BFF writes Thunder OIDC config into `window._env_` via the SPA's
-  ReleaseBinding (`services/runtime_config_service.go:layerThunderKeys`).
-  Authoritative keys (use these EXACT spellings — inventing one
+- One Thunder application is provisioned per `thunder-app` platform-resource
+  dependency, created by the platform's Thunder Application operator once the
+  dependency is provisioned. Its `client_id` is the OpenChoreo resource name.
+  The agent never sees or hardcodes the `client_id`, `client_secret`, or
+  redirect URIs — the platform owns them.
+- The redirect URIs are platform-managed — computed from the SPA's public
+  URL. They are never user- or architect-supplied.
+- The platform reads the OIDC config from the `thunder-app` resource's
+  binding outputs and writes it into `window._env_` via the SPA's
+  ReleaseBinding, once the dependency is provisioned AND the SPA's public
+  URL exists. Authoritative keys (use these EXACT spellings — inventing one
   produces a `ReferenceError` at module load because the value is
   `undefined`):
 
   | Key | Meaning |
   |---|---|
   | `THUNDER_URL` | OIDC issuer / authority for `oidc-client-ts` |
-  | `THUNDER_CLIENT_ID` | per-project Thunder OAuth client id |
+  | `THUNDER_CLIENT_ID` | the `thunder-app` resource's OAuth client id |
   | `THUNDER_REDIRECT_URI` | absolute URL of this SPA's `/callback` route |
   | `THUNDER_SCOPES` | space-separated OIDC scopes (e.g. `openid profile email`) |
   | `THUNDER_AFTER_SIGN_IN_URL` | absolute URL to land on after sign-in (usually the SPA root) |
@@ -44,8 +47,8 @@ sign users in via Authorization Code + PKCE.
   admin console / SCIM.
 - Switching IDPs (Asgardeo, custom) is a settings-page action against
   the org's `OrganizationIDPProfile` record — NOT a skill edit. The
-  `THUNDER_*` keys are emitted unconditionally when `callerIdentity.mode:
-  end-user` is set; a future PR honours the profile flavour. Until
+  `THUNDER_*` keys are emitted for every SPA that declares a `thunder-app`
+  dependency; a future PR honours the profile flavour. Until
   then, attaching an `asgardeo-authentication` custom skill produces
   code that *talks Asgardeo client semantics against a Thunder backend*
   — the OIDC handshake completes but Asgardeo-specific extensions
@@ -55,34 +58,34 @@ sign users in via Authorization Code + PKCE.
 
 ### Architect
 
-**Emitting `callerIdentity` is a HARD REQUIREMENT, not a minor omission.**
-`callerIdentity` is a STRUCTURED design field the platform reads directly
-— it is NOT satisfied by mentioning OIDC, sign-in, or Thunder in
-`componentAgentInstructions`. `componentAgentInstructions` is for the
-coding agent; `callerIdentity` is for the platform. Without the
-structured field, NO per-project OAuth client is provisioned, NO
-`THUNDER_*` keys land in `window._env_`, and the SPA deploys unable to
-sign in. Treat a missing `callerIdentity` like a missing required schema
-field — it produces a broken deployment.
+**The sign-in trigger is an explicit `thunder-app` dependency — nothing
+else provisions auth.** When the spec implies users sign in (keywords:
+`login`, `sign in`, `user account`, `personal`, ...), the SPA **and** every
+backend it calls each declare the SAME `platform-resource` dependency of
+type `thunder-app`:
 
-- Whenever the spec implies users sign in (keywords: `login`, `sign in`,
-  `user account`, `personal`, ...), mark the SPA component with:
-  ```yaml
-  callerIdentity:
-    mode: end-user
-  ```
-- The protected backend it depends on must have
-  `exposesAPI.auth: end-user-required` (see the `api-management` skill).
-  The two are paired — without it the SPA logs in but its API calls all
-  401.
+```json
+{ "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app", "description": "sign-in for shoppers" }
+```
 
-Checklist before emitting `add_component` for a web-app:
-  1. Does it depend on a service with `exposesAPI.auth: end-user-required`?
-     → must have `callerIdentity.mode: end-user`.
-  2. Does the spec contain "sign in", "login", "user account", or similar?
-     → must have `callerIdentity.mode: end-user`.
-  3. If either is yes and you didn't include the structured `callerIdentity`
-     block, your output is incomplete.
+- Call `list_platform_resource_types` FIRST — never guess the type.
+  `thunder-app` is the platform's auth resource type; it outputs
+  `client_id` / `issuer` / `jwks_url` / `scopes`.
+- You MAY propose the `scopes` parameter value derived from the spec — this
+  is the one explicit exception to the never-invent-parameters rule (default
+  `openid profile email`).
+- NEVER set `redirectUris` — they are platform-managed (computed from the
+  SPA's public URL).
+- Do NOT emit `exposesAPI.auth: end-user-required` on the backend yourself —
+  the platform DERIVES it from the shared `thunder-app` dependency. Setting
+  an explicit `service-required` alongside the dependency is a validation
+  error.
+- Declare the dependency on the SPA and on each protected backend with the
+  SAME dependency `name`, so the SPA signs in and its API calls carry a
+  token the backend's gateway accepts. Without the dependency, NO Thunder
+  application is provisioned, NO `THUNDER_*` keys land in `window._env_`,
+  and the SPA deploys unable to sign in.
+
 - The web-app's `componentAgentInstructions` MUST say (verbatim or close):
   `OIDC Authorization Code + PKCE against the platform IDP using oidc-client-ts. Read OIDC + upstream URLs from window._env_.THUNDER_* / window._env_.<UPSTREAM>_URL — typed via src/env.ts. Attach Authorization: Bearer <access_token> to every API call. DO NOT write a .env file. DO NOT read environment variables at build time (no import.meta.env). DO NOT use envsubst, /etc/nginx/templates/, or any custom nginx entrypoint — stock nginx:alpine serves the static bundle + env-config.js.`
 - Do NOT create a separate `auth` / `identity` / `login` /
@@ -94,7 +97,7 @@ Checklist before emitting `add_component` for a web-app:
 
 ### Tech-lead — issue body bullets
 
-For every web-app task whose component has `callerIdentity.mode: end-user`:
+For every web-app task whose component declares a `thunder-app` dependency:
 
 - Scope: "Implement OIDC Authorization Code + PKCE using
   `oidc-client-ts`, configured from `window._env_.THUNDER_*`. The
@@ -118,7 +121,7 @@ For every web-app task whose component has `callerIdentity.mode: end-user`:
 `src/env.ts` — the base shim (the `window._env_` presence guard,
 `API_BASE_URL`, any `<UPSTREAM>_URL` keys, and the `export const env`)
 is owned by the `react-webapp` skill — don't duplicate it. When the
-component's design has `callerIdentity.mode: end-user`, the platform
+component declares a `thunder-app` dependency, the platform
 also populates the `THUNDER_*` keys; extend the `Env` type with them:
 
 ```ts
@@ -192,8 +195,8 @@ export async function listTodos() {
   `${env.THUNDER_URL}/oauth2/token` cross-origin.
 - ❌ Hardcode the `client_id`. It changes per project; the BFF puts it in
   `window._env_.THUNDER_CLIENT_ID`.
-- ❌ Add Thunder client provisioning code anywhere — the BFF does it on
-  first dispatch when `callerIdentity.mode: end-user` is set.
+- ❌ Add Thunder client provisioning code anywhere — the platform's Thunder
+  Application operator does it when the `thunder-app` dependency is provisioned.
 
 ### Common pitfalls
 
