@@ -45,6 +45,16 @@ services:
     build:
       context: ../services/aep-api
     container_name: aep-api
+    # Fast SYN-retransmit recovery for the local Colima env. Its docker-bridge
+    # NAT intermittently drops a SYN under concurrent outbound bursts (the BFF's
+    # parallel git fetches + GitHub API calls on a project page load); the kernel
+    # default (tcp_syn_retries=6) then leaves the connect hanging ~50-76s before
+    # a retransmit lands — surfacing as hanging tasks/versions endpoints. 2
+    # retries recovers (or fails fast) within ~7s so reads degrade gracefully and
+    # the console re-polls. Namespaced sysctl (per-netns); harmless elsewhere.
+    # Proper durable fix tracked in docs/design/gitfs-fetch-on-read-followup.md.
+    sysctls:
+      net.ipv4.tcp_syn_retries: "2"
     ports:
       - "9090:9090"
     depends_on:
@@ -235,6 +245,10 @@ services:
       context: ..
       dockerfile: services/agents/Dockerfile
     container_name: aep-agents
+    # See aep-api: bound the Colima docker-bridge SYN-drop stall to ~7s so the
+    # agents service's Anthropic API calls (plan/design turns) don't hang.
+    sysctls:
+      net.ipv4.tcp_syn_retries: "2"
     ports:
       - "4000:4000"
     depends_on:
