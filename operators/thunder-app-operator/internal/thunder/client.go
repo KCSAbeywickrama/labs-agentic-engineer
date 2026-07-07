@@ -83,7 +83,10 @@ type DesiredApp struct {
 	// set on every call — it does not merge with whatever Thunder
 	// currently has (desired-state semantics: the CR is the single source
 	// of truth, unlike the aep-api BFF client this package's wire shapes
-	// were mirrored from, which merges).
+	// were mirrored from, which merges). An empty set is adapted on the
+	// wire to a single unroutable placeholder (see placeholderRedirectURI)
+	// because Thunder rejects an empty list; the field itself stays
+	// honestly empty.
 	RedirectURIs []string
 }
 
@@ -113,6 +116,33 @@ type Config struct {
 	// HTTPClient — optional override (tests inject one pointed at an
 	// httptest.Server). Defaults to a 30s-timeout net/http client.
 	HTTPClient *http.Client
+}
+
+// placeholderRedirectURI is sent on the wire whenever the desired app has
+// NO redirect URIs. Thunder rejects creating/updating an authorization_code
+// app with an empty redirectUris list (error APP-1024), but our flow must
+// mint the app before any real redirect URI exists — the consuming SPA's
+// public URL appears only after it deploys, and component dispatch gates on
+// this resource being ready, so empty-URIs-blocks-ready would deadlock
+// provisioning. ".invalid" is an RFC 2606 reserved TLD: syntactically valid
+// for Thunder, unroutable by construction (no OAuth redirect can ever land
+// on it). It is wire adaptation only — the DesiredApp/CR stay honestly
+// empty, and it is replaced automatically on the next reconcile once real
+// URIs land.
+const placeholderRedirectURI = "https://pending.invalid/callback"
+
+// wireRedirectURIs adapts the desired redirect-URI set for Thunder's wire:
+// the exact desired values when present, [placeholderRedirectURI] when empty
+// (see that constant's doc comment).
+func wireRedirectURIs(desired []string) []any {
+	if len(desired) == 0 {
+		return []any{placeholderRedirectURI}
+	}
+	uris := make([]any, 0, len(desired))
+	for _, u := range desired {
+		uris = append(uris, u)
+	}
+	return uris
 }
 
 // New builds a Thunder admin client.
@@ -367,10 +397,7 @@ func (c *client) EnsureApplication(ctx context.Context, app DesiredApp) (string,
 // DesiredApp.Name — client_id equals app name, the deterministic per-CR
 // lookup key — where createSPAApp used the project name).
 func (c *client) createApp(ctx context.Context, token string, app DesiredApp, ouID string) (string, error) {
-	uris := make([]any, 0, len(app.RedirectURIs))
-	for _, u := range app.RedirectURIs {
-		uris = append(uris, u)
-	}
+	uris := wireRedirectURIs(app.RedirectURIs)
 	payload := map[string]any{
 		"name": app.Name,
 		"ouId": ouID,
@@ -425,7 +452,8 @@ func (c *client) createApp(ctx context.Context, token string, app DesiredApp, ou
 
 // updateApp implements desired-state semantics: read the full app, replace
 // its redirect URIs with EXACTLY the desired set (not a merge — the CR is
-// the single source of truth), then write the full object back.
+// the single source of truth; the placeholder stands in when the set is
+// empty, see placeholderRedirectURI), then write the full object back.
 func (c *client) updateApp(ctx context.Context, token, internalID string, app DesiredApp) error {
 	full, err := c.getAppByID(ctx, token, internalID)
 	if err != nil {
@@ -435,11 +463,7 @@ func (c *client) updateApp(ctx context.Context, token, internalID string, app De
 	if err != nil {
 		return fmt.Errorf("app %q: %w", app.Name, err)
 	}
-	uris := make([]any, 0, len(app.RedirectURIs))
-	for _, u := range app.RedirectURIs {
-		uris = append(uris, u)
-	}
-	cfg["redirectUris"] = uris
+	cfg["redirectUris"] = wireRedirectURIs(app.RedirectURIs)
 	return c.putAppByID(ctx, token, internalID, full)
 }
 

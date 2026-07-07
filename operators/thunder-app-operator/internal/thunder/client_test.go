@@ -362,7 +362,7 @@ func TestEnsureApplication_CreatesWhenAbsent(t *testing.T) {
 	}
 	uris, _ := cfg["redirectUris"].([]any)
 	if len(uris) != 1 || uris[0] != "https://my-app.example.com/callback" {
-		t.Errorf("redirectUris = %v, want [https://my-app.example.com/callback]", uris)
+		t.Errorf("redirectUris = %v, want [https://my-app.example.com/callback] — real URIs must be sent verbatim, never the placeholder", uris)
 	}
 	grants, _ := cfg["grantTypes"].([]any)
 	if len(grants) != 2 || grants[0] != "authorization_code" || grants[1] != "refresh_token" {
@@ -436,10 +436,78 @@ func TestEnsureApplication_UpdatesExistingReplacesRedirectURIs(t *testing.T) {
 	}
 	uris, _ := cfg["redirectUris"].([]any)
 	if len(uris) != 1 || uris[0] != "https://fresh.example.com/callback" {
-		t.Errorf("PUT redirectUris = %v, want EXACTLY [https://fresh.example.com/callback] (replace, not union with the stale value)", uris)
+		t.Errorf("PUT redirectUris = %v, want EXACTLY [https://fresh.example.com/callback] (replace, not union with the stale value; no placeholder when real URIs exist)", uris)
 	}
 	if _, present := cfg["redirect_uris"]; present {
 		t.Errorf("PUT body carries snake_case key %q — want redirectUris", "redirect_uris")
+	}
+}
+
+// Create with NO desired redirect URIs must still succeed: Thunder rejects
+// an empty redirectUris list on authorization_code apps (APP-1024), but the
+// app has to exist before its consumer's URL is known, so the wire carries
+// exactly the unroutable placeholder instead.
+func TestEnsureApplication_EmptyRedirectURIsSendsPlaceholderOnCreate(t *testing.T) {
+	f := newFakeThunder(t)
+	c := newTestClient(f)
+
+	app := DesiredApp{Name: "aep-default-pre-deploy-app"}
+
+	gotClientID, err := c.EnsureApplication(context.Background(), app)
+	if err != nil {
+		t.Fatalf("EnsureApplication: %v", err)
+	}
+	if gotClientID != app.Name {
+		t.Errorf("clientID = %q, want %q (wire adaptation must not leak into return values)", gotClientID, app.Name)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1", f.createCalls)
+	}
+	cfg, ok := firstOAuthConfig(f.lastCreateBody)
+	if !ok {
+		t.Fatalf("POST body missing inboundAuthConfig[0].config: %#v", f.lastCreateBody)
+	}
+	uris, _ := cfg["redirectUris"].([]any)
+	if len(uris) != 1 || uris[0] != placeholderRedirectURI {
+		t.Errorf("POST redirectUris = %v, want exactly [%s] (empty desired set → placeholder, or Thunder rejects with APP-1024)", uris, placeholderRedirectURI)
+	}
+}
+
+// Update from real URIs down to an empty desired set must PUT the
+// placeholder, not an empty list (same APP-1024 constraint on update).
+func TestEnsureApplication_EmptyRedirectURIsSendsPlaceholderOnUpdate(t *testing.T) {
+	f := newFakeThunder(t)
+	c := newTestClient(f)
+
+	const name = "aep-default-shrinking-app"
+	f.seedApp(name, []string{"https://real.example.com/callback"})
+
+	gotClientID, err := c.EnsureApplication(context.Background(), DesiredApp{Name: name})
+	if err != nil {
+		t.Fatalf("EnsureApplication: %v", err)
+	}
+	if gotClientID != name {
+		t.Errorf("clientID = %q, want %q", gotClientID, name)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createCalls != 0 {
+		t.Errorf("createCalls = %d, want 0", f.createCalls)
+	}
+	if f.putCalls != 1 {
+		t.Fatalf("putCalls = %d, want 1", f.putCalls)
+	}
+	cfg, ok := firstOAuthConfig(f.lastPutBody)
+	if !ok {
+		t.Fatalf("PUT body missing inboundAuthConfig[0].config: %#v", f.lastPutBody)
+	}
+	uris, _ := cfg["redirectUris"].([]any)
+	if len(uris) != 1 || uris[0] != placeholderRedirectURI {
+		t.Errorf("PUT redirectUris = %v, want exactly [%s] (empty desired set → placeholder, or Thunder rejects with APP-1024)", uris, placeholderRedirectURI)
 	}
 }
 
