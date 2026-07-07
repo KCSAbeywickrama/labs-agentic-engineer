@@ -31,16 +31,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/models"
 )
+
+// conflictRepoSvc is a minimal gitrepo.RepoService whose CreateRepo always
+// reports a name conflict; every other method is unreachable from create.
+type conflictRepoSvc struct{}
+
+func (conflictRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
+	return nil, fmt.Errorf("create github repo: %w", gitrepo.ErrRepoNameConflict)
+}
+func (conflictRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+	panic("EnsureBareRepo not expected")
+}
+func (conflictRepoSvc) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
+	panic("GetRepo not expected")
+}
+func (conflictRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
+	panic("SetWebhookID not expected")
+}
+func (conflictRepoSvc) DeleteRepo(context.Context, string, string) error {
+	panic("DeleteRepo not expected")
+}
 
 // newProjectHarness assembles the real handler with the REAL project service;
 // only the OC client is mocked. The sibling ports (repo, webhook, artifacts,
@@ -152,6 +174,58 @@ func TestProjectComponent_CreateValidationAndHappyPath(t *testing.T) {
 	calls := oc.CreateProjectCalls()
 	if len(calls) != 1 || calls[0].OrgName != "acme" || calls[0].Req.Name != "web" {
 		t.Fatalf("OC create call: got %+v", calls)
+	}
+
+	// prompt + repoName are contract fields the console sends (issue #72 /
+	// #98): huma must accept them, and they must survive into the service's
+	// request. prompt is not consumed yet; repoName overrides the provisioned
+	// repo's name (asserted at the service tier).
+	resp = h.AsOrg("acme").Post("/api/v1/projects",
+		`{"name":"gym","prompt":"a workout tracker","repoName":"gym-repo"}`)
+	if resp.Code != 201 {
+		t.Fatalf("create with prompt+repoName: want 201, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	calls = oc.CreateProjectCalls()
+	last := calls[len(calls)-1]
+	if last.Req.Prompt != "a workout tracker" || last.Req.RepoName != "gym-repo" {
+		t.Fatalf("prompt/repoName lost in transit: got %+v", last.Req)
+	}
+
+	// repoName that isn't a DNS-label slug → the handler guard's 400 (GitHub
+	// would otherwise silently normalize it, diverging from the stored name).
+	resp = h.AsOrg("acme").Post("/api/v1/projects", `{"name":"web2","repoName":"Bad Name!"}`)
+	if resp.Code != 400 {
+		t.Fatalf("bad repoName: want 400, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if p := decodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "repoName") {
+		t.Fatalf("400 detail should name repoName: got %q", p.Detail)
+	}
+}
+
+// A user-chosen repoName that already exists on the Git host must fail the
+// whole create with a 409 (and compensate the OC project away) — the no-repo
+// limbo would be unrecoverable for that name.
+func TestProjectComponent_CreateExplicitRepoNameConflictIs409(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{
+		CreateProjectFunc: func(_ context.Context, orgName string, req *models.CreateProjectRequest) (*models.Project, error) {
+			return &models.Project{Name: req.Name, NamespaceName: orgName}, nil
+		},
+		DeleteProjectFunc: func(context.Context, string, string) error { return nil },
+	}
+	svc := project.NewProjectService(oc, conflictRepoSvc{}, nil, nil, nil, nil)
+	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{ProjectSvc: svc}})
+
+	resp := h.AsOrg("acme").Post("/api/v1/projects", `{"name":"gym","repoName":"taken-repo"}`)
+	if resp.Code != 409 {
+		t.Fatalf("taken repoName: want 409, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	p := decodeProblem(t, resp.Body.String())
+	if !strings.Contains(strings.ToLower(p.Detail), "repo") {
+		t.Fatalf("409 detail should mention the repository name: got %q", p.Detail)
+	}
+	if n := len(oc.DeleteProjectCalls()); n != 1 {
+		t.Fatalf("OC project compensation: DeleteProject called %d times, want 1", n)
 	}
 }
 

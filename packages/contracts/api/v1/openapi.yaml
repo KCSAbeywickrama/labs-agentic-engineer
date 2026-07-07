@@ -746,6 +746,9 @@ components:
         prompt:
           description: Optional requirement prompt that kicks off spec derivation (issue #72).
           type: string
+        repoName:
+          description: Optional Git repository name override (DNS-label slug); defaults to the project name.
+          type: string
       required:
         - name
       type: object

@@ -39,6 +39,13 @@ type CreateProjectRequest struct {
 	DisplayName        string `json:"displayName,omitempty"`
 	Description        string `json:"description,omitempty"`
 	DeploymentPipeline string `json:"deploymentPipeline,omitempty"`
+	// Prompt is the requirement text the console's create flow captures; it
+	// is accepted per the contract but not consumed until spec derivation
+	// lands (issue #72).
+	Prompt string `json:"prompt,omitempty" doc:"Optional requirement prompt that kicks off spec derivation."`
+	// RepoName overrides the provisioned Git repository's name; defaults to
+	// the project name. DNS-label slug (validated in the handler).
+	RepoName string `json:"repoName,omitempty" doc:"Git repository name override; defaults to the project name."`
 }
 
 // ProjectStatus represents the computed SDLC phase and artifact states.

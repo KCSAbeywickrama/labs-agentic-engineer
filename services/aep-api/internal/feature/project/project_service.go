@@ -149,8 +149,20 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 
 	// Provision + clone the platform-owned git repo (async — polling via GetRepoStatus).
 	if s.repoSvc != nil {
-		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, req.Name)
+		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, req.Name, req.RepoName)
 		if createErr != nil {
+			// A repo name that already exists — user-chosen or derived from
+			// the project name — can never succeed on retry: compensate the
+			// OC project away and fail the create so the user picks another
+			// name. Every other repo failure stays best-effort (clone happens
+			// async and can be retried).
+			if gitrepo.IsRepoNameConflict(createErr) {
+				if delErr := s.client.DeleteProject(ctx, orgName, project.Name); delErr != nil {
+					slog.ErrorContext(ctx, "failed to compensate project after repo name conflict",
+						"project", project.Name, "error", delErr)
+				}
+				return nil, createErr
+			}
 			slog.ErrorContext(ctx, "failed to provision repo", "project", project.Name, "error", createErr)
 			// Don't fail project creation — clone happens async and can be retried.
 		} else {
