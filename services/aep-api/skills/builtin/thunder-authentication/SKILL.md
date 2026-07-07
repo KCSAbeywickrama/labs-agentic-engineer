@@ -11,17 +11,20 @@ metadata:
 
 The platform delegates end-user authentication to Thunder (the WSO2
 Identity Provider running on the cluster). This skill tells the
-architect when to mark a web-app for sign-in, what the BFF provisions
-behind the scenes, and how the SPA code reads OIDC config at runtime to
+architect when to mark a web-app for sign-in, what the platform's Thunder
+Application operator provisions behind the scenes via the provisioned
+dependency, and how the SPA code reads OIDC config at runtime to
 sign users in via Authorization Code + PKCE.
 
 ## Platform facts
 
 - One Thunder application is provisioned per `thunder-app` platform-resource
   dependency, created by the platform's Thunder Application operator once the
-  dependency is provisioned. Its `client_id` is the OpenChoreo resource name.
-  The agent never sees or hardcodes the `client_id`, `client_secret`, or
-  redirect URIs — the platform owns them.
+  dependency is provisioned. Its `client_id` is a platform-derived opaque
+  identifier — it is NOT the dependency's design.json `name`, and the agent
+  never computes, sees, or hardcodes it; the platform delivers it via
+  `window._env_.THUNDER_CLIENT_ID`. The same goes for the `client_secret`
+  and redirect URIs — the platform owns them.
 - The redirect URIs are platform-managed — computed from the SPA's public
   URL. They are never user- or architect-supplied.
 - The platform reads the OIDC config from the `thunder-app` resource's
@@ -193,8 +196,8 @@ export async function listTodos() {
 - ❌ Invent `THUNDER_ISSUER` — the key is `THUNDER_URL`.
 - ❌ Add a same-origin `/oidc/` proxy in nginx. The browser posts to
   `${env.THUNDER_URL}/oauth2/token` cross-origin.
-- ❌ Hardcode the `client_id`. It changes per project; the BFF puts it in
-  `window._env_.THUNDER_CLIENT_ID`.
+- ❌ Hardcode the `client_id`. It is per-dependency and platform-derived;
+  the platform puts it in `window._env_.THUNDER_CLIENT_ID`.
 - ❌ Add Thunder client provisioning code anywhere — the platform's Thunder
   Application operator does it when the `thunder-app` dependency is provisioned.
 
