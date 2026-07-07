@@ -44,6 +44,15 @@ var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generati
 // only path that checks this; committed-truth has no autosave to gate.
 var ErrUnresolvedDependency = errors.New("design has unresolved dependencies — resolve them before saving")
 
+// ErrEndUserAuthConflict is the design-domain sentinel surfaced (as 409 by the
+// controller, mirroring ErrUnresolvedDependency) when the tag-cut is attempted
+// on a design where a service component declares a thunder-app platform-
+// resource dependency (auth-as-platform-resource) AND explicitly sets
+// exposesAPI.auth to service-required. The dependency requires
+// end-user-required; the platform derives it automatically, so this only
+// fires on a genuine, explicit contradiction — see deriveEndUserAuth.
+var ErrEndUserAuthConflict = errors.New("service component declares a thunder-app dependency but explicitly sets a conflicting exposesAPI.auth")
+
 // Spec-collection sentinels (dependency-management — the collect-dependency-spec
 // route). The HTTP layer maps each to a status: ErrDependencyNotFound→404,
 // ErrDependencyWrongKind/ErrInvalidSpec→400, ErrSpecFetchFailed→502,
@@ -635,6 +644,31 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		designFile, err = s.store.ReadDesign(ctx, orgID, projectID)
 		if err != nil {
 			return nil, fmt.Errorf("re-read design after auto-fetch: %w", err)
+		}
+		if designFile == nil {
+			return nil, artifacts.ErrDesignNotFound
+		}
+	}
+
+	// Derive exposesAPI.auth from a thunder-app platform-resource dependency
+	// (auth-as-platform-resource): a service component that declares one gets
+	// exposesAPI.auth stamped end-user-required, persisted to its design.json
+	// BEFORE the tag-cut so the derived value is already on disk the next
+	// time the design is read (EnsureComponent's create-time trait
+	// derivation, component.TraitSyncService, the Explorer) — same
+	// re-read-after-commit convention as auto-fetch-on-save above. An
+	// explicit conflicting service-required is rejected as
+	// ErrEndUserAuthConflict and the save is blocked, mirroring the
+	// unresolved-dependency proceed-gate immediately below.
+	derivedCommit, derr := s.persistEndUserAuthDerivation(ctx, orgID, projectID, designFile)
+	if derr != nil {
+		return nil, derr
+	}
+	if derivedCommit {
+		commitSHA = ""
+		designFile, err = s.store.ReadDesign(ctx, orgID, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("re-read design after auth derivation: %w", err)
 		}
 		if designFile == nil {
 			return nil, artifacts.ErrDesignNotFound
