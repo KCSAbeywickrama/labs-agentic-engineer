@@ -80,6 +80,12 @@ type CodingExecutor struct {
 	// runnerSecrets resolves the component's external-resource secret bundles so
 	// the proxy dispatch mounts them into the runner (nil → none). Best-effort.
 	runnerSecrets RunnerSecretResolver
+
+	// runtimeConfig emits env-config.js onto a web-app's ReleaseBindings at the
+	// component-ensure pre-flight (nil → skipped). Best-effort — a failure warns
+	// but never fails the dispatch. The web-app gate lives in the emitter, so a
+	// call for a non-web-app component is a self-no-op.
+	runtimeConfig ComponentRuntimeConfigEmitter
 }
 
 // NewCodingExecutor wires the ClusterWorkflow-path executor. anthropic may be
@@ -147,6 +153,14 @@ func (e *CodingExecutor) WithRunnerSecrets(r RunnerSecretResolver) *CodingExecut
 	return e
 }
 
+// WithComponentRuntimeConfig enables best-effort env-config.js emission at the
+// component-ensure pre-flight (nil → skipped). Returns the receiver for chained
+// construction.
+func (e *CodingExecutor) WithComponentRuntimeConfig(r ComponentRuntimeConfigEmitter) *CodingExecutor {
+	e.runtimeConfig = r
+	return e
+}
+
 // AuthRetryBudget reports the configured git-clone-auth build retry budget
 // (default when unset). The ExecWatcher reads it to bound its retry loop.
 func (e *CodingExecutor) AuthRetryBudget() int {
@@ -182,6 +196,17 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 	if e.components != nil {
 		if err := e.components.EnsureComponent(ctx, t.OrgID, t.ProjectID, t.Component); err != nil {
 			return fmt.Errorf("ensure component pre-flight: %w", err)
+		}
+	}
+	// Web-apps only: emit env-config.js so the SPA's `window._env_` is populated
+	// at request time (parity with the legacy dispatch service's ensureOCComponent
+	// hook). The emitter self-no-ops for non-web-app components, so this is safe to
+	// call unconditionally — the design/type read lives inside the emitter, keeping
+	// this feature free of an artifacts import. Best-effort: an emit failure warns
+	// but must never fail the coding dispatch (the deploy cascade re-fires it).
+	if e.runtimeConfig != nil {
+		if rcErr := e.runtimeConfig.EmitForComponent(ctx, t.OrgID, t.ProjectID, t.Component); rcErr != nil {
+			slog.WarnContext(ctx, "coding executor: env-config.js emit failed (best-effort)", "component", t.Component, "error", rcErr)
 		}
 	}
 	repo, err := e.repos.GetRepo(ctx, t.OrgID, t.ProjectID)

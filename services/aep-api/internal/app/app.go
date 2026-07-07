@@ -61,6 +61,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
+	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
@@ -838,8 +839,23 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Mount the component's external-resource secrets into the coding runner so
 	// the agent can integration-test against the live service.
 	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
-	// Grant pending cross-project access when a provider component deploys.
-	execWatcher.WithDeployObserver(provisioningSvc)
+
+	// Runtime-config (env-config.js) emission — the SPA's `window._env_` (API URLs
+	// + THUNDER_* OIDC config) is materialised onto each web-app ReleaseBinding.
+	// Two triggers, mirroring the retired dispatch cascade:
+	//   - ensure-time: at the coding-dispatch pre-flight, emit for the just-ensured
+	//     component (self-no-ops for non-web-apps);
+	//   - deploy-time: when ANY component deploys, re-emit across every SPA in the
+	//     project (a backend's deploy can resolve a SPA's dep URL).
+	runtimeConfigSvc := runtimeconfig.NewRuntimeConfigService(componentClient, resourceClient, artifactStore)
+	codingExecutor.WithComponentRuntimeConfig(runtimeConfigSvc)
+	// Fan the build-success deploy event out to both the cross-project access grant
+	// AND env-config.js re-emission. Best-effort + error-isolated: one observer
+	// failing never stops the other (matching the old cascade's warn-and-continue).
+	execWatcher.WithDeployObserver(codingagent.NewMultiDeployObserver(
+		provisioningSvc,
+		spaDeployObserver{svc: runtimeConfigSvc},
+	))
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 

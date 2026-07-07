@@ -28,6 +28,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
+	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -112,6 +113,18 @@ func (r runnerSecretResolver) ResolveRunnerSecrets(ctx context.Context, orgID, p
 		out = append(out, codingagent.ExternalResourceSecretInputs{KVPath: s.KVPath, Keys: s.Keys})
 	}
 	return out, nil
+}
+
+// spaDeployObserver adapts the runtime-config emitter onto the codingagent
+// DeployObserver port: when any component deploys, re-emit env-config.js across
+// every SPA in the project (a sibling backend's deploy can resolve a SPA's dep
+// URL — project-wide, mirroring the retired dispatch cascade). The deployed
+// component name is unused; emission fans over the project's web-apps. Satisfies
+// codingagent.DeployObserver.
+type spaDeployObserver struct{ svc *runtimeconfig.RuntimeConfigService }
+
+func (o spaDeployObserver) OnComponentDeployed(ctx context.Context, orgID, projectID, _ string) error {
+	return o.svc.EmitForProjectSPAs(ctx, orgID, projectID)
 }
 
 // repoNamer resolves an org+project to its GitHub repo full name ("owner/name")
