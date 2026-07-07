@@ -216,17 +216,31 @@ type CreateOrgRepoRequest struct {
 }
 
 // CreateIssueRequest maps to the fields we send to POST /repos/{owner}/{repo}/issues.
+//
+// DedupeKey is aep-api-only and never reaches GitHub (issueService clears it
+// before the GitHub call; omitempty keeps it off the wire). When set, issue
+// creation is idempotent per open issue: the key becomes a `dedupe:<key>`
+// label, and if an OPEN issue carrying that label already exists the existing
+// issue is returned instead of creating a duplicate. This is the correctness
+// layer for callers that may fire concurrently for one incident (e.g. the
+// OpenChoreo SRE/RCA handoff, one run per alert rule) — they pass a stable
+// key like `sre-rca/<component>` so only the first run files an issue.
 type CreateIssueRequest struct {
-	Title  string   `json:"title"`
-	Body   string   `json:"body"`
-	Labels []string `json:"labels,omitempty"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	Labels    []string `json:"labels,omitempty"`
+	DedupeKey string   `json:"dedupeKey,omitempty"`
 }
 
-// IssueResult is the GitHub issue metadata returned after creation.
+// IssueResult is the GitHub issue metadata returned after creation. Deduped
+// reports that no issue was created because an open issue with the same
+// DedupeKey already existed — Number/URL then refer to that existing issue
+// (NodeID may be empty in that case; the list API doesn't return it).
 type IssueResult struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	NodeID string `json:"nodeId"`
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+	NodeID  string `json:"nodeId"`
+	Deduped bool   `json:"deduped,omitempty"`
 }
 
 var ErrRepoNameConflict = errors.New("repo name already taken")

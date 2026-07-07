@@ -51,13 +51,16 @@ export function createAepMcpServer(client: AepClientOptions): McpServer {
     {
       title: "Search related AE issues",
       description:
-        "Search existing GitHub issues on a project's repo, to check for a duplicate before filing a new one.",
+        "Search existing GitHub issues on a project's repo to find related/duplicate issues before filing a new one. " +
+        "Keyword-ranked: pass space-separated keywords (component name + symptom terms), not a sentence; results come back ranked by keyword overlap for you to judge.",
       inputSchema: {
         project: z.string().describe("OpenChoreo/AE project name"),
         query: z
           .string()
           .optional()
-          .describe("Case-insensitive substring match against issue title/body"),
+          .describe(
+            "Space-separated keywords (e.g. 'service1 service2 timeout'), NOT a natural-language phrase. Tokenised and matched against issue title/body; issues are returned ranked by how many keywords they contain. Omit to list all issues.",
+          ),
         labels: z.array(z.string()).optional().describe("Filter by GitHub labels"),
       },
     },
@@ -84,20 +87,28 @@ export function createAepMcpServer(client: AepClientOptions): McpServer {
     {
       title: "Create a GitHub issue via AE",
       description:
-        "Create a GitHub issue on a project's repo. Use this for a code-level fix that needs the AE coding agent — not for config-level changes.",
+        "Create a GitHub issue on a project's repo. Use this for a code-level fix that needs the AE coding agent — not for config-level changes. " +
+        "Pass a stable dedupeKey so concurrent callers reporting the same incident share one issue: if an OPEN issue with the same key exists, it is returned with `deduped: true` and no new issue is created.",
       inputSchema: {
         project: z.string().describe("OpenChoreo/AE project name"),
         title: z.string().describe("Issue title"),
         body: z.string().describe("Issue body (markdown)"),
         labels: z.array(z.string()).optional().describe("GitHub labels to apply"),
+        dedupeKey: z
+          .string()
+          .optional()
+          .describe(
+            "Stable idempotency key (e.g. 'sre-rca/<component>'). While an issue created with this key is open, further creates with the same key return that issue (deduped: true) instead of filing a duplicate.",
+          ),
       },
     },
-    async ({ project, title, body, labels }) => {
+    async ({ project, title, body, labels, dedupeKey }) => {
       try {
         const issue = await createIssue(client, project, {
           title,
           body,
           ...(labels !== undefined ? { labels } : {}),
+          ...(dedupeKey !== undefined ? { dedupeKey } : {}),
         });
         return textResult(issue);
       } catch (err) {

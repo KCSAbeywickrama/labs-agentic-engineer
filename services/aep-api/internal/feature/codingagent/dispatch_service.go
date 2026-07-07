@@ -854,24 +854,19 @@ type DependencyEndpoint struct {
 // and reminds it how to link the PR back. Dependency URLs reach the SPA
 // at runtime via `window._env_` (written into `env-config.js` by the BFF
 // at ReleaseBinding time) — not through prompts or issue comments.
-// TODO: Move this to the Coding agent skill
-// The related-issues instruction must live HERE (not just in the runner's
-// `skills:` option): the Claude Agent SDK's `skills` option is an
-// enablement filter, not a preload — the model only reliably applies a
-// skill it is explicitly told to use, which is also why the issue-body
-// suffix names the `aep` skill. Verified empirically: without this line the
-// agent ships the fix but never cross-links (helloserv214 #5/#7/#9/#11).
+//
+// Related-issue discovery/cross-linking is NOT done here anymore: it moved
+// to the SRE agent's handoff stage, which reads the search results and
+// writes a "## Related issues" section (with #N mentions) into the issue
+// body it creates — GitHub's automatic cross-reference events provide the
+// back-links. The issue this task is bound to arrives pre-linked.
 func buildAgentPrompt(task *models.ComponentTask) string {
 	return fmt.Sprintf(
 		"Work on this GitHub issue: %s\n\n"+
 			"You are at the project repo root, on its default branch. Create your "+
 			"own feature branch, implement the task, and open a PR whose body "+
 			"includes the literal text `Closes #%d` so the platform links the "+
-			"PR back to this task.\n\n"+
-			"BEFORE creating your branch, apply the `related-issues` skill: "+
-			"search this repo's issues (open AND closed) for ones related to the "+
-			"same root cause or component, and cross-link every genuinely related "+
-			"one with brief `Related: #N` comments in both directions.",
+			"PR back to this task.",
 		task.IssueURL, task.IssueNumber,
 	)
 }

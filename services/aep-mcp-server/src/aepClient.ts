@@ -35,6 +35,8 @@ export interface IssueResult {
   number: number;
   url: string;
   nodeId: string;
+  /** True when an open issue with the same dedupeKey already existed — number/url refer to that issue and nothing was created. */
+  deduped?: boolean;
 }
 
 export interface IssueInfo {
@@ -97,7 +99,7 @@ async function request<T>(
 export function createIssue(
   opts: AepClientOptions,
   project: string,
-  req: { title: string; body: string; labels?: string[] },
+  req: { title: string; body: string; labels?: string[]; dedupeKey?: string },
 ): Promise<IssueResult> {
   return request<IssueResult>(opts, "POST", `/projects/${encodeURIComponent(project)}/issues`, req);
 }

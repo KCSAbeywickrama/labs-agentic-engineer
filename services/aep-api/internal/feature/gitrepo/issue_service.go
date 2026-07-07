@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/models"
@@ -46,6 +47,15 @@ type issueService struct {
 	github   GitHubClient
 	githubV2 GitHubV2Client
 	resolver credentials.Resolver
+	// createLocks serializes dedupe-checked creation per "owner/repo" so two
+	// concurrent CreateIssue calls with the same DedupeKey can't both pass the
+	// existing-issue check before either creates — the exact race that produced
+	// duplicate SRE/RCA issues when multiple alert rules fired for one incident.
+	// In-process: correct within this aep-api instance (the deployment runs
+	// one). Across replicas the check-then-create window shrinks from the
+	// caller's whole run to a single list+create roundtrip, not zero — a DB
+	// unique constraint would be needed for cross-replica atomicity.
+	createLocks sync.Map // map[string]*sync.Mutex
 }
 
 func NewIssueService(repo repositories.RepoRepository, github GitHubClient, githubV2 GitHubV2Client, resolver credentials.Resolver) IssueService {
@@ -65,6 +75,31 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
+	}
+
+	if key := strings.TrimSpace(req.DedupeKey); key != "" {
+		req.DedupeKey = "" // aep-api-only field; must not reach GitHub
+		label := dedupeLabelFor(key)
+
+		unlock := s.lockRepoCreates(owner, repoName)
+		defer unlock()
+
+		existing, listErr := s.github.ListIssues(ctx, owner, repoName, cred, []string{label})
+		if listErr != nil {
+			// Best-effort: a failed lookup must not block filing the issue; at
+			// worst we regress to a possible duplicate.
+			slog.WarnContext(ctx, "dedupe lookup failed, creating without dedup check",
+				"project", projectID, "label", label, "error", listErr)
+		} else {
+			for _, iss := range existing {
+				if strings.EqualFold(iss.State, "open") {
+					slog.InfoContext(ctx, "issue create deduped to existing open issue",
+						"project", projectID, "label", label, "issue", iss.Number)
+					return &IssueResult{Number: iss.Number, URL: iss.URL, Deduped: true}, nil
+				}
+			}
+		}
+		req.Labels = append(req.Labels, label)
 	}
 
 	// Ensure all requested labels exist in the repo before creating the issue.
@@ -105,6 +140,27 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 	}
 
 	return issue, nil
+}
+
+// lockRepoCreates acquires the per-repo creation lock and returns its release
+// func. See the createLocks field doc for why this exists.
+func (s *issueService) lockRepoCreates(owner, repo string) func() {
+	v, _ := s.createLocks.LoadOrStore(owner+"/"+repo, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// dedupeLabelFor turns a caller-supplied dedupe key into the GitHub label that
+// marks issues created with that key. Whitespace collapses to "-" and the
+// result is capped at GitHub's 50-char label limit — the cap is deterministic
+// (same key → same label), so we truncate rather than hash.
+func dedupeLabelFor(key string) string {
+	label := "dedupe:" + strings.ToLower(strings.Join(strings.Fields(key), "-"))
+	if len(label) > 50 {
+		label = label[:50]
+	}
+	return label
 }
 
 func (s *issueService) ensureBoard(ctx context.Context, gitRepo *models.GitRepository, owner, repoName, token string) (string, error) {

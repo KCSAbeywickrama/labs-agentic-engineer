@@ -132,14 +132,16 @@ spec:
             # counts against the registry's pull rate limits). When stabilising
             # for a long-lived dev/stage, pin to an immutable SHA tag and switch
             # to `imagePullPolicy: IfNotPresent`.
-            # tharindulak build of the upstream v4 runner + the `related-issues`
-            # skill (cross-links related GitHub issues — e.g. an SRE/RCA-handoff
-            # issue and the earlier issue whose fix caused it). Keep in sync with
-            # AGENT_RUNNER_IMAGE in deployments/docker-compose.yml: that env feeds
-            # the proxy dispatch path, while THIS manifest feeds the legacy
+            # tharindulak build of the runner WITHOUT the `related-issues` skill:
+            # related-issue discovery/linking moved to the SRE agent's handoff
+            # stage (a "## Related issues" section in the issue body; GitHub #N
+            # mentions back-link automatically) — see AE-HANDOFF-DESIGN.md in
+            # openchoreo/agents/sre-agent. Keep in sync with AGENT_RUNNER_IMAGE
+            # in deployments/docker-compose.yml: that env feeds the proxy
+            # dispatch path, while THIS manifest feeds the legacy
             # ClusterWorkflow path (used when per-org SM-API secrets are absent,
             # e.g. right after a fresh setup).
-            image: docker.io/tharindulak/aep-coding-agent-runner:v4-related-issues
+            image: docker.io/tharindulak/aep-coding-agent-runner:v5-sre-side-linking
             imagePullPolicy: Always
             # Explicit command/args is the OC convention — every ClusterWorkflow
             # in this directory and Agent-Manager's amp-monitor-evaluation set

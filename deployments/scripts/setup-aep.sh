@@ -110,8 +110,9 @@ fi
 # starts and the task fails with DeadlineExceeded (and any dependent task then
 # sits On Hold forever). Pre-importing makes the first dispatch start instantly.
 # The tag is read from the manifest so it can't drift from what the Job uses.
-# Repo-agnostic match: the runner image moved from xlight05/... to a fork with
-# the related-issues skill (tharindulak/...) — match any registry/repo carrying
+# Repo-agnostic match: the runner image has moved repos before (xlight05/...
+# → tharindulak/..., whose v5 dropped the related-issues skill after linking
+# moved to the SRE agent's handoff stage) — match any registry/repo carrying
 # the aep-coding-agent-runner image so this pre-pull can't silently skip when
 # the manifest's repo changes (a skipped pre-pull = 560MB cold pull on first
 # dispatch = Job DeadlineExceeded).

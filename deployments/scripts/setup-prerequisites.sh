@@ -87,15 +87,33 @@ kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=openbao -n open
 # The pod is Ready before postStart finishes — wait for the auth/kubernetes
 # mount to appear before any downstream caller (External Secrets) tries to
 # resolve a role.
+#
+# HARD-FAIL if it never appears: on 2026-07-06 this loop timed out silently
+# on a cold node, setup continued "green", and every component build then ran
+# credential-less (ESO 403 on every OpenBao login; private-repo checkouts
+# failed, public builds would die at registry push). A missing seed must
+# abort setup here, not surface hours later as a build mystery.
 echo "⏳ Waiting for OpenBao postStart hook to finish..."
-for i in $(seq 1 30); do
+OPENBAO_SEEDED=""
+for i in $(seq 1 60); do
     if kubectl exec -n openbao --context ${CLUSTER_CONTEXT} openbao-0 -- \
         sh -c 'BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN=root bao auth list 2>/dev/null | grep -q kubernetes'; then
         echo "✅ OpenBao ready (kubernetes auth + policies seeded by postStart)"
+        OPENBAO_SEEDED=yes
         break
     fi
     sleep 2
 done
+if [ -z "$OPENBAO_SEEDED" ]; then
+    echo "❌ OpenBao postStart seeding never completed: no auth/kubernetes mount"
+    echo "   after 120s. External Secrets cannot authenticate, so ALL component"
+    echo "   builds would run without git/registry credentials. Aborting."
+    echo "   Inspect:  kubectl logs -n openbao openbao-0"
+    echo "   Re-seed:  kubectl get statefulset openbao -n openbao \\"
+    echo "               -o jsonpath='{.spec.template.spec.containers[0].lifecycle.postStart.exec.command[2]}' \\"
+    echo "               | kubectl exec -i -n openbao openbao-0 -- /bin/sh"
+    exit 1
+fi
 
 echo ""
 echo "🔧 Configuring External Secrets ClusterSecretStore..."

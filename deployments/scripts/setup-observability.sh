@@ -64,8 +64,9 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff;
-#                   falls back to anthropic-patched if handoff isn't built)
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v5 —
+#                   SRE-side related-issue linking; falls back to
+#                   anthropic-patched if it isn't built or pullable)
 #   AE_HANDOFF      enable the RCA→AEP coding-agent handoff (default: true)
 #   AE_AUTO_DISPATCH auto-dispatch the coding agent after issue creation
 #                   (default: true; false = issue-only, human dispatches)
@@ -168,8 +169,8 @@ echo "1️⃣b RCA agent image + secret"
 #                             to the local name so the helm values stay stable
 #   3. local anthropic-patched (older tag: RCA works, handoff stage ABSENT)
 RCA_IMAGE_REPO="openchoreo-sre-agent"
-RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff}"
-RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff}"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v5}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v5}"
 if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
     echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
     if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then
@@ -330,6 +331,17 @@ fluent-bit:
 # adapter.enabled defaults true in >=0.5.1; it only needs the credentials ref.
 adapter:
   openSearchSecretName: opensearch-admin-credentials
+  # Patched build of upstream 0.5.1: alert-rule log matching is
+  # case-insensitive (stock 0.5.1 compiles rules into a case-sensitive
+  # wildcard, so a rule watching "ERROR" silently stops firing when a code
+  # change rewords the log line to "error" — when a
+  # coding-agent PR detached the alert from the failure it watched).
+  # Stopgap pending the upstream PR to openchoreo/community-modules
+  # (fix/alert-rule-case-insensitive-match) — drop this pin when the fix
+  # ships in a released adapter (>0.5.1).
+  image:
+    repository: docker.io/tharindulak/observability-logs-opensearch-adapter
+    tag: 0.5.1-case-insensitive
 EOF
 helm upgrade --install observability-logs-opensearch \
     "oci://ghcr.io/openchoreo/helm-charts/observability-logs-opensearch" \
