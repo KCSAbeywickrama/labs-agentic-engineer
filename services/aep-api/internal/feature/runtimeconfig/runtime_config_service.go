@@ -25,10 +25,24 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/models"
+)
+
+const (
+	// thunderAppResourceType is the platform-resource ResourceType a web-app
+	// declares to sign end users in via OIDC. Its presence on a web-app gates
+	// THUNDER_* emission. Mirrors design.thunderAppResourceType.
+	thunderAppResourceType = "thunder-app"
+	// bindingEnv is the single environment runtime-config targets (mirrors
+	// provisioning.defaultEnv). The thunder-app binding whose outputs + redirect
+	// URIs drive the SPA lives in this env.
+	bindingEnv = "development"
+	// thunderCallbackPath is appended to the SPA origin to form the OIDC
+	// redirect URI the SPA registers with Thunder and navigates back to.
+	thunderCallbackPath = "/callback"
 )
 
 // RuntimeConfigService emits the per-web-app `env-config.js` file onto
@@ -42,52 +56,20 @@ import (
 // at ReleaseBinding time.
 type RuntimeConfigService struct {
 	componentClient openchoreo.ComponentClient
-	store           *artifacts.ArtifactStore
-	// thunderAdmin, when non-nil, is used to declare the per-project
-	// OAuth client on the first SPA emission in a project. The returned
-	// client_id is the project name verbatim — the SPA reads it from
-	// `window._env_.THUNDER_CLIENT_ID` to drive PKCE.
-	thunderAdmin thundersvc.Client
-	// platformIDPIssuer is the public Thunder URL (e.g.
-	// `http://thunder.openchoreo.localhost:8080`). Written into every
-	// SPA's `THUNDER_URL`.
-	platformIDPIssuer string
-	// platformIDPScopes is the default OAuth scope string (e.g.
-	// `openid profile email`). Written into every SPA's `THUNDER_SCOPES`.
-	platformIDPScopes string
+	// resourceClient reads the thunder-app dependency's per-env
+	// ResourceReleaseBinding — its status.outputs carry the OIDC config
+	// (client_id/issuer/scopes, resolved by OC) the SPA needs — and patches the
+	// binding's redirectUris declaratively so the operator registers the SPA's
+	// callback URL. nil in paths that never emit THUNDER_*.
+	resourceClient openchoreo.ResourceClient
+	store          *artifacts.ArtifactStore
 }
 
-func NewRuntimeConfigService(componentClient openchoreo.ComponentClient, store *artifacts.ArtifactStore) *RuntimeConfigService {
+func NewRuntimeConfigService(componentClient openchoreo.ComponentClient, resourceClient openchoreo.ResourceClient, store *artifacts.ArtifactStore) *RuntimeConfigService {
 	return &RuntimeConfigService{
-		componentClient:   componentClient,
-		store:             store,
-		platformIDPScopes: "openid profile email",
-	}
-}
-
-// SetThunderAdmin wires the Thunder admin client. When set, the first
-// SPA emission in a project declares the per-project OAuth client and
-// later emissions merge the SPA's external URL into its redirectUris.
-func (s *RuntimeConfigService) SetThunderAdmin(t thundersvc.Client) {
-	if s == nil {
-		return
-	}
-	s.thunderAdmin = t
-}
-
-// SetPlatformIDP wires the cluster-wide Thunder URL + default scopes.
-// These are written into every SPA's window._env_ as THUNDER_URL +
-// THUNDER_SCOPES so the bundle can drive PKCE against the same IDP the
-// gateway validates JWTs from.
-func (s *RuntimeConfigService) SetPlatformIDP(issuer, scopes string) {
-	if s == nil {
-		return
-	}
-	if issuer != "" {
-		s.platformIDPIssuer = issuer
-	}
-	if scopes != "" {
-		s.platformIDPScopes = scopes
+		componentClient: componentClient,
+		resourceClient:  resourceClient,
+		store:           store,
 	}
 }
 
@@ -210,10 +192,10 @@ func (s *RuntimeConfigService) EmitForProjectSPAs(ctx context.Context, orgID, pr
 //     conventional name for the primary backend).
 //   - `<UPPER_SNAKE_NAME>_URL` — every dep, keyed by component name. Lets
 //     a SPA with multiple backends address each one explicitly.
-//   - `THUNDER_*` — OIDC config. Emitted when the webapp's design
-//     declares `callerIdentity.mode: end-user`. The BFF declares the
-//     per-project OAuth client in Thunder lazily here; the agent never
-//     sees a client_id.
+//   - `THUNDER_*` — OIDC config. Emitted when the webapp declares a
+//     `thunder-app` platform-resource dependency. The values come from that
+//     dependency's provisioned binding outputs (client_id/issuer/scopes,
+//     resolved by OC); the BFF never calls Thunder from this path.
 //
 // buildEnvValues returns the map + a `ready` flag. The flag is false
 // when a required key couldn't be populated yet (transient OC error,
@@ -279,10 +261,12 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 		out["API_BASE_URL"] = firstServiceURL
 	}
 
-	// Layer THUNDER_* — OIDC config the SPA reads to drive PKCE.
-	if oidcSPAEnabled(webapp) {
-		ok := s.layerThunderKeys(ctx, orgID, projectID, webapp, out)
-		if !ok {
+	// Layer THUNDER_* — OIDC config the SPA reads to drive PKCE. Emitted when
+	// the web-app declares a `thunder-app` platform-resource dependency; the
+	// values come from that dependency's binding outputs (resolved by OC), not
+	// from any BFF→Thunder call.
+	if dep := thunderAppDep(webapp); dep != nil {
+		if ok := s.layerThunderKeys(ctx, orgID, projectID, webapp, dep, out); !ok {
 			ready = false
 		}
 	}
@@ -290,38 +274,48 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 	return out, ready
 }
 
-// oidcSPAEnabled returns true when the component should receive
-// THUNDER_* keys in its env-config.js — `callerIdentity.mode: end-user`
-// on a web-app component.
-func oidcSPAEnabled(c *models.DesignComponent) bool {
+// thunderAppDep returns the first platform-resource dependency with
+// resourceType "thunder-app" declared by a web-app component, or nil. Its
+// presence is what gates THUNDER_* emission (the successor to the old
+// callerIdentity.mode==end-user check): a web-app that declares this dependency
+// signs users in via OIDC against the platform IDP.
+func thunderAppDep(c *models.DesignComponent) *models.Dependency {
 	if c == nil || c.ComponentType != "web-app" {
-		return false
+		return nil
 	}
-	if c.CallerIdentity == nil {
-		return false
+	for i := range c.Dependencies {
+		d := &c.Dependencies[i]
+		if d.Kind == models.DependencyKindPlatformResource && d.ResourceType == thunderAppResourceType {
+			return d
+		}
 	}
-	return c.CallerIdentity.Mode == "end-user"
+	return nil
 }
 
-// layerThunderKeys writes the OIDC client config into the env-config.js
-// map. Idempotently declares the per-project Thunder OAuth client and
-// merges the SPA's own external URL into its redirectUris.
+// layerThunderKeys writes the OIDC client config into the env-config.js map
+// from the thunder-app dependency's binding. It (1) patches the binding's dev
+// resourceTypeEnvironmentConfigs with the SPA's own redirect URI (declarative —
+// the operator reconciles the OAuth client to register it), then (2) reads the
+// binding's status.outputs for the resolved client_id / issuer / scopes and
+// layers the five THUNDER_* keys.
 //
-// Returns false when a required input is missing (platform issuer not
-// configured, SPA external URL not yet resolved, Thunder admin client
-// reachable but EnsureProjectOAuthClient failed). The caller treats
-// false as "defer the env-config.js write" so the SPA isn't shipped a
-// window._env_ that will throw at module load.
-func (s *RuntimeConfigService) layerThunderKeys(ctx context.Context, orgID, projectID string, webapp *models.DesignComponent, out map[string]interface{}) bool {
-	if s.platformIDPIssuer == "" {
-		slog.WarnContext(ctx, "runtime_config: platformIDPIssuer not configured; skipping THUNDER_*",
+// Returns false — "defer the env-config.js write" — when a required input is
+// missing: the resource client isn't wired, the SPA external URL hasn't
+// resolved, the redirect-URI patch failed, or the binding outputs aren't ready
+// yet (no client_id — e.g. right after the patch, before the operator
+// reconciles). On defer it writes NO partial THUNDER_* keys, so the SPA is
+// never shipped a window._env_ its typed env shim throws on at module load.
+func (s *RuntimeConfigService) layerThunderKeys(ctx context.Context, orgID, projectID string, webapp *models.DesignComponent, dep *models.Dependency, out map[string]interface{}) bool {
+	if s.resourceClient == nil {
+		slog.WarnContext(ctx, "runtime_config: resourceClient not wired; deferring THUNDER_*",
 			"projectID", projectID, "component", webapp.Name)
 		return false
 	}
 
-	// Compute the SPA's own external URL. Defer the THUNDER_* layer
-	// until the SPA has materialised a public URL (the OC ReleaseBinding
-	// status fills `Endpoints[].externalURLs` after the first reconcile).
+	// Defer until the SPA has materialised a public URL (the OC ReleaseBinding
+	// status fills the external URL after the first reconcile): the redirect +
+	// after-sign-in URLs derive from it, and Thunder rejects an authorize call
+	// whose redirect_uri it hasn't been told about.
 	spaURL := s.componentExternalURL(ctx, orgID, projectID, webapp.Name)
 	if spaURL == "" {
 		slog.InfoContext(ctx, "runtime_config: SPA external URL not yet resolved; will retry on next cascade",
@@ -329,33 +323,50 @@ func (s *RuntimeConfigService) layerThunderKeys(ctx context.Context, orgID, proj
 		return false
 	}
 	spaOrigin := strings.TrimRight(spaURL, "/")
-	redirectURI := spaOrigin + "/callback"
+	redirectURI := spaOrigin + thunderCallbackPath
 
-	// EnsureProjectOAuthClient is the source of truth for THUNDER_CLIENT_ID.
-	// On error we DEFER rather than ship a clientID that Thunder doesn't
-	// recognise — otherwise the SPA's /oauth2/authorize call returns
-	// `invalid_client` with no useful diagnostic.
-	if s.thunderAdmin == nil {
-		slog.WarnContext(ctx, "runtime_config: thunderAdmin not wired; deferring THUNDER_*",
-			"projectID", projectID, "component", webapp.Name)
+	// Patch the dependency's dev binding so the operator registers this SPA's
+	// redirect URI on the OAuth client. The patch is idempotent inside the
+	// client (no-op when the value is already present), so re-running on every
+	// cascade doesn't churn the CR. On failure DEFER rather than emit a
+	// client_id whose redirect URI Thunder would reject.
+	bindingName := resources.ExternalResourceBindingName(projectID, dep.Name, bindingEnv)
+	if err := s.resourceClient.PatchBindingEnvironmentConfigs(ctx, orgID, bindingName,
+		map[string]string{"redirectUris": redirectURI}); err != nil {
+		slog.WarnContext(ctx, "runtime_config: patch binding redirectUris failed; deferring",
+			"projectID", projectID, "component", webapp.Name, "binding", bindingName, "error", err)
 		return false
 	}
-	gotID, _, err := s.thunderAdmin.EnsureProjectOAuthClient(ctx, projectID, []string{redirectURI})
+
+	// Read the resolved OIDC config from the binding outputs. Not-ready (binding
+	// absent/without status, or no client_id yet because the operator hasn't
+	// reconciled the patch) → defer with NO partial THUNDER_* keys.
+	b, err := s.resourceClient.GetBinding(ctx, orgID, bindingName)
 	if err != nil {
-		slog.WarnContext(ctx, "runtime_config: EnsureProjectOAuthClient failed; deferring",
-			"projectID", projectID, "error", err)
+		slog.WarnContext(ctx, "runtime_config: get thunder-app binding failed; deferring",
+			"projectID", projectID, "component", webapp.Name, "binding", bindingName, "error", err)
 		return false
 	}
-	if gotID == "" {
-		slog.WarnContext(ctx, "runtime_config: EnsureProjectOAuthClient returned empty clientID; deferring",
-			"projectID", projectID)
+	if b == nil || b.Status == nil {
+		slog.InfoContext(ctx, "runtime_config: thunder-app binding not ready; will retry on next cascade",
+			"projectID", projectID, "component", webapp.Name, "binding", bindingName)
+		return false
+	}
+	outputs := make(map[string]string, len(b.Status.Outputs))
+	for _, o := range b.Status.Outputs {
+		outputs[o.Name] = o.Value
+	}
+	clientID := outputs["client_id"]
+	if clientID == "" {
+		slog.InfoContext(ctx, "runtime_config: thunder-app binding outputs missing client_id; will retry on next cascade",
+			"projectID", projectID, "component", webapp.Name, "binding", bindingName)
 		return false
 	}
 
-	out["THUNDER_URL"] = s.platformIDPIssuer
-	out["THUNDER_CLIENT_ID"] = gotID
+	out["THUNDER_URL"] = outputs["issuer"]
+	out["THUNDER_CLIENT_ID"] = clientID
+	out["THUNDER_SCOPES"] = outputs["scopes"]
 	out["THUNDER_REDIRECT_URI"] = redirectURI
-	out["THUNDER_SCOPES"] = s.platformIDPScopes
 	out["THUNDER_AFTER_SIGN_IN_URL"] = spaOrigin
 	return true
 }
