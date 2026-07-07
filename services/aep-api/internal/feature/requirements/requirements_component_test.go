@@ -68,6 +68,9 @@ type fakeCollabRepos struct {
 
 var _ gitrepo.RepoService = (*fakeCollabRepos)(nil)
 
+func (f *fakeCollabRepos) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	panic("fakeCollabRepos: ListByOrg not expected")
+}
 func (f *fakeCollabRepos) GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error) {
 	if f.GetRepoFunc == nil {
 		panic("fakeCollabRepos: GetRepo not set")

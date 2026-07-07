@@ -44,6 +44,9 @@ type RepoService interface {
 	// See docs/design/skills-repo-storage.md §10.
 	EnsureBareRepo(ctx context.Context, orgID, projectID, repoName string) (*models.GitRepository, error)
 	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+	// ListByOrg returns the org's repo rows (all statuses) — the source for
+	// the project-list repoUrl annotation (#108).
+	ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error)
 	// SetWebhookID is called by the webhook registration service after a hook
 	// is provisioned for the repo on GitHub. Stored alongside the repo record
 	// so cleanup can deregister.
@@ -234,6 +237,14 @@ func (s *repoService) GetRepo(ctx context.Context, orgID, projectID string) (*mo
 		return nil, ErrRepoNotFound
 	}
 	return repo, nil
+}
+
+func (s *repoService) ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error) {
+	rows, err := s.repo.ListByOrg(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list repos by org: %w", err)
+	}
+	return rows, nil
 }
 
 func (s *repoService) SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64) error {

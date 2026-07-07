@@ -101,6 +101,22 @@ func (s *projectService) ListProjects(ctx context.Context, orgName string, limit
 	if err != nil {
 		return nil, translateHTTPError(err)
 	}
+	// Annotate each project with its repo URL from the BFF's own rows (#108
+	// — the delete dialog names the repo the cascade destroys). Best-effort:
+	// a failing join degrades to a repoUrl-less list, never a 500.
+	if s.repoSvc != nil && len(list.Items) > 0 {
+		if repos, repoErr := s.repoSvc.ListByOrg(ctx, orgName); repoErr != nil {
+			slog.WarnContext(ctx, "repoUrl annotation skipped", "org", orgName, "error", repoErr)
+		} else {
+			byProject := make(map[string]string, len(repos))
+			for _, r := range repos {
+				byProject[r.ProjectID] = r.RepoURL
+			}
+			for i := range list.Items {
+				list.Items[i].RepoURL = byProject[list.Items[i].Name]
+			}
+		}
+	}
 	// The search filter is applied Go-side over the FETCHED PAGE only — the
 	// OpenChoreo list API takes just (limit, cursor), so a match on a later
 	// page is not pulled forward; the caller pages via nextCursor and filters

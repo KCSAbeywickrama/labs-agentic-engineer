@@ -59,6 +59,9 @@ func (s *stubRepoSvc) GetRepo(ctx context.Context, orgID, projectID string) (*mo
 	}
 	return s.GetRepoFunc(ctx, orgID, projectID)
 }
+func (s *stubRepoSvc) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	panic("stubRepoSvc: ListByOrg not expected in component tests")
+}
 func (s *stubRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
 	panic("stubRepoSvc: CreateRepo not expected")
 }

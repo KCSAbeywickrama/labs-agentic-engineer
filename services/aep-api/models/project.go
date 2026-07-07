@@ -25,6 +25,10 @@ type Project struct {
 	DeploymentPipeline string `json:"deploymentPipeline,omitempty"`
 	CreatedAt          string `json:"createdAt,omitempty"`
 	Status             string `json:"status,omitempty"`
+	// RepoURL is the clone URL of the project's git repo, joined from the
+	// BFF's own git_repositories rows on list reads (#108); absent when no
+	// repo is provisioned.
+	RepoURL string `json:"repoUrl,omitempty" doc:"Clone URL of the project's Git repository; absent when no repo is provisioned."`
 }
 
 type ProjectList struct {

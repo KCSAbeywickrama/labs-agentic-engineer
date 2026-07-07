@@ -51,6 +51,9 @@ type conflictRepoSvc struct{}
 func (conflictRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
 	return nil, fmt.Errorf("create github repo: %w", gitrepo.ErrRepoNameConflict)
 }
+func (conflictRepoSvc) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	return nil, nil
+}
 func (conflictRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
 	panic("EnsureBareRepo not expected")
 }
