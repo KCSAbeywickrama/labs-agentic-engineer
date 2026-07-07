@@ -4,3 +4,5 @@ metadata:
   name: platform-configs
 data:
   PLATFORM_API_SERVICE_BASE_URL: http://api.openchoreo.localhost:8080
+  JWKS_URL: http://thunder.openchoreo.localhost:8080/oauth2/jwks
+  JWT_ISSUER: http://thunder.openchoreo.localhost:8080

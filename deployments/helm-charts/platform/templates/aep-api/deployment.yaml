@@ -63,6 +63,16 @@ spec:
                 configMapKeyRef:
                   name: platform-configs
                   key: PLATFORM_API_SERVICE_BASE_URL
+            - name: JWKS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: JWKS_URL
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: JWT_ISSUER
 
             # secrets
             - name: POSTGRES_PASSWORD

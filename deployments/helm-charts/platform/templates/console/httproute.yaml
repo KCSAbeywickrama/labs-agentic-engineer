@@ -13,6 +13,22 @@ spec:
   hostnames:
     - "console.openchoreo.localhost"
   rules:
+    # Route /aep-api-service/* → aep-api, stripping the prefix so the API
+    # receives paths like /api/v1/... without the console-side prefix.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /aep-api-service
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: aep-api
+          namespace: {{ .Release.Namespace }}
+          port: {{ .Values.aepApi.port }}
     - matches:
         - path:
             type: PathPrefix
