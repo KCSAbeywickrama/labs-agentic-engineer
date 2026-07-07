@@ -123,6 +123,13 @@ func Load() (Config, error) {
 		SecretManagerAPITimeout: r.readOptionalDuration("SECRET_MANAGER_API_TIMEOUT", 30*time.Second),
 		ClusterGatewayProxyURL:  r.readOptionalString("CLUSTER_GATEWAY_PROXY_URL", ""),
 
+		// Anthropic-key push target (see AnthropicCredentialService.pushExternalSecret).
+		// Both empty (the default) disables the push entirely — no consumer is
+		// assumed by default; set explicitly for the deployment that reads a
+		// live-synced Anthropic key (e.g. the OpenChoreo SRE/RCA agent).
+		RCAAgentAnthropicPushNamespace:  r.readOptionalString("RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE", ""),
+		RCAAgentAnthropicPushSecretName: r.readOptionalString("RCA_AGENT_ANTHROPIC_PUSH_SECRET_NAME", ""),
+
 		// Agent runner image + ESO CSS for per-run ExternalSecrets.
 		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
 		AgentClusterSecretStore: r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),

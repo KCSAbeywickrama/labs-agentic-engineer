@@ -403,6 +403,11 @@ func buildApp(cfg config.Config, db *gorm.DB) (*App, error) {
 	// the Enabled() check.
 	credService.WithSMAPIWriter(smWriter)
 	anthropicCredService.WithSMAPIWriter(smWriter)
+	// Push the org's Anthropic key to a consumer's ExternalSecret on every
+	// successful Connect (both first-time connect and later rotation) — see
+	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
+	// unless both env vars are set (no consumer assumed by default).
+	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
 	validatorProbes := orgcreds.NewValidatorProbes(credService, githubClient, credResolver, minter)
 	credValidator := credentials.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 	repoBoardService := gitrepo.NewRepoBoardService(repoRepo, githubV2Client, credResolver)

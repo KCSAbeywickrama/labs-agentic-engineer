@@ -64,9 +64,14 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v5 —
-#                   SRE-side related-issue linking; falls back to
-#                   anthropic-patched if it isn't built or pullable)
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v8 —
+#                   dynamic Anthropic-key resolution [resolve_api_key: console/
+#                   OpenBao-backed file first, static RCA_LLM_API_KEY fallback,
+#                   applied consistently at boot AND at runtime] plus a
+#                   non-fatal boot path when no key is configured anywhere yet
+#                   [warns and stays up instead of crash-looping — see
+#                   AE-HANDOFF-DESIGN.md]. Falls back to anthropic-patched if
+#                   it isn't built or pullable)
 #   AE_HANDOFF      enable the RCA→AEP coding-agent handoff (default: true)
 #   AE_AUTO_DISPATCH auto-dispatch the coding agent after issue creation
 #                   (default: true; false = issue-only, human dispatches)
@@ -169,8 +174,8 @@ echo "1️⃣b RCA agent image + secret"
 #                             to the local name so the helm values stay stable
 #   3. local anthropic-patched (older tag: RCA works, handoff stage ABSENT)
 RCA_IMAGE_REPO="openchoreo-sre-agent"
-RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v5}"
-RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v5}"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v8}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v8}"
 if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
     echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
     if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then
@@ -401,6 +406,63 @@ if [ "$AE_HANDOFF" = "true" ]; then
     fi
 fi
 echo "✅ auto-trigger + handoff wiring applied"
+
+# ── 3c. Dynamic Anthropic key — reuse the org's key as set via the AE console ──
+# AnthropicCredentialService.Connect() (aep-api) stores the console-connected
+# key in Postgres (org_secrets, AES-256-GCM), best-effort mirrors it into
+# OpenBao via the SM-API stub, and — when RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE/
+# _SECRET_NAME are set on aep-api (docker-compose.yml) — PUSHES a matching
+# ExternalSecret into THIS namespace itself, synchronously with every
+# Connect() call (AnthropicCredentialService.pushExternalSecret, via the
+# same cluster-gateway-proxy ApplyExternalSecret the coding-agent dispatcher
+# uses for its own per-run secrets). That push is what keeps the
+# ExternalSecret's remoteRef pointed at the CURRENT OpenBao path: the SM-API
+# stub regenerates a brand-new random-suffixed path on every single
+# Connect() call (deployments/local-secret-manager-api/main.go
+# generateSecretRefName → randomHex12(), never an in-place update), so a
+# path fixed at setup time would go stale the moment anyone
+# reconnects/rotates the key. Pushing on every Connect() closes that gap for
+# both the first-ever connect and every later rotation — no re-run needed.
+#
+# So THIS script no longer creates or discovers that ExternalSecret at all —
+# it only ensures the one-time STRUCTURAL piece exists: the volume + mount +
+# env var wiring below, which the ExternalSecret (whenever aep-api pushes
+# one) feeds into. If the org has never connected a key via the console,
+# `optional: true` on the volume's secret source means the mount is just an
+# empty dir rather than blocking the pod in ContainerCreating —
+# resolve_api_key() falls back to the static RCA_LLM_API_KEY exactly as
+# before, and main.py's boot-time LLM test skips (warns, doesn't crash) when
+# neither source has a key.
+echo ""
+echo "3️⃣c Dynamic Anthropic key (volume wiring; ExternalSecret is pushed by aep-api on Connect)"
+# Patched onto the Deployment (not chart values) for the same "survives a
+# helm re-run" reason as step 3b's ConfigMap patches. A podSpec change here
+# triggers K8s's normal rolling update on its own — no explicit restart needed.
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch deployment ai-rca-agent --type=strategic -p '
+spec:
+  template:
+    spec:
+      volumes:
+        - name: anthropic-key
+          secret:
+            secretName: rca-agent-anthropic-secret
+            optional: true
+            defaultMode: 0400
+      containers:
+        - name: ai-rca-agent
+          volumeMounts:
+            - name: anthropic-key
+              mountPath: /etc/rca-agent/anthropic
+              readOnly: true
+          env:
+            - name: RCA_LLM_API_KEY_FILE
+              value: /etc/rca-agent/anthropic/RCA_LLM_API_KEY
+'
+echo "✅ ai-rca-agent volume/env wired for the dynamic Anthropic key"
+echo "   Once an org connects a key via the AE console, aep-api pushes an ExternalSecret here"
+echo "   automatically (refreshed every 5m) — no re-run of this script needed, then or on later"
+echo "   rotations. Until then, or if push isn't configured on aep-api, it falls back to the"
+echo "   static RCA_LLM_API_KEY from step 1b."
 
 # ── 4. Cross-namespace HTTPRoute on the MAIN kgateway ────────────────────
 # The chart's own HTTPRoute attaches to a separate Gateway on port 11080.

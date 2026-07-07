@@ -152,6 +152,15 @@ services:
       # of the cloud services; same client surface in both build configs.
       SECRET_MANAGER_API_URL: "http://secret-manager-api:8082"
       CLUSTER_GATEWAY_PROXY_URL: "http://local-cluster-gateway-proxy:8085"
+      # Push target for AnthropicCredentialService.pushExternalSecret: on every
+      # successful Connect (first-time connect AND rotation), aep-api applies
+      # an ExternalSecret here via the proxy above, pointed at the freshly
+      # mirrored SM-API/OpenBao path. Closes the gap where a console-side key
+      # change would otherwise sit unused until something re-discovers it.
+      # Both empty disables the push (no consumer assumed) — set here because
+      # this local demo's only consumer is the OC SRE/RCA agent.
+      RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE: "openchoreo-observability-plane"
+      RCA_AGENT_ANTHROPIC_PUSH_SECRET_NAME: "rca-agent-anthropic-secret"
       # Required for mint-build (per-org build Secret SSA into
       # workflows-<orgID>) and apply-wp-secret (per-org Anthropic Secret
       # SSA). Without it the binary degrades: builds fail at clone,
