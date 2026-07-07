@@ -8,11 +8,10 @@
 #
 # It renders a `ThunderApplication` (aep.wso2.com/v1alpha1) — a namespaced CR the
 # thunder-app-operator reconciles into a real OAuth app on the platform Thunder
-# IdP. On success the operator writes a ConfigMap `<cr-name>-oauth` with key
-# `client_id` and sets `status.ready=true`. The Resource model resolves
-# `${metadata.name}` to a hashed render name (e.g. `r-<binding>-<hash>`); the
-# operator names the `-oauth` ConfigMap off that same object name, so the
-# `${metadata.name}-oauth` output ref lines up.
+# IdP. On success the operator sets `status.ready=true` + `status.clientId` (the
+# client_id output below reads the latter) and additionally writes a ConfigMap
+# `<cr-name>-oauth` with key `client_id`. The Resource model resolves
+# `${metadata.name}` to a hashed render name (e.g. `r-<binding>-<hash>`).
 #
 # CEL context (per OC 1.1.1 ResourceType CRD docs): readyWhen/outputs are evaluated
 # against metadata.*, parameters.*, environmentConfigs.*, dataplane.*, and — once the
@@ -76,13 +75,22 @@ spec:
           scopes: ${parameters.scopes}
           redirectUris: ${environmentConfigs.redirectUris}
   outputs:
-    # client_id is resolved from the operator-written `<cr-name>-oauth` ConfigMap
-    # as a reference (the data-plane agent reads the ConfigMap via its EXISTING
-    # core-group grant — no explicit configmaps grant is added in the RBAC file).
+    # client_id is read straight off the applied CR's live status (the operator
+    # writes `status.clientId` alongside `status.ready`). Emitting it as a CEL
+    # `value` makes OC deliver a LITERAL string in the binding's status.outputs
+    # — which the aep-api runtimeconfig env-config.js path requires (it reads
+    # `output.value` only; a configMapKeyRef-shaped output carries no value in
+    # binding status, leaving THUNDER_CLIENT_ID unresolvable). Verified
+    # empirically on OC 1.1.1: outputs share readyWhen's CEL context, including
+    # `applied.<id>.status.*`. The readyWhen gate above means outputs are only
+    # surfaced once `status.ready=true`, and the operator sets `clientId`
+    # together with `ready`, so this never resolves empty on a Ready binding.
+    #
+    # The operator ALSO publishes client_id in the `<cr-name>-oauth` ConfigMap;
+    # that stays useful as a k8s-native artifact and for generic valueFrom-style
+    # env injection — but the authoritative binding output is the CR status.
     - name: client_id
-      configMapKeyRef:
-        name: ${metadata.name}-oauth
-        key: client_id
+      value: ${applied.app.status.clientId}
     # Plain coordinates — exposed as values (the BFF surfaces them un-masked). The
     # issuer/jwks_url are the browser-reachable Thunder addresses (they match the
     # compose PLATFORM_IDP_ISSUER host thunder.openchoreo.localhost:8080).

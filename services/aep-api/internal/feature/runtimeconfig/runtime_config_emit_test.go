@@ -101,7 +101,10 @@ func thunderRC(outputs map[string]string, patchErr error) *ocmocks.ResourceClien
 }
 
 // thunderOutputs is the full resolved-output set a ready thunder-app binding
-// carries (values resolved by OC; client_id from the operator's ConfigMap).
+// carries. ALL outputs — including client_id — arrive as literal values: the
+// ClusterResourceType emits client_id via a `${applied.app.status.clientId}`
+// CEL value (OC resolves it from the ThunderApplication's live status), never
+// as a ref-shaped output without a value.
 func thunderOutputs() map[string]string {
 	return map[string]string{
 		"client_id": "web-cid",
