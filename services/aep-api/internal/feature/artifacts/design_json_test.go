@@ -24,9 +24,9 @@ import (
 )
 
 // fullComponentDesignJSON is a canonical `components/checkout/design.json`
-// exercising all four dependency kinds and both platform-owned blocks. It is
-// authored to be byte-identical to marshalComponentDesignJSON's output so the
-// round-trip assertion is exact.
+// exercising all four dependency kinds and the platform-owned exposesAPI
+// block. It is authored to be byte-identical to marshalComponentDesignJSON's
+// output so the round-trip assertion is exact.
 const fullComponentDesignJSON = `{
   "name": "checkout",
   "type": "service",
@@ -74,9 +74,6 @@ const fullComponentDesignJSON = `{
     "auth": "service-required",
     "orgPublished": true
   },
-  "callerIdentity": {
-    "mode": "service-account"
-  },
   "componentAgentInstructions": "prefer stdlib net/http"
 }
 `
@@ -102,9 +99,6 @@ func TestParseComponentDesignJSON_AllKinds(t *testing.T) {
 	}
 	if comp.ExposesAPI == nil || comp.ExposesAPI.Auth != "service-required" || !comp.ExposesAPI.OrgPublished {
 		t.Fatalf("exposesAPI drifted: %+v", comp.ExposesAPI)
-	}
-	if comp.CallerIdentity == nil || comp.CallerIdentity.Mode != "service-account" {
-		t.Fatalf("callerIdentity drifted: %+v", comp.CallerIdentity)
 	}
 
 	if len(comp.Dependencies) != 4 {
@@ -182,6 +176,23 @@ func TestParseComponentDesignJSON_UnknownTopLevelKeyRejected(t *testing.T) {
 	raw := `{"name":"checkout","type":"service","dependencies":[],"connections":[]}`
 	if _, err := parseComponentDesignJSON("checkout", raw); err == nil {
 		t.Fatalf("expected unknown top-level key (connections) to be rejected")
+	}
+}
+
+// TestParseComponentDesignJSON_RetiredCallerIdentityKeyRejected documents the
+// deletion's actual on-disk consequence: this decoder calls
+// DisallowUnknownFields, so a design.json still carrying the retired
+// caller-identity field (e.g. one written before the thunder-app dependency
+// replaced it) is now REJECTED as an unknown top-level key — not silently
+// tolerated.
+func TestParseComponentDesignJSON_RetiredCallerIdentityKeyRejected(t *testing.T) {
+	raw := `{"name":"checkout","type":"service","dependencies":[],"callerIdentity":{"mode":"end-user"}}`
+	_, err := parseComponentDesignJSON("checkout", raw)
+	if err == nil {
+		t.Fatalf("expected the retired caller-identity key to be rejected as an unknown top-level key")
+	}
+	if !strings.Contains(err.Error(), "callerIdentity") {
+		t.Fatalf("expected error to name the unknown key, got: %v", err)
 	}
 }
 

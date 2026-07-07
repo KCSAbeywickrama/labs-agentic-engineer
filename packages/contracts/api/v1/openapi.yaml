@@ -168,12 +168,6 @@ components:
       required:
         - logs
       type: object
-    CallerIdentity:
-      additionalProperties: false
-      properties:
-        mode:
-          type: string
-      type: object
     ChatHistoryMessage:
       additionalProperties: false
       properties:
@@ -911,8 +905,6 @@ components:
           type: string
         buildpack:
           type: string
-        callerIdentity:
-          $ref: "#/components/schemas/CallerIdentity"
         componentAgentInstructions:
           type: string
         componentType:

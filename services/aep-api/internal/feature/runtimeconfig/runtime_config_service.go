@@ -276,9 +276,9 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 
 // thunderAppDep returns the first platform-resource dependency with
 // resourceType "thunder-app" declared by a web-app component, or nil. Its
-// presence is what gates THUNDER_* emission (the successor to the old
-// callerIdentity.mode==end-user check): a web-app that declares this dependency
-// signs users in via OIDC against the platform IDP.
+// presence is what gates THUNDER_* emission (the successor to the retired
+// caller-identity field's end-user mode check): a web-app that declares this
+// dependency signs users in via OIDC against the platform IDP.
 func thunderAppDep(c *models.DesignComponent) *models.Dependency {
 	if c == nil || c.ComponentType != "web-app" {
 		return nil
