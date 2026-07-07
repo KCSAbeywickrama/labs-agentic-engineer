@@ -46,6 +46,59 @@ components:
         - createdAt
         - updatedAt
       type: object
+    ApplyRequest:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ApplyRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        deletes:
+          items:
+            $ref: "#/components/schemas/DeleteOp"
+          type:
+            - array
+            - "null"
+        message:
+          type: string
+        writes:
+          items:
+            $ref: "#/components/schemas/WriteOp"
+          type:
+            - array
+            - "null"
+      type: object
+    ApplyResult:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ApplyResult.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          type: string
+        files:
+          items:
+            $ref: "#/components/schemas/FileMeta"
+          type:
+            - array
+            - "null"
+        warnings:
+          items:
+            $ref: "#/components/schemas/Warning"
+          type:
+            - array
+            - "null"
+      required:
+        - commitSha
+        - files
+      type: object
     ArtifactVersion:
       additionalProperties: false
       properties:
@@ -719,6 +772,16 @@ components:
         - skillMd
         - references
       type: object
+    DeleteOp:
+      additionalProperties: false
+      properties:
+        baseSha:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+      type: object
     Dependency:
       additionalProperties: false
       properties:
@@ -1151,6 +1214,41 @@ components:
         - name
         - configKeys
         - consumers
+      type: object
+    FileContent:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/FileContent.json
+          format: uri
+          readOnly: true
+          type: string
+        content:
+          type: string
+        path:
+          type: string
+        sha:
+          type: string
+      required:
+        - path
+        - content
+        - sha
+      type: object
+    FileMeta:
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+        sha:
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+        - path
+        - sha
       type: object
     FormFile:
       additionalProperties: false
@@ -1963,6 +2061,49 @@ components:
         - version
         - hasUnsavedChanges
       type: object
+    TurnInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        instruction:
+          description: User message / generation directive
+          type: string
+        target:
+          description: Optional target (e.g. a doc type)
+          type: string
+        useCase:
+          description: Which generation/chat flow
+          enum:
+            - requirements-generate
+            - requirements-chat
+            - design-generate
+          type: string
+      required:
+        - useCase
+        - instruction
+      type: object
+    TurnOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        turnId:
+          description: The started turn's id — poll/attach with it
+          type: string
+      required:
+        - turnId
+      type: object
     UpdateConfigBody:
       additionalProperties: false
       properties:
@@ -2001,6 +2142,20 @@ components:
       required:
         - skillMd
         - references
+      type: object
+    Warning:
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+        - code
+        - message
       type: object
     WorkflowRun:
       additionalProperties: false
@@ -2065,6 +2220,19 @@ components:
           type: string
       required:
         - name
+      type: object
+    WriteOp:
+      additionalProperties: false
+      properties:
+        baseSha:
+          type: string
+        content:
+          type: string
+        path:
+          type: string
+      required:
+        - path
+        - content
       type: object
     userJWT:
       bearerFormat: JWT
@@ -2987,6 +3155,83 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
+  /projects/{projectName}/conversations/{conversationId}:
+    get:
+      operationId: get-conversation
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: FE-chosen conversation uuid
+          in: path
+          name: conversationId
+          required: true
+          schema:
+            description: FE-chosen conversation uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Rehydrate a chat conversation (messages only)
+      tags:
+        - GenAI
+  /projects/{projectName}/conversations/{conversationId}/turns:
+    post:
+      operationId: create-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: FE-chosen conversation uuid
+          in: path
+          name: conversationId
+          required: true
+          schema:
+            description: FE-chosen conversation uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TurnInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Start a generation/chat turn (202 — runs detached; attach via the turn stream)
+      tags:
+        - GenAI
   /projects/{projectName}/dependencies/access-requests:
     get:
       operationId: list-access-requests
@@ -3385,6 +3630,118 @@ paths:
       summary: Get the design bundle at a tag
       tags:
         - Design(Deprecated)
+  /projects/{projectName}/files:
+    get:
+      operationId: list-files
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Only list paths under this prefix (e.g. specs/design/)
+          explode: false
+          in: query
+          name: prefix
+          schema:
+            description: Only list paths under this prefix (e.g. specs/design/)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/FileMeta"
+                type:
+                  - array
+                  - "null"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List spec files at HEAD
+      tags:
+        - Files
+  /projects/{projectName}/files/apply:
+    post:
+      operationId: apply-files
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyRequest"
+              description: Atomic write/delete batch with per-file baseSha
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Atomically apply a batch of writes/deletes (single commit to main)
+      tags:
+        - Files
+  /projects/{projectName}/files/{path...}:
+    get:
+      operationId: read-file
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: File path under specs/
+          in: path
+          name: path
+          required: true
+          schema:
+            description: File path under specs/
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileContent"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Read a spec file at HEAD
+      tags:
+        - Files
   /projects/{projectName}/requirements:
     get:
       operationId: get-requirements
