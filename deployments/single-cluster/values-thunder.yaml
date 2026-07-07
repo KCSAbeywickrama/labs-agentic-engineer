@@ -110,6 +110,11 @@ bootstrap:
       #   PUBLIC_APPS:        name|description|clientId|redirectUris(CSV)|userAttributes(CSV)
       #     → authorization_code + refresh_token, PKCE, public, uses
       #       default-basic-flow.
+      #   CONFIDENTIAL_AUTHCODE_APPS:
+      #       name|description|clientId|clientSecret|redirectUris(CSV)|userAttributes(CSV)
+      #     → authorization_code + refresh_token + client_credentials, has a
+      #       secret (server-side code exchange), NOT PKCE. For a backend that
+      #       both logs users in AND makes its own service calls (Backstage).
       # Adding a new OAuth client = add one row below.
       # ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +132,20 @@ bootstrap:
         # Root redirects serve the legacy console; /callback is the new
         # console's dedicated OAuth route (issue #91).
         "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
+      )
+
+      # OpenChoreo's control-plane chart ships Backstage enabled (values-cp.yaml
+      # backstage.enabled=true) + an HTTPRoute on openchoreo.localhost:8080, and
+      # a backstage-catalog-reader ClusterAuthzRoleBinding for sub=openchoreo-
+      # backstage-client — but stock OC registers this IDP client via its own
+      # Thunder bootstrap, which we replaced. This row restores it so the portal
+      # Sign In works out of the box. clientSecret matches the backstage-secrets
+      # Secret (backstage-portal-secret) created by setup-openchoreo.sh; the
+      # redirect uses provider id `openchoreo-auth` and must match values-cp.yaml
+      # backstage.baseUrl. The default admin (admin/admin, group Administrators →
+      # admin role) then has full portal access; no test users are needed.
+      CONFIDENTIAL_AUTHCODE_APPS=(
+        "OpenChoreo Backstage Portal|OIDC client for the OpenChoreo Backstage developer portal — sign-in (authorization_code) + catalog-sync service token (client_credentials).|openchoreo-backstage-client|backstage-portal-secret|http://openchoreo.localhost:8080/api/auth/openchoreo-auth/handler/frame|sub,email,email_verified,given_name,family_name,username,groups"
       )
 
       # ──────────────────────────────────────────────────────────────────
@@ -148,7 +167,7 @@ bootstrap:
       log_info "Using OU ID: $OU_ID"
 
       AUTH_FLOW_ID=""
-      if [ ${#PUBLIC_APPS[@]} -gt 0 ]; then
+      if [ ${#PUBLIC_APPS[@]} -gt 0 ] || [ ${#CONFIDENTIAL_AUTHCODE_APPS[@]} -gt 0 ]; then
         log_info "Fetching default-basic-flow authentication flow ID..."
         RESPONSE=$(thunder_api_call GET "/flows?flowType=AUTHENTICATION&limit=200")
         HTTP_CODE="${RESPONSE: -3}"; BODY="${RESPONSE%???}"
@@ -294,6 +313,57 @@ bootstrap:
       }
 
       # ──────────────────────────────────────────────────────────────────
+      # ensure_confidential_authcode_app NAME DESC CLIENT_ID CLIENT_SECRET \
+      #                                  REDIRECT_URIS_CSV USER_ATTRS_CSV
+      #   Confidential authorization_code client that ALSO holds
+      #   client_credentials (browser login + backend service token). Has a
+      #   secret, not PKCE. Used by Backstage.
+      # ──────────────────────────────────────────────────────────────────
+
+      ensure_confidential_authcode_app() {
+        local name="$1"
+        local description="$2"
+        local client_id="$3"
+        local client_secret="$4"
+        local redirect_uris_csv="$5"
+        local user_attrs_csv="$6"
+
+        local redirect_uris_json
+        redirect_uris_json=$(csv_to_json_array "${redirect_uris_csv}")
+        local user_attrs_json
+        user_attrs_json=$(csv_to_json_array "${user_attrs_csv}")
+
+        local payload
+        payload=$(cat <<JSON
+      {
+        "name": "${name}",
+        "description": "${description}",
+        "ouId": "${OU_ID}",
+        "authFlowId": "${AUTH_FLOW_ID}",
+        "inboundAuthConfig": [{
+          "type": "oauth2",
+          "config": {
+            "clientId": "${client_id}",
+            "clientSecret": "${client_secret}",
+            "redirectUris": ${redirect_uris_json},
+            "grantTypes": ["authorization_code", "refresh_token", "client_credentials"],
+            "responseTypes": ["code"],
+            "tokenEndpointAuthMethod": "client_secret_post",
+            "pkceRequired": false,
+            "publicClient": false,
+            "token": {
+              "accessToken": {"validityPeriod": 3600, "userAttributes": ${user_attrs_json}},
+              "idToken":     {"validityPeriod": 3600, "userAttributes": ${user_attrs_json}}
+            }
+          }
+        }]
+      }
+      JSON
+      )
+        upsert_app "${client_id}" "${payload}"
+      }
+
+      # ──────────────────────────────────────────────────────────────────
       # Run.
       # ──────────────────────────────────────────────────────────────────
 
@@ -305,6 +375,11 @@ bootstrap:
       for row in "${PUBLIC_APPS[@]}"; do
         IFS='|' read -r _name _desc _client_id _redirect_uris _user_attrs <<<"$row"
         ensure_public_app "$_name" "$_desc" "$_client_id" "$_redirect_uris" "$_user_attrs"
+      done
+
+      for row in "${CONFIDENTIAL_AUTHCODE_APPS[@]}"; do
+        IFS='|' read -r _name _desc _client_id _client_secret _redirect_uris _user_attrs <<<"$row"
+        ensure_confidential_authcode_app "$_name" "$_desc" "$_client_id" "$_client_secret" "$_redirect_uris" "$_user_attrs"
       done
 
       log_success "All OAuth applications configured"
