@@ -99,25 +99,6 @@ components:
         - commitSha
         - files
       type: object
-    ArtifactVersion:
-      additionalProperties: false
-      properties:
-        commitHash:
-          type: string
-        sourceDesign:
-          type: string
-        sourceSpec:
-          type: string
-        tagName:
-          type: string
-        version:
-          format: int64
-          type: integer
-      required:
-        - version
-        - tagName
-        - commitHash
-      type: object
     BuildLogEntry:
       additionalProperties: false
       properties:
@@ -214,12 +195,6 @@ components:
       required:
         - title
         - status
-      type: object
-    CallerIdentity:
-      additionalProperties: false
-      properties:
-        mode:
-          type: string
       type: object
     ClientSecretOutputBody:
       additionalProperties: false
@@ -425,19 +400,6 @@ components:
         - componentType
         - spec
       type: object
-    ConfigKey:
-      additionalProperties: false
-      properties:
-        credentialClass:
-          type: string
-        key:
-          type: string
-        secret:
-          type: boolean
-      required:
-        - key
-        - secret
-      type: object
     ConfigKeyDTO:
       additionalProperties: false
       properties:
@@ -579,9 +541,6 @@ components:
             Repository name for the project's GitHub repo; defaults to the
             project name, the organization is fixed server-side (issue #71).
           type: string
-        repoName:
-          description: Optional Git repository name override (DNS-label slug); defaults to the project name.
-          type: string
       required:
         - name
       type: object
@@ -617,59 +576,6 @@ components:
           type: string
       required:
         - path
-      type: object
-    Dependency:
-      additionalProperties: false
-      properties:
-        candidates:
-          items:
-            $ref: "#/components/schemas/DependencyCandidate"
-          type:
-            - array
-            - "null"
-        config:
-          items:
-            $ref: "#/components/schemas/ConfigKey"
-          type:
-            - array
-            - "null"
-        description:
-          type: string
-        kind:
-          type: string
-        name:
-          type: string
-        needsSpec:
-          type: boolean
-        parameters:
-          additionalProperties:
-            type: string
-          type: object
-        reason:
-          type: string
-        resourceType:
-          type: string
-        specPath:
-          type: string
-        specUrl:
-          type: string
-        status:
-          type: string
-      required:
-        - kind
-        - name
-      type: object
-    DependencyCandidate:
-      additionalProperties: false
-      properties:
-        description:
-          type: string
-        label:
-          type: string
-        url:
-          type: string
-      required:
-        - label
       type: object
     DependencyStatus:
       additionalProperties: false
@@ -732,129 +638,6 @@ components:
             - "null"
       required:
         - items
-      type: object
-    Design:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/Design.json
-          format: uri
-          readOnly: true
-          type: string
-        components:
-          items:
-            $ref: "#/components/schemas/DesignComponent"
-          type:
-            - array
-            - "null"
-        hasUnsavedChanges:
-          type: boolean
-        overview:
-          type: string
-        projectId:
-          type: string
-        sourceSpec:
-          type: string
-        status:
-          type: string
-        version:
-          format: int64
-          type: integer
-        versions:
-          items:
-            $ref: "#/components/schemas/ArtifactVersion"
-          type:
-            - array
-            - "null"
-      required:
-        - projectId
-        - overview
-        - components
-        - status
-        - version
-        - hasUnsavedChanges
-      type: object
-    DesignBundle:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DesignBundle.json
-          format: uri
-          readOnly: true
-          type: string
-        design:
-          $ref: "#/components/schemas/Design"
-        files:
-          additionalProperties:
-            type: string
-          type: object
-      required:
-        - files
-        - design
-      type: object
-    DesignComponent:
-      additionalProperties: false
-      properties:
-        appPath:
-          type: string
-        buildpack:
-          type: string
-        callerIdentity:
-          $ref: "#/components/schemas/CallerIdentity"
-        componentAgentInstructions:
-          type: string
-        componentType:
-          type: string
-        dependencies:
-          items:
-            $ref: "#/components/schemas/Dependency"
-          type:
-            - array
-            - "null"
-        description:
-          type: string
-        entrypoint:
-          type: string
-        exposesAPI:
-          $ref: "#/components/schemas/ExposesAPI"
-        exposure:
-          type: string
-        language:
-          type: string
-        name:
-          type: string
-        openAPISpec:
-          type: string
-        version:
-          type: string
-      required:
-        - name
-        - componentType
-        - language
-        - dependencies
-        - entrypoint
-        - buildpack
-        - appPath
-        - openAPISpec
-        - componentAgentInstructions
-      type: object
-    DesignSaveBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/DesignSaveBody.json
-          format: uri
-          readOnly: true
-          type: string
-        commitSha:
-          description: "Commit to read, gate and tag (the publish's just-applied commit). Empty: resolve HEAD."
-          type: string
       type: object
     DisconnectOutputBody:
       additionalProperties: false
@@ -987,18 +770,6 @@ components:
         - status
         - createdAt
       type: object
-    ExposesAPI:
-      additionalProperties: false
-      properties:
-        auth:
-          type: string
-        managed:
-          type: boolean
-        orgPublished:
-          type: boolean
-        userContext:
-          type: string
-      type: object
     ExternalResourceDTO:
       additionalProperties: false
       properties:
@@ -1058,24 +829,6 @@ components:
         - path
         - sha
       type: object
-    FormFile:
-      additionalProperties: false
-      properties:
-        ContentType:
-          type: string
-        Filename:
-          type: string
-        IsSet:
-          type: boolean
-        Size:
-          format: int64
-          type: integer
-      required:
-        - ContentType
-        - IsSet
-        - Size
-        - Filename
-      type: object
     GitProviderProjection:
       additionalProperties: false
       properties:
@@ -1124,28 +877,6 @@ components:
         - status
         - connectedAt
       type: object
-    GitProviderWrite:
-      additionalProperties: false
-      properties:
-        githubLogin:
-          type: string
-        kind:
-          enum:
-            - github
-          type: string
-        mode:
-          enum:
-            - pat
-          type: string
-        pat:
-          type: string
-      required:
-        - kind
-        - mode
-        - pat
-      type:
-        - object
-        - "null"
     IDPProjection:
       additionalProperties: false
       properties:
@@ -1170,24 +901,6 @@ components:
         - publisherClientId
         - hasClientSecret
       type: object
-    IDPWrite:
-      additionalProperties: false
-      properties:
-        issuer:
-          type: string
-        jwksUrl:
-          type: string
-        kind:
-          enum:
-            - platform
-            - asgardeo
-            - custom
-          type: string
-      required:
-        - kind
-      type:
-        - object
-        - "null"
     ImportResult:
       additionalProperties: false
       properties:
@@ -1245,21 +958,6 @@ components:
         - status
         - connectedAt
       type: object
-    LLMWrite:
-      additionalProperties: false
-      properties:
-        apiKey:
-          type: string
-        kind:
-          enum:
-            - anthropic
-          type: string
-      required:
-        - kind
-        - apiKey
-      type:
-        - object
-        - "null"
     Lineage:
       additionalProperties: false
       properties:
@@ -1444,64 +1142,6 @@ components:
       required:
         - items
       type: object
-    ProjectStatus:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ProjectStatus.json
-          format: uri
-          readOnly: true
-          type: string
-        deployStatus:
-          description: >-
-            Result of the latest dev deployment (e.g. in_progress /
-            succeeded / failed); absent when nothing was deployed.
-          type: string
-        deployedVersion:
-          description: >-
-            Version tag currently deployed to the dev environment; absent
-            when nothing deployed.
-          type: string
-        designStatus:
-          type: string
-        hasDesign:
-          type: boolean
-        hasSpec:
-          type: boolean
-        hasTasks:
-          type: boolean
-        phase:
-          type: string
-        repoErrorMessage:
-          type: string
-        repoStatus:
-          type: string
-        repoUrl:
-          type: string
-        specDirty:
-          description: >-
-            True when the spec/design changed after specVersion was
-            published.
-          type: boolean
-        specStatus:
-          type: string
-        specVersion:
-          description: >-
-            Latest published spec version tag (e.g. v1); absent when
-            nothing published.
-          type: string
-      required:
-        - phase
-        - repoStatus
-        - repoUrl
-        - hasSpec
-        - hasDesign
-        - hasTasks
-        - specStatus
-        - designStatus
-      type: object
     ProvisionBody:
       additionalProperties: false
       properties:
@@ -1524,54 +1164,6 @@ components:
             type: string
           description: Provisioning parameters (override the design defaults)
           type: object
-      type: object
-    RequirementsBundle:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/RequirementsBundle.json
-          format: uri
-          readOnly: true
-          type: string
-        files:
-          additionalProperties:
-            type: string
-          type: object
-        hasUnsavedChanges:
-          type: boolean
-        projectId:
-          type: string
-        status:
-          type: string
-        version:
-          format: int64
-          type: integer
-        versions:
-          items:
-            $ref: "#/components/schemas/ArtifactVersion"
-          type:
-            - array
-            - "null"
-      required:
-        - projectId
-        - files
-        - status
-      type: object
-    SaveBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SaveBody.json
-          format: uri
-          readOnly: true
-          type: string
-        commitSha:
-          description: "Commit to gate and tag (the publish's just-applied commit). Empty: resolve HEAD."
-          type: string
       type: object
     SaveValuesBody:
       additionalProperties: false
@@ -1642,44 +1234,6 @@ components:
         - version
         - contentSha
         - updatedAt
-      type: object
-    SpecBundle:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SpecBundle.json
-          format: uri
-          readOnly: true
-          type: string
-        files:
-          items:
-            $ref: "#/components/schemas/SpecFile"
-          type: array
-      required:
-        - files
-      type: object
-    SpecFile:
-      additionalProperties: false
-      properties:
-        content:
-          description: Raw file content, inline.
-          type: string
-        group:
-          description: Which spec-view section the file belongs to.
-          enum:
-            - requirements
-            - designs
-            - validation
-          type: string
-        path:
-          description: File path within the project's spec tree (e.g. requirements/prd.md).
-          type: string
-      required:
-        - path
-        - group
-        - content
       type: object
     StartConnectInputBody:
       additionalProperties: false
@@ -1911,52 +1465,6 @@ components:
           type: string
       required:
         - turnId
-      type: object
-    TurnStatus:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/TurnStatus.json
-          format: uri
-          readOnly: true
-          type: string
-        commitSha:
-          type: string
-        conversationId:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        message:
-          type: string
-        noChanges:
-          type: boolean
-        paths:
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-        reason:
-          type: string
-        status:
-          type: string
-        turnId:
-          type: string
-        updatedAt:
-          format: date-time
-          type: string
-        useCase:
-          type: string
-      required:
-        - turnId
-        - conversationId
-        - useCase
-        - status
-        - createdAt
-        - updatedAt
       type: object
     UpdateConfigBody:
       additionalProperties: false
