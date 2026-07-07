@@ -170,14 +170,17 @@ func TestLoadEmbeddedBuiltins(t *testing.T) {
 		t.Fatalf("loadEmbeddedBuiltins: %v", err)
 	}
 	by := nameSet(got)
-	// The four shipped built-ins, all kind=builtin. `go`, `api-management`, and
-	// `react-webapp` are v2 (the latter two carry the dependencies[] vocabulary
-	// after the connections[]→dependencies[] migration).
+	// The four shipped built-ins, all kind=builtin. `go` is v2 (the
+	// connections[]→dependencies[] migration). `api-management`,
+	// `react-webapp`, and `thunder-authentication` are v3: the thunder-app
+	// dependency rewrite (2e25858/6b03d34) changed all three bodies, so each
+	// was bumped past its pre-rewrite shipped version (2, 2, 1) — see
+	// shipped_versions_test.go for the invariant this protects.
 	wantVersions := map[string]int{
-		"api-management":         2,
+		"api-management":         3,
 		"go":                     2,
-		"react-webapp":           2,
-		"thunder-authentication": 1,
+		"react-webapp":           3,
+		"thunder-authentication": 3,
 	}
 	for name, wantV := range wantVersions {
 		sk, ok := by[name]

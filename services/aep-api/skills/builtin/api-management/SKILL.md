@@ -2,7 +2,7 @@
 name: api-management
 description: How the platform's API gateway validates JWTs, injects X-User-Id from the sub claim, attaches CORS, and how to design + write services and consumers that match. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API.
 metadata:
-  aep.version: "2"
+  aep.version: "3"
 ---
 
 # API Management

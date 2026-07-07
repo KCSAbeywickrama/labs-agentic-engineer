@@ -26,6 +26,18 @@ package skills
 // version-based: absent → seed; embed.version > repo.version → overwrite
 // (replacing the whole skill dir, so stale references never linger); else
 // leave. Retired names the embed no longer ships are purged.
+//
+// BUMP-THE-VERSION RULE: version comes from metadata.aep.version in the
+// SKILL.md frontmatter (versionFromMetadata in skill_service.go — absent or
+// unparseable defaults to 1). Editing a builtin or flow skill's body WITHOUT
+// bumping metadata.aep.version is silently a no-op for every org whose repo
+// already has an equal-or-newer version seeded: embed.version <= cur just
+// skips (line ~160 below), so the stale copy lives on forever in that org.
+// This bit the platform once already (thunder-authentication/api-management/
+// react-webapp all changed body in 2e25858/6b03d34 without a version bump) —
+// see shipped_versions_test.go's TestBuiltinSkills_VersionBumpedOnContentChange,
+// which fails the build when a builtin's content hash moves but its recorded
+// version doesn't.
 
 import (
 	"context"
