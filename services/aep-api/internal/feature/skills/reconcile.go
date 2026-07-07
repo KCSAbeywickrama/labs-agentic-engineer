@@ -34,10 +34,12 @@ package skills
 // already has an equal-or-newer version seeded: embed.version <= cur just
 // skips (line ~160 below), so the stale copy lives on forever in that org.
 // This bit the platform once already (thunder-authentication/api-management/
-// react-webapp all changed body in 2e25858/6b03d34 without a version bump) —
-// see shipped_versions_test.go's TestBuiltinSkills_VersionBumpedOnContentChange,
-// which fails the build when a builtin's content hash moves but its recorded
-// version doesn't.
+// react-webapp all changed body in 2e25858/6b03d34 without a version bump, and
+// flow high-level-architecture lost its metadata block entirely) — see
+// shipped_versions_test.go's TestEmbeddedSkills_VersionBumpedOnContentChange,
+// which fails the build when an embedded skill's content hash moves but its
+// recorded version doesn't, and flow_vendor_test.go, which pins the vendored
+// flow/ mirror to the repo-root skills/ source of truth.
 
 import (
 	"context"
