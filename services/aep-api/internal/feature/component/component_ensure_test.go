@@ -30,6 +30,9 @@ import (
 // EnsureComponent; the rest panic if reached.
 type ensureRepoSvc struct{ repo *models.GitRepository }
 
+func (r ensureRepoSvc) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	panic("ensureRepoSvc: ListByOrg not expected")
+}
 func (r ensureRepoSvc) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
 	return r.repo, nil
 }

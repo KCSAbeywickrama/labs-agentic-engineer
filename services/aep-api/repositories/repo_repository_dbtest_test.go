@@ -278,3 +278,44 @@ func TestLookupOrgProjectByRepoURL(t *testing.T) {
 		t.Fatalf("Lookup(todo) = (%q,%q,%v); want empty (no unanchored suffix match)", o, p, err)
 	}
 }
+
+// TestRepoRepository_ListByOrg proves the list-projects repoUrl join source
+// (#108): only the caller org's rows come back, all statuses included.
+func TestRepoRepository_ListByOrg(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+
+	repo := repositories.NewRepoRepository(db)
+	ctx := context.Background()
+
+	for _, r := range []models.GitRepository{
+		{OrgID: "orga", ProjectID: "web", RepoURL: "https://github.com/a/web.git", Status: "ready"},
+		{OrgID: "orga", ProjectID: "api", RepoURL: "https://github.com/a/api.git", Status: "pending"},
+		{OrgID: "orgb", ProjectID: "web", RepoURL: "https://github.com/b/web.git", Status: "ready"},
+	} {
+		if err := repo.Create(ctx, &r); err != nil {
+			t.Fatalf("create %s/%s: %v", r.OrgID, r.ProjectID, err)
+		}
+	}
+
+	rows, err := repo.ListByOrg(ctx, "orga")
+	if err != nil {
+		t.Fatalf("ListByOrg: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("ListByOrg(orga) returned %d rows, want 2 (all statuses, no cross-org leak)", len(rows))
+	}
+	for _, r := range rows {
+		if r.OrgID != "orga" {
+			t.Fatalf("cross-org leak: %+v", r)
+		}
+	}
+
+	empty, err := repo.ListByOrg(ctx, "orgc")
+	if err != nil {
+		t.Fatalf("ListByOrg(orgc): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("ListByOrg(orgc) = %d rows, want 0", len(empty))
+	}
+}

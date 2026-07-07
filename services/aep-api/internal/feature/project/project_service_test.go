@@ -47,6 +47,7 @@ type fakeRepoSvc struct {
 	CreateRepoFunc func(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error)
 	GetRepoFunc    func(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
 	DeleteRepoFunc func(ctx context.Context, orgID, projectID string) error
+	ListByOrgFunc  func(ctx context.Context, orgID string) ([]models.GitRepository, error)
 }
 
 func (f *fakeRepoSvc) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
@@ -54,6 +55,12 @@ func (f *fakeRepoSvc) CreateRepo(ctx context.Context, orgID, projectID, projectN
 		panic("fakeRepoSvc: CreateRepo not set")
 	}
 	return f.CreateRepoFunc(ctx, orgID, projectID, projectName, repoName)
+}
+func (f *fakeRepoSvc) ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error) {
+	if f.ListByOrgFunc == nil {
+		panic("fakeRepoSvc: ListByOrg not set")
+	}
+	return f.ListByOrgFunc(ctx, orgID)
 }
 func (f *fakeRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
 	panic("fakeRepoSvc: EnsureBareRepo not expected in project tests")
@@ -238,6 +245,56 @@ func TestListProjects_SurfacesNextCursorAndPassesParams(t *testing.T) {
 	}
 	if list.NextCursor != "next-tok" || len(list.Items) != 1 {
 		t.Fatalf("list = %+v; want 1 item + NextCursor next-tok", list)
+	}
+}
+
+// ListProjects joins each project's git repo URL from the BFF's own rows
+// (#108): repo-less projects stay bare, and a failing join degrades to a
+// repoUrl-less list rather than a 500 — the listing must never break because
+// the annotation source is down.
+func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{
+		ListProjectsFunc: func(context.Context, string, int, string) (*models.ProjectList, error) {
+			return &models.ProjectList{Items: []models.Project{
+				{Name: "web"},
+				{Name: "no-repo"},
+			}}, nil
+		},
+	}
+	repoSvc := &fakeRepoSvc{
+		ListByOrgFunc: func(_ context.Context, orgID string) ([]models.GitRepository, error) {
+			if orgID != "acme" {
+				t.Errorf("ListByOrg org = %q, want acme", orgID)
+			}
+			return []models.GitRepository{
+				{OrgID: "acme", ProjectID: "web", RepoURL: "https://github.com/acme/web.git"},
+			}, nil
+		},
+	}
+	svc := NewProjectService(oc, repoSvc, nil, nil, nil, nil)
+
+	list, err := svc.ListProjects(context.Background(), "acme", 100, "", "")
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if list.Items[0].RepoURL != "https://github.com/acme/web.git" {
+		t.Fatalf("web repoUrl = %q, want the joined clone URL", list.Items[0].RepoURL)
+	}
+	if list.Items[1].RepoURL != "" {
+		t.Fatalf("no-repo project got repoUrl %q, want empty", list.Items[1].RepoURL)
+	}
+
+	// Join failure → list still returns, just unannotated.
+	repoSvc.ListByOrgFunc = func(context.Context, string) ([]models.GitRepository, error) {
+		return nil, errors.New("db down")
+	}
+	list, err = svc.ListProjects(context.Background(), "acme", 100, "", "")
+	if err != nil {
+		t.Fatalf("ListProjects with failing join: %v", err)
+	}
+	if list.Items[0].RepoURL != "" {
+		t.Fatalf("failing join must not annotate: got %q", list.Items[0].RepoURL)
 	}
 }
 
