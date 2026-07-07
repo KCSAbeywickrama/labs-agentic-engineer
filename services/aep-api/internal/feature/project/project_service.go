@@ -21,9 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
@@ -41,7 +42,7 @@ var (
 
 // ProjectService handles business logic for project operations.
 type ProjectService interface {
-	ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error)
+	ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*models.ProjectList, error)
 	GetProject(ctx context.Context, orgName, projectName string) (*models.Project, error)
 	CreateProject(ctx context.Context, orgName string, req *models.CreateProjectRequest) (*models.Project, error)
 	DeleteProject(ctx context.Context, orgName, projectName string) error
@@ -49,13 +50,23 @@ type ProjectService interface {
 }
 
 type projectService struct {
-	client      openchoreo.ProjectClient
-	repoSvc     gitrepo.RepoService
-	webhookSvc  gitrepo.WebhookService
-	artifactSvc artifacts.ArtifactService
-	store       *artifacts.ArtifactStore
-	taskRepo    repositories.TaskRepository
-	skillsProv  skillsProvisioner
+	client        openchoreo.ProjectClient
+	repoSvc       gitrepo.RepoService
+	webhookSvc    gitrepo.WebhookService
+	artifactSvc   artifacts.ArtifactService
+	store         *artifacts.ArtifactStore
+	execs         repositories.ExecutionRepository
+	skillsProv    skillsProvisioner
+	deprovisioner resourceDeprovisioner // dependency provisioning teardown; may be nil
+}
+
+// resourceDeprovisioner is project_service's narrow consumer port for the
+// dependency-provisioning teardown: on project delete it deprovisions the
+// project's OC Resource model (external + platform resources), which the OC
+// Project delete does not cascade. *provisioning.Service satisfies it. Wired via
+// SetResourceDeprovisioner at the composition root; nil is a no-op.
+type resourceDeprovisioner interface {
+	DeprovisionProject(ctx context.Context, orgID, projectID string) error
 }
 
 // skillsProvisioner is the narrow port for eagerly provisioning the org's
@@ -73,7 +84,7 @@ func NewProjectService(
 	webhookSvc gitrepo.WebhookService,
 	artifactSvc artifacts.ArtifactService,
 	store *artifacts.ArtifactStore,
-	taskRepo repositories.TaskRepository,
+	execs repositories.ExecutionRepository,
 ) *projectService {
 	return &projectService{
 		client:      client,
@@ -81,14 +92,45 @@ func NewProjectService(
 		webhookSvc:  webhookSvc,
 		artifactSvc: artifactSvc,
 		store:       store,
-		taskRepo:    taskRepo,
+		execs:       execs,
 	}
 }
 
-func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*models.ProjectList, error) {
+func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*models.ProjectList, error) {
 	list, err := s.client.ListProjects(ctx, orgName, limit, cursor)
 	if err != nil {
 		return nil, translateHTTPError(err)
+	}
+	// Annotate each project with its repo URL from the BFF's own rows (#108
+	// — the delete dialog names the repo the cascade destroys). Best-effort:
+	// a failing join degrades to a repoUrl-less list, never a 500.
+	if s.repoSvc != nil && len(list.Items) > 0 {
+		if repos, repoErr := s.repoSvc.ListByOrg(ctx, orgName); repoErr != nil {
+			slog.WarnContext(ctx, "repoUrl annotation skipped", "org", orgName, "error", repoErr)
+		} else {
+			byProject := make(map[string]string, len(repos))
+			for _, r := range repos {
+				byProject[r.ProjectID] = r.RepoURL
+			}
+			for i := range list.Items {
+				list.Items[i].RepoURL = byProject[list.Items[i].Name]
+			}
+		}
+	}
+	// The search filter is applied Go-side over the FETCHED PAGE only — the
+	// OpenChoreo list API takes just (limit, cursor), so a match on a later
+	// page is not pulled forward; the caller pages via nextCursor and filters
+	// each page. Acceptable for the console's org-sized project counts.
+	if search != "" {
+		needle := strings.ToLower(search)
+		filtered := make([]models.Project, 0, len(list.Items))
+		for _, p := range list.Items {
+			if strings.Contains(strings.ToLower(p.Name), needle) ||
+				strings.Contains(strings.ToLower(p.DisplayName), needle) {
+				filtered = append(filtered, p)
+			}
+		}
+		list.Items = filtered
 	}
 	return list, nil
 }
@@ -123,8 +165,20 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 
 	// Provision + clone the platform-owned git repo (async — polling via GetRepoStatus).
 	if s.repoSvc != nil {
-		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, req.Name)
+		repoInfo, createErr := s.repoSvc.CreateRepo(ctx, orgName, project.Name, req.Name, req.RepoName)
 		if createErr != nil {
+			// A repo name that already exists — user-chosen or derived from
+			// the project name — can never succeed on retry: compensate the
+			// OC project away and fail the create so the user picks another
+			// name. Every other repo failure stays best-effort (clone happens
+			// async and can be retried).
+			if gitrepo.IsRepoNameConflict(createErr) {
+				if delErr := s.client.DeleteProject(ctx, orgName, project.Name); delErr != nil {
+					slog.ErrorContext(ctx, "failed to compensate project after repo name conflict",
+						"project", project.Name, "error", delErr)
+				}
+				return nil, createErr
+			}
 			slog.ErrorContext(ctx, "failed to provision repo", "project", project.Name, "error", createErr)
 			// Don't fail project creation — clone happens async and can be retried.
 		} else {
@@ -151,7 +205,23 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 	return project, nil
 }
 
+// SetResourceDeprovisioner wires the dependency-provisioning teardown so a
+// project delete deprovisions its OC Resource model. A nil deprovisioner is a
+// documented no-op.
+func (s *projectService) SetResourceDeprovisioner(d resourceDeprovisioner) {
+	s.deprovisioner = d
+}
+
 func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName string) error {
+	// Deprovision the project's OC Resource model FIRST — while its design (the
+	// dependency inventory) is still readable and before the OC Project delete,
+	// which does not cascade the logically-owned Resources/bindings. Best-effort.
+	if s.deprovisioner != nil {
+		if err := s.deprovisioner.DeprovisionProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to deprovision project resources", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
 	if err := translateHTTPError(s.client.DeleteProject(ctx, orgName, projectName)); err != nil {
 		return err
 	}
@@ -160,6 +230,16 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 	if s.repoSvc != nil {
 		if err := s.repoSvc.DeleteRepo(ctx, orgName, projectName); err != nil {
 			slog.ErrorContext(ctx, "failed to delete git repo for project", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
+	// Tasks are GitHub issues (deleted with the repo). The platform-owned
+	// executions rows for the project ARE purged here — they are keyed to the
+	// project and would otherwise orphan (no FK to cascade). Best-effort, like
+	// the repo cleanup.
+	if s.execs != nil {
+		if err := s.execs.DeleteByProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to purge executions for project", "org", orgName, "project", projectName, "error", err)
 		}
 	}
 
@@ -228,19 +308,11 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 		return status, nil
 	}
 
-	// Check tasks.
-	tasks, err := s.taskRepo.ListByProjectID(ctx, orgName, projectName)
-	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
-	}
-	status.HasTasks = len(tasks) > 0
-
-	if !status.HasTasks {
-		status.Phase = "tasks"
-		return status, nil
-	}
-
-	status.Phase = "components"
+	// Tasks are GitHub issues now (no component_tasks table). The status phase
+	// stops at "tasks" once a design exists; the console derives per-Task detail
+	// live from the tasks API (§8). HasTasks is left false here — a live GitHub
+	// count on every status poll is not worth the request.
+	status.Phase = "tasks"
 	return status, nil
 }
 

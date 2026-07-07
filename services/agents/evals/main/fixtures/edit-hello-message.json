@@ -1,6 +1,6 @@
 {
   "name": "edit-hello-message",
-  "description": "Single-turn: rename the hello message in the spec.",
+  "description": "Single-turn: rename the hello message across the spec bundle. Workspace shape: the turn input is the filtered snapshot (.md/.dsl/design.json — openapi.yaml is not inlined), so the expectations live on requirements.md.",
   "difficulty": "easy",
   "turns": [
     {
@@ -9,13 +9,12 @@
   ],
   "expect": {
     "filesContain": [
-      { "path": "specs/design/components/hello-api/openapi.yaml", "text": "Hi there!" }
+      { "path": "specs/requirements/requirements.md", "text": "Hi there!" }
     ],
     "filesNotContain": [
-      { "path": "specs/design/components/hello-api/openapi.yaml", "text": "Hello, World!" }
+      { "path": "specs/requirements/requirements.md", "text": "Hello, World!" }
     ],
-    "yamlValid": ["specs/design/components/hello-api/openapi.yaml"],
-    "touched": ["specs/design/components/hello-api/openapi.yaml"],
+    "touched": ["specs/requirements/requirements.md"],
     "preferEdit": true
   }
 }

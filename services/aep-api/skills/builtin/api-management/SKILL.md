@@ -1,8 +1,8 @@
 ---
 name: api-management
-description: How the platform's API gateway validates JWTs, injects X-User-Id from the sub claim, attaches CORS, and how to design + write services and consumers that match. Apply to any service with exposesAPI.auth set, and to any consumer (sibling component OR external dependentApi) that calls a protected API.
+description: How the platform's API gateway validates JWTs, injects X-User-Id from the sub claim, attaches CORS, and how to design + write services and consumers that match. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API.
 metadata:
-  aep.version: "1"
+  aep.version: "2"
 ---
 
 # API Management
@@ -43,8 +43,8 @@ output from reality.
   - Backend consumer: read `os.Getenv("<NAME>_URL")` (Go) or
     `process.env.<NAME>_URL` (Node).
   Never hardcode the URL.
-- For consumers of **external** dependent APIs (declared via
-  `dependentApis` on the component), the BFF pins the URL on the
+- For consumers of **external** upstream APIs (declared as `external`-kind
+  entries in the component's `dependencies`), the BFF pins the URL on the
   consuming workload's ReleaseBinding env as `<NAME>_URL`. Same read
   pattern as sibling URLs.
 - API error responses should use `application/problem+json` with a
@@ -66,16 +66,17 @@ output from reality.
   The `thunder-authentication` skill owns this pairing rule (and its
   rationale) — apply it.
 - For external upstreams that already exist outside the project, declare
-  them as `dependentApis` on the consuming component. Use **name-only**
-  declarations (`{ "name": "employee-api", "description": "..." }`) for
-  catalog-known APIs — the platform resolves the URL from its in-cluster
-  catalog at design-load time. Use full `{ name, url, description,
-  authentication }` for arbitrary third-party APIs.
-- Every component with a `dependentApi` MUST also carry an instruction
+  them as `external`-kind entries in the consuming component's
+  `dependencies`. Use **name-only** declarations (`{ "kind": "external",
+  "name": "employee-api", "description": "..." }`) for catalog-known APIs —
+  the platform resolves the URL from its in-cluster catalog at design-load
+  time. Add `needsSpec: true` (and a `specUrl` hint, or attach the contract
+  later) when the agent must call the API by specific endpoints.
+- Every component with an `external` dependency MUST also carry an instruction
   line in `componentAgentInstructions` of the form:
   `Upstream external API <name>: env var <NAME_UPPER_SNAKE>_URL (auth: <authentication>). <description>. Read via os.Getenv / process.env / window._env_, call with standard HTTP client.`
-- Every component with a sibling `dependsOn` on a backend service MUST
-  also carry an instruction line of the form:
+- Every component with a sibling backend `dependencies` entry (`kind:
+  component`) MUST also carry an instruction line of the form:
   `Upstream <name>: read the URL from <NAME_UPPER_SNAKE>_URL via the runtime-config shim.`
 - Protected `service` `componentAgentInstructions` MUST say (verbatim or close):
   `No /auth/* endpoints. The API Platform gateway validates the JWT and the api-configuration trait's jwt-auth policy injects X-User-Id (from JWT sub claim) on every request. Read X-User-Id to identify the caller; reject (401) when missing. Per-user records MUST be keyed on X-User-Id. Do NOT validate JWTs yourself; do NOT add CORS middleware (the gateway handles CORS).`
@@ -100,8 +101,8 @@ For every task targeting a `service` with `exposesAPI.auth: end-user-required`:
   data owned by that subject. `/health` is exempt and returns 200
   without auth."
 
-For every task whose component has a non-empty `dependentApis` array,
-add **one Scope bullet per entry** of the form:
+For every task whose component has one or more `external`-kind
+`dependencies` entries, add **one Scope bullet per entry** of the form:
 
 - "External upstream `<name>`: `<METHOD or 'GET'>` `<url>` —
   <description>. Authentication: <authentication>. Read the URL from
@@ -117,7 +118,7 @@ And one Acceptance criteria bullet per entry:
   forwarded; `api-key` → static key from env.>"
 
 Use the literal URL, description, and authentication string from the
-`dependentApis` entry — do not invent values.
+`external` dependency entry — do not invent values.
 
 For service components (NOT web-apps), always add a Scope bullet: "Do
 NOT add CORS middleware. The platform's gateway attaches an Envoy CORS

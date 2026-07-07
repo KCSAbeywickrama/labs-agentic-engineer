@@ -21,13 +21,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Box, Button, CircularProgress, PageContent, Typography } from '@wso2/oxygen-ui';
 import { ProjectStatusPolyline, type Stage } from '@aep/project-status';
 import { api, ApiError } from '../services/api';
-import type { ComponentTask, ProjectSdlcPhase, ProjectStatus } from '../services/api';
+import type { TaskView, ProjectSdlcPhase, ProjectStatus } from '../services/api';
 import {
   projectArchitecturePath,
   projectRequirementsPath,
   projectTasksPath,
 } from '../lib/paths';
 import { buildProjectStages } from '../lib/buildProjectStages';
+import { ACTIVE_TASK_STATUSES } from '../components/tasks/types';
 import { useAuth } from '../auth';
 import ProjectPromptPage from './ProjectPromptPage';
 import ProjectComponentsPage from './ProjectComponentsPage';
@@ -37,22 +38,13 @@ import ProjectComponentsPage from './ProjectComponentsPage';
 // otherwise (status fetch returned nothing) and shouldn't share UI.
 type Phase = ProjectSdlcPhase | 'auth-expired' | null;
 
-const ACTIVE_TASK_STATUSES: ReadonlySet<string> = new Set([
-  'pending',
-  'on_hold',
-  'in_progress',
-  'ready_for_review',
-  'merged',
-  'building',
-]);
-
 export default function ProjectOverviewPage() {
   const { orgId, projectId } = useParams();
   const navigate = useNavigate();
   const routeOrgId = orgId ?? 'default';
   const [phase, setPhase] = useState<Phase>(null);
   const [status, setStatus] = useState<ProjectStatus | undefined>();
-  const [tasks, setTasks] = useState<ComponentTask[]>([]);
+  const [tasks, setTasks] = useState<TaskView[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAll = useCallback(async () => {
@@ -67,7 +59,7 @@ export default function ProjectOverviewPage() {
       }
       throw e;
     }
-    const t = await api.listTasks(projectId).catch(() => [] as ComponentTask[]);
+    const t = await api.listTasks(projectId).catch(() => [] as TaskView[]);
     setStatus(s);
     setPhase(s ? s.phase : 'no-repo');
     setTasks(t);
@@ -80,7 +72,7 @@ export default function ProjectOverviewPage() {
   // Poll while repo is cloning or any task is active in the pipeline.
   useEffect(() => {
     const cloning = phase === 'repo-cloning';
-    const tasksActive = tasks.some((t) => ACTIVE_TASK_STATUSES.has(t.status));
+    const tasksActive = tasks.some((t) => ACTIVE_TASK_STATUSES.has(t.derivedStatus));
     if (cloning || tasksActive) {
       const interval = cloning ? 3000 : 5000;
       pollRef.current = setInterval(fetchAll, interval);

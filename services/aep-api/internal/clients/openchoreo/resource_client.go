@@ -1,0 +1,664 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package openchoreo
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/wso2/aep/aep-api/internal/clients/httpx"
+	"github.com/wso2/aep/aep-api/internal/clients/requests"
+)
+
+//go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/resource_client_mock.go . ResourceClient
+
+// ResourceClient authors the OpenChoreo Resource model (openchoreo.dev/v1alpha1,
+// shipped v1.1) used to wire external resources (and platform-resources) into
+// consuming Workloads. The generated `gen` client is pinned to a spec version
+// that predates v1.1 and has no Resource types, so this client is hand-rolled
+// over the same authenticated transport (buildRetryConfig + authRequestEditor
+// in transport.go) rather than over gen.ClientWithResponses.
+//
+// Authoring chain (the BFF owns every step — Resources have NO AutoDeploy):
+//
+//	EnsureResourceType  → per-dependency ResourceType (schema + ConfigMap/
+//	                      ExternalSecret template + outputs), get-or-create,
+//	                      immutable once created
+//	ApplyResource       → one Resource per project; the OC controller cuts an
+//	                      immutable ResourceRelease and writes status.latestRelease
+//	EnsureBinding       → one ResourceReleaseBinding per environment, with
+//	                      spec.resourceRelease PINNED to status.latestRelease (the
+//	                      `occ resource promote` contract — no controller does this)
+//
+// The consumer Workload then references the Resource via
+// spec.dependencies.resources[].ref + envBindings; its ReleaseBinding gates on
+// the native `ResourceDependenciesReady` condition. Wiring that reference onto
+// the Workload is out of this client's scope (it lives with the Component/
+// Workload write path); this client only authors the Resource-model CRs
+// themselves plus the read-only endpoint catalog below.
+type ResourceClient interface {
+	// EnsureResourceType get-or-creates a namespaced ResourceType. Idempotent on
+	// (namespace, name): a 409 returns the existing one. ResourceTypes are treated
+	// as immutable — a changed schema must use a new name (suffix), never an edit.
+	EnsureResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error)
+
+	// ApplyResource creates a Resource, or on 409 reconciles the existing one
+	// via PUT so RT-version bumps and spec.parameters changes propagate. A 409
+	// whose existing spec.type differs from the desired one is a HARD error
+	// (cross-kind name collision) — never a silent overwrite. The returned
+	// Resource carries the release known AT APPLY TIME in status.latestRelease
+	// (empty on create, the pre-reconcile release on a 409 PUT); read it with
+	// ReleaseName and pass it to WaitForReleaseChange so a reconcile waits for a
+	// NEW release rather than re-pinning the stale one.
+	ApplyResource(ctx context.Context, namespace string, r *Resource) (*Resource, error)
+
+	// GetResource reads a Resource (incl. status.latestRelease).
+	GetResource(ctx context.Context, namespace, name string) (*Resource, error)
+
+	// EnsureBinding authors a per-env ResourceReleaseBinding and PINS
+	// spec.resourceRelease (no AutoDeploy controller exists). Idempotent: a 409
+	// PUTs the binding to reconcile the pin / per-env configs.
+	EnsureBinding(ctx context.Context, namespace string, b *ResourceReleaseBinding) (*ResourceReleaseBinding, error)
+
+	// GetBinding reads a ResourceReleaseBinding (incl. status.conditions).
+	// Returns (nil, nil) on 404 — a binding may not exist yet (e.g. the
+	// provision watcher hasn't run); callers treat that as "not yet created".
+	GetBinding(ctx context.Context, namespace, name string) (*ResourceReleaseBinding, error)
+
+	// DeleteBinding removes a per-env binding. Step 1 of a 2-step
+	// dependency delete (bindings cascade their DP objects via
+	// retainPolicy: Delete). 404-tolerant (idempotent).
+	DeleteBinding(ctx context.Context, namespace, name string) error
+
+	// DeleteResource removes a Resource. Step 2 of the delete — its finalizer
+	// blocks until all bindings referencing it are gone. 404-tolerant (idempotent).
+	DeleteResource(ctx context.Context, namespace, name string) error
+
+	// ListClusterResourceTypes discovers the installed cluster-scoped
+	// ClusterResourceTypes (the platform-resource catalog — read-only).
+	ListClusterResourceTypes(ctx context.Context) ([]ResourceType, error)
+
+	// ListWorkloadEndpoints enumerates every provider-side endpoint declared by
+	// the Workloads in an org's namespace (one row per endpoint, carrying owner +
+	// visibility). This is the dynamic source for the org endpoint catalog: the
+	// architect discovers org-service targets here, and resolution gates on
+	// each row's namespace visibility. orgHandle is the org's namespace name
+	// (OC namespaces are 1:1 with orgs).
+	ListWorkloadEndpoints(ctx context.Context, orgHandle string) ([]WorkloadEndpointInfo, error)
+}
+
+// WorkloadEndpointInfo is one provider-side endpoint discovered by enumerating
+// an org namespace's Workloads — the raw material for the org endpoint
+// catalog. It names the owning project + component, the endpoint, and the
+// extra visibilities the provider declared (project visibility is always
+// implicit).
+type WorkloadEndpointInfo struct {
+	Project    string   // owner project (spec.owner.projectName)
+	Component  string   // owner component (spec.owner.componentName)
+	Workload   string   // workload name (metadata.name)
+	Name       string   // endpoint name (spec.endpoints key)
+	Type       string   // HTTP | gRPC | GraphQL | Websocket | TCP | UDP
+	Port       int32    // endpoint port
+	BasePath   string   // optional root path
+	Visibility []string // explicit extra visibilities: namespace | internal | external
+}
+
+// NamespaceVisible reports whether this endpoint is consumable cross-project
+// within the same namespace (i.e. the provider published it for org-service use).
+func (e WorkloadEndpointInfo) NamespaceVisible() bool {
+	for _, v := range e.Visibility {
+		if v == "namespace" {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- wire DTOs (openchoreo.dev/v1alpha1) -----------------------------------
+
+const (
+	ocResourceAPIVersion    = "openchoreo.dev/v1alpha1"
+	kindResourceType        = "ResourceType"
+	kindResource            = "Resource"
+	kindResourceReleaseBind = "ResourceReleaseBinding"
+)
+
+// OCObjectMeta is the slice of k8s metadata the BFF sets on Resource-model CRs.
+type OCObjectMeta struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace,omitempty"`
+	Labels    map[string]string `json:"labels,omitempty"`
+}
+
+// OCKeyRef is a {name,key} reference into a Secret/ConfigMap (both CEL-templatable).
+type OCKeyRef struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}
+
+// SchemaSection wraps a raw OpenAPI v3 / JSON Schema object.
+type SchemaSection struct {
+	OpenAPIV3Schema map[string]any `json:"openAPIV3Schema"`
+}
+
+// ResourceTypeOutput declares one consumer-bindable output. Exactly ONE of
+// Value / SecretKeyRef / ConfigMapKeyRef is set (OC enforces via XValidation).
+type ResourceTypeOutput struct {
+	Name            string    `json:"name"`
+	Value           string    `json:"value,omitempty"`
+	SecretKeyRef    *OCKeyRef `json:"secretKeyRef,omitempty"`
+	ConfigMapKeyRef *OCKeyRef `json:"configMapKeyRef,omitempty"`
+}
+
+// ResourceTypeManifest is one DP object the ResourceType renders. Template is a
+// raw k8s manifest with `${...}` CEL expressions; readyWhen gates ResourcesReady.
+type ResourceTypeManifest struct {
+	ID          string          `json:"id"`
+	IncludeWhen string          `json:"includeWhen,omitempty"`
+	ReadyWhen   string          `json:"readyWhen,omitempty"`
+	Template    json.RawMessage `json:"template"`
+}
+
+// ResourceTypeSpec is ResourceType.spec.
+type ResourceTypeSpec struct {
+	Parameters         *SchemaSection         `json:"parameters,omitempty"`
+	EnvironmentConfigs *SchemaSection         `json:"environmentConfigs,omitempty"`
+	RetainPolicy       string                 `json:"retainPolicy,omitempty"`
+	Outputs            []ResourceTypeOutput   `json:"outputs,omitempty"`
+	Resources          []ResourceTypeManifest `json:"resources"` // MinItems=1 (OC-enforced)
+}
+
+// ResourceType is the openchoreo.dev/v1alpha1 ResourceType CR.
+type ResourceType struct {
+	APIVersion string           `json:"apiVersion"`
+	Kind       string           `json:"kind"`
+	Metadata   OCObjectMeta     `json:"metadata"`
+	Spec       ResourceTypeSpec `json:"spec"`
+}
+
+// ResourceOwner is Resource.spec.owner.
+type ResourceOwner struct {
+	ProjectName string `json:"projectName"`
+}
+
+// ResourceTypeRef is Resource.spec.type — the ResourceType (or
+// ClusterResourceType) a Resource instantiates.
+type ResourceTypeRef struct {
+	Kind string `json:"kind,omitempty"` // ResourceType | ClusterResourceType (default ResourceType)
+	Name string `json:"name"`
+}
+
+// ResourceSpec is Resource.spec.
+type ResourceSpec struct {
+	Owner      ResourceOwner   `json:"owner"`
+	Type       ResourceTypeRef `json:"type"`
+	Parameters json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ResourceLatestRelease is Resource.status.latestRelease — the ResourceRelease
+// name the per-env bindings pin to.
+type ResourceLatestRelease struct {
+	Name string `json:"name"`
+	Hash string `json:"hash,omitempty"`
+}
+
+// ResourceStatus is Resource.status.
+type ResourceStatus struct {
+	LatestRelease *ResourceLatestRelease `json:"latestRelease,omitempty"`
+}
+
+// Resource is the openchoreo.dev/v1alpha1 Resource CR.
+type Resource struct {
+	APIVersion string          `json:"apiVersion"`
+	Kind       string          `json:"kind"`
+	Metadata   OCObjectMeta    `json:"metadata"`
+	Spec       ResourceSpec    `json:"spec"`
+	Status     *ResourceStatus `json:"status,omitempty"`
+}
+
+// ResourceReleaseBindingOwner is ResourceReleaseBinding.spec.owner.
+type ResourceReleaseBindingOwner struct {
+	ProjectName  string `json:"projectName"`
+	ResourceName string `json:"resourceName"`
+}
+
+// ResourceReleaseBindingSpec is ResourceReleaseBinding.spec.
+type ResourceReleaseBindingSpec struct {
+	Owner                          ResourceReleaseBindingOwner `json:"owner"`
+	Environment                    string                      `json:"environment"`
+	ResourceRelease                string                      `json:"resourceRelease,omitempty"` // the PIN
+	RetainPolicy                   string                      `json:"retainPolicy,omitempty"`
+	ResourceTypeEnvironmentConfigs json.RawMessage             `json:"resourceTypeEnvironmentConfigs,omitempty"`
+}
+
+// OCCondition mirrors a k8s CR's status.conditions[] entry.
+type OCCondition struct {
+	Type   string `json:"type"`
+	Status string `json:"status"` // "True" | "False" | "Unknown"
+	Reason string `json:"reason,omitempty"`
+}
+
+// ResolvedOutput is one entry of a binding's status.outputs — a
+// ResourceType output resolved to a concrete (hashed) DP object name. The BFF
+// reads these to wire the consuming component's env (the names are
+// OC-generated, not guessable).
+type ResolvedOutput struct {
+	Name            string    `json:"name"`
+	Value           string    `json:"value,omitempty"`
+	SecretKeyRef    *OCKeyRef `json:"secretKeyRef,omitempty"`
+	ConfigMapKeyRef *OCKeyRef `json:"configMapKeyRef,omitempty"`
+}
+
+// ResourceReleaseBindingStatus is ResourceReleaseBinding.status.
+type ResourceReleaseBindingStatus struct {
+	Conditions []OCCondition    `json:"conditions,omitempty"`
+	Outputs    []ResolvedOutput `json:"outputs,omitempty"`
+}
+
+// ResourceReleaseBinding is the openchoreo.dev/v1alpha1 ResourceReleaseBinding CR.
+type ResourceReleaseBinding struct {
+	APIVersion string                        `json:"apiVersion"`
+	Kind       string                        `json:"kind"`
+	Metadata   OCObjectMeta                  `json:"metadata"`
+	Spec       ResourceReleaseBindingSpec    `json:"spec"`
+	Status     *ResourceReleaseBindingStatus `json:"status,omitempty"`
+}
+
+// IsReady reports whether the binding's aggregate Ready condition is True.
+func (b *ResourceReleaseBinding) IsReady() bool {
+	if b == nil || b.Status == nil {
+		return false
+	}
+	for _, c := range b.Status.Conditions {
+		if c.Type == "Ready" {
+			return c.Status == "True"
+		}
+	}
+	return false
+}
+
+// ---- client -----------------------------------------------------------------
+
+// resourceHTTPDoer is satisfied by *http.Client and by requests.RetryableHTTPClient.
+type resourceHTTPDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+type resourceClient struct {
+	baseURL string
+	http    resourceHTTPDoer
+	editor  func(ctx context.Context, req *http.Request) error
+}
+
+// NewResourceClient builds a Resource-model client over the same
+// authenticated transport stack as newGenClient (correlation-id →
+// retry/401-refresh → auth request-editor), reusing buildRetryConfig and
+// authRequestEditor from transport.go so the two clients never drift on auth
+// or retry semantics.
+func NewResourceClient(cfg Config) ResourceClient {
+	if cfg.BaseURL == "" {
+		panic(errors.New("init openchoreo resource client: Config.BaseURL is required"))
+	}
+	inner := &http.Client{Transport: httpx.WrapTransport(nil)}
+	return &resourceClient{
+		baseURL: cfg.BaseURL,
+		http:    requests.NewRetryableHTTPClient(inner, buildRetryConfig(cfg)),
+		editor:  authRequestEditor(cfg),
+	}
+}
+
+// do issues a single authenticated request. `body` is JSON-encoded (nil ⇒ none);
+// on a 2xx the response is decoded into `out` (nil ⇒ discarded). Returns the
+// status code so callers can branch on 409 (conflict) / 404, and an error that
+// (on non-2xx) wraps the matching sentinel from errors.go when one applies.
+func (c *resourceClient) do(ctx context.Context, method, path string, body, out any) (int, error) {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return 0, fmt.Errorf("openchoreo(resource): marshal body: %w", err)
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
+	if err != nil {
+		return 0, fmt.Errorf("openchoreo(resource): build request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if err := c.editor(ctx, req); err != nil {
+		return 0, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("openchoreo(resource): %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if out != nil && len(raw) > 0 {
+			if err := json.Unmarshal(raw, out); err != nil {
+				return resp.StatusCode, fmt.Errorf("openchoreo(resource): decode %s %s: %w", method, path, err)
+			}
+		}
+		return resp.StatusCode, nil
+	}
+	if sentinel := sentinelForStatus(resp.StatusCode); sentinel != nil {
+		return resp.StatusCode, fmt.Errorf("%w: %s %s: %s", sentinel, method, path, string(raw))
+	}
+	return resp.StatusCode, fmt.Errorf("openchoreo(resource): %s %s → %d: %s", method, path, resp.StatusCode, string(raw))
+}
+
+func nsBase(ns string) string {
+	return "/api/v1/namespaces/" + ns
+}
+
+func (c *resourceClient) EnsureResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error) {
+	rt.APIVersion, rt.Kind = ocResourceAPIVersion, kindResourceType
+	rt.Metadata.Namespace = namespace
+	out := &ResourceType{}
+	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resourcetypes", rt, out)
+	switch {
+	case err == nil:
+		return out, nil
+	case code == http.StatusConflict:
+		// Already exists — ResourceTypes are immutable, so return the existing one.
+		got := &ResourceType{}
+		if _, gerr := c.do(ctx, http.MethodGet, nsBase(namespace)+"/resourcetypes/"+rt.Metadata.Name, nil, got); gerr != nil {
+			return nil, fmt.Errorf("ensure resourcetype %q: conflict but refetch failed: %w", rt.Metadata.Name, gerr)
+		}
+		return got, nil
+	default:
+		return nil, fmt.Errorf("ensure resourcetype %q: %w", rt.Metadata.Name, err)
+	}
+}
+
+func (c *resourceClient) ApplyResource(ctx context.Context, namespace string, r *Resource) (*Resource, error) {
+	r.APIVersion, r.Kind = ocResourceAPIVersion, kindResource
+	r.Metadata.Namespace = namespace
+	out := &Resource{}
+	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resources", r, out)
+	switch {
+	case err == nil:
+		// Freshly created — status.latestRelease is not cut yet, so callers see
+		// an empty ReleaseName and wait-for-nonempty.
+		return out, nil
+	case code == http.StatusConflict:
+		// Exists — reconcile via PUT so RT-version bumps and spec.parameters
+		// changes propagate (mirrors EnsureBinding's 409→PUT), instead of the old
+		// GetResource-and-return which silently dropped the new desired spec.
+		//
+		// Guard first: GET the existing Resource and REFUSE to overwrite it when
+		// its spec.type differs from the desired one. Dependency names are unique
+		// per project across kinds (external + platform-resource share ONE OC
+		// Resource namespace per project, matched project-wide), so a differing
+		// type means two different deps collided on one name — a blind PUT would
+		// cross-wire them. Fail loud, naming both types.
+		existing, gerr := c.GetResource(ctx, namespace, r.Metadata.Name)
+		if gerr != nil {
+			return nil, fmt.Errorf("apply resource %q: conflict but refetch failed: %w", r.Metadata.Name, gerr)
+		}
+		// Guard on the type KIND only. A differing Kind (ResourceType vs
+		// ClusterResourceType) is the cross-wire hazard — an `external` dep and a
+		// `platform-resource` dep collided on one project-scoped Resource name. A
+		// differing Name at the SAME Kind is a legitimate reconcile (an external
+		// RT version bump re-points the Resource at the freshly authored,
+		// version-suffixed ResourceType), which the PUT below must propagate.
+		if resourceTypeRefKind(existing.Spec.Type.Kind) != resourceTypeRefKind(r.Spec.Type.Kind) {
+			return nil, fmt.Errorf(
+				"apply resource %q: existing spec.type %s conflicts with desired %s — "+
+					"dependency names must be unique per project across kinds; a differing kind means two deps collided on one name",
+				r.Metadata.Name, formatTypeRef(existing.Spec.Type), formatTypeRef(r.Spec.Type))
+		}
+		// No-op reconcile: when the desired spec is identical to the existing one
+		// there is nothing to propagate and the controller will never cut a new
+		// release — a PUT + wait-for-CHANGE would hang until the poll timeout
+		// (caught live in E2E: an idempotent re-save of unchanged values stalled
+		// the /values endpoint). Report create-equivalent semantics instead:
+		// strip the release so callers wait-for-nonempty, which their first poll
+		// satisfies with the existing (still-correct) release.
+		if specsEqual(existing.Spec, r.Spec) {
+			out := *existing
+			out.Status = nil
+			return &out, nil
+		}
+		put := &Resource{}
+		if _, perr := c.do(ctx, http.MethodPut, nsBase(namespace)+"/resources/"+r.Metadata.Name, r, put); perr != nil {
+			return nil, fmt.Errorf("apply resource %q: conflict but update failed: %w", r.Metadata.Name, perr)
+		}
+		// Carry the PRE-reconcile status.latestRelease forward so callers can wait
+		// for the controller to cut a NEW release for the changed spec rather than
+		// re-pinning the stale one. A PUT to spec does not reset status, so the
+		// response usually still reports it; if the server omitted it, fall back
+		// to the pre-apply GET.
+		if ReleaseName(put) == "" && ReleaseName(existing) != "" {
+			put.Status = existing.Status
+		}
+		return put, nil
+	default:
+		return nil, fmt.Errorf("apply resource %q: %w", r.Metadata.Name, err)
+	}
+}
+
+// specsEqual compares two ResourceSpecs by canonical JSON (Go's json.Marshal
+// sorts map keys), normalising the type-ref Kind default first so an implicit
+// "ResourceType" compares equal to an explicit one. Used to detect no-op
+// reconciles on the ApplyResource 409 path.
+func specsEqual(a, b ResourceSpec) bool {
+	a.Type.Kind = resourceTypeRefKind(a.Type.Kind)
+	b.Type.Kind = resourceTypeRefKind(b.Type.Kind)
+	aj, aerr := json.Marshal(a)
+	bj, berr := json.Marshal(b)
+	return aerr == nil && berr == nil && bytes.Equal(aj, bj)
+}
+
+// resourceTypeRefKind normalises an empty Kind to its OC default ("ResourceType")
+// so a Resource authored with an implicit kind compares equal to one that spells
+// it out.
+func resourceTypeRefKind(kind string) string {
+	if kind == "" {
+		return "ResourceType"
+	}
+	return kind
+}
+
+// formatTypeRef renders a spec.type ref as "Kind/Name" for error messages.
+func formatTypeRef(t ResourceTypeRef) string {
+	return resourceTypeRefKind(t.Kind) + "/" + t.Name
+}
+
+// ReleaseName returns a Resource's status.latestRelease name, or "" when no
+// release has been cut yet (or r/its status is nil). Provisioners read it off
+// ApplyResource's result to decide whether to wait-for-CHANGE (reconcile: a
+// stale release is already present) or wait-for-nonempty (create).
+func ReleaseName(r *Resource) string {
+	if r != nil && r.Status != nil && r.Status.LatestRelease != nil {
+		return r.Status.LatestRelease.Name
+	}
+	return ""
+}
+
+func (c *resourceClient) GetResource(ctx context.Context, namespace, name string) (*Resource, error) {
+	out := &Resource{}
+	if _, err := c.do(ctx, http.MethodGet, nsBase(namespace)+"/resources/"+name, nil, out); err != nil {
+		return nil, fmt.Errorf("get resource %q: %w", name, err)
+	}
+	return out, nil
+}
+
+func (c *resourceClient) EnsureBinding(ctx context.Context, namespace string, b *ResourceReleaseBinding) (*ResourceReleaseBinding, error) {
+	b.APIVersion, b.Kind = ocResourceAPIVersion, kindResourceReleaseBind
+	b.Metadata.Namespace = namespace
+	out := &ResourceReleaseBinding{}
+	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resourcereleasebindings", b, out)
+	switch {
+	case err == nil:
+		return out, nil
+	case code == http.StatusConflict:
+		// Exists — PUT to reconcile the pin / per-env configs (PUT is a keyed update).
+		put := &ResourceReleaseBinding{}
+		if _, perr := c.do(ctx, http.MethodPut, nsBase(namespace)+"/resourcereleasebindings/"+b.Metadata.Name, b, put); perr != nil {
+			return nil, fmt.Errorf("ensure binding %q: conflict but update failed: %w", b.Metadata.Name, perr)
+		}
+		return put, nil
+	default:
+		return nil, fmt.Errorf("ensure binding %q: %w", b.Metadata.Name, err)
+	}
+}
+
+func (c *resourceClient) GetBinding(ctx context.Context, namespace, name string) (*ResourceReleaseBinding, error) {
+	out := &ResourceReleaseBinding{}
+	code, err := c.do(ctx, http.MethodGet, nsBase(namespace)+"/resourcereleasebindings/"+name, nil, out)
+	if err != nil {
+		// Mirror DeleteBinding: suppress 404 — binding may not exist yet (e.g.
+		// the provision watcher hasn't run). Callers receive (nil, nil) and
+		// must treat it as "not yet created" (ready=false, no outputs).
+		if code == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get binding %q: %w", name, err)
+	}
+	return out, nil
+}
+
+func (c *resourceClient) DeleteBinding(ctx context.Context, namespace, name string) error {
+	code, err := c.do(ctx, http.MethodDelete, nsBase(namespace)+"/resourcereleasebindings/"+name, nil, nil)
+	if err != nil && code != http.StatusNotFound {
+		return fmt.Errorf("delete binding %q: %w", name, err)
+	}
+	return nil
+}
+
+func (c *resourceClient) DeleteResource(ctx context.Context, namespace, name string) error {
+	code, err := c.do(ctx, http.MethodDelete, nsBase(namespace)+"/resources/"+name, nil, nil)
+	if err != nil && code != http.StatusNotFound {
+		return fmt.Errorf("delete resource %q: %w", name, err)
+	}
+	return nil
+}
+
+// resourceTypeList is the OC list envelope for (cluster)resourcetypes.
+type resourceTypeList struct {
+	Items []ResourceType `json:"items"`
+}
+
+func (c *resourceClient) ListClusterResourceTypes(ctx context.Context) ([]ResourceType, error) {
+	out := &resourceTypeList{}
+	if _, err := c.do(ctx, http.MethodGet, "/api/v1/clusterresourcetypes", nil, out); err != nil {
+		return nil, fmt.Errorf("list clusterresourcetypes: %w", err)
+	}
+	return out.Items, nil
+}
+
+// workloadList / workloadItem mirror just the slice of the Workload CR the
+// catalog needs: the owner (project/component) and the endpoints map.
+type workloadList struct {
+	Items []workloadItem `json:"items"`
+}
+
+type workloadItem struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		Owner struct {
+			ProjectName   string `json:"projectName"`
+			ComponentName string `json:"componentName"`
+		} `json:"owner"`
+		Endpoints map[string]struct {
+			Type       string   `json:"type"`
+			Port       int32    `json:"port"`
+			BasePath   string   `json:"basePath"`
+			Visibility []string `json:"visibility"`
+		} `json:"endpoints"`
+	} `json:"spec"`
+}
+
+func (c *resourceClient) ListWorkloadEndpoints(ctx context.Context, orgHandle string) ([]WorkloadEndpointInfo, error) {
+	out := &workloadList{}
+	if _, err := c.do(ctx, http.MethodGet, nsBase(orgHandle)+"/workloads", nil, out); err != nil {
+		return nil, fmt.Errorf("list workloads in %q: %w", orgHandle, err)
+	}
+	infos := make([]WorkloadEndpointInfo, 0)
+	for _, w := range out.Items {
+		for name, ep := range w.Spec.Endpoints {
+			infos = append(infos, WorkloadEndpointInfo{
+				Project:    w.Spec.Owner.ProjectName,
+				Component:  w.Spec.Owner.ComponentName,
+				Workload:   w.Metadata.Name,
+				Name:       name,
+				Type:       ep.Type,
+				Port:       ep.Port,
+				BasePath:   ep.BasePath,
+				Visibility: ep.Visibility,
+			})
+		}
+	}
+	return infos, nil
+}
+
+// WaitForReleaseChange polls GetResource until status.latestRelease.Name is
+// non-empty AND differs from prior, returning the release name the caller pins
+// a ResourceReleaseBinding to. `prior` is the release observed at apply time
+// (ReleaseName on ApplyResource's result):
+//
+//   - "" when the Resource was freshly created — any non-empty release
+//     satisfies the wait (the wait-for-nonempty case; see WaitForLatestRelease);
+//   - the stale release when an EXISTING Resource was reconciled — the wait then
+//     holds until the OC controller cuts the NEW release for the changed spec,
+//     so a reconcile never pins the binding to the pre-reconcile release.
+//
+// It bounds ONLY the (fast) release-cut — the controller hashing spec.parameters
+// into an immutable ResourceRelease — never the readiness of the backing infra
+// that release eventually provisions (a real database can take minutes; callers
+// must poll GetBinding/IsReady separately for that). Dedupes the two copies of
+// this polling loop the source repo carried (its external-dependency and
+// platform-resource provisioners each had their own).
+func WaitForReleaseChange(ctx context.Context, rc ResourceClient, namespace, resourceName, prior string, interval, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		got, err := rc.GetResource(ctx, namespace, resourceName)
+		if err != nil {
+			return "", fmt.Errorf("poll resource %q: %w", resourceName, err)
+		}
+		if name := ReleaseName(got); name != "" && name != prior {
+			return name, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("resource %q produced no new ResourceRelease within %s", resourceName, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+// WaitForLatestRelease is the prior=="" special case of WaitForReleaseChange:
+// wait until any non-empty release appears. Used on the create path where no
+// stale release exists yet.
+func WaitForLatestRelease(ctx context.Context, rc ResourceClient, namespace, resourceName string, interval, timeout time.Duration) (string, error) {
+	return WaitForReleaseChange(ctx, rc, namespace, resourceName, "", interval, timeout)
+}

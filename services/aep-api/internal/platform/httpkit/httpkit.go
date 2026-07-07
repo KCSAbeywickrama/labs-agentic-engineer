@@ -14,50 +14,36 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package httpkit holds the shared HTTP response writers (§4.0). It exposes the
-// Write40x helpers the central tenant gate uses; bodies are kept byte-identical
-// to the utils.WriteErrorResponse payload by delegating to it, so no client/test
-// sees a changed error shape.
+// Package httpkit holds the shared HTTP response writers (§4.0): the
+// WriteSuccessResponse/WriteErrorResponse base writers plus the Write40x
+// helpers the central tenant gate uses, and the UUID path-param validator.
 package httpkit
 
 import (
-	"context"
 	"net/http"
 
-	"github.com/wso2/aep/aep-api/middleware/jwt"
-	"github.com/wso2/aep/aep-api/utils"
-	"github.com/wso2/aep/aep-api/utils/validate"
+	"github.com/wso2/aep/aep-api/internal/platform/validate"
 )
 
 // Write400 writes a 400 Bad Request with the given client-facing message.
 func Write400(w http.ResponseWriter, msg string) {
-	utils.WriteErrorResponse(w, http.StatusBadRequest, msg)
+	WriteErrorResponse(w, http.StatusBadRequest, msg)
 }
 
 // Write401 writes a 401 Unauthorized.
 func Write401(w http.ResponseWriter) {
-	utils.WriteErrorResponse(w, http.StatusUnauthorized, "authentication required")
+	WriteErrorResponse(w, http.StatusUnauthorized, "authentication required")
 }
 
 // Write404 writes a 404 Not Found. The gate uses the SAME body for wrong-org
 // and no-such-org so cross-org existence is never leaked (§6.1a).
 func Write404(w http.ResponseWriter, msg string) {
-	utils.WriteErrorResponse(w, http.StatusNotFound, msg)
+	WriteErrorResponse(w, http.StatusNotFound, msg)
 }
 
 // Write500 writes a 500 Internal Server Error with a generic message.
 func Write500(w http.ResponseWriter) {
-	utils.WriteErrorResponse(w, http.StatusInternalServerError, "internal error")
-}
-
-// ActorFromContext returns the requesting user's identifier (the verified
-// JWT subject) for audit attribution. Falls back to "unknown" when the JWT
-// middleware didn't populate claims (e.g. an unauthenticated path).
-func ActorFromContext(ctx context.Context) string {
-	if c := jwt.ClaimsFromContext(ctx); c != nil && c.Subject != "" {
-		return c.Subject
-	}
-	return "unknown"
+	WriteErrorResponse(w, http.StatusInternalServerError, "internal error")
 }
 
 // RequireUUID validates a canonical UUID path param. On failure it writes a

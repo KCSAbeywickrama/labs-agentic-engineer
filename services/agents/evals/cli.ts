@@ -20,12 +20,13 @@
  * The eval entry (`pnpm --filter @aep/agents eval`). Report-not-gate: always
  * exits 0, and SKIPS cleanly (no tokens) when `ANTHROPIC_API_KEY` is unset.
  *
- *   pnpm --filter @aep/agents eval                 # run all main fixtures, K samples
- *   pnpm --filter @aep/agents eval -- <fixture>    # run one fixture
- *   EVAL_RECORD=1 pnpm ... eval -- <fixture>       # record turns, print messages
+ *   pnpm --filter @aep/agents eval                     # run every suite, K samples
+ *   pnpm --filter @aep/agents eval -- <fixture>        # run one fixture (any suite)
+ *   pnpm --filter @aep/agents eval -- --suite=task-plan  # run one suite
+ *   EVAL_RECORD=1 pnpm ... eval -- <fixture>           # record turns, print messages (main only)
  *
- * Each run dumps every turn's reconstructed snapshot under evals/.eval-preview/
- * (gitignored) for human inspection.
+ * The file suite dumps every turn's reconstructed snapshot under
+ * evals/.eval-preview/ (gitignored) for human inspection.
  */
 
 import { dirname, join } from "node:path";
@@ -34,10 +35,81 @@ import { createModel } from "../src/shared/model.js";
 import { loadDotenv } from "../src/shared/env.js";
 import { loadFixture, loadFixtures } from "./fixture.js";
 import { runSuite, recordFixture, writeResults, type RunOptions } from "./harness.js";
+import { runSuite as runTaskPlanSuite } from "./task-plan/harness.js";
 import { loadRepoSkills } from "./skills.js";
 import { mainSuite } from "./main/main.eval.js";
+import { taskPlanSuite, taskPlanFixtures } from "./task-plan/task-plan.eval.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/** `--suite=<name>` selects one suite; a bare positional arg is a fixture-name filter. */
+function parseArgs(argv: string[]): { suite?: string; nameFilter?: string } {
+  const suiteArg = argv.find((a) => a.startsWith("--suite="));
+  return {
+    ...(suiteArg ? { suite: suiteArg.slice("--suite=".length) } : {}),
+    ...(() => {
+      const positional = argv.find((a) => !a.startsWith("-"));
+      return positional ? { nameFilter: positional } : {};
+    })(),
+  };
+}
+
+async function runMainSuite(model: ReturnType<typeof createModel>, apiKey: string, nameFilter?: string): Promise<void> {
+  const skills = mainSuite.skillsDir ? loadRepoSkills(mainSuite.skillsDir) : [];
+
+  if (process.env.EVAL_RECORD === "1") {
+    if (!nameFilter) {
+      process.stdout.write("EVAL_RECORD requires a fixture name: eval -- <fixture>\n");
+      return;
+    }
+    const fixture = loadFixture(join(mainSuite.fixturesDir, `${nameFilter}.json`));
+    const messages = await recordFixture(mainSuite, fixture, model, skills, apiKey);
+    process.stdout.write(`${JSON.stringify(messages, null, 2)}\n`);
+    return;
+  }
+
+  let fixtures = loadFixtures(mainSuite.fixturesDir);
+  if (nameFilter) fixtures = fixtures.filter((f) => f.name === nameFilter);
+  if (fixtures.length === 0) return;
+
+  const samples = Math.max(1, Number(process.env.EVAL_SAMPLES ?? 3));
+  const opts: RunOptions = {
+    model,
+    samples,
+    apiKey,
+    ...(skills.length > 0 ? { skills } : {}),
+    onLog: (m) => process.stdout.write(`${m}\n`),
+    writePreviewDir: join(here, ".eval-preview"),
+  };
+
+  process.stdout.write(`\n=== suite: main (${skills.length} skill(s)) ===\n`);
+  const result = await runSuite(mainSuite, fixtures, opts);
+  writeResults(join(here, "eval-results", `${mainSuite.agent}.json`), result);
+  for (const f of result.fixtures) {
+    process.stdout.write(`main/${f.name}: ${f.passed}/${f.samples} samples passed (${Math.round(f.passRate * 100)}%)\n`);
+  }
+}
+
+async function runPlanSuite(model: ReturnType<typeof createModel>, apiKey: string, nameFilter?: string): Promise<void> {
+  const skills = taskPlanSuite.skillsDir ? loadRepoSkills(taskPlanSuite.skillsDir) : [];
+  let fixtures = taskPlanFixtures;
+  if (nameFilter) fixtures = fixtures.filter((f) => f.name === nameFilter);
+  if (fixtures.length === 0) return;
+
+  const samples = Math.max(1, Number(process.env.EVAL_SAMPLES ?? 3));
+  process.stdout.write(`\n=== suite: task-plan (${skills.length} skill(s)) ===\n`);
+  const result = await runTaskPlanSuite(taskPlanSuite, fixtures, {
+    model,
+    samples,
+    apiKey,
+    ...(skills.length > 0 ? { skills } : {}),
+    onLog: (m) => process.stdout.write(`${m}\n`),
+  });
+  writeResults(join(here, "eval-results", `${taskPlanSuite.agent}.json`), result);
+  for (const f of result.fixtures) {
+    process.stdout.write(`task-plan/${f.name}: ${f.passed}/${f.samples} samples passed (${Math.round(f.passRate * 100)}%)\n`);
+  }
+}
 
 async function main(): Promise<void> {
   loadDotenv();
@@ -47,51 +119,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  const nameFilter = process.argv.slice(2).find((a) => !a.startsWith("-"));
+  const { suite, nameFilter } = parseArgs(process.argv.slice(2));
   const model = createModel({ apiKey });
 
-  // The caller resolves skills from the repo (ADR-0002); the service reads none.
-  const skills = mainSuite.skillsDir ? loadRepoSkills(mainSuite.skillsDir) : [];
-  if (skills.length > 0) {
-    process.stdout.write(`eval: ${skills.length} skill(s) in catalog: ${skills.map((s) => s.name).join(", ")}\n`);
-  }
-
-  // Record mode: run a fixture's turns and print the resulting messages (for
-  // authoring thread-2 captured-trace fixtures). Does not score.
-  if (process.env.EVAL_RECORD === "1") {
-    if (!nameFilter) {
-      process.stdout.write("EVAL_RECORD requires a fixture name: eval -- <fixture>\n");
-      return;
-    }
-    const fixture = loadFixture(join(mainSuite.fixturesDir, `${nameFilter}.json`));
-    const messages = await recordFixture(mainSuite, fixture, model, skills);
-    process.stdout.write(`${JSON.stringify(messages, null, 2)}\n`);
-    return;
-  }
-
-  let fixtures = loadFixtures(mainSuite.fixturesDir);
-  if (nameFilter) fixtures = fixtures.filter((f) => f.name === nameFilter);
-  if (fixtures.length === 0) {
-    process.stdout.write(`eval: no fixtures${nameFilter ? ` matching "${nameFilter}"` : ""}.\n`);
-    return;
-  }
-
-  const samples = Math.max(1, Number(process.env.EVAL_SAMPLES ?? 3));
-  const opts: RunOptions = {
-    model,
-    samples,
-    ...(skills.length > 0 ? { skills } : {}),
-    onLog: (m) => process.stdout.write(`${m}\n`),
-    writePreviewDir: join(here, ".eval-preview"),
-  };
-
-  const result = await runSuite(mainSuite, fixtures, opts);
-  writeResults(join(here, "eval-results", `${mainSuite.agent}.json`), result);
-
-  process.stdout.write("\n=== eval summary (report-not-gate) ===\n");
-  for (const f of result.fixtures) {
-    process.stdout.write(`${f.name}: ${f.passed}/${f.samples} samples passed (${Math.round(f.passRate * 100)}%)\n`);
-  }
+  if (!suite || suite === "main") await runMainSuite(model, apiKey, nameFilter);
+  if (!suite || suite === "task-plan") await runPlanSuite(model, apiKey, nameFilter);
 }
 
 main().catch((err: unknown) => {

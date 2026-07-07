@@ -19,6 +19,7 @@ package gitrepo
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -39,11 +40,22 @@ type WebhookService interface {
 	Register(ctx context.Context, orgID, projectID string) (hookID *int64, err error)
 }
 
+// issueRepoResolver is the private capability webhookService borrows from the
+// issue service: resolving a project's (owner, repo, credential) in one place.
+// The production *issueService satisfies it. Storing the IssueService interface
+// (rather than a lossy `issueSvc.(*issueService)` cast that silently yields nil
+// and nil-derefs at request time) means Register reaches the resolver through a
+// checked assertion — an impl that can't resolve fails loudly with an error, not
+// a panic.
+type issueRepoResolver interface {
+	resolveRepoAndCredential(ctx context.Context, orgID, projectID string) (owner, repo string, cred credentials.Credential, err error)
+}
+
 type webhookService struct {
 	repo             repositories.RepoRepository
-	github           GitHubClient
+	github           WebhookOps
 	repoSvc          RepoService
-	issue            *issueService
+	issue            IssueService
 	deliveryURL      string
 	hmacSecret       string
 	subscribedEvents []string
@@ -51,26 +63,28 @@ type webhookService struct {
 
 func NewWebhookService(
 	repo repositories.RepoRepository,
-	github GitHubClient,
+	github WebhookOps,
 	repoSvc RepoService,
 	issueSvc IssueService,
 	deliveryURL, hmacSecret string,
 ) WebhookService {
-	is, _ := issueSvc.(*issueService)
 	return &webhookService{
 		repo:        repo,
 		github:      github,
 		repoSvc:     repoSvc,
-		issue:       is,
+		issue:       issueSvc,
 		deliveryURL: deliveryURL,
 		hmacSecret:  hmacSecret,
 		// Events subscribed to. Repo-level webhooks only — App-installation
 		// events like installation_repositories are scoped to the App's own
-		// callback and are rejected by GitHub on repo webhooks (422).
+		// callback and are rejected by GitHub on repo webhooks (422). "issues"
+		// joins the set for the tasks-github-native model (§9.2): task birth,
+		// command labels, block validation/repair, close/reopen.
 		subscribedEvents: []string{
 			"pull_request",
 			"push",
 			"issue_comment",
+			"issues",
 		},
 	}
 }
@@ -80,7 +94,11 @@ func (s *webhookService) Register(ctx context.Context, orgID, projectID string) 
 		return nil, fmt.Errorf("webhook delivery URL or HMAC secret not configured — set GITHUB_WEBHOOK_DELIVERY_URL and GITHUB_WEBHOOK_SECRET")
 	}
 
-	owner, repoName, cred, err := s.issue.resolveRepoAndCredential(ctx, orgID, projectID)
+	resolver, ok := s.issue.(issueRepoResolver)
+	if !ok {
+		return nil, fmt.Errorf("webhook: issue service %T cannot resolve repo credentials", s.issue)
+	}
+	owner, repoName, cred, err := resolver.resolveRepoAndCredential(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +116,16 @@ func (s *webhookService) Register(ctx context.Context, orgID, projectID string) 
 	)
 	if err != nil {
 		return nil, fmt.Errorf("register webhook: %w", err)
+	}
+
+	// Reconcile the event list on the hook. RegisterWebhook's already-exists
+	// path returns a pre-existing hook WITHOUT updating its events, so a hook
+	// created before "issues" joined the subscription would never receive
+	// issue deliveries. PATCHing the events every register makes cutover
+	// idempotent (§9.2). Best-effort: a reconcile failure must not block a
+	// successful registration.
+	if patchErr := s.github.UpdateWebhookEvents(ctx, owner, repoName, cred, hookID, s.subscribedEvents); patchErr != nil {
+		slog.WarnContext(ctx, "reconcile webhook events failed", "project", projectID, "hookId", hookID, "error", patchErr)
 	}
 
 	if err := s.repoSvc.SetWebhookID(ctx, orgID, projectID, hookID); err != nil {

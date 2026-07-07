@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, Stack, Typography } from '@wso2/oxygen-ui';
 import {
   Circle,
@@ -33,10 +33,9 @@ import {
 import type { TaskProgressEvent } from '../../services/api';
 
 interface Props {
-  agentLines: TaskProgressEvent[];
-  buildLines: TaskProgressEvent[];
-  agentFinal?: boolean;
-  buildFinal?: boolean;
+  /** The feed, already ordered by (ts, seq) — the BFF returns it sorted. */
+  lines: TaskProgressEvent[];
+  final?: boolean;
   emptyMessage?: string;
 }
 
@@ -77,11 +76,6 @@ function formatTs(ts: string | undefined): string {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return '—:—:—';
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-}
-
-function compareEvents(a: TaskProgressEvent, b: TaskProgressEvent): number {
-  if (a.ts === b.ts) return a.seq - b.seq;
-  return a.ts < b.ts ? -1 : 1;
 }
 
 // Hoisted row styles — emotion hashes these once instead of re-processing
@@ -143,45 +137,18 @@ const ActivityRow = memo(function ActivityRow({ ev }: RowProps) {
   );
 });
 
-// mergeSorted does a 2-pointer merge of two already-sorted arrays. The
-// inputs from the BFF are sorted by (ts, seq); previously we concatenated
-// and re-sorted on every poll (O(N log N)). The merge is O(N) and the
-// dedup is fold-into-the-walk.
-function mergeSorted(a: TaskProgressEvent[], b: TaskProgressEvent[]): TaskProgressEvent[] {
-  const out: TaskProgressEvent[] = [];
-  out.length = a.length + b.length;
-  let i = 0, j = 0, k = 0;
-  let lastKey = '';
-  const writeIfNew = (ev: TaskProgressEvent) => {
-    const key = `${ev.ts}|${ev.seq}|${ev.kind}`;
-    if (key === lastKey) return;
-    lastKey = key;
-    out[k++] = ev;
-  };
-  while (i < a.length && j < b.length) {
-    if (compareEvents(a[i], b[j]) <= 0) writeIfNew(a[i++]);
-    else writeIfNew(b[j++]);
-  }
-  while (i < a.length) writeIfNew(a[i++]);
-  while (j < b.length) writeIfNew(b[j++]);
-  out.length = k;
-  return out;
-}
-
-export function TaskActivityFeed({ agentLines, buildLines, agentFinal, buildFinal, emptyMessage }: Props) {
+export function TaskActivityFeed({ lines, final, emptyMessage }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stick-to-bottom: when the user is near the bottom, auto-scroll on new
   // events; if they scroll up to read history, we stop auto-scrolling and
   // surface a "jump to latest" affordance.
   const [stickToBottom, setStickToBottom] = useState(true);
 
-  const merged = useMemo(() => mergeSorted(agentLines, buildLines), [agentLines, buildLines]);
-
   useEffect(() => {
     if (!stickToBottom) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [merged.length, stickToBottom]);
+  }, [lines.length, stickToBottom]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -190,7 +157,7 @@ export function TaskActivityFeed({ agentLines, buildLines, agentFinal, buildFina
     setStickToBottom(nearBottom);
   };
 
-  if (merged.length === 0) {
+  if (lines.length === 0) {
     return (
       <Box sx={{ py: 4, textAlign: 'center' }}>
         <Typography variant="body2" color="text.disabled">
@@ -207,10 +174,10 @@ export function TaskActivityFeed({ agentLines, buildLines, agentFinal, buildFina
       sx={{ position: 'relative', py: 1, maxHeight: 480, overflowY: 'auto' }}
     >
       <Stack spacing={0.5}>
-        {merged.map((ev, i) => (
+        {lines.map((ev, i) => (
           <ActivityRow key={`${ev.ts}-${ev.seq}-${i}`} ev={ev} />
         ))}
-        {(agentFinal || buildFinal) && (
+        {final && (
           <Box sx={{ px: 1, py: 1, textAlign: 'center' }}>
             <Typography variant="caption" color="text.disabled">— end of feed —</Typography>
           </Box>

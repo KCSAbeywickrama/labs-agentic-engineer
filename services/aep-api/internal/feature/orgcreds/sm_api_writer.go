@@ -26,9 +26,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
-	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -165,6 +165,43 @@ func (w *SMAPIWriter) WriteGitHubPAT(ctx context.Context, ocOrgID string, pat st
 		"secretRefName", secretRefName,
 		"vaultKey", vaultKey)
 	return secretRefName, nil
+}
+
+// WriteExternalResourceSecret uploads the secret fields of an external
+// resource's per-(project, env) value bundle to SM-API and returns the Vault
+// KV path the rendered ExternalSecret reads (the secretStorePath) plus the
+// secretRefName. Unlike WriteAnthropic/WriteGitHubPAT there is NO DB triplet
+// to stamp — the vault path is carried on the per-env OC
+// ResourceReleaseBinding instead (pinned by the external-resource
+// provisioner). Same semantics otherwise: errors are returned, ctx must carry
+// the user JWT (resolveVaultKey reads the ouId claim).
+func (w *SMAPIWriter) WriteExternalResourceSecret(ctx context.Context, ocOrgID, projectName, entityName string, data map[string]string) (vaultKey, secretRefName string, err error) {
+	if !w.Enabled() {
+		return "", "", nil
+	}
+	if strings.TrimSpace(ocOrgID) == "" || strings.TrimSpace(projectName) == "" || strings.TrimSpace(entityName) == "" {
+		return "", "", errors.New("sm-api writer: ocOrgID, projectName, entityName required")
+	}
+	if len(data) == 0 {
+		return "", "", errors.New("sm-api writer: no external-resource secret data to write")
+	}
+	loc := secretmanagersvc.SecretLocation{
+		OrgName:     ocOrgID,
+		ProjectName: projectName,
+		EntityName:  entityName,
+	}
+	secretRefName, err = w.client.CreateSecret(ctx, loc, data)
+	if err != nil {
+		return "", "", fmt.Errorf("sm-api writer: external-resource secret upload (%s): %w", entityName, err)
+	}
+	vaultKey, err = w.resolveVaultKey(ctx, secretRefName)
+	if err != nil {
+		return "", secretRefName, fmt.Errorf("sm-api writer: resolve external-resource vault key (%s): %w", entityName, err)
+	}
+	slog.InfoContext(ctx, "sm-api writer: external-resource secret uploaded",
+		"ocOrgId", ocOrgID, "project", projectName, "entity", entityName,
+		"secretRefName", secretRefName, "vaultKey", vaultKey)
+	return vaultKey, secretRefName, nil
 }
 
 // resolveVaultKey reconstructs the actual Vault KV key from the

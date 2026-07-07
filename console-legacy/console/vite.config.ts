@@ -16,6 +16,7 @@
  * under the License.
  */
 
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 
@@ -23,6 +24,23 @@ const apiTarget = process.env.API_PROXY_TARGET || 'http://localhost:9090';
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test-setup.ts'],
+    // Scope vitest to the component/unit suites under `src/`. The `test/`
+    // directory is the node:test SSE-cassette suite (run via `test:cassettes`,
+    // a separate runner) — vitest must NOT collect those.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    server: {
+      deps: {
+        // @wso2/oxygen-ui uses prismjs with CJS extension-less imports that
+        // fail in vitest's native ESM mode. Inline-transform it so vitest
+        // can resolve those imports correctly.
+        inline: ['@wso2/oxygen-ui', 'prismjs'],
+      },
+    },
+  },
   resolve: {
     dedupe: ['react', 'react-dom'],
   },

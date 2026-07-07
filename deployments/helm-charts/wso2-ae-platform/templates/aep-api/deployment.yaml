@@ -19,6 +19,10 @@ spec:
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
       serviceAccountName: aep-api
+      securityContext:
+        # The shared workspaces PVC is handed to the pod's fsGroup so the
+        # non-root runtime user (uid 1000) can write it.
+        fsGroup: 1000
       containers:
         - name: aep-api
           image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
@@ -41,6 +45,12 @@ spec:
             - name: LOCAL_OPENBAO_REPAIR
               value: "false"
 
+            # ── Shared git workspaces (RWX PVC aep-workspaces) ────────────────
+            # Bare mirrors + per-SHA snapshots
+            # (docs/design/shared-volume-clone-architecture.md). Sole writer.
+            - name: AEP_WORKSPACE_ROOT
+              value: "/workspaces"
+
             # ── Database ──────────────────────────────────────────────────────
             {{- if .Values.postgres.url }}
             - name: DATABASE_URL
@@ -56,16 +66,35 @@ spec:
             - name: PLATFORM_API_SERVICE_HOST
               value: {{ .Values.openchoreo.apiGatewayHost | quote }}
 
-            # ── Sister services ───────────────────────────────────────────────
-            - name: AGENTS_SERVICE_BASE_URL
-              value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
-            - name: AGENTS_SERVICE_URL
-              value: "http://agents-service.{{ .Release.Namespace }}:{{ .Values.agentsService.port }}"
+            # ── File-mutation agents service (services/agents) ────────────────
+            # BFF→agents M2M: an HS256 bearer signed with the shared secret the
+            # agents deployment verifies (AGENT_JWT_SECRET). Reached by Service
+            # DNS, independent of the gateway HTTPRoute split.
+            - name: AGENTS_SVC_BASE_URL
+              value: "http://agents.{{ .Release.Namespace }}:{{ .Values.agents.port }}"
+            - name: AGENTS_SVC_JWT_SECRET
+              value: {{ .Values.agents.m2mSecret | quote }}
+            - name: AGENTS_SVC_JWT_AUDIENCE
+              value: {{ .Values.agents.jwtAudience | quote }}
+            - name: AGENTS_SVC_JWT_ISSUER
+              value: {{ .Values.agents.jwtIssuer | quote }}
             # The runner's /internal callback base. Points at the dedicated
             # internal host when bff.internalURL is set (pairs with the
             # aepApi.internalHostname HTTPRoute split); otherwise the public URL.
             - name: AGENT_PLATFORM_URL
               value: {{ .Values.bff.internalURL | default .Values.bff.publicURL | quote }}
+            # The BFF's own base URL as reached by the agents service (in-cluster
+            # Service DNS) for the internal MCP discovery surface. Enables the
+            # `mcp` bundle handed to the agents service in the generation turn.
+            # (Inert until the dependencies feature lands — Phase 4.)
+            - name: AEP_API_INTERNAL_BASE_URL
+              value: "http://aep-api.{{ .Release.Namespace }}:{{ .Values.aepApi.port }}"
+            # ESO ClusterSecretStore backing the proxy-dispatched runners' per-run
+            # ExternalSecrets. Empty → BFF default ("default", local k3d); a real
+            # dataplane must set it to the DP app-secrets store or private-repo
+            # build clones + agent creds silently resolve nothing.
+            - name: AGENT_CLUSTER_SECRET_STORE
+              value: {{ .Values.aepApi.agentClusterSecretStore | default "" | quote }}
 
             # ── Identity Provider (OC Thunder) ────────────────────────────────
             - name: JWKS_URL
@@ -107,14 +136,6 @@ spec:
             - name: SERVICE_AUTH_GIT_CLIENT_SECRET
               value: "aep-bff-to-git-service-secret"
             - name: SERVICE_AUTH_GIT_HOST_HEADER
-              value: ""
-            - name: SERVICE_AUTH_AGENTS_TOKEN_URL
-              value: {{ .Values.idp.tokenURL | quote }}
-            - name: SERVICE_AUTH_AGENTS_CLIENT_ID
-              value: {{ .Values.aepApi.agentsJwt.clientId | quote }}
-            - name: SERVICE_AUTH_AGENTS_CLIENT_SECRET
-              value: {{ .Values.aepApi.agentsJwt.clientSecret | quote }}
-            - name: SERVICE_AUTH_AGENTS_HOST_HEADER
               value: ""
 
             # ── Task JWT ──────────────────────────────────────────────────────
@@ -175,32 +196,30 @@ spec:
             - name: OBSERVER_OAUTH_HOST_HEADER
               value: ""
 
-            - name: REPO_BASE_PATH
-              value: "/data/repos"
-
           volumeMounts:
             - name: task-signing-key
               mountPath: /app/keys
               readOnly: true
+            - name: workspaces
+              mountPath: /workspaces
             {{- if .Values.github.appPrivateKeyPem }}
             - name: github-app-key
               mountPath: /etc/github-app
               readOnly: true
             {{- end }}
-            - name: repos
-              mountPath: /data/repos
 
       volumes:
         - name: task-signing-key
           configMap:
             name: aep-api-task-signing-key
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces
         {{- if .Values.github.appPrivateKeyPem }}
         - name: github-app-key
           configMap:
             name: aep-api-github-app-key
         {{- end }}
-        - name: repos
-          emptyDir: {}
 {{- if .Values.taskSigning.privateKeyPem }}
 ---
 # ConfigMap holding the task-signing RSA private key (only if custom key provided).

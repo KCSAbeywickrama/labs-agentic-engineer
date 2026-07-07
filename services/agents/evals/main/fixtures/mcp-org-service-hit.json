@@ -1,0 +1,21 @@
+{
+  "name": "mcp-org-service-hit",
+  "description": "MCP discovery (Task E2): the org already publishes an `employee-api` endpoint from project `hr-directory` (mock catalog). The agent should call list_org_endpoints and reuse the exact provider component name for the org-service dependency instead of inventing one.",
+  "difficulty": "medium",
+  "turns": [
+    {
+      "prompt": "Derive a new backend component named `onboarding-api` — a Go service that looks up new hires in the company's employee directory, which is already published as a service by another project in this org. Check the org's published endpoints before declaring that dependency."
+    }
+  ],
+  "expect": {
+    "toolsUsed": ["list_org_endpoints"],
+    "fileMatches": [
+      {
+        "path": "specs/design/components/onboarding-api/design.json",
+        "pattern": "\"kind\":\\s*\"org-service\"[\\s\\S]*?\"name\":\\s*\"employee-api\""
+      }
+    ],
+    "touched": ["specs/design/components/onboarding-api/design.json"],
+    "noToolErrors": true
+  }
+}

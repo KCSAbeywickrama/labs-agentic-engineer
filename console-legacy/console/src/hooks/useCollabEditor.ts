@@ -22,6 +22,7 @@ import { WebsocketProvider } from 'y-websocket';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { getToken } from '../services/api/rest';
+import { env } from '../config/env';
 
 export interface CollabPeer {
   clientId: number;
@@ -95,6 +96,10 @@ export function useCollabEditor(opts: UseCollabEditorOptions): UseCollabEditorRe
   pausedRef.current = !!paused;
 
   useEffect(() => {
+    // Collab is disabled pending re-point to the GitHub-direct file model
+    // (agents-generation-migration §5). While off, never open the WebSocket —
+    // the hook returns an inert result and the editor runs standalone.
+    if (!env.VITE_COLLAB_ENABLED) return;
     if (!roomId) return;
     if (!userName) return;
     cleanedUpRef.current = false;

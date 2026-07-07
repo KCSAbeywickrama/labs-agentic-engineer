@@ -155,14 +155,7 @@ else
     [ -f "$INTERNAL_KUBECONFIG" ] || touch "$INTERNAL_KUBECONFIG"
 fi
 
-# 4. Repo workspace bind mount — aep-api clones project repos here
-#    (REPO_BASE_PATH=/data/repos). Must exist and be writable by appuser
-#    (uid 1000) before compose creates the mount as root.
-echo ""
-echo "📁 Ensuring repo storage at $DEPLOY_DIR/data/repos..."
-ensure_repo_storage "$DEPLOY_DIR/data/repos"
-
-# 5. BFF Task JWT signing key — bind-mounted into aep-api as
+# BFF Task JWT signing key — bind-mounted into aep-api as
 #    /app/keys/task-signing.pem (docker-compose volume). The BFF reads
 #    the PEM from BFF_TASK_SIGNING_KEY_PATH; mounting beats env-passing
 #    a multi-line value through compose's `${VAR}` substitution.
@@ -183,6 +176,21 @@ if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/d
     apply_public_urls_to_cluster
 else
     echo "⚠️  k3d cluster not accessible — skipping public-URL sync"
+fi
+
+# 6c. Generate the OpenChoreo API client (internal/clients/openchoreo/gen/*.gen.go)
+#     if it's missing. Gitignored (source of truth is the pinned OC spec, see
+#     the Makefile) — a fresh clone has no gen/ output, and aep-api's
+#     Dockerfile does a plain `go build` with no codegen step of its own, so
+#     the very first `docker compose up --build` would otherwise fail with
+#     "no required module provides package .../gen". The Makefile target hits
+#     the network (fetches the pinned spec), so skip it once already generated
+#     rather than re-fetching on every start.
+OC_GEN_DIR="$ROOT_DIR/services/aep-api/internal/clients/openchoreo/gen"
+if [ ! -f "$OC_GEN_DIR/types.gen.go" ] || [ ! -f "$OC_GEN_DIR/client.gen.go" ]; then
+    echo ""
+    echo "🔧 Generating OpenChoreo API client (first run only)..."
+    make -C "$ROOT_DIR/services/aep-api" gen-oc-client
 fi
 
 # 7. Bring up the compose stack. The coding-agent runner is no longer a
@@ -290,15 +298,32 @@ if [ -x "$SCRIPT_DIR/repair-secrets.sh" ]; then
         echo "⚠️  repair-secrets did not complete cleanly — see output above."
 fi
 
+# 9. Local-dev seed. Opt-in: runs only when the operator has set
+#    LOCAL_DEV_ADMIN_GITHUB_PAT and/or ANTHROPIC_API_KEY in .env (both
+#    are preserved across setup-aep.sh re-runs). Connects the default
+#    org's credentials exactly as a user would via Settings — idempotent
+#    on re-runs, and best-effort: failure here doesn't fail start.sh.
+#    SKIP_DEV_SEED=1 disables the auto-run (e.g. to exercise the manual
+#    Settings clickthrough, or to run scripts/seed-dev.sh yourself later).
+echo ""
+if [ "${SKIP_DEV_SEED:-0}" = "1" ]; then
+    echo "⏭️  SKIP_DEV_SEED=1 — skipping dev seed (run scripts/seed-dev.sh manually when needed)"
+elif grep -qE '^(LOCAL_DEV_ADMIN_GITHUB_PAT|ANTHROPIC_API_KEY)=.+' "$DEPLOY_DIR/.env" 2>/dev/null; then
+    bash "$SCRIPT_DIR/seed-dev.sh" || \
+        echo "⚠️  seed-dev did not complete cleanly — see output above."
+else
+    echo "⏭️  no LOCAL_DEV_ADMIN_GITHUB_PAT / ANTHROPIC_API_KEY in .env — skipping dev seed (scripts/seed-dev.sh)"
+fi
+
 echo ""
 echo "============================================"
 echo "  ✅ All services running!"
 echo "============================================"
 echo ""
 echo "  Console:          http://localhost:8090"
+echo "  Console (new):    http://localhost:8091   (#98 preview, apps/console)"
 echo "  API:              http://localhost:9090"
-echo "  Git Service:      http://localhost:3300"
-echo "  Agents Service:   http://localhost:3400"
+echo "  Agents:           http://localhost:4000"
 echo "  SRE-handoff MCP:  http://localhost:3401 (alert → AI-RCA → issue → coding agent;"
 echo "                    see docs/developer-guide/sre-handoff-runbook.md)"
 echo ""

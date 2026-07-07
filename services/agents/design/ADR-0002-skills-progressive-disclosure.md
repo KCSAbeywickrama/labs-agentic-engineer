@@ -31,17 +31,21 @@ pushing skills in the turn request payload.
   library; in production a BFF pushes them. (`src/` writes no files; only `evals/`
   touches the fs — existing service invariant.)
 - **Catalog, then load.** The service appends a **catalog** — `name` + `description`
-  only, no bodies — to the **end** of the system prompt. A new **`loadSkill(name)`**
-  tool returns a skill's `content` as a tool result; the body enters context only
-  when loaded, and persists in message history thereafter.
-- **Corrective miss.** `loadSkill` on an unknown name returns a self-correctable
-  error result (`unknown skill: X; available: …`), never aborting the turn —
-  matching the `editFile` `NOT_FOUND`/`NOT_UNIQUE` convention (ADR-0001).
+  only, no bodies — to the **end** of the system prompt. A new **`loadSkill(names)`**
+  tool returns the requested skills' `content` as one tool result (batched: every
+  skill a turn needs loads in ONE call = one agent step, instead of a step per
+  skill); the bodies enter context only when loaded, and persist in message
+  history thereafter.
+- **Corrective miss.** `loadSkill` with unknown names returns a self-correctable
+  error result that still carries every skill that DID resolve plus `missing` and
+  `available`, never aborting the turn — the model re-calls for the corrected
+  missing names only, matching the `editFile` `NOT_FOUND`/`NOT_UNIQUE` convention
+  (ADR-0001).
 - **Inert when absent.** No skills in the payload → no catalog, `loadSkill`
   unregistered → byte-identical to today's behavior. `loadSkill` is not a bundle
   mutation, so it projects to **no `Change`**.
 
-Wire types (`Skill`, `LoadSkillInput`) live in `@aep/contracts`; the Zod schema is
+Wire types (`Skill`, `LoadSkillInput`) live in `src/contracts/sse-events.ts`; the Zod schema is
 drift-guarded against them, as with the file tools.
 
 ## Alternatives rejected

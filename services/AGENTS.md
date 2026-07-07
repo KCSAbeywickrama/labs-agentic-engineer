@@ -9,3 +9,9 @@
 ## Conventions
 
 - Config/env parsing in one place per service; add every var to `.env.example`.
+
+## Practices
+
+- Test driven developement is preferred. Write tests first, then implement the feature. Define the contrract first, then write the test case for that contract, then implement the feature. You can tweak along the way.
+
+

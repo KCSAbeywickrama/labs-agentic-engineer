@@ -82,7 +82,10 @@ func (s *SkillImportService) Import(ctx context.Context, orgID, actor string, r 
 			fmt.Sprintf("frontmatter name %q must equal the tarball's top-level directory %q", fm.Name, name), "name")
 	}
 
-	existing, err := s.skills.Resolve(ctx, orgID, name)
+	// resolveFresh, not Resolve: the collision check must also see flow-kind
+	// skills (their names are reserved) and must surface a read failure rather
+	// than proceed on a phantom "no collision".
+	existing, err := s.skills.resolveFresh(ctx, orgID, name)
 	if err != nil {
 		return nil, fmt.Errorf("collision check: %w", err)
 	}

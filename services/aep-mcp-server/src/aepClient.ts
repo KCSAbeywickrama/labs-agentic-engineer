@@ -48,14 +48,6 @@ export interface IssueInfo {
   Labels: string[];
 }
 
-export interface DispatchResult {
-  taskId: string;
-  componentName: string;
-  runName?: string;
-  status: string;
-  error?: string;
-}
-
 export class AepApiError extends Error {
   constructor(
     public readonly status: number,
@@ -92,8 +84,13 @@ async function request<T>(
     throw new AepApiError(res.status, text || `aep-api request failed: ${res.status}`);
   }
 
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // 204 (no-content commands like unhold) and 202 (accepted-async commands
+  // like promote-from-issue) both carry an empty body — Huma sends none for
+  // an output type with no `Body` field, regardless of status code — so key
+  // off actual content rather than a hardcoded status list.
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export function createIssue(
@@ -117,15 +114,20 @@ export function listIssues(
   return request<IssueInfo[]>(opts, "GET", path);
 }
 
+// Promotes an ad-hoc issue into a coding Task and dispatches it through the
+// funnel. Async (202, empty body, see the request() comment above) — there is
+// no synchronous run name anymore; the funnel dispatches out-of-band. title
+// and issueUrl are accepted but unused: kept so ae_dispatch_coding_agent's
+// tool contract doesn't need to change on the SRE agent side.
 export function dispatchFromIssue(
   opts: AepClientOptions,
   project: string,
   req: { componentName: string; title: string; issueNumber: number; issueUrl: string },
-): Promise<DispatchResult> {
-  return request<DispatchResult>(
+): Promise<void> {
+  return request<void>(
     opts,
     "POST",
-    `/projects/${encodeURIComponent(project)}/tasks/dispatch-from-issue`,
-    req,
+    `/projects/${encodeURIComponent(project)}/tasks/${req.issueNumber}/promote-from-issue`,
+    { componentName: req.componentName },
   );
 }

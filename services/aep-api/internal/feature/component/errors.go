@@ -22,9 +22,4 @@ var (
 	ErrComponentNotFound   = errors.New("component not found")
 	ErrComponentNotService = errors.New("component is not a service")
 	ErrLogsUnavailable     = errors.New("observability service not configured")
-	// ErrUnauthorized is the component-local unauthorized sentinel.
-	// component_service returns it on a 401 from OC; component_controller
-	// checks it via errors.Is. Kept local to the feature so the package
-	// does not import services for the sentinel.
-	ErrUnauthorized = errors.New("unauthorized")
 )

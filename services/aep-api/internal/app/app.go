@@ -1,0 +1,927 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+// Package app is the composition root: it assembles the entire service graph
+// (HTTP handler + background watchers) from config + an open DB, and owns the
+// imperative first-boot steps (Bootstrap) main runs before serving. It lives
+// under internal/ — not package main — so a component test can import it and
+// assemble the same real handler with faked deps (the harness IS Build).
+package app
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/wso2/aep/aep-api/internal/api"
+	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
+	githubclient "github.com/wso2/aep/aep-api/internal/clients/github"
+	k8sclient "github.com/wso2/aep/aep-api/internal/clients/k8s"
+	"github.com/wso2/aep/aep-api/internal/clients/oauth"
+	"github.com/wso2/aep/aep-api/internal/clients/observability"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc/providers/secretmanagerapi"
+	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
+	"github.com/wso2/aep/aep-api/internal/config"
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
+	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
+	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
+	"github.com/wso2/aep/aep-api/internal/feature/files"
+	"github.com/wso2/aep/aep-api/internal/feature/genai"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/idp"
+	"github.com/wso2/aep/aep-api/internal/feature/organization"
+	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
+	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/project"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
+	"github.com/wso2/aep/aep-api/internal/feature/requirements"
+	"github.com/wso2/aep/aep-api/internal/feature/skills"
+	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/feature/webhook"
+	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/reaper"
+	"github.com/wso2/aep/aep-api/internal/seed"
+	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
+	"gorm.io/gorm"
+)
+
+// Watcher is a long-running background loop. Every watcher blocks on its
+// context and returns nothing; main starts each in its own goroutine and
+// cancels the shared context on shutdown.
+type Watcher interface {
+	Run(ctx context.Context)
+}
+
+// App is the assembled service graph: the HTTP handler plus the background
+// watchers to launch. Bootstrap side effects (migrations, grants) already ran
+// before Build; App holds only what main needs to serve and to shut down.
+type App struct {
+	Handler  http.Handler
+	Watchers []Watcher
+}
+
+// Build wires the entire service graph from config + an open DB and returns
+// the HTTP handler + background watchers. It performs NO process-lifecycle work
+// (no os.Exit, no signal handling, no migrations) — every failure is returned —
+// so a component test can assemble the same real handler with faked deps.
+// Wiring order is load-bearing: several constructors read the value a prior one
+// produced; the comments call out the couplings.
+func Build(cfg config.Config, db *gorm.DB) (*App, error) {
+	var err error
+
+	// Skills are repo-backed now (one private org-skills repo per org —
+	// docs/design/skills-repo-storage.md). The store needs gitOpsService +
+	// repoService, so it is constructed below once those exist. No startup
+	// bootstrap: built-ins seed/reconcile into each org's repo on demand.
+
+	// Repositories
+	executionRepo := repositories.NewExecutionRepository(db)
+	configRepo := repositories.NewConfigRepository(db)
+	repoRepo := repositories.NewRepoRepository(db)
+
+	// Token provider for service-to-service auth. OC authorizes requests by
+	// the service client subject (aep-api-client), so every OC API call
+	// must carry this token rather than the end-user's token.
+	var tokenProvider *oauth.TokenProvider
+	if cfg.ServiceAuth.TokenURL != "" && cfg.ServiceAuth.ClientID != "" {
+		tokenProvider = oauth.NewTokenProvider(
+			cfg.ServiceAuth.TokenURL,
+			cfg.ServiceAuth.ClientID,
+			cfg.ServiceAuth.ClientSecret,
+			cfg.ServiceAuth.HostHeader,
+		)
+		slog.Info("Service auth configured", "tokenURL", cfg.ServiceAuth.TokenURL, "clientID", cfg.ServiceAuth.ClientID)
+	}
+
+	// orgUUIDResolver maps an OC namespace (the org handle the BFF puts in the
+	// request URL) to the org's UUID, for the X-Impersonate-Org header on M2M
+	// OC calls. Reads the local organizations side-car; prefers the
+	// Thunder-issued ouId.
+	orgUUIDResolver := func(ctx context.Context, namespace string) (string, error) {
+		// Authoritative path: a user-initiated request carries the caller's
+		// Thunder org UUID in the JWT (ouId). When the JWT's handle matches the
+		// namespace we're about to impersonate, use ouId directly — no DB
+		// dependency, and it's the same value Thunder embeds. Async paths
+		// (webhooks, watchers) have no JWT and fall through to the side-car.
+		if claims := authn.ClaimsFromContext(ctx); claims != nil && claims.OuId != "" && authn.ResolveOuHandle(claims) == namespace {
+			return claims.OuId, nil
+		}
+		// Side-car path: the organizations row is keyed by the org handle (the
+		// same value the BFF puts in OC URLs). orgensure backfills it with the
+		// Thunder UUID on the first authed request from the org.
+		var org models.Organization
+		if err := db.WithContext(ctx).Where("name = ?", namespace).First(&org).Error; err != nil {
+			return "", fmt.Errorf("resolve impersonation org for namespace %q: %w", namespace, err)
+		}
+		if org.ThunderOrgUUID != nil {
+			return org.ThunderOrgUUID.String(), nil
+		}
+		return org.UUID.String(), nil
+	}
+
+	// OpenChoreo clients. Each one resolves the OC namespace as the OC
+	// org handle directly (== ouHandle); there is no override map. Migrated
+	// clients (namespace, project) take an openchoreo.Config; the still-hand-
+	// rolled clients (component, secretref) keep the legacy positional args
+	// until they migrate too.
+	ocConfig := openchoreo.Config{
+		BaseURL:                cfg.PlatformAPI.BaseURL,
+		HostHeader:             cfg.PlatformAPI.HostHeader,
+		AuthProvider:           tokenProvider,
+		ImpersonateOrgResolver: orgUUIDResolver,
+	}
+	projectClient := openchoreo.NewProjectClient(ocConfig)
+	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
+	componentClient := openchoreo.NewComponentClient(ocConfig)
+	// GitSecret client lands the per-org build git credential on the workflow
+	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
+	// for both cloud (CP/WP split) and local k3d — one unified path.
+	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
+
+	// Observability client (optional — build logs disabled when URL not set)
+	var observClient observability.Client
+	if cfg.Observability.BaseURL != "" {
+		observClient = observability.NewClient(cfg.Observability.BaseURL)
+		slog.Info("Observability API", "baseURL", cfg.Observability.BaseURL)
+	}
+
+	// SM-API provider (ADR-0002). Same provider in local + cloud: local
+	// SM-API runs in the docker-compose stack, cloud SM-API is reached at
+	// its public DNS. When SECRET_MANAGER_API_URL is empty the provider is
+	// not constructed and downstream callers handle the absence.
+	var smClient secretmanagersvc.SecretManagementClient
+	if cfg.SecretManagerAPIURL != "" {
+		smProvider := secretmanagerapi.NewProvider(secretmanagerapi.Config{
+			BaseURL: cfg.SecretManagerAPIURL,
+			Timeout: cfg.SecretManagerAPITimeout,
+		})
+		smClient, err = secretmanagersvc.NewSecretManagementClient(&secretmanagersvc.StoreConfig{
+			Provider: secretmanagerapi.ProviderName,
+		}, smProvider)
+		if err != nil {
+			return nil, fmt.Errorf("sm-api client init: %w", err)
+		}
+		slog.Info("sm-api client", "baseURL", cfg.SecretManagerAPIURL, "timeout", cfg.SecretManagerAPITimeout)
+	} else {
+		slog.Warn("SECRET_MANAGER_API_URL not set — Phase 1 secret writes disabled")
+	}
+	_ = smClient // consumed via smWriter below.
+
+	// SM-API mirror writer. Constructed ahead of the credential / IDP service
+	// constructors so all consumers can attach via WithSMAPIWriter (the no-op
+	// case when smClient is nil is fine).
+	smWriter := orgcreds.NewSMAPIWriter(smClient, db)
+
+	// cluster-gateway-proxy client — the local plane's coding-agent dispatch
+	// path (`ca-…` Jobs). When CLUSTER_GATEWAY_PROXY_URL is empty the proxy
+	// executor + JobWatcher are not wired and the coding executor uses the
+	// ClusterWorkflow fallback.
+	var cgwClient *clustergatewayproxy.Client
+	if cfg.ClusterGatewayProxyURL != "" {
+		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
+		if tokenProvider != nil {
+			cgwCfg.AuthProvider = tokenProvider
+		}
+		cgwClient = clustergatewayproxy.New(cgwCfg)
+		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL, "authenticated", tokenProvider != nil)
+	} else {
+		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — coding-agent dispatch uses the ClusterWorkflow fallback")
+	}
+
+	// Credentials + git-service services and controllers.
+	credKey, err := base64.StdEncoding.DecodeString(cfg.CredentialEncryptionKey)
+	if err != nil || len(credKey) != 32 {
+		// config.Validate guarantees this decodes to 32 bytes; kept as defense.
+		return nil, fmt.Errorf("CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key: %w", err)
+	}
+	credStore, err := credentials.NewDBStore(db, credKey)
+	if err != nil {
+		return nil, fmt.Errorf("credential store init: %w", err)
+	}
+	slog.Info("credential store: postgres (aes-256-gcm)")
+
+	wpClient, err := k8sclient.NewInClusterClient()
+	if err != nil {
+		slog.Warn("k8s client init failed — mint-build will skip Secret writes; builds will fail at clone", "error", err)
+		wpClient = nil
+	}
+
+	// App-token minter — best-effort App-key load. With no App key the minter
+	// answers in no-app mode; the connect surface lights up the App path
+	// lazily on first use.
+	loadCtx, cancelLoad := context.WithTimeout(context.Background(), 10*time.Second)
+	appKey, err := credentials.LoadAppKeyFromOpenBao(loadCtx, credStore)
+	cancelLoad()
+	if err != nil {
+		slog.Warn("app key load failed; App-mode credentials will return ErrAppNotConfigured", "error", err)
+		appKey = nil
+	}
+	minter, err := credentials.NewAppTokenMinter(appKey)
+	if err != nil {
+		return nil, fmt.Errorf("app token minter init: %w", err)
+	}
+	minter.WithOpenBao(credStore)
+
+	// Dev-only app-platform seed (App private key + client_secret + webhook
+	// HMAC). No-op outside DEPLOYMENT_TIER=dev.
+	{
+		c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := seed.AppPlatformFromEnv(c, credStore, cfg); err != nil {
+			cancel()
+			return nil, fmt.Errorf("app platform seed: %w", err)
+		}
+		cancel()
+	}
+	if appKey == nil {
+		retryCtx, cancelRetry := context.WithTimeout(context.Background(), 10*time.Second)
+		if reloaded, rerr := credentials.LoadAppKeyFromOpenBao(retryCtx, credStore); rerr == nil && reloaded != nil {
+			cancelRetry()
+			minter, err = credentials.NewAppTokenMinter(reloaded)
+			if err != nil {
+				return nil, fmt.Errorf("app token minter re-init: %w", err)
+			}
+			minter.WithOpenBao(credStore)
+			slog.Info("github app loaded post-seed", "appId", reloaded.AppID)
+		} else {
+			cancelRetry()
+		}
+	}
+	if minter.AppID() != 0 {
+		idCtx, cancelID := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := minter.LoadAppBotIdentity(idCtx, "https://api.github.com"); err != nil {
+			slog.Warn("app bot identity load failed; will retry on first connect", "error", err)
+		}
+		cancelID()
+	}
+	var appClientSecret string
+	if minter.AppID() != 0 {
+		csCtx, cancelCS := context.WithTimeout(context.Background(), 10*time.Second)
+		if cs, err := minter.LoadAppClientSecret(csCtx); err != nil {
+			slog.Warn("app oauth client_secret load failed; bind path disabled", "error", err)
+		} else {
+			appClientSecret = cs
+		}
+		cancelCS()
+	}
+
+	credResolver := credentials.NewOrgResolver(db, credStore, minter)
+
+	// One git host, selected by GIT_PROVIDER, threaded into every gitrepo
+	// domain service where it narrows to that service's capability port.
+	gitHost, err := buildGitHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Workspace engine — the disk-backed git plumbing over the shared
+	// /workspaces mount (docs/design/shared-volume-clone-architecture.md).
+	// Fail fast on an unusable root: the volume is mounted in compose/k8s,
+	// and dev runs override AEP_WORKSPACE_ROOT. It backs the disk-lifecycle
+	// pieces (the two best-effort trash hooks below + the reaper watcher) and
+	// the GitOpsService Workspace port (skills today; files/artifacts/genai
+	// in Phases 2–3).
+	workspaceEngine, err := gitfs.New(cfg.Workspace.Root)
+	if err != nil {
+		return nil, fmt.Errorf("workspace engine init (root %q): %w", cfg.Workspace.Root, err)
+	}
+	slog.Info("workspace engine", "root", workspaceEngine.Root())
+	// Both hooks are phase 1 of the two-phase delete (O(1) rename into
+	// trash/) and best-effort by contract: failures are logged, never
+	// surfaced — the reaper's orphan pass is the correctness backstop.
+	trashWorkspaceRepo := func(ctx context.Context, orgID, projectID, repoSlug string) {
+		if err := workspaceEngine.TrashRepo(ctx, gitfs.RepoRef{OrgID: orgID, ProjectID: projectID, RepoSlug: repoSlug}); err != nil {
+			slog.WarnContext(ctx, "workspace: trash repo subtree failed (reaper will reconcile)",
+				"org", orgID, "project", projectID, "slug", repoSlug, "error", err)
+		}
+	}
+	trashWorkspaceOrg := func(ctx context.Context, ocOrgID string) {
+		if err := workspaceEngine.TrashOrg(ctx, ocOrgID); err != nil {
+			slog.WarnContext(ctx, "workspace: trash org subtree failed (reaper will reconcile)",
+				"ocOrgId", ocOrgID, "error", err)
+		}
+	}
+
+	repoService := gitrepo.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility,
+		gitrepo.WithWorkspaceTrash(trashWorkspaceRepo))
+	gitOpsService := gitrepo.NewGitOpsService(credResolver, workspaceEngine)
+	artifactSvcGit := artifacts.NewArtifactService(repoRepo, gitOpsService)
+	issueService := gitrepo.NewIssueService(repoRepo, gitHost, credResolver)
+	webhookRegService := gitrepo.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
+	credRefreshService := orgcreds.NewCredentialsRefreshService(credResolver)
+	credService := orgcreds.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
+	buildCredService := orgcreds.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
+	credService.WithBuildSecretCleaner(buildCredService)
+	anthropicCredService := orgcreds.NewAnthropicCredentialService(db, credStore, wpClient)
+
+	// Task JWT manager — RS256, 24h TTL. The public key is published on the
+	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner
+	// callbacks (inbound S2S) and agents-service (outbound S2S). Constructed
+	// here, before the agents client, because that client uses it to mint the
+	// per-call outbound identity token.
+	var taskTokens *authn.TaskTokenManager
+	if cfg.TaskTokenSigningKey != "" {
+		mgr, err := authn.NewTaskTokenManager(authn.TaskTokenConfig{
+			PrivateKey: cfg.TaskTokenSigningKey,
+			Issuer:     cfg.TaskTokenIssuer,
+			Audience:   cfg.TaskTokenAudience,
+			TTL:        24 * time.Hour,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("task token manager init: %w", err)
+		}
+		taskTokens = mgr
+		slog.Info("Task token manager", "kid", mgr.KeyID(), "issuer", cfg.TaskTokenIssuer, "audience", cfg.TaskTokenAudience)
+	} else {
+		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
+	}
+
+	// SM-API mirror writer wired into both credential services. nil-safe via
+	// the Enabled() check.
+	credService.WithSMAPIWriter(smWriter)
+	anthropicCredService.WithSMAPIWriter(smWriter)
+	// Push the org's Anthropic key to a consumer's ExternalSecret on every
+	// successful Connect (both first-time connect and later rotation) — see
+	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
+	// unless both env vars are set (no consumer assumed by default).
+	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
+	validatorProbes := orgcreds.NewValidatorProbes(credService, gitHost, credResolver, minter)
+	credValidator := credentials.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
+
+	// Artifact store — in-process via artifactSvcGit. Adds the
+	// external-API catalog + the `DesignFile` YAML split/assemble layer
+	// on top of raw file I/O.
+	artifactStore := artifacts.NewArtifactStore(artifactSvcGit)
+
+	// Repo-backed skills store (single source of truth = per-org org-skills
+	// repo). Reads walk the shared-volume mirror at branch tip and writes
+	// commit to main through the Workspace port (shared-volume-clone
+	// architecture, Phase 1). Built-ins + flow skills seed/reconcile from the
+	// embedded files on demand. docs/design/skills-repo-storage.md.
+	skillSvc := skills.NewSkillService(gitOpsService, repoService)
+	skillMutationSvc := skills.NewSkillMutationService(skillSvc)
+	skillImportSvc := skills.NewSkillImportService(skillSvc)
+
+	// File-mutation agents service (services/agents) — the requirements/design/
+	// chat generation and task-planning flows. Plain HS256 M2M bearer; the
+	// per-org Anthropic key is resolved by genai pre-stream and forwarded as
+	// X-Anthropic-Key.
+	agentsvcClient := agentsvc.New(agentsvc.Config{
+		BaseURL:  cfg.AgentsSvc.BaseURL,
+		Secret:   cfg.AgentsSvc.JWTSecret,
+		Audience: cfg.AgentsSvc.JWTAudience,
+		Issuer:   cfg.AgentsSvc.JWTIssuer,
+	})
+
+	// Files API — generic specs/-scoped, GitHub-at-HEAD reads + atomic apply
+	// (commits straight to main under CAS retry). No local working tree.
+	filesSvc := files.NewService(repoService, gitOpsService)
+
+	// Unified genai committed-truth turn surface (shared-volume-clone §6). It
+	// resolves the org Anthropic key (no platform fallback), snapshots the
+	// project repo + the org's _skills repo onto the workspace mount, and
+	// runs turns detached behind the durable agent_turns guard. Skills are
+	// NOT pushed inline anymore — agents reads the full catalog (embedded
+	// flow skills seeded into _skills + org skills) from the SkillsRef
+	// snapshot.
+	anthropicKeyForGenAI := func(ctx context.Context, orgID string) (string, error) {
+		res, err := anthropicCredService.EffectiveKey(ctx, orgID)
+		if err != nil {
+			return "", err
+		}
+		if res == nil || res.Source == "none" {
+			return "", nil // no key → genai raises a pre-202 4xx
+		}
+		return res.Key, nil
+	}
+	// skillsRepoForTurns ensures the org's _skills repo exists (seeding the
+	// embedded builtin/flow skills on first touch) and hands back its row —
+	// the SkillsRef source for genai + task-plan turns. A closure at the
+	// composition root so neither feature grows a skills edge.
+	skillsRepoForTurns := func(ctx context.Context, orgID string) (*models.GitRepository, error) {
+		if err := skillSvc.EnsureProvisioned(ctx, orgID); err != nil {
+			return nil, err
+		}
+		return repoService.GetRepo(ctx, orgID, models.SkillsRepoSentinelProjectID)
+	}
+	turnRepo := genai.NewTurnRepository(db)
+	turnBroker := genai.NewTurnBroker()
+	genaiDeps := genai.ServiceDeps{
+		Repos:      repoService,
+		Git:        gitOpsService,
+		Keys:       anthropicKeyForGenAI,
+		Client:     agentsvcClient,
+		Turns:      turnRepo,
+		Broker:     turnBroker,
+		Snapshots:  workspaceEngine,
+		SkillsRepo: skillsRepoForTurns,
+	}
+	// MCP discovery on design-generation turns (dependency-management Phase 5):
+	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
+	// service can call back into /internal/v1/mcp. Wired only when the token
+	// manager exists (a nil *TaskTokenManager would satisfy the interface but
+	// panic on use) AND the internal base URL is configured; otherwise the
+	// additive `mcp` field is simply omitted.
+	if taskTokens != nil && cfg.AEPInternalBaseURL != "" {
+		genaiDeps.MCPTokens = taskTokens
+		genaiDeps.MCPBaseURL = cfg.AEPInternalBaseURL
+	}
+	genaiSvc := genai.NewService(genaiDeps)
+
+	// Services. componentService is constructed before configService so
+	// configService can call back into it to mirror env-var edits onto
+	// the OC Component's workflow params.
+	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, artifactStore, executionRepo)
+	organizationService := organization.NewOrganizationService(db, namespaceClient)
+	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
+	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
+	// before the WorkflowRun is created (see
+	// docs/design/build-credential-injection.md).
+	var buildStager component.BuildSecretStager
+	if buildCredService != nil {
+		buildStager = buildSecretStagerAdapter{svc: buildCredService}
+	}
+	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
+	configService := component.NewConfigService(configRepo, componentService)
+	requirementsService := requirements.NewRequirementsService(artifactStore, artifactSvcGit)
+	designService := design.NewDesignService(artifactStore, artifactSvcGit)
+
+	// Tasks are GitHub issues (the Task/Execution split, tasks-github-native):
+	// the read + plan surface reads them live and fuses executions. The dispatch
+	// half (funnel, coding executor, watchers) is wired below, after
+	// asServiceIdentity. repoService/artifactStore/artifactSvcGit/gitOpsService
+	// satisfy the task consumer ports directly.
+	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit)
+	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
+		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
+
+	// Eagerly provision each org's skills repo on project creation.
+	projectService.SetSkillsProvisioner(skillSvc)
+
+	// Runner skills S2S (re-keyed to execution, §9.2) + the unified progress
+	// endpoint. execSkillsSvc backs GET /internal/v1/executions/{id}/skills.
+	execSkillsSvc := execution.NewSkillsService(executionRepo, artifactStore, skillSvc)
+	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
+
+	// trait_sync is the single shared emitter that reconciles the
+	// `api-configuration` ClusterTrait on a Component CR + per-environment
+	// ReleaseBindings. Hooked from both the dispatch path (after
+	// CreateComponent) and the design-edit path (after
+	// `components/<name>/design.md` PUT). See
+	// docs/design/api-platform-integration.md §6 Phase 2.
+	traitSyncService := component.NewTraitSyncService(componentClient, artifactStore)
+
+	// Thunder admin client + IDP service. Reads
+	// aep-system-client credentials from env (THUNDER_*) and exposes
+	// EnsureOrgPublisher / RevokeOrgPublisher / RegenerateClientSecret
+	// for per-org publisher OAuth app lifecycle. Optional — when the
+	// Thunder base URL is empty the IDP service still runs and serves
+	// GetProfile / GetOrCreateProfile, but mutating calls fail with
+	// ErrIDPThunderUnavailable (non-fatal — protected components keep
+	// deploying, just without per-org publishers).
+	var thunderAdminClient thundersvc.Client
+	thunderBase := cfg.ThunderAdmin.BaseURL
+	if thunderBase == "" {
+		// Fall back to the public Thunder URL the auth middleware
+		// already trusts. setup-prerequisites and docker compose set
+		// this to http://k3d-openchoreo-serverlb:8080 in-cluster /
+		// http://thunder.openchoreo.localhost:8080 from the host.
+		thunderBase = cfg.ServiceAuth.TokenURL
+		// TokenURL contains /oauth2/token — strip back to the host:
+		if idx := strings.Index(thunderBase, "/oauth2/"); idx > 0 {
+			thunderBase = thunderBase[:idx]
+		}
+	}
+	if cfg.ThunderAdmin.ClientID != "" && cfg.ThunderAdmin.ClientSecret != "" && thunderBase != "" {
+		thunderAdminClient = thundersvc.New(thundersvc.Config{
+			BaseURL:      thunderBase,
+			ClientID:     cfg.ThunderAdmin.ClientID,
+			ClientSecret: cfg.ThunderAdmin.ClientSecret,
+		})
+		slog.Info("Thunder admin client", "baseURL", thunderBase, "clientID", cfg.ThunderAdmin.ClientID)
+	} else {
+		slog.Warn("Thunder admin client disabled — set THUNDER_ADMIN_URL + THUNDER_SYSTEM_CLIENT_ID + THUNDER_SYSTEM_CLIENT_SECRET")
+	}
+
+	// Wire the Thunder OU validator into the org service so a stale/phantom JWT
+	// `ouId` can't poison the org→OU mapping (the root cause behind the runner
+	// publisher cc-token invalid_client: a phantom OU broke wc- namespace
+	// derivation + forced a publisher re-registration under a non-existent OU →
+	// Thunder 400 APP-1018). nil client → validation disabled (trust the JWT).
+	if thunderAdminClient != nil {
+		organizationService.SetOUValidator(thunderAdminClient)
+		slog.Info("org OU validation wired — JWT ouId is validated against Thunder before the org→OU mapping is (over)written")
+	}
+	// WithSMAPIWriter mirrors per-org publisher client_secret to SM-API on
+	// EnsureOrgPublisher / RegenerateClientSecret so the dispatcher's
+	// PUBLISHER_CLIENT_SECRET ExternalSecret can materialise it into runner
+	// pods without the BFF holding the plaintext.
+	idpService := idp.NewIDPService(db, thunderAdminClient, idp.PlatformIDPConfig{
+		Issuer:  cfg.PlatformIDP.Issuer,
+		JWKSURL: cfg.PlatformIDP.JWKSURL,
+	}).WithSMAPIWriter(smWriter)
+	// Make idpService available to trait_sync so first-protected-deploy
+	// provisions the publisher app lazily.
+	traitSyncService.SetIDPService(idpService)
+
+	// Connect-state JWT issuer (App-mode OAuth CSRF state). This HS256 signing
+	// key only ever leaves the BFF as a JWT signature inside the GitHub OAuth
+	// `state` query param. (Task JWTs use RS256 via taskTokens below.)
+	bearerSvc := orgcreds.NewBearerService(cfg.OAuthStateSigningKey, 24*time.Hour)
+	if cfg.OAuthStateSigningKey == "" {
+		slog.Warn("OAUTH_STATE_SIGNING_KEY not set — connect-state JWTs will fail to mint")
+	}
+
+	// taskTokens (the RS256 Task-JWT manager) is constructed earlier, before
+	// the agents client — that client uses it to mint per-call outbound
+	// identity tokens, so it must exist by then.
+
+	// asServiceIdentity marks OC API calls made from inside dispatch, webhook
+	// handlers, and the watchers as orchestration / async calls: they
+	// authenticate with the BFF's M2M service identity and impersonate the
+	// target org (via X-Impersonate-Org, derived from the request URL's
+	// namespace) instead of forwarding the inbound user JWT. The OC client's
+	// AuthProvider supplies the M2M token, so this only needs to set the marker.
+	asServiceIdentity := func(ctx context.Context) context.Context {
+		return authn.WithServiceIdentity(ctx)
+	}
+
+	// Webhook receiver wiring. The verifier's HMAC secrets come from the
+	// per-org credential record (via git-service).
+	secretProvider := webhook.NewGitServiceSecretProvider(credService, 30*time.Second)
+	var routingLookup webhook.OcOrgIDLookup = credService
+	webhookVerifier := webhook.NewVerifier(secretProvider).
+		WithRefetchLimiter(webhook.NewRefetchLimiter(1, 5))
+	routingCache := webhook.NewRoutingCache(60 * time.Second)
+	deliveryStore := webhook.NewDeliveryStore(db)
+	webhookRouter := webhook.NewRouter()
+
+	// The reactive engine (tasks-github-native §5): the executions repository +
+	// an executor registry + THE single funnel. The execute endpoint, the
+	// webhook handlers, and the reconciliation sweep all call into the funnel —
+	// there is no imperative second door, so gates cannot be bypassed.
+	registry := execution.NewRegistry()
+	funnel := execution.NewFunnel(executionRepo, issueService, repoLocator{db: db}, designComponents{store: artifactStore}, registry)
+
+	// The coding-class executor (feature/codingagent) is the one wired executor.
+	// It dispatches the coding-agent run and the post-merge build, writing
+	// execution rows. The ops class has no executor yet (§11 — the funnel flags
+	// aep:attention for it).
+	codingExecutor := codingagent.NewCodingExecutor(
+		componentClient, repoService, identities{cred: credService},
+		anthropicProvisioner{svc: anthropicCredService}, taskTokens, executionRepo,
+		cfg.AgentPlatformURL, cfg.AgentPlatformURL)
+	// The cluster-gateway-proxy dispatch path (the `ca-…` Jobs the local plane
+	// uses): per-org NS + per-run ExternalSecrets + a K8s Job via the proxy.
+	// Publisher-cc is provisioned through idpService (skipped for an http
+	// platform URL). Falls back to ClusterWorkflow when unconfigured.
+	if cgwClient != nil {
+		codingExecutor.WithProxy(codingagent.New(cgwClient), db, idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
+		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled",
+			"runnerImage", cfg.AgentRunnerImage, "clusterSecretStore", cfg.AgentClusterSecretStore)
+	}
+	// Build-secret staging so the post-merge build clones a PRIVATE project repo
+	// (the local plane sets GITHUB_REPO_VISIBILITY=private). Reuses the same
+	// per-org build GitSecret stager feature/component uses for manual builds.
+	// nil stager → builds clone unauthenticated (public repos).
+	if buildStager != nil {
+		codingExecutor.WithBuildSecrets(buildStager, 0)
+		slog.Info("coding executor: build-secret staging enabled (private-repo builds)")
+	}
+	// Coding-dispatch pre-flight: provision the OpenChoreo Component CR from the
+	// design facts before the coding run, so the merged-PR build has a Component
+	// to build (else "Component not found"). Ported from the legacy dispatch
+	// service's ensureOCComponent; componentService reads the design facts.
+	codingExecutor.WithComponentEnsurer(componentService)
+	registry.Register(taskmeta.ClassCoding, codingExecutor)
+
+	// Command surface calls into the funnel; webhook handling splits across the
+	// two package halves: issues.* (task birth / block repair / command labels)
+	// in feature/task, pull_request.* (end coding / spawn build) in feature/execution.
+	taskCommands := task.NewCommands(issueService, repoService, funnel, componentService)
+	platformSender := githubBotLogin(cfg.GitHubAppSlug)
+	registerWebhook := func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
+		webhookRouter.Register(event, action, webhook.EventHandlerFunc(h))
+	}
+	task.NewWebhookEvents(issueService, repoLocator{db: db}, funnel, platformSender).RegisterHandlers(registerWebhook)
+	// pull_request.* handlers apply NO echo suppression (the platform authors no
+	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
+	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService)
+	execEvents.RegisterHandlers(registerWebhook)
+	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, trashWorkspaceOrg)
+	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
+
+	// Reconciliation sweep (missed webhooks / requeue gating / PR-state healing /
+	// disaster recovery, §5) + the exec watcher (OC WorkflowRun → execution-row
+	// outcomes; build success re-evaluates the funnel).
+	sweep := execution.NewSweep(funnel, execEvents, executionRepo, repoLister{repos: repoRepo}, issueService, 0)
+	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, funnel, asServiceIdentity, 0)
+	// A build that fails at git-clone-auth within budget is re-minted + re-tried
+	// (§7). Only meaningful when a credential can be staged; otherwise a git-auth
+	// failure is terminal like any other.
+	if buildStager != nil {
+		execWatcher.WithBuildRetrier(codingExecutor, codingExecutor.AuthRetryBudget())
+	}
+
+	// NOTE: the trait_sync drift watcher enumerated (org,project,component) from
+	// the component_tasks table to periodically reconcile the api-configuration
+	// ClusterTrait. That table is gone (tasks are GitHub issues), so the periodic
+	// watcher is dropped; dispatch-time trait sync (traitSyncService, wired into
+	// componentService/idpService) still runs. A component-enumerating reconcile
+	// backstop can be re-added over the OC component list if drift reappears.
+
+	// Inbound JWT verifier — Thunder publishes the User JWT and Service JWT
+	// signing keys at JWKSURL. Lazy fetch on first request avoids compose
+	// start-order races.
+	var thunderJWKS *jwtassertion.JWKSCache
+	if cfg.JWKSURL != "" {
+		thunderJWKS = jwtassertion.NewJWKSCache(cfg.JWKSURL)
+		slog.Info("Inbound JWT verifier", "jwksURL", cfg.JWKSURL, "audience", cfg.JWTAllowedAudience, "issuer", cfg.JWTAllowedIssuer)
+	} else {
+		// Fail closed: with no JWKS the verifier rejects every /api/ request
+		// (401). There is no unsigned-claim fallback — both planes set JWKS_URL.
+		slog.Error("JWKS_URL not set — every authenticated /api/ request will be rejected (401)")
+	}
+
+	// Org-scoped GitHub connect/disconnect surface. Tasks are GitHub issues now
+	// (no rows to abandon on disconnect); the disconnect service severs the
+	// credential and the issues become inert to the router (no valid webhook).
+	disconnectSvc := orgcreds.NewOrgDisconnectService(db, credService, issueService).
+		WithWorkspaceTrash(trashWorkspaceOrg)
+	orgGitHubCtrl := orgcreds.NewOrgGitHubController(
+		credService,
+		disconnectSvc,
+		bearerSvc,
+		cfg.GitHubAppSlug,
+		cfg.BFFPublicURL,
+		cfg.GitHubAppClientID,
+	)
+
+	// Internal S2S runner authorizer — re-keyed to executions (§9.2): the id in
+	// the runner bearer is an execution id, and the publisher-cc branch resolves
+	// the acting org by execution id.
+	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
+	authn.SetRunnerAuthorizer(authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, executionOrgLookup(db)))
+
+	// Controllers
+	params := api.AppParams{
+		Config: cfg,
+		// Runner callbacks are the internal Huma surface (InternalDeps); only the
+		// connect-callback + webhook controllers remain raw handlers. Every other
+		// feature registers code-first via params.HumaDeps below.
+		InternalDeps: api.InternalDeps{
+			ExecSkills:   execSkillsSvc,
+			CredsRefresh: credRefreshService,
+		},
+		WebhookController:   webhookCtrl,
+		OrgGitHubController: orgGitHubCtrl,
+		ConfigRepo:          configRepo,
+		ThunderJWKS:         thunderJWKS,
+		OrganizationService: organizationService,
+
+		DB:                   db,
+		CredService:          credService,
+		AnthropicCredService: anthropicCredService,
+	}
+
+	// The consolidated /config orchestrator (docs/design/org-config-consolidation.md):
+	// one settings resource over the reused Anthropic/GitHub/IDP services, with the
+	// platform IDP defaults so GET /config can render the default idp section
+	// without persisting a row on read.
+	orgConfigSvc := orgconfig.NewService(
+		anthropicCredService,
+		credService,
+		disconnectSvc,
+		bearerSvc,
+		idpService,
+		idp.PlatformIDPConfig{Issuer: cfg.PlatformIDP.Issuer, JWKSURL: cfg.PlatformIDP.JWKSURL},
+		cfg.BFFPublicURL,
+		cfg.GitHubAppClientID,
+	)
+
+	// Code-first OpenAPI (Huma) feature dependencies. api.NewHandler creates the
+	// Huma API on apiMux and registers every migrated feature via
+	// RegisterAllHuma. See docs/design/bff-openapi-huma-migration.md.
+	params.HumaDeps = api.HumaDeps{
+		ProjectSvc:        projectService,
+		OrgSvc:            organizationService,
+		ComponentSvc:      componentService,
+		ConfigSvc:         configService,
+		RequirementsSvc:   requirementsService,
+		CollabRepo:        repoService,
+		IssueSvc:          issueService,
+		DesignSvc:         designService,
+		TaskReads:         taskReads,
+		TaskCommands:      taskCommands,
+		TaskPlan:          taskPlan,
+		ExecProgress:      execProgressSvc,
+		ComponentClient:   componentClient,
+		IDPSvc:            idpService,
+		CredentialSvc:     credService,
+		DisconnectSvc:     disconnectSvc,
+		BearerSvc:         bearerSvc,
+		AnthropicSvc:      anthropicCredService,
+		OrgConfigSvc:      orgConfigSvc,
+		TaskTokens:        taskTokens,
+		SkillSvc:          skillSvc,
+		SkillMutationSvc:  skillMutationSvc,
+		SkillImportSvc:    skillImportSvc,
+		FilesSvc:          filesSvc,
+		GenAISvc:          genaiSvc,
+		GitHubAppSlug:     cfg.GitHubAppSlug,
+		BFFPublicURL:      cfg.BFFPublicURL,
+		GitHubAppClientID: cfg.GitHubAppClientID,
+	}
+
+	// Dependency-management MCP discovery readers (agnostic subset — Phase 4 of
+	// the dependency-management migration). The MCP surface (surfaces.go) is
+	// mounted behind the AgentsScopedVerifier; wire real backends for its four
+	// read-only tools: the org external-resource catalog (DB) and the org
+	// published endpoints + platform resource types (OC Resource-model client).
+	// The provisioning surface (value/param collection + the aep:provision issue
+	// funnel) is wired in the Phase-6 block further below.
+	resourceClient := openchoreo.NewResourceClient(ocConfig)
+	orgEndpointCatalog := endpoints.NewCatalog(resourceClient)
+	externalResourceRepo := repositories.NewExternalResourceRepository(db)
+	params.MCPExternalResources = externalResourceRepo
+	params.MCPOrgEndpoints = orgEndpointCatalog
+	params.MCPResourceTypes = resources.NewResourceTypeCatalog(resourceClient)
+
+	// Read-time org-service dependency resolution (dependency-management Phase 5):
+	// the same endpoint catalog that backs the MCP list_org_endpoints tool marks
+	// each design's `org-service` dependencies resolved/blocked/unresolved against
+	// the live namespace-visible catalog. Consumer-side wiring — artifacts never
+	// imports the dependencies feature (the *Catalog satisfies
+	// artifacts.OrgServiceResolver structurally).
+	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
+
+	// Register each tagged design's `external` dependencies into the org's
+	// external-resource catalog on save (best-effort). Consumer-side port —
+	// design never imports repositories concretely.
+	designService.SetExternalResourceRegistry(externalResourceRepo)
+
+	// Dependency provisioning (dependency-management Phase 6): the value/param
+	// collection surface + the aep:provision gate funnel. The provisioner cores
+	// author the OC Resource model; the service drives gate issues + provision
+	// Executions (Kind=provision) and closes each issue with a no-secrets
+	// reference; the readiness watcher observes platform-resource bindings'
+	// native Ready condition out-of-band and releases gated consumer tasks.
+	externalProvisioner := resources.NewExternalResourceProvisioner(externalResourceRepo, resourceClient, smWriter)
+	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)
+	provisioningSvc := provisioning.NewService(provisioning.Deps{
+		Issues:    issueService,
+		Execs:     executionRepo,
+		Reeval:    funnel,
+		Design:    designComponents{store: artifactStore},
+		Repos:     repoNamer{repos: repoRepo, db: db},
+		Catalog:   externalResourceRepo,
+		ExtProv:   externalProvisioner,
+		PlatProv:  platformProvisioner,
+		Bindings:  resourceClient,
+		Projects:  provisionProjects{repos: repoRepo},
+		Access:    repositories.NewAccessRequestRepository(db),
+		Providers: orgEndpointCatalog,
+	})
+	params.HumaDeps.ProvisioningSvc = provisioningSvc
+	// Mint aep:provision gate issues on design approval (before planning gates any
+	// consumer coding task on them).
+	designService.SetProvisionIssueMinter(provisioningSvc)
+	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
+	// external dependency's OpenAPI contract and atomically commits the spec file
+	// + the design.json specPath edit (clearing the external-needs-spec gate) via
+	// the Files API. Composition-root adapter keeps files out of the design feature.
+	designService.SetFileCommitter(designFilesCommitter{files: filesSvc})
+	// Grant cascade → design: commit the exposesAPI.orgPublished durability marker
+	// on a provider component when its cross-project access request is granted.
+	// The reverse edge (design→provisioning) is SetProvisionIssueMinter above;
+	// both are setter-wired here so the mutual dependency stays at the root.
+	provisioningSvc.SetOrgPublishMarker(designService)
+	// Reject cascade: an org-publish gate issue closed with its consumers still
+	// ungranted is a decline → flip those access requests to rejected. Registered
+	// on the router's issues/closed chain alongside task's noop (both run). The
+	// router is a pointer held by the already-built controller, so a late Register
+	// (before serve) is picked up.
+	registerWebhook("issues", "closed", provisioningSvc.OnIssueClosed)
+	// Deprovision a project's OC Resource model on project delete (OC does not
+	// cascade the logically-owned Resources/bindings).
+	projectService.SetResourceDeprovisioner(provisioningSvc)
+	resourceWatcher := provisioning.NewResourceWatcher(provisioningSvc, asServiceIdentity, 0)
+
+	// ADR-0004 declarative wiring: at coding dispatch the platform resolves the
+	// component's dependency targets (org-service + sibling endpoints, external +
+	// platform-resource binding outputs) and posts them as a comment the coding
+	// agent copies into workload.yaml — the platform never patches the CR.
+	codingExecutor.WithDependencyWiring(provisioning.NewWiringResolver(
+		designComponents{store: artifactStore}, orgEndpointCatalog, resourceClient, issueService))
+	// Mount the component's external-resource secrets into the coding runner so
+	// the agent can integration-test against the live service.
+	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
+	// Grant pending cross-project access when a provider component deploys.
+	execWatcher.WithDeployObserver(provisioningSvc)
+
+	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
+
+	handler := api.NewHandler(params)
+
+	// Background watchers, launched by main under a shared cancellable context.
+	// State lives in Postgres + GitHub, so a plain goroutine per watcher is
+	// enough. The reconciliation sweep re-gates queued executions and picks up
+	// missed command labels; the exec watcher turns OC WorkflowRun outcomes into
+	// execution-row terminals; the trait-sync + credential-validator watchers
+	// are unchanged.
+	watchers := []Watcher{
+		sweep,
+		execWatcher,
+		// Resource-readiness watcher: turns platform-resource bindings going Ready
+		// into provision-Execution terminals + gate-issue closes, releasing gated
+		// consumer tasks (dependency-management §3.6).
+		resourceWatcher,
+		// Periodic credential validator — walks every active org_credentials row
+		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
+		// flags identity drift on confirmed unauthorised credentials.
+		credValidator,
+		// Disk-lifecycle reaper (design §14/D12): trash purge, snapshot
+		// age-reap, DB↔disk orphan reconciliation, quota/LRU eviction. The
+		// global passes self-elect via a non-blocking flock on the mount, so
+		// running one per replica is correct.
+		reaper.New(workspaceEngine, repoRepo, cfg.Workspace),
+		// agent_turns crash-safety sweep (design D17): a stale-heartbeat
+		// running turn is failed and the D18 one-active guard released;
+		// locally-buffered streams get the terminal event.
+		genai.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
+	}
+	// JobWatcher polls the proxy-dispatched `ca-…` coding-agent Jobs and Finishes
+	// the coding execution FAILED on Job failure (success rides the PR webhook),
+	// capturing the pod's final log. Only when the proxy path is configured.
+	if cgwClient != nil {
+		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo))
+		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
+	}
+
+	return &App{Handler: handler, Watchers: watchers}, nil
+}
+
+// buildSecretStagerAdapter maps the concrete *orgcreds.BuildCredentialsService
+// (StageBuildSecret → *StageResult) onto the component feature's
+// BuildSecretStager port (→ secretRef string), so the component package need
+// not import the services StageResult type. The adapter satisfies the consumer
+// port at the composition root, not in the feature (§6.8).
+type buildSecretStagerAdapter struct {
+	svc *orgcreds.BuildCredentialsService
+}
+
+func (a buildSecretStagerAdapter) StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (string, error) {
+	res, err := a.svc.StageBuildSecret(ctx, ocOrgID, repoSlug, workflowRunName)
+	if err != nil {
+		return "", err
+	}
+	if res == nil {
+		return "", nil
+	}
+	return res.SecretRef, nil
+}
+
+// buildGitHost selects the git host implementation named by GIT_PROVIDER and
+// returns it as gitrepo.Host. This is the only place a concrete provider client
+// is constructed; every gitrepo domain service narrows Host to its own
+// capability port. Deliberately a plain switch — NOT a registry or capability
+// framework (see docs/design/aep-api-target-structure.md, "Explicitly NOT a
+// framework"). A GitLab impl later is one new clients/gitlab package + one case.
+// cfg.Validate() already rejects unknown providers at boot; the default arm is
+// defensive.
+func buildGitHost(cfg config.Config) (gitrepo.Host, error) {
+	switch cfg.GitProvider {
+	case "github":
+		return githubclient.NewClient(), nil
+	default:
+		return nil, fmt.Errorf("unknown GIT_PROVIDER %q — supported: github", cfg.GitProvider)
+	}
+}

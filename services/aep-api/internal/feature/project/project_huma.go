@@ -23,8 +23,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/internal/platform/ocerr"
+	"github.com/wso2/aep/aep-api/internal/platform/validate"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -35,6 +38,7 @@ import (
 type listProjectsInput struct {
 	humakit.OrgScopedInput
 	Cursor string `query:"cursor" doc:"Opaque pagination cursor"`
+	Search string `query:"search" doc:"Case-insensitive substring match on name and displayName"`
 }
 
 type orgProjectInput struct {
@@ -65,7 +69,7 @@ func RegisterProject(api huma.API, svc ProjectService) {
 		Tags:        []string{"Projects"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *listProjectsInput) (*projectListOutput, error) {
-		list, err := svc.ListProjects(ctx, in.OrgHandle, 100, in.Cursor)
+		list, err := svc.ListProjects(ctx, in.OrgHandle, 100, in.Cursor, in.Search)
 		if err != nil {
 			return nil, mapProjectError(err)
 		}
@@ -83,6 +87,14 @@ func RegisterProject(api huma.API, svc ProjectService) {
 	}, func(ctx context.Context, in *createProjectInput) (*projectOutput, error) {
 		if in.Body.Name == "" {
 			return nil, huma.Error400BadRequest("name is required")
+		}
+		// repoName becomes a GitHub repo name verbatim — enforce the slug rule
+		// here so GitHub can't silently normalize it into a repo whose actual
+		// name diverges from what we store.
+		if in.Body.RepoName != "" {
+			if err := validate.Slug(in.Body.RepoName); err != nil {
+				return nil, huma.Error400BadRequest("repoName: " + err.Error())
+			}
 		}
 		p, err := svc.CreateProject(ctx, in.OrgHandle, &in.Body)
 		if err != nil {
@@ -138,8 +150,9 @@ func RegisterProject(api huma.API, svc ProjectService) {
 }
 
 // mapProjectError translates project + OpenChoreo sentinel errors into RFC 9457
-// problem responses, preserving the status classification the legacy controller
-// applied (openchoreoErrorStatus lives in project_controller.go).
+// problem responses. The feature sentinels (translated from OC by the service's
+// translateHTTPError) carry the fixed user-facing messages; any remaining raw
+// OC sentinel rides the shared ocerr classifier.
 func mapProjectError(err error) error {
 	switch {
 	case errors.Is(err, ErrUnauthorized) || errors.Is(err, openchoreo.ErrUnauthorized):
@@ -148,8 +161,10 @@ func mapProjectError(err error) error {
 		return huma.Error404NotFound("project not found")
 	case errors.Is(err, ErrForbidden):
 		return huma.Error403Forbidden("insufficient permissions to perform this action")
+	case gitrepo.IsRepoNameConflict(err):
+		return huma.Error409Conflict("a repository with this name already exists — choose another repository name")
 	}
-	if status, ok := openchoreoErrorStatus(err); ok {
+	if status, ok := ocerr.Status(err); ok {
 		return humakit.ErrorFromStatus(status, err.Error())
 	}
 	return huma.Error500InternalServerError("internal error")

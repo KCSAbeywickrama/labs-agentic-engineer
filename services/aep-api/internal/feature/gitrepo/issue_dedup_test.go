@@ -48,14 +48,13 @@ func (fakeResolver) Resolve(context.Context, string) (credentials.Credential, er
 type fakeRepoRepo struct{ repositories.RepoRepository }
 
 func (fakeRepoRepo) GetByOrgAndProjectID(_ context.Context, org, proj string) (*models.GitRepository, error) {
-	// GithubProjectID non-empty so the post-create board path is skipped.
-	return &models.GitRepository{OrgID: org, ProjectID: proj, RepoURL: "https://github.com/o/r", GithubProjectID: "PVT_x"}, nil
+	return &models.GitRepository{OrgID: org, ProjectID: proj, RepoURL: "https://github.com/o/r"}, nil
 }
 
 // fakeGitHub records created issues in memory and filters ListIssues by label,
 // exactly as the real GitHub label query would.
 type fakeGitHub struct {
-	GitHubClient
+	IssueOps
 	mu          sync.Mutex
 	issues      []IssueInfo
 	createCount int
@@ -101,7 +100,7 @@ func hasLabel(iss IssueInfo, want string) bool {
 }
 
 func newDedupService(gh *fakeGitHub) IssueService {
-	return NewIssueService(fakeRepoRepo{}, gh, nil, fakeResolver{})
+	return NewIssueService(fakeRepoRepo{}, gh, fakeResolver{})
 }
 
 func req(title, key string) CreateIssueRequest {

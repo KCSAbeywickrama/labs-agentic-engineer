@@ -16,7 +16,8 @@
  * under the License.
  */
 
-import { lazy, memo, Suspense, useMemo } from 'react';
+import { lazy, memo, Suspense, useMemo, useRef } from 'react';
+import type { Project } from '@wso2/cell-diagram';
 import { Box, CircularProgress, Typography } from '@wso2/oxygen-ui';
 import { buildProjectModel, type CellDiagramComponent } from './buildProjectModel.js';
 
@@ -25,18 +26,48 @@ const CellDiagram = lazy(() =>
 );
 
 export interface CellDiagramViewProps {
-  components: CellDiagramComponent[];
+  /** Components projected into a diagram via {@link buildProjectModel}. */
+  components?: CellDiagramComponent[];
+  /**
+   * A pre-built cell-diagram project, rendered as-is (bypasses
+   * `buildProjectModel`) and taking precedence over `components`. Use when the
+   * caller already holds the projected model — e.g. the design page projects the
+   * live draft/stream through the SAME `toCellDiagramProject` pipeline that
+   * derives the committed `cell-diagram.gen.json`, so the diagram tracks the
+   * files exactly while streaming and before publish.
+   */
+  project?: Project;
   /** Optional override for the empty-state copy. */
   emptyState?: React.ReactNode;
 }
 
 export const CellDiagramView = memo(function CellDiagramView({
   components,
+  project,
   emptyState,
 }: CellDiagramViewProps) {
-  const project = useMemo(() => buildProjectModel(components), [components]);
+  const model = useMemo(
+    () => project ?? buildProjectModel(components ?? []),
+    [project, components],
+  );
 
-  if (components.length === 0) {
+  // Debug tap: EVERY render of this component redraws the diagram — the lib's
+  // ProjectDiagram runs drawDiagram() + zoom-to-fit in a useEffect keyed on its
+  // props OBJECT (new per render). So one line here = one visible refresh.
+  // "same-model" renders are pure waste (a memo break upstream), "NEW model"
+  // renders are the data reloads that also print `[live-design] reload #N`.
+  const renders = useRef(0);
+  const prevModel = useRef<Project | null>(null);
+  renders.current += 1;
+  // eslint-disable-next-line no-console
+  console.log(
+    `[live-design] CellDiagramView render #${renders.current} (${
+      model === prevModel.current ? 'same-model — memo break upstream' : 'NEW model'
+    }, ${model.components.length} components)`,
+  );
+  prevModel.current = model;
+
+  if (model.components.length === 0) {
     return (
       <Box
         sx={{
@@ -68,7 +99,7 @@ export const CellDiagramView = memo(function CellDiagramView({
           </Box>
         }
       >
-        <CellDiagram project={project} />
+        <CellDiagram project={model} />
       </Suspense>
     </Box>
   );

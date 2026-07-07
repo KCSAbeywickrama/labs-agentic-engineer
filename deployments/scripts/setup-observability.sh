@@ -64,14 +64,19 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v8 —
-#                   dynamic Anthropic-key resolution [resolve_api_key: console/
-#                   OpenBao-backed file first, static RCA_LLM_API_KEY fallback,
-#                   applied consistently at boot AND at runtime] plus a
-#                   non-fatal boot path when no key is configured anywhere yet
-#                   [warns and stays up instead of crash-looping — see
-#                   AE-HANDOFF-DESIGN.md]. Falls back to anthropic-patched if
-#                   it isn't built or pullable)
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v9 —
+#                   the handoff agent's classify/dedupe/tag/dispatch-guard
+#                   logic moved out of the prompt into deterministic code
+#                   (src/agent/handoff_logic.py) plus a pluggable Skill
+#                   mechanism (src/agent/skills.py, src/skills/issue-fix/) for
+#                   the remaining judgment-based work — see AE-HANDOFF-DESIGN.md.
+#                   handoff-v8 carried dynamic Anthropic-key resolution
+#                   [resolve_api_key: console/OpenBao-backed file first,
+#                   static RCA_LLM_API_KEY fallback, applied consistently at
+#                   boot AND at runtime] plus a non-fatal boot path when no
+#                   key is configured anywhere yet [warns and stays up instead
+#                   of crash-looping]. Falls back to anthropic-patched if it
+#                   isn't built or pullable)
 #   AE_HANDOFF      enable the RCA→AEP coding-agent handoff (default: true)
 #   AE_AUTO_DISPATCH auto-dispatch the coding agent after issue creation
 #                   (default: true; false = issue-only, human dispatches)
@@ -174,8 +179,8 @@ echo "1️⃣b RCA agent image + secret"
 #                             to the local name so the helm values stay stable
 #   3. local anthropic-patched (older tag: RCA works, handoff stage ABSENT)
 RCA_IMAGE_REPO="openchoreo-sre-agent"
-RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v8}"
-RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v8}"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v9}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v9}"
 if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
     echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
     if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then

@@ -23,7 +23,7 @@
  */
 
 import { stdout } from "node:process";
-import type { StreamPart } from "../src/agents/main/stream-types.js";
+import type { StreamPart } from "@aep/agent-stream";
 import type { FileChange } from "./threads.js";
 
 // Color only on a real terminal — otherwise raw escapes litter piped/redirected output.
@@ -32,10 +32,11 @@ const dim = color("2");
 const green = color("32");
 const red = color("31");
 
-/** The path/name a tool acted on (file tools carry `path`; loadSkill carries `name`). */
+/** The path/name a tool acted on (file tools carry `path`; loadSkill carries `names`). */
 function inputLabel(input: unknown): string {
   const v = (input ?? {}) as Record<string, unknown>;
   if (typeof v.path === "string") return v.path;
+  if (Array.isArray(v.names)) return v.names.filter((n) => typeof n === "string").join(", ");
   if (typeof v.name === "string") return v.name;
   return "";
 }
@@ -58,8 +59,14 @@ export function renderPart(part: StreamPart): void {
       stdout.write(`\n${dim("→")} ${part.toolName ?? "?"} ${dim(inputLabel(part.input))}\n`);
       break;
     case "tool-result": {
-      const r = part.output as ResultShape | undefined;
-      if (r?.ok) stdout.write(`  ${green("✓")} ${r.op ?? "loaded"} ${dim(r.status ?? "")}\n`);
+      const r = part.output as ResultShape | string | undefined;
+      // MCP discovery tools return bare strings, not the file tools'
+      // {ok, op, status} shape — render them as the successes they are
+      // (a thrown MCP failure arrives as a tool-error part, not here).
+      if (typeof r === "string") {
+        const preview = r.replace(/\s+/g, " ").trim();
+        stdout.write(`  ${green("✓")} ${dim(preview.length > 80 ? `${preview.slice(0, 80)}…` : preview)}\n`);
+      } else if (r?.ok) stdout.write(`  ${green("✓")} ${r.op ?? "loaded"} ${dim(r.status ?? "")}\n`);
       else if (r) stdout.write(`  ${red("✗")} ${r.code ?? "error"}${r.message ? `: ${r.message}` : ""}\n`);
       break;
     }

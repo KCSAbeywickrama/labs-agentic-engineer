@@ -34,8 +34,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
-	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
 )
 
 // newRunnerTaskManager builds a TaskTokenManager backed by a freshly generated

@@ -2,7 +2,7 @@
 name: react-webapp
 description: How to build a React SPA on the platform — Vite project layout, multi-stage Dockerfile → nginx:alpine runtime, synchronous /env-config.js load before the bundle, the authoritative window._env_ key set, throw-on-missing-key rule, and stock static-only nginx config (no envsubst, no proxy). Apply to every web-app component.
 metadata:
-  aep.version: "1"
+  aep.version: "2"
 ---
 
 # React Webapp
@@ -40,9 +40,9 @@ Use these EXACT spellings — do not invent new keys:
 
 | Key | Set when | Meaning |
 |---|---|---|
-| `API_BASE_URL` | this web-app `dependsOn` a service sibling | external gateway URL of the primary upstream service in this project |
-| `<UPSTREAM>_URL` | this web-app `dependsOn` `<upstream>` | external gateway URL of that sibling (`<UPSTREAM>` = upstream component name in `UPPER_SNAKE_CASE`, e.g. `todo-api` → `TODO_API_URL`) |
-| `<NAME>_URL` | this web-app `dependentApis` includes `<name>` | external gateway URL of that external dependent API (same UPPER_SNAKE convention, e.g. `employee-api` → `EMPLOYEE_API_URL`) |
+| `API_BASE_URL` | this web-app has a `component`-kind `dependencies` entry on a service sibling | external gateway URL of the primary upstream service in this project |
+| `<UPSTREAM>_URL` | this web-app depends on `<upstream>` (a `component`-kind `dependencies` entry) | external gateway URL of that sibling (`<UPSTREAM>` = upstream component name in `UPPER_SNAKE_CASE`, e.g. `todo-api` → `TODO_API_URL`) |
+| `<NAME>_URL` | this web-app's `dependencies` include an `external`-kind entry `<name>` | external gateway URL of that external upstream API (same UPPER_SNAKE convention, e.g. `employee-api` → `EMPLOYEE_API_URL`) |
 | `THUNDER_*` | this web-app has `callerIdentity.mode: end-user` | OIDC config keys (`THUNDER_URL`, `THUNDER_CLIENT_ID`, `THUNDER_REDIRECT_URI`, `THUNDER_SCOPES`, `THUNDER_AFTER_SIGN_IN_URL`) — owned by the `thunder-authentication` skill; see it for the per-key meanings and wiring |
 | `<NAME>` (any) | the agent declared it in `workload.yaml` `configurations.env` | app-config default (per-env override possible) |
 
@@ -53,8 +53,9 @@ Use these EXACT spellings — do not invent new keys:
 - One web-app component per user-facing surface; do NOT split a frontend
   into "ui-shell" + "ui-pages" — every SPA is one component, one
   task, one bundle.
-- For every backend in the web-app's `dependsOn`, the architect MUST
-  include an instruction line in `componentAgentInstructions`:
+- For every backend the web-app has a `component`-kind `dependencies` entry
+  on, the architect MUST include an instruction line in
+  `componentAgentInstructions`:
   `Upstream <name>: read the URL from window._env_.<NAME_UPPER_SNAKE>_URL via src/env.ts. Throw (no ?? "" fallback) on missing.`
 - Do NOT write anything about `VITE_*`, `REACT_APP_*`,
   `NEXT_PUBLIC_*`, `.env` files, build-time substitution, or
@@ -63,8 +64,8 @@ Use these EXACT spellings — do not invent new keys:
 
 ### Tech-lead — issue body bullets
 
-For every web-app task whose `dependsOn` is non-empty, include one
-Scope bullet per upstream:
+For every web-app task whose component `dependencies` include a
+`component`-kind entry, include one Scope bullet per upstream:
 
 - "Wire upstream `<name>`: Read the URL from
   `window._env_.<NAME_UPPER_SNAKE>_URL` via `src/env.ts`. The platform
@@ -135,7 +136,7 @@ missing (which means a config bug, not a missing key default):
 ```ts
 type Env = {
   API_BASE_URL: string;
-  // Plus one <UPSTREAM>_URL per dependsOn entry, if any.
+  // Plus one <UPSTREAM>_URL per component-kind dependency entry, if any.
   // If this SPA has callerIdentity.mode: end-user, the THUNDER_* OIDC
   // keys are also present — extend this type with them per the
   // thunder-authentication skill, which owns the auth wiring.

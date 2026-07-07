@@ -14,90 +14,231 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//go:build dbtest
-
-// Package dbtest is the DB-backed test harness (§8.0). It is compiled ONLY
-// under the `dbtest` build tag, so the default `go test ./...` (and `make
-// test`) never require a database — only `make test-db` (`go test -tags
-// dbtest ./...`) exercises it.
+// Package dbtest is the DB-backed test harness. A single call —
+// dbtest.New(t) — hands back a pristine, fully-migrated, isolated *gorm.DB per
+// test, so a DB test is just:
 //
-// It reuses the deployments Postgres on :5433 (the doc's option 1; override
-// with TEST_DATABASE_URL), applies schema with AutoMigrate, and isolates test
-// data by namespacing rows (e.g. org handles prefixed "dbtest-") and deleting
-// them via t.Cleanup — so it never truncates or collides with application
-// data. If the database is unreachable, Open skips the test rather than
-// failing, so `-tags dbtest` is a safe no-op on machines without the local
-// stack.
+//	func TestFoo(t *testing.T) {
+//	    t.Parallel()
+//	    db := dbtest.New(t)
+//	    repo := repositories.NewFooRepository(db)
+//	    // ...just write the test.
+//	}
+//
+// How it works (template-clone, not truncate/transaction):
+//
+//   - Once per process: one throwaway Postgres is started via testcontainers-go
+//     (sync.Once, reused across every test in the run) and migrated ONCE with
+//     the real production migrator into a template database. The container is
+//     fully hermetic — a run depends on nothing but Docker (no compose stack, no
+//     :5433, no shared server to collide on). Its schema is byte-for-byte the
+//     production schema, because it is built by the same migrations.RunAll the
+//     app runs at boot.
+//   - Per test: pgtestdb issues `CREATE DATABASE … TEMPLATE <template>` — a
+//     Postgres file-copy in single-digit ms — so each test gets its own
+//     pristine, fully-migrated, fully-isolated database, dropped on t.Cleanup.
+//     Template-clone keeps every test a real separate DB with real transactions,
+//     so production paths that use `FOR UPDATE SKIP LOCKED` / manual Begin/Commit
+//     test truthfully (an outer wrapping txn would break them).
+//
+// Fast lane: New calls t.Skip under `testing.Short()`, so `make test`
+// (go test -short ./...) needs no Docker and `make test-db` (go test ./...)
+// runs the DB tier. There is no build tag — every test compiles in one world.
+// Where Docker is unavailable, New skips (via testcontainers' provider health
+// check) rather than failing, so machines without Docker degrade gracefully.
 package dbtest
 
 import (
-	"os"
+	"context"
+	"database/sql"
+	"fmt"
+	"sync"
 	"testing"
 
-	"gorm.io/driver/postgres"
+	"github.com/peterldowns/pgtestdb"
+	"github.com/testcontainers/testcontainers-go"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	// Registers the "pgx" database/sql driver that pgtestdb opens the
+	// template/base connections with (Config.DriverName below).
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/wso2/aep/aep-api/internal/database/migrations"
+	"github.com/wso2/aep/aep-api/models"
 )
 
-// DefaultURL points at the deployments Postgres (docker-compose `postgres`
-// service, host-mapped to :5433 with the aep/aep dev credentials).
-const DefaultURL = "postgres://aep:aep@localhost:5433/aep?sslmode=disable"
+const (
+	// postgresImage is the throwaway backing store. It must track the Postgres
+	// major the app runs against so template-clone schema fidelity is real.
+	postgresImage = "postgres:17-alpine"
 
-// URL returns the test database DSN (TEST_DATABASE_URL or DefaultURL).
-func URL() string {
-	if v := os.Getenv("TEST_DATABASE_URL"); v != "" {
-		return v
-	}
-	return DefaultURL
-}
+	// migrationTier drives the dev-only destructive/seed branches in RunAll.
+	// "dev" matches config's DEPLOYMENT_TIER default, so the template is built
+	// on the same code path the local app boots on.
+	migrationTier = "dev"
 
-// Open returns a *gorm.DB connected to the test Postgres. It calls t.Skip when
-// the database is unreachable so the dbtest suite degrades gracefully where no
-// local stack is running (rather than failing the build).
-func Open(t testing.TB) *gorm.DB {
+	// baseUser/basePassword/baseDB are the throwaway container superuser and its
+	// default database. pgtestdb connects as this superuser to CREATE/DROP the
+	// template and per-test clones, and (since it is the superuser) migrations
+	// run with full privileges — e.g. phase6's `CREATE EXTENSION pgcrypto`.
+	baseUser     = "postgres"
+	basePassword = "postgres"
+	baseDB       = "aep_dbtest"
+
+	// schemaVersion is folded into the migrator Hash so pgtestdb rebuilds the
+	// template when the schema changes. The backing container is ephemeral (one
+	// per process), so a stale template can never outlive a run — this only
+	// needs to be stable within a run. Bump it when database/migrations or the
+	// base-model set below changes, purely as documentation of intent.
+	schemaVersion = "4"
+)
+
+// container holds the process-wide testcontainers Postgres, started once by
+// startContainer and reused by every New call. It is torn down by Ryuk when the
+// test process exits (never per test — the container must outlive every clone).
+var (
+	containerOnce sync.Once
+	baseConfig    pgtestdb.Config
+	containerErr  error
+	container     *tcpostgres.PostgresContainer //nolint:unused // kept alive for the process lifetime
+)
+
+// New returns a fresh, fully-migrated, isolated *gorm.DB for the test, dropped
+// on t.Cleanup. It skips under -short (fast lane) and where Docker is
+// unavailable, so it is safe to leave in the default build.
+func New(t testing.TB) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(postgres.Open(URL()), &gorm.Config{
+	if testing.Short() {
+		t.Skip("dbtest: skipped under -short (run `make test-db`)")
+	}
+	// Degrade gracefully where Docker isn't running: skip rather than fail, so
+	// only genuine container/migration errors below are fatal.
+	if tt, ok := t.(*testing.T); ok {
+		testcontainers.SkipIfProviderIsNotHealthy(tt)
+	}
+
+	base := ensureContainer(t)
+
+	// Clone a pristine per-test database off the migrated template. pgtestdb
+	// registers its own t.Cleanup to drop the clone once the test passes.
+	cfg := pgtestdb.Custom(t, base, &runAllMigrator{})
+
+	db, err := gorm.Open(gormpostgres.Open(cfg.URL()), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
+		// Match production (database.Open) so paths that use FOR UPDATE SKIP
+		// LOCKED / manual Begin/Commit test truthfully — without this, gorm wraps
+		// every write in an implicit transaction that prod does not have.
+		SkipDefaultTransaction: true,
 	})
 	if err != nil {
-		t.Skipf("dbtest: Postgres not reachable at %s (%v); skipping (run `bash deployments/scripts/start.sh`)", URL(), err)
-		return nil
+		t.Fatalf("dbtest: open gorm on clone %s: %v", cfg.Database, err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Skipf("dbtest: cannot obtain sql.DB (%v); skipping", err)
-		return nil
-	}
-	if err := sqlDB.Ping(); err != nil {
-		t.Skipf("dbtest: ping failed (%v); skipping (run `bash deployments/scripts/start.sh`)", err)
-		return nil
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	return db
 }
 
-// Migrate AutoMigrates the given models into the test database. Idempotent —
-// the tables typically already exist (the app created them), so this just
-// reconciles columns/indexes for the schema under test.
-func Migrate(t testing.TB, db *gorm.DB, models ...any) {
+// ensureContainer starts the throwaway Postgres exactly once per process and
+// returns the pgtestdb base config pointing at it. A start failure is fatal
+// (Docker was already confirmed healthy by New's skip check).
+func ensureContainer(t testing.TB) pgtestdb.Config {
 	t.Helper()
-	if err := db.AutoMigrate(models...); err != nil {
-		t.Fatalf("dbtest: AutoMigrate failed: %v", err)
+	containerOnce.Do(startContainer)
+	if containerErr != nil {
+		t.Fatalf("dbtest: start Postgres container: %v", containerErr)
+	}
+	return baseConfig
+}
+
+// startContainer boots the testcontainers Postgres and populates baseConfig /
+// containerErr. Run once via containerOnce.
+func startContainer() {
+	ctx := context.Background()
+	c, err := tcpostgres.Run(ctx, postgresImage,
+		tcpostgres.WithDatabase(baseDB),
+		tcpostgres.WithUsername(baseUser),
+		tcpostgres.WithPassword(basePassword),
+		tcpostgres.BasicWaitStrategies(),
+	)
+	if err != nil {
+		containerErr = err
+		return
+	}
+	host, err := c.Host(ctx)
+	if err != nil {
+		containerErr = fmt.Errorf("container host: %w", err)
+		return
+	}
+	port, err := c.MappedPort(ctx, "5432/tcp")
+	if err != nil {
+		containerErr = fmt.Errorf("container port: %w", err)
+		return
+	}
+	container = c
+	baseConfig = pgtestdb.Config{
+		DriverName: "pgx",
+		Host:       host,
+		Port:       port.Port(),
+		User:       baseUser,
+		Password:   basePassword,
+		Database:   baseDB,
+		Options:    "sslmode=disable",
+		// Own and connect to the template/clones as the container superuser, so
+		// migrations run with full privileges (matching the local dev DB role).
+		TestRole: &pgtestdb.Role{
+			Username:     baseUser,
+			Password:     basePassword,
+			Capabilities: "",
+		},
 	}
 }
 
-// CleanupRows registers a t.Cleanup that deletes the rows matched by the given
-// gorm where-clause from the model's table. Use it to remove a test's
-// namespaced fixtures (e.g. org_id LIKE 'dbtest-%') without touching
-// application data. Runs both before the test body (immediate) and after
-// (deferred) so a prior crashed run leaves no residue.
-func CleanupRows(t testing.TB, db *gorm.DB, model any, query string, args ...any) {
-	t.Helper()
-	del := func() {
-		if err := db.Unscoped().Where(query, args...).Delete(model).Error; err != nil {
-			t.Logf("dbtest: cleanup delete failed (non-fatal): %v", err)
-		}
+// runAllMigrator builds the template database with the real production migrator,
+// so every clone has the exact production schema.
+type runAllMigrator struct{}
+
+// baseModels mirrors the AutoMigrate set cmd/aep-api/main.go passes to
+// database.Open before RunAll — the tables RunAll's ALTERs assume already exist.
+// Keep it in sync with main.go's database.Open(...) call.
+var baseModels = []any{
+	&models.ComponentConfig{},
+	&models.WebhookDelivery{},
+	&models.WebhookPayload{},
+	&models.Organization{},
+	&models.Execution{},
+	&models.AgentTurn{},
+}
+
+// Migrate provisions the template exactly as the app provisions a fresh DB at
+// boot: AutoMigrate the base models, self-heal grants, then run every ordered
+// migration via migrations.RunAll. pgtestdb calls this once, on the empty
+// template database it just created.
+func (runAllMigrator) Migrate(ctx context.Context, sqlDB *sql.DB, _ pgtestdb.Config) error {
+	db, err := gorm.Open(gormpostgres.New(gormpostgres.Config{Conn: sqlDB}), &gorm.Config{
+		Logger:                 logger.Default.LogMode(logger.Silent),
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		return fmt.Errorf("open gorm on template: %w", err)
 	}
-	del()
-	t.Cleanup(del)
+	if err := db.AutoMigrate(baseModels...); err != nil {
+		return fmt.Errorf("auto-migrate base models: %w", err)
+	}
+	_ = migrations.RunBootstrapGrants(ctx, db) // non-fatal self-heal, as in main
+	if err := migrations.RunAll(ctx, db, migrationTier); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	return nil
+}
+
+// Hash keys pgtestdb's template cache. See schemaVersion for why a stable
+// string (not a content hash) is sufficient here.
+func (runAllMigrator) Hash() (string, error) {
+	return "aep-api-schema-v" + schemaVersion, nil
 }

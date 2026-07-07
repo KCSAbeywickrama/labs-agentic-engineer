@@ -34,28 +34,25 @@ import (
 var ErrComponentRemovedAfterGeneration = errors.New("component removed after generation")
 
 // ResolveDesignComponent reads the project's current `specs/design/` tree via
-// the given store and returns the entry whose Name matches task.ComponentName.
-// Per design §12, dispatch reads the *current* design at dispatch time — not a
-// snapshot from when the task was generated — so design edits between
-// generation and dispatch propagate. Lookups are case-insensitive on Name to
-// mirror toposort/lookup behaviour elsewhere in the codebase.
-func ResolveDesignComponent(ctx context.Context, store *ArtifactStore, task *models.ComponentTask) (*models.DesignComponent, error) {
+// the given store and returns the entry whose Name matches componentName. The
+// design at HEAD is read at the moment of use (not a snapshot), so design edits
+// propagate. Lookups are case-insensitive on Name.
+func ResolveDesignComponent(ctx context.Context, store *ArtifactStore, orgID, projectID, componentName string) (*models.DesignComponent, error) {
 	if store == nil {
 		return nil, fmt.Errorf("artifact store not configured")
 	}
-	design, err := store.ReadDesign(ctx, task.OrgID, task.ProjectID)
+	design, err := store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("read design for task %s: %w", task.ID, err)
+		return nil, fmt.Errorf("read design for %s/%s: %w", orgID, projectID, err)
 	}
 	if design == nil {
-		return nil, fmt.Errorf("design missing for project %s (no specs/design/design.md)", task.ProjectID)
+		return nil, fmt.Errorf("design missing for project %s (no specs/design/design.md)", projectID)
 	}
-	target := strings.ToLower(task.ComponentName)
 	for i := range design.Components {
-		if strings.EqualFold(design.Components[i].Name, target) {
+		if strings.EqualFold(design.Components[i].Name, componentName) {
 			c := design.Components[i]
 			return &c, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: %s", ErrComponentRemovedAfterGeneration, task.ComponentName)
+	return nil, fmt.Errorf("%w: %s", ErrComponentRemovedAfterGeneration, componentName)
 }

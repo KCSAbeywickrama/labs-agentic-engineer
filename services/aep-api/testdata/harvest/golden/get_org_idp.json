@@ -1,0 +1,11 @@
+{
+  "id": "9f35daf0-a743-4f38-9e58-d9939b477cfb",
+  "orgId": "default",
+  "kind": "platform",
+  "issuer": "http://thunder.openchoreo.localhost:8080",
+  "jwksUrl": "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks",
+  "publisherClientId": "aep-publisher-default",
+  "publisherSecretRef": "secret/aep/default/idp/publisher",
+  "createdAt": "2026-07-01T05:41:54.661591Z",
+  "updatedAt": "2026-07-01T09:55:57.160423Z"
+}

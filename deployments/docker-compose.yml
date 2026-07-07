@@ -22,6 +22,21 @@ services:
       - aep
 
   # ---------------------------------------------------------------------------
+  # workspace-init — one-shot chown of the shared workspaces volume. A fresh
+  # named volume is root-owned, but both aep-api and agents run non-root
+  # (uid 1000); hand the mount to uid 1000 once before either starts.
+  # ---------------------------------------------------------------------------
+  workspace-init:
+    image: alpine:3.21
+    container_name: aep-workspace-init
+    command: ["chown", "1000:1000", "/workspaces"]
+    volumes:
+      - aep-workspaces:/workspaces
+    restart: "no"
+    networks:
+      - aep
+
+  # ---------------------------------------------------------------------------
   # aep-api — Go BFF + GitHub webhook receiver. Reaches OC via the k3d
   # docker network (k3d-openchoreo-serverlb) and Thunder via the same
   # loadbalancer routed by Host header.
@@ -30,24 +45,39 @@ services:
     build:
       context: ../services/aep-api
     container_name: aep-api
+    # Fast SYN-retransmit recovery for the local Colima env. Its docker-bridge
+    # NAT intermittently drops a SYN under concurrent outbound bursts (the BFF's
+    # parallel git fetches + GitHub API calls on a project page load); the kernel
+    # default (tcp_syn_retries=6) then leaves the connect hanging ~50-76s before
+    # a retransmit lands — surfacing as hanging tasks/versions endpoints. 2
+    # retries recovers (or fails fast) within ~7s so reads degrade gracefully and
+    # the console re-polls. Namespaced sysctl (per-netns); harmless elsewhere.
+    # Proper durable fix tracked in docs/design/gitfs-fetch-on-read-followup.md.
+    sysctls:
+      net.ipv4.tcp_syn_retries: "2"
     ports:
       - "9090:9090"
     depends_on:
       postgres:
         condition: service_healthy
-      agents-service:
+      agents:
         condition: service_started
+      workspace-init:
+        condition: service_completed_successfully
     environment:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "9090"
       LOG_LEVEL: "debug"
       DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
       # Runner image override: built from this repo's runners/remote-worker.
-      # v5 drops the `related-issues` skill — related-issue linking moved to
+      # Drops the `related-issues` skill — related-issue linking moved to
       # the SRE agent's handoff stage (issue body "## Related issues" section;
-      # GitHub #N mentions back-link automatically). Keep in sync with
+      # GitHub #N mentions back-link automatically). v6 rebases onto
+      # upstream's tasks-github-native re-key (executions-keyed skills pull +
+      # credentials refresh — v5 called the now-retired tasks-keyed routes and
+      # could not authenticate git operations at all). Keep in sync with
       # deployments/manifests/aep-coding-agent.yaml.
-      AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-docker.io/tharindulak/aep-coding-agent-runner:v5-sre-side-linking}"
+      AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-docker.io/tharindulak/aep-coding-agent-runner:v6-sre-side-linking}"
       DEPLOYMENT_TIER: "${DEPLOYMENT_TIER:-dev}"
       # Central per-route tenant gate (§6.1b). ENFORCE by default (404s
       # cross-org); set TENANT_GATE_MODE=log for the observe-only canary
@@ -59,19 +89,40 @@ services:
       # Local-only by design — cloud release bindings never set this.
       # See deployments/scripts/repair-secrets.sh.
       LOCAL_OPENBAO_REPAIR: "true"
+      # ── Shared git workspaces volume — bare mirrors + per-SHA snapshots
+      # (docs/design/shared-volume-clone-architecture.md). aep-api is the
+      # SOLE writer; the agents service mounts the same volume read-only.
+      AEP_WORKSPACE_ROOT: "/workspaces"
+      # Gates POST /internal/v1/mcp/playground-token — mints a short-lived MCP
+      # token with NO caller auth so services/agents' playground CLI can drive
+      # dependency discovery against this aep-api locally (AEP_MCP_URL et al.
+      # in services/agents/.env.example). Local-only by design — never set in
+      # helm release bindings.
+      PLAYGROUND_TOKEN_ENABLED: "true"
 
       # ── OpenChoreo platform API (reached via k3d loadbalancer + Host header)
       PLATFORM_API_SERVICE_BASE_URL: "${PLATFORM_API_SERVICE_BASE_URL}"
       PLATFORM_API_SERVICE_HOST: "${PLATFORM_API_SERVICE_HOST:-api.openchoreo.localhost}"
 
       # ── Sister services on the aep compose network
-      AGENTS_SERVICE_BASE_URL: "http://agents-service:3400"
+      # File-mutation agents service (services/agents) — requirements/design/
+      # chat generation + task planning. Plain HS256 M2M bearer; the secret must
+      # match the service's AGENT_JWT_SECRET below.
+      AGENTS_SVC_BASE_URL: "http://agents:4000"
+      AGENTS_SVC_JWT_SECRET: "${AGENTS_M2M_SECRET:-dev-agents-m2m-secret}"
+      AGENTS_SVC_JWT_AUDIENCE: "agents-service"
       # After WS0.1, git-service is folded into the aep-api binary. The
       # ── Coding-agent runner reach-back URL. The pod runs in
       # `workflows-<orgID>` inside the cluster, so it must reach the
       # compose services through k3d's host bridge. All former
       # git-service endpoints + the BFF live on the merged binary.
       AGENT_PLATFORM_URL: "http://host.k3d.internal:9090"
+      # The BFF's own base URL as reached by the agents service (same compose
+      # network) for the internal MCP discovery surface. Enables the `mcp`
+      # bundle handed to agents in the generation turn so it can call back to
+      # <this>/internal/v1/mcp with a BFF-signed MCP token. (Inert until the
+      # dependencies feature lands — Phase 4.)
+      AEP_API_INTERNAL_BASE_URL: "http://aep-api:9090"
 
       # ── GitHub webhook validation + connect-state HMAC.
       GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"
@@ -114,9 +165,10 @@ services:
       USER_APPS_OIDC_SCOPES: "openid profile"
 
       # ── Outbound Service JWTs — one client_credentials principal per
-      # target audience (git-service, agents-service). The remote-worker
-      # audience is gone — coding-agent runs as a ClusterWorkflow pod
-      # and authenticates back to git-service with a per-task Task JWT.
+      # target audience (git-service). The agents service is reached with a
+      # plain HS256 M2M bearer (AGENTS_SVC_* above), not a Thunder client. The
+      # remote-worker audience is gone — coding-agent runs as a ClusterWorkflow
+      # pod and authenticates back to git-service with a per-task Task JWT.
       SERVICE_AUTH_TOKEN_URL: "http://k3d-openchoreo-serverlb:8080/oauth2/token"
       SERVICE_AUTH_CLIENT_ID: "aep-api-client"
       SERVICE_AUTH_CLIENT_SECRET: "aep-api-client-secret"
@@ -138,7 +190,6 @@ services:
       # block. The merged binary owns the repo/credential/anthropic
       # endpoints on the same port; envs are renamed only where the
       # binary historically used different names.
-      REPO_BASE_PATH: "/data/repos"
       GITHUB_REPO_VISIBILITY: "${GITHUB_REPO_VISIBILITY:-private}"
       GITHUB_WEBHOOK_DELIVERY_URL: "${GITHUB_WEBHOOK_PROXY_URL}"
       OPENBAO_ADDR: "${OPENBAO_ADDR:-http://host.docker.internal:8200}"
@@ -146,7 +197,6 @@ services:
       GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
       GITHUB_APP_PRIVATE_KEY_PATH: "${GITHUB_APP_PRIVATE_KEY_PATH:-/etc/github-app/private-key.pem}"
-      AGENTS_SERVICE_URL: "http://agents-service:3400"
 
       # ── Phase 1 — sm-api + cluster-gateway-proxy. Compose-only stubs
       # of the cloud services; same client surface in both build configs.
@@ -185,11 +235,9 @@ services:
       OBSERVER_OAUTH_HOST_HEADER: "${OBSERVER_OAUTH_HOST_HEADER:-thunder.openchoreo.localhost}"
     volumes:
       - ./keys/task-signing.pem:/app/keys/task-signing.pem:ro
-      # Folded-in git-service volumes (after WS0.1). Host path is prepared by
-      # start.sh (ensure_repo_storage) so appuser (uid 1000) can mkdir clones.
-      - ./data/repos:/data/repos
       - ./github-app-private-key.pem:/etc/github-app/private-key.pem:ro
       - ./.kube/config:/app/.kube/config:ro
+      - aep-workspaces:/workspaces
     networks:
       - aep
       - k3d-openchoreo
@@ -200,35 +248,51 @@ services:
       - "observer.openchoreo.localhost:host-gateway"
 
   # ---------------------------------------------------------------------------
-  # agents-service — AI BA/Architect/TaskGen/Wireframe agents (Vercel AI SDK).
-  # No ANTHROPIC_API_KEY env: the key is resolved per-call via git-service
-  # (the org's own key, or 503 when the org hasn't connected one — there is
-  # no platform fallback). See docs/design/anthropic-key-dual-token.md §6.4.
+  # agents — file-mutation agents service (services/agents). Serves the
+  # requirements/design/chat generation turns AND task planning. The BFF
+  # (aep-api/internal/feature/{genai,task}) is its only caller. Tenancy-blind:
+  # the acting org rides the log-only X-Org-Id header; the per-org Anthropic key
+  # arrives per-turn in X-Anthropic-Key (no boot-time key).
+  # See docs/design/agents-generation-migration.md.
+  # Built from the repo root so pnpm resolves the workspace:* deps
+  # (@aep/agent-stream, @aep/excalidraw-dsl, @aep/design-projection).
   # ---------------------------------------------------------------------------
-  agents-service:
+  agents:
     build:
-      context: ../services/agents-legacy
-    container_name: aep-agents-service
+      context: ..
+      dockerfile: services/agents/Dockerfile
+    container_name: aep-agents
+    # See aep-api: bound the Colima docker-bridge SYN-drop stall to ~7s so the
+    # agents service's Anthropic API calls (plan/design turns) don't hang.
+    sysctls:
+      net.ipv4.tcp_syn_retries: "2"
     ports:
-      - "3400:3400"
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      workspace-init:
+        condition: service_completed_successfully
     environment:
-      PORT: "3400"
-      LOG_LEVEL: "debug"
+      PORT: "4000"
+      LOG_LEVEL: "${LOG_LEVEL:-debug}"
       AGENT_MODEL: "${AGENT_MODEL:-claude-sonnet-5}"
-      # Inbound identity verification — BFF-signed JWT. agents verifies against
-      # the BFF JWKS (not Thunder) and reads org from the verified ocOrgId
-      # claim; the BFF is the single issuer for S2S identity tokens.
-      JWKS_URL: "http://aep-api:9090/auth/external/jwks.json"
-      JWT_ISSUER: "aep-bff"
-      JWT_AUDIENCE: "agents-service"
-      # Resolve the per-org Anthropic key (or platform fallback) on each call.
-      # Points at the merged aep-api which serves the former
-      # /internal/credentials/orgs/{ocOrgId}/anthropic surface.
-      AEP_API_URL: "http://aep-api:9090"
+      # Anthropic reasoning effort per turn (low|medium|high|xhigh|max).
+      AGENT_REASONING_EFFORT: "${AGENT_REASONING_EFFORT:-medium}"
+      # Shared postgres — the service owns its own `conversations` table (TTL-swept).
+      DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
+      # M2M inbound auth — HS256 shared secret; the BFF mints a matching bearer
+      # (AGENTS_SVC_JWT_SECRET). aud must match the BFF's AGENTS_SVC_JWT_AUDIENCE.
+      AGENT_JWT_SECRET: "${AGENTS_M2M_SECRET:-dev-agents-m2m-secret}"
+      AGENT_JWT_AUDIENCE: "agents-service"
+      # Read-only view of the shared workspaces volume — per-SHA snapshots
+      # written by aep-api. The :ro mount enforces the reader-only contract
+      # structurally (design D3).
+      WORKSPACE_MOUNT_ROOT: "/workspaces"
+    volumes:
+      - aep-workspaces:/workspaces:ro
     networks:
       - aep
-    extra_hosts:
-      - "thunder.openchoreo.localhost:host-gateway"
 
   # ---------------------------------------------------------------------------
   # aep-mcp-server — Streamable-HTTP MCP wrapper over aep-api's issue/dispatch
@@ -344,15 +408,48 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # console — React SPA served by nginx. The browser hits Thunder directly
-  # via thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1
-  # → k3d loadbalancer). All API requests go through the same-origin
+  # console — the NEW console (apps/console), served by nginx (#98) at :8091
+  # while it builds toward parity (legacy keeps :8090 so existing developer
+  # workflows are untouched; the ports flip when the #98 retirement checklist
+  # completes). The browser hits Thunder directly via
+  # thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1 → k3d
+  # loadbalancer); OIDC redirect URIs derive from window.location.origin, so
+  # no redirect env is needed. All API requests go through the same-origin
   # /aep-api-service/ nginx proxy → aep-api:9090.
   # ---------------------------------------------------------------------------
   console:
     build:
-      context: ../console-legacy
-      dockerfile: console/Dockerfile
+      # Repo root — apps/console is a root-pnpm-workspace member and the
+      # image build runs `pnpm gen` against packages/contracts.
+      context: ..
+      dockerfile: apps/console/Dockerfile
+    container_name: aep-console-new
+    ports:
+      - "8091:3000"
+    depends_on:
+      - aep-api
+    environment:
+      AEP_API_PROXY_URL: "http://aep-api:9090"
+      VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
+      VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
+      VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
+    networks:
+      - aep
+
+  # ---------------------------------------------------------------------------
+  # console-legacy — the legacy console, still the default at :8090 during
+  # the #98 transition (org settings, component ops, tasks live here until
+  # the new console reaches parity). Deleted when the #98 retirement
+  # checklist completes.
+  # ---------------------------------------------------------------------------
+  console-legacy:
+    build:
+      # Repo root — not console-legacy/ — so the build can reach the shared
+      # packages/agent-stream + packages/design-projection workspace packages
+      # console/package.json depends on across the console-legacy boundary.
+      # See console-legacy/console/Dockerfile's pkg-builder stage.
+      context: ..
+      dockerfile: console-legacy/console/Dockerfile
     container_name: aep-console
     ports:
       - "8090:3000"
@@ -370,6 +467,9 @@ services:
 
 volumes:
   pgdata:
+  # Shared git workspaces — bare mirrors + per-SHA snapshots. A single Docker
+  # host makes a named volume de-facto RWX; aep-api writes, agents reads (:ro).
+  aep-workspaces:
 
 networks:
   aep:

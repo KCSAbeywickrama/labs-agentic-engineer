@@ -1,0 +1,16 @@
+{
+  "$schema": "http://localhost:9090/api/v1/ComponentList.json",
+  "items": [
+    {
+      "uid": "bd8b1849-98d5-4dc3-812a-568183cddfbd",
+      "name": "hello-api",
+      "projectName": "hello-world-api",
+      "displayName": "hello-api",
+      "description": "Implement hello-api Go service with greeting endpoint — Provide a single Go service that responds with Hello, World! or Hello, [name]! per the spec.",
+      "type": "deployment/service",
+      "autoDeploy": true,
+      "createdAt": "2026-07-01T05:41:54Z",
+      "status": "ComponentReleaseReady"
+    }
+  ]
+}

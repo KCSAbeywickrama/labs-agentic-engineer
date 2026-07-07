@@ -53,8 +53,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
-	"github.com/wso2/aep/aep-api/clients/k8s"
+	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/internal/clients/k8s"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -105,6 +105,14 @@ func (s *AnthropicCredentialService) WithRCAAgentPush(c *clustergatewayproxy.Cli
 // as "disabled" rather than as an error.
 func (s *AnthropicCredentialService) pushEnabled() bool {
 	return s.cgwClient != nil && s.pushNamespace != "" && s.pushSecretName != ""
+}
+
+// WithAnthropicAPIBase points key validation at base instead of the real
+// Anthropic API; chainable. Tests aim it at an httptest server so
+// validateAnthropicKey's probe never leaves the process.
+func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *AnthropicCredentialService {
+	s.anthropicAPI = base
+	return s
 }
 
 // NewAnthropicCredentialService wires the service. db, store must be
@@ -178,14 +186,7 @@ type AnthropicConnectRequest struct {
 // lazily on first dispatch via ApplyWPSecret.
 func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string, req AnthropicConnectRequest) (*AnthropicProjection, error) {
 	key := strings.TrimSpace(req.APIKey)
-	if key == "" {
-		return nil, &ValidationError{Code: "anthropic_key_missing", Message: "apiKey is required"}
-	}
-	if !looksLikeAnthropicKey(key) {
-		return nil, &ValidationError{Code: "anthropic_key_invalid", Message: "API key does not look like an Anthropic key (expected prefix 'sk-ant-')"}
-	}
-
-	if err := s.validateAnthropicKey(ctx, key); err != nil {
+	if err := s.ValidateKey(ctx, key); err != nil {
 		return nil, err
 	}
 
@@ -216,8 +217,12 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 		LastValidatedAt: &now,
 		ValidationError: nil,
 	}
-	// Upsert via ON CONFLICT DO UPDATE so Replace is idempotent.
-	if err := tx.Exec(`
+	// Upsert via ON CONFLICT DO UPDATE so Replace is idempotent. The UPDATE
+	// deliberately omits connected_at so a replace preserves the ORIGINAL
+	// connection time; RETURNING that column reads the persisted value back so
+	// the projection we return matches the stored row (on a replace it's the
+	// original, not the in-memory `now`).
+	if err := tx.Raw(`
 		INSERT INTO org_anthropic_credentials
 		    (oc_org_id, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
 		VALUES (?, ?, ?, ?, ?, ?, NULL)
@@ -226,9 +231,10 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 		      key_last4          = EXCLUDED.key_last4,
 		      status             = EXCLUDED.status,
 		      last_validated_at  = EXCLUDED.last_validated_at,
-		      validation_error   = NULL`,
+		      validation_error   = NULL
+		RETURNING connected_at`,
 		row.OcOrgID, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
-	).Error; err != nil {
+	).Scan(&row.ConnectedAt).Error; err != nil {
 		return nil, fmt.Errorf("anthropic connect: upsert: %w", err)
 	}
 	if err := tx.Commit().Error; err != nil {
@@ -310,6 +316,25 @@ func (s *AnthropicCredentialService) pushExternalSecret(ctx context.Context, ocO
 	slog.InfoContext(ctx, "anthropic: pushed ExternalSecret to consumer",
 		"ocOrgId", ocOrgID, "namespace", s.pushNamespace, "secretName", s.pushSecretName)
 	return nil
+}
+
+// ValidateKey runs the connect-time validation for an Anthropic key WITHOUT
+// persisting anything: the shape checks plus the live /v1/messages probe.
+//
+// It is the probe-only seam the /config PATCH orchestrator calls in its
+// pre-persist phase, so a bad key in one section fails the whole atomic patch
+// before any section is written (docs/design/org-config-consolidation.md §4).
+// Connect calls it too, so the validation logic lives in exactly one place and
+// the two paths can't drift.
+func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, apiKey string) error {
+	key := strings.TrimSpace(apiKey)
+	if key == "" {
+		return &ValidationError{Code: "anthropic_key_missing", Message: "apiKey is required"}
+	}
+	if !looksLikeAnthropicKey(key) {
+		return &ValidationError{Code: "anthropic_key_invalid", Message: "API key does not look like an Anthropic key (expected prefix 'sk-ant-')"}
+	}
+	return s.validateAnthropicKey(ctx, key)
 }
 
 // ----------------------------------------------------------------------------
@@ -561,8 +586,10 @@ func (s *AnthropicCredentialService) fetchRow(ctx context.Context, ocOrgID strin
 }
 
 // validateAnthropicKey probes Anthropic's /v1/messages with a minimal
-// payload. 401 → ValidationError{anthropic_key_invalid}. 5xx → 503-shape
-// transient. Other non-2xx are treated as transient by default.
+// payload. 401 → ValidationError{anthropic_key_invalid}. A 5xx is the
+// upstream's fault → UpstreamError (mapped to 502 Bad Gateway), NOT a
+// client-fault 400. Other unexpected non-5xx statuses (e.g. 429) stay a
+// ValidationError.
 //
 // Anthropic's /v1/messages requires both `x-api-key` and `anthropic-version`
 // headers; a malformed request returns 400 (which still proves the key is
@@ -594,6 +621,14 @@ func (s *AnthropicCredentialService) validateAnthropicKey(ctx context.Context, k
 		// 200 = key valid; 400 = key recognized but request payload arguable
 		// (e.g. unknown model). Either way the key is authenticated.
 		return nil
+	}
+	if resp.StatusCode >= 500 {
+		// Upstream is broken, not the caller's key/request — surface a 502 at
+		// the edge so we don't blame the client for Anthropic's outage.
+		return &UpstreamError{
+			Code:    "anthropic_unavailable",
+			Message: fmt.Sprintf("Anthropic API returned %d: %s", resp.StatusCode, truncateForError(respBody)),
+		}
 	}
 	return &ValidationError{
 		Code:    "anthropic_unexpected_status",

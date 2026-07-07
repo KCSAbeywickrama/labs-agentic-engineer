@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/aep/aep-api/middleware/jwtassertion"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 )
 
 // TestTaskTokenRoundtrip exercises the full chain from token issuance to
@@ -78,7 +78,7 @@ func TestTaskTokenRoundtrip(t *testing.T) {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/internal/v1/tasks/task-abc/credentials/refresh", nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/v1/executions/task-abc/credentials/refresh", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

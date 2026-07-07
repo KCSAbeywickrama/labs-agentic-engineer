@@ -16,82 +16,87 @@
  * under the License.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { alpha, Box, Button, CircularProgress, IconButton, PageContent, Typography } from '@wso2/oxygen-ui';
-import { AlertTriangle, CheckCircle, ChevronRight, Clock, Info, X } from '@wso2/oxygen-ui-icons-react';
-import { useProjectBoard } from '../hooks/useProjectBoard';
+import { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { alpha, Box, ButtonBase, CircularProgress, IconButton, PageContent, Stack, Typography } from '@wso2/oxygen-ui';
+import { Info, X } from '@wso2/oxygen-ui-icons-react';
+import { api } from '../services/api';
+import type { TaskView } from '../services/api';
+import { useProjectTasks, type TaskListState } from '../hooks/useProjectTasks';
 import { AnimatedBanner } from '../components/tasks/AnimatedBanner';
 import { TaskSection } from '../components/tasks/TaskSection';
 import { TasksPageHeader } from '../components/tasks/TasksPageHeader';
-import type { SectionConfig } from '../components/tasks/types';
+import { EXECUTABLE_STATUSES, TASK_SECTIONS, type SectionKey } from '../components/tasks/types';
 
-const SECTIONS: SectionConfig[] = [
-  { key: 'inProgress', label: 'In Progress', isPrimary: true,  dotColor: 'primary',      borderColor: null            },
-  { key: 'todo',       label: 'To Do',       isPrimary: false, dotColor: null,           borderColor: null            },
-  { key: 'done',       label: 'Done',        isPrimary: false, dotColor: null,           borderColor: null            },
-  { key: 'onHold',     label: 'On Hold',     isPrimary: false, dotColor: 'warning.main', borderColor: 'warning.main'  },
-  { key: 'failed',     label: 'Failed',      isPrimary: false, dotColor: 'error.main',   borderColor: 'error.main'    },
+const STATE_FILTERS: { key: TaskListState; label: string }[] = [
+  { key: 'open', label: 'Open' },
+  { key: 'closed', label: 'Closed' },
+  { key: 'all', label: 'All' },
 ];
+
+function groupBySection(tasks: TaskView[]): Record<SectionKey, TaskView[]> {
+  const groups = { active: [], pending: [], onHold: [], done: [], blocked: [] } as Record<SectionKey, TaskView[]>;
+  for (const task of tasks) {
+    const section = TASK_SECTIONS.find((s) => s.statuses.includes(task.derivedStatus));
+    // Any unrecognized derivedStatus lands in "Needs attention" so nothing is
+    // silently dropped from the board.
+    groups[section?.key ?? 'blocked'].push(task);
+  }
+  return groups;
+}
 
 export default function ProjectTasksPage() {
   const { orgId, projectId } = useParams<{ orgId: string; projectId: string }>();
-  const navigate = useNavigate();
-  const failedRef = useRef<HTMLDivElement>(null);
-
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(SECTIONS.map(s => [s.key, s.key === 'todo' || s.key === 'inProgress']))
-  );
-  const prevCountsRef = useRef<Record<string, number>>({});
+  // Default to "All": a PR merge auto-closes the issue, so a task whose build
+  // then fails would be hidden under a default "Open" filter. The sections
+  // already separate settled from active work; Open/Closed remain as filters.
+  const [stateFilter, setStateFilter] = useState<TaskListState>('all');
+  const [isExecutingAll, setIsExecutingAll] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const {
-    board,
+    tasks,
     isLoading,
     error,
-    isGenerating,
-    isDispatching,
-    actionError,
-    totalTasks,
-    handleGenerate,
-    handleStartImplementation,
-    clearActionError,
-    generateBanner,
-    hideGenerateButton,
-    clearGenerateBanner,
-  } = useProjectBoard(orgId, projectId);
+    refresh,
+    plan,
+    isPlanning,
+    planError,
+    clearPlanError,
+  } = useProjectTasks(projectId, stateFilter);
 
-  // Auto-expand sections when their task count increases
-  useEffect(() => {
-    const prev = prevCountsRef.current;
-    const toExpand: Record<string, boolean> = {};
-    let hasNew = false;
-    for (const section of SECTIONS) {
-      const prevCount = prev[section.key] ?? 0;
-      const currCount = board[section.key].length;
-      if (currCount > prevCount) {
-        toExpand[section.key] = true;
-        hasNew = true;
-      }
-      prev[section.key] = currCount;
-    }
-    if (hasNew) {
-      setExpandedSections(s => ({ ...s, ...toExpand }));
-    }
-  }, [board]);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(TASK_SECTIONS.map((s) => [s.key, s.key === 'active' || s.key === 'pending'])),
+  );
 
-  // Snapshot last non-null values so banners can render during their exit animation
-  const lastGenerateBanner = useRef(generateBanner);
-  if (generateBanner) lastGenerateBanner.current = generateBanner;
-  const lastActionError = useRef(actionError);
-  if (actionError) lastActionError.current = actionError;
+  const groups = useMemo(() => groupBySection(tasks), [tasks]);
 
-  useEffect(() => {
-    if (generateBanner?.autoDismiss) {
-      const t = setTimeout(() => clearGenerateBanner(), 5000);
-      return () => clearTimeout(t);
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setIsRefreshing(false);
     }
-    return undefined;
-  }, [generateBanner, clearGenerateBanner]);
+  };
+
+  const handleExecuteAll = async () => {
+    if (!projectId) return;
+    // "Execute all" — the funnel handles deps, so we just stamp every
+    // actionable, not-held task and let it order itself.
+    const targets = tasks.filter((t) => !t.hold && EXECUTABLE_STATUSES.has(t.derivedStatus));
+    if (targets.length === 0) return;
+    setIsExecutingAll(true);
+    try {
+      // Fan out per task — there is no batch endpoint (§9.1); ordering emerges
+      // from the funnel's dependency gates. Best-effort: one failure doesn't
+      // abort the rest.
+      await Promise.allSettled(targets.map((t) => api.executeTask(projectId, t.issueNumber)));
+      await refresh();
+    } finally {
+      setIsExecutingAll(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -104,302 +109,139 @@ export default function ProjectTasksPage() {
     );
   }
 
-  if (error) {
-    return (
-      <PageContent>
-        <Box sx={{ display: 'flex', justifyContent: 'center', pt: 16 }}>
-          <Typography variant="body2" color="error.main">{error}</Typography>
-        </Box>
-      </PageContent>
-    );
-  }
-
-  const failedCount     = board.failed.length;
-  const inProgressCount = board.inProgress.length;
-  const todoCount       = board.todo.length;
-  const onHoldCount     = board.onHold.length;
-  const buildingDepCount = board.done.filter(t => t.status === 'building').length;
-
-  type BannerVariant = 'failed' | 'in_progress' | 'on_hold_building' | 'all_done' | null;
-  let bannerVariant: BannerVariant = null;
-  if (totalTasks > 0) {
-    if (failedCount > 0)                                               bannerVariant = 'failed';
-    else if (inProgressCount > 0)                                      bannerVariant = 'in_progress';
-    else if (onHoldCount > 0 && buildingDepCount > 0 && todoCount === 0) bannerVariant = 'on_hold_building';
-    else if (todoCount === 0)                                          bannerVariant = 'all_done';
-  }
-
   return (
     <PageContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-
         <TasksPageHeader
           projectId={projectId ?? ''}
-          totalTasks={totalTasks}
-          isGenerating={isGenerating}
-          isDispatching={isDispatching}
-          githubProjectUrl={board.url}
-          hideGenerateButton={hideGenerateButton}
-          onGenerate={handleGenerate}
-          onStartImplementation={handleStartImplementation}
+          totalTasks={tasks.length}
+          isPlanning={isPlanning}
+          isExecutingAll={isExecutingAll}
+          isRefreshing={isRefreshing}
+          onPlan={plan}
+          onExecuteAll={handleExecuteAll}
+          onRefresh={handleRefresh}
         />
 
-        {/* Generate / action banners */}
-        <AnimatedBanner show={!!generateBanner}>
-          {(() => {
-            const banner = lastGenerateBanner.current;
-            if (!banner) return null;
-            const color =
-              banner.variant === 'info'    ? 'info.main'    :
-              banner.variant === 'warning' ? 'warning.main' :
-              banner.variant === 'success' ? 'success.main' : 'error.main';
+        {/* State filter */}
+        <Stack direction="row" spacing={0.5} sx={{ mb: 2 }}>
+          {STATE_FILTERS.map((f) => {
+            const active = stateFilter === f.key;
             return (
-              <Box
+              <ButtonBase
+                key={f.key}
+                onClick={() => setStateFilter(f.key)}
                 sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1.5,
-                  px: 2,
-                  py: 1.5,
-                  mb: 2,
-                  borderRadius: 1.25,
-                  bgcolor: (t) =>
-                    banner.variant === 'info'    ? alpha(t.palette.info.main,    0.08) :
-                    banner.variant === 'warning' ? alpha(t.palette.warning.main, 0.08) :
-                    banner.variant === 'success' ? alpha(t.palette.success.main, 0.08) :
-                                                   alpha(t.palette.error.main,   0.08),
+                  px: 1.5,
+                  py: 0.5,
+                  borderRadius: 1,
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  color: active ? 'primary.main' : 'text.secondary',
+                  bgcolor: (t) => (active ? alpha(t.palette.primary.main, 0.1) : 'transparent'),
                   border: '1px solid',
-                  borderColor: (t) =>
-                    banner.variant === 'info'    ? alpha(t.palette.info.main,    0.2) :
-                    banner.variant === 'warning' ? alpha(t.palette.warning.main, 0.2) :
-                    banner.variant === 'success' ? alpha(t.palette.success.main, 0.2) :
-                                                   alpha(t.palette.error.main,   0.2),
+                  borderColor: (t) => (active ? alpha(t.palette.primary.main, 0.3) : 'divider'),
                 }}
               >
-                <Box sx={{ flexShrink: 0, display: 'flex', color }}>
-                  {banner.variant === 'info'    ? <CircularProgress size={16} sx={{ color }} /> :
-                   banner.variant === 'success' ? <CheckCircle size={16} /> :
-                                                  <AlertTriangle size={16} />}
-                </Box>
-                <Typography variant="body2" sx={{ flex: 1, color, lineHeight: 1.3 }}>
-                  {banner.message}
-                </Typography>
-                {banner.action && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color={banner.variant === 'warning' ? 'warning' : 'error'}
-                    onClick={() => navigate(banner.action!.path)}
-                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-                  >
-                    {banner.action.label}
-                  </Button>
-                )}
-                <IconButton size="small" onClick={clearGenerateBanner} sx={{ p: 0.5, color }}>
-                  <X size={14} />
-                </IconButton>
-              </Box>
+                {f.label}
+              </ButtonBase>
             );
-          })()}
+          })}
+        </Stack>
+
+        {/* Errors */}
+        <AnimatedBanner show={!!planError}>
+          <ErrorBanner message={planError ?? ''} onClose={clearPlanError} />
+        </AnimatedBanner>
+        <AnimatedBanner show={!!error}>
+          <ErrorBanner message={error ?? ''} onClose={handleRefresh} />
         </AnimatedBanner>
 
-        <AnimatedBanner show={!!actionError}>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              px: 2,
-              py: 1.5,
-              mb: 2,
-              borderRadius: 1.25,
-              bgcolor: (t) => alpha(t.palette.error.main, 0.08),
-              border: '1px solid',
-              borderColor: (t) => alpha(t.palette.error.main, 0.2),
-            }}
-          >
-            <Typography variant="body2" sx={{ flex: 1, color: 'error.main', lineHeight: 1.3 }}>
-              {lastActionError.current}
-            </Typography>
-            <IconButton size="small" onClick={clearActionError} sx={{ p: 0.5, color: 'error.main' }}>
-              <X size={14} />
-            </IconButton>
-          </Box>
-        </AnimatedBanner>
-
-        {/* Contextual status banners */}
-        <AnimatedBanner show={bannerVariant === 'failed'}>
-          <Box
-            onClick={() => failedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              px: 2,
-              py: 1.5,
-              mb: 2,
-              borderRadius: 1.25,
-              bgcolor: (t) => alpha(t.palette.error.main, 0.08),
-              border: '1px solid',
-              borderColor: (t) => alpha(t.palette.error.main, 0.2),
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-              '&:hover': {
-                bgcolor: (t) => alpha(t.palette.error.main, 0.12),
-                borderColor: (t) => alpha(t.palette.error.main, 0.3),
-              },
-            }}
-          >
-            <Box sx={{ flexShrink: 0, display: 'flex', color: 'error.main' }}>
-              <AlertTriangle size={16} />
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 700, color: 'error.main', lineHeight: 1.3 }}>
-                {failedCount} task{failedCount !== 1 ? 's' : ''} failed
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'error.dark', lineHeight: 1.3 }}>
-                Click to review failed tasks
-              </Typography>
-            </Box>
-            <Box sx={{ flexShrink: 0, color: 'error.main', display: 'flex' }}>
-              <ChevronRight size={16} />
-            </Box>
-          </Box>
-        </AnimatedBanner>
-
-        <AnimatedBanner show={bannerVariant === 'in_progress'}>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              px: 2,
-              py: 1.5,
-              mb: 2,
-              borderRadius: 1.25,
-              bgcolor: (t) => alpha(t.palette.info.main, 0.08),
-              border: '1px solid',
-              borderColor: (t) => alpha(t.palette.info.main, 0.2),
-            }}
-          >
-            <Box sx={{ flexShrink: 0, display: 'flex' }}>
-              <CircularProgress size={16} sx={{ color: 'info.main' }} />
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.main', lineHeight: 1.3 }}>
-                {inProgressCount} task{inProgressCount !== 1 ? 's' : ''} in progress
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
-                All tasks are dispatched to the agents and they are working on it
-              </Typography>
-            </Box>
-          </Box>
-        </AnimatedBanner>
-
-        <AnimatedBanner show={bannerVariant === 'on_hold_building'}>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              px: 2,
-              py: 1.5,
-              mb: 2,
-              borderRadius: 1.25,
-              bgcolor: (t) => alpha(t.palette.warning.main, 0.08),
-              border: '1px solid',
-              borderColor: (t) => alpha(t.palette.warning.main, 0.2),
-            }}
-          >
-            <Box sx={{ flexShrink: 0, display: 'flex', color: 'warning.main' }}>
-              <Clock size={16} />
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 700, color: 'warning.main', lineHeight: 1.3 }}>
-                {onHoldCount} task{onHoldCount !== 1 ? 's' : ''} on hold — awaiting deployment
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
-                {buildingDepCount} dependency component{buildingDepCount !== 1 ? 's are' : ' is'} still building. Held tasks will proceed once deployment completes.
-              </Typography>
-            </Box>
-          </Box>
-        </AnimatedBanner>
-
-        <AnimatedBanner show={bannerVariant === 'all_done'}>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              px: 2,
-              py: 1.5,
-              mb: 2,
-              borderRadius: 1.25,
-              bgcolor: (t) => alpha(t.palette.success.main, 0.08),
-              border: '1px solid',
-              borderColor: (t) => alpha(t.palette.success.main, 0.2),
-            }}
-          >
-            <Box sx={{ flexShrink: 0, display: 'flex', color: 'success.main' }}>
-              <CheckCircle size={16} />
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.main', lineHeight: 1.3 }}>
-                All pending tasks are complete
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
-                All tasks have been completed successfully
-              </Typography>
-            </Box>
-          </Box>
-        </AnimatedBanner>
-
-        {/* Task sections */}
+        {/* Sections */}
         <Box sx={{ flex: 1, overflowY: 'auto', pr: 0.25 }}>
-          {totalTasks === 0 && !isGenerating && !generateBanner && (
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.5,
-                px: 2,
-                py: 1.5,
-                mb: 2,
-                borderRadius: 1.25,
-                bgcolor: (t) => alpha(t.palette.info.main, 0.08),
-                border: '1px solid',
-                borderColor: (t) => alpha(t.palette.info.main, 0.2),
-              }}
-            >
-              <Box sx={{ flexShrink: 0, display: 'flex', color: 'info.main' }}>
-                <Info size={16} />
-              </Box>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.main', lineHeight: 1.3 }}>
-                  No tasks generated yet
-                </Typography>
-                <Typography variant="caption" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
-                  Tasks haven't been generated for this project. Generate tasks to get started.
-                </Typography>
-              </Box>
+          {tasks.length === 0 && !isPlanning && (
+            <EmptyState />
+          )}
+          {tasks.length === 0 && isPlanning && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, pt: 8 }}>
+              <CircularProgress size={16} thickness={4} />
+              <Typography variant="body2" color="text.disabled">
+                Planning tasks — issues appear below as they are created…
+              </Typography>
             </Box>
           )}
 
-          {SECTIONS.map(section => (
-            <Box key={section.key} ref={section.key === 'failed' ? failedRef : undefined}>
-              <TaskSection
-                section={section}
-                tasks={board[section.key]}
-                orgId={orgId ?? ''}
-                projectId={projectId ?? ''}
-                expanded={expandedSections[section.key] ?? false}
-                onExpandedChange={(val) => setExpandedSections(s => ({ ...s, [section.key]: val }))}
-              />
-            </Box>
+          {TASK_SECTIONS.map((section) => (
+            <TaskSection
+              key={section.key}
+              section={section}
+              tasks={groups[section.key]}
+              orgId={orgId ?? ''}
+              projectId={projectId ?? ''}
+              onChanged={refresh}
+              expanded={expandedSections[section.key] ?? false}
+              onExpandedChange={(val) => setExpandedSections((s) => ({ ...s, [section.key]: val }))}
+            />
           ))}
         </Box>
-
       </Box>
     </PageContent>
+  );
+}
+
+function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.5,
+        px: 2,
+        py: 1.5,
+        mb: 2,
+        borderRadius: 1.25,
+        bgcolor: (t) => alpha(t.palette.error.main, 0.08),
+        border: '1px solid',
+        borderColor: (t) => alpha(t.palette.error.main, 0.2),
+      }}
+    >
+      <Typography variant="body2" sx={{ flex: 1, color: 'error.main', lineHeight: 1.3 }}>
+        {message}
+      </Typography>
+      <IconButton size="small" onClick={onClose} sx={{ p: 0.5, color: 'error.main' }}>
+        <X size={14} />
+      </IconButton>
+    </Box>
+  );
+}
+
+function EmptyState() {
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.5,
+        px: 2,
+        py: 1.5,
+        mb: 2,
+        borderRadius: 1.25,
+        bgcolor: (t) => alpha(t.palette.info.main, 0.08),
+        border: '1px solid',
+        borderColor: (t) => alpha(t.palette.info.main, 0.2),
+      }}
+    >
+      <Box sx={{ flexShrink: 0, display: 'flex', color: 'info.main' }}>
+        <Info size={16} />
+      </Box>
+      <Box sx={{ flex: 1 }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.main', lineHeight: 1.3 }}>
+          No tasks yet
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
+          Plan tasks from the approved design to create the GitHub issues that drive implementation.
+        </Typography>
+      </Box>
+    </Box>
   );
 }

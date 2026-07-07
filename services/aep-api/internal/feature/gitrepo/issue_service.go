@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
-	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
 
@@ -40,12 +39,27 @@ type IssueService interface {
 	// phase to write the LLM-authored body after the placeholder issue was
 	// created.
 	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
+	// EditIssueTitle replaces the issue's title. Used by the plan tap on a
+	// planned-Task rename (updateTask set.title).
+	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
+	// AddLabels adds labels to an existing issue (merges; a present label is a
+	// no-op). Ensures each label exists in the repo first. Used by the platform
+	// to stamp aep:status/* and aep:attention projections.
+	AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error
+	// RemoveLabel removes one label from an issue (404 = already absent = ok).
+	// Used to consume the aep:execute command label after dispatch.
+	RemoveLabel(ctx context.Context, orgID, projectID string, number int, label string) error
+	// SetLabels replaces the issue's entire label set. Used when the projection
+	// must be authoritative (clearing stale aep:status/* in one call).
+	SetLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error
+	// GetPullRequestState returns a pull request's live state — the sweep's
+	// PR-state reconciliation input (§5).
+	GetPullRequestState(ctx context.Context, orgID, projectID string, number int) (*PullRequestState, error)
 }
 
 type issueService struct {
 	repo     repositories.RepoRepository
-	github   GitHubClient
-	githubV2 GitHubV2Client
+	github   IssueOps
 	resolver credentials.Resolver
 	// createLocks serializes dedupe-checked creation per "owner/repo" so two
 	// concurrent CreateIssue calls with the same DedupeKey can't both pass the
@@ -58,11 +72,10 @@ type issueService struct {
 	createLocks sync.Map // map[string]*sync.Mutex
 }
 
-func NewIssueService(repo repositories.RepoRepository, github GitHubClient, githubV2 GitHubV2Client, resolver credentials.Resolver) IssueService {
+func NewIssueService(repo repositories.RepoRepository, github IssueOps, resolver credentials.Resolver) IssueService {
 	return &issueService{
 		repo:     repo,
 		github:   github,
-		githubV2: githubV2,
 		resolver: resolver,
 	}
 }
@@ -112,34 +125,9 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 		}
 	}
 
-	issue, err := s.github.CreateIssue(ctx, owner, repoName, cred, req)
-	if err != nil {
-		return nil, err
-	}
-
-	gitRepo, repoErr := s.repo.GetByOrgAndProjectID(ctx, orgID, projectID)
-	if repoErr == nil && gitRepo != nil {
-		// Mint the V2 (GraphQL) bearer once and reuse for the up-to-three
-		// sequential ensureBoard + addIssueToProject calls. App-installation
-		// tokens are 1h-TTL but the per-call latency we'd add by re-resolving
-		// is wasted work.
-		token, _, tokenErr := cred.Token(ctx)
-		if tokenErr != nil {
-			slog.WarnContext(ctx, "fetch credential token for board ops failed", "project", projectID, "error", tokenErr)
-		} else {
-			if gitRepo.GithubProjectID == "" {
-				if boardID, err := s.ensureBoard(ctx, gitRepo, owner, repoName, token); err == nil {
-					gitRepo.GithubProjectID = boardID
-					if updateErr := s.repo.Update(ctx, gitRepo); updateErr != nil {
-						slog.WarnContext(ctx, "failed to persist github project id after lazy creation", "project", projectID, "error", updateErr)
-					}
-				}
-			}
-			s.addIssueToProject(ctx, gitRepo.GithubProjectID, issue, token)
-		}
-	}
-
-	return issue, nil
+	// GitHub Projects v2 is dropped (tasks-github-native §4): no lazy board
+	// create/link/add on issue creation. Tasks are plain GitHub issues.
+	return s.github.CreateIssue(ctx, owner, repoName, cred, req)
 }
 
 // lockRepoCreates acquires the per-repo creation lock and returns its release
@@ -161,35 +149,6 @@ func dedupeLabelFor(key string) string {
 		label = label[:50]
 	}
 	return label
-}
-
-func (s *issueService) ensureBoard(ctx context.Context, gitRepo *models.GitRepository, owner, repoName, token string) (string, error) {
-	orgNodeID, err := s.githubV2.GetOrgID(ctx, owner, token)
-	if err != nil {
-		return "", fmt.Errorf("resolve org id during lazy board create: %w", err)
-	}
-
-	githubProjectID, err := s.githubV2.CreateGitHubV2Project(ctx, orgNodeID, token, gitRepo.ProjectID)
-	if err != nil {
-		return "", fmt.Errorf("create github project board: %w", err)
-	}
-
-	if linkErr := s.githubV2.LinkProjectToRepository(ctx, githubProjectID, owner, repoName, token); linkErr != nil {
-		slog.WarnContext(ctx, "failed to link lazy-created board to repository", "project", gitRepo.ProjectID, "error", linkErr)
-	}
-
-	slog.InfoContext(ctx, "lazy-created github project board", "project", gitRepo.ProjectID, "boardId", githubProjectID)
-	return githubProjectID, nil
-}
-
-func (s *issueService) addIssueToProject(ctx context.Context, githubProjectID string, issue *IssueResult, token string) {
-	if issue.NodeID == "" || s.githubV2 == nil || githubProjectID == "" {
-		slog.WarnContext(ctx, "skipping board add: missing project id or issue node id", "issue", issue.URL)
-		return
-	}
-	if err := s.githubV2.AddIssueToProject(ctx, githubProjectID, issue.NodeID, token); err != nil {
-		slog.WarnContext(ctx, "failed to add issue to GitHub project board", "issue", issue.URL, "error", err)
-	}
 }
 
 func (s *issueService) ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]IssueInfo, error) {
@@ -238,6 +197,63 @@ func (s *issueService) EditIssueBody(ctx context.Context, orgID, projectID strin
 		return err
 	}
 	return s.github.EditIssueBody(ctx, owner, repoName, cred, number, body)
+}
+
+func (s *issueService) EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("title is required")
+	}
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.github.EditIssueTitle(ctx, owner, repoName, cred, number, title)
+}
+
+func (s *issueService) AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error {
+	if len(labels) == 0 {
+		return nil
+	}
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	// Ensure each label exists first — GitHub silently drops unknown labels.
+	for _, label := range labels {
+		if ensureErr := s.github.EnsureLabel(ctx, owner, repoName, cred, label, labelColor(label)); ensureErr != nil {
+			slog.WarnContext(ctx, "ensure github label failed", "label", label, "error", ensureErr)
+		}
+	}
+	return s.github.AddIssueLabels(ctx, owner, repoName, cred, number, labels)
+}
+
+func (s *issueService) RemoveLabel(ctx context.Context, orgID, projectID string, number int, label string) error {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.github.RemoveIssueLabel(ctx, owner, repoName, cred, number, label)
+}
+
+func (s *issueService) SetLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	for _, label := range labels {
+		if ensureErr := s.github.EnsureLabel(ctx, owner, repoName, cred, label, labelColor(label)); ensureErr != nil {
+			slog.WarnContext(ctx, "ensure github label failed", "label", label, "error", ensureErr)
+		}
+	}
+	return s.github.SetIssueLabels(ctx, owner, repoName, cred, number, labels)
+}
+
+func (s *issueService) GetPullRequestState(ctx context.Context, orgID, projectID string, number int) (*PullRequestState, error) {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.github.GetPullRequest(ctx, owner, repoName, cred, number)
 }
 
 // resolveRepoAndCredential looks up the project's git repository, parses its

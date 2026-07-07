@@ -1,7 +1,7 @@
 apiVersion: v2
 appVersion: 0.0.0-dev
 description: >
-  Deploys AEP platform services (aep-api, agents-service, aep-console)
+  Deploys AEP platform services (aep-api, agents, aep-console)
   as plain Kubernetes Deployments in the OC control-plane namespace (wso2-ae),
   exposed via the OC control-plane gateway using HTTPRoute + ReferenceGrant.
   PostgreSQL is deployed as a direct StatefulSet (not an OC Resource).

@@ -17,25 +17,78 @@
  */
 
 /**
- * The composition root: build the model ONCE, pick a store, mount the SSE app,
- * listen. The only place that wires concrete dependencies together.
+ * The composition root: pick a store (Postgres when DATABASE_URL is set, else
+ * in-memory), wire the always-on M2M gate and the per-request model factory,
+ * mount the SSE app, listen. The model is built per turn from the request's
+ * `X-Anthropic-Key`, so there is NO boot-time key or model here.
  *
  *   pnpm --filter @aep/agents dev     # watch + reload
  *   pnpm --filter @aep/agents start   # run once
  */
 
+import pg from "pg";
 import { createApp } from "./server.js";
 import { createModel } from "./shared/model.js";
-import { loadAnthropicKey, intEnv } from "./shared/env.js";
+import { intEnv } from "./shared/env.js";
+import { config } from "./shared/config.js";
+import type { AgentsAuthConfig } from "./shared/auth.js";
+import type { ConversationStore } from "./store/conversation-store.js";
 import { InMemoryConversationStore } from "./store/memory-store.js";
+import { PostgresConversationStore } from "./store/postgres-store.js";
 
 const port = intEnv(process.env.PORT, 4000);
 
-const app = createApp({
-  store: new InMemoryConversationStore(), // Postgres later, same interface
-  model: createModel({ apiKey: loadAnthropicKey() }), // built once, injected per turn
-});
+/** Only include the optional fields that are actually set (exactOptionalPropertyTypes). */
+function buildAuthConfig(): AgentsAuthConfig {
+  const { audience, issuer, jwksUrl, secret } = config.auth;
+  return {
+    audience,
+    ...(issuer ? { issuer } : {}),
+    ...(jwksUrl ? { jwksUrl } : {}),
+    ...(secret ? { secret } : {}),
+  };
+}
 
-app.listen(port, () => {
-  process.stdout.write(`@aep/agents SSE server listening on :${port}\n`);
+async function buildStore(): Promise<ConversationStore> {
+  if (!config.database.url) {
+    process.stdout.write("@aep/agents: no DATABASE_URL — using the in-memory conversation store\n");
+    return new InMemoryConversationStore();
+  }
+  const pool = new pg.Pool({ connectionString: config.database.url });
+  const store = new PostgresConversationStore(pool);
+  await store.init(); // idempotent CREATE TABLE IF NOT EXISTS
+
+  // Periodic TTL sweep — threads embed inlined snapshots, so rows are heavy;
+  // reclaim ones untouched past the retention window.
+  const timer = setInterval(() => {
+    void store.sweepExpired(config.database.conversationsTtlMs).catch((err: unknown) => {
+      process.stderr.write(
+        `conversation TTL sweep failed: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    });
+  }, config.database.conversationsSweepMs);
+  timer.unref();
+
+  process.stdout.write("@aep/agents: using the Postgres conversation store\n");
+  return store;
+}
+
+async function main(): Promise<void> {
+  const store = await buildStore();
+  const app = createApp({
+    store,
+    buildModel: (apiKey) => createModel({ apiKey }), // built PER TURN from X-Anthropic-Key
+    auth: buildAuthConfig(), // throws here if neither JWKS nor secret is set (gate is always on)
+  });
+
+  app.listen(port, () => {
+    process.stdout.write(`@aep/agents SSE server listening on :${port}\n`);
+  });
+}
+
+main().catch((err: unknown) => {
+  process.stderr.write(
+    `@aep/agents failed to start: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+  );
+  process.exitCode = 1;
 });

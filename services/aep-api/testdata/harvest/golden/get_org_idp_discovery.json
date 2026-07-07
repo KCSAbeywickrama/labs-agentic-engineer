@@ -1,0 +1,5 @@
+{
+  "$schema": "http://localhost:9090/api/v1/DiscoverOutputBody.json",
+  "issuer": "http://thunder.openchoreo.localhost:8080",
+  "jwksUrl": "http://thunder.openchoreo.localhost:8080/oauth2/jwks"
+}

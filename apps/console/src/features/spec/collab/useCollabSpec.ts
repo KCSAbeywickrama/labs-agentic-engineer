@@ -1,0 +1,163 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as Y from "yjs";
+import { HocuspocusProvider } from "@hocuspocus/provider";
+import { getAccessToken } from "../../../auth/token";
+
+// Console side of #86 phase 5: connect the spec view to the collab service.
+// One room + one Y.Doc per project (`spec-<org>-<project>`), Y.Map('files')
+// of path → Y.Text. If no collab server is reachable the view degrades to
+// solo (#86 decision 10) — callers keep their non-collaborative fallback.
+//
+// The connection authenticates with the session's access token (#91): a real
+// Thunder JWT in thunder mode (verified by the BFF oracle), the unsigned
+// mock token in mock mode (decoded by the collab mock BFF). The token is a
+// getter so reconnects pick up silently-renewed tokens.
+
+export interface CollabPeer {
+  clientId: number;
+  name: string;
+  color: string;
+  kind: "user" | "agent";
+}
+
+export type CollabStatus = "connecting" | "connected" | "offline";
+
+export interface CollabSpec {
+  status: CollabStatus;
+  peers: CollabPeer[];
+  /** Y.Text for a non-md path, once synced; null → REST-content fallback. */
+  getFileText: (path: string) => Y.Text | null;
+  /** Y.XmlFragment for an md path, once synced (#86 phase 6 doc model). */
+  getFileFragment: (path: string) => Y.XmlFragment | null;
+  /** The live provider (for CollaborationCaret); null until connected. */
+  provider: HocuspocusProvider | null;
+  /** This client's presence identity (name/color) for caret labels. */
+  self: { name: string; color: string };
+  /** True while a transaction originates from this client (binding helper). */
+  isLocalTransaction: (transaction: Y.Transaction) => boolean;
+  /** Bumped on any files-map change so selections can re-resolve. */
+  version: number;
+}
+
+const PEER_COLORS = [
+  "#e57373", "#64b5f6", "#81c784", "#ffb74d",
+  "#ba68c8", "#4dd0e1", "#f06292", "#aed581",
+];
+
+function collabWsUrl(): string {
+  const env = (window as { _env_?: { collabWsUrl?: string } })._env_;
+  if (env?.collabWsUrl) return env.collabWsUrl;
+  if (import.meta.env.DEV) return "ws://localhost:8091";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/collab`;
+}
+
+export function useCollabSpec(
+  projectName: string,
+  user: { name: string; email: string },
+  orgHandle: string,
+): CollabSpec {
+  const [status, setStatus] = useState<CollabStatus>("connecting");
+  const [peers, setPeers] = useState<CollabPeer[]>([]);
+  const [version, setVersion] = useState(0);
+  const docRef = useRef<Y.Doc | null>(null);
+  const providerRef = useRef<HocuspocusProvider | null>(null);
+
+  useEffect(() => {
+    const doc = new Y.Doc();
+    docRef.current = doc;
+    const provider = new HocuspocusProvider({
+      url: collabWsUrl(),
+      name: `spec-${orgHandle}-${projectName}`,
+      document: doc,
+      token: async () => (await getAccessToken()) ?? "",
+      onSynced: () => setStatus("connected"),
+      onStatus: ({ status: s }) => {
+        if (s === "disconnected") setStatus("offline");
+      },
+      onAuthenticationFailed: () => setStatus("offline"),
+    });
+    providerRef.current = provider;
+
+    provider.setAwarenessField("user", {
+      name: user.name,
+      color: PEER_COLORS[doc.clientID % PEER_COLORS.length],
+      kind: "user",
+    });
+    const awareness = provider.awareness;
+    const onAwareness = () => {
+      if (!awareness) return;
+      const list: CollabPeer[] = [];
+      awareness.getStates().forEach((state, clientId) => {
+        if (clientId === doc.clientID) return;
+        const u = (state as { user?: Partial<CollabPeer> }).user;
+        if (!u?.name) return;
+        list.push({
+          clientId,
+          name: u.name,
+          color: u.color ?? PEER_COLORS[clientId % PEER_COLORS.length] ?? "#888",
+          kind: u.kind === "agent" ? "agent" : "user",
+        });
+      });
+      setPeers(list);
+    };
+    awareness?.on("change", onAwareness);
+
+    const files = doc.getMap<Y.Text>("files");
+    const onFiles = () => setVersion((v) => v + 1);
+    files.observeDeep(onFiles);
+
+    provider.attach();
+    return () => {
+      files.unobserveDeep(onFiles);
+      awareness?.off("change", onAwareness);
+      provider.destroy();
+      doc.destroy();
+      docRef.current = null;
+      providerRef.current = null;
+    };
+  }, [projectName, user.name, user.email, orgHandle]);
+
+  return useMemo(
+    () => ({
+      status,
+      peers,
+      version,
+      getFileText: (path: string) =>
+        status === "connected"
+          ? (docRef.current?.getMap<Y.Text>("files").get(path) ?? null)
+          : null,
+      getFileFragment: (path: string) =>
+        status === "connected"
+          ? (docRef.current?.getXmlFragment(path) ?? null)
+          : null,
+      provider: status === "connected" ? providerRef.current : null,
+      self: {
+        name: user.name,
+        color:
+          PEER_COLORS[(docRef.current?.clientID ?? 0) % PEER_COLORS.length] ??
+          "#888",
+      },
+      isLocalTransaction: (transaction: Y.Transaction) => transaction.local,
+    }),
+    [status, peers, version, user.name],
+  );
+}

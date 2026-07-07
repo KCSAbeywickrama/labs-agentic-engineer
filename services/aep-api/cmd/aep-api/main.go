@@ -26,17 +26,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wso2/aep/aep-api/config"
-	"github.com/wso2/aep/aep-api/database"
-	"github.com/wso2/aep/aep-api/database/migrations"
-	"github.com/wso2/aep/aep-api/middleware/logger"
+	"github.com/wso2/aep/aep-api/internal/app"
+	"github.com/wso2/aep/aep-api/internal/config"
+	"github.com/wso2/aep/aep-api/internal/database"
+	"github.com/wso2/aep/aep-api/internal/platform/obs"
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// main is the process entry point: load+validate config, open the DB, run
-// migrations, assemble the app graph (buildApp), then serve until a signal.
-// All wiring lives in buildApp (app.go) so it is reachable from a test with
-// faked deps; main owns only process lifecycle.
+// main is the process entry point and owns only process lifecycle: load+validate
+// config, open the DB, run first-boot schema steps (app.Bootstrap), assemble the
+// service graph (app.Build), then serve until a signal. All wiring lives in
+// internal/app so it is reachable from a test with faked deps; main holds no
+// business logic.
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -46,37 +47,31 @@ func main() {
 
 	setupLogger(cfg.LogLevel)
 
-	// Database. ComponentTask + ComponentConfig + webhook + push-rendezvous
-	// tables. org_credentials lives in git-service — the BFF does not
+	// Database. Executions + ComponentConfig + webhook tables. Tasks are GitHub
+	// issues now (no component_tasks table — dropped by the tasks-github-native
+	// migration). org_credentials lives in git-service — the BFF does not
 	// auto-migrate or read it locally.
 	db, err := database.Open(cfg.DatabaseURL,
-		&models.ComponentTask{},
 		&models.ComponentConfig{},
 		&models.WebhookDelivery{},
 		&models.WebhookPayload{},
 		&models.Organization{},
+		&models.Execution{},
+		&models.AgentTurn{},
 	)
 	if err != nil {
 		slog.Error("database init failed", "error", err)
 		os.Exit(1)
 	}
 
-	// Schema bootstrap + migrations. RunBootstrapGrants self-grants privileges
-	// on owned schema objects (non-fatal) so FK-creating migrations don't trip
-	// over a managed-DB REVOKE that stripped REFERENCES/TRIGGER from the owner
-	// role. RunAll then applies every migration in dependency order (each
-	// context-taking step gets its own timeout internally).
-	{
-		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = migrations.RunBootstrapGrants(c, db)
-		cancel()
-	}
-	if err := migrations.RunAll(context.Background(), db, cfg.DeploymentTier); err != nil {
-		slog.Error("migrations failed", "error", err)
+	// Schema bootstrap + migrations (grants + RunAll). Kept out of Build so the
+	// composition root stays a pure assembly.
+	if err := app.Bootstrap(context.Background(), db, cfg); err != nil {
+		slog.Error("bootstrap failed", "error", err)
 		os.Exit(1)
 	}
 
-	app, err := buildApp(cfg, db)
+	application, err := app.Build(cfg, db)
 	if err != nil {
 		slog.Error("app init failed", "error", err)
 		os.Exit(1)
@@ -84,7 +79,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.ServerPort),
-		Handler:           app.Handler,
+		Handler:           application.Handler,
 		ReadHeaderTimeout: 15 * time.Second,
 		WriteTimeout:      15 * time.Minute, // AI design generation can take up to 10 min
 		IdleTimeout:       60 * time.Second,
@@ -103,10 +98,10 @@ func main() {
 	// watcherCtx, cancelled on shutdown.
 	watcherCtx, cancelWatcher := context.WithCancel(context.Background())
 	defer cancelWatcher()
-	for _, w := range app.Watchers {
+	for _, w := range application.Watchers {
 		go w.Run(watcherCtx)
 	}
-	slog.Info("background watchers started", "count", len(app.Watchers))
+	slog.Info("background watchers started", "count", len(application.Watchers))
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -136,5 +131,5 @@ func setupLogger(level string) {
 		logLevel = slog.LevelInfo
 	}
 	base := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
-	slog.SetDefault(slog.New(logger.NewContextHandler(base)))
+	slog.SetDefault(slog.New(obs.NewContextHandler(base)))
 }

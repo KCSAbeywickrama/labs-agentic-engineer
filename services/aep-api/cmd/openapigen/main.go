@@ -14,10 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command openapigen writes the code-first OpenAPI documents to build/ (gitignored)
-// for offline tooling — client codegen, portal upload, diffing. It is NOT a
-// source of truth and has no drift guard: the live spec at GET /openapi.yaml is
-// authoritative. Run via `make openapi`. Same code path as the live route.
 package main
 
 import (
@@ -25,33 +21,31 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wso2/aep/aep-api/api"
+	"github.com/wso2/aep/aep-api/internal/api"
 )
 
 func main() {
-	const dir = "build"
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		fmt.Fprintln(os.Stderr, "mkdir", dir+":", err)
-		os.Exit(1)
-	}
 	specs := []struct {
-		name string
+		path string
 		gen  func() ([]byte, error)
 	}{
-		{"openapi.yaml", api.GenerateOpenAPIYAML},
-		{"internal-openapi.yaml", api.GenerateInternalOpenAPIYAML},
+		{filepath.Join("..", "..", "packages", "contracts", "api", "v1", "openapi.yaml"), api.GenerateOpenAPIYAML},
+		{filepath.Join("build", "internal-openapi.yaml"), api.GenerateInternalOpenAPIYAML},
 	}
 	for _, s := range specs {
-		path := filepath.Join(dir, s.name)
+		if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, "mkdir", filepath.Dir(s.path)+":", err)
+			os.Exit(1)
+		}
 		b, err := s.gen()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "generate", path+":", err)
+			fmt.Fprintln(os.Stderr, "generate", s.path+":", err)
 			os.Exit(1)
 		}
-		if err := os.WriteFile(path, b, 0o644); err != nil { //nolint:gosec
-			fmt.Fprintln(os.Stderr, "write", path+":", err)
+		if err := os.WriteFile(s.path, b, 0o644); err != nil { //nolint:gosec
+			fmt.Fprintln(os.Stderr, "write", s.path+":", err)
 			os.Exit(1)
 		}
-		fmt.Printf("wrote %s (%d bytes)\n", path, len(b))
+		fmt.Printf("wrote %s (%d bytes)\n", s.path, len(b))
 	}
 }

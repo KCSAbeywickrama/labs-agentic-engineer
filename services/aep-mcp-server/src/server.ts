@@ -122,7 +122,7 @@ export function createAepMcpServer(client: AepClientOptions): McpServer {
     {
       title: "Dispatch the AE coding agent",
       description:
-        "Create a task bound to an already-created GitHub issue and dispatch the AE coding agent against it. Call ae_create_issue first and pass its returned issue number/url here.",
+        "Create a task bound to an already-created GitHub issue and dispatch the AE coding agent against it. Call ae_create_issue first and pass its returned issue number/url here. Dispatch is async — this call only confirms the dispatch was accepted, not that the coding agent run has started or finished.",
       inputSchema: {
         project: z.string().describe("OpenChoreo/AE project name"),
         componentName: z
@@ -135,13 +135,13 @@ export function createAepMcpServer(client: AepClientOptions): McpServer {
     },
     async ({ project, componentName, title, issueNumber, issueUrl }) => {
       try {
-        const result = await dispatchFromIssue(client, project, {
+        await dispatchFromIssue(client, project, {
           componentName,
           title,
           issueNumber,
           issueUrl,
         });
-        return textResult(result);
+        return textResult({ dispatched: true });
       } catch (err) {
         return errorResult(err);
       }

@@ -42,16 +42,16 @@ func TestValidateOrgID_Reserved(t *testing.T) {
 
 func TestValidateOrgID_Shape(t *testing.T) {
 	cases := map[string]bool{
-		"default":          true,
-		"my-org":           true,
-		"abc-123":          true,
-		"a":                true,
-		"My-Org":           false, // uppercase not allowed
-		"-leading-dash":    false,
-		"trailing-dash-":   true, // matches DNS-label pattern (any non-leading char OK)
-		"con tains space":  false,
-		"slashes/in/path":  false,
-		"under_score":      false,
+		"default":               true,
+		"my-org":                true,
+		"abc-123":               true,
+		"a":                     true,
+		"My-Org":                false, // uppercase not allowed
+		"-leading-dash":         false,
+		"trailing-dash-":        true, // matches DNS-label pattern (any non-leading char OK)
+		"con tains space":       false,
+		"slashes/in/path":       false,
+		"under_score":           false,
 		strings.Repeat("a", 64): false, // exceeds 63-char limit
 		strings.Repeat("a", 63): true,
 	}
@@ -126,7 +126,7 @@ func TestRedactPath(t *testing.T) {
 	cases := map[string]string{
 		"secret/data/aep/default/github/pat":           "secret/data/aep/default/<redacted>",
 		"secret/data/aep/_platform/github/app/private": "secret/data/aep/_platform/<redacted>",
-		"unexpected/shape":                               "<redacted>",
+		"unexpected/shape":                             "<redacted>",
 	}
 	for in, want := range cases {
 		got := redactPath(in)

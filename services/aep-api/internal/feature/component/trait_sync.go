@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/models"
@@ -47,7 +47,7 @@ type OrgPublisher interface {
 //  1. Dispatch path (`dispatch_service.go`): after CreateComponent so a
 //     newly-protected component lands with traits set immediately.
 //  2. Design edit path (`design_service.UpdateDesignFile`): after the
-//     user toggles `exposesAPI.auth` on `design.md` so the trait shape
+//     user toggles `exposesAPI.auth` on `design.json` so the trait shape
 //     propagates without waiting for the next dispatch.
 //
 // Concurrency: every call acquires a per-component mutex keyed by
@@ -96,11 +96,11 @@ func NewTraitSyncService(componentClient openchoreo.ComponentClient, store *arti
 }
 
 // SyncComponentTraits reconciles the OC Component CR + its ReleaseBindings
-// against the desired state derived from `design.md`. Acquires the
+// against the desired state derived from `design.json`. Acquires the
 // per-component mutex BEFORE reading design so a concurrent design edit
 // doesn't write past us mid-PATCH.
 //
-// `componentName` is the user-friendly name (matches design.md component
+// `componentName` is the user-friendly name (matches design.json component
 // name); the OC client prefixes it with the project name internally.
 //
 // First-deploy race: when no ReleaseBindings exist yet for the component,

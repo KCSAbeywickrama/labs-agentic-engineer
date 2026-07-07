@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -63,6 +63,12 @@ func (f *fakeRepoRepo) GetByOrgAndProjectID(ctx context.Context, ocOrgID, projec
 	return nil, nil
 }
 func (f *fakeRepoRepo) ListAllReady(context.Context) ([]models.GitRepository, error) {
+	return nil, nil
+}
+func (f *fakeRepoRepo) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	panic("fakeRepoRepo: ListByOrg not expected in orgcreds tests")
+}
+func (f *fakeRepoRepo) ListAll(context.Context) ([]models.GitRepository, error) {
 	return nil, nil
 }
 func (f *fakeRepoRepo) GetByOrgAndSlug(ctx context.Context, ocOrgID, repoSlug string) (*models.GitRepository, error) {

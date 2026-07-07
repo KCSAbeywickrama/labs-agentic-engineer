@@ -25,10 +25,17 @@ type Project struct {
 	DeploymentPipeline string `json:"deploymentPipeline,omitempty"`
 	CreatedAt          string `json:"createdAt,omitempty"`
 	Status             string `json:"status,omitempty"`
+	// RepoURL is the clone URL of the project's git repo, joined from the
+	// BFF's own git_repositories rows on list reads (#108); absent when no
+	// repo is provisioned.
+	RepoURL string `json:"repoUrl,omitempty" doc:"Clone URL of the project's Git repository; absent when no repo is provisioned."`
 }
 
 type ProjectList struct {
 	Items []Project `json:"items"`
+	// NextCursor is the OpenChoreo continuation token for the next page,
+	// surfaced verbatim; empty/absent on the last page. The console pages on it.
+	NextCursor string `json:"nextCursor,omitempty" doc:"Cursor for the next page; absent on the last page."`
 }
 
 type CreateProjectRequest struct {
@@ -36,6 +43,13 @@ type CreateProjectRequest struct {
 	DisplayName        string `json:"displayName,omitempty"`
 	Description        string `json:"description,omitempty"`
 	DeploymentPipeline string `json:"deploymentPipeline,omitempty"`
+	// Prompt is the requirement text the console's create flow captures; it
+	// is accepted per the contract but not consumed until spec derivation
+	// lands (issue #72).
+	Prompt string `json:"prompt,omitempty" doc:"Optional requirement prompt that kicks off spec derivation."`
+	// RepoName overrides the provisioned Git repository's name; defaults to
+	// the project name. DNS-label slug (validated in the handler).
+	RepoName string `json:"repoName,omitempty" doc:"Git repository name override; defaults to the project name."`
 }
 
 // ProjectStatus represents the computed SDLC phase and artifact states.

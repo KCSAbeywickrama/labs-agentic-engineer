@@ -24,7 +24,7 @@ import (
 
 // GitRepository stores metadata about a platform-provisioned git repository.
 type GitRepository struct {
-	ID            string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ID string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
 	// OrgID + ProjectID form a composite UNIQUE so two orgs can own a
 	// same-named project and lookups must be org-scoped
 	// (GetByOrgAndProjectID). The composite's leading org_id column also
@@ -32,7 +32,6 @@ type GitRepository struct {
 	OrgID         string `gorm:"not null;uniqueIndex:ux_git_repositories_org_project,priority:1" json:"orgId"`
 	ProjectID     string `gorm:"not null;uniqueIndex:ux_git_repositories_org_project,priority:2" json:"projectId"`
 	RepoURL       string `gorm:"not null" json:"repoUrl"`
-	ClonePath     string `gorm:"type:text" json:"clonePath"`
 	DefaultBranch string `gorm:"default:main" json:"defaultBranch"`
 	Status        string `gorm:"default:pending" json:"status"`
 	ErrorMessage  string `gorm:"type:text" json:"errorMessage,omitempty"`
@@ -51,10 +50,12 @@ type GitRepository struct {
 	// for OpenBao path keying (`secret/aep/{ocOrgId}/git/{repoSlug}`) and
 	// the OC SecretReference CR name (`git-{ocOrgId}-{repoSlug}`). Nullable;
 	// the dispatch path lazy-backfills from RepoURL.
-	RepoSlug        string    `gorm:"column:repo_slug;index" json:"repoSlug,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	GithubProjectID string    `gorm:"type:text" json:"githubProjectId,omitempty"`
+	RepoSlug  string    `gorm:"column:repo_slug;index" json:"repoSlug,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	// GitHub Projects v2 is dropped (tasks-github-native §4) — the
+	// github_project_id cache column is removed by the tasks_github_native
+	// migration and no longer modeled.
 }
 
 // repoURLPattern extracts `<owner>/<repo>` from a GitHub HTTPS URL.
@@ -75,6 +76,23 @@ func SlugForURL(repoURL string) string {
 	return strings.ToLower(strings.ReplaceAll(m[1], "/", "-"))
 }
 
+// WorkspaceSlug returns the on-disk directory leaf for this repo row on the
+// shared workspace volume (repos/<org>/<project>/<slug>/ — design D6: a pure
+// function of the DB row). For the per-org skills repo the leaf is the pinned
+// constant SkillsRepoDirName — the agents service derives the skills snapshot
+// path structurally from that fixed name and never receives a path or slug
+// for it on the wire. For everything else it is RepoSlug, backfilled from the
+// URL for pre-phase2 rows.
+func (r *GitRepository) WorkspaceSlug() string {
+	if r.ProjectID == SkillsRepoSentinelProjectID {
+		return SkillsRepoDirName
+	}
+	if r.RepoSlug != "" {
+		return r.RepoSlug
+	}
+	return SlugForURL(r.RepoURL)
+}
+
 // OwnerRepoFromURL extracts (owner, repo) from a GitHub HTTPS URL, preserving
 // the original case (unlike SlugForURL which lowercases). Returns empty
 // strings if the URL doesn't match the GitHub HTTPS pattern. Used by the
@@ -90,4 +108,3 @@ func OwnerRepoFromURL(repoURL string) (owner, repo string) {
 	}
 	return parts[0], parts[1]
 }
-

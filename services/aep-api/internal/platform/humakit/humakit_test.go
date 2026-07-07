@@ -23,19 +23,24 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
 
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
-	"github.com/wso2/aep/aep-api/middleware/jwt"
 )
 
 // resolveWith runs OrgScopedInput.Resolve with the given JWT claim org and
+// gate mode (stamped on the request context exactly as api.mountSurfaces
+// does; "" leaves the context unstamped to exercise the ENFORCE default) and
 // returns the input (with OrgHandle bound by Resolve) plus the resolver errors.
 // There is no path org any more — the active org is derived solely from the
 // token, so a cross-org request is unrepresentable here by construction.
-func resolveWith(t *testing.T, claimOrg string) (*OrgScopedInput, []error) {
+func resolveWith(t *testing.T, claimOrg string, mode tenant.GateMode) (*OrgScopedInput, []error) {
 	t.Helper()
 	r := httptest.NewRequest("GET", "/api/v1/projects", nil)
 	if claimOrg != "" {
-		r = r.WithContext(jwt.WithClaims(r.Context(), &jwt.Claims{OuHandle: claimOrg}))
+		r = r.WithContext(auth.WithClaims(r.Context(), &auth.Claims{OuHandle: claimOrg}))
+	}
+	if mode != "" {
+		r = r.WithContext(tenant.WithGateMode(r.Context(), mode))
 	}
 	ctx := humatest.NewContext(&huma.Operation{}, r, httptest.NewRecorder())
 	in := &OrgScopedInput{}
@@ -55,11 +60,10 @@ func statusOf(t *testing.T, errs []error) int {
 }
 
 func TestOrgScopedResolve_Enforce(t *testing.T) {
-	SetGateMode(tenant.GateModeEnforce)
-	t.Cleanup(func() { SetGateMode(tenant.GateModeEnforce) })
+	t.Parallel()
 
 	// A verified token that names an org is bound onto OrgHandle and passes.
-	in, errs := resolveWith(t, "acme")
+	in, errs := resolveWith(t, "acme", tenant.GateModeEnforce)
 	if len(errs) != 0 {
 		t.Fatalf("valid token org should pass, got %v", errs)
 	}
@@ -68,18 +72,31 @@ func TestOrgScopedResolve_Enforce(t *testing.T) {
 	}
 
 	// No org claim → 401: the active org cannot be derived from the token.
-	_, noClaimErrs := resolveWith(t, "")
+	_, noClaimErrs := resolveWith(t, "", tenant.GateModeEnforce)
 	if got := statusOf(t, noClaimErrs); got != 401 {
 		t.Fatalf("missing org claim should 401, got %d", got)
 	}
 }
 
-func TestOrgScopedResolve_LogModePassesThrough(t *testing.T) {
-	SetGateMode(tenant.GateModeLog)
-	t.Cleanup(func() { SetGateMode(tenant.GateModeEnforce) })
+func TestOrgScopedResolve_UnstampedContextDefaultsToEnforce(t *testing.T) {
+	t.Parallel()
 
-	// Log mode observes but does not enforce the missing-org-claim deny.
-	if _, errs := resolveWith(t, ""); len(errs) != 0 {
+	// A context nothing stamped a mode onto (a stray path that bypassed the
+	// mountSurfaces middleware, or a bare test context) must fail secure:
+	// GateModeFromContext defaults to ENFORCE, so no-org-claim still denies.
+	_, errs := resolveWith(t, "", "")
+	if got := statusOf(t, errs); got != 401 {
+		t.Fatalf("unstamped context must default to ENFORCE (401), got %d", got)
+	}
+}
+
+func TestOrgScopedResolve_LogModePassesThrough(t *testing.T) {
+	t.Parallel()
+
+	// Log mode observes but does not enforce the missing-org-claim deny. The
+	// mode is request-scoped (stamped by mountSurfaces from TENANT_GATE_MODE),
+	// so this cannot leak into any other test or handler.
+	if _, errs := resolveWith(t, "", tenant.GateModeLog); len(errs) != 0 {
 		t.Fatalf("log mode must pass a missing org claim through, got %v", errs)
 	}
 }

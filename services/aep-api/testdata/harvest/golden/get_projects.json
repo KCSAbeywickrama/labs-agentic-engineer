@@ -1,0 +1,23 @@
+{
+  "$schema": "http://localhost:9090/api/v1/ProjectList.json",
+  "items": [
+    {
+      "uid": "d0ba2287-dbb7-471f-ab52-4c2864c684c4",
+      "name": "apii",
+      "namespaceName": "default",
+      "displayName": "apii",
+      "deploymentPipeline": "default",
+      "createdAt": "2026-07-01T09:48:00Z",
+      "status": "ProjectCreated"
+    },
+    {
+      "uid": "bf1105ae-1c07-4015-8b32-c2e55bd56fdd",
+      "name": "hello-world-api",
+      "namespaceName": "default",
+      "displayName": "hello-world-api",
+      "deploymentPipeline": "default",
+      "createdAt": "2026-07-01T05:02:18Z",
+      "status": "ProjectCreated"
+    }
+  ]
+}

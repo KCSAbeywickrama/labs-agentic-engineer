@@ -1,6 +1,10 @@
 /aep-api
 /default
 
-# Generated OpenAPI specs (`make openapi`) — build artifacts, not committed.
+# Internal (S2S) OpenAPI spec (`make openapi`) — build artifact, not committed.
+# The PUBLIC spec is committed at packages/contracts/api/v1/openapi.yaml.
 # root .gitignore already ignores build/; kept here to self-document.
 /build/
+
+# Coverage profile from `make cover` — local artifact, not committed.
+/coverage.out

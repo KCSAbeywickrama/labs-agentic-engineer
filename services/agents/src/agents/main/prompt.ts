@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { Skill } from "@aep/contracts";
+import { EMPTY_SKILL_SOURCE, type SkillSource } from "./skill-source.js";
 
 /** System instructions for the file-mutating main agent. */
 export const instructions = `You are a spec-bundle editing agent. You are given a set of existing files
@@ -43,31 +43,80 @@ Reacting to tool results (each result tells you the next move):
   oldString that includes a surrounding unique line.
 - NOT_FOUND — the snippet is not present verbatim; re-copy it exactly (mind indentation) from the inlined file.
 - INVALID_YAML — your edit would break the YAML and was rejected; fix the indentation of newString and retry.
+- INVALID_JSON / SCHEMA_VIOLATION — a components/<name>/design.json write was rejected (broken JSON or a
+  schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
 
 Keep prose outside tool calls to a single short sentence. When the instruction is fully applied, stop.`;
 
 /**
  * The skill catalog appended to the END of the system prompt (ADR-0002): skill
  * names + one-line descriptions only, never bodies. It is identical across a
- * conversation's turns (the caller sends the same library), so the cacheable
- * instruction prefix is preserved. Returns "" for an empty list, leaving the
- * base instructions byte-identical to a skill-free turn.
+ * conversation's turns (the `_skills` snapshot pins the same catalog), so the
+ * cacheable instruction prefix is preserved. Built through the `SkillSource`
+ * seam. Returns "" for an empty catalog, leaving the base instructions
+ * byte-identical to a skill-free turn.
  */
-export function buildSkillCatalog(skills: readonly Skill[]): string {
-  if (skills.length === 0) return "";
-  const lines = skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
+export function buildSkillCatalog(skills: SkillSource | undefined): string {
+  const entries = (skills ?? EMPTY_SKILL_SOURCE).catalog();
+  if (entries.length === 0) return "";
+  const lines = entries.map((e) => `- ${e.name}: ${e.description}`).join("\n");
+  // The reference note appears only when some skill actually carries reference
+  // files, so a references-free library keeps today's byte-identical catalog.
+  const hasRefs = entries.some((e) => e.hasReferences);
+  const refNote = hasRefs
+    ? " Some skills carry reference files: loadSkill lists their paths, and loadSkillReference(name, path) reads one — call it only when the skill's guidance points you there."
+    : "";
   return `
 
 # Skills
 
-You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. If a skill is relevant to the instruction, call loadSkill(name) to read its guidance BEFORE applying it — never guess a skill's contents.
+You have access to skills — reusable guidance for specific tasks. Only their names and one-line descriptions are listed below; the full guidance is hidden until you load it. Call loadSkill ONCE with every relevant skill's name (names: [...]) to read their guidance BEFORE applying any of them — never guess a skill's contents.${refNote}
 
 ${lines}`;
 }
 
 /** Base instructions + the skill catalog (empty when no skills are supplied). */
-export function buildInstructions(skills: readonly Skill[] = []): string {
+export function buildInstructions(skills?: SkillSource): string {
   return instructions + buildSkillCatalog(skills);
+}
+
+/**
+ * System instructions for the `task-plan` tool set. The mission is PLANNING Tasks
+ * against the read-only CURRENT STATE — the agent does not edit files here. Detail
+ * (title conventions, fresh vs incremental, obsolescence) lives in the
+ * `task-planning` skill, not this prompt; the prompt only fixes the invariants.
+ */
+export const taskPlanInstructions = `You are a task-planning agent. You are given a project's spec and design
+(inlined as CURRENT STATE) plus any existing Tasks, and an instruction to plan the work. You plan Tasks by calling
+the task tools. You do NOT edit files — the CURRENT STATE is read-only.
+
+The unit of work is the DESIGN COMPONENT. Each component under specs/design/components/<name>/ that needs work gets a
+Task. Never invent a component: if a requirement is covered by no design component, do not plan a Task for it — say so
+in your final text and recommend regenerating the design.
+
+Tools:
+- planTask(component, title, rationale, dependsOn[], origin?) — create a Task for one component. component must be a
+  known component; dependsOn lists component names (from the design's relationships), never issue numbers; title must
+  be unique; rationale is one sentence.
+- updateTask(ref, set) — patch a Task and/or write its body. ref is { title } for a Task you planned earlier this turn,
+  or { issueNumber } for an existing Task from the context. After planning, write each Task's full body via updateTask
+  in this same turn. There is no close operation.
+
+Existing Tasks appear under tasks/<issueNumber>.md (their machine facts in frontmatter). Reference them by issueNumber.
+
+Reacting to tool results (each result tells you the next move):
+- ok:true — recorded. Move on.
+- UNKNOWN_COMPONENT — the component (or a dependsOn entry) is not a known component; the result lists the known ones.
+- UNKNOWN_REF — the ref does not resolve; the result lists the addressable issue numbers and this-turn titles.
+- DUPLICATE_TITLE — the title is already taken (listed); choose a distinct one.
+- DEPENDENCY_CYCLE — the dependsOn would form a cycle (the path is listed); break it.
+
+Load the task-planning skill before planning, and follow it. Keep prose outside tool calls to a single short sentence,
+except a final note flagging anything that needs a human (e.g. a requirement no component covers).`;
+
+/** Task-plan instructions + the skill catalog (empty when no skills are supplied). */
+export function buildTaskPlanInstructions(skills?: SkillSource): string {
+  return taskPlanInstructions + buildSkillCatalog(skills);
 }
 
 /**
@@ -104,17 +153,18 @@ skillsApplied:
 A simple public API service that responds with "Hello, World!" in JSON format. Built as a single Go service exposing one endpoint, requiring no authentication.
 `,
 
-  "specs/design/components/hello-api/design.md": `---
-type: service
-language: Go
-buildpack: docker
-appPath: hello-api
-entrypoint: deployment/service
----
-
-# hello-api
-
-Implement a simple Go HTTP service on port 9090 using net/http. Expose GET /hello that returns {"message": "Hello, World!"} with Content-Type: application/json. Include GET /health returning 200 OK for liveness probes. This is a public API — no authentication required, no X-User-Id checks.
+  "specs/design/components/hello-api/design.json": `{
+  "name": "hello-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "hello-api",
+  "entrypoint": "deployment/service",
+  "exposure": "internet",
+  "dependencies": [],
+  "description": "A simple public Go HTTP service (port 9090, net/http) that returns a hello-world JSON message. No authentication. Endpoints are specified in openapi.yaml."
+}
 `,
 
   "specs/design/components/hello-api/openapi.yaml": `openapi: 3.0.3

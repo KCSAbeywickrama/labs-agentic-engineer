@@ -24,8 +24,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wso2/aep/aep-api/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/clients/thundersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/models"
@@ -230,7 +230,7 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 	}
 
 	var firstServiceURL string
-	for _, dep := range webapp.DependsOn {
+	for _, dep := range webapp.ComponentDependsOn() {
 		sibling, ok := byName[dep]
 		if !ok {
 			continue

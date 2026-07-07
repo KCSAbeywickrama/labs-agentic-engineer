@@ -17,17 +17,11 @@
 package gitrepo
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/models"
@@ -36,7 +30,11 @@ import (
 
 // RepoService manages git repository lifecycle (create, get, delete).
 type RepoService interface {
-	CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error)
+	// CreateRepo provisions the project's GitHub repo. repoName == "" derives
+	// the name from projectName (slug); either way the name is used VERBATIM —
+	// a conflict fails with ErrRepoNameConflict (never suffixed away) so the
+	// user can be asked for a different name.
+	CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error)
 	// EnsureBareRepo idempotently provisions a private repo with a STABLE name
 	// (no random suffix) and NO local clone — used for the per-org skills repo
 	// (sentinel projectID, e.g. "_skills"). AutoInit gives it a `main` branch +
@@ -46,6 +44,9 @@ type RepoService interface {
 	// See docs/design/skills-repo-storage.md §10.
 	EnsureBareRepo(ctx context.Context, orgID, projectID, repoName string) (*models.GitRepository, error)
 	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+	// ListByOrg returns the org's repo rows (all statuses) — the source for
+	// the project-list repoUrl annotation (#108).
+	ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error)
 	// SetWebhookID is called by the webhook registration service after a hook
 	// is provisioned for the repo on GitHub. Stored alongside the repo record
 	// so cleanup can deregister.
@@ -54,30 +55,50 @@ type RepoService interface {
 }
 
 type repoService struct {
-	repo         repositories.RepoRepository
-	github       GitHubClient
-	resolver     credentials.Resolver
-	repoVis      string
-	repoBasePath string
+	repo     repositories.RepoRepository
+	github   RepoAdmin
+	resolver credentials.Resolver
+	repoVis  string
+	// workspaceTrash, when set (from the composition root), renames the
+	// repo's on-disk workspace subtree into trash after the DB row is
+	// deleted — phase 1 of the two-phase disk delete (design §14/D12).
+	// Best-effort by contract: it returns nothing and must never fail the
+	// caller; the reaper's orphan pass is the correctness backstop.
+	workspaceTrash func(ctx context.Context, orgID, projectID, repoSlug string)
+}
+
+// RepoServiceOption customizes NewRepoService wiring without churning its
+// positional signature.
+type RepoServiceOption func(*repoService)
+
+// WithWorkspaceTrash installs the best-effort disk-trash hook DeleteRepo
+// fires after a successful DB delete. nil-safe (a nil fn leaves the hook
+// unset).
+func WithWorkspaceTrash(fn func(ctx context.Context, orgID, projectID, repoSlug string)) RepoServiceOption {
+	return func(s *repoService) { s.workspaceTrash = fn }
 }
 
 func NewRepoService(
 	repo repositories.RepoRepository,
-	github GitHubClient,
+	github RepoAdmin,
 	resolver credentials.Resolver,
-	repoVisibility, repoBasePath string,
+	repoVisibility string,
+	opts ...RepoServiceOption,
 ) RepoService {
-	return &repoService{
-		repo:         repo,
-		github:       github,
-		resolver:     resolver,
-		repoVis:      repoVisibility,
-		repoBasePath: repoBasePath,
+	s := &repoService{
+		repo:     repo,
+		github:   github,
+		resolver: resolver,
+		repoVis:  repoVisibility,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
-func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error) {
-	slog.InfoContext(ctx, "creating repository", "org", orgID, "project", projectID, "name", projectName)
+func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
+	slog.InfoContext(ctx, "creating repository", "org", orgID, "project", projectID, "name", projectName, "repoName", repoName)
 	if orgID == "" {
 		return nil, fmt.Errorf("orgID is required")
 	}
@@ -101,15 +122,24 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 		return nil, fmt.Errorf("resolve credential for org %q: %w", orgID, err)
 	}
 
-	slug := slugifyProjectName(projectName)
 	description := fmt.Sprintf("WSO2 Labs Agentic Engineer project %s", projectName)
 
-	repoName, cloneURL, err := s.createGitHubRepoWithRetry(ctx, cred, slug, description)
+	if repoName == "" {
+		repoName = slugifyProjectName(projectName)
+	}
+	// The name — user-chosen or derived — is created VERBATIM: it is what the
+	// create form showed. A conflict propagates (ErrRepoNameConflict survives
+	// the wrap) so the caller can ask the user for a different name; suffixing
+	// it away would silently rename the repo behind their back.
+	cloneURL, err := s.github.CreateOrgRepo(ctx, cred, CreateOrgRepoRequest{
+		Name:        repoName,
+		Private:     strings.EqualFold(s.repoVis, "private"),
+		AutoInit:    true,
+		Description: description,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create github repo: %w", err)
 	}
-
-	clonePath := filepath.Join(s.repoBasePath, orgID, projectID)
 
 	// Compute the per-repo slug from the GitHub clone URL — used by
 	// StageBuildSecret to validate (ocOrgId, repoSlug) ownership. The
@@ -119,13 +149,16 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 	// name is computed here; OcSecretRefName is left nil on new rows.
 	repoSlug := models.SlugForURL(cloneURL)
 
+	// The repo is ready the moment GitHub has it: reads/writes/tags go through
+	// the Git Data API (docs/design/agents-generation-migration.md §5), so there
+	// is no local clone to warm and no "cloning" state to wait through.
 	gitRepo := &models.GitRepository{
-		OrgID:     orgID,
-		ProjectID: projectID,
-		RepoURL:   cloneURL,
-		ClonePath: clonePath,
-		Status:    "cloning",
-		RepoSlug:  repoSlug,
+		OrgID:         orgID,
+		ProjectID:     projectID,
+		RepoURL:       cloneURL,
+		DefaultBranch: "main", // AutoInit gives the repo a main branch + base tree
+		Status:        "ready",
+		RepoSlug:      repoSlug,
 	}
 
 	if err := s.repo.Create(ctx, gitRepo); err != nil {
@@ -135,29 +168,7 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 	slog.InfoContext(ctx, "created platform repo",
 		"owner", cred.RepoOwner(), "name", repoName, "project", projectID, "org", orgID)
 
-	go s.performClone(orgID, projectID, cloneURL, clonePath)
-
 	return gitRepo, nil
-}
-
-// createGitHubRepoWithRetry rolls a fresh 3-digit suffix per attempt. Up to 5 retries on name conflict.
-func (s *repoService) createGitHubRepoWithRetry(ctx context.Context, cred credentials.Credential, slug, description string) (repoName, cloneURL string, err error) {
-	for attempt := 1; attempt <= 5; attempt++ {
-		name := fmt.Sprintf("%s%03d", slug, rand.IntN(1000))
-		cloneURL, err = s.github.CreateOrgRepo(ctx, cred, CreateOrgRepoRequest{
-			Name:        name,
-			Private:     strings.EqualFold(s.repoVis, "private"),
-			AutoInit:    true,
-			Description: description,
-		})
-		if err == nil {
-			return name, cloneURL, nil
-		}
-		if !IsRepoNameConflict(err) {
-			return "", "", err
-		}
-	}
-	return "", "", fmt.Errorf("repo name for %q unavailable after 5 attempts: %w", slug, err)
 }
 
 func (s *repoService) EnsureBareRepo(ctx context.Context, orgID, projectID, repoName string) (*models.GitRepository, error) {
@@ -228,6 +239,14 @@ func (s *repoService) GetRepo(ctx context.Context, orgID, projectID string) (*mo
 	return repo, nil
 }
 
+func (s *repoService) ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error) {
+	rows, err := s.repo.ListByOrg(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list repos by org: %w", err)
+	}
+	return rows, nil
+}
+
 func (s *repoService) SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64) error {
 	repo, err := s.repo.GetByOrgAndProjectID(ctx, orgID, projectID)
 	if err != nil {
@@ -250,131 +269,22 @@ func (s *repoService) DeleteRepo(ctx context.Context, orgID, projectID string) e
 		return ErrRepoNotFound
 	}
 
-	if repo.ClonePath != "" {
-		if err := os.RemoveAll(repo.ClonePath); err != nil {
-			slog.ErrorContext(ctx, "failed to remove clone directory", "path", repo.ClonePath, "error", err)
-		}
-	}
-
 	if err := s.repo.DeleteByOrgAndProjectID(ctx, orgID, projectID); err != nil {
 		return fmt.Errorf("delete repo record: %w", err)
+	}
+
+	// Best-effort disk cleanup AFTER the DB delete succeeded: rename the
+	// workspace subtree into trash (O(1); open fds keep working — design
+	// §14). The hook logs its own failures and never fails this call.
+	if s.workspaceTrash != nil {
+		s.workspaceTrash(ctx, orgID, projectID, repo.WorkspaceSlug())
 	}
 	return nil
 }
 
-func (s *repoService) performClone(orgID, projectID, repoURL, clonePath string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	slog.Info("cloning repository", "project", projectID, "url", repoURL, "path", clonePath)
-
-	if err := os.MkdirAll(filepath.Dir(clonePath), 0o755); err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("create directory: %v", err))
-		return
-	}
-
-	cred, err := s.resolver.Resolve(ctx, orgID)
-	if err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("resolve credential: %v", err))
-		return
-	}
-	token, _, err := cred.Token(ctx)
-	if err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("token: %v", err))
-		return
-	}
-
-	askPassScript, err := createAskPassScript(token)
-	if err != nil {
-		s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("create askpass script: %v", err))
-		return
-	}
-	defer os.Remove(askPassScript)
-
-	cmd := exec.CommandContext(ctx, "git", "clone", repoURL, clonePath)
-	cmd.Env = append(os.Environ(),
-		"GIT_ASKPASS="+askPassScript,
-		"GIT_TERMINAL_PROMPT=0",
-	)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := stderr.String()
-		if strings.Contains(errMsg, "Authentication") || strings.Contains(errMsg, "could not read Username") {
-			s.updateRepoStatus(orgID, projectID, "error", "authentication failed — check platform PAT")
-		} else {
-			s.updateRepoStatus(orgID, projectID, "error", fmt.Sprintf("clone failed: %s", errMsg))
-		}
-		return
-	}
-
-	defaultBranch := detectDefaultBranch(clonePath)
-
-	repo, err := s.repo.GetByOrgAndProjectID(context.Background(), orgID, projectID)
-	if err != nil || repo == nil {
-		slog.Error("failed to update repo after clone", "project", projectID, "error", err)
-		return
-	}
-
-	repo.Status = "ready"
-	repo.DefaultBranch = defaultBranch
-	if err := s.repo.Update(context.Background(), repo); err != nil {
-		slog.Error("failed to update repo status", "project", projectID, "error", err)
-	}
-
-	slog.Info("repository cloned successfully", "project", projectID, "branch", defaultBranch)
-}
-
-func (s *repoService) updateRepoStatus(orgID, projectID, status, errorMsg string) {
-	repo, err := s.repo.GetByOrgAndProjectID(context.Background(), orgID, projectID)
-	if err != nil || repo == nil {
-		slog.Error("failed to find repo for status update", "project", projectID, "error", err)
-		return
-	}
-	repo.Status = status
-	repo.ErrorMessage = errorMsg
-	if err := s.repo.Update(context.Background(), repo); err != nil {
-		slog.Error("failed to update repo status", "project", projectID, "error", err)
-	}
-}
-
-func createAskPassScript(pat string) (string, error) {
-	f, err := os.CreateTemp("", "git-askpass-*.sh")
-	if err != nil {
-		return "", err
-	}
-	_, err = f.WriteString(fmt.Sprintf("#!/bin/sh\necho '%s'\n", pat))
-	if err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
-	}
-	f.Close()
-	if err := os.Chmod(f.Name(), 0o700); err != nil {
-		os.Remove(f.Name())
-		return "", err
-	}
-	return f.Name(), nil
-}
-
-func detectDefaultBranch(repoPath string) string {
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return "main"
-	}
-	branch := strings.TrimSpace(string(out))
-	if branch == "" {
-		return "main"
-	}
-	return branch
-}
-
 var repoSlugInvalid = regexp.MustCompile(`[^a-z0-9-]+`)
 
-// slugifyProjectName produces the slug portion of a repo name. The 3-digit suffix is added by the caller.
+// slugifyProjectName produces the default repo name from the project name.
 func slugifyProjectName(projectName string) string {
 	slug := strings.ToLower(projectName)
 	slug = repoSlugInvalid.ReplaceAllString(slug, "-")

@@ -16,112 +16,94 @@
  * under the License.
  */
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import {
+  alpha,
   Box,
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Divider,
   PageContent,
   Stack,
   Typography,
 } from '@wso2/oxygen-ui';
-import { ChevronLeft, RotateCcw } from '@wso2/oxygen-ui-icons-react';
+import { ChevronLeft, Github } from '@wso2/oxygen-ui-icons-react';
 import { api } from '../services/api';
-import { useTaskStatus } from '../hooks/useTaskStatus';
-import { useTaskAgentProgress } from '../hooks/useTaskAgentProgress';
-import { useTaskBuildProgress } from '../hooks/useTaskBuildProgress';
-import { TaskPipelineStrip } from '../components/tasks/TaskPipelineStrip';
+import type { ExecutionView, TaskDetail, TaskStatus } from '../services/api';
+import { useExecutionProgress } from '../hooks/useExecutionProgress';
 import { TaskActivityFeed } from '../components/tasks/TaskActivityFeed';
-import { TaskArtifactsBar } from '../components/tasks/TaskArtifactsBar';
+import { TaskPipelineStrip } from '../components/tasks/TaskPipelineStrip';
+import { FlagChip, TaskStatusPill } from '../components/tasks/TaskStatusPill';
+import { IN_FLIGHT_TASK_STATUSES } from '../components/tasks/types';
 import { projectTasksPath } from '../lib/paths';
-import type { TaskStatus } from '../services/api';
+import { formatElapsedSince } from '../lib/relativeTime';
 
-const STATUS_TONE: Record<TaskStatus, 'default' | 'primary' | 'success' | 'error' | 'warning'> = {
-  pending: 'default',
-  on_hold: 'default',
-  in_progress: 'primary',
-  ready_for_review: 'primary',
-  merged: 'success',
-  building: 'primary',
-  deployed: 'success',
-  rejected: 'warning',
-  failed: 'error',
-  abandoned: 'default',
-};
+// Terminal for polling. failed/rejected are NOT terminal — a retry can drive
+// them to deployed — so the detail keeps polling through them; otherwise the
+// header freezes on the failed attempt's stale attention flag after the task
+// recovers (the list, which refetches, shows it correctly). Only deployed/
+// abandoned truly settle.
+const SETTLED_STATUSES = new Set<TaskStatus>(['deployed', 'abandoned']);
+const POLL_MS = 5000;
 
-function formatElapsed(ms: number): string {
-  if (ms < 0) ms = 0;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-const STUCK_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
-
-function emptyMessageFor(status: TaskStatus | undefined, dispatchedAt: string | undefined, runName: string | undefined): string {
-  if (status === 'pending' || status === 'on_hold') return 'Waiting for the agent to start…';
-  if (status === 'in_progress') {
-    // Detect a likely-stuck task: in_progress for >30 min with no agent run recorded.
-    if (dispatchedAt && !runName) {
-      const age = Date.now() - new Date(dispatchedAt).getTime();
-      if (age > STUCK_THRESHOLD_MS) {
-        return 'Task appears stuck — no agent run recorded. Try re-dispatching from the tasks page.';
-      }
-    }
-    return 'Agent has started. Streaming activity will appear here as the agent works…';
-  }
-  if (status === 'building') return 'Build dispatched. Waiting for build steps…';
-  return 'No activity recorded for this task.';
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Typography variant="caption" sx={{ color: 'text.disabled', fontWeight: 600, display: 'block' }}>{label}</Typography>
+      <Typography variant="body2" sx={{ color: 'text.primary', wordBreak: 'break-word' }}>{value}</Typography>
+    </Box>
+  );
 }
 
 export default function TaskDetailPage() {
-  const { orgId, projectId, taskId } = useParams<{ orgId: string; projectId: string; taskId: string }>();
-  const status = useTaskStatus(orgId, projectId, taskId);
-  const task = status.data?.task;
-  const taskStatus = task?.status as TaskStatus | undefined;
-  const [isRetrying, setIsRetrying] = useState(false);
+  const { orgId, projectId, issueNumber } = useParams<{ orgId: string; projectId: string; issueNumber: string }>();
+  const issueNum = Number(issueNumber);
 
-  // Retry re-dispatches a `failed` task. Same handler as TaskDetailPanel
-  // (kanban card); both call POST /tasks/{id}/retry which clears
-  // LastCodingAgentRunName + DispatchedAt server-side and runs through
-  // dispatchSvc.RetryTask → tryDispatchViaProxy.
-  const handleRetry = async () => {
-    if (!orgId || !projectId || !taskId) return;
-    setIsRetrying(true);
+  const [task, setTask] = useState<TaskDetail | undefined>();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedExecId, setSelectedExecId] = useState<string | undefined>();
+
+  const load = useCallback(async () => {
+    if (!projectId || !Number.isFinite(issueNum)) return;
     try {
-      await api.retryTask(projectId, taskId);
-      // useTaskStatus polls — the next tick will pick up the new
-      // status. No optimistic update needed; the API doesn't return
-      // the row.
-      status.refetch();
-    } catch {
-      // Surface via the existing inline error banner below; nothing
-      // else to do here. Polling continues.
+      const data = await api.getTask(projectId, issueNum);
+      setTask(data);
+      setError(null);
+      // Default the progress feed to the most-recent execution.
+      setSelectedExecId((prev) => prev ?? data.executionHistory[0]?.id);
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Task not found.');
     } finally {
-      setIsRetrying(false);
+      setIsLoading(false);
     }
-  };
-  const canRetry = taskStatus === 'failed';
+  }, [projectId, issueNum]);
 
-  const agent = useTaskAgentProgress(orgId, projectId, taskId, taskStatus);
-  const build = useTaskBuildProgress(orgId, projectId, taskId, taskStatus);
+  useEffect(() => {
+    setIsLoading(true);
+    void load();
+  }, [load]);
 
-  const elapsed = useMemo(() => {
-    if (!task?.dispatchedAt) return null;
-    const start = new Date(task.dispatchedAt).getTime();
-    if (isNaN(start)) return null;
-    return formatElapsed(Date.now() - start);
-  }, [task?.dispatchedAt, status.dataUpdatedAt]);
+  // Poll until the task settles — including through failed/rejected, which a
+  // retry can still carry to deployed, so the header (status + attention) stays
+  // consistent with the freshly-refetched list instead of freezing on a stale
+  // attention flag from a since-recovered attempt.
+  useEffect(() => {
+    if (!task || SETTLED_STATUSES.has(task.derivedStatus)) return undefined;
+    const t = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(t);
+  }, [task, load]);
 
-  if (status.isLoading) {
+  const selectedExec = useMemo(
+    () => task?.executionHistory.find((e) => e.id === selectedExecId),
+    [task, selectedExecId],
+  );
+  const progress = useExecutionProgress(projectId, selectedExecId, selectedExec?.status === 'running');
+
+  if (isLoading) {
     return (
       <PageContent>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 16, gap: 1.5 }}>
@@ -132,13 +114,11 @@ export default function TaskDetailPage() {
     );
   }
 
-  if (status.error || !task) {
+  if (error || !task) {
     return (
       <PageContent>
         <Box sx={{ pt: 8, textAlign: 'center' }}>
-          <Typography variant="body2" color="error.main">
-            {(status.error as Error | undefined)?.message ?? 'Task not found.'}
-          </Typography>
+          <Typography variant="body2" color="error.main">{error ?? 'Task not found.'}</Typography>
           <Button
             component={RouterLink}
             to={projectTasksPath(orgId ?? '', projectId ?? '')}
@@ -156,6 +136,7 @@ export default function TaskDetailPage() {
   return (
     <PageContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack spacing={2} sx={{ pb: 2 }}>
+        {/* Header */}
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Button
             component={RouterLink}
@@ -168,99 +149,151 @@ export default function TaskDetailPage() {
             Tasks
           </Button>
           <Typography variant="h6" sx={{ flex: 1, fontWeight: 600 }}>
-            {task.title || task.componentName || 'Task'}
+            <Box component="span" sx={{ color: 'text.disabled', mr: 0.75 }}>#{task.issueNumber}</Box>
+            {task.title}
           </Typography>
-          <Chip
-            label={task.status.replace(/_/g, ' ')}
-            color={STATUS_TONE[task.status as TaskStatus] ?? 'default'}
-            size="small"
-            sx={{ textTransform: 'uppercase', fontSize: '0.7rem', fontWeight: 700 }}
-          />
-          {canRetry && (
+          {task.hold && <FlagChip label="On hold" tone="warning" />}
+          {task.attention.map((flag) => <FlagChip key={flag} label={flag} tone="error" />)}
+          <TaskStatusPill status={task.derivedStatus} live={IN_FLIGHT_TASK_STATUSES.has(task.derivedStatus)} />
+          {task.issueUrl && (
             <Button
-              variant="contained"
+              component="a"
+              href={task.issueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               size="small"
-              color="warning"
-              startIcon={isRetrying ? <CircularProgress size={12} color="inherit" /> : <RotateCcw size={12} />}
-              disabled={isRetrying}
-              onClick={handleRetry}
+              variant="outlined"
+              startIcon={<Github size={14} />}
             >
-              {isRetrying ? 'Retrying…' : 'Retry'}
+              Issue
             </Button>
-          )}
-          {elapsed && (
-            <Typography variant="caption" color="text.disabled" sx={{ minWidth: 70, textAlign: 'right' }}>
-              {elapsed}
-            </Typography>
           )}
         </Stack>
 
+        {/* Pipeline */}
         <Card variant="outlined">
           <CardContent>
-            <TaskPipelineStrip status={taskStatus} />
+            <TaskPipelineStrip status={task.derivedStatus} />
           </CardContent>
         </Card>
 
+        {/* Facts */}
         <Card variant="outlined">
           <CardContent>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-              <Typography variant="overline" sx={{ color: 'text.disabled' }}>Activity</Typography>
-              {taskStatus === 'in_progress' && agent.lines.length > 0 && !agent.final && (
-                <Box sx={{
-                  width: 6, height: 6, borderRadius: '50%',
-                  bgcolor: 'success.main',
-                  animation: 'pulse 1.4s ease-out infinite',
-                  '@keyframes pulse': {
-                    '0%':   { opacity: 1 },
-                    '100%': { opacity: 0.2 },
-                  },
-                }} />
-              )}
-              {taskStatus === 'in_progress' && agent.lines.length > 0 && (
-                <Typography variant="caption" color="text.disabled">
-                  · live
-                </Typography>
-              )}
-            </Stack>
-            <TaskActivityFeed
-              agentLines={agent.lines}
-              buildLines={build.lines}
-              agentFinal={agent.final}
-              buildFinal={build.final}
-              emptyMessage={emptyMessageFor(taskStatus, task.dispatchedAt, task.lastCodingAgentRunName)}
-            />
-            {(agent.error || build.error) && (
-              <Box sx={{ mt: 1.5 }}>
-                <Typography variant="caption" color="warning.main">
-                  Live progress unavailable — falling back to status polling. Pipeline + status remain accurate.
-                </Typography>
-              </Box>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="overline" sx={{ color: 'text.disabled' }}>Artifacts</Typography>
-            <Box sx={{ mt: 0.5 }}>
-              <TaskArtifactsBar task={task} />
+            <Typography variant="overline" sx={{ color: 'text.disabled' }}>Task</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 1.5, mt: 1 }}>
+              {task.component && <Fact label="Component" value={task.component} />}
+              {task.operation && <Fact label="Operation" value={task.operation} />}
+              {task.executorClass && <Fact label="Executor" value={task.executorClass} />}
+              {task.origin && <Fact label="Origin" value={task.origin} />}
+              <Fact label="Depends on" value={task.dependsOn.length ? task.dependsOn.join(', ') : '—'} />
+              <Fact label="Spec" value={task.lineage.specTag || '—'} />
+              <Fact label="Design" value={task.lineage.designTag || '—'} />
             </Box>
-            {status.data?.buildSteps && status.data.buildSteps.length > 0 && (
+          </CardContent>
+        </Card>
+
+        {/* Executions + progress */}
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="overline" sx={{ color: 'text.disabled' }}>Executions</Typography>
+            {task.executionHistory.length === 0 ? (
+              <Typography variant="body2" color="text.disabled" sx={{ mt: 1 }}>
+                No executions yet — Execute this task (or stamp <code>aep:execute</code> on the issue) to dispatch it.
+              </Typography>
+            ) : (
+              <Stack spacing={0.5} sx={{ mt: 1 }}>
+                {task.executionHistory.map((exec) => (
+                  <ExecutionRow
+                    key={exec.id}
+                    exec={exec}
+                    selected={exec.id === selectedExecId}
+                    onSelect={() => setSelectedExecId(exec.id)}
+                  />
+                ))}
+              </Stack>
+            )}
+
+            {selectedExec && (
               <>
                 <Divider sx={{ my: 1.5 }} />
-                <Typography variant="overline" sx={{ color: 'text.disabled' }}>Build steps</Typography>
-                <Stack spacing={0.5} sx={{ mt: 0.5 }}>
-                  {status.data.buildSteps.map((s, i) => (
-                    <Typography key={`${s.name}-${i}`} variant="caption" color="text.secondary">
-                      {s.name}{s.phase ? ` · ${s.phase}` : ''}{s.message ? ` · ${s.message}` : ''}
-                    </Typography>
-                  ))}
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                  <Typography variant="overline" sx={{ color: 'text.disabled' }}>
+                    {selectedExec.kind} progress
+                  </Typography>
+                  {selectedExec.status === 'running' && progress.lines.length > 0 && !progress.final && (
+                    <Typography variant="caption" color="text.disabled">· live</Typography>
+                  )}
                 </Stack>
+                <TaskActivityFeed
+                  lines={progress.lines}
+                  final={progress.final}
+                  emptyMessage={
+                    selectedExec.status === 'queued'
+                      ? `Queued${selectedExec.reason ? ` — ${selectedExec.reason}` : ''}. Waiting to start…`
+                      : selectedExec.status === 'running'
+                        ? 'Execution running — streaming activity will appear here…'
+                        : 'No activity recorded for this execution.'
+                  }
+                />
+                {progress.error && (
+                  <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: 'block' }}>
+                    Live progress unavailable — the execution status above remains accurate.
+                  </Typography>
+                )}
               </>
             )}
           </CardContent>
         </Card>
       </Stack>
     </PageContent>
+  );
+}
+
+function ExecutionRow({ exec, selected, onSelect }: { exec: ExecutionView; selected: boolean; onSelect: () => void }) {
+  const tone =
+    exec.status === 'succeeded' ? 'success.main'
+    : exec.status === 'failed' ? 'error.main'
+    : exec.status === 'running' ? 'primary.main'
+    : exec.status === 'canceled' ? 'text.disabled'
+    : 'warning.main'; // queued
+  const started = formatElapsedSince(exec.startedAt ?? exec.createdAt);
+
+  return (
+    <Box
+      onClick={onSelect}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.25,
+        px: 1.25,
+        py: 0.875,
+        borderRadius: 1,
+        cursor: 'pointer',
+        border: '1px solid',
+        borderColor: selected ? 'primary.main' : 'divider',
+        bgcolor: (t) => (selected ? alpha(t.palette.primary.main, 0.05) : 'transparent'),
+        '&:hover': { bgcolor: (t) => alpha(t.palette.text.primary, 0.03) },
+      }}
+    >
+      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tone, flexShrink: 0 }} />
+      <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 52 }}>{exec.kind}</Typography>
+      <Typography variant="caption" sx={{ color: tone, fontWeight: 600, textTransform: 'uppercase', minWidth: 72 }}>
+        {exec.status}
+      </Typography>
+      {exec.runName && (
+        <Typography variant="caption" sx={{ color: 'text.disabled', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          {exec.runName}
+        </Typography>
+      )}
+      {exec.reason && !exec.runName && (
+        <Typography variant="caption" sx={{ color: 'text.disabled', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          {exec.reason}
+        </Typography>
+      )}
+      {started && (
+        <Typography variant="caption" sx={{ color: 'text.disabled', flexShrink: 0 }}>{started} ago</Typography>
+      )}
+    </Box>
   );
 }

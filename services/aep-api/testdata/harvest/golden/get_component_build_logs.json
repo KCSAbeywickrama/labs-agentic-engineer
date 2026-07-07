@@ -1,0 +1,6 @@
+{
+  "$schema": "http://localhost:9090/api/v1/ErrorModel.json",
+  "title": "Internal Server Error",
+  "status": 500,
+  "detail": "failed to get build logs"
+}

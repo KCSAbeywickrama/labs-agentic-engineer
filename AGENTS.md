@@ -15,6 +15,11 @@ SDLC platform built on OpenChoreo.
 | typecheck | `make typecheck` | `tsc` + `go vet` |
 | license-check | `make license-check` | fail if any source lacks the Apache header |
 
+## Development Practices
+- Focus on writing maintainable code, clean code. 
+- Keep files seperated based on responsibility.
+- Proper Fix alawys, no hacks or workarounds unless explicitly specified.
+
 ## Design docs
 
 Each package keeps a `design/` folder: concise notes + ADRs written **after** a

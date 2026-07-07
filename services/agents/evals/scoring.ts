@@ -24,7 +24,7 @@
  */
 
 import { parse as parseYaml } from "yaml";
-import type { OpResult } from "@aep/contracts";
+import type { OpResult } from "@aep/agent-stream";
 import type { Expect } from "./fixture.js";
 
 export interface CheckResult {

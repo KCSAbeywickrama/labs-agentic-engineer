@@ -136,12 +136,15 @@ spec:
             # related-issue discovery/linking moved to the SRE agent's handoff
             # stage (a "## Related issues" section in the issue body; GitHub #N
             # mentions back-link automatically) — see AE-HANDOFF-DESIGN.md in
-            # openchoreo/agents/sre-agent. Keep in sync with AGENT_RUNNER_IMAGE
-            # in deployments/docker-compose.yml: that env feeds the proxy
-            # dispatch path, while THIS manifest feeds the legacy
-            # ClusterWorkflow path (used when per-org SM-API secrets are absent,
-            # e.g. right after a fresh setup).
-            image: docker.io/tharindulak/aep-coding-agent-runner:v5-sre-side-linking
+            # openchoreo/agents/sre-agent. v6 rebases onto upstream's
+            # tasks-github-native re-key (executions-keyed skills pull +
+            # credentials refresh) — v5 called the now-retired tasks-keyed
+            # routes and could not authenticate git operations at all. Keep in
+            # sync with AGENT_RUNNER_IMAGE in deployments/docker-compose.yml:
+            # that env feeds the proxy dispatch path, while THIS manifest
+            # feeds the legacy ClusterWorkflow path (used when per-org SM-API
+            # secrets are absent, e.g. right after a fresh setup).
+            image: docker.io/tharindulak/aep-coding-agent-runner:v6-sre-side-linking
             imagePullPolicy: Always
             # Explicit command/args is the OC convention — every ClusterWorkflow
             # in this directory and Agent-Manager's amp-monitor-evaluation set

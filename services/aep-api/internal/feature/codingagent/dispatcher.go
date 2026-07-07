@@ -33,7 +33,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/wso2/aep/aep-api/clients/clustergatewayproxy"
+	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
@@ -68,6 +68,14 @@ type Inputs struct {
 	// Optional — when absent the runner falls back to AEP_BEARER.
 	PublisherSR *SecretRef
 
+	// ExternalResourceSRs are the per-env secret bundles for the external
+	// resources the task's component binds (the SM-API vault path + the secret
+	// keys). The orchestrator emits one per-run ExternalSecret each, materialising
+	// every key into a K8s Secret the runner mounts via envFrom — so the agent
+	// integration-tests against the live service. Empty when the task binds no
+	// secret-bearing external resource.
+	ExternalResourceSRs []ExternalResourceSecretInputs
+
 	// ClusterSecretStoreName is the ESO CSS that backs reads. On
 	// cloud-dp-oc-dp this MUST be `application-secrets-read` (AppRole
 	// `approle-creds-application-read-permission` — the only one
@@ -82,6 +90,14 @@ type SecretRef struct {
 	SecretRefName string
 	KVPath        string
 	Property      string
+}
+
+// ExternalResourceSecretInputs is one external resource's per-env secret bundle
+// for the runner: the SM-API vault KV path + the secret keys (each key == its
+// SM-API property == the env var name the runner reads via envFrom).
+type ExternalResourceSecretInputs struct {
+	KVPath string
+	Keys   []string
 }
 
 // Dispatcher wraps the proxy client + defaults. Construct once at boot.
@@ -139,8 +155,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 		Name: ns,
 		Labels: map[string]string{
 			"app.kubernetes.io/managed-by": "aep",
-			"aep.io/purpose":             "remote-worker",
-			"aep.io/org-uuid":            in.OrgUUID,
+			"aep.io/purpose":               "remote-worker",
+			"aep.io/org-uuid":              in.OrgUUID,
 		},
 	}); err != nil {
 		return "", fmt.Errorf("dispatcher: ensure namespace %s: %w", ns, err)
@@ -173,6 +189,21 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 			return "", fmt.Errorf("dispatcher: apply publisher ExternalSecret: %w", err)
 		}
 	}
+	// Per-external-resource ExternalSecrets — each key materialises into a K8s
+	// Secret the runner mounts via envFrom (the agent integration-tests against
+	// the live resource).
+	extResSecretNames := make([]string, 0, len(in.ExternalResourceSRs))
+	for i, er := range in.ExternalResourceSRs {
+		if er.KVPath == "" || len(er.Keys) == 0 {
+			continue
+		}
+		esName := fmt.Sprintf("%s-extres%d-es", runName, i)
+		secretName := fmt.Sprintf("%s-extres%d", runName, i)
+		if err := d.applyExternalResourceExternalSecret(ctx, in, ns, esName, secretName, er); err != nil {
+			return "", fmt.Errorf("dispatcher: apply external-resource ExternalSecret: %w", err)
+		}
+		extResSecretNames = append(extResSecretNames, secretName)
+	}
 
 	// 4) Job — fill the secret names + NS + SA into the job inputs the
 	// caller pre-populated, then build + apply.
@@ -182,6 +213,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, in Inputs) (string, error) {
 	job.AnthropicSecretName = anthropicSecret
 	job.GitHubSecretName = githubSecret
 	job.PublisherSecretName = publisherSecret
+	job.ExternalResourceSecretNames = extResSecretNames
 	manifest, err := Build(job)
 	if err != nil {
 		return "", fmt.Errorf("dispatcher: build Job manifest: %w", err)
@@ -226,6 +258,29 @@ func (d *Dispatcher) applyPublisherExternalSecret(ctx context.Context, in Inputs
 			{LocalKey: "PUBLISHER_CLIENT_ID", RemoteRefProperty: "client_id"},
 			{LocalKey: "PUBLISHER_CLIENT_SECRET", RemoteRefProperty: "client_secret"},
 		},
+	})
+	if err != nil {
+		return err
+	}
+	return d.proxy.ApplyExternalSecret(ctx, ns, manifest)
+}
+
+// applyExternalResourceExternalSecret emits one ExternalSecret reading all of an
+// external resource's secret keys from its single SM-API path (one data entry per
+// key, localKey == property == key) into a K8s Secret the runner mounts via
+// envFrom.
+func (d *Dispatcher) applyExternalResourceExternalSecret(ctx context.Context, in Inputs, ns, esName, secretName string, er ExternalResourceSecretInputs) error {
+	entries := make([]ExternalSecretDataEntry, 0, len(er.Keys))
+	for _, k := range er.Keys {
+		entries = append(entries, ExternalSecretDataEntry{LocalKey: k, RemoteRefProperty: k})
+	}
+	manifest, err := BuildExternalSecret(ExternalSecretInputs{
+		Name:                   esName,
+		Namespace:              ns,
+		TargetSecretName:       secretName,
+		ClusterSecretStoreName: in.ClusterSecretStoreName,
+		RemoteRefKey:           er.KVPath,
+		DataEntries:            entries,
 	})
 	if err != nil {
 		return err

@@ -572,6 +572,16 @@ spec:
 OCEOF
 echo "✅ ClusterComponentType 'deployment/web-application' created"
 
+# ── Sample platform-resource: postgres-cnpg ClusterResourceType (P5) ────────
+# The cluster PE installs the platform-resource catalog; app-factory's BFF only
+# DISCOVERS and REFERENCES these types (it never authors a ClusterResourceType).
+# postgres-cnpg renders a CloudNativePG `Cluster`; its RBAC grant lets OC's
+# data-plane agent apply that foreign CRD into the `dp-*` namespace (without it,
+# provisioning fails with a `clusters.postgresql.cnpg.io is forbidden` denial).
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/postgres-cnpg-rbac.yaml"
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/postgres-cnpg-resourcetype.yaml"
+echo "✅ ClusterResourceType 'postgres-cnpg' + CNPG data-plane RBAC created"
+
 # ── Per-org NAMESPACED ComponentTypes (local stand-in for cloud's
 #    platform-api ProvisionOrgUnit) ────────────────────────────────────────
 # The BFF references the per-org namespaced ComponentType (kind=ComponentType),
@@ -661,8 +671,32 @@ spec:
   - roleRef:
       kind: ClusterAuthzRole
       name: admin
+---
+# The coding-agent build's `generate-workload-cr` step authenticates as the
+# Thunder client `openchoreo-workload-publisher-client` (its own client_credentials
+# grant, NOT the per-task BFF JWT) and POSTs the Workload CR to the OC API. OC
+# authorizes that via this binding → the `workload-publisher` role (workload:
+# create/update/view). The role is Helm-bootstrapped by the control-plane chart,
+# but its BINDING is only re-applied on a clean first install — a control-plane
+# install that fails on the controller-manager webhook race and is then recovered
+# with `helm upgrade --install` skips it, leaving builds to 403 at workload create
+# ("FORBIDDEN") on a reseeded cluster. Assert it here so the local setup is
+# self-sufficient regardless of the chart bootstrap path.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRoleBinding
+metadata:
+  name: workload-publisher-binding
+spec:
+  effect: allow
+  entitlement:
+    claim: sub
+    value: openchoreo-workload-publisher-client
+  roleMappings:
+  - roleRef:
+      kind: ClusterAuthzRole
+      name: workload-publisher
 OCEOF
-echo "✅ AEP API service account + Administrators group authorized"
+echo "✅ AEP API service account + Administrators group + workload publisher authorized"
 
 # ============================================================================
 # Generate .env file

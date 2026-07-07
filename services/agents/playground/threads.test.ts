@@ -29,9 +29,13 @@ function reset(): void {
   ensureThread(NAME);
 }
 
-test("name validation rejects path escapes", () => {
+test("name validation rejects path escapes and conversation-id delimiters", () => {
   assert.ok(isValidThreadName("my-spec.1_v2"));
-  for (const bad of ["..", ".", "a/b", "a\\b", "a b", ""]) assert.equal(isValidThreadName(bad), false);
+  // `--` is the namespaced conversation-id segment delimiter (§12); dot-led
+  // names would be skipped by the snapshot walk.
+  for (const bad of ["..", ".", "a/b", "a\\b", "a b", "", "my--spec", ".hidden"]) {
+    assert.equal(isValidThreadName(bad), false);
+  }
 });
 
 test("readSnapshot reads text recursively, skips dot-entries and binary", () => {
@@ -45,6 +49,18 @@ test("readSnapshot reads text recursively, skips dot-entries and binary", () => 
   const snap = readSnapshot(NAME);
   assert.deepEqual(Object.keys(snap).sort(), ["specs/a.md"]);
   assert.equal(snap["specs/a.md"], "hello\n");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("readSnapshot excludes derived artifacts (.excalidraw, *.gen.json) — agent never sees them", () => {
+  reset();
+  const root = threadDir(NAME);
+  mkdirSync(join(root, "specs"), { recursive: true });
+  writeFileSync(join(root, "specs", "wireframes.dsl"), "screen A\n");
+  writeFileSync(join(root, "specs", "wireframes.excalidraw"), '{"type":"excalidraw"}');
+  writeFileSync(join(root, "specs", "design.gen.json"), "{}");
+
+  assert.deepEqual(Object.keys(readSnapshot(NAME)).sort(), ["specs/wireframes.dsl"]);
   rmSync(root, { recursive: true, force: true });
 });
 

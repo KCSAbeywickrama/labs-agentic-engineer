@@ -136,4 +136,14 @@ echo "🔐 Reseed complete: $WROTE write(s) across $ORG_COUNT org(s)$( [ "$FAILE
 
 # Surface per-org errors from the BFF (cred-store misses, etc.).
 ERRORS="$(echo "$BODY" | jq -r '.orgs[] | select(.anthropicError or .githubPatError) | "  - \(.ocOrgId): anthropic=\(.anthropicError // "-") github=\(.githubPatError // "-")"')"
-[ -n "$ERRORS" ] && { echo "⚠️  bundle errors:"; echo "$ERRORS"; }
+if [ -n "$ERRORS" ]; then
+    echo "⚠️  bundle errors:"
+    echo "$ERRORS"
+fi
+
+# Exit non-zero only when something actually went wrong, so callers
+# (start.sh) don't warn on clean runs.
+if [ "$FAILED" -gt 0 ] || [ -n "$ERRORS" ]; then
+    exit 1
+fi
+exit 0
