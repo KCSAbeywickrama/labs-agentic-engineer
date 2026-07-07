@@ -125,10 +125,11 @@ bootstrap:
 
       PUBLIC_APPS=(
         # /callback is the new console's dedicated OAuth route (issue #91);
-        # root redirects serve the legacy console, which lives at :8091
-        # during the #98 transition (:8090 root kept for cluster/OC
-        # deployments that still serve legacy at PUBLIC_CONSOLE_URL).
-        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,http://localhost:8091,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
+        # root redirects serve the legacy console (login + post-logout).
+        # During the #98 transition legacy stays at :8090 and the new
+        # console lives at :8091, so that origin needs /callback (login)
+        # and root (post-logout) entries too.
+        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,http://localhost:8091,http://localhost:8091/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
       )
 
       # ──────────────────────────────────────────────────────────────────

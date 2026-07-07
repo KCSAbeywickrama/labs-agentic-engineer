@@ -83,9 +83,9 @@ that's a stalled feature — investigate, don't ignore.
   [#71](https://github.com/wso2/labs-agentic-engineer/issues/71) (BE
   handshake: [#72](https://github.com/wso2/labs-agentic-engineer/issues/72),
   ADR-0005)
-- Legacy console replacement — apps/console becomes the served default at
-  :8090 (Docker/nginx packaging, compose swap, OC workload.yaml); legacy
-  escape hatch at :8091 until the retirement checklist completes —
+- Legacy console replacement — apps/console gets production serving at :8091
+  (Docker/nginx packaging, compose service, OC workload.yaml) while legacy
+  keeps :8090; ports flip when the retirement checklist completes —
   [#98](https://github.com/wso2/labs-agentic-engineer/issues/98) (BE
   handshake: [#99](https://github.com/wso2/labs-agentic-engineer/issues/99))
 

@@ -15,20 +15,21 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# #98 transition: the legacy console moves to http://localhost:8091 while the
-# new console (apps/console) takes :8090. Fresh clusters get both origins from
-# values-thunder.yaml + setup-openchoreo.sh; THIS script retrofits an
-# already-seeded cluster, idempotently:
+# #98 transition: the NEW console (apps/console) serves at
+# http://localhost:8091 while legacy keeps :8090. Fresh clusters get the
+# :8091 origin from values-thunder.yaml + setup-openchoreo.sh; THIS script
+# retrofits an already-seeded cluster, idempotently:
 #
-#   1. adds http://localhost:8091 to aep-console-client's redirectUris
-#      (Thunder admin API, via the same in-pod THUNDER_SKIP_SECURITY
-#      lift/restore dance as setup-thunder-client.sh), and
+#   1. adds http://localhost:8091/callback (login) and http://localhost:8091
+#      (post-logout) to aep-console-client's redirectUris (Thunder admin
+#      API, via the same in-pod THUNDER_SKIP_SECURITY lift/restore dance as
+#      setup-thunder-client.sh), and
 #   2. re-applies the Thunder HTTPRoute CORS filter with the :8091 origin
 #      (kgateway rejects the token-endpoint preflight otherwise — redirect
 #      URIs alone are not enough).
 #
-# Delete this script together with the legacy console when the #98
-# retirement checklist completes.
+# Delete this script when the #98 retirement checklist completes and the
+# new console takes over :8090.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,10 +37,10 @@ source "$SCRIPT_DIR/env.sh"
 source "$SCRIPT_DIR/utils.sh"
 load_public_urls
 
-LEGACY_ORIGIN="${PUBLIC_LEGACY_CONSOLE_URL:-http://localhost:8091}"
+NEW_CONSOLE_ORIGIN="${PUBLIC_NEW_CONSOLE_URL:-http://localhost:8091}"
 CLIENT_ID="aep-console-client"
 
-echo "=== Patching Thunder for the legacy console at ${LEGACY_ORIGIN} ==="
+echo "=== Patching Thunder for the new console at ${NEW_CONSOLE_ORIGIN} ==="
 
 THUNDER_POD=$(kubectl --context "${CLUSTER_CONTEXT}" get pod -n thunder \
     -l app.kubernetes.io/name=thunder -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
@@ -86,12 +87,16 @@ fi
 echo "Application: ${CLIENT_ID} (${APP_ID})"
 
 APP_JSON=$(thunder_get "/applications/${APP_ID}")
-if echo "$APP_JSON" | jq -e --arg uri "$LEGACY_ORIGIN" \
-        '.inboundAuthConfig[0].config.redirectUris | index($uri)' >/dev/null; then
-    echo "⏭️  ${LEGACY_ORIGIN} already in redirectUris"
+# /callback handles login (oidc-client-ts redirect_uri); the bare origin is
+# the post-logout redirect. Missing entries are appended in one PUT.
+UPDATED=$(echo "$APP_JSON" | jq --arg root "$NEW_CONSOLE_ORIGIN" \
+    '.inboundAuthConfig[0].config.redirectUris |=
+        (. + [$root, $root + "/callback"] | unique)')
+if [ "$UPDATED" = "$APP_JSON" ] || \
+   [ "$(echo "$UPDATED" | jq -c '.inboundAuthConfig[0].config.redirectUris | sort')" = \
+     "$(echo "$APP_JSON" | jq -c '.inboundAuthConfig[0].config.redirectUris | sort')" ]; then
+    echo "⏭️  ${NEW_CONSOLE_ORIGIN}[/callback] already in redirectUris"
 else
-    UPDATED=$(echo "$APP_JSON" | jq --arg uri "$LEGACY_ORIGIN" \
-        '.inboundAuthConfig[0].config.redirectUris += [$uri]')
     HTTP_CODE=$(echo "$UPDATED" | kubectl --context "${CLUSTER_CONTEXT}" exec -i -n thunder "${THUNDER_POD}" -- \
         curl -sS -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' \
         -d @- "http://localhost:8090/applications/${APP_ID}")
@@ -99,14 +104,14 @@ else
         echo "❌ Failed to update redirectUris (HTTP $HTTP_CODE)" >&2
         exit 1
     fi
-    echo "✅ ${LEGACY_ORIGIN} added to redirectUris"
+    echo "✅ ${NEW_CONSOLE_ORIGIN} + ${NEW_CONSOLE_ORIGIN}/callback in redirectUris"
 fi
 
 # ── 2. CORS origin ──────────────────────────────────────────────────────────
 # Same filter value as setup-openchoreo.sh (keep in sync). kgateway rejects
 # duplicate allowOrigins, hence replace-not-append semantics.
 CORS_PATCH=$(cat <<EOF
-[{"op":"replace","path":"/spec/rules/0/filters","value":[{"type":"CORS","cors":{"allowOrigins":["http://localhost:19080","http://*.openchoreoapis.localhost:19080","${PUBLIC_CONSOLE_URL}","${LEGACY_ORIGIN}","${PUBLIC_THUNDER_URL}"],"allowMethods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allowHeaders":["Content-Type","Authorization","Accept","Origin"],"allowCredentials":true,"maxAge":3600}}]}]
+[{"op":"replace","path":"/spec/rules/0/filters","value":[{"type":"CORS","cors":{"allowOrigins":["http://localhost:19080","http://*.openchoreoapis.localhost:19080","${PUBLIC_CONSOLE_URL}","${NEW_CONSOLE_ORIGIN}","${PUBLIC_THUNDER_URL}"],"allowMethods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allowHeaders":["Content-Type","Authorization","Accept","Origin"],"allowCredentials":true,"maxAge":3600}}]}]
 EOF
 )
 kubectl patch httproute -n thunder thunder-httproute \
@@ -117,6 +122,6 @@ if [ "$(kubectl get httproute -n thunder thunder-httproute \
     echo "❌ CORS filter verify failed on thunder-httproute" >&2
     exit 1
 fi
-echo "✅ Thunder HTTPRoute CORS filter includes ${LEGACY_ORIGIN}"
+echo "✅ Thunder HTTPRoute CORS filter includes ${NEW_CONSOLE_ORIGIN}"
 
 echo "=== Done ==="

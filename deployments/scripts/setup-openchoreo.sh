@@ -183,9 +183,10 @@ done
 # (default = http://localhost:8090) and every retry failed silently because
 # the patch call below masks stderr. Rely on the env-var here and let the
 # user override via PUBLIC_CONSOLE_URL in .env.
-# http://localhost:8091 is the legacy-console escape hatch during the #98
-# transition — same aep-console-client, different origin, so it needs its
-# own allowOrigins entry or the token-endpoint preflight fails.
+# http://localhost:8091 is the NEW console (apps/console) during the #98
+# transition (legacy keeps :8090) — same aep-console-client, different
+# origin, so it needs its own allowOrigins entry or the token-endpoint
+# preflight fails.
 CORS_PATCH=$(cat <<EOF
 [{"op":"replace","path":"/spec/rules/0/filters","value":[{"type":"CORS","cors":{"allowOrigins":["http://localhost:19080","http://*.openchoreoapis.localhost:19080","${PUBLIC_CONSOLE_URL}","http://localhost:8091","${PUBLIC_THUNDER_URL}"],"allowMethods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allowHeaders":["Content-Type","Authorization","Accept","Origin"],"allowCredentials":true,"maxAge":3600}}]}]
 EOF
