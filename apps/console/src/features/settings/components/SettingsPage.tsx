@@ -17,7 +17,17 @@
  */
 
 import { useState } from "react";
-import { Box, Card, CardContent, PageContent, PageTitle, Tab, Tabs } from "@wso2/oxygen-ui";
+import {
+  Box,
+  Card,
+  CardContent,
+  PageContent,
+  PageTitle,
+  Tab,
+  Tabs,
+  useMediaQuery,
+  useTheme,
+} from "@wso2/oxygen-ui";
 import { KeyRound, Puzzle } from "@wso2/oxygen-ui-icons-react";
 import { CredentialsSection } from "./CredentialsSection";
 import { SkillsSection } from "./SkillsSection";
@@ -28,6 +38,8 @@ import { SkillsSection } from "./SkillsSection";
 // today, and no reliable client-side role signal either).
 export function SettingsPage() {
   const [tab, setTab] = useState(0);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   return (
     <PageContent>
@@ -38,17 +50,39 @@ export function SettingsPage() {
         </PageTitle.SubHeader>
       </PageTitle>
 
-      <Box sx={{ display: "flex", gap: 3 }}>
-        <Card variant="outlined" sx={{ width: 220, height: "fit-content" }}>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: { xs: "column", sm: "row" },
+          gap: 3,
+        }}
+      >
+        <Card
+          variant="outlined"
+          sx={{ width: { xs: "100%", sm: 220 }, height: "fit-content" }}
+        >
           <CardContent sx={{ p: 2 }}>
-            <Tabs orientation="vertical" value={tab} onChange={(_, v) => setTab(v)}>
-              <Tab icon={<KeyRound size={18} />} iconPosition="start" label="Credentials" />
-              <Tab icon={<Puzzle size={18} />} iconPosition="start" label="Skills" />
+            <Tabs
+              orientation={isMobile ? "horizontal" : "vertical"}
+              variant={isMobile ? "fullWidth" : "standard"}
+              value={tab}
+              onChange={(_, v) => setTab(v)}
+            >
+              <Tab
+                icon={<KeyRound size={18} />}
+                iconPosition="start"
+                label="Credentials"
+              />
+              <Tab
+                icon={<Puzzle size={18} />}
+                iconPosition="start"
+                label="Skills"
+              />
             </Tabs>
           </CardContent>
         </Card>
 
-        <Box sx={{ flexGrow: 1 }}>
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           {tab === 0 && <CredentialsSection />}
           {tab === 1 && <SkillsSection />}
         </Box>

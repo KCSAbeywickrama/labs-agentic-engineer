@@ -32,7 +32,12 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { FolderGit2, Plus, Upload } from "@wso2/oxygen-ui-icons-react";
-import { useConfig, useDeleteSkill, useSkillUpdates, useSkills } from "../api/queries";
+import {
+  useConfig,
+  useDeleteSkill,
+  useSkillUpdates,
+  useSkills,
+} from "../api/queries";
 import { CreateSkillDialog } from "./CreateSkillDialog";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
@@ -61,8 +66,8 @@ export function SkillsSection() {
   if (!config?.gitProvider) {
     return (
       <Alert severity="info" icon={<FolderGit2 size={20} />}>
-        The skills catalogue lives in the org's GitHub repo — connect GitHub
-        in the Credentials tab first.
+        The skills catalogue lives in the org's GitHub repo — connect GitHub in
+        the Credentials tab first.
       </Alert>
     );
   }
@@ -76,12 +81,18 @@ export function SkillsSection() {
   }
 
   if (isError || !skills) {
-    return <Alert severity="error">{error?.message ?? "Failed to load skills"}</Alert>;
+    return (
+      <Alert severity="error">
+        {error?.message ?? "Failed to load skills"}
+      </Alert>
+    );
   }
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    deleteSkill.mutate(deleteTarget, { onSuccess: () => setDeleteTarget(null) });
+    deleteSkill.mutate(deleteTarget, {
+      onSuccess: () => setDeleteTarget(null),
+    });
   };
 
   return (
@@ -89,80 +100,108 @@ export function SkillsSection() {
       <SyncUpdatesPanel updates={updates ?? []} />
 
       <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mb: 2 }}>
-        <Button variant="outlined" startIcon={<Upload size={18} />} onClick={() => setImportOpen(true)}>
+        <Button
+          variant="outlined"
+          startIcon={<Upload size={18} />}
+          onClick={() => setImportOpen(true)}
+        >
           Import
         </Button>
-        <Button variant="contained" startIcon={<Plus size={18} />} onClick={() => setCreateOpen(true)}>
+        <Button
+          variant="contained"
+          startIcon={<Plus size={18} />}
+          onClick={() => setCreateOpen(true)}
+        >
           Create skill
         </Button>
       </Box>
 
-      <ListingTable.Container>
-        <ListingTable>
-          <ListingTable.Head>
-            <ListingTable.Row>
-              <ListingTable.Cell>Name</ListingTable.Cell>
-              <ListingTable.Cell>Kind</ListingTable.Cell>
-              <ListingTable.Cell>Version</ListingTable.Cell>
-              <ListingTable.Cell>Description</ListingTable.Cell>
-              <ListingTable.Cell align="right">Actions</ListingTable.Cell>
-            </ListingTable.Row>
-          </ListingTable.Head>
-          <ListingTable.Body>
-            {skills.length === 0 ? (
+      <Box sx={{ overflowX: "auto" }}>
+        <ListingTable.Container>
+          <ListingTable>
+            <ListingTable.Head>
               <ListingTable.Row>
-                <ListingTable.Cell colSpan={5}>
-                  <ListingTable.EmptyState
-                    title="No skills yet"
-                    description="Create a skill, import one, or sync the platform's built-ins."
-                  />
-                </ListingTable.Cell>
+                <ListingTable.Cell>Name</ListingTable.Cell>
+                <ListingTable.Cell>Kind</ListingTable.Cell>
+                <ListingTable.Cell>Version</ListingTable.Cell>
+                <ListingTable.Cell>Description</ListingTable.Cell>
+                <ListingTable.Cell align="right">Actions</ListingTable.Cell>
               </ListingTable.Row>
-            ) : (
-              skills.map((skill) => (
-                <ListingTable.Row key={skill.name}>
-                  <ListingTable.Cell>
-                    <Typography variant="body2">{skill.name}</Typography>
-                  </ListingTable.Cell>
-                  <ListingTable.Cell>
-                    <Chip label={skill.kind} size="small" variant="outlined" />
-                  </ListingTable.Cell>
-                  <ListingTable.Cell>v{skill.version}</ListingTable.Cell>
-                  <ListingTable.Cell>
-                    <Typography variant="body2" color="text.secondary">
-                      {skill.description}
-                    </Typography>
-                  </ListingTable.Cell>
-                  <ListingTable.Cell align="right">
-                    {skill.editable ? (
-                      <ListingTable.RowActions>
-                        <Button size="small" onClick={() => setEditTarget(skill.name)}>
-                          Edit
-                        </Button>
-                        <Button
-                          size="small"
-                          color="error"
-                          onClick={() => setDeleteTarget(skill.name)}
-                        >
-                          Delete
-                        </Button>
-                      </ListingTable.RowActions>
-                    ) : (
-                      <Chip label="read-only" size="small" />
-                    )}
+            </ListingTable.Head>
+            <ListingTable.Body>
+              {skills.length === 0 ? (
+                <ListingTable.Row>
+                  <ListingTable.Cell colSpan={5}>
+                    <ListingTable.EmptyState
+                      title="No skills yet"
+                      description="Create a skill, import one, or sync the platform's built-ins."
+                    />
                   </ListingTable.Cell>
                 </ListingTable.Row>
-              ))
-            )}
-          </ListingTable.Body>
-        </ListingTable>
-      </ListingTable.Container>
+              ) : (
+                skills.map((skill) => (
+                  <ListingTable.Row key={skill.name}>
+                    <ListingTable.Cell>
+                      <Typography variant="body2">{skill.name}</Typography>
+                    </ListingTable.Cell>
+                    <ListingTable.Cell>
+                      <Chip
+                        label={skill.kind}
+                        size="small"
+                        variant="outlined"
+                      />
+                    </ListingTable.Cell>
+                    <ListingTable.Cell>v{skill.version}</ListingTable.Cell>
+                    <ListingTable.Cell>
+                      <Typography variant="body2" color="text.secondary">
+                        {skill.description}
+                      </Typography>
+                    </ListingTable.Cell>
+                    <ListingTable.Cell align="right">
+                      {skill.editable ? (
+                        <ListingTable.RowActions>
+                          <Button
+                            size="small"
+                            onClick={() => setEditTarget(skill.name)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={() => setDeleteTarget(skill.name)}
+                          >
+                            Delete
+                          </Button>
+                        </ListingTable.RowActions>
+                      ) : (
+                        <Chip label="read-only" size="small" />
+                      )}
+                    </ListingTable.Cell>
+                  </ListingTable.Row>
+                ))
+              )}
+            </ListingTable.Body>
+          </ListingTable>
+        </ListingTable.Container>
+      </Box>
 
-      <CreateSkillDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-      <ImportSkillDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <CreateSkillDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
+      <ImportSkillDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
       <EditSkillDialog name={editTarget} onClose={() => setEditTarget(null)} />
 
-      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Delete {deleteTarget}?</DialogTitle>
         <DialogContent>
           <DialogContentText>This can't be undone.</DialogContentText>

@@ -73,7 +73,9 @@ export function AnthropicCredentialCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
           <Key size={22} />
           <Typography variant="h6">Anthropic</Typography>
-          {connected && <Chip label={llm.status} size="small" color="success" />}
+          {connected && (
+            <Chip label={llm.status} size="small" color="success" />
+          )}
         </Box>
         <Divider sx={{ mb: 3 }} />
 
@@ -125,16 +127,31 @@ export function AnthropicCredentialCard({
           {connect.isError && (
             <Alert severity="error">{connect.error.message}</Alert>
           )}
-          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 1,
+              justifyContent: "space-between",
+            }}
+          >
             <Button
               variant="contained"
               onClick={submit}
               disabled={!apiKey || connect.isPending}
             >
-              {connect.isPending ? "Validating…" : connected ? "Replace key" : "Connect"}
+              {connect.isPending
+                ? "Validating…"
+                : connected
+                  ? "Replace key"
+                  : "Connect"}
             </Button>
             {connected && (
-              <Button color="error" variant="outlined" onClick={() => setDisconnectOpen(true)}>
+              <Button
+                color="error"
+                variant="outlined"
+                onClick={() => setDisconnectOpen(true)}
+              >
                 Disconnect
               </Button>
             )}
@@ -142,7 +159,12 @@ export function AnthropicCredentialCard({
         </Box>
       </CardContent>
 
-      <Dialog open={disconnectOpen} onClose={() => setDisconnectOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={disconnectOpen}
+        onClose={() => setDisconnectOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Disconnect Anthropic?</DialogTitle>
         <DialogContent>
           <DialogContentText>

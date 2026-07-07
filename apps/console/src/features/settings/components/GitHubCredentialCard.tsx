@@ -39,10 +39,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Eye, EyeOff, GitHub } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import {
-  useConnectGitHubPat,
-  useDisconnectGitProvider,
-} from "../api/queries";
+import { useConnectGitHubPat, useDisconnectGitProvider } from "../api/queries";
 
 type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 
@@ -97,9 +94,13 @@ export function GitHubCredentialCard({
             <Typography variant="body2">
               Connected as{" "}
               <strong>
-                {gitProvider.identityName ?? gitProvider.identityLogin ?? gitProvider.githubLogin}
+                {gitProvider.identityName ??
+                  gitProvider.identityLogin ??
+                  gitProvider.githubLogin}
               </strong>
-              {gitProvider.identityEmail ? ` (${gitProvider.identityEmail})` : ""}
+              {gitProvider.identityEmail
+                ? ` (${gitProvider.identityEmail})`
+                : ""}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Connected {new Date(gitProvider.connectedAt).toLocaleString()}
@@ -109,15 +110,19 @@ export function GitHubCredentialCard({
           </Box>
         ) : (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Not connected. A GitHub personal access token is needed to read
-            and write project spec and code repos, and to host the org's
-            skills catalogue.
+            Not connected. A GitHub personal access token is needed to read and
+            write project spec and code repos, and to host the org's skills
+            catalogue.
           </Typography>
         )}
 
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <TextField
-            label={connected ? "Replace personal access token" : "Personal access token"}
+            label={
+              connected
+                ? "Replace personal access token"
+                : "Personal access token"
+            }
             placeholder="ghp_..."
             type={showPat ? "text" : "password"}
             value={pat}
@@ -149,16 +154,31 @@ export function GitHubCredentialCard({
           {connect.isError && (
             <Alert severity="error">{connect.error.message}</Alert>
           )}
-          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 1,
+              justifyContent: "space-between",
+            }}
+          >
             <Button
               variant="contained"
               onClick={submit}
               disabled={!pat || connect.isPending}
             >
-              {connect.isPending ? "Validating…" : connected ? "Replace token" : "Connect"}
+              {connect.isPending
+                ? "Validating…"
+                : connected
+                  ? "Replace token"
+                  : "Connect"}
             </Button>
             {connected && (
-              <Button color="error" variant="outlined" onClick={() => setDisconnectOpen(true)}>
+              <Button
+                color="error"
+                variant="outlined"
+                onClick={() => setDisconnectOpen(true)}
+              >
                 Disconnect
               </Button>
             )}
@@ -166,12 +186,17 @@ export function GitHubCredentialCard({
         </Box>
       </CardContent>
 
-      <Dialog open={disconnectOpen} onClose={() => setDisconnectOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={disconnectOpen}
+        onClose={() => setDisconnectOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Disconnect GitHub?</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>
-            Projects relying on this org's GitHub connection will lose spec
-            and code access until it's reconnected.
+            Projects relying on this org's GitHub connection will lose spec and
+            code access until it's reconnected.
           </DialogContentText>
           <FormControlLabel
             control={
