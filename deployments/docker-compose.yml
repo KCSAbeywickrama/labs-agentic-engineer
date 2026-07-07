@@ -368,19 +368,19 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # console — React SPA served by nginx. The browser hits Thunder directly
-  # via thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1
-  # → k3d loadbalancer). All API requests go through the same-origin
-  # /aep-api-service/ nginx proxy → aep-api:9090.
+  # console — the NEW console (apps/console), served by nginx (#98). The
+  # browser hits Thunder directly via thunder.openchoreo.localhost (resolved
+  # by /etc/hosts → 127.0.0.1 → k3d loadbalancer); OIDC redirect URIs derive
+  # from window.location.origin, so no redirect env is needed. All API
+  # requests go through the same-origin /aep-api-service/ nginx proxy →
+  # aep-api:9090.
   # ---------------------------------------------------------------------------
   console:
     build:
-      # Repo root — not console-legacy/ — so the build can reach the shared
-      # packages/agent-stream + packages/design-projection workspace packages
-      # console/package.json depends on across the console-legacy boundary.
-      # See console-legacy/console/Dockerfile's pkg-builder stage.
+      # Repo root — apps/console is a root-pnpm-workspace member and the
+      # image build runs `pnpm gen` against packages/contracts.
       context: ..
-      dockerfile: console-legacy/console/Dockerfile
+      dockerfile: apps/console/Dockerfile
     container_name: aep-console
     ports:
       - "8090:3000"
@@ -391,8 +391,37 @@ services:
       VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
       VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
       VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
-      VITE_SIGN_IN_REDIRECT_URL: "${PUBLIC_CONSOLE_URL}"
-      VITE_SIGN_OUT_REDIRECT_URL: "${PUBLIC_CONSOLE_URL}/login"
+    networks:
+      - aep
+
+  # ---------------------------------------------------------------------------
+  # console-legacy — escape hatch during the #98 transition, serving the flows
+  # the new console doesn't cover yet (org settings, component ops, tasks).
+  # Same Thunder client; its :8091 redirect URIs + CORS origin are seeded by
+  # values-thunder.yaml / setup-openchoreo.sh (patch-thunder-legacy-console.sh
+  # for already-seeded clusters). Deleted when the #98 retirement checklist
+  # completes.
+  # ---------------------------------------------------------------------------
+  console-legacy:
+    build:
+      # Repo root — not console-legacy/ — so the build can reach the shared
+      # packages/agent-stream + packages/design-projection workspace packages
+      # console/package.json depends on across the console-legacy boundary.
+      # See console-legacy/console/Dockerfile's pkg-builder stage.
+      context: ..
+      dockerfile: console-legacy/console/Dockerfile
+    container_name: aep-console-legacy
+    ports:
+      - "8091:3000"
+    depends_on:
+      - aep-api
+    environment:
+      AEP_API_PROXY_URL: "http://aep-api:9090"
+      VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
+      VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
+      VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
+      VITE_SIGN_IN_REDIRECT_URL: "${PUBLIC_LEGACY_CONSOLE_URL:-http://localhost:8091}"
+      VITE_SIGN_OUT_REDIRECT_URL: "${PUBLIC_LEGACY_CONSOLE_URL:-http://localhost:8091}/login"
     networks:
       - aep
 
