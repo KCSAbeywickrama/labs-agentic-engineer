@@ -174,6 +174,30 @@ WSO2's IDP (`platform-idp` on cloud). Issues OIDC tokens for users and
 client-credentials tokens for service-to-service. The lab stack runs a local
 Thunder instance via `deployments/single-cluster/values-thunder.yaml`.
 
+### Platform IdP
+The single shared Thunder instance backing every generated app's end-user
+sign-in, as opposed to a dedicated instance per project. One issuer, one JWKS,
+one keymanager-gateway trust chain — the API gateway validates every JWT
+against this one issuer's JWKS and injects `X-User-Id`; services never verify
+tokens themselves. A future bring-your-own-instance reference is deliberately
+out of scope; the `thunder-app` `ClusterResourceType`/CRD leave room for one
+(e.g. an `instanceRef`) without a breaking change.
+
+### Thunder application
+A `platform-resource` dependency (`resourceType: thunder-app`) representing a
+per-project OAuth (PKCE) client registered on the Platform IdP. Declared under
+the *same* dependency name by both the SPA performing sign-in and the service
+whose API it protects. Provisioned like any other platform resource — via a
+`ThunderApplication` CR reconciled by the in-repo `thunder-app-operator`
+against Thunder's admin REST API — never by an application-plane component
+calling Thunder directly.
+
+### `callerIdentity` — retired
+The implicit per-component field this dependency replaces. Design agents no
+longer emit it, and the design.json codec's `DisallowUnknownFields` decoding
+rejects any design still carrying the key rather than silently dropping or
+migrating it — such files must be hand-edited before they parse again.
+
 ### `M2M client secret`
 A `client_credentials` OAuth client provisioned in Thunder for service-to-
 service auth (e.g. `AEP_BFF_TO_PLATFORM_API`,
@@ -213,7 +237,8 @@ pattern**: per-org OAuth client-secret + per-run ExternalSecret +
 org-published component, addressed by project-prefixed catalog name),
 `external` (third-party service consumed via configured values), and
 `platform-resource` (platform-provisioned infrastructure from a typed catalog,
-e.g. `postgres-cnpg`). Authored in `specs/design/components/<name>/design.json`
+e.g. `postgres-cnpg`, `thunder-app`). Authored in
+`specs/design/components/<name>/design.json`
 under `dependencies[]`. The word **connection** is banned for these concepts —
 in OC it means a consumed endpoint (WorkloadConnection), the opposite side.
 

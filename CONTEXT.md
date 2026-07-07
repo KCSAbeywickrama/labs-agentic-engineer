@@ -34,6 +34,39 @@ _Avoid_: workspace, repo, project.
 One request→response cycle of the main agent: a user instruction plus the current
 spec bundle in, a stream of file mutations out. One turn = one POST.
 
+## Dependencies (`services/aep-api`)
+
+**Platform resource**:
+A dependency kind: platform-provisioned infrastructure from a typed catalog
+(`resourceType`), approved and provisioned by the user in the console drawer —
+e.g. `postgres-cnpg`, `thunder-app`. Authored under a component's
+`dependencies[]` in `design.json`; resolved against live platform state, never
+a stored "connected/not" flag.
+_Avoid_: connection (in OpenChoreo that names a consumed endpoint — the
+opposite side of the wire).
+
+**Thunder application**:
+A platform resource (`resourceType: thunder-app`) representing a per-project
+OAuth client on the Platform IdP. Declared under the same dependency name by
+both the SPA that signs users in and the service whose API it protects — the
+architect proposes it when the spec implies end-user sign-in; the user
+approves and provisions it like any other platform resource.
+_Avoid_: connection, caller identity (the retired implicit mechanism this
+replaces — see below).
+
+**Platform IdP**:
+The single Thunder instance every generated app's end-user sign-in and every
+gateway JWT verification trusts — one issuer, one JWKS, one keymanager-gateway
+trust chain, never one per project or per org.
+_Avoid_: tenant IdP, dedicated IdP (a future bring-your-own-instance reference
+is out of scope today).
+
+**Caller identity** — _retired_:
+Formerly an implicit per-component flag describing who calls a service's API.
+Superseded by the explicit Thunder application dependency: a design.json still
+carrying the field is rejected on write, not silently migrated.
+_Avoid_: reviving `callerIdentity` as a design.json key — it no longer parses.
+
 ## Tasks
 
 **Task**:
