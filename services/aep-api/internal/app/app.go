@@ -650,9 +650,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// NOTE: the trait_sync drift watcher enumerated (org,project,component) from
 	// the component_tasks table to periodically reconcile the api-configuration
 	// ClusterTrait. That table is gone (tasks are GitHub issues), so the periodic
-	// watcher is dropped; dispatch-time trait sync (traitSyncService, wired into
-	// componentService/idpService) still runs. A component-enumerating reconcile
-	// backstop can be re-added over the OC component list if drift reappears.
+	// watcher is dropped. The per-env traitEnvironmentConfigs (jwtAuth/CORS) are
+	// instead re-emitted on the ExecWatcher deploy path via traitDeployObserver
+	// (wired into the MultiDeployObserver fan-out below), which fires once a
+	// protected component — or a sibling SPA — deploys and its ReleaseBinding
+	// exists to carry the config. A component-enumerating reconcile backstop can
+	// be re-added over the OC component list if drift reappears.
 
 	// Inbound JWT verifier — Thunder publishes the User JWT and Service JWT
 	// signing keys at JWKSURL. Lazy fetch on first request avoids compose
@@ -855,6 +858,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	execWatcher.WithDeployObserver(codingagent.NewMultiDeployObserver(
 		provisioningSvc,
 		spaDeployObserver{svc: runtimeConfigSvc},
+		// api-configuration trait re-emit: land the jwtAuth/CORS
+		// traitEnvironmentConfigs on each protected API's ReleaseBinding once it
+		// (or a sibling SPA) deploys. EnsureComponent sets only the CR trait
+		// shape at create; this deploy-time PATCH is what makes the gateway
+		// enforce end-user auth (docs/design/api-platform-integration.md §6).
+		traitDeployObserver{svc: traitSyncService},
 	))
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
