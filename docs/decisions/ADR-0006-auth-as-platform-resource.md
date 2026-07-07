@@ -28,8 +28,9 @@ namespaced `ThunderApplication` CR (`aep.wso2.com/v1alpha1`). A new in-repo
 operator, `operators/thunder-app-operator/`, deployed cluster-wide — the same
 shape as the CNPG operator — reconciles it: it creates a public PKCE OAuth
 application against the shared Platform IdP's admin REST API, publishes the
-assigned `client_id` to a `<cr-name>-oauth` ConfigMap, and sets
-`status.ready` once registration succeeds. The ClusterResourceType's
+assigned `client_id` to a `<cr-name>-oauth` ConfigMap and to
+`status.clientId` (the authoritative source of the `client_id` binding
+output), and sets `status.ready` once registration succeeds. The ClusterResourceType's
 `readyWhen` CEL gate reads that status field directly (`getUnknownResourceHealth`
 reports `Healthy` unconditionally for a foreign CRD, so without this explicit
 gate the binding would flip ready before the client_id exists). On delete, a
