@@ -858,6 +858,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	//   - deploy-time: when ANY component deploys, re-emit across every SPA in the
 	//     project (a backend's deploy can resolve a SPA's dep URL).
 	runtimeConfigSvc := runtimeconfig.NewRuntimeConfigService(componentClient, resourceClient, artifactStore)
+	// A web-app's platform-resource dependency outputs go into window._env_ as
+	// generic <DEP>_<OUTPUT> keys; deps whose CRT carries the consumer-URL-env-config
+	// marker also get the SPA's callback URL patched into their binding. Both key
+	// off the same CRT marker catalog design-save uses — wired consumer-side so
+	// runtimeconfig holds only a narrow MarkersByName port. Unlike design-save
+	// this fails OPEN (defer + retry) when the catalog is unreachable: emission is
+	// a retried cascade hook, not a user-facing save gate.
+	runtimeConfigSvc.SetResourceCatalog(resourceTypeCatalog)
 	codingExecutor.WithComponentRuntimeConfig(runtimeConfigSvc)
 	// Fan the build-success deploy event out to both the cross-project access grant
 	// AND env-config.js re-emission. Best-effort + error-isolated: one observer

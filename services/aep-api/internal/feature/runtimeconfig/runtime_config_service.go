@@ -32,17 +32,10 @@ import (
 )
 
 const (
-	// thunderAppResourceType is the platform-resource ResourceType a web-app
-	// declares to sign end users in via OIDC. Its presence on a web-app gates
-	// THUNDER_* emission. Mirrors design.thunderAppResourceType.
-	thunderAppResourceType = "thunder-app"
 	// bindingEnv is the single environment runtime-config targets (mirrors
-	// provisioning.defaultEnv). The thunder-app binding whose outputs + redirect
-	// URIs drive the SPA lives in this env.
+	// provisioning.defaultEnv). A web-app's platform-resource binding whose
+	// outputs drive the SPA lives in this env.
 	bindingEnv = "development"
-	// thunderCallbackPath is appended to the SPA origin to form the OIDC
-	// redirect URI the SPA registers with Thunder and navigates back to.
-	thunderCallbackPath = "/callback"
 )
 
 // RuntimeConfigService emits the per-web-app `env-config.js` file onto
@@ -56,13 +49,34 @@ const (
 // at ReleaseBinding time.
 type RuntimeConfigService struct {
 	componentClient openchoreo.ComponentClient
-	// resourceClient reads the thunder-app dependency's per-env
-	// ResourceReleaseBinding — its status.outputs carry the OIDC config
-	// (client_id/issuer/scopes, resolved by OC) the SPA needs — and patches the
-	// binding's redirectUris declaratively so the operator registers the SPA's
-	// callback URL. nil in paths that never emit THUNDER_*.
+	// resourceClient reads a web-app's platform-resource dependency's per-env
+	// ResourceReleaseBinding — its status.outputs (resolved by OC) become the
+	// generic <DEP>_<OUTPUT> window._env_ keys — and patches the binding's
+	// env-configs declaratively (the annotation-driven consumer-URL patch) so
+	// the operator registers the SPA's callback URL. nil in paths that never
+	// consume platform-resource outputs.
 	resourceClient openchoreo.ResourceClient
-	store          *artifacts.ArtifactStore
+	// catalog resolves the PE-authored CRT metadata markers (see
+	// resources.TypeMarkers) keyed by resourceType name. runtimeconfig keys the
+	// consumer-URL patch on markers.ConsumerURLEnvConfig instead of a hardcoded
+	// resourceType name. Wired via SetResourceCatalog; nil (or an unreachable
+	// catalog) defers the emission with a warning — emission is a retried
+	// cascade, NOT a save gate, so it fails OPEN-WITH-RETRY here (the opposite
+	// of design-save's fail-closed ErrResourceCatalogUnavailable: a deferred
+	// env-config.js write just retries on the next deploy event and never blocks
+	// a user action).
+	catalog resourceMarkerCatalog
+	store   *artifacts.ArtifactStore
+}
+
+// resourceMarkerCatalog is runtimeconfig's narrow consumer port over the
+// dependencies/resources catalog (mirrors design_service's port of the same
+// name): it returns the PE-authored CRT marker map (resources.TypeMarkers keyed
+// by resourceType name) the consumer-URL patch keys on. *resources.ResourceTypeCatalog
+// satisfies it structurally. Wired via SetResourceCatalog at the composition
+// root so runtimeconfig needn't import the concrete catalog.
+type resourceMarkerCatalog interface {
+	MarkersByName(ctx context.Context) (map[string]resources.TypeMarkers, error)
 }
 
 func NewRuntimeConfigService(componentClient openchoreo.ComponentClient, resourceClient openchoreo.ResourceClient, store *artifacts.ArtifactStore) *RuntimeConfigService {
@@ -71,6 +85,13 @@ func NewRuntimeConfigService(componentClient openchoreo.ComponentClient, resourc
 		resourceClient:  resourceClient,
 		store:           store,
 	}
+}
+
+// SetResourceCatalog wires the CRT marker lookup the consumer-URL patch keys on.
+// A nil catalog defers emission (with a warning) whenever the web-app declares a
+// platform-resource dependency — never blocks, always retries.
+func (s *RuntimeConfigService) SetResourceCatalog(c resourceMarkerCatalog) {
+	s.catalog = c
 }
 
 // EmitForComponent computes the env-config.js content for the named
@@ -192,10 +213,13 @@ func (s *RuntimeConfigService) EmitForProjectSPAs(ctx context.Context, orgID, pr
 //     conventional name for the primary backend).
 //   - `<UPPER_SNAKE_NAME>_URL` — every dep, keyed by component name. Lets
 //     a SPA with multiple backends address each one explicitly.
-//   - `THUNDER_*` — OIDC config. Emitted when the webapp declares a
-//     `thunder-app` platform-resource dependency. The values come from that
-//     dependency's provisioned binding outputs (client_id/issuer/scopes,
-//     resolved by OC); the BFF never calls Thunder from this path.
+//   - `<DEP>_<OUTPUT>` — every platform-resource dependency's resolved binding
+//     outputs, keyed generically (resources.EnvVarName — the same convention
+//     wiring.go injects pod env vars with). No resource-type name is hardcoded:
+//     an OIDC dependency's client_id/issuer/scopes and a database dependency's
+//     host/port land through the identical mechanism. The values come from each
+//     dependency's provisioned binding outputs (resolved by OC); the BFF never
+//     calls the upstream from this path.
 //
 // buildEnvValues returns the map + a `ready` flag. The flag is false
 // when a required key couldn't be populated yet (transient OC error,
@@ -261,12 +285,11 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 		out["API_BASE_URL"] = firstServiceURL
 	}
 
-	// Layer THUNDER_* — OIDC config the SPA reads to drive PKCE. Emitted when
-	// the web-app declares a `thunder-app` platform-resource dependency; the
-	// values come from that dependency's binding outputs (resolved by OC), not
-	// from any BFF→Thunder call.
-	if dep := thunderAppDep(webapp); dep != nil {
-		if ok := s.layerThunderKeys(ctx, orgID, projectID, webapp, dep, out); !ok {
+	// Layer every platform-resource dependency's binding outputs generically.
+	// No resource-type name is hardcoded — an OIDC dependency and a database
+	// dependency flow through the identical path (see layerPlatformResources).
+	if deps := platformResourceDeps(webapp); len(deps) > 0 {
+		if ok := s.layerPlatformResources(ctx, orgID, projectID, webapp, deps, out); !ok {
 			ready = false
 		}
 	}
@@ -274,101 +297,128 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 	return out, ready
 }
 
-// thunderAppDep returns the first platform-resource dependency with
-// resourceType "thunder-app" declared by a web-app component, or nil. Its
-// presence is what gates THUNDER_* emission (the successor to the retired
-// caller-identity field's end-user mode check): a web-app that declares this
-// dependency signs users in via OIDC against the platform IDP.
-func thunderAppDep(c *models.DesignComponent) *models.Dependency {
+// platformResourceDeps returns every `kind: platform-resource` dependency a
+// web-app component declares, in declaration order (nil for a non-web-app or a
+// web-app with none). Its emptiness is what gates the whole platform-resource
+// layer — including the single CRT-marker catalog fetch — so an auth-free /
+// resource-free SPA never touches the resource client or the catalog.
+func platformResourceDeps(c *models.DesignComponent) []models.Dependency {
 	if c == nil || c.ComponentType != "web-app" {
 		return nil
 	}
+	var out []models.Dependency
 	for i := range c.Dependencies {
-		d := &c.Dependencies[i]
-		if d.Kind == models.DependencyKindPlatformResource && d.ResourceType == thunderAppResourceType {
-			return d
+		if c.Dependencies[i].Kind == models.DependencyKindPlatformResource {
+			out = append(out, c.Dependencies[i])
 		}
 	}
-	return nil
+	return out
 }
 
-// layerThunderKeys writes the OIDC client config into the env-config.js map
-// from the thunder-app dependency's binding. It (1) patches the binding's dev
-// resourceTypeEnvironmentConfigs with the SPA's own redirect URI (declarative —
-// the operator reconciles the OAuth client to register it), then (2) reads the
-// binding's status.outputs for the resolved client_id / issuer / scopes and
-// layers the five THUNDER_* keys.
+// layerPlatformResources emits every platform-resource dependency's resolved
+// binding outputs as generic <DEP>_<OUTPUT> keys, and — for any dependency
+// whose CRT carries the consumer-URL-env-config annotation — patches the SPA's
+// own <origin><consumer-url-path> into that env-config key on the dependency's
+// dev binding (declarative: the operator registers the callback URL).
 //
-// Returns false — "defer the env-config.js write" — when a required input is
-// missing: the resource client isn't wired, the SPA external URL hasn't
-// resolved, the redirect-URI patch failed, or the binding outputs aren't ready
-// yet (no client_id — e.g. right after the patch, before the operator
-// reconciles). On defer it writes NO partial THUNDER_* keys, so the SPA is
-// never shipped a window._env_ its typed env shim throws on at module load.
-func (s *RuntimeConfigService) layerThunderKeys(ctx context.Context, orgID, projectID string, webapp *models.DesignComponent, dep *models.Dependency, out map[string]interface{}) bool {
+// It fetches the CRT marker catalog ONCE for the whole pass (only reached when
+// the web-app has ≥1 platform-resource dep). Fail-open-with-retry: a nil or
+// unreachable catalog, a failed patch, or an unresolved binding all return
+// false ("defer the env-config.js write") rather than erroring — this is a
+// retried cascade hook, not a user-facing save gate, so deferring simply waits
+// for the next deploy event (contrast design-save, which fails CLOSED on an
+// unreachable catalog because a silent skip there could expose an API).
+//
+// All-or-nothing at the write level: any not-ready dependency sets ready=false,
+// and the caller (EmitForComponent) then skips the whole write — a deferring
+// dependency contributes NO keys of its own (`continue` before its outputs),
+// and sibling deps' keys already in `out` are never shipped because the write
+// is gated. The SPA is thus never handed a partial window._env_.
+func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID, projectID string, webapp *models.DesignComponent, deps []models.Dependency, out map[string]interface{}) bool {
 	if s.resourceClient == nil {
-		slog.WarnContext(ctx, "runtime_config: resourceClient not wired; deferring THUNDER_*",
+		slog.WarnContext(ctx, "runtime_config: resourceClient not wired; deferring platform-resource outputs",
 			"projectID", projectID, "component", webapp.Name)
 		return false
 	}
 
-	// Defer until the SPA has materialised a public URL (the OC ReleaseBinding
-	// status fills the external URL after the first reconcile): the redirect +
-	// after-sign-in URLs derive from it, and Thunder rejects an authorize call
-	// whose redirect_uri it hasn't been told about.
-	spaURL := s.componentExternalURL(ctx, orgID, projectID, webapp.Name)
-	if spaURL == "" {
-		slog.InfoContext(ctx, "runtime_config: SPA external URL not yet resolved; will retry on next cascade",
-			"projectID", projectID, "component", webapp.Name)
-		return false
-	}
-	spaOrigin := strings.TrimRight(spaURL, "/")
-	redirectURI := spaOrigin + thunderCallbackPath
-
-	// Patch the dependency's dev binding so the operator registers this SPA's
-	// redirect URI on the OAuth client. The patch is idempotent inside the
-	// client (no-op when the value is already present), so re-running on every
-	// cascade doesn't churn the CR. On failure DEFER rather than emit a
-	// client_id whose redirect URI Thunder would reject.
-	bindingName := resources.ExternalResourceBindingName(projectID, dep.Name, bindingEnv)
-	if err := s.resourceClient.PatchBindingEnvironmentConfigs(ctx, orgID, bindingName,
-		map[string]string{"redirectUris": redirectURI}); err != nil {
-		slog.WarnContext(ctx, "runtime_config: patch binding redirectUris failed; deferring",
-			"projectID", projectID, "component", webapp.Name, "binding", bindingName, "error", err)
-		return false
-	}
-
-	// Read the resolved OIDC config from the binding outputs. Not-ready (binding
-	// absent/without status, or no client_id yet because the operator hasn't
-	// reconciled the patch) → defer with NO partial THUNDER_* keys.
-	b, err := s.resourceClient.GetBinding(ctx, orgID, bindingName)
+	// One catalog read per emission pass. On failure DEFER (fail-open-with-retry):
+	// without the markers we cannot know which deps need the consumer-URL patch,
+	// so retrying is safer than emitting an unpatched binding's outputs.
+	markers, err := s.catalogMarkers(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "runtime_config: get thunder-app binding failed; deferring",
-			"projectID", projectID, "component", webapp.Name, "binding", bindingName, "error", err)
-		return false
-	}
-	if b == nil || b.Status == nil {
-		slog.InfoContext(ctx, "runtime_config: thunder-app binding not ready; will retry on next cascade",
-			"projectID", projectID, "component", webapp.Name, "binding", bindingName)
-		return false
-	}
-	outputs := make(map[string]string, len(b.Status.Outputs))
-	for _, o := range b.Status.Outputs {
-		outputs[o.Name] = o.Value
-	}
-	clientID := outputs["client_id"]
-	if clientID == "" {
-		slog.InfoContext(ctx, "runtime_config: thunder-app binding outputs missing client_id; will retry on next cascade",
-			"projectID", projectID, "component", webapp.Name, "binding", bindingName)
+		slog.WarnContext(ctx, "runtime_config: CRT marker catalog unavailable; deferring platform-resource outputs",
+			"projectID", projectID, "component", webapp.Name, "error", err)
 		return false
 	}
 
-	out["THUNDER_URL"] = outputs["issuer"]
-	out["THUNDER_CLIENT_ID"] = clientID
-	out["THUNDER_SCOPES"] = outputs["scopes"]
-	out["THUNDER_REDIRECT_URI"] = redirectURI
-	out["THUNDER_AFTER_SIGN_IN_URL"] = spaOrigin
-	return true
+	// Resolve the SPA's public origin lazily + once — only the annotation-driven
+	// patch needs it (the OC ReleaseBinding status fills the external URL after
+	// the first reconcile).
+	spaOrigin, spaResolved := "", false
+
+	ready := true
+	for i := range deps {
+		dep := deps[i]
+		bindingName := resources.ExternalResourceBindingName(projectID, dep.Name, bindingEnv)
+		m := markers[dep.ResourceType]
+
+		// Annotation-driven consumer-URL patch. Gate on ConsumerURLEnvConfig (the
+		// path is already defaulted into the markers when the env-config marker is
+		// set — never branch on the path alone).
+		if m.ConsumerURLEnvConfig != "" {
+			if !spaResolved {
+				spaOrigin = strings.TrimRight(s.componentExternalURL(ctx, orgID, projectID, webapp.Name), "/")
+				spaResolved = true
+			}
+			if spaOrigin == "" {
+				slog.InfoContext(ctx, "runtime_config: SPA external URL not yet resolved; will retry on next cascade",
+					"projectID", projectID, "component", webapp.Name, "dep", dep.Name)
+				ready = false
+				continue
+			}
+			// Idempotent inside the client (no-op when already present), so
+			// re-running on every cascade doesn't churn the CR. On failure DEFER.
+			if perr := s.resourceClient.PatchBindingEnvironmentConfigs(ctx, orgID, bindingName,
+				map[string]string{m.ConsumerURLEnvConfig: spaOrigin + m.ConsumerURLPath}); perr != nil {
+				slog.WarnContext(ctx, "runtime_config: patch binding consumer URL failed; deferring",
+					"projectID", projectID, "component", webapp.Name, "dep", dep.Name,
+					"binding", bindingName, "envConfig", m.ConsumerURLEnvConfig, "error", perr)
+				ready = false
+				continue
+			}
+		}
+
+		// Read the resolved outputs. Not-ready (binding absent/without status, or
+		// no outputs yet because the operator hasn't reconciled) → defer with NO
+		// partial keys for this dep.
+		b, berr := s.resourceClient.GetBinding(ctx, orgID, bindingName)
+		if berr != nil {
+			slog.WarnContext(ctx, "runtime_config: get platform-resource binding failed; deferring",
+				"projectID", projectID, "component", webapp.Name, "dep", dep.Name, "binding", bindingName, "error", berr)
+			ready = false
+			continue
+		}
+		if b == nil || b.Status == nil || len(b.Status.Outputs) == 0 {
+			slog.InfoContext(ctx, "runtime_config: platform-resource binding not ready; will retry on next cascade",
+				"projectID", projectID, "component", webapp.Name, "dep", dep.Name, "binding", bindingName)
+			ready = false
+			continue
+		}
+		for _, o := range b.Status.Outputs {
+			out[resources.EnvVarName(dep.Name, o.Name)] = o.Value
+		}
+	}
+	return ready
+}
+
+// catalogMarkers reads the PE-authored CRT marker map once. A nil catalog is a
+// deferrable error (not a panic): the composition root wires it, but a
+// nil-catalog test or a mis-wire must defer-and-retry, never crash the cascade.
+func (s *RuntimeConfigService) catalogMarkers(ctx context.Context) (map[string]resources.TypeMarkers, error) {
+	if s.catalog == nil {
+		return nil, fmt.Errorf("runtime_config: no resource-type catalog wired")
+	}
+	return s.catalog.MarkersByName(ctx)
 }
 
 // componentExternalURL returns the first external URL OC has resolved
