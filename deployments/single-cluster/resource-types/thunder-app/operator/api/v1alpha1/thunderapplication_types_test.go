@@ -25,8 +25,9 @@ import (
 
 // TestSchemeRegistersThunderApplication is a compile-anchor test: it asserts
 // that ThunderApplication is registered with the scheme and round-trips
-// through runtime.Object deepcopy, which only compiles once the generated
-// zz_generated.deepcopy.go satisfies the runtime.Object interface.
+// through runtime.Object deepcopy, which only compiles once the hand-written
+// deepcopy.go satisfies the runtime.Object interface. It also guards
+// field-copy completeness — see the doc comment in deepcopy.go.
 func TestSchemeRegistersThunderApplication(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := AddToScheme(scheme); err != nil {
@@ -70,11 +71,24 @@ func TestSchemeRegistersThunderApplication(t *testing.T) {
 	}
 
 	// ThunderApplicationList must also satisfy runtime.Object via its own
-	// generated deepcopy.
+	// deepcopy.
 	list := &ThunderApplicationList{Items: []ThunderApplication{*original}}
 	var listObj runtime.Object = list
 	copiedList := listObj.DeepCopyObject().(*ThunderApplicationList)
+	if copiedList == list {
+		t.Fatal("DeepCopyObject returned the same pointer, expected a copy")
+	}
 	if len(copiedList.Items) != 1 {
 		t.Fatalf("expected 1 item in copied list, got %d", len(copiedList.Items))
+	}
+	if copiedList.Items[0].Spec != list.Items[0].Spec {
+		t.Fatalf("Items[0].Spec mismatch after deepcopy: got %+v, want %+v", copiedList.Items[0].Spec, list.Items[0].Spec)
+	}
+
+	// Mutating the copy must not affect the original — proves the Items
+	// slice (and each element) was actually deep-copied, not aliased.
+	copiedList.Items[0].Spec.DisplayName = "mutated"
+	if list.Items[0].Spec.DisplayName == "mutated" {
+		t.Fatal("mutating copiedList.Items affected the original list — Items slice was not deep-copied")
 	}
 }

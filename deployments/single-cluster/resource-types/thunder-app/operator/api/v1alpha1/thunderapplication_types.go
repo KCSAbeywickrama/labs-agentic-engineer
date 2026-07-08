@@ -34,6 +34,11 @@ type ThunderApplicationSpec struct {
 	// platform Thunder. A future BYO field slots in here additively.
 }
 
+// Reference-typed fields on ThunderApplicationSpec (slice/map/pointer) would
+// require a matching update in deepcopy.go — see the doc comment there. (Not
+// a doc comment on the type: keeping it detached avoids changing the
+// generated CRD schema description.)
+
 // ThunderApplicationStatus reports the observed state of a ThunderApplication.
 type ThunderApplicationStatus struct {
 	// Ready is the readyWhen gate the ClusterResourceType CEL reads.
@@ -45,6 +50,11 @@ type ThunderApplicationStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
+
+// Reference-typed fields on ThunderApplicationStatus (slice/map/pointer)
+// would require a matching update in deepcopy.go — see the doc comment
+// there. (Not a doc comment on the type: keeping it detached avoids changing
+// the generated CRD schema description.)
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
