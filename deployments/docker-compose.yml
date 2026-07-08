@@ -200,6 +200,13 @@ services:
       # coding-agent dispatch fails on the pre-flight.
       KUBECONFIG: "/app/.kube/config"
 
+      # ── Temporal (devflow workflows). aep-api runs the worker in-process and
+      # dials the k3d-hosted Temporal frontend via the start.sh host bridge.
+      # Unset TEMPORAL_HOSTPORT disables the feature: no worker, /devflows → 503.
+      TEMPORAL_HOSTPORT: "${TEMPORAL_HOSTPORT:-host.docker.internal:7233}"
+      TEMPORAL_NAMESPACE: "${TEMPORAL_NAMESPACE:-default}"
+      TEMPORAL_TASKQUEUE: "${TEMPORAL_TASKQUEUE:-aep-devflow}"
+
       # ── Observer (task-progress) — reads workflow logs via OC Observer.
       # Optional: leave empty to disable; the BFF returns 503 on /progress.
       #

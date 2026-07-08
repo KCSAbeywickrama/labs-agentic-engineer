@@ -401,6 +401,16 @@ func (c *Client) GetPullRequest(ctx context.Context, owner, repo string, cred cr
 	return &gitrepo.PullRequestState{State: raw.State, Merged: raw.Merged, MergeCommitSHA: raw.MergeCommitSHA}, nil
 }
 
+// MergePullRequest squash-merges a pull request (PUT /pulls/{n}/merge) — the
+// devflow task workflow's auto-merge adapter. GitHub answers 405 when the PR
+// is not mergeable (checks pending, conflicts, already merged); the error is
+// returned verbatim for the caller to reconcile against GetPullRequest.
+func (c *Client) MergePullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/pulls/%d/merge", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPut, url, "pull request merge", cred,
+		map[string]string{"merge_method": "squash"}, nil, http.StatusOK)
+}
+
 func (c *Client) CommentIssue(ctx context.Context, owner, repo string, cred credentials.Credential, number int, body string) error {
 	payload := map[string]string{"body": body}
 	reqBody, err := json.Marshal(payload)

@@ -112,6 +112,34 @@ else
     echo "⚠️  k3d cluster not accessible — git-service will fail OpenBao readiness"
 fi
 
+# 1b. Temporal port bridge — aep-api (in docker-compose) runs the devflow
+#     Temporal worker in-process and must reach the k3d-hosted Temporal
+#     frontend at host.docker.internal:7233, plus the Web UI at :8233. Mirrors
+#     the OpenBao bridge above: try a direct dial first, else port-forward.
+#     Skips silently when Temporal is not installed (setup-temporal.sh is
+#     optional for the non-workflow flows).
+echo ""
+echo "⏱️  Ensuring Temporal reachable on :7233..."
+if nc -z localhost 7233 >/dev/null 2>&1; then
+    echo "   Temporal frontend already reachable on :7233"
+elif kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null \
+        && kubectl --context "${CLUSTER_CONTEXT}" -n temporal get svc temporal-frontend &>/dev/null; then
+    if pgrep -f "port-forward.*temporal-frontend.*7233" > /dev/null 2>&1; then
+        echo "   Temporal frontend port-forward already running"
+    else
+        kubectl port-forward --context "${CLUSTER_CONTEXT}" -n temporal svc/temporal-frontend 7233:7233 \
+            > /tmp/aep-temporal-portfwd.log 2>&1 &
+        echo "   frontend port-forward PID: $! (logs: /tmp/aep-temporal-portfwd.log)"
+    fi
+    if ! pgrep -f "port-forward.*temporal-web.*8233" > /dev/null 2>&1; then
+        kubectl port-forward --context "${CLUSTER_CONTEXT}" -n temporal svc/temporal-web 8233:8080 \
+            > /tmp/aep-temporal-web-portfwd.log 2>&1 &
+        echo "   Web UI port-forward PID: $! → http://localhost:8233"
+    fi
+else
+    echo "   Temporal not installed — skipping (run scripts/setup-temporal.sh to enable devflow workflows)"
+fi
+
 # 2. GitHub App private key placeholder — docker-compose mounts the file
 #    into git-service. If the operator hasn't dropped a real key, we touch
 #    a placeholder so the volume mount succeeds; the seed skips silently

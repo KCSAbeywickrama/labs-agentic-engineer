@@ -50,6 +50,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
@@ -108,6 +109,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	executionRepo := repositories.NewExecutionRepository(db)
 	configRepo := repositories.NewConfigRepository(db)
 	repoRepo := repositories.NewRepoRepository(db)
+	workflowRunRepo := repositories.NewWorkflowRunRepository(db)
+
+	// Temporal devflow runtime. Constructed always, but connects lazily in the
+	// worker watcher's retry loop (never at Build time), so aep-api boots and
+	// serves everything else when Temporal is down. Its worker watcher is
+	// appended to the watcher slice below only when Temporal is configured.
+	devflowRuntime := devflow.NewRuntime(cfg.Temporal)
 
 	// Token provider for service-to-service auth. OC authorizes requests by
 	// the service client subject (aep-api-client), so every OC API call
@@ -930,6 +938,15 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	if cgwClient != nil {
 		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo))
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
+	}
+	// Temporal devflow worker. Registered only when Temporal is configured
+	// (TEMPORAL_HOSTPORT set). The watcher dials in a retry loop, so a Temporal
+	// server that is down at boot is not fatal — the worker connects when it
+	// comes up and the devflow endpoints answer 503 until then.
+	if cfg.Temporal.Enabled() {
+		devflowActs := devflow.NewActivities(workflowRunRepo)
+		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
+		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)
 	}
 
 	return &App{Handler: handler, Watchers: watchers}, nil
