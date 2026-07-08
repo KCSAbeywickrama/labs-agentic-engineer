@@ -89,7 +89,6 @@ export default function SkillViewer({ name, open, onClose }: SkillViewerProps) {
           {detail && (
             <>
               <Chip size="small" color={kindChipColor(detail.kind)} label={kindLabel(detail.kind)} />
-              <Chip size="small" variant="outlined" label={`v${detail.version}`} />
               {!detail.editable && <Chip size="small" variant="outlined" label="read-only" />}
             </>
           )}

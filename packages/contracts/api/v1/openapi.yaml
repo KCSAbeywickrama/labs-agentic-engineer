@@ -1220,9 +1220,6 @@ components:
         updatedAt:
           format: date-time
           type: string
-        version:
-          format: int64
-          type: integer
       required:
         - editable
         - orgId
@@ -1231,7 +1228,6 @@ components:
         - description
         - skillMd
         - references
-        - version
         - contentSha
         - updatedAt
       type: object

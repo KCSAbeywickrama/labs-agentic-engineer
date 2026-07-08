@@ -169,7 +169,6 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 		out = append(out, SkillSummary{
 			Name:        sk.Name,
 			Kind:        sk.Kind,
-			Version:     sk.Version,
 			Description: sk.Description,
 			ContentSHA:  sk.ContentSHA,
 			Editable:    sk.Kind != "builtin",
@@ -294,7 +293,6 @@ func parseBundle(ctx context.Context, files map[string]string) []Skill {
 			Description:   strings.TrimSpace(fm.Description),
 			SkillMD:       bodies[k],
 			References:    r,
-			Version:       versionFromMetadata(fm),
 			ContentSHA:    contentSHA(bodies[k], r),
 			License:       fm.License,
 			Compatibility: fm.Compatibility,

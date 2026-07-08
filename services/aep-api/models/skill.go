@@ -33,7 +33,6 @@ type Skill struct {
 	Description   string            `json:"description"`
 	SkillMD       string            `json:"skillMd"`
 	References    map[string]string `json:"references"`
-	Version       int               `json:"version"`
 	ContentSHA    string            `json:"contentSha"`
 	License       string            `json:"license,omitempty"`
 	Compatibility string            `json:"compatibility,omitempty"`

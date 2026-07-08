@@ -185,9 +185,6 @@ func TestList_SeedsBuiltinsOnFirstRead(t *testing.T) {
 		if sk.Kind != "builtin" {
 			t.Fatalf("skill %q: kind = %q, want builtin", want, sk.Kind)
 		}
-		if sk.Version < 1 {
-			t.Fatalf("skill %q: version = %d, want >= 1", want, sk.Version)
-		}
 	}
 }
 

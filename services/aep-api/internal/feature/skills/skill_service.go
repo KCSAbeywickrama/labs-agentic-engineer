@@ -48,7 +48,6 @@ func newSkillValue(orgID, kind, name, skillMD string, refs References, fm skillF
 		Description:   strings.TrimSpace(fm.Description),
 		SkillMD:       skillMD,
 		References:    map[string]string(refs),
-		Version:       versionFromMetadata(fm),
 		ContentSHA:    contentSHA(skillMD, refs),
 		License:       fm.License,
 		Compatibility: fm.Compatibility,
@@ -70,7 +69,6 @@ type Skill = models.Skill
 type SkillSummary struct {
 	Name        string `json:"name"`
 	Kind        string `json:"kind"`
-	Version     int    `json:"version"`
 	Description string `json:"description"`
 	ContentSHA  string `json:"contentSha"`
 	Editable    bool   `json:"editable"`
@@ -80,14 +78,13 @@ type SkillSummary struct {
 
 // skillFrontmatter is the YAML frontmatter shape accepted on SKILL.md.
 // Spec-clean AgentSkills: name, description, optional license,
-// compatibility, allowed-tools. Platform extensions under metadata.aep.*
+// compatibility, allowed-tools.
 type skillFrontmatter struct {
-	Name          string                 `yaml:"name"`
-	Description   string                 `yaml:"description"`
-	License       string                 `yaml:"license,omitempty"`
-	Compatibility string                 `yaml:"compatibility,omitempty"`
-	AllowedTools  any                    `yaml:"allowed-tools,omitempty"`
-	Metadata      map[string]interface{} `yaml:"metadata,omitempty"`
+	Name          string `yaml:"name"`
+	Description   string `yaml:"description"`
+	License       string `yaml:"license,omitempty"`
+	Compatibility string `yaml:"compatibility,omitempty"`
+	AllowedTools  any    `yaml:"allowed-tools,omitempty"`
 }
 
 // parseSkillMD splits frontmatter from body and decodes it. Returns the
@@ -111,55 +108,6 @@ func parseSkillMD(content string) (skillFrontmatter, string, error) {
 		return skillFrontmatter{}, "", fmt.Errorf("frontmatter missing description")
 	}
 	return s, body, nil
-}
-
-// versionFromMetadata pulls metadata.aep.version out of frontmatter
-// (stored as a string-as-int by the spec) and returns the integer
-// version. Defaults to 1 when absent.
-func versionFromMetadata(s skillFrontmatter) int {
-	if s.Metadata == nil {
-		return 1
-	}
-	// Flat dotted-key form — the documented AgentSkills string→string
-	// representation: `metadata: { "aep.version": "2" }`.
-	if v, ok := s.Metadata["aep.version"]; ok {
-		return coerceVersion(v)
-	}
-	// Nested form — `metadata: { aep: { version: "2" } }`.
-	if aepAny, ok := s.Metadata["aep"]; ok {
-		if aepMap, ok := aepAny.(map[string]interface{}); ok {
-			if verAny, ok := aepMap["version"]; ok {
-				return coerceVersion(verAny)
-			}
-		}
-	}
-	return 1
-}
-
-// coerceVersion maps an int/float/string YAML scalar to a positive version
-// integer, defaulting to 1.
-func coerceVersion(v any) int {
-	switch t := v.(type) {
-	case int:
-		if t > 0 {
-			return t
-		}
-	case int64:
-		if t > 0 {
-			return int(t)
-		}
-	case float64:
-		if t > 0 {
-			return int(t)
-		}
-	case string:
-		var n int
-		_, _ = fmt.Sscanf(t, "%d", &n)
-		if n > 0 {
-			return n
-		}
-	}
-	return 1
 }
 
 // contentSHA computes a deterministic hash over the canonical concat of

@@ -48,8 +48,6 @@ export function newSkillTemplate(name: string): string {
   return `---
 name: ${slug}
 description: One-line summary of what this skill does and when an agent should apply it.
-metadata:
-  aep.version: "1"
 ---
 
 # ${slug}

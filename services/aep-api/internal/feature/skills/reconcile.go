@@ -17,13 +17,13 @@
 package skills
 
 // Provisioning + embedded-skill reconciliation. Two embedded kinds ship in the
-// BFF container (the shipping vehicle) and are seeded + version-reconciled into
+// BFF container (the shipping vehicle) and are seeded + reconciled into
 // each org's skills repo (the live store): built-ins (builtin/, coding-agent
 // skills on the skills page) and flow skills (flow/, generation flow skills,
 // hidden from the page — shared-volume-clone-architecture §17.8 decision (a)).
 // docs/design/skills-repo-storage.md §6 (reconcile) and §10 (provisioning).
-// User-modification protection is deferred (§6.4) — reconcile is purely
-// version-based: absent → seed; embed.version > repo.version → overwrite
+// User-modification protection is deferred (§6.4) — reconcile is content-hash
+// based: absent → seed; embedded content SHA ≠ repo content SHA → overwrite
 // (replacing the whole skill dir, so stale references never linger); else
 // leave. Retired names the embed no longer ships are purged.
 
@@ -42,11 +42,9 @@ import (
 )
 
 // SkillUpdate is one row of the "updates available" badge: a built-in whose
-// embedded version is newer than (or absent from) the org's repo. §6.3.
+// embedded content differs from (or is absent from) the org's repo. §6.3.
 type SkillUpdate struct {
-	Name            string `json:"name"`
-	RepoVersion     int    `json:"repoVersion"` // -1 when the skill is absent in the repo
-	EmbeddedVersion int    `json:"embeddedVersion"`
+	Name string `json:"name"`
 }
 
 // ensureSkillsRepo idempotently provisions the org's skills repo, seeding
@@ -139,13 +137,13 @@ func (s *SkillService) reconcileFlow(ctx context.Context, orgID string, repo *mo
 }
 
 // reconcileEmbedded writes every embedded skill of one kind that is absent
-// from the repo or whose embedded version is newer, and purges skills of that
+// from the repo or whose embedded content differs, and purges skills of that
 // kind the platform embed no longer ships, in a single commit. A rewritten
 // skill's directory is replaced wholesale (delete staged before the writes) so
-// references removed by the new version never linger. Returns the number of
+// references removed by the new content never linger. Returns the number of
 // skills written + purged. §6.2.
 func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *models.GitRepository, kind, label string, embedded []Skill) (int, error) {
-	current, err := s.repoVersionsByKind(ctx, orgID, repo, kind)
+	current, err := s.repoContentSHAsByKind(ctx, orgID, repo, kind)
 	if err != nil {
 		return 0, err
 	}
@@ -157,7 +155,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	for _, b := range embedded {
 		embeddedNames[b.Name] = true
 		cur, ok := current[b.Name]
-		if ok && b.Version <= cur {
+		if ok && b.ContentSHA == cur {
 			continue
 		}
 		written++
@@ -191,8 +189,8 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	return changed, nil
 }
 
-// UpdatesAvailable returns the built-ins whose embedded version is newer than
-// (or missing from) the org's repo — the data behind the badge. Flow skills
+// UpdatesAvailable returns the built-ins whose embedded content differs from
+// (or is missing from) the org's repo — the data behind the badge. Flow skills
 // never surface here: the badge belongs to the skills page, which hides them
 // (they still re-reconcile via Reconcile). §6.3.
 func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]SkillUpdate, error) {
@@ -204,36 +202,32 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.repoVersionsByKind(ctx, orgID, repo, "builtin")
+	current, err := s.repoContentSHAsByKind(ctx, orgID, repo, "builtin")
 	if err != nil {
 		return nil, err
 	}
 	var out []SkillUpdate
 	for _, b := range embedded {
-		cur, ok := current[b.Name]
-		switch {
-		case !ok:
-			out = append(out, SkillUpdate{Name: b.Name, RepoVersion: -1, EmbeddedVersion: b.Version})
-		case b.Version > cur:
-			out = append(out, SkillUpdate{Name: b.Name, RepoVersion: cur, EmbeddedVersion: b.Version})
+		if cur, ok := current[b.Name]; !ok || cur != b.ContentSHA {
+			out = append(out, SkillUpdate{Name: b.Name})
 		}
 	}
 	return out, nil
 }
 
-// repoVersionsByKind reads the current name→version map for one kind from the
+// repoContentSHAsByKind reads the current name→content-SHA map for one kind from the
 // repo at the branch tip. A skill shadowed in the deduped catalog by a
 // same-named higher-precedence kind reads as "absent" and just triggers a
 // no-op rewrite (the tree is unchanged, so Mutate commits nothing).
-func (s *SkillService) repoVersionsByKind(ctx context.Context, orgID string, repo *models.GitRepository, kind string) (map[string]int, error) {
+func (s *SkillService) repoContentSHAsByKind(ctx context.Context, orgID string, repo *models.GitRepository, kind string) (map[string]string, error) {
 	skills, err := s.loadCatalog(ctx, orgID, repo)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]int{}
+	out := map[string]string{}
 	for _, sk := range skills {
 		if sk.Kind == kind {
-			out[sk.Name] = sk.Version
+			out[sk.Name] = sk.ContentSHA
 		}
 	}
 	return out, nil
@@ -303,7 +297,6 @@ func loadEmbeddedKind(fsys fs.FS, root, kind string) ([]Skill, error) {
 			Description: strings.TrimSpace(fm.Description),
 			SkillMD:     string(raw),
 			References:  refs,
-			Version:     versionFromMetadata(fm),
 			ContentSHA:  contentSHA(string(raw), refs),
 		})
 	}

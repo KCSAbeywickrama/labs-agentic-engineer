@@ -61,7 +61,7 @@ const (
 
 // newHarness assembles the real chain around the REAL skills services (all
 // three) over one engine-backed store, and returns the store so a test can
-// drive repo state (e.g. DowngradeBuiltin for the updates badge).
+// drive repo state (e.g. DriftBuiltin for the updates badge).
 func newHarness(t *testing.T) (*componenttest.Harness, *skills.ComponentStore) {
 	t.Helper()
 	store := skills.NewComponentStore(t)
@@ -278,7 +278,7 @@ func TestSkillsComponent_Updates_MatchesGolden(t *testing.T) {
 
 	// Plant a stale built-in so the badge reports one update, then assert the
 	// element field set against the golden's updates[0].
-	store.DowngradeBuiltin("acme", "go", skillMD("go", ""))
+	store.DriftBuiltin("acme", "go", skillMD("go", ""))
 	resp = h.AsOrg("acme").Get(base + "/updates")
 	if resp.Code != 200 {
 		t.Fatalf("updates (stale): want 200, got %d body=%s", resp.Code, resp.Body.String())
