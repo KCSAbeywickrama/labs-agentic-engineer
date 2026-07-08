@@ -3,7 +3,6 @@
 | New | Tech |
 |---|---|
 | `aep-api/`| Go BFF + GitHub webhooks (git ops folded in) |
-| `aepctl/` | Go CLI (`aep`) + in-cluster gRPC management server (`aep-server`) |
 | `agents/` | TS interactive spec agents (Vercel AI SDK) |
 | `collab/`|  TS Yjs collaboration server |
 

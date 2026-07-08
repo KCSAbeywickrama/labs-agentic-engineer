@@ -8,6 +8,6 @@ use (
 	// workspace modules dynamically, so adding a `use` line is the only edit
 	// needed to adopt a new Go module.
 	./services/aep-api
-	./services/aepctl
+	./tools/aepctl
 	./deployments/single-cluster/resource-types/thunder-app/operator
 )
