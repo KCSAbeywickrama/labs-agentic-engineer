@@ -155,10 +155,15 @@ const (
 )
 
 // OCObjectMeta is the slice of k8s metadata the BFF sets on Resource-model CRs.
+// Annotations is read-only here: the BFF never sets it on Resource-model CRs it
+// authors, but ListClusterResourceTypes decodes it off PE-authored
+// ClusterResourceTypes, which carry the `aep.wso2.com/*` markers (see the
+// `resources` package's markers.go) alongside Labels' `aep.wso2.com/role`.
 type OCObjectMeta struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // OCKeyRef is a {name,key} reference into a Secret/ConfigMap (both CEL-templatable).
