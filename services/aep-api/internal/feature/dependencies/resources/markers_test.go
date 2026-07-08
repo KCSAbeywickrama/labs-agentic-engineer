@@ -26,6 +26,7 @@ func TestMarkersFrom_AllMarkersPresent(t *testing.T) {
 		AnnotationConsumerURLEnvConfig: "redirectUris",
 		AnnotationConsumerURLPath:      "/oauth2/callback",
 		AnnotationSkill:                "thunder-authentication",
+		AnnotationDescription:          "End-user sign-in: provisions an OAuth client on the platform IdP.",
 	}
 
 	got := MarkersFrom(labels, annotations)
@@ -34,6 +35,7 @@ func TestMarkersFrom_AllMarkersPresent(t *testing.T) {
 		ConsumerURLEnvConfig: "redirectUris",
 		ConsumerURLPath:      "/oauth2/callback",
 		Skill:                "thunder-authentication",
+		Description:          "End-user sign-in: provisions an OAuth client on the platform IdP.",
 	}
 	if got != want {
 		t.Fatalf("MarkersFrom() = %+v, want %+v", got, want)
@@ -70,6 +72,9 @@ func TestMarkersFrom_ConsumerURLEnvConfigWithoutPath_DefaultsCallback(t *testing
 	}
 	if got.Skill != "" {
 		t.Fatalf("Skill = %q, want empty", got.Skill)
+	}
+	if got.Description != "" {
+		t.Fatalf("Description = %q, want empty", got.Description)
 	}
 }
 

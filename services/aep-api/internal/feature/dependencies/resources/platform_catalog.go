@@ -31,6 +31,13 @@ type PlatformResourceType struct {
 	Parameters map[string]any `json:"parameters,omitempty"` // openAPIV3Schema.properties
 	Outputs    []string       `json:"outputs,omitempty"`
 
+	// Description is the PE-authored `aep.wso2.com/description` annotation:
+	// human prose describing what the type provides and when to depend on
+	// it. Unlike Markers below it IS serialized — it is part of the
+	// architect-facing discovery contract (the architect reads it to pick
+	// the right resourceType), and the console drawer shows it to users.
+	Description string `json:"description,omitempty"`
+
 	// Markers carries the PE-authored `aep.wso2.com/*` labels/annotations
 	// extracted off this ClusterResourceType (see markers.go) — the signal
 	// design-save and runtimeconfig key auth-role/consumer-URL/skill
@@ -52,8 +59,8 @@ func NewResourceTypeCatalog(rc openchoreo.ResourceClient) *ResourceTypeCatalog {
 }
 
 // List returns the installed ClusterResourceTypes sorted by name, projecting
-// each to its architect-facing slice (name, parameter properties, output
-// names).
+// each to its architect-facing slice (name, description, parameter
+// properties, output names).
 func (c *ResourceTypeCatalog) List(ctx context.Context) ([]PlatformResourceType, error) {
 	cts, err := c.rc.ListClusterResourceTypes(ctx)
 	if err != nil {
@@ -61,9 +68,11 @@ func (c *ResourceTypeCatalog) List(ctx context.Context) ([]PlatformResourceType,
 	}
 	out := make([]PlatformResourceType, 0, len(cts))
 	for _, ct := range cts {
+		markers := MarkersFrom(ct.Metadata.Labels, ct.Metadata.Annotations)
 		prt := PlatformResourceType{
-			Name:    ct.Metadata.Name,
-			Markers: MarkersFrom(ct.Metadata.Labels, ct.Metadata.Annotations),
+			Name:        ct.Metadata.Name,
+			Description: markers.Description,
+			Markers:     markers,
 		}
 		if ct.Spec.Parameters != nil {
 			if props, ok := ct.Spec.Parameters.OpenAPIV3Schema["properties"].(map[string]any); ok {

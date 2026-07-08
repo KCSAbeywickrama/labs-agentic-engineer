@@ -171,7 +171,9 @@ tools, USE them before authoring an `external`, `org-service`, or
 - `list_org_endpoints` — find the real provider component name for an
   `org-service` before referencing it.
 - `list_platform_resource_types` — get a valid `resourceType` (and its
-  parameters) before declaring a `platform-resource`.
+  parameters) before declaring a `platform-resource`. Read each type's
+  `description` and pick the type whose description matches the need; when
+  none matches, leave the dependency unresolved rather than forcing a fit.
 
 **Config-key conventions.** `config` is the env-var schema the consuming
 component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials

@@ -61,6 +61,14 @@ const (
 	// Design save appends it (append-only; unknown skill names warn, they
 	// never fail the save).
 	AnnotationSkill = "aep.wso2.com/skill"
+
+	// AnnotationDescription carries human prose describing what the resource
+	// type provides and when a component should depend on it. OpenChoreo's
+	// ClusterResourceType spec has no native description field (and its CRD
+	// rejects unknown fields), so the annotation is the mechanism. Surfaced
+	// to the architect via the list_platform_resource_types MCP tool and to
+	// users in the console dependency drawer.
+	AnnotationDescription = "aep.wso2.com/description"
 )
 
 // TypeMarkers is the extracted, typed view of the `aep.wso2.com/*` vocabulary
@@ -81,6 +89,10 @@ type TypeMarkers struct {
 	// Skill is the skill name that must appear in skillsApplied, or "" when
 	// the type carries no skill annotation.
 	Skill string
+	// Description is the human prose off AnnotationDescription — what the
+	// type provides and when to depend on it — or "" when the type carries
+	// no description annotation.
+	Description string
 }
 
 // MarkersFrom extracts a TypeMarkers from a ClusterResourceType's raw
@@ -93,6 +105,7 @@ func MarkersFrom(labels, annotations map[string]string) TypeMarkers {
 		ConsumerURLEnvConfig: annotations[AnnotationConsumerURLEnvConfig],
 		ConsumerURLPath:      annotations[AnnotationConsumerURLPath],
 		Skill:                annotations[AnnotationSkill],
+		Description:          annotations[AnnotationDescription],
 	}
 	if m.ConsumerURLEnvConfig != "" && m.ConsumerURLPath == "" {
 		m.ConsumerURLPath = DefaultConsumerURLPath

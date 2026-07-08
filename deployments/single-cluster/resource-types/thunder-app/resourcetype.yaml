@@ -22,7 +22,13 @@
 # consumption behaviors this resource type needs. AEP keys its behavior ONLY on
 # these markers — it has NO hardcoded type names, so "thunder-app" is just data.
 # Adding a new auth flavor (or any new type) is a cluster install + a skill, never
-# an app-factory release. The four markers AEP understands:
+# an app-factory release. The markers AEP understands:
+#
+#   aep.wso2.com/description: <prose>
+#     Human prose describing what the type provides and when to depend on it.
+#     Surfaced to the architect via the list_platform_resource_types MCP tool
+#     (the architect picks the type whose description matches the need) and to
+#     users in the console dependency drawer.
 #
 #   aep.wso2.com/role: end-user-auth
 #     A service declaring a dependency of this type gets
@@ -52,6 +58,13 @@ metadata:
     # role → design-save stamps end-user-required auth on services that depend on this type.
     aep.wso2.com/role: end-user-auth
   annotations:
+    # description → the type's prose self-description; surfaced to the architect
+    # via list_platform_resource_types (it picks the type whose description
+    # matches the need) and to users in the console dependency drawer.
+    aep.wso2.com/description: >-
+      End-user sign-in for this project's apps: provisions an OAuth (PKCE)
+      client on the platform IdP. Declare on both the web app that signs
+      users in and the service whose API it protects.
     # consumer-url-env-config → platform patches <spaOrigin><path> into this env-config key.
     aep.wso2.com/consumer-url-env-config: redirectUris
     # consumer-url-path omitted → defaults to /callback (the path this OAuth app expects).
