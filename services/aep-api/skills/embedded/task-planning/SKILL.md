@@ -1,6 +1,9 @@
 ---
 name: task-planning
 description: Use when asked to plan or re-plan a project's implementation Tasks from its spec and design — one Task per design component, with dependencies, using planTask/updateTask.
+metadata:
+  aep:
+    kind: platform
 ---
 
 # Task planning

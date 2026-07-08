@@ -73,6 +73,13 @@ that's a stalled feature — investigate, don't ignore.
   [#80](https://github.com/wso2/labs-agentic-engineer/issues/80) (BE
   handshake: [#81](https://github.com/wso2/labs-agentic-engineer/issues/81),
   ADR-0007)
+- Console on the proposed contract (#111) — spec view reads via `list-files` +
+  lazy `read-file` (supersedes #99); overview Build card from `list-tasks`
+  (`/board` is gone); version chips from `/tags` `latest`/`specDirty` —
+  [#113](https://github.com/wso2/labs-agentic-engineer/issues/113) (BE
+  handshake: [#117](https://github.com/wso2/labs-agentic-engineer/issues/117),
+  collab seeding follow-up:
+  [#114](https://github.com/wso2/labs-agentic-engineer/issues/114))
 - Project overview page — spec/build/deployment status cards (versioned),
   components list, project-view tab shell —
   [#77](https://github.com/wso2/labs-agentic-engineer/issues/77) (BE

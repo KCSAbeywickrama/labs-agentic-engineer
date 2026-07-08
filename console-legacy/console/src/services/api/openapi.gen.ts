@@ -1686,8 +1686,6 @@ export interface components {
             skillMd: string;
             /** Format: date-time */
             updatedAt: string;
-            /** Format: int64 */
-            version: number;
         };
         StartConnectInputBody: {
             /**

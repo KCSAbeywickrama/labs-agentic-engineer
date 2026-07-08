@@ -70,12 +70,12 @@ func TestUpdate_HappyAndGuards(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		if sk == nil || sk.Version != 2 || sk.Kind != "custom" {
-			t.Fatalf("updated skill = %+v, want version 2 custom", sk)
+		if sk == nil || sk.Kind != "custom" || sk.Description != "revised." {
+			t.Fatalf("updated skill = %+v, want the revised custom content", sk)
 		}
 		got, _ := svc.Resolve(ctx, "org1", "my-skill")
-		if got == nil || got.Version != 2 {
-			t.Fatalf("read-back after update = %+v, want version 2", got)
+		if got == nil || got.Description != "revised." {
+			t.Fatalf("read-back after update = %+v, want the revised content", got)
 		}
 	})
 

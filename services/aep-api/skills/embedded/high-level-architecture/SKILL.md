@@ -2,8 +2,10 @@
 name: high-level-architecture
 description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, or writing a component's design.json.
 metadata:
-  aep.version: "3"
+  aep:
+    kind: platform
 ---
+
 
 # High-level architecture
 
