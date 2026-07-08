@@ -20,7 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 import { seedDocument, filesMap } from "./seed.js";
-import { fragmentToMarkdown } from "./markdown.js";
+import { fragmentToMarkdown } from "@aep/collab-doc";
 
 const bundle = [
   { path: "requirements/prd.md", content: "# PRD\n" },

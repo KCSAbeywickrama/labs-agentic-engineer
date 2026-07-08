@@ -197,6 +197,33 @@ export interface McpConfig {
   token: string;
 }
 
+/**
+ * Caller-supplied collab-room reference for a room-scoped turn (#86 phase 4).
+ * Mirrors `McpConfig`: the BFF resolves the room and forwards the caller's
+ * bearer; the service never reads either from its own env (the ws URL alone
+ * comes from service config — the BFF doesn't know the agents-side route).
+ * Present → the agents service joins the room as a live Yjs peer, reads the
+ * file bundle FROM the doc, and applies file ops to it; nothing is committed
+ * to git (persistence is the #86 phase-3 committer). Omitted → the
+ * committed-truth snapshot turn, byte-identical to today.
+ */
+export interface CollabConfig {
+  /** The room id (`spec-<org>-<project>`), resolved by the BFF. */
+  roomId: string;
+  /**
+   * The caller's bearer, forwarded request-scoped (#86 decision 7): the
+   * collab server's BFF oracle validates it exactly like a browser join.
+   */
+  token: string;
+}
+
+/** Runtime guard for an untrusted `collab` value (the server's pre-stream 400 check). */
+export function isCollabConfig(v: unknown): v is CollabConfig {
+  if (typeof v !== "object" || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return typeof c.roomId === "string" && c.roomId !== "" && typeof c.token === "string" && c.token !== "";
+}
+
 // --- The reviewable change (§7) ---------------------------------------------
 
 /**
@@ -280,6 +307,12 @@ export interface TurnRequest {
    * no fetch, no discovery tools (byte-identical to an mcp-free turn).
    */
   mcp?: McpConfig;
+  /**
+   * Room-scoped turn (#86 phase 4): join this collab room as a live Yjs peer,
+   * read files from the doc, apply ops to the doc, commit nothing. Omitted →
+   * the committed-truth snapshot turn (byte-identical to today).
+   */
+  collab?: CollabConfig;
 }
 
 /** The registrable tool sets a turn may request (`TurnRequest.toolset`). */

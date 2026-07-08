@@ -17,22 +17,18 @@
  */
 
 import * as Y from "yjs";
+import { filesMap, isMarkdownPath, markdownToFragment } from "@aep/collab-doc";
 import type { SpecFile } from "./bff.js";
-import { isMarkdownPath, markdownToFragment } from "./markdown.js";
 
-// Doc model (#86 decision 2 + phase 6): one Y.Doc per project. Markdown
-// files are Y.XmlFragments keyed by path (Tiptap's collaboration binding
-// needs rich structure); everything else is a Y.Text in Y.Map('files').
+// Doc model (#86 decision 2 + phase 6): one Y.Doc per project — the model
+// itself (Y.Map('files') + md fragments) lives in @aep/collab-doc, shared
+// with the agents service's live-peer path (#86 phase 4).
 //
 // KEY SCHEME INVARIANT (#113 decision 2 / #114): doc keys are the repo path
 // with the `specs/` prefix stripped (requirements/prd.md). The console's spec
-// feature strips identically at its API boundary; any future peer that writes
-// to rooms (agents, #86) must too. The strip lives in bff.ts (toRoomPath).
-export const FILES_MAP = "files";
-
-export function filesMap(doc: Y.Doc): Y.Map<Y.Text> {
-  return doc.getMap<Y.Text>(FILES_MAP);
-}
+// feature strips identically at its API boundary; agent peers (#86 phase 4)
+// inherit it via @aep/collab-doc. The strip lives in bff.ts (toRoomPath).
+export { FILES_MAP, filesMap } from "@aep/collab-doc";
 
 /**
  * Populate an (empty or partial) doc from a spec bundle. Existing entries are

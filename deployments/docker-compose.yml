@@ -272,6 +272,9 @@ services:
       # written by aep-api. The :ro mount enforces the reader-only contract
       # structurally (design D3).
       WORKSPACE_MOUNT_ROOT: "/workspaces"
+      # Room-scoped turns (#86 phase 4): the agents service joins spec rooms
+      # as a live Yjs peer through the in-network collab server.
+      AGENT_COLLAB_WS_URL: "ws://collab-server:3400"
     volumes:
       - aep-workspaces:/workspaces:ro
     networks:

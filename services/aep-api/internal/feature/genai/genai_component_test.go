@@ -770,6 +770,61 @@ func (r *genaiRig) waitTerminalOf(t *testing.T, turnID string) genai.TurnStatus 
 	return r.waitTerminal(t, turnID)
 }
 
+// TestCollabTurn_RoomScopedDispatchNoCommit pins #86 phase 4's BFF half: a
+// `collab: true` turn dispatches the agents service with the room + the
+// caller's bearer, relays the stream, and lands NOTHING on git — the doc is
+// the write surface (no fold, no manifest gate, no commit).
+func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	base := r.fx.Origin.HeadSHA(t)
+	// Room-scheme (unprefixed) paths: in committed mode this would fail the
+	// fold; room mode never folds — pinning that the fold is bypassed.
+	r.fake.parts = []string{
+		textPart("editing the shared doc"),
+		editFilePart("requirements/requirements.md", "# Reqs\n", "# Requirements\n"),
+	}
+	m := manifestPart(map[string]string{"requirements/requirements.md": "# Requirements\n"}, nil)
+	r.fake.manifest = &m
+
+	body, _ := json.Marshal(map[string]any{
+		"useCase":     "requirements-chat",
+		"instruction": "edit the doc live",
+		"collab":      true,
+	})
+	rec := r.h.AsOrg(testOrg).Post(turnsPath(convUUID), string(body))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("POST collab turn: code %d (%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		TurnID string `json:"turnId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.TurnID == "" {
+		t.Fatalf("202 body = %s (err %v)", rec.Body.String(), err)
+	}
+
+	st := r.waitTerminal(t, out.TurnID)
+	if st.Status != "completed" || !st.NoChanges {
+		t.Fatalf("terminal = %+v, want completed no-changes", st)
+	}
+	if st.CommitSHA != base {
+		t.Errorf("collab turn commitSha = %s, want base pin %s", st.CommitSHA, base)
+	}
+	if r.fx.Origin.HeadSHA(t) != base {
+		t.Error("collab turn must not commit — git is not the write surface")
+	}
+
+	sent := r.fake.sentTurn(t, 0)
+	if sent.req.Collab == nil {
+		t.Fatal("dispatch carried no collab block")
+	}
+	if want := "spec-" + testOrg + "-" + testProj; sent.req.Collab.RoomID != want {
+		t.Errorf("collab roomId = %q, want %q", sent.req.Collab.RoomID, want)
+	}
+	if sent.req.Collab.Token != componenttest.TestBearer {
+		t.Errorf("collab token = %q, want the caller's bearer", sent.req.Collab.Token)
+	}
+}
+
 // TestD15_ConcurrentBaseMovement pins disjoint→rebase, overlap→fail: an
 // unrelated commit landing mid-turn does not kill the generation; a commit
 // touching a folded path fails the turn with the conflicting path listed.

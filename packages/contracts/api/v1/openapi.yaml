@@ -1641,6 +1641,9 @@ components:
           format: uri
           readOnly: true
           type: string
+        collab:
+          description: 'Room-scoped turn (#86 phase 4): the agent joins the project''s spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git.'
+          type: boolean
         instruction:
           description: User message / generation directive
           type: string

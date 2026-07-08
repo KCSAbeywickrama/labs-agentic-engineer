@@ -16,9 +16,9 @@
 
 # Collab service (services/collab) — Yjs/Hocuspocus rooms with BFF-oracle auth
 # and Files-API seeding (#86 / #114). Built from the REPO ROOT context
-# (docker-compose sets `context: ..`) so pnpm resolves the workspace lockfile;
-# @aep/collab has no workspace-package dependencies, so only its own tree is
-# copied. Runs from TypeScript source via tsx, like @aep/agents.
+# (docker-compose sets `context: ..`) because @aep/collab depends on the
+# workspace package @aep/collab-doc (the shared doc model, #86 phase 4).
+# Runs from TypeScript source via tsx, like @aep/agents.
 FROM node:22-bookworm-slim
 
 RUN corepack enable
@@ -26,9 +26,13 @@ WORKDIR /repo
 
 # Workspace manifests first for install-layer caching.
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY packages ./packages
 COPY services/collab ./services/collab
 
 RUN pnpm install --frozen-lockfile --filter @aep/collab...
+
+# @aep/collab-doc resolves through its dist exports — build it before boot.
+RUN pnpm --filter @aep/collab-doc build
 
 WORKDIR /repo/services/collab
 
