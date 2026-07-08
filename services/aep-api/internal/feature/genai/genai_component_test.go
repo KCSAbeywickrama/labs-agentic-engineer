@@ -413,13 +413,20 @@ type genaiRig struct {
 type rigOption func(*rigConfig)
 
 type rigConfig struct {
-	client agentsvc.Client // overrides the default real-over-fake-HTTP client
+	client     agentsvc.Client // overrides the default real-over-fake-HTTP client
+	skillsRepo genai.SkillsRepoResolver
 }
 
 // withAgentsClient swaps the agents client (e.g. a panicking fake) — everything
 // else in the rig stays real.
 func withAgentsClient(c agentsvc.Client) rigOption {
 	return func(rc *rigConfig) { rc.client = c }
+}
+
+// withSkillsRepo overrides the skills-repo resolver (e.g. to hand back a row
+// whose backing repo is gone, exercising the skills-unavailable 503 path).
+func withSkillsRepo(fn genai.SkillsRepoResolver) rigOption {
+	return func(rc *rigConfig) { rc.skillsRepo = fn }
 }
 
 // newGenaiRig wires the real genai service over a real engine + origins and
@@ -461,17 +468,21 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	if cfg.client != nil {
 		client = cfg.client
 	}
+	skillsRepo := genai.SkillsRepoResolver(func(context.Context, string) (*models.GitRepository, error) {
+		return skillsRow, nil
+	})
+	if cfg.skillsRepo != nil {
+		skillsRepo = cfg.skillsRepo
+	}
 	svc := genai.NewService(genai.ServiceDeps{
-		Repos:     stubRepoResolver{rec: rec},
-		Git:       gitrepo.NewGitOpsService(stubResolver{}, fx.Engine),
-		Keys:      func(context.Context, string) (string, error) { return rig.key, nil },
-		Client:    client,
-		Turns:     turns,
-		Broker:    broker,
-		Snapshots: fx.Engine,
-		SkillsRepo: func(context.Context, string) (*models.GitRepository, error) {
-			return skillsRow, nil
-		},
+		Repos:      stubRepoResolver{rec: rec},
+		Git:        gitrepo.NewGitOpsService(stubResolver{}, fx.Engine),
+		Keys:       func(context.Context, string) (string, error) { return rig.key, nil },
+		Client:     client,
+		Turns:      turns,
+		Broker:     broker,
+		Snapshots:  fx.Engine,
+		SkillsRepo: skillsRepo,
 	})
 	rig.h = componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{GenAISvc: svc}})
 	return rig
