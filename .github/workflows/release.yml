@@ -1,0 +1,251 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release — no leading v (e.g. 0.1.0)"
+        required: true
+      component:
+        description: "What to release"
+        type: choice
+        options: [platform, ctl, all]
+        default: all
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/wso2/aep
+
+jobs:
+  # ─── Platform: build + push images ──────────────────────────────────────────
+  build-push-images:
+    name: Build + push ${{ matrix.name }}
+    if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aep-server
+            dockerfile: tools/aepctl/Dockerfile.server
+            context: tools/aepctl
+          - name: aep-api
+            dockerfile: services/aep-api/Dockerfile
+            context: services/aep-api
+          - name: agents
+            dockerfile: services/agents/Dockerfile
+            context: .
+          - name: remote-worker
+            dockerfile: runners/remote-worker/Dockerfile
+            context: runners/remote-worker
+          # console: add when apps/console/Dockerfile exists
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ inputs.version }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ─── Platform: package + push Helm charts ───────────────────────────────────
+  package-push-charts:
+    name: Package + push Helm charts
+    if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
+    needs: build-push-images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.3
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ${{ env.REGISTRY }} \
+              --username ${{ github.actor }} --password-stdin
+
+      - name: Package bootstrap chart
+        run: |
+          cp -r deployments/helm-charts/bootstrap /tmp/bootstrap
+
+          yq -i '.version = "${{ inputs.version }}"' /tmp/bootstrap/Chart.yaml
+          yq -i '.appVersion = "${{ inputs.version }}"' /tmp/bootstrap/Chart.yaml
+          yq -i '.aepServer.image.repository = "${{ env.IMAGE_PREFIX }}/aep-server"' /tmp/bootstrap/values.yaml
+          yq -i '.aepServer.image.tag = "${{ inputs.version }}"' /tmp/bootstrap/values.yaml
+          yq -i '.aepServer.image.pullPolicy = "IfNotPresent"' /tmp/bootstrap/values.yaml
+
+          helm dependency build /tmp/bootstrap
+          helm package /tmp/bootstrap --destination /tmp/charts
+
+      - name: Package platform chart
+        run: |
+          cp -r deployments/helm-charts/platform /tmp/platform
+
+          yq -i '.version = "${{ inputs.version }}"' /tmp/platform/Chart.yaml
+          yq -i '.appVersion = "${{ inputs.version }}"' /tmp/platform/Chart.yaml
+          yq -i '.aepApi.image.repository = "${{ env.IMAGE_PREFIX }}/aep-api"' /tmp/platform/values.yaml
+          yq -i '.aepApi.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.aepApi.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
+          yq -i '.aepAgents.image.repository = "${{ env.IMAGE_PREFIX }}/agents"' /tmp/platform/values.yaml
+          yq -i '.aepAgents.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.aepAgents.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
+          yq -i '.console.image.repository = "${{ env.IMAGE_PREFIX }}/console"' /tmp/platform/values.yaml
+          yq -i '.console.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
+          yq -i '.console.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
+
+          helm package /tmp/platform --destination /tmp/charts
+
+      - name: Push charts to GHCR
+        run: |
+          for chart in /tmp/charts/*.tgz; do
+            helm push "$chart" oci://${{ env.REGISTRY }}/wso2/aep/charts
+          done
+
+  # ─── Platform: create GitHub release ────────────────────────────────────────
+  create-platform-release:
+    name: Create platform release
+    if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
+    needs: package-push-charts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "platform/v${{ inputs.version }}" \
+            --title "Platform v${{ inputs.version }}" \
+            --notes "## Platform v${{ inputs.version }}
+
+          ### Install
+
+          \`\`\`bash
+          helm install aep oci://ghcr.io/wso2/aep/charts/bootstrap \\
+            --version ${{ inputs.version }} -n wso2-aep --create-namespace
+
+          aep connect --server http://aep-server.openchoreo.localhost:8080
+          aep init --platform-version ${{ inputs.version }}
+          \`\`\`
+
+          ### Images
+
+          - \`ghcr.io/wso2/aep/aep-server:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/aep-api:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/agents:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/remote-worker:${{ inputs.version }}\`"
+
+  # ─── CTL: build CLI binaries ─────────────────────────────────────────────────
+  build-ctl-binaries:
+    name: Build aep binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    if: ${{ inputs.component == 'ctl' || inputs.component == 'all' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+
+      - name: Build aep
+        working-directory: tools/aepctl
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${{ inputs.version }}" \
+            -o aep-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }} .
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aep-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: tools/aepctl/aep-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext || '' }}
+
+  # ─── CTL: create GitHub release ──────────────────────────────────────────────
+  create-ctl-release:
+    name: Create CTL release
+    if: ${{ inputs.component == 'ctl' || inputs.component == 'all' }}
+    needs: build-ctl-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aep-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "ctl/v${{ inputs.version }}" \
+            --title "AEP CTL v${{ inputs.version }}" \
+            --notes "## AEP CTL v${{ inputs.version }}
+
+          ### Install
+
+          **Linux (amd64)**
+          \`\`\`bash
+          curl -L https://github.com/wso2/aep/releases/download/ctl%2Fv${{ inputs.version }}/aep-linux-amd64 \
+            -o /usr/local/bin/aep && chmod +x /usr/local/bin/aep
+          \`\`\`
+
+          **macOS (Apple Silicon)**
+          \`\`\`bash
+          curl -L https://github.com/wso2/aep/releases/download/ctl%2Fv${{ inputs.version }}/aep-darwin-arm64 \
+            -o /usr/local/bin/aep && chmod +x /usr/local/bin/aep
+          \`\`\`" \
+            dist/aep-*

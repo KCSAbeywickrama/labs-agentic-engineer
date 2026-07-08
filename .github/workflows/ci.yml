@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [aep-rewrite]
+  pull_request:
+    branches: [aep-rewrite]
+
+jobs:
+  build-images:
+    name: Build ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aep-server
+            dockerfile: tools/aepctl/Dockerfile.server
+            context: tools/aepctl
+          - name: aep-api
+            dockerfile: services/aep-api/Dockerfile
+            context: services/aep-api
+          - name: agents
+            dockerfile: services/agents/Dockerfile
+            context: .
+          - name: remote-worker
+            dockerfile: runners/remote-worker/Dockerfile
+            context: runners/remote-worker
+          # console: apps/console/Dockerfile does not exist yet — add when ready
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  go-checks:
+    name: Go build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+
+      - name: Build all Go modules
+        run: go build ./...
+
+      - name: Test all Go modules
+        run: go test ./...
+
+  ts-checks:
+    name: TypeScript typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm turbo typecheck
+
+      - name: Test
+        run: pnpm turbo test

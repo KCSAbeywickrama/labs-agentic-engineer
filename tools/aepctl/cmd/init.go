@@ -38,6 +38,7 @@ import (
 
 var (
 	initPlatformChart     string
+	initPlatformVersion   string
 	initPlatformRelease   string
 	initPlatformNamespace string
 	initConsoleURL        string
@@ -61,7 +62,8 @@ Configure the server URL first:
 
 func init() {
 	rootCmd.AddCommand(initCmd)
-	initCmd.Flags().StringVar(&initPlatformChart, "platform-chart", "", "Path to the platform Helm chart directory (required)")
+	initCmd.Flags().StringVar(&initPlatformChart, "platform-chart", "", "Local path to the platform Helm chart (for local/dev installs; takes precedence over --platform-version)")
+	initCmd.Flags().StringVar(&initPlatformVersion, "platform-version", "latest", "Platform version to pull from GHCR (ignored when --platform-chart is set)")
 	initCmd.Flags().StringVar(&initPlatformRelease, "platform-release", "aep-platform", "Helm release name for the platform chart")
 	initCmd.Flags().StringVar(&initPlatformNamespace, "namespace", "wso2-aep", "Kubernetes namespace")
 	initCmd.Flags().StringVar(&initConsoleURL, "console-url", "http://console.openchoreo.localhost:8080", "Public URL of the AEP console")
@@ -69,7 +71,6 @@ func init() {
 	initCmd.Flags().String("server", "", "AEP server gRPC URL (overrides config file)")
 	viper.BindPFlag("server", initCmd.Flags().Lookup("server"))
 	registerThunderFlags(initCmd)
-	_ = initCmd.MarkFlagRequired("platform-chart")
 }
 
 func runAEPInit(cmd *cobra.Command, args []string) error {
@@ -139,15 +140,27 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	// 4. Install the platform chart.
 	fmt.Fprintln(os.Stdout, "Installing platform chart...")
 	thunderURL := viper.GetString("thunder.url")
-	helmCmd := exec.CommandContext(ctx, "helm", "install", initPlatformRelease, initPlatformChart,
+	helmArgs := []string{
+		"install", initPlatformRelease,
 		"-n", initPlatformNamespace,
-		"--set", "console.publicURL="+initConsoleURL,
-		"--set", "aepApi.publicURL="+initAPIURL,
-		"--set", "console.thunderPublicURL="+viper.GetString("thunder.public_url"),
-		"--set", "thunder.adminURL="+thunderURL,
-		"--set", "thunder.jwksURL="+thunderURL+"/oauth2/jwks",
-	)
+		"--set", "console.publicURL=" + initConsoleURL,
+		"--set", "aepApi.publicURL=" + initAPIURL,
+		"--set", "console.thunderPublicURL=" + viper.GetString("thunder.public_url"),
+		"--set", "thunder.adminURL=" + thunderURL,
+		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
+	}
+	if initPlatformChart != "" {
+		// Local chart path — used for dev/local testing.
+		helmArgs = append([]string{helmArgs[0], helmArgs[1], initPlatformChart}, helmArgs[2:]...)
+	} else {
+		// Pull chart from GHCR.
+		helmArgs = append([]string{helmArgs[0], helmArgs[1], "oci://ghcr.io/wso2/aep/charts/platform"}, helmArgs[2:]...)
+		if initPlatformVersion != "latest" {
+			helmArgs = append(helmArgs, "--version", initPlatformVersion)
+		}
+	}
 	var helmOut bytes.Buffer
+	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)
 	helmCmd.Stdout = &helmOut
 	helmCmd.Stderr = &helmOut
 	if err := helmCmd.Run(); err != nil {

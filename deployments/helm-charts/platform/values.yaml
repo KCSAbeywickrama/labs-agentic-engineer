@@ -1,9 +1,9 @@
 aepApi:
   replicas: 1
   image:
-    repository: docker.io/senithkay/ae
-    tag: aep-api
-    pullPolicy: Always
+    repository: ghcr.io/wso2/aep/aep-api
+    tag: latest
+    pullPolicy: IfNotPresent
   port: 9090
   logLevel: "info"
   deploymentTier: "dev"
@@ -21,9 +21,9 @@ aepApi:
 aepAgents:
   replicas: 1
   image:
-    repository: docker.io/senithkay/ae
-    tag: agents
-    pullPolicy: Always
+    repository: ghcr.io/wso2/aep/agents
+    tag: latest
+    pullPolicy: IfNotPresent
   port: 9090
   logLevel: "info"
   model: "claude-sonnet-5"
@@ -41,9 +41,9 @@ aepAgents:
 console:
   replicas: 1
   image:
-    repository: docker.io/senithkay/ae
-    tag: console
-    pullPolicy: Always
+    repository: ghcr.io/wso2/aep/console
+    tag: latest
+    pullPolicy: IfNotPresent
   port: 3000
   resources:
     requests:

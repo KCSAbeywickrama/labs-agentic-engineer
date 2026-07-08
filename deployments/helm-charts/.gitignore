@@ -2,6 +2,5 @@
 **/charts/*.tgz
 **/Chart.lock
 
-# Bootstrap values — contain secrets, never commit
+# Bootstrap values — generated at install time, contain secrets, never commit
 **/templates/bootstrapValues/
-**/bootstrap/
