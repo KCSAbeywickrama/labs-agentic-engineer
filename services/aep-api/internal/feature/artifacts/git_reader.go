@@ -125,7 +125,15 @@ func (s *artifactService) readBundleAtTag(ctx context.Context, ref gitrepo.RepoR
 
 // listVersionTags returns every `v*` tag with its Name, peeled commit SHA, and
 // annotation subject. The local read restores the Message the Git Data refs API
-// could not expose (it is empty only for lightweight tags).
+// could not expose (it is empty only for lightweight tags). Fetches origin
+// first — the freshness-critical path (version lists, save prechecks).
 func (s *artifactService) listVersionTags(ctx context.Context, ref gitrepo.RepoRef) ([]gitrepo.TagInfo, error) {
 	return s.git.Workspace().ListTags(ctx, ref, "v")
+}
+
+// listVersionTagsLocal is listVersionTags without the origin fetch — for the
+// best-effort LatestDesignTag read (the task stale-design attention flag),
+// which must not force a per-read network round-trip.
+func (s *artifactService) listVersionTagsLocal(ctx context.Context, ref gitrepo.RepoRef) ([]gitrepo.TagInfo, error) {
+	return s.git.Workspace().ListTagsLocal(ctx, ref, "v")
 }
