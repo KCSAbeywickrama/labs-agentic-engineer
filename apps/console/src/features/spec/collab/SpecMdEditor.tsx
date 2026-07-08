@@ -88,11 +88,25 @@ export function SpecMdEditor({
           alignItems="center"
           spacing={1}
           sx={{
+            // Floats over the doc while scrolling (the spec content pane is
+            // the scrollport) so Accept/Reject stays reachable mid-review.
+            position: "sticky",
+            top: 0,
+            zIndex: 2,
             mb: 1,
             px: 1.5,
             py: 0.75,
             borderRadius: 1,
-            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+            boxShadow: 1,
+            // The Oxygen paper color is translucent (acrylic); the blur keeps
+            // the floating bar readable over the document text behind it.
+            bgcolor: "background.paper",
+            backdropFilter: "blur(8px)",
+            backgroundImage: (theme) =>
+              `linear-gradient(${alpha(theme.palette.primary.main, 0.08)}, ${alpha(
+                theme.palette.primary.main,
+                0.08,
+              )})`,
           }}
         >
           <Sparkles size={16} />
