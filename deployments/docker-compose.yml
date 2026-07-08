@@ -194,6 +194,11 @@ services:
       # imagePullPolicy to Always and forces a registry pull) to run a
       # locally-built runner.
       AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-}"
+      # Validation-runner image (Dockerfile.validation: Debian + Playwright
+      # browsers). Empty ⇒ validation dispatch fails loudly — the alpine
+      # coding image cannot run chromium, so there is no fallback. Build +
+      # k3d-import it like the coding runner (e.g. aep-validation-runner:dev).
+      VALIDATION_RUNNER_IMAGE: "${VALIDATION_RUNNER_IMAGE:-}"
       # Required for mint-build (per-org build Secret SSA into
       # workflows-<orgID>) and apply-wp-secret (per-org Anthropic Secret
       # SSA). Without it the binary degrades: builds fail at clone,
