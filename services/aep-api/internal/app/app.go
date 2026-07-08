@@ -749,6 +749,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		SkillMutationSvc:  skillMutationSvc,
 		SkillImportSvc:    skillImportSvc,
 		FilesSvc:          filesSvc,
+		ArtifactSvc:       artifactSvcGit,
 		GenAISvc:          genaiSvc,
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
