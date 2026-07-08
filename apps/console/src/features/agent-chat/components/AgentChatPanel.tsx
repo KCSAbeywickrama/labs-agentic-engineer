@@ -18,6 +18,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  alpha,
   Avatar,
   Box,
   Chip,
@@ -65,8 +66,10 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
             px: 1.5,
             py: 1,
             borderRadius: 2,
-            bgcolor: "primary.main",
-            color: "primary.contrastText",
+            // Soft primary tint (chip-like), not the full brand color — a
+            // solid primary bubble reads far too loud in a side panel.
+            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+            color: "text.primary",
             whiteSpace: "pre-wrap",
             fontSize: "0.875rem",
             opacity: msg.status === "failed" ? 0.6 : 1,
