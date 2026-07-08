@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
@@ -174,6 +175,15 @@ func NewComponentClient(cfg Config) ComponentClient {
 
 // -- Conversions -------------------------------------------------------------
 
+// designComponentType maps an OpenChoreo ComponentType name to AEP's design
+// vocabulary — the read-path inverse of the component feature's ocEntrypoint
+// mapping. OC's names are AEP's kinds prefixed with "deployment/"
+// (deployment/web-application → web-application); the prefix never leaves
+// this client.
+func designComponentType(ocType string) string {
+	return strings.TrimPrefix(ocType, "deployment/")
+}
+
 func componentToModel(c gen.Component) models.Component {
 	var projectName, componentType string
 	var autoBuild, autoDeploy bool
@@ -205,7 +215,7 @@ func componentToModel(c gen.Component) models.Component {
 		ProjectName: projectName,
 		DisplayName: annotation(c.Metadata.Annotations, AnnotationKeyDisplayName),
 		Description: annotation(c.Metadata.Annotations, AnnotationKeyDescription),
-		Type:        componentType,
+		Type:        designComponentType(componentType),
 		AutoDeploy:  autoDeploy,
 		AutoBuild:   autoBuild,
 		CreatedAt:   derefTimeRFC3339(c.Metadata.CreationTimestamp),

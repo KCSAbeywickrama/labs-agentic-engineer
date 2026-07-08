@@ -29,7 +29,3 @@ export const projectKeys = {
   tasks: (name: string) => [...projectKeys.detail(name), "tasks"] as const,
   tags: (name: string) => [...projectKeys.detail(name), "tags"] as const,
 };
-
-export const githubKeys = {
-  status: ["github", "status"] as const,
-};

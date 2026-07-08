@@ -24,7 +24,7 @@
     {
       "name": "thunder-authentication",
       "kind": "org",
-      "description": "How the platform's Thunder IDP is wired into SPAs that sign users in. Covers the callerIdentity.mode design field, the per-project Thunder OAuth client (BFF-owned — agent never sees client_id), the window._env_.THUNDER_* key set, and OIDC client wiring with oidc-client-ts. Pairs with react-webapp when the SPA wiring patterns apply. Apply on any project whose spec implies users sign in.",
+      "description": "How the platform's Thunder IDP is wired into SPAs that sign users in. Covers the end-user-auth platform-resource dependency that triggers auth, the per-dependency Thunder OAuth client (platform-owned — agent never sees client_id), the generic window._env_.<DEP>_* runtime keys derived from YOUR dependency name, and OIDC client wiring with oidc-client-ts. Pairs with react-webapp when the SPA wiring patterns apply. Apply on any project whose spec implies users sign in.",
       "contentSha": "d8f8ccc491f493f02e396a2d39fc8c1924913884aa86476474e1a51968bd946b",
       "editable": false
     }
