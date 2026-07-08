@@ -851,7 +851,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	codingExecutor.WithRunnerSecrets(runnerSecretResolver{svc: provisioningSvc})
 
 	// Runtime-config (env-config.js) emission — the SPA's `window._env_` (API URLs
-	// + THUNDER_* OIDC config) is materialised onto each web-app ReleaseBinding.
+	// + generic <DEP>_<OUTPUT> keys for its platform-resource deps) is materialised
+	// onto each web-app ReleaseBinding.
 	// Two triggers, mirroring the retired dispatch cascade:
 	//   - ensure-time: at the coding-dispatch pre-flight, emit for the just-ensured
 	//     component (self-no-ops for non-web-apps);
