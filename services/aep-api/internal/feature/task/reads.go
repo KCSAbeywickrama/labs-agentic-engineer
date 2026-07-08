@@ -245,18 +245,16 @@ func executionView(e *models.Execution) ExecutionView {
 	}
 }
 
-// latestDesignTag returns the newest approved design tag (index 0 of the
-// descending version list), or "" when unavailable. Best-effort — used only for
-// the stale-design attention flag.
+// latestDesignTag returns the newest approved design tag, or "" when
+// unavailable. Best-effort — used only for the stale-design attention flag, so
+// it reads the local mirror WITHOUT a fetch (VersionReader.LatestDesignTag)
+// rather than forcing a live ListDesignVersions round-trip on every task-list
+// call (docs/design/gitfs-fetch-on-read-followup.md §2).
 func (r *Reads) latestDesignTag(ctx context.Context, orgID, projectID string) string {
 	if r.versions == nil {
 		return ""
 	}
-	vs, err := r.versions.ListDesignVersions(ctx, orgID, projectID)
-	if err != nil || len(vs) == 0 {
-		return ""
-	}
-	return vs[0].Tag
+	return r.versions.LatestDesignTag(ctx, orgID, projectID)
 }
 
 func matchesState(issueState, filter string) bool {

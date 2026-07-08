@@ -18,6 +18,7 @@ export const seedProjects: Project[] = [
     description: "Sample storefront seeded by the mock layer",
     status: "active",
     createdAt: "2026-06-12T09:30:00Z",
+    repoUrl: "https://github.com/acme-dev/demo-shop.git",
   },
   {
     name: "gym-tracker",
@@ -25,7 +26,10 @@ export const seedProjects: Project[] = [
     description: "Track workouts, sets, and progress over time",
     status: "active",
     createdAt: "2026-06-20T14:05:00Z",
+    repoUrl: "https://github.com/acme-dev/gym-tracker.git",
   },
+  // invoice-hub deliberately has NO repoUrl — exercises the delete dialog's
+  // generic-copy variant (failed/absent repo provisioning, #107).
   {
     name: "invoice-hub",
     displayName: "Invoice Hub",
@@ -136,3 +140,15 @@ export const duplicateProjectError: ErrorModel = {
   detail: "A project with this name already exists",
 };
 
+// Delete-failure scenario (#107): toggle in the browser devtools:
+//   localStorage.setItem('aep:mock:projects:delete', 'error')
+export const deleteProjectError: ErrorModel = {
+  type: "about:blank",
+  status: 500,
+  title: "Internal Server Error",
+  detail: "Mock error scenario for project deletion",
+};
+
+// The /config mock (org-config projection) lives in mocks/fixtures/settings.ts
+// and mocks/handlers/settings.ts (issue #96 owns that endpoint) — not
+// duplicated here.

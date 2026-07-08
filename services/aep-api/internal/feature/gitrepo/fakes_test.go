@@ -156,6 +156,18 @@ func (f *fakeRepoRepo) ListAllReady(context.Context) ([]models.GitRepository, er
 	return out, nil
 }
 
+func (f *fakeRepoRepo) ListByOrg(_ context.Context, ocOrgID string) ([]models.GitRepository, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []models.GitRepository
+	for _, r := range f.rows {
+		if r.OrgID == ocOrgID {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepoRepo) ListAll(context.Context) ([]models.GitRepository, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

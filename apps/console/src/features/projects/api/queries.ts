@@ -147,10 +147,34 @@ export function useCreateProject() {
   });
 }
 
+// Delete a project (#107). The BFF cascade destroys the OC project, its
+// deployments, and the GitHub repo; the confirm dialog owns the warning.
+// Invalidates every list page so the card leaves the grid on success.
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (projectName: string) => {
+      const { error } = await client.DELETE("/projects/{projectName}", {
+        params: { path: { projectName } },
+      });
+      if (error) {
+        throw new Error(
+          error.detail ?? error.title ?? "Failed to delete project",
+        );
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: projectKeys.lists() });
+    },
+  });
+}
+
 // The connected GitHub org, for the repo-URL preview in the create flow.
 // GitHub connection state now lives on the org config (issue #96 moved it
 // off the old /org/credentials/github onto GET /config's gitProvider
-// section), so this rides the settings feature's shared useConfig query.
+// section), so this rides the settings feature's shared useConfig query
+// instead of a second, independent fetch of the same endpoint. gitProvider
+// is nullable (not connected yet), hence the optional chaining.
 export function useGithubOrg() {
   const { data } = useConfig();
   return {

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"regexp"
 	"strings"
 
@@ -31,7 +30,11 @@ import (
 
 // RepoService manages git repository lifecycle (create, get, delete).
 type RepoService interface {
-	CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error)
+	// CreateRepo provisions the project's GitHub repo. repoName == "" derives
+	// the name from projectName (slug); either way the name is used VERBATIM —
+	// a conflict fails with ErrRepoNameConflict (never suffixed away) so the
+	// user can be asked for a different name.
+	CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error)
 	// EnsureBareRepo idempotently provisions a private repo with a STABLE name
 	// (no random suffix) and NO local clone — used for the per-org skills repo
 	// (sentinel projectID, e.g. "_skills"). AutoInit gives it a `main` branch +
@@ -41,6 +44,9 @@ type RepoService interface {
 	// See docs/design/skills-repo-storage.md §10.
 	EnsureBareRepo(ctx context.Context, orgID, projectID, repoName string) (*models.GitRepository, error)
 	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+	// ListByOrg returns the org's repo rows (all statuses) — the source for
+	// the project-list repoUrl annotation (#108).
+	ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error)
 	// SetWebhookID is called by the webhook registration service after a hook
 	// is provisioned for the repo on GitHub. Stored alongside the repo record
 	// so cleanup can deregister.
@@ -91,8 +97,8 @@ func NewRepoService(
 	return s
 }
 
-func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error) {
-	slog.InfoContext(ctx, "creating repository", "org", orgID, "project", projectID, "name", projectName)
+func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
+	slog.InfoContext(ctx, "creating repository", "org", orgID, "project", projectID, "name", projectName, "repoName", repoName)
 	if orgID == "" {
 		return nil, fmt.Errorf("orgID is required")
 	}
@@ -116,10 +122,21 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 		return nil, fmt.Errorf("resolve credential for org %q: %w", orgID, err)
 	}
 
-	slug := slugifyProjectName(projectName)
 	description := fmt.Sprintf("WSO2 Labs Agentic Engineer project %s", projectName)
 
-	repoName, cloneURL, err := s.createGitHubRepoWithRetry(ctx, cred, slug, description)
+	if repoName == "" {
+		repoName = slugifyProjectName(projectName)
+	}
+	// The name — user-chosen or derived — is created VERBATIM: it is what the
+	// create form showed. A conflict propagates (ErrRepoNameConflict survives
+	// the wrap) so the caller can ask the user for a different name; suffixing
+	// it away would silently rename the repo behind their back.
+	cloneURL, err := s.github.CreateOrgRepo(ctx, cred, CreateOrgRepoRequest{
+		Name:        repoName,
+		Private:     strings.EqualFold(s.repoVis, "private"),
+		AutoInit:    true,
+		Description: description,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create github repo: %w", err)
 	}
@@ -152,26 +169,6 @@ func (s *repoService) CreateRepo(ctx context.Context, orgID, projectID, projectN
 		"owner", cred.RepoOwner(), "name", repoName, "project", projectID, "org", orgID)
 
 	return gitRepo, nil
-}
-
-// createGitHubRepoWithRetry rolls a fresh 3-digit suffix per attempt. Up to 5 retries on name conflict.
-func (s *repoService) createGitHubRepoWithRetry(ctx context.Context, cred credentials.Credential, slug, description string) (repoName, cloneURL string, err error) {
-	for attempt := 1; attempt <= 5; attempt++ {
-		name := fmt.Sprintf("%s%03d", slug, rand.IntN(1000))
-		cloneURL, err = s.github.CreateOrgRepo(ctx, cred, CreateOrgRepoRequest{
-			Name:        name,
-			Private:     strings.EqualFold(s.repoVis, "private"),
-			AutoInit:    true,
-			Description: description,
-		})
-		if err == nil {
-			return name, cloneURL, nil
-		}
-		if !IsRepoNameConflict(err) {
-			return "", "", err
-		}
-	}
-	return "", "", fmt.Errorf("repo name for %q unavailable after 5 attempts: %w", slug, err)
 }
 
 func (s *repoService) EnsureBareRepo(ctx context.Context, orgID, projectID, repoName string) (*models.GitRepository, error) {
@@ -242,6 +239,14 @@ func (s *repoService) GetRepo(ctx context.Context, orgID, projectID string) (*mo
 	return repo, nil
 }
 
+func (s *repoService) ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error) {
+	rows, err := s.repo.ListByOrg(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list repos by org: %w", err)
+	}
+	return rows, nil
+}
+
 func (s *repoService) SetWebhookID(ctx context.Context, orgID, projectID string, hookID int64) error {
 	repo, err := s.repo.GetByOrgAndProjectID(ctx, orgID, projectID)
 	if err != nil {
@@ -279,7 +284,7 @@ func (s *repoService) DeleteRepo(ctx context.Context, orgID, projectID string) e
 
 var repoSlugInvalid = regexp.MustCompile(`[^a-z0-9-]+`)
 
-// slugifyProjectName produces the slug portion of a repo name. The 3-digit suffix is added by the caller.
+// slugifyProjectName produces the default repo name from the project name.
 func slugifyProjectName(projectName string) string {
 	slug := strings.ToLower(projectName)
 	slug = repoSlugInvalid.ReplaceAllString(slug, "-")

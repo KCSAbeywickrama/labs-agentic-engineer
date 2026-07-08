@@ -73,6 +73,9 @@ func (s *stubRepoRepo) GetByOrgAndSlug(context.Context, string, string) (*models
 func (s *stubRepoRepo) ListAllReady(context.Context) ([]models.GitRepository, error) {
 	return nil, nil
 }
+func (s *stubRepoRepo) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+	panic("stubRepoRepo: ListByOrg not expected in artifacts tests")
+}
 func (s *stubRepoRepo) ListAll(context.Context) ([]models.GitRepository, error) {
 	return nil, nil
 }

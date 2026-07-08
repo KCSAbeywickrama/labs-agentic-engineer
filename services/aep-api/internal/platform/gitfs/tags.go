@@ -78,10 +78,11 @@ func (e *Engine) Tag(ctx context.Context, ref RepoRef, spec TagSpec) error {
 	return nil
 }
 
-// ListTags implements Workspace: fetches tags then lists refs/tags/<prefix>*
-// via for-each-ref plumbing. CommitHash is the PEELED commit (annotated tags
-// dereferenced); Message is the tag message subject, empty for lightweight
-// tags.
+// ListTags implements Workspace: fetches origin tags then lists
+// refs/tags/<prefix>* via for-each-ref plumbing. CommitHash is the PEELED
+// commit (annotated tags dereferenced); Message is the tag message subject,
+// empty for lightweight tags. Use this on the freshness-critical paths (the
+// version-list endpoints, the save collision precheck, the plan lineage).
 func (e *Engine) ListTags(ctx context.Context, ref RepoRef, prefix string) ([]TagInfo, error) {
 	p, err := e.pathsFor(ref)
 	if err != nil {
@@ -102,6 +103,33 @@ func (e *Engine) ListTags(ctx context.Context, ref RepoRef, prefix string) ([]Ta
 			return nil, ferr
 		}
 	}
+	return e.readTags(ctx, ref, p, prefix)
+}
+
+// ListTagsLocal implements Workspace: like ListTags but WITHOUT the origin
+// fetch — it lists whatever tags the shared mirror already holds. The mirror is
+// authoritative for every tag this platform creates (Tag pushes AND updates the
+// mirror before returning, and the mirror lives on the shared RWX volume, so a
+// tag cut by any instance is visible to all), so this is correctness-equivalent
+// to ListTags for the platform-owned `v*` tags — only truly out-of-band pushes
+// are missed until the next fetch-bearing op. Intended for best-effort,
+// hot-path reads (the task stale-design attention flag) that must not pay a
+// per-read network round-trip. ensureMirror still clones on first-ever access
+// (a stat when the mirror is already present).
+func (e *Engine) ListTagsLocal(ctx context.Context, ref RepoRef, prefix string) ([]TagInfo, error) {
+	p, err := e.pathsFor(ref)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := e.ensureMirror(ctx, ref, p); err != nil {
+		return nil, err
+	}
+	return e.readTags(ctx, ref, p, prefix)
+}
+
+// readTags lists refs/tags/<prefix>* from the local mirror under the shared
+// flock (a pure ref read — no fetch). Shared by ListTags/ListTagsLocal.
+func (e *Engine) readTags(ctx context.Context, ref RepoRef, p repoPaths, prefix string) ([]TagInfo, error) {
 	release, err := e.locks.RLock(ctx, p.lockPath)
 	if err != nil {
 		return nil, err
