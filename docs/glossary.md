@@ -242,6 +242,19 @@ e.g. `postgres-cnpg`, `thunder-app`). Authored in
 under `dependencies[]`. The word **connection** is banned for these concepts —
 in OC it means a consumed endpoint (WorkloadConnection), the opposite side.
 
+### Resource-type marker
+A PE-authored label or annotation (the `aep.wso2.com/` prefix) on a
+`ClusterResourceType`, telling aep-api which generic consumption behavior a
+`platform-resource` type needs — `role: end-user-auth` (stamp
+`exposesAPI.auth` on dependents), `consumer-url-env-config` /
+`consumer-url-path` (patch the consuming web-app's callback URL into an
+env-config key), `skill` (auto-attach a named skill to the design). aep-api
+keys behavior ONLY on markers, never on a `resourceType` name — adding a new
+type, including a new auth flavor, is a cluster install plus a skill, never
+an app-factory code change. See [[adr-metadata-driven-resource-consumption]].
+_Avoid_: reserved name, well-known type name (no `resourceType` value carries
+platform-level meaning; see ADR-0007's rejected alternatives).
+
 ### External resource registry
 Org-level definitions (name + config-key schema) reusable across projects; the
 design agent discovers them via MCP (`list_external_resources`) and reuses the

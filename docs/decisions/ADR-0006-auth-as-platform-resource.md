@@ -42,20 +42,26 @@ that already handles `postgres-cnpg` handles `thunder-app`, unmodified.
 
 `exposesAPI.auth: end-user-required` is derived by the platform, not authored:
 at design save (before the tag-cut), any `service` component that declares a
-`thunder-app` dependency gets this value stamped automatically
-(`services/aep-api/internal/feature/design/derive_auth.go`). An explicit
-`exposesAPI.auth: service-required` on such a component is a
+dependency on a resource type carrying the `aep.wso2.com/role: end-user-auth`
+marker — `thunder-app` is the first and, at the time of writing, only such
+type — gets this value stamped automatically
+(`services/aep-api/internal/feature/design/derive_auth.go`; see ADR-0007 for
+why this keys on the marker rather than the `thunder-app` name itself). An
+explicit `exposesAPI.auth: service-required` on such a component is a
 self-contradiction — the dependency says the API sits behind end-user
 sign-in, the flag says it never does — and is rejected as a validation error
 rather than silently overridden or silently allowed.
 
-SPAs receive OAuth coordinates via `window._env_`, sourced from the
-dependency binding's outputs: `THUNDER_URL`, `THUNDER_CLIENT_ID`,
-`THUNDER_SCOPES`, `THUNDER_REDIRECT_URI`, `THUNDER_AFTER_SIGN_IN_URL`. Redirect
+SPAs receive OAuth coordinates via `window._env_`, sourced generically from the
+dependency binding's outputs (see ADR-0007 for the generic `<DEP>_<OUTPUT>`
+key contract that replaced the original fixed `THUNDER_*` names). Redirect
 URIs are platform-managed, not authored: aep-api patches the binding's
 `environmentConfigs.redirectUris` with the SPA's `/callback` URL once its
 public URL resolves, declaratively — the operator picks up the change on its
 next reconcile, the same cascade-on-deploy path other resource outputs use.
+The SPA itself computes `redirect_uri = window.location.origin + '/callback'`
+in the browser; the platform's role is limited to getting that origin
+registered on the binding (ADR-0007's consumer-URL-patch marker).
 
 Token verification for backends is unchanged by this decision: the API
 gateway validates JWTs against the Platform IdP's JWKS and injects

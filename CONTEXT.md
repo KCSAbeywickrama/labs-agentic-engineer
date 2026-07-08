@@ -45,6 +45,17 @@ a stored "connected/not" flag.
 _Avoid_: connection (in OpenChoreo that names a consumed endpoint — the
 opposite side of the wire).
 
+**Resource-type marker**:
+A declaration a platform engineer attaches to a resource type in the catalog,
+naming a generic consumption behavior that type needs — for example, "using
+this resource requires end-user sign-in," or "attach this skill wherever this
+resource is used." The platform decides how to treat a dependency by reading
+these markers, never by recognizing the resource type's name; introducing a
+new resource type, including a new way of doing end-user auth, is a catalog
+addition, not a platform change.
+_Avoid_: reserved name, well-known type name (no resource type's name is ever
+meaningful to the platform itself).
+
 **Thunder application**:
 A platform resource (`resourceType: thunder-app`) representing a per-project
 OAuth client on the Platform IdP. Declared under the same dependency name by
