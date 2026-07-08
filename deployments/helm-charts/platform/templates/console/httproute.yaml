@@ -11,7 +11,7 @@ spec:
     - name: gateway-default
       namespace: openchoreo-control-plane
   hostnames:
-    - "console.openchoreo.localhost"
+    - {{ index (urlParse .Values.console.publicURL) "hostname" | quote }}
   rules:
     # Route /aep-api-service/* → aep-api, stripping the prefix so the API
     # receives paths like /api/v1/... without the console-side prefix.

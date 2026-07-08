@@ -67,14 +67,32 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   name: platform-configs
-                  key: JWKS_URL
+                  key: THUNDER_JWKS_URL
             - name: JWT_ISSUER
               valueFrom:
                 configMapKeyRef:
                   name: platform-configs
-                  key: JWT_ISSUER
+                  key: THUNDER_ISSUER
 
-            # secrets
+            - name: THUNDER_ADMIN_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_ADMIN_URL
+            - name: THUNDER_SYSTEM_CLIENT_ID
+              value: "aep-system-client"
+
+            # secrets — all values sourced from ESO-synced K8s Secrets (written by aep init)
+            - name: THUNDER_SYSTEM_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-thunder-secrets
+                  key: THUNDER_SYSTEM_CLIENT_SECRET
+            - name: OAUTH_STATE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aep-oauth-secrets
+                  key: OAUTH_STATE_SIGNING_KEY
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

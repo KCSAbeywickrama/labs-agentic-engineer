@@ -65,8 +65,14 @@ taskSigning:
 observer:
   clientId: "openchoreo-observer-resource-reader-client"
 
+thunder:
+  # In-cluster URL for the Thunder service. Override if Thunder is deployed in a different namespace or port.
+  adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
+  jwksURL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
+
 openbao:
-  release: aep-openbao
+  # Address of the OpenBao service. Matches: helm install aep ./bundle -n wso2-aep
+  addr: "http://aep-aep-openbao.wso2-aep.svc.cluster.local:8200"
 
 postgres:
   version: "16"
