@@ -30,11 +30,21 @@ import {
   yXmlFragmentToProsemirrorJSON,
 } from "y-prosemirror";
 import type * as Y from "yjs";
+import type { Node as ProseMirrorNode } from "prosemirror-model";
+import { AgentInsertion } from "./agent-mark.js";
 
-const extensions = [StarterKit];
+// AgentInsertion rides in the ONE shared schema (console editor, seeding,
+// committer serialization, agent diff application) — its markdown render is
+// a passthrough, so committed files never carry review state.
+const extensions = [StarterKit, AgentInsertion];
 
 const manager = new MarkdownManager({ extensions });
 const schema = getSchema(extensions);
+
+/** Parse markdown into a ProseMirror Node (the diff-apply input, #86 ph6). */
+export function markdownToNode(markdown: string): ProseMirrorNode {
+  return schema.nodeFromJSON(manager.parse(markdown));
+}
 
 export function isMarkdownPath(path: string): boolean {
   return path.endsWith(".md");

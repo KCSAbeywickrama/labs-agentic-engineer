@@ -20,7 +20,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 import type { Document } from "@hocuspocus/server";
-import { setDocFile } from "@aep/collab-doc";
+import { setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
 import { flushRoom } from "./committer.js";
 import {
   addParticipant,
@@ -194,4 +194,24 @@ test("participants without an email get the noreply trailer address", async () =
     applies[0]!.message,
     /Co-authored-by: Chris <Chris@users\.noreply\.aep\.dev>/,
   );
+});
+
+test("interim flush holds md files with pending agent marks; forced flush commits them", async () => {
+  const doc = seededDoc();
+  setDocFileAsAgent(
+    doc as unknown as Parameters<typeof setDocFileAsAgent>[0],
+    "requirements/prd.md",
+    "# PRD\n\nSeeded. Agent addition.",
+    "agent",
+    { agent: "Spec Agent", at: "2026-07-08T00:00:00Z" },
+  );
+  const { bff, applies } = fakeBff();
+
+  await flushRoom({ bff }, ROOM, doc, ctx); // interim: held
+  assert.equal(applies.length, 0);
+
+  await flushRoom({ bff }, ROOM, doc, ctx, true); // forced: commits
+  assert.equal(applies.length, 1);
+  assert.match(applies[0]!.writes[0]!.content, /Agent addition\./);
+  assert.ok(!applies[0]!.writes[0]!.content.includes("agentInsertion"));
 });

@@ -24,7 +24,11 @@
 // bounded retries (#86 d6).
 
 import type { Document } from "@hocuspocus/server";
-import { isMarkdownPath, snapshotDoc } from "@aep/collab-doc";
+import {
+  hasPendingAgentMarks,
+  isMarkdownPath,
+  snapshotDoc,
+} from "@aep/collab-doc";
 import {
   ApplyConflictError,
   type ApplyDelete,
@@ -41,20 +45,31 @@ interface FlushDeps {
   log?: ((message: string) => void) | undefined;
 }
 
-/** The diff between the live doc and the room's baseline. */
+/**
+ * The diff between the live doc and the room's baseline. Interim flushes
+ * (`force: false`) HOLD files with pending agentInsertion marks — unreviewed
+ * agent text never reaches git mid-session; the forced session-end flush
+ * commits everything (accept-by-default; the serializer strips marks).
+ */
 export function pendingChanges(
   doc: Document,
   state: RoomState,
-): { writes: ApplyWrite[]; deletes: ApplyDelete[] } {
+  force: boolean,
+): { writes: ApplyWrite[]; deletes: ApplyDelete[]; held: string[] } {
   const current = snapshotDoc(doc);
   const writes: ApplyWrite[] = [];
   const deletes: ApplyDelete[] = [];
+  const held: string[] = [];
   for (const [path, content] of Object.entries(current)) {
     const base = state.baseline.get(path);
     if (base && base.content === content) continue;
     // Emptied md fragments write as empty (top-level fragments cannot be
     // deleted from a Y.Doc); empty NEW files are noise — skip them.
     if (!base && content === "") continue;
+    if (!force && isMarkdownPath(path) && hasPendingAgentMarks(doc, path)) {
+      held.push(path);
+      continue;
+    }
     writes.push({ path, content, baseSha: base?.sha ?? "" });
   }
   for (const [path, base] of state.baseline) {
@@ -63,7 +78,7 @@ export function pendingChanges(
     if (base.sha === "") continue; // never reached git — nothing to delete
     deletes.push({ path, baseSha: base.sha });
   }
-  return { writes, deletes };
+  return { writes, deletes, held };
 }
 
 function trailers(state: RoomState): string {
@@ -84,17 +99,23 @@ export async function flushRoom(
   documentName: string,
   doc: Document,
   context: CollabContext | undefined,
+  force = false,
 ): Promise<void> {
   const state = roomState(documentName);
   if (!state) return;
-  const token = context?.token;
+  const token = context?.token ?? state.lastToken;
   if (!token) {
     deps.log?.(`committer: no token for ${documentName} — skipping flush`);
     return;
   }
 
   for (let attempt = 0; ; attempt++) {
-    const { writes, deletes } = pendingChanges(doc, state);
+    const { writes, deletes, held } = pendingChanges(doc, state, force);
+    if (held.length > 0) {
+      deps.log?.(
+        `committer: ${documentName} holding ${held.join(", ")} (pending agent review)`,
+      );
+    }
     if (writes.length === 0 && deletes.length === 0) return;
 
     try {

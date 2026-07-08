@@ -19,6 +19,7 @@
 export {
   isMarkdownPath,
   markdownToFragment,
+  markdownToNode,
   fragmentToMarkdown,
 } from "./markdown.js";
 export {
@@ -29,5 +30,10 @@ export {
   snapshotDoc,
   applyTextEdit,
   setDocFile,
+  setDocFileAsAgent,
   deleteDocFile,
+  hasPendingAgentMarks,
 } from "./doc.js";
+export type { AgentEditMeta, CaretJSON } from "./doc.js";
+export { AgentInsertion, AGENT_INSERTION } from "./agent-mark.js";
+export type { AgentInsertionAttrs } from "./agent-mark.js";

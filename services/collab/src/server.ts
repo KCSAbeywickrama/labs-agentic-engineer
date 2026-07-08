@@ -19,6 +19,7 @@
 import { Server } from "@hocuspocus/server";
 import type {
   afterUnloadDocumentPayload,
+  beforeUnloadDocumentPayload,
   onAuthenticatePayload,
   onLoadDocumentPayload,
   onStoreDocumentPayload,
@@ -77,8 +78,10 @@ export function buildAuthenticateHook(config: CollabConfig, deps: CollabDeps) {
     // room into a project name for the seed read.
     const identity = await deps.bff.validateAccess(token, documentName);
     // Committer bookkeeping (#133): the session's participants become the
-    // commit's Co-authored-by trailers.
-    ensureRoomState(documentName, identity.projectName);
+    // commit's Co-authored-by trailers; the latest token backs the forced
+    // unload flush (no connection context exists by then).
+    const state = ensureRoomState(documentName, identity.projectName);
+    state.lastToken = token;
     addParticipant(documentName, {
       name: identity.name,
       email: identity.email,
@@ -167,6 +170,32 @@ export function buildStoreDocumentHook(config: CollabConfig, deps: CollabDeps) {
   };
 }
 
+// The forced session-end flush (#86 ph6 review gate): interim stores HOLD
+// files with pending agent marks, so the last leave must commit everything
+// (accept-by-default) BEFORE the doc unloads. beforeUnloadDocument has no
+// connection context — the room state's lastToken authenticates the apply.
+export function buildBeforeUnloadHook(config: CollabConfig, deps: CollabDeps) {
+  return async (
+    data: Pick<beforeUnloadDocumentPayload, "document" | "documentName">,
+  ) => {
+    if (config.devMode || !deps.bff) return;
+    if (!roomState(data.documentName)) return;
+    try {
+      await flushRoom(
+        { bff: deps.bff, log: deps.log },
+        data.documentName,
+        data.document,
+        undefined,
+        true,
+      );
+    } catch (err) {
+      deps.log?.(
+        `committer: final flush failed for ${data.documentName} (${String(err)})`,
+      );
+    }
+  };
+}
+
 export function buildAfterUnloadHook(deps: CollabDeps) {
   return (data: Pick<afterUnloadDocumentPayload, "documentName">) => {
     dropRoomState(data.documentName);
@@ -195,6 +224,9 @@ export function createCollabServer(
     ) => Promise<unknown>,
     onStoreDocument: buildStoreDocumentHook(config, deps) as (
       data: onStoreDocumentPayload<CollabContext>,
+    ) => Promise<unknown>,
+    beforeUnloadDocument: buildBeforeUnloadHook(config, deps) as (
+      data: beforeUnloadDocumentPayload,
     ) => Promise<unknown>,
     afterUnloadDocument: buildAfterUnloadHook(deps),
   });

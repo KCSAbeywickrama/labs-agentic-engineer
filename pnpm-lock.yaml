@@ -35,6 +35,9 @@ importers:
       '@aep/agent-stream':
         specifier: workspace:*
         version: link:../../packages/agent-stream
+      '@aep/collab-doc':
+        specifier: workspace:*
+        version: link:../../packages/collab-doc
       '@hocuspocus/provider':
         specifier: 4.3.0
         version: 4.3.0(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
@@ -154,6 +157,9 @@ importers:
       fast-diff:
         specifier: ^1.3.0
         version: 1.3.0
+      prosemirror-model:
+        specifier: ^1.25.10
+        version: 1.25.10
       y-prosemirror:
         specifier: ^1.3.7
         version: 1.3.7(prosemirror-model@1.25.10)(prosemirror-state@1.4.4)(prosemirror-view@1.42.0)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)

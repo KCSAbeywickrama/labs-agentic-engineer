@@ -34,10 +34,13 @@
 
 import diff from "fast-diff";
 import * as Y from "yjs";
+import { updateYFragment } from "y-prosemirror";
+import { AGENT_INSERTION } from "./agent-mark.js";
 import {
   fragmentToMarkdown,
   isMarkdownPath,
   markdownToFragment,
+  markdownToNode,
 } from "./markdown.js";
 
 /** The Y.Map holding non-markdown files (path → Y.Text). */
@@ -139,6 +142,171 @@ export function setDocFile(
     text.insert(0, content);
     filesMap(doc).set(path, text);
   }, origin);
+}
+
+/** Attribution metadata for reviewable agent edits (#86 phase 6). */
+export interface AgentEditMeta {
+  agent: string;
+  at: string;
+}
+
+/** JSON-encoded Y.RelativePosition (awareness `cursor` payload). */
+export type CaretJSON = ReturnType<typeof Y.relativePositionToJSON>;
+
+interface InsertedRun {
+  text: Y.XmlText;
+  index: number;
+  length: number;
+}
+
+/**
+ * Character-exact agent write (#86 phase 6): apply the new markdown as a
+ * MINIMAL diff onto the fragment (updateYFragment — concurrent user edits in
+ * untouched content survive, history is preserved), mark exactly the
+ * inserted ranges with `agentInsertion`, and return a caret at the end of
+ * the last insertion for the agent's awareness cursor. Non-md files get the
+ * plain diff-and-patch (no marks — textarea surfaces render none) with the
+ * caret at the last insert.
+ */
+export function setDocFileAsAgent(
+  doc: Y.Doc,
+  path: string,
+  content: string,
+  origin: unknown,
+  meta: AgentEditMeta,
+): { caret: CaretJSON | null } {
+  if (!isMarkdownPath(path)) {
+    let caret: CaretJSON | null = null;
+    const existing = doc.share.has(FILES_MAP)
+      ? filesMap(doc).get(path)
+      : undefined;
+    if (existing) {
+      doc.transact(() => {
+        let pos = 0;
+        let lastEnd: number | null = null;
+        for (const [op, chunk] of diff(existing.toString(), content)) {
+          if (op === diff.EQUAL) pos += chunk.length;
+          else if (op === diff.DELETE) existing.delete(pos, chunk.length);
+          else {
+            existing.insert(pos, chunk);
+            pos += chunk.length;
+            lastEnd = pos;
+          }
+        }
+        if (lastEnd !== null) {
+          caret = Y.relativePositionToJSON(
+            Y.createRelativePositionFromTypeIndex(existing, lastEnd),
+          );
+        }
+      }, origin);
+      return { caret };
+    }
+    setDocFile(doc, path, content, origin);
+    return { caret: null };
+  }
+
+  const node = markdownToNode(content);
+  const inserted: InsertedRun[] = [];
+
+  const collect = (events: Y.YEvent<Y.AbstractType<Y.YEvent<never>>>[]) => {
+    for (const event of events) {
+      const target = event.target;
+      if (target instanceof Y.XmlText) {
+        let pos = 0;
+        for (const d of event.delta) {
+          if (d.retain !== undefined) pos += d.retain as number;
+          else if (typeof d.insert === "string") {
+            inserted.push({ text: target, index: pos, length: d.insert.length });
+            pos += d.insert.length;
+          }
+        }
+      } else if (target instanceof Y.XmlFragment || target instanceof Y.XmlElement) {
+        // Newly inserted elements (whole blocks): mark all their text.
+        for (const d of event.delta) {
+          const items = d.insert;
+          if (!Array.isArray(items)) continue;
+          for (const item of items) {
+            if (item instanceof Y.XmlElement || item instanceof Y.XmlText) {
+              collectAllText(item, inserted);
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const fragment = doc.getXmlFragment(path);
+  fragment.observeDeep(collect);
+  try {
+    doc.transact(() => {
+      updateYFragment(doc, fragment, node, {
+        mapping: new Map(),
+        isOMark: new Map(),
+      });
+    }, origin);
+  } finally {
+    fragment.unobserveDeep(collect);
+  }
+
+  let caret: CaretJSON | null = null;
+  if (inserted.length > 0) {
+    doc.transact(() => {
+      for (const run of inserted) {
+        if (run.length === 0) continue;
+        run.text.format(run.index, run.length, {
+          [AGENT_INSERTION]: { agent: meta.agent, at: meta.at },
+        });
+      }
+    }, origin);
+    const last = inserted[inserted.length - 1]!;
+    caret = Y.relativePositionToJSON(
+      Y.createRelativePositionFromTypeIndex(last.text, last.index + last.length),
+    );
+  }
+  return { caret };
+}
+
+function collectAllText(
+  node: Y.XmlElement | Y.XmlText,
+  out: InsertedRun[],
+): void {
+  if (node instanceof Y.XmlText) {
+    if (node.length > 0) out.push({ text: node, index: 0, length: node.length });
+    return;
+  }
+  for (let i = 0; i < node.length; i++) {
+    const child = node.get(i);
+    if (child instanceof Y.XmlElement || child instanceof Y.XmlText) {
+      collectAllText(child, out);
+    }
+  }
+}
+
+/** True when any md fragment in the doc still carries agentInsertion marks. */
+export function hasPendingAgentMarks(doc: Y.Doc, path: string): boolean {
+  if (!isMarkdownPath(path) || !doc.share.has(path)) return false;
+  return fragmentHasMark(doc.getXmlFragment(path));
+}
+
+function fragmentHasMark(node: Y.XmlFragment | Y.XmlElement | Y.XmlText): boolean {
+  if (node instanceof Y.XmlText) {
+    return node
+      .toDelta()
+      .some(
+        (d: { attributes?: Record<string, unknown> }) =>
+          d.attributes && d.attributes[AGENT_INSERTION] !== undefined,
+      );
+  }
+  for (let i = 0; i < node.length; i++) {
+    const child = node.get(i);
+    if (
+      (child instanceof Y.XmlElement || child instanceof Y.XmlText) &&
+      fragmentHasMark(child)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Remove a file from the doc (fragment emptied — top-level shares cannot be deleted — or map entry removed). */

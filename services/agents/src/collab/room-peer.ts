@@ -35,7 +35,7 @@ import WebSocket from "ws";
 import type * as Y from "yjs";
 import {
   deleteDocFile,
-  setDocFile,
+  setDocFileAsAgent,
   snapshotDoc,
 } from "@aep/collab-doc";
 
@@ -112,14 +112,27 @@ export async function joinRoom(input: JoinRoomInput): Promise<RoomPeer> {
   }
 
   const doc: Y.Doc = provider.document;
+  const agentName = input.agentName ?? "Spec Agent";
   let left = false;
   return {
     files: () => snapshotDoc(doc),
-    set: (path, content) => setDocFile(doc, path, content, AGENT_ORIGIN),
+    set: (path, content) => {
+      // Reviewable, character-exact write (#86 phase 6): inserted ranges get
+      // the agentInsertion mark; the caret rides awareness so every browser
+      // renders the agent's cursor at its last insertion.
+      const { caret } = setDocFileAsAgent(doc, path, content, AGENT_ORIGIN, {
+        agent: agentName,
+        at: new Date().toISOString(),
+      });
+      if (caret) {
+        provider.setAwarenessField("cursor", { anchor: caret, head: caret });
+      }
+    },
     delete: (path) => deleteDocFile(doc, path, AGENT_ORIGIN),
     leave: () => {
       if (left) return;
       left = true;
+      provider.setAwarenessField("cursor", null);
       provider.destroy();
       socket.destroy(); // we created the sub-provider, we close it
     },
