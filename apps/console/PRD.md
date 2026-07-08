@@ -87,6 +87,11 @@ that's a stalled feature — investigate, don't ignore.
   [#80](https://github.com/wso2/labs-agentic-engineer/issues/80) (BE
   handshake: [#81](https://github.com/wso2/labs-agentic-engineer/issues/81),
   ADR-0007)
+- Project AI panel — right-hand agent chat on every project route; messages
+  run room-scoped collab turns (#86 phase 4): the agent joins the spec room
+  as a live peer and edits the shared doc while narrating in the panel —
+  [#130](https://github.com/wso2/labs-agentic-engineer/issues/130) (on
+  `feature-collab-with-agents`, not aep-rewrite, until the flow completes)
 - Console on the proposed contract (#111) — spec view reads via `list-files` +
   lazy `read-file` (supersedes #99); overview Build card from `list-tasks`
   (`/board` is gone); version chips from `/tags` `latest`/`specDirty` —

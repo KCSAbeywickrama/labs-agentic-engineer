@@ -16,20 +16,32 @@
  * under the License.
  */
 
+import { useState } from "react";
 import {
   AppShell,
+  Box,
   ColorSchemeToggle,
   Divider,
   Footer,
   Header,
+  IconButton,
   Sidebar,
+  Tooltip,
   UserMenu,
   version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
-import { FolderOpen, LogOut, Settings, User as UserIcon, WSO2 } from "@wso2/oxygen-ui-icons-react";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import {
+  FolderOpen,
+  LogOut,
+  Settings,
+  Sparkles,
+  User as UserIcon,
+  WSO2,
+} from "@wso2/oxygen-ui-icons-react";
+import { Link, Outlet, useParams, useRouterState } from "@tanstack/react-router";
 import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
+import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 
 // Sidebar highlight follows the route; grows one mapping per top-level route.
 function activeItemFor(pathname: string): string {
@@ -42,7 +54,14 @@ function activeItemFor(pathname: string): string {
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeItem = activeItemFor(pathname);
-  const { user, signOut } = useSession();
+  const { user, signOut, orgHandle } = useSession();
+
+  // Project AI panel (#130): available on every project route — mounted here
+  // because the full-screen spec route bypasses ProjectLayout. Same
+  // strict:false param read as the header's project switcher.
+  const params = useParams({ strict: false }) as { projectName?: string };
+  const projectName = params.projectName;
+  const [chatOpen, setChatOpen] = useState(false);
 
   return (
     <AppShell initialCollapsed={false} collapseOnSelectOnMobile>
@@ -72,6 +91,17 @@ export function AppLayout() {
           </Header.Switchers>
           <Header.Spacer />
           <Header.Actions>
+            {projectName && (
+              <Tooltip title={chatOpen ? "Close agent chat" : "Agent chat"}>
+                <IconButton
+                  aria-label="Toggle agent chat"
+                  color={chatOpen ? "primary" : "default"}
+                  onClick={() => setChatOpen((v) => !v)}
+                >
+                  <Sparkles size={20} />
+                </IconButton>
+              </Tooltip>
+            )}
             <ColorSchemeToggle />
             <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
             <UserMenu>
@@ -118,7 +148,20 @@ export function AppLayout() {
       </AppShell.Sidebar>
 
       <AppShell.Main>
-        <Outlet />
+        {/* Content + the project AI panel side by side: the page shrinks
+            rather than being overlaid; the panel mounts only while open. */}
+        <Box sx={{ display: "flex", height: "100%", minHeight: 0 }}>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Outlet />
+          </Box>
+          {projectName && chatOpen && (
+            <AgentChatPanel
+              org={orgHandle ?? "default"}
+              projectName={projectName}
+              onClose={() => setChatOpen(false)}
+            />
+          )}
+        </Box>
       </AppShell.Main>
 
       <AppShell.Footer>
