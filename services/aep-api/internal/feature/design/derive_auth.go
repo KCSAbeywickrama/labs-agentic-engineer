@@ -144,7 +144,7 @@ func exposesAPIEqual(a, b *models.ExposesAPI) bool {
 // components and, for every component it stamps, commits the updated
 // design.json to main via the committed-truth write surface (the same
 // designFileCommitter port + per-component SplitDesign render CollectSpec
-// uses). It runs from SaveAndProceed BEFORE the tag-cut, so a thunder-app
+// uses). It runs from SaveAndProceed BEFORE the tag-cut, so an auth-labeled
 // dependency's derived exposesAPI.auth is already on disk — and therefore
 // already what the NEXT design read sees (EnsureComponent's create-time trait
 // derivation, component.TraitSyncService, the Explorer) — by the time
