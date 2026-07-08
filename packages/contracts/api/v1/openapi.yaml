@@ -934,6 +934,23 @@ components:
         - kind
         - warnings
       type: object
+    ImportSkillUrlInput:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ImportSkillUrlInput.json
+          format: uri
+          readOnly: true
+          type: string
+        url:
+          description: Direct file URL — a raw SKILL.md or a gzip-compressed AgentSkills tarball. Fetched server-side.
+          format: uri
+          type: string
+      required:
+        - url
+      type: object
     LLMProjection:
       additionalProperties: false
       properties:
@@ -1280,14 +1297,18 @@ components:
           format: uri
           readOnly: true
           type: string
-        items:
+        repoUrl:
+          description: HTML URL of the org skills repo backing the catalogue.
+          type: string
+        skills:
           items:
             $ref: "#/components/schemas/SkillSummary"
           type:
             - array
             - "null"
       required:
-        - items
+        - skills
+        - repoUrl
       type: object
     SkillSyncOutput:
       additionalProperties: false
@@ -1342,14 +1363,18 @@ components:
           format: uri
           readOnly: true
           type: string
-        items:
+        count:
+          format: int64
+          type: integer
+        updates:
           items:
             $ref: "#/components/schemas/SkillUpdate"
           type:
             - array
             - "null"
       required:
-        - items
+        - updates
+        - count
       type: object
     StartConnectInputBody:
       additionalProperties: false
@@ -3244,6 +3269,33 @@ paths:
       security:
         - userJWT: []
       summary: Import an AgentSkills tarball
+      tags:
+        - Skills
+  /skills/import-url:
+    post:
+      operationId: import-skill-url
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportSkillUrlInput"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Import a skill from a URL
       tags:
         - Skills
   /skills/sync:

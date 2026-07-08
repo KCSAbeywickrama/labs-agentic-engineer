@@ -23,12 +23,18 @@ import {
   gitProviderDisconnectRejected,
   githubConnectedFixture,
   gitProviderValidationError,
+  IMPORT_INVALID_SENTINEL,
+  IMPORT_WARN_SENTINEL,
+  importFileInvalidError,
+  importUrlInvalidError,
+  importWarningsFixture,
   INVALID_CREDENTIAL_VALUE,
   llmConnectedFixture,
   llmValidationError,
   seedSkillUpdates,
   seedSkills,
   skillsLoadError,
+  skillsRepoUrl,
   type SettingsScenario,
 } from "../fixtures/settings";
 
@@ -89,6 +95,49 @@ function toSummary(s: SkillDetailBody): SkillSummary {
 function extractDescription(skillMd: string): string {
   const match = /^description:\s*(.+)$/m.exec(skillMd);
   return match?.[1]?.trim() ?? "Custom skill";
+}
+
+function slugFromFileName(fileName: string): string {
+  return fileName
+    .replace(/\.(md|tgz|tar\.gz)$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+type ImportResult = components["schemas"]["ImportResult"];
+
+// Shared by the tarball and URL import handlers: lands the skill in the
+// session catalogue and builds the ImportResult (warn-sentinel names get
+// the soft-warnings outcome — see fixtures/settings.ts).
+function importSkill(name: string, source: string): ImportResult {
+  const withWarnings = name.includes(IMPORT_WARN_SENTINEL);
+  const existing = skills.find((s) => s.name === name);
+  if (existing) {
+    existing.version += 1;
+    existing.contentSha = `sha-${name}-${existing.version}`;
+    existing.updatedAt = new Date().toISOString();
+  } else {
+    skills.push({
+      orgId: "org-1",
+      name,
+      kind: "imported",
+      editable: true,
+      description: `Imported from ${source}.`,
+      skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
+      references: {},
+      version: 1,
+      contentSha: `sha-${name}-1`,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  return {
+    name,
+    kind: "imported",
+    ...(withWarnings ? {} : { license: "Apache-2.0" }),
+    compatibility: withWarnings ? "partial" : "full",
+    warnings: withWarnings ? [...importWarningsFixture] : [],
+  };
 }
 
 function configProjection(): ConfigProjection {
@@ -166,26 +215,37 @@ export const settingsHandlers = [
 
   // Static /skills/* routes must register before the dynamic /skills/:name
   // handler below, or MSW would match "updates"/"import"/"sync" as a name.
-  http.post("*/api/v1/skills/import", async () => {
+  http.post("*/api/v1/skills/import", async ({ request }) => {
     ensureInitialized();
-    const imported: SkillDetailBody = {
-      orgId: "org-1",
-      name: `imported-skill-${skills.length + 1}`,
-      kind: "imported",
-      editable: true,
-      description: "Imported from an AgentSkills tarball.",
-      skillMd:
-        "---\nname: imported-skill\ndescription: Imported from an AgentSkills tarball.\n---\n\nImported skill body.",
-      references: {},
-      version: 1,
-      contentSha: `sha-imported-${skills.length + 1}`,
-      updatedAt: new Date().toISOString(),
-    };
-    skills.push(imported);
-    return HttpResponse.json(
-      { name: imported.name, kind: imported.kind, warnings: [] },
-      { status: 201 },
-    );
+    let fileName = "";
+    try {
+      const formData = await request.formData();
+      const file = formData.get("file");
+      fileName = file instanceof File ? file.name : "";
+    } catch {
+      fileName = "";
+    }
+    if (!fileName || fileName.includes(IMPORT_INVALID_SENTINEL)) {
+      return problem(importFileInvalidError, 422);
+    }
+    const name =
+      slugFromFileName(fileName) || `imported-skill-${skills.length + 1}`;
+    return HttpResponse.json(importSkill(name, "an AgentSkills tarball"), {
+      status: 201,
+    });
+  }),
+
+  http.post("*/api/v1/skills/import-url", async ({ request }) => {
+    ensureInitialized();
+    const body = (await request.json()) as { url?: string } | null;
+    const url = body?.url ?? "";
+    if (!url || url.includes(IMPORT_INVALID_SENTINEL)) {
+      return problem(importUrlInvalidError, 422);
+    }
+    const basename = url.split("/").pop() ?? "";
+    const name =
+      slugFromFileName(basename) || `imported-skill-${skills.length + 1}`;
+    return HttpResponse.json(importSkill(name, url), { status: 201 });
   }),
 
   http.post("*/api/v1/skills/sync", async ({ request }) => {
@@ -231,13 +291,16 @@ export const settingsHandlers = [
   http.get("*/api/v1/skills/updates", () => {
     ensureInitialized();
     if (scenario() === "error") return problem(skillsLoadError, 500);
-    return HttpResponse.json({ items: skillUpdates });
+    return HttpResponse.json({ updates: skillUpdates, count: skillUpdates.length });
   }),
 
   http.get("*/api/v1/skills", () => {
     ensureInitialized();
     if (scenario() === "error") return problem(skillsLoadError, 500);
-    return HttpResponse.json({ items: skills.map(toSummary) });
+    return HttpResponse.json({
+      skills: skills.map(toSummary),
+      repoUrl: skillsRepoUrl,
+    });
   }),
 
   http.post("*/api/v1/skills", async ({ request }) => {

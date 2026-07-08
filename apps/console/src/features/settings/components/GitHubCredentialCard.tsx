@@ -145,7 +145,7 @@ export function GitHubCredentialCard({
             }}
           />
           <TextField
-            label="GitHub login (optional)"
+            label="GitHub organization name"
             placeholder="octocat"
             value={githubLogin}
             onChange={(e) => setGithubLogin(e.target.value)}

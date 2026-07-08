@@ -69,7 +69,7 @@ Features currently being built. One line each; **must be emptied on ship**
 that's a stalled feature — investigate, don't ignore.
 
 - Settings — org GitHub PAT + Anthropic key credentials, and skills catalogue
-  (browse/create/import/sync) —
+  (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
   handshake: [#100](https://github.com/wso2/labs-agentic-engineer/issues/100))
 - Spec view — full-screen spec workspace (grouped requirement/design/validation

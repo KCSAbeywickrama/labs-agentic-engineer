@@ -37,6 +37,37 @@ export type SettingsScenario = "empty" | "connected" | "error";
 // provider (issue #96: PATCH /config validates before persisting).
 export const INVALID_CREDENTIAL_VALUE = "invalid";
 
+// Import sentinels (issue #96 re-grill: reject hard, warn soft). A file name
+// or URL containing "invalid" simulates a structurally-broken skill (hard
+// 422, nothing persisted); containing "warn" simulates an importable-but-
+// imperfect skill (201 with a non-empty ImportResult.warnings).
+export const IMPORT_INVALID_SENTINEL = "invalid";
+export const IMPORT_WARN_SENTINEL = "warn";
+
+export const importWarningsFixture = [
+  "license: none declared — treated as unlicensed",
+  "compatibility: references a tool ('browser') this platform does not provide",
+];
+
+// HTML URL of the org skills repo backing the catalogue (GET /skills
+// envelope repoUrl — powers the Import dialog's via-pull-request guidance).
+export const skillsRepoUrl = "https://github.com/acme-dev/org-skills";
+
+export const importUrlInvalidError: ErrorModel = {
+  type: "about:blank",
+  status: 422,
+  title: "Unprocessable Entity",
+  detail:
+    "body.url: the URL did not yield a valid skill (expected a raw SKILL.md or a gzip AgentSkills tarball)",
+};
+
+export const importFileInvalidError: ErrorModel = {
+  type: "about:blank",
+  status: 422,
+  title: "Unprocessable Entity",
+  detail: "body.file: not a valid gzip AgentSkills tarball",
+};
+
 export const githubConnectedFixture: GitProviderProjection = {
   kind: "github",
   mode: "pat",

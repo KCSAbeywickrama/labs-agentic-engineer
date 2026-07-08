@@ -29,27 +29,27 @@ import {
   DialogContentText,
   DialogTitle,
   ListingTable,
+  SearchBar,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FolderGit2, Plus, Upload } from "@wso2/oxygen-ui-icons-react";
+import { FolderGit2, Upload } from "@wso2/oxygen-ui-icons-react";
 import {
   useConfig,
   useDeleteSkill,
   useSkillUpdates,
   useSkills,
 } from "../api/queries";
-import { CreateSkillDialog } from "./CreateSkillDialog";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
 import { SyncUpdatesPanel } from "./SyncUpdatesPanel";
 
 export function SkillsSection() {
   const { data: config, isLoading: configLoading } = useConfig();
-  const { data: skills, isLoading, isError, error } = useSkills();
+  const { data, isLoading, isError, error } = useSkills();
   const { data: updates } = useSkillUpdates();
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
@@ -80,13 +80,26 @@ export function SkillsSection() {
     );
   }
 
-  if (isError || !skills) {
+  if (isError || !data) {
     return (
       <Alert severity="error">
         {error?.message ?? "Failed to load skills"}
       </Alert>
     );
   }
+
+  const { skills, repoUrl } = data;
+
+  // Client-side filter (issue #96 re-grill): the catalogue is fully loaded
+  // and tens of skills at most — name, description, and kind all match.
+  const query = search.trim().toLowerCase();
+  const visibleSkills = query
+    ? skills.filter((skill) =>
+        [skill.name, skill.description, skill.kind].some((field) =>
+          field.toLowerCase().includes(query),
+        ),
+      )
+    : skills;
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
@@ -99,20 +112,29 @@ export function SkillsSection() {
     <Box>
       <SyncUpdatesPanel updates={updates ?? []} />
 
-      <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mb: 2 }}>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 1,
+          mb: 2,
+        }}
+      >
+        <Box sx={{ width: { xs: "100%", sm: 320 } }}>
+          <SearchBar
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search skills..."
+          />
+        </Box>
         <Button
-          variant="outlined"
+          variant="contained"
           startIcon={<Upload size={18} />}
           onClick={() => setImportOpen(true)}
         >
           Import
-        </Button>
-        <Button
-          variant="contained"
-          startIcon={<Plus size={18} />}
-          onClick={() => setCreateOpen(true)}
-        >
-          Create skill
         </Button>
       </Box>
 
@@ -129,17 +151,24 @@ export function SkillsSection() {
               </ListingTable.Row>
             </ListingTable.Head>
             <ListingTable.Body>
-              {skills.length === 0 ? (
+              {visibleSkills.length === 0 ? (
                 <ListingTable.Row>
                   <ListingTable.Cell colSpan={5}>
-                    <ListingTable.EmptyState
-                      title="No skills yet"
-                      description="Create a skill, import one, or sync the platform's built-ins."
-                    />
+                    {skills.length === 0 ? (
+                      <ListingTable.EmptyState
+                        title="No skills yet"
+                        description="Import a skill, or sync the platform's built-ins."
+                      />
+                    ) : (
+                      <ListingTable.EmptyState
+                        title="No matching skills"
+                        description={`No skills match “${search.trim()}”.`}
+                      />
+                    )}
                   </ListingTable.Cell>
                 </ListingTable.Row>
               ) : (
-                skills.map((skill) => (
+                visibleSkills.map((skill) => (
                   <ListingTable.Row key={skill.name}>
                     <ListingTable.Cell>
                       <Typography variant="body2">{skill.name}</Typography>
@@ -186,13 +215,10 @@ export function SkillsSection() {
         </ListingTable.Container>
       </Box>
 
-      <CreateSkillDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-      />
       <ImportSkillDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
+        repoUrl={repoUrl}
       />
       <EditSkillDialog name={editTarget} onClose={() => setEditTarget(null)} />
 

@@ -134,6 +134,8 @@ export function useDisconnectGitProvider() {
 
 // --- Skills catalogue (repo-backed — see reconcile.go; no DB table) -------
 
+// Returns the whole envelope: `skills` plus `repoUrl` (the org skills repo
+// backing the catalogue — powers the Import dialog's via-PR guidance link).
 export function useSkills() {
   return useQuery({
     queryKey: skillsKeys.lists(),
@@ -142,7 +144,7 @@ export function useSkills() {
       if (error) {
         throw new Error(errorMessage(error, "Failed to load skills"));
       }
-      return data.items ?? [];
+      return { skills: data.skills ?? [], repoUrl: data.repoUrl };
     },
     staleTime: 30_000,
   });
@@ -156,7 +158,7 @@ export function useSkillUpdates() {
       if (error) {
         throw new Error(errorMessage(error, "Failed to load skill updates"));
       }
-      return data.items ?? [];
+      return data.updates ?? [];
     },
     staleTime: 30_000,
   });
@@ -246,6 +248,26 @@ export function useImportSkill() {
       });
       if (error) {
         throw new Error(errorMessage(error, "Failed to import the skill"));
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
+    },
+  });
+}
+
+// Server-side fetch of a direct file URL (raw SKILL.md or tarball) — the
+// BE fetches so the browser never hits CORS (issue #96 re-grill decision).
+export function useImportSkillUrl() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (url: string) => {
+      const { data, error } = await client.POST("/skills/import-url", {
+        body: { url },
+      });
+      if (error) {
+        throw new Error(errorMessage(error, "Failed to import from the URL"));
       }
       return data;
     },
