@@ -28,6 +28,7 @@ package project
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -42,16 +44,23 @@ import (
 
 // fakeRepoSvc fakes gitrepo.RepoService. Unset funcs panic loudly.
 type fakeRepoSvc struct {
-	CreateRepoFunc func(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error)
+	CreateRepoFunc func(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error)
 	GetRepoFunc    func(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
 	DeleteRepoFunc func(ctx context.Context, orgID, projectID string) error
+	ListByOrgFunc  func(ctx context.Context, orgID string) ([]models.GitRepository, error)
 }
 
-func (f *fakeRepoSvc) CreateRepo(ctx context.Context, orgID, projectID, projectName string) (*models.GitRepository, error) {
+func (f *fakeRepoSvc) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
 	if f.CreateRepoFunc == nil {
 		panic("fakeRepoSvc: CreateRepo not set")
 	}
-	return f.CreateRepoFunc(ctx, orgID, projectID, projectName)
+	return f.CreateRepoFunc(ctx, orgID, projectID, projectName, repoName)
+}
+func (f *fakeRepoSvc) ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error) {
+	if f.ListByOrgFunc == nil {
+		panic("fakeRepoSvc: ListByOrg not set")
+	}
+	return f.ListByOrgFunc(ctx, orgID)
 }
 func (f *fakeRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
 	panic("fakeRepoSvc: EnsureBareRepo not expected in project tests")
@@ -239,6 +248,56 @@ func TestListProjects_SurfacesNextCursorAndPassesParams(t *testing.T) {
 	}
 }
 
+// ListProjects joins each project's git repo URL from the BFF's own rows
+// (#108): repo-less projects stay bare, and a failing join degrades to a
+// repoUrl-less list rather than a 500 — the listing must never break because
+// the annotation source is down.
+func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{
+		ListProjectsFunc: func(context.Context, string, int, string) (*models.ProjectList, error) {
+			return &models.ProjectList{Items: []models.Project{
+				{Name: "web"},
+				{Name: "no-repo"},
+			}}, nil
+		},
+	}
+	repoSvc := &fakeRepoSvc{
+		ListByOrgFunc: func(_ context.Context, orgID string) ([]models.GitRepository, error) {
+			if orgID != "acme" {
+				t.Errorf("ListByOrg org = %q, want acme", orgID)
+			}
+			return []models.GitRepository{
+				{OrgID: "acme", ProjectID: "web", RepoURL: "https://github.com/acme/web.git"},
+			}, nil
+		},
+	}
+	svc := NewProjectService(oc, repoSvc, nil, nil, nil, nil)
+
+	list, err := svc.ListProjects(context.Background(), "acme", 100, "", "")
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if list.Items[0].RepoURL != "https://github.com/acme/web.git" {
+		t.Fatalf("web repoUrl = %q, want the joined clone URL", list.Items[0].RepoURL)
+	}
+	if list.Items[1].RepoURL != "" {
+		t.Fatalf("no-repo project got repoUrl %q, want empty", list.Items[1].RepoURL)
+	}
+
+	// Join failure → list still returns, just unannotated.
+	repoSvc.ListByOrgFunc = func(context.Context, string) ([]models.GitRepository, error) {
+		return nil, errors.New("db down")
+	}
+	list, err = svc.ListProjects(context.Background(), "acme", 100, "", "")
+	if err != nil {
+		t.Fatalf("ListProjects with failing join: %v", err)
+	}
+	if list.Items[0].RepoURL != "" {
+		t.Fatalf("failing join must not annotate: got %q", list.Items[0].RepoURL)
+	}
+}
+
 // --- CreateProject -----------------------------------------------------------
 
 func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
@@ -248,10 +307,10 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 			return &models.Project{Name: req.Name, NamespaceName: org}, nil
 		},
 	}
-	var repoOrg, repoProject, repoName string
+	var repoOrg, repoProject, repoProjectName, repoOverride string
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(_ context.Context, orgID, projectID, projectName string) (*models.GitRepository, error) {
-			repoOrg, repoProject, repoName = orgID, projectID, projectName
+		CreateRepoFunc: func(_ context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
+			repoOrg, repoProject, repoProjectName, repoOverride = orgID, projectID, projectName, repoName
 			return &models.GitRepository{Status: "ready"}, nil
 		},
 	}
@@ -268,8 +327,8 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 	if p.Name != "web" {
 		t.Fatalf("project name: got %q", p.Name)
 	}
-	if repoOrg != "acme" || repoProject != "web" || repoName != "web" {
-		t.Fatalf("CreateRepo args: got (%q,%q,%q)", repoOrg, repoProject, repoName)
+	if repoOrg != "acme" || repoProject != "web" || repoProjectName != "web" || repoOverride != "" {
+		t.Fatalf("CreateRepo args: got (%q,%q,%q,override=%q)", repoOrg, repoProject, repoProjectName, repoOverride)
 	}
 	if webhooks.calls != 1 {
 		t.Fatalf("webhook Register calls: got %d, want 1", webhooks.calls)
@@ -281,6 +340,80 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("skills provisioner was never called")
+	}
+}
+
+func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
+	t.Parallel()
+	oc := &ocmocks.ProjectClientMock{
+		CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
+			return &models.Project{Name: req.Name, NamespaceName: org}, nil
+		},
+	}
+	var repoProject, repoOverride string
+	repoSvc := &fakeRepoSvc{
+		CreateRepoFunc: func(_ context.Context, _, projectID, _, repoName string) (*models.GitRepository, error) {
+			repoProject, repoOverride = projectID, repoName
+			return &models.GitRepository{Status: "ready"}, nil
+		},
+	}
+	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{}, nil, nil, nil)
+
+	req := &models.CreateProjectRequest{Name: "gym", RepoName: "gym-repo", Prompt: "a workout tracker"}
+	if _, err := svc.CreateProject(context.Background(), "acme", req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The OC project keeps the project name; only the git repo gets the override.
+	if repoProject != "gym" || repoOverride != "gym-repo" {
+		t.Fatalf("CreateRepo args: got (project=%q repo=%q), want (gym, gym-repo)", repoProject, repoOverride)
+	}
+}
+
+// A repo name conflict is a hard failure whether the name was user-chosen or
+// derived from the project name: the WHOLE create fails (the just-created OC
+// project is compensated away) instead of degrading to the no-repo limbo —
+// retrying the same name can never succeed, so the user must be told
+// immediately to pick another name.
+func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		repoName string
+	}{
+		{"user-chosen repo name", "taken-repo"},
+		{"derived repo name", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var deletedProject string
+			oc := &ocmocks.ProjectClientMock{
+				CreateProjectFunc: func(_ context.Context, org string, req *models.CreateProjectRequest) (*models.Project, error) {
+					return &models.Project{Name: req.Name, NamespaceName: org}, nil
+				},
+				DeleteProjectFunc: func(_ context.Context, _, projectName string) error {
+					deletedProject = projectName
+					return nil
+				},
+			}
+			repoSvc := &fakeRepoSvc{
+				CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
+					return nil, fmt.Errorf("create github repo: %w", gitrepo.ErrRepoNameConflict)
+				},
+			}
+			svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
+				t.Error("webhook must not be registered when the repo conflicts")
+				return nil, nil
+			}}, nil, nil, nil)
+
+			req := &models.CreateProjectRequest{Name: "gym", RepoName: tc.repoName}
+			_, err := svc.CreateProject(context.Background(), "acme", req)
+			if !gitrepo.IsRepoNameConflict(err) {
+				t.Fatalf("err = %v, want the repo-name-conflict sentinel surfaced", err)
+			}
+			if deletedProject != "gym" {
+				t.Fatalf("OC project compensation: deleted %q, want gym", deletedProject)
+			}
+		})
 	}
 }
 
@@ -310,7 +443,7 @@ func TestCreateProject_RepoFailureIsBestEffort(t *testing.T) {
 		},
 	}
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(context.Context, string, string, string) (*models.GitRepository, error) {
+		CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
 			return nil, errors.New("github down")
 		},
 	}
@@ -334,7 +467,7 @@ func TestCreateProject_WebhookFailureIsBestEffort(t *testing.T) {
 		},
 	}
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(context.Context, string, string, string) (*models.GitRepository, error) {
+		CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
 			return &models.GitRepository{Status: "ready"}, nil
 		},
 	}

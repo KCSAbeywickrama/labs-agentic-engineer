@@ -1,9 +1,10 @@
 import { http, HttpResponse } from "msw";
 import type { components } from "../../generated/aep-api";
 import {
+  deleteProjectError,
   duplicateProjectError,
   emptyProjects,
-  githubStatus,
+  orgConfig,
   projectsError,
   PROJECTS_PAGE_SIZE,
   seedProjects,
@@ -24,9 +25,15 @@ function scenario(): ProjectsScenario {
 // scenario's seed so the create flow behaves statefully in mock mode.
 const createdProjects: Project[] = [];
 
+// Names deleted through the UI in this session — masks seed AND created
+// entries so the delete flow behaves statefully in mock mode (#107).
+const deletedProjects = new Set<string>();
+
 function currentProjects(): Project[] {
   const seed = scenario() === "some" ? seedProjects : [];
-  return [...seed, ...createdProjects];
+  return [...seed, ...createdProjects].filter(
+    (p) => !deletedProjects.has(p.name),
+  );
 }
 
 export const projectsHandlers = [
@@ -100,9 +107,32 @@ export const projectsHandlers = [
     return HttpResponse.json(project);
   }),
 
-  // get-github-status: the create flow reads the connected org for the
-  // repo-URL preview.
-  http.get("*/api/v1/org/credentials/github", () =>
-    HttpResponse.json(githubStatus),
-  ),
+  // delete-project (#107). Error state via
+  // localStorage.setItem('aep:mock:projects:delete', 'error').
+  http.delete("*/api/v1/projects/:projectName", ({ params }) => {
+    if (localStorage.getItem("aep:mock:projects:delete") === "error") {
+      return HttpResponse.json(deleteProjectError, {
+        status: 500,
+        headers: { "Content-Type": "application/problem+json" },
+      });
+    }
+    const name = String(params.projectName);
+    if (!currentProjects().some((p) => p.name === name)) {
+      return HttpResponse.json(
+        {
+          type: "about:blank",
+          status: 404,
+          title: "Not Found",
+          detail: `Project ${name} not found`,
+        },
+        { status: 404, headers: { "Content-Type": "application/problem+json" } },
+      );
+    }
+    deletedProjects.add(name);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // get-config: the create flow reads the connected GitHub org for the
+  // repo-URL preview from the org-config projection.
+  http.get("*/api/v1/config", () => HttpResponse.json(orgConfig)),
 ];

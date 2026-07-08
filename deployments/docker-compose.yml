@@ -368,12 +368,41 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # console — React SPA served by nginx. The browser hits Thunder directly
-  # via thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1
-  # → k3d loadbalancer). All API requests go through the same-origin
+  # console — the NEW console (apps/console), served by nginx (#98) at :8091
+  # while it builds toward parity (legacy keeps :8090 so existing developer
+  # workflows are untouched; the ports flip when the #98 retirement checklist
+  # completes). The browser hits Thunder directly via
+  # thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1 → k3d
+  # loadbalancer); OIDC redirect URIs derive from window.location.origin, so
+  # no redirect env is needed. All API requests go through the same-origin
   # /aep-api-service/ nginx proxy → aep-api:9090.
   # ---------------------------------------------------------------------------
   console:
+    build:
+      # Repo root — apps/console is a root-pnpm-workspace member and the
+      # image build runs `pnpm gen` against packages/contracts.
+      context: ..
+      dockerfile: apps/console/Dockerfile
+    container_name: aep-console-new
+    ports:
+      - "8091:3000"
+    depends_on:
+      - aep-api
+    environment:
+      AEP_API_PROXY_URL: "http://aep-api:9090"
+      VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
+      VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
+      VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
+    networks:
+      - aep
+
+  # ---------------------------------------------------------------------------
+  # console-legacy — the legacy console, still the default at :8090 during
+  # the #98 transition (org settings, component ops, tasks live here until
+  # the new console reaches parity). Deleted when the #98 retirement
+  # checklist completes.
+  # ---------------------------------------------------------------------------
+  console-legacy:
     build:
       # Repo root — not console-legacy/ — so the build can reach the shared
       # packages/agent-stream + packages/design-projection workspace packages
