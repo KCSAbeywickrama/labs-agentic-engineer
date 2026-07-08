@@ -111,7 +111,9 @@ echo ""
 # Data Plane
 # ============================================================================
 echo "2️⃣  Data Plane"
-if helm status openchoreo-data-plane -n openchoreo-data-plane --kube-context ${CLUSTER_CONTEXT} &>/dev/null; then
+# Only a `deployed` release counts as installed — a `failed`/`pending` release
+# falls through to re-drive `helm upgrade --install` (self-healing).
+if helm_release_deployed openchoreo-data-plane openchoreo-data-plane; then
     echo "⏭️  Already installed"
 else
     echo "📦 Installing OpenChoreo Data Plane..."
@@ -138,7 +140,8 @@ echo ""
 # Thunder (Auth IDP)
 # ============================================================================
 echo "3️⃣  Thunder (Auth IDP)"
-if helm status thunder -n thunder --kube-context ${CLUSTER_CONTEXT} &>/dev/null; then
+# Only a `deployed` release counts as installed (self-heals a failed release).
+if helm_release_deployed thunder thunder; then
     echo "⏭️  Already installed"
 else
     echo "📦 Installing Thunder (Asgardeo IDP)..."
@@ -239,7 +242,12 @@ echo ""
 # Workflow Plane (optional, for builds)
 # ============================================================================
 echo "4️⃣  Workflow Plane"
-if helm status openchoreo-workflow-plane -n openchoreo-workflow-plane --kube-context ${CLUSTER_CONTEXT} &>/dev/null; then
+# Only a `deployed` release counts as installed. This is the guard that caused
+# the reported setup failure: a cert-manager webhook TLS-handshake timeout left
+# this release `failed` (its cluster-agent-tls cert never created, so the
+# cluster-agent pod hung in ContainerCreating and the wait below timed out), and
+# the old existence check skipped the reinstall that would have recreated it.
+if helm_release_deployed openchoreo-workflow-plane openchoreo-workflow-plane; then
     echo "⏭️  Already installed"
 else
     echo "📦 Installing Workflow Plane..."
