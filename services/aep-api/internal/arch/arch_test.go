@@ -67,7 +67,13 @@ var featureEdgeAllowlist = map[string][]string{
 	// external-resource repo, secret writer, design reader) is a consumer-side
 	// port wired at the composition root, keeping the feature edge surface minimal.
 	"dependencies": {"dependencies/resources"},
-	"design":       {"artifacts"},
+	// design imports dependencies/resources for the CRT metadata vocabulary
+	// (resources.TypeMarkers + the marker catalog port): design-save keys
+	// end-user-auth derivation on the PE-authored role marker instead of a
+	// hardcoded resourceType name (thunder-app generalization). This mirrors the
+	// runtimeconfig edge below — both features read the same single source of
+	// truth for CRT markers rather than re-deriving the vocabulary.
+	"design": {"artifacts", "dependencies/resources"},
 	// execution is the platform-owned half of the Task/Execution split: it reads
 	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
 	// (artifacts). It NEVER imports feature/task — the §1 split is a package

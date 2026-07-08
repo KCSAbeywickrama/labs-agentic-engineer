@@ -22,48 +22,55 @@ import (
 	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// Auth-as-platform-resource (learning/thunder-resource/PLAN.md): a `service`
-// component that declares a `platform-resource` dependency with
-// `resourceType: "thunder-app"` gets end-user gateway auth on its managed API
-// for free — the platform derives `exposesAPI.auth` from the dependency
-// instead of requiring the architect (or a human editor) to author it
-// separately. The two must never disagree: an explicit `service-required` on
-// such a component is a self-contradiction (the dependency says "this API
-// sits behind the end-user login the SPA performs via thunder-app"; the flag
-// says "no end-user ever reaches this API") and is rejected as a validation
-// error rather than silently overridden.
+// Auth-as-platform-resource (learning/thunder-resource/PLAN-generalization.md):
+// a `service` component that declares a `platform-resource` dependency whose
+// ClusterResourceType carries the PE-authored `aep.wso2.com/role:
+// end-user-auth` label (resources.TypeMarkers.EndUserAuth) gets end-user
+// gateway auth on its managed API for free — the platform derives
+// `exposesAPI.auth` from the dependency instead of requiring the architect (or
+// a human editor) to author it separately. The membership test keys on the CRT
+// role MARKER, never on a hardcoded resourceType name: adding a new auth
+// flavor is a cluster install (a new labeled CRT), not an app-factory release.
+// The two must never disagree: an explicit `service-required` on such a
+// component is a self-contradiction (the dependency says "this API sits behind
+// the end-user login the SPA performs"; the flag says "no end-user ever reaches
+// this API") and is rejected as a validation error rather than silently
+// overridden.
 const (
-	thunderAppResourceType = "thunder-app"
-	authEndUserRequired    = "end-user-required"
-	authServiceRequired    = "service-required"
+	authEndUserRequired = "end-user-required"
+	authServiceRequired = "service-required"
 )
 
 // deriveEndUserAuth stamps exposesAPI.auth=end-user-required on service
-// components that declare a thunder-app platform-resource dependency, and
-// rejects an explicit conflicting service-required as a validation error.
+// components that declare a platform-resource dependency whose resourceType
+// carries the end-user-auth role marker (markers[resourceType].EndUserAuth),
+// and rejects an explicit conflicting service-required as a validation error.
 // Mutates components in place. web-app components and services with no
-// thunder-app dependency (including a platform-resource dependency of some
-// OTHER resourceType, e.g. postgres-cnpg) are left completely untouched: SPAs
-// aren't gateway-exposed managed APIs, and a bare dependency-less/differently-
-// typed service has nothing to derive from. On a conflict, nothing in
-// components is mutated — the caller sees the original, unmodified state.
-func deriveEndUserAuth(components []models.DesignComponent) error {
+// qualifying dependency (including a platform-resource dependency of a type
+// that carries NO end-user-auth marker, e.g. postgres-cnpg) are left completely
+// untouched: SPAs aren't gateway-exposed managed APIs, and a bare
+// dependency-less/differently-marked service has nothing to derive from. A nil
+// markers map (no platform-resource deps → no catalog fetch) qualifies nothing.
+// On a conflict, nothing in components is mutated — the caller sees the
+// original, unmodified state.
+func deriveEndUserAuth(components []models.DesignComponent, markers map[string]resources.TypeMarkers) error {
 	for i := range components {
 		comp := &components[i]
 		if comp.ComponentType != "service" {
 			continue
 		}
-		dep, ok := thunderAppDependency(comp.Dependencies)
+		dep, ok := endUserAuthDependency(comp.Dependencies, markers)
 		if !ok {
 			continue
 		}
 		if comp.ExposesAPI != nil && comp.ExposesAPI.Auth == authServiceRequired {
 			return fmt.Errorf(
 				"component %q: dependency %q (platform-resource, resourceType %q) requires exposesAPI.auth=%q, but the component explicitly declares exposesAPI.auth=%q",
-				comp.Name, dep.Name, thunderAppResourceType, authEndUserRequired, comp.ExposesAPI.Auth,
+				comp.Name, dep.Name, dep.ResourceType, authEndUserRequired, comp.ExposesAPI.Auth,
 			)
 		}
 		if comp.ExposesAPI == nil {
@@ -74,15 +81,53 @@ func deriveEndUserAuth(components []models.DesignComponent) error {
 	return nil
 }
 
-// thunderAppDependency returns the first thunder-app platform-resource
-// dependency in deps, if any.
-func thunderAppDependency(deps []models.Dependency) (models.Dependency, bool) {
+// endUserAuthDependency returns the first platform-resource dependency in deps
+// whose resourceType carries the end-user-auth role marker, if any. A nil
+// markers map (a Go nil-map read is a safe zero-value lookup) matches nothing.
+func endUserAuthDependency(deps []models.Dependency, markers map[string]resources.TypeMarkers) (models.Dependency, bool) {
 	for _, d := range deps {
-		if d.Kind == models.DependencyKindPlatformResource && d.ResourceType == thunderAppResourceType {
+		if d.Kind == models.DependencyKindPlatformResource && markers[d.ResourceType].EndUserAuth {
 			return d, true
 		}
 	}
 	return models.Dependency{}, false
+}
+
+// resourceMarkersForAuthDerivation returns the CRT marker map the auth
+// derivation keys on. It makes at most ONE OC catalog call, and ONLY when the
+// design declares a platform-resource dependency — auth-free saves never touch
+// the catalog. Fail-closed: when the design DOES declare a platform-resource
+// dependency but the catalog is unreachable (or unwired), the save must stop
+// with ErrResourceCatalogUnavailable rather than silently skip the derivation
+// (a silent skip could leave an API that must sit behind end-user login
+// exposed). Returns (nil, nil) when there is no platform-resource dependency:
+// deriveEndUserAuth over a nil map qualifies nothing, which is exactly right.
+func (s *designService) resourceMarkersForAuthDerivation(ctx context.Context, designFile *artifacts.DesignFile) (map[string]resources.TypeMarkers, error) {
+	if !hasPlatformResourceDependency(designFile.Components) {
+		return nil, nil
+	}
+	if s.resourceCatalog == nil {
+		return nil, fmt.Errorf("%w: no resource-type catalog wired", ErrResourceCatalogUnavailable)
+	}
+	markers, err := s.resourceCatalog.MarkersByName(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrResourceCatalogUnavailable, err)
+	}
+	return markers, nil
+}
+
+// hasPlatformResourceDependency reports whether any component declares at least
+// one platform-resource dependency — the gate on whether design-save fetches
+// the CRT marker catalog at all.
+func hasPlatformResourceDependency(components []models.DesignComponent) bool {
+	for i := range components {
+		for _, d := range components[i].Dependencies {
+			if d.Kind == models.DependencyKindPlatformResource {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // exposesAPIEqual reports whether two (possibly nil) ExposesAPI pointers
@@ -116,7 +161,7 @@ func exposesAPIEqual(a, b *models.ExposesAPI) bool {
 // no-op after a successful derivation: designFile.Components is still mutated
 // in place so THIS response reflects the derived value, but nothing is
 // persisted, so it will not survive to the next independent design read.
-func (s *designService) persistEndUserAuthDerivation(ctx context.Context, orgID, projectID string, designFile *artifacts.DesignFile) (bool, error) {
+func (s *designService) persistEndUserAuthDerivation(ctx context.Context, orgID, projectID string, designFile *artifacts.DesignFile, markers map[string]resources.TypeMarkers) (bool, error) {
 	// Snapshot a COPY of each ExposesAPI value (not the pointer): when a
 	// component already carries a non-nil ExposesAPI, deriveEndUserAuth
 	// mutates its Auth field THROUGH that same pointer — capturing the
@@ -129,7 +174,7 @@ func (s *designService) persistEndUserAuthDerivation(ctx context.Context, orgID,
 			before[i] = &v
 		}
 	}
-	if err := deriveEndUserAuth(designFile.Components); err != nil {
+	if err := deriveEndUserAuth(designFile.Components, markers); err != nil {
 		return false, fmt.Errorf("%w: %v", ErrEndUserAuthConflict, err)
 	}
 	if s.fileCommitter == nil {
@@ -165,7 +210,7 @@ func (s *designService) persistEndUserAuthDerivation(ctx context.Context, orgID,
 		return false, nil
 	}
 	if err := s.fileCommitter.Commit(ctx, orgID, projectID, writes,
-		"Derive exposesAPI.auth from thunder-app dependency"); err != nil {
+		"Derive exposesAPI.auth from platform-resource dependency"); err != nil {
 		return false, err
 	}
 	slog.InfoContext(ctx, "design save: derived end-user-required auth persisted",

@@ -22,13 +22,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/models"
 )
 
 // --- deriveEndUserAuth (pure function) ---------------------------------------
 
+// thunderDep builds a platform-resource dependency of the SAMPLE resourceType
+// "thunder-app". The name is arbitrary sample data — derivation keys on the CRT
+// role MARKER (authRole), never on the name (see
+// TestDeriveEndUserAuth_UnlabeledTypeUntouchedEvenIfNamedThunderApp).
 func thunderDep(name string) models.Dependency {
 	return models.Dependency{Kind: models.DependencyKindPlatformResource, Name: name, ResourceType: "thunder-app"}
+}
+
+// authRole returns a marker map flagging resourceType as carrying the
+// end-user-auth role — the labeled sample type the derivation stamps on.
+func authRole(resourceType string) map[string]resources.TypeMarkers {
+	return map[string]resources.TypeMarkers{resourceType: {EndUserAuth: true}}
+}
+
+// fakeMarkerCatalog is the resourceMarkerCatalog port double for SaveAndProceed
+// integration tests: it records whether it was consulted and serves a canned
+// marker map (or an error to exercise the fail-closed save gate).
+type fakeMarkerCatalog struct {
+	markers map[string]resources.TypeMarkers
+	err     error
+	calls   int
+}
+
+func (f *fakeMarkerCatalog) MarkersByName(context.Context) (map[string]resources.TypeMarkers, error) {
+	f.calls++
+	return f.markers, f.err
 }
 
 // (a) service + thunder-app dep + nil ExposesAPI → ExposesAPI created with
@@ -41,7 +66,7 @@ func TestDeriveEndUserAuth_StampsNilExposesAPI(t *testing.T) {
 		Dependencies:  []models.Dependency{thunderDep("user-auth")},
 	}}
 
-	if err := deriveEndUserAuth(comps); err != nil {
+	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if comps[0].ExposesAPI == nil || comps[0].ExposesAPI.Auth != authEndUserRequired {
@@ -60,7 +85,7 @@ func TestDeriveEndUserAuth_ExistingEndUserRequiredUnchanged(t *testing.T) {
 		ExposesAPI:    &models.ExposesAPI{Auth: authEndUserRequired, Managed: true, UserContext: "X-User-Id"},
 	}}
 
-	if err := deriveEndUserAuth(comps); err != nil {
+	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := comps[0].ExposesAPI
@@ -80,7 +105,7 @@ func TestDeriveEndUserAuth_ServiceRequiredConflictErrors(t *testing.T) {
 		ExposesAPI:    &models.ExposesAPI{Auth: authServiceRequired},
 	}}
 
-	err := deriveEndUserAuth(comps)
+	err := deriveEndUserAuth(comps, authRole("thunder-app"))
 	if err == nil {
 		t.Fatal("want a conflict error, got nil")
 	}
@@ -104,7 +129,7 @@ func TestDeriveEndUserAuth_WebAppUntouched(t *testing.T) {
 		Dependencies:  []models.Dependency{thunderDep("user-auth")},
 	}}
 
-	if err := deriveEndUserAuth(comps); err != nil {
+	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if comps[0].ExposesAPI != nil {
@@ -121,7 +146,7 @@ func TestDeriveEndUserAuth_DepLessServiceUntouched(t *testing.T) {
 		Dependencies:  []models.Dependency{{Kind: models.DependencyKindComponent, Name: "sibling"}},
 	}}
 
-	if err := deriveEndUserAuth(comps); err != nil {
+	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if comps[0].ExposesAPI != nil {
@@ -141,11 +166,52 @@ func TestDeriveEndUserAuth_OtherResourceTypeUntouched(t *testing.T) {
 		},
 	}}
 
-	if err := deriveEndUserAuth(comps); err != nil {
+	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if comps[0].ExposesAPI != nil {
 		t.Fatalf("non-thunder-app resource ExposesAPI must stay nil, got %+v", comps[0].ExposesAPI)
+	}
+}
+
+// The NAME must mean nothing now: a platform-resource dep whose resourceType
+// happens to be "thunder-app" but which carries NO end-user-auth role marker
+// (empty catalog) is left completely untouched. This is the crux of the
+// generalization — derivation keys on the CRT marker, never on the name.
+func TestDeriveEndUserAuth_UnlabeledTypeUntouchedEvenIfNamedThunderApp(t *testing.T) {
+	t.Parallel()
+	comps := []models.DesignComponent{{
+		Name:          "orders-api",
+		ComponentType: "service",
+		Dependencies:  []models.Dependency{thunderDep("user-auth")},
+	}}
+
+	// Empty marker map: "thunder-app" carries no role — nothing to derive.
+	if err := deriveEndUserAuth(comps, map[string]resources.TypeMarkers{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if comps[0].ExposesAPI != nil {
+		t.Fatalf("unlabeled type must stay untouched regardless of its name, got %+v", comps[0].ExposesAPI)
+	}
+}
+
+// A labeled type with a name OTHER than "thunder-app" stamps just the same —
+// the marker, not the name, is the signal.
+func TestDeriveEndUserAuth_StampsAnyLabeledType(t *testing.T) {
+	t.Parallel()
+	comps := []models.DesignComponent{{
+		Name:          "orders-api",
+		ComponentType: "service",
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindPlatformResource, Name: "user-auth", ResourceType: "custom-oidc"},
+		},
+	}}
+
+	if err := deriveEndUserAuth(comps, authRole("custom-oidc")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if comps[0].ExposesAPI == nil || comps[0].ExposesAPI.Auth != authEndUserRequired {
+		t.Fatalf("labeled type of any name must stamp: ExposesAPI = %+v", comps[0].ExposesAPI)
 	}
 }
 
@@ -160,7 +226,7 @@ func TestDeriveEndUserAuth_MixedComponentsOnlyQualifyingServiceStamped(t *testin
 		{Name: "storefront-web", ComponentType: "web-app", Dependencies: []models.Dependency{thunderDep("user-auth")}},
 	}
 
-	if err := deriveEndUserAuth(comps); err != nil {
+	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if comps[0].ExposesAPI == nil || comps[0].ExposesAPI.Auth != authEndUserRequired {
@@ -193,6 +259,7 @@ func TestSaveAndProceed_DerivesEndUserAuthAndPersistsBeforeTag(t *testing.T) {
 	svc := newService(fake)
 	fc := &fakeCommitter{}
 	svc.fileCommitter = fc
+	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
 
 	got, err := svc.SaveAndProceed(context.Background(), "acme", "web", "")
 	if err != nil {
@@ -239,6 +306,7 @@ func TestSaveAndProceed_DerivesAuthOnAlreadyNonNilExposesAPI(t *testing.T) {
 	svc := newService(fake)
 	fc := &fakeCommitter{}
 	svc.fileCommitter = fc
+	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
 
 	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web", ""); err != nil {
 		t.Fatalf("SaveAndProceed: unexpected error: %v", err)
@@ -264,6 +332,7 @@ func TestSaveAndProceed_EndUserAuthConflictBlocksTagCut(t *testing.T) {
 	fake := readsFor(t, files)
 	svc := newService(fake)
 	svc.fileCommitter = &fakeCommitter{}
+	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
 
 	_, err := svc.SaveAndProceed(context.Background(), "acme", "web", "")
 	if !errors.Is(err, ErrEndUserAuthConflict) {
@@ -274,7 +343,7 @@ func TestSaveAndProceed_EndUserAuthConflictBlocksTagCut(t *testing.T) {
 	}
 }
 
-func TestSaveAndProceed_NoThunderAppDepNoDerivationCommit(t *testing.T) {
+func TestSaveAndProceed_NoPlatformResourceDepNoDerivationCommit(t *testing.T) {
 	t.Parallel()
 	fake := happySave(validDesignFiles())
 	svc := newService(fake)
@@ -285,6 +354,71 @@ func TestSaveAndProceed_NoThunderAppDepNoDerivationCommit(t *testing.T) {
 		t.Fatalf("SaveAndProceed: unexpected error: %v", err)
 	}
 	if fc.commits != 0 {
-		t.Fatalf("no thunder-app dependency in the design — want zero derive-persist commits, got %d", fc.commits)
+		t.Fatalf("no platform-resource dependency in the design — want zero derive-persist commits, got %d", fc.commits)
+	}
+}
+
+// Fail-closed save gate: when the design declares a platform-resource
+// dependency but the CRT catalog is unreachable, the save must fail with the
+// retryable ErrResourceCatalogUnavailable and commit NOTHING (the derivation
+// can't be evaluated, so a silent skip would risk leaving an auth-required API
+// exposed). readsFor's SaveDesignFunc fails the test if the tag-cut is reached.
+func TestSaveAndProceed_CatalogDownWithPlatformResourceDepFailsClosed(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
+	fake := readsFor(t, designFilesWithDeps(deps))
+	svc := newService(fake)
+	fc := &fakeCommitter{}
+	svc.fileCommitter = fc
+	cat := &fakeMarkerCatalog{err: errors.New("OC unreachable")}
+	svc.resourceCatalog = cat
+
+	_, err := svc.SaveAndProceed(context.Background(), "acme", "web", "")
+	if !errors.Is(err, ErrResourceCatalogUnavailable) {
+		t.Fatalf("want ErrResourceCatalogUnavailable, got %v", err)
+	}
+	if cat.calls != 1 {
+		t.Fatalf("want exactly one catalog lookup, got %d", cat.calls)
+	}
+	if fc.commits != 0 {
+		t.Fatalf("fail-closed save must commit nothing, got %d commits", fc.commits)
+	}
+}
+
+// A nil catalog is treated as unreachable for the same reason: a design with a
+// platform-resource dependency cannot proceed without the marker map.
+func TestSaveAndProceed_NilCatalogWithPlatformResourceDepFailsClosed(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
+	fake := readsFor(t, designFilesWithDeps(deps))
+	svc := newService(fake)
+	svc.fileCommitter = &fakeCommitter{}
+	// No resourceCatalog wired.
+
+	_, err := svc.SaveAndProceed(context.Background(), "acme", "web", "")
+	if !errors.Is(err, ErrResourceCatalogUnavailable) {
+		t.Fatalf("nil catalog + platform-resource dep: want ErrResourceCatalogUnavailable, got %v", err)
+	}
+}
+
+// Auth-free save (no platform-resource dependency) must NEVER touch the catalog
+// — even a catalog wired to error is not consulted, and the save succeeds.
+func TestSaveAndProceed_NoPlatformResourceDepSkipsCatalog(t *testing.T) {
+	t.Parallel()
+	fake := happySave(validDesignFiles())
+	svc := newService(fake)
+	fc := &fakeCommitter{}
+	svc.fileCommitter = fc
+	cat := &fakeMarkerCatalog{err: errors.New("must not be called")}
+	svc.resourceCatalog = cat
+
+	if _, err := svc.SaveAndProceed(context.Background(), "acme", "web", ""); err != nil {
+		t.Fatalf("auth-free save: unexpected error: %v", err)
+	}
+	if cat.calls != 0 {
+		t.Fatalf("auth-free save must not consult the catalog, got %d calls", cat.calls)
+	}
+	if fc.commits != 0 {
+		t.Fatalf("no derivation commit expected, got %d", fc.commits)
 	}
 }

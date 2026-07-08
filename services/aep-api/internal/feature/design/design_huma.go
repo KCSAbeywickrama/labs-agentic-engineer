@@ -137,6 +137,9 @@ func RegisterDesign(api huma.API, svc DesignService) {
 			if errors.Is(err, ErrEndUserAuthConflict) {
 				return nil, huma.Error409Conflict(err.Error())
 			}
+			if errors.Is(err, ErrResourceCatalogUnavailable) {
+				return nil, huma.Error503ServiceUnavailable(err.Error(), err)
+			}
 			if de := asDesignValidationError(err); de != nil {
 				return nil, de
 			}

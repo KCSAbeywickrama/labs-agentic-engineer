@@ -771,7 +771,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
 	params.MCPExternalResources = externalResourceRepo
 	params.MCPOrgEndpoints = orgEndpointCatalog
-	params.MCPResourceTypes = resources.NewResourceTypeCatalog(resourceClient)
+	resourceTypeCatalog := resources.NewResourceTypeCatalog(resourceClient)
+	params.MCPResourceTypes = resourceTypeCatalog
+	// design-save keys end-user-auth derivation on the CRT role marker read from
+	// this catalog (thunder-app generalization); wired consumer-side so design
+	// holds only a narrow MarkersByName port. When the design declares a
+	// platform-resource dependency and this catalog is unreachable, the save
+	// fails closed (ErrResourceCatalogUnavailable → 503).
+	designService.SetResourceCatalog(resourceTypeCatalog)
 
 	// Read-time org-service dependency resolution (dependency-management Phase 5):
 	// the same endpoint catalog that backs the MCP list_org_endpoints tool marks
