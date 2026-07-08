@@ -1021,9 +1021,6 @@ export interface components {
             /** Format: int64 */
             totalCount?: number;
         };
-        CallerIdentity: {
-            mode?: string;
-        };
         ClientSecretOutputBody: {
             /**
              * Format: uri
@@ -1294,7 +1291,6 @@ export interface components {
         DesignComponent: {
             appPath: string;
             buildpack: string;
-            callerIdentity?: components["schemas"]["CallerIdentity"];
             componentAgentInstructions: string;
             componentType: string;
             dependencies: components["schemas"]["Dependency"][] | null;

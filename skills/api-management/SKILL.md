@@ -3,6 +3,7 @@ name: api-management
 description: How the platform's API gateway validates JWTs, injects X-User-Id from the sub claim, attaches CORS, and how to design + write services and consumers that match. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API.
 ---
 
+
 # API Management
 
 ## What this skill does
@@ -54,15 +55,20 @@ output from reality.
 ### Architect
 
 - Set `exposesAPI.auth: end-user-required` on a `service` component when
-  the spec OR its description implies caller authentication is needed.
-  Use the keyword rubric in the base architect prompt to decide.
+  the spec OR its description implies caller authentication is needed AND
+  no sign-in dependency is involved. Use the keyword rubric in the base
+  architect prompt to decide.
 - Set `exposesAPI.auth: service-required` for machine-to-machine APIs.
 - Omit `exposesAPI` entirely for public APIs (landing pages, health,
   status hello-worlds).
-- When a `service` is `end-user-required` AND a sibling `web-app` signs
-  in to it, that web-app MUST also carry `callerIdentity: { mode: end-user }`.
-  The `thunder-authentication` skill owns this pairing rule (and its
-  rationale) — apply it.
+- When end-users sign in, do NOT set `exposesAPI.auth` on the backend by
+  hand. The SPA and the backend each declare the SAME `thunder-app`
+  `platform-resource` dependency, and the platform DERIVES
+  `exposesAPI.auth: end-user-required` on the backend from that dependency.
+  Setting an explicit `service-required` alongside the dependency is a
+  validation error; `service-required` stays manual only for pure
+  service-to-service APIs. The `thunder-authentication` skill owns this
+  dependency rule (and its rationale) — apply it.
 - For external upstreams that already exist outside the project, declare
   them as `external`-kind entries in the consuming component's
   `dependencies`. Use **name-only** declarations (`{ "kind": "external",
