@@ -485,6 +485,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
 	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
+	// Coding-execution activity feed: live-tail the ca-… pod log while running,
+	// serve the captured coding_agent_logs snapshot once terminal. Wired only on
+	// the proxy dispatch path (cgwClient present); otherwise coding executions
+	// report terminal-ness only.
+	if cgwClient != nil {
+		execProgressSvc.WithCodingProgress(codingagent.NewAgentProgressReader(cgwClient, db))
+	}
 
 	// trait_sync is the single shared emitter that reconciles the
 	// `api-configuration` ClusterTrait on a Component CR + per-environment
