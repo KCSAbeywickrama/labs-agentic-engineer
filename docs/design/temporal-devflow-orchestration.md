@@ -103,8 +103,9 @@ visible as `PendingGate` in the status query. Gate names: dev `design`, `plan`,
 
 ## IDs, lookup, and status
 
-- Dev workflow ID (strict): `devflow-<yyyyMMddHHmmss>-<org>-<project>-<tag>`
-- Task workflow ID: `taskflow-<org>-<project>-<tag>-issue<N>`
+- Dev workflow ID: `devflow-<org>-<project>-<tag>` (the tag makes it unique per
+  build; a completed version re-runs under the same id via `AllowDuplicate`)
+- Task workflow ID: `taskflow-<org>-<project>-<tag>-<issueNumber>`
 - **Lookup**: a Postgres `workflow_runs` table (`models.DevflowRun`, partial
   unique index `(repo, issue_number) WHERE kind='task' AND status='running'`) is
   the signaler's point-lookup index and the list endpoint's source. Temporal

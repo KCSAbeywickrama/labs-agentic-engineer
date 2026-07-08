@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -52,12 +51,11 @@ type HumaService struct {
 	store  HumaStore
 	repos  RepoLookup
 	tagger Tagger
-	now    func() time.Time
 }
 
-// NewHumaService wires the API service. now defaults to time.Now.
+// NewHumaService wires the API service.
 func NewHumaService(rt *Runtime, store HumaStore, repos RepoLookup, tagger Tagger) *HumaService {
-	return &HumaService{rt: rt, store: store, repos: repos, tagger: tagger, now: time.Now}
+	return &HumaService{rt: rt, store: store, repos: repos, tagger: tagger}
 }
 
 // --- inputs / outputs -------------------------------------------------------
@@ -179,7 +177,7 @@ func (s *HumaService) start(ctx context.Context, in *startInput) (*startOutput, 
 		}
 	}
 
-	workflowID := DevWorkflowID(s.now().UTC(), in.OrgHandle, in.ProjectName, tag)
+	workflowID := DevWorkflowID(in.OrgHandle, in.ProjectName, tag)
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:                    workflowID,
 		TaskQueue:             s.rt.TaskQueue(),
@@ -278,8 +276,10 @@ func (s *HumaService) temporal() (client.Client, error) {
 	return c, nil
 }
 
-// DevWorkflowID builds the strict dev workflow id
-// devflow-<yyyyMMddHHmmss>-<org>-<project>-<tag> (UTC datetime).
-func DevWorkflowID(now time.Time, orgID, projectID, tag string) string {
-	return fmt.Sprintf("devflow-%s-%s-%s-%s", now.Format("20060102150405"), orgID, projectID, tag)
+// DevWorkflowID builds the dev workflow id devflow-<org>-<project>-<tag>.
+// The tag (the spec version) makes it unique per build; concurrent builds for
+// a project are blocked at the API layer, and a completed version re-runs
+// under the same id (WorkflowIDReusePolicy AllowDuplicate).
+func DevWorkflowID(orgID, projectID, tag string) string {
+	return fmt.Sprintf("devflow-%s-%s-%s", orgID, projectID, tag)
 }

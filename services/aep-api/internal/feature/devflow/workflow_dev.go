@@ -370,7 +370,7 @@ func planActivityOpts(ctx workflow.Context) workflow.Context {
 }
 
 // taskWorkflowID builds the deterministic child workflow id
-// (taskflow-<org>-<project>-<tag>-issue<N>).
+// (taskflow-<org>-<project>-<tag>-<issueNumber>).
 func taskWorkflowID(orgID, projectID, tag string, issue int) string {
-	return fmt.Sprintf("taskflow-%s-%s-%s-issue%d", orgID, projectID, tag, issue)
+	return fmt.Sprintf("taskflow-%s-%s-%s-%d", orgID, projectID, tag, issue)
 }

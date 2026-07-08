@@ -18,18 +18,14 @@ package devflow
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestDevWorkflowID_StrictFormat(t *testing.T) {
-	at := time.Date(2026, 7, 8, 22, 4, 39, 0, time.UTC)
-	require.Equal(t,
-		"devflow-20260708220439-acme-shop-v3",
-		DevWorkflowID(at, "acme", "shop", "v3"))
+func TestDevWorkflowID_Format(t *testing.T) {
+	require.Equal(t, "devflow-acme-shop-v3", DevWorkflowID("acme", "shop", "v3"))
 }
 
 func TestTaskWorkflowID_Format(t *testing.T) {
-	require.Equal(t, "taskflow-acme-shop-v3-issue7", taskWorkflowID("acme", "shop", "v3", 7))
+	require.Equal(t, "taskflow-acme-shop-v3-7", taskWorkflowID("acme", "shop", "v3", 7))
 }
