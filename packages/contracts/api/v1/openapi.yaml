@@ -322,6 +322,11 @@ components:
         status:
           type: string
         type:
+          description: >-
+            Component kind in AEP's design vocabulary — "web-application" or
+            "service" (matching design.json's componentType). OpenChoreo's
+            prefixed ComponentType names (deployment/*) never appear on this
+            API.
           type: string
         uid:
           type: string

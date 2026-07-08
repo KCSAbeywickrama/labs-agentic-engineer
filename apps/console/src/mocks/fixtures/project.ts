@@ -118,7 +118,7 @@ const builtComponents: ComponentList = {
       name: "storefront",
       displayName: "Storefront",
       description: "Customer-facing web app",
-      type: "deployment/web-application",
+      type: "web-application",
       status: "active",
     },
     {
@@ -140,7 +140,7 @@ const builtComponents: ComponentList = {
 
 const deployedComponents: ComponentList = {
   items: (builtComponents.items ?? []).map((c) =>
-    c.type === "deployment/web-application"
+    c.type === "web-application"
       ? { ...c, endpointUrl: "https://storefront.dev.acme-aep.io" }
       : c,
   ),
