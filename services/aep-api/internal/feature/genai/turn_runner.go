@@ -391,6 +391,10 @@ func (s *service) finishTurn(ctx context.Context, job turnJob, term TurnTerminal
 		return
 	}
 	s.broker.Terminal(job.turnID, terminalEventJSON(term))
+	// Notify any waiting devflow workflow of the terminal outcome (best-effort).
+	if s.finishHook != nil {
+		s.finishHook(ctx, job.orgID, job.projectID, job.turnID, job.useCase, term.Status)
+	}
 }
 
 // turnBaseReader adapts Workspace.ReadFile at the turn's base ref into the

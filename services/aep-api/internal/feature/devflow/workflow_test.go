@@ -153,24 +153,122 @@ func TestTaskFlowWorkflow_ManualMergeGate_Approve(t *testing.T) {
 	require.Equal(t, OutcomeSucceeded, res.Outcome)
 }
 
-func TestDevFlowWorkflow_SkeletonCompletes(t *testing.T) {
-	var ts testsuite.WorkflowTestSuite
-	env := ts.NewTestWorkflowEnvironment()
-
+// registerDevActivities mocks every dev-workflow activity. designExists and
+// plannedTasks tune the two branch points the tests exercise.
+func registerDevActivities(env *testsuite.TestWorkflowEnvironment, designExists bool, plannedTasks []PlannedTask) {
 	var acts *Activities
 	env.RegisterActivity(acts.RecordWorkflowRun)
 	env.RegisterActivity(acts.SetWorkflowRunStatus)
+	env.RegisterActivity(acts.CreateVersionTag)
+	env.RegisterActivity(acts.CheckDesignExists)
+	env.RegisterActivity(acts.StartDesignTurn)
+	env.RegisterActivity(acts.PollDesignTurn)
+	env.RegisterActivity(acts.RunPlan)
+	env.RegisterActivity(acts.Validate)
 	env.OnActivity(acts.RecordWorkflowRun, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.SetWorkflowRunStatus, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.CreateVersionTag, mock.Anything, mock.Anything).Return("v1", nil)
+	env.OnActivity(acts.CheckDesignExists, mock.Anything, mock.Anything).Return(designExists, nil)
+	env.OnActivity(acts.StartDesignTurn, mock.Anything, mock.Anything).Return("turn1", nil)
+	env.OnActivity(acts.PollDesignTurn, mock.Anything, mock.Anything).Return(DesignTurnOutcomeResult{Done: true, Outcome: "completed"}, nil)
+	env.OnActivity(acts.RunPlan, mock.Anything, mock.Anything).Return(plannedTasks, nil)
+	env.OnActivity(acts.Validate, mock.Anything, mock.Anything).Return(nil)
+}
 
-	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{
-		OrgID: "org1", ProjectID: "proj1", Tag: "v1",
-	})
+func TestDevFlowWorkflow_HappyPath_DesignGenerated(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	tasks := []PlannedTask{{Issue: 1, Key: "api"}, {Issue: 2, Key: "web"}}
+	registerDevActivities(env, false, tasks)
+	// Mock the task child workflow so this test stays a dev-workflow unit test.
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
+
+	// Design was not generated → the workflow waits for the design-turn-done
+	// signal; deliver it (matching the started turn id).
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(SigDesignTurnDone, DesignTurnDoneSignal{TurnID: "turn1", Outcome: "completed"})
+	}, time.Second)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
-
 	var res DevFlowStatus
 	require.NoError(t, env.GetWorkflowResult(&res))
 	require.Equal(t, DevPhaseDone, res.Phase)
+	require.Len(t, res.Tasks, 2)
+}
+
+func TestDevFlowWorkflow_SkipsDesignWhenExists(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerDevActivities(env, true, []PlannedTask{{Issue: 1, Key: "api"}})
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
+	// No StartDesignTurn expected — asserting it is never called proves the skip.
+	env.OnActivity("StartDesignTurn", mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { t.Fatal("StartDesignTurn called though design already exists") }).
+		Return("", nil).Maybe()
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseDone, res.Phase)
+}
+
+func TestDevFlowWorkflow_FailedDepSkipsDependent(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	// web depends on api; api fails → web is skipped, never started.
+	tasks := []PlannedTask{
+		{Issue: 1, Key: "api"},
+		{Issue: 2, Key: "web", DependsOn: []string{"api"}},
+	}
+	registerDevActivities(env, true, tasks)
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	// api (issue 1) fails; web (issue 2) must never be invoked.
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.MatchedBy(func(in TaskFlowInput) bool { return in.Issue == 1 })).
+		Return(TaskFlowResult{Outcome: OutcomeFailed}, nil)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.MatchedBy(func(in TaskFlowInput) bool { return in.Issue == 2 })).
+		Run(func(mock.Arguments) { t.Fatal("dependent task started though its dependency failed") }).
+		Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil).Maybe()
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	// The dev workflow still completes; the skipped dependent shows in its tasks.
+	var web DevTaskRef
+	for _, tr := range res.Tasks {
+		if tr.Issue == 2 {
+			web = tr
+		}
+	}
+	require.Equal(t, OutcomeSkippedDepFai, web.Outcome)
+}
+
+func TestDevFlowWorkflow_CycleFastFails(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	// a → b → a is an unsatisfiable cycle.
+	cyclic := []PlannedTask{
+		{Issue: 1, Key: "a", DependsOn: []string{"b"}},
+		{Issue: 2, Key: "b", DependsOn: []string{"a"}},
+	}
+	registerDevActivities(env, true, cyclic)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res DevFlowStatus
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, DevPhaseFailed, res.Phase)
+	require.Contains(t, res.Error, "cycle")
 }

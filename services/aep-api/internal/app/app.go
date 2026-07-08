@@ -450,6 +450,19 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
+		// Signal a waiting devflow workflow when a design-generate turn ends.
+		// Best-effort + nil-safe; other use cases are ignored (the workflow also
+		// filters by turn id).
+		TurnFinishHook: func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string) {
+			if useCase != designGenerateUseCase {
+				return
+			}
+			devflowSignaler.SignalDev(ctx, orgID, projectID, devflow.SigDesignTurnDone, devflow.DesignTurnDoneSignal{
+				TurnID:  turnID,
+				UseCase: useCase,
+				Outcome: outcome,
+			})
+		},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
@@ -951,11 +964,15 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// comes up and the devflow endpoints answer 503 until then. Activities are
 	// thin adapters over the funnel (dispatch) + issue service (merge).
 	if cfg.Temporal.Enabled() {
-		devflowActs := devflow.NewActivities(
-			workflowRunRepo,
-			codingDispatcher{funnel: funnel, execs: executionRepo},
-			prMerger{issues: issueService},
-		)
+		devflowActs := devflow.NewActivities(devflow.Deps{
+			Runs:       workflowRunRepo,
+			Dispatcher: codingDispatcher{funnel: funnel, execs: executionRepo},
+			Merger:     prMerger{issues: issueService},
+			Tagger:     devflowTagger{art: artifactSvcGit},
+			Design:     devflowDesign{art: artifactSvcGit, genai: genaiSvc},
+			Planner:    devflowPlanner{plan: taskPlan, reads: taskReads},
+			Validator:  devflowValidator{},
+		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)
 	}

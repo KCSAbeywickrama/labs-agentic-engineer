@@ -219,6 +219,12 @@ type ServiceDeps struct {
 	SkillsRepo SkillsRepoResolver
 	MCPTokens  MCPTokenMinter
 	MCPBaseURL string
+	// TurnFinishHook, when set, is invoked once with the terminal outcome of
+	// every turn (outcome is "completed" | "failed"). The devflow feature uses
+	// it to signal a waiting design-generate workflow. Best-effort — a nil hook
+	// or a slow hook must never delay or fail the turn. Kept as a plain func so
+	// the genai package does not import devflow.
+	TurnFinishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
 }
 
 type service struct {
@@ -232,6 +238,7 @@ type service struct {
 	skillsRepo SkillsRepoResolver
 	mcpTokens  MCPTokenMinter
 	mcpBaseURL string
+	finishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
 }
 
 // NewService wires the genai service.
@@ -247,6 +254,7 @@ func NewService(d ServiceDeps) GenAIService {
 		skillsRepo: d.SkillsRepo,
 		mcpTokens:  d.MCPTokens,
 		mcpBaseURL: d.MCPBaseURL,
+		finishHook: d.TurnFinishHook,
 	}
 }
 

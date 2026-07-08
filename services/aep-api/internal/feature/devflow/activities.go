@@ -38,13 +38,36 @@ type Activities struct {
 	runs       WorkflowRunStore
 	dispatcher CodingDispatcher
 	merger     PRMerger
+	tagger     Tagger
+	design     DesignPort
+	planner    Planner
+	validator  Validator
 }
 
-// NewActivities wires the activity adapters. dispatcher and merger may be nil
-// in narrow contexts (their activities then return a not-configured error);
-// the app root wires all three.
-func NewActivities(runs WorkflowRunStore, dispatcher CodingDispatcher, merger PRMerger) *Activities {
-	return &Activities{runs: runs, dispatcher: dispatcher, merger: merger}
+// Deps carries the activity adapters. Any field may be nil in narrow contexts
+// (the corresponding activity then returns a not-configured error); the app
+// root wires all of them.
+type Deps struct {
+	Runs       WorkflowRunStore
+	Dispatcher CodingDispatcher
+	Merger     PRMerger
+	Tagger     Tagger
+	Design     DesignPort
+	Planner    Planner
+	Validator  Validator
+}
+
+// NewActivities wires the activity adapters.
+func NewActivities(d Deps) *Activities {
+	return &Activities{
+		runs:       d.Runs,
+		dispatcher: d.Dispatcher,
+		merger:     d.Merger,
+		tagger:     d.Tagger,
+		design:     d.Design,
+		planner:    d.Planner,
+		validator:  d.Validator,
+	}
 }
 
 // RecordWorkflowRunInput is the first-activity payload every workflow emits so
@@ -122,4 +145,87 @@ func (a *Activities) MergePR(ctx context.Context, in MergePRInput) error {
 		return errNotConfigured
 	}
 	return a.merger.MergePR(ctx, in.OrgID, in.ProjectID, in.PRNumber)
+}
+
+// ProjectRef identifies a project for the dev-workflow activities.
+type ProjectRef struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+}
+
+// CreateVersionTag cuts (idempotently) the requirements version tag the build
+// is based on and returns it.
+func (a *Activities) CreateVersionTag(ctx context.Context, in ProjectRef) (string, error) {
+	if a.tagger == nil {
+		return "", errNotConfigured
+	}
+	return a.tagger.CreateVersionTag(ctx, in.OrgID, in.ProjectID)
+}
+
+// DesignExistsInput asks whether a design already exists for a requirements tag.
+type DesignExistsInput struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	ReqTag    string `json:"reqTag"`
+}
+
+// CheckDesignExists reports whether the design for reqTag is already generated.
+func (a *Activities) CheckDesignExists(ctx context.Context, in DesignExistsInput) (bool, error) {
+	if a.design == nil {
+		return false, errNotConfigured
+	}
+	return a.design.DesignExists(ctx, in.OrgID, in.ProjectID, in.ReqTag)
+}
+
+// StartDesignTurn starts the design-generate turn and returns its id.
+func (a *Activities) StartDesignTurn(ctx context.Context, in ProjectRef) (string, error) {
+	if a.design == nil {
+		return "", errNotConfigured
+	}
+	return a.design.StartDesignTurn(ctx, in.OrgID, in.ProjectID)
+}
+
+// DesignTurnOutcomeInput asks for a turn's terminal state.
+type DesignTurnOutcomeInput struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	TurnID    string `json:"turnId"`
+}
+
+// DesignTurnOutcomeResult is the fallback poll result.
+type DesignTurnOutcomeResult struct {
+	Done    bool   `json:"done"`
+	Outcome string `json:"outcome"`
+}
+
+// PollDesignTurn reads a design turn's terminal state (the signal-miss fallback).
+func (a *Activities) PollDesignTurn(ctx context.Context, in DesignTurnOutcomeInput) (DesignTurnOutcomeResult, error) {
+	if a.design == nil {
+		return DesignTurnOutcomeResult{}, errNotConfigured
+	}
+	done, outcome, err := a.design.DesignTurnOutcome(ctx, in.OrgID, in.ProjectID, in.TurnID)
+	return DesignTurnOutcomeResult{Done: done, Outcome: outcome}, err
+}
+
+// RunPlan runs task planning and returns the planned tasks.
+func (a *Activities) RunPlan(ctx context.Context, in ProjectRef) ([]PlannedTask, error) {
+	if a.planner == nil {
+		return nil, errNotConfigured
+	}
+	return a.planner.RunPlan(ctx, in.OrgID, in.ProjectID)
+}
+
+// ValidateInput carries the project + tag for the validation step.
+type ValidateInput struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	Tag       string `json:"tag"`
+}
+
+// Validate runs the post-execution validation step.
+func (a *Activities) Validate(ctx context.Context, in ValidateInput) error {
+	if a.validator == nil {
+		return errNotConfigured
+	}
+	return a.validator.Validate(ctx, in.OrgID, in.ProjectID, in.Tag)
 }
