@@ -149,6 +149,54 @@ func TestListTagsPrefixPeelAndMessage(t *testing.T) {
 	}
 }
 
+func TestListTagsLocalSkipsFetch(t *testing.T) {
+	fx := workspacetest.New(t, seedFiles())
+	ctx := context.Background()
+
+	// Prime the mirror (clone) BEFORE any v* tag exists on origin.
+	mustHead(t, fx, "")
+
+	// A tag pushed out-of-band to origin AFTER the mirror was cloned — the
+	// mirror has no way to know about it without a fetch.
+	fx.Origin.Tag(t, "v1-1", "design v1-1")
+
+	// ListTagsLocal serves the mirror as-is → does NOT see the un-fetched tag.
+	local, err := fx.Engine.ListTagsLocal(ctx, fx.Ref, "v")
+	if err != nil {
+		t.Fatalf("ListTagsLocal: %v", err)
+	}
+	if len(local) != 0 {
+		t.Fatalf("ListTagsLocal = %+v, want empty (no fetch)", local)
+	}
+
+	// ListTags fetches first → sees the out-of-band tag (the freshness-critical
+	// path is unchanged).
+	fetched, err := fx.Engine.ListTags(ctx, fx.Ref, "v")
+	if err != nil {
+		t.Fatalf("ListTags: %v", err)
+	}
+	if len(fetched) != 1 || fetched[0].Name != "v1-1" {
+		t.Fatalf("ListTags = %+v, want v1-1 after fetch", fetched)
+	}
+
+	// A tag created THROUGH the engine updates the mirror, so ListTagsLocal
+	// sees it without a fetch — the platform-owned tag path stays correct.
+	if err := fx.Engine.Tag(ctx, fx.Ref, gitfs.TagSpec{Name: "v1-2", Message: "design v1-2"}); err != nil {
+		t.Fatalf("Tag: %v", err)
+	}
+	local2, err := fx.Engine.ListTagsLocal(ctx, fx.Ref, "v")
+	if err != nil {
+		t.Fatalf("ListTagsLocal(after engine tag): %v", err)
+	}
+	names := map[string]bool{}
+	for _, tg := range local2 {
+		names[tg.Name] = true
+	}
+	if !names["v1-2"] {
+		t.Fatalf("ListTagsLocal = %+v, want to include engine-created v1-2", local2)
+	}
+}
+
 func TestDiffThreeDot(t *testing.T) {
 	fx := workspacetest.New(t, seedFiles())
 	ctx := context.Background()

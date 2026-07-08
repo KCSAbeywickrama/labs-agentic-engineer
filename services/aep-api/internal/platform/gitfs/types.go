@@ -93,6 +93,11 @@ type Workspace interface {
 	// peeled commit SHA and the tag message subject (empty for lightweight
 	// tags). Fetches origin tags first.
 	ListTags(ctx context.Context, ref RepoRef, prefix string) ([]TagInfo, error)
+	// ListTagsLocal is ListTags without the origin fetch — it serves whatever
+	// the shared mirror already holds. Correctness-equivalent to ListTags for
+	// platform-owned `v*` tags (the mirror is updated on tag creation); for
+	// best-effort hot-path reads that must not pay a per-read network fetch.
+	ListTagsLocal(ctx context.Context, ref RepoRef, prefix string) ([]TagInfo, error)
 	// Diff is the local `git diff base...head` (three-dot: merge-base to
 	// head), replacing the remote CompareRefs.
 	Diff(ctx context.Context, ref RepoRef, base, head string) (*CompareResult, error)

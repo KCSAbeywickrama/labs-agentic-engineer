@@ -55,6 +55,11 @@ type RepoResolver interface {
 type VersionReader interface {
 	ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
 	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
+	// LatestDesignTag is the newest design tag name (`v<N>-<M>`) read WITHOUT a
+	// network fetch — the best-effort input to the stale-design attention flag.
+	// The list read path (ListDesignVersions) still fetches; this one must not,
+	// so a task-list page load pays no per-read GitHub round-trip for it.
+	LatestDesignTag(ctx context.Context, orgID, projectID string) string
 	GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 }
