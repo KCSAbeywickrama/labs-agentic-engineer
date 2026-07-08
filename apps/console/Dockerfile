@@ -34,6 +34,9 @@ COPY apps/console ./apps/console
 
 RUN pnpm install --frozen-lockfile --filter @aep/console...
 
+# Workspace deps whose exports resolve to ./dist must be compiled first
+# (@aep/agent-stream — the agent-chat panel's SSE contracts, #130).
+RUN pnpm --filter @aep/agent-stream build
 RUN pnpm --filter @aep/console gen
 RUN pnpm --filter @aep/console build
 
