@@ -33,10 +33,11 @@ import (
 // that ALREADY exist in the org instead of inventing names/shapes.
 //
 // Read-only tools (see mcp_tools.go):
-//   - list_external_resources       → every registered external resource + its config-key schema
-//   - get_external_resource_schema  → one external resource's config-key schema
-//   - list_org_endpoints            → every service endpoint published across the org
-//   - list_platform_resource_types  → the platform-provisioned resource types on the cluster
+//   - list_external_resources        → every registered external resource + its config-key schema
+//   - get_external_resource_schema   → one external resource's config-key schema
+//   - list_org_endpoints             → every service endpoint published across the org
+//   - list_org_component_endpoints   → list_org_endpoints resolved with repo coords + discovered OpenAPI spec
+//   - list_platform_resource_types   → the platform-provisioned resource types on the cluster
 //
 // Mounted at POST /internal/v1/mcp behind auth.AgentsScopedVerifier, which binds
 // the acting org onto the request context from a verified BFF-signed token

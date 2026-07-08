@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -55,6 +56,33 @@ type orgEndpointView struct {
 	NamespaceVisible bool   `json:"namespaceVisible"` // consumable cross-project as an org-service
 }
 
+// orgComponentEndpointView is the JSON shape returned to the agent for one
+// resolved org-wide component endpoint — list_org_endpoints's rows enriched
+// with the provider's repo coordinates and a discovered OpenAPI contract
+// (endpoint spec discovery). Mirrors endpoints.OrgComponentEndpoint.
+type orgComponentEndpointView struct {
+	Project          string           `json:"project"`
+	Component        string           `json:"component"`
+	Endpoint         string           `json:"endpoint"`
+	Type             string           `json:"type"`
+	Port             int32            `json:"port,omitempty"`
+	BasePath         string           `json:"basePath,omitempty"`
+	NamespaceVisible bool             `json:"namespaceVisible"`
+	Owner            string           `json:"owner,omitempty"`
+	Repo             string           `json:"repo,omitempty"`
+	Subdir           string           `json:"subdir,omitempty"`
+	Branch           string           `json:"branch,omitempty"`
+	Spec             endpointSpecView `json:"spec"`
+}
+
+// endpointSpecView is the JSON shape for an OrgComponentEndpoint's discovered
+// OpenAPI contract availability (see endpoints.EndpointSpec).
+type endpointSpecView struct {
+	Availability  string `json:"availability"`
+	InlineContent string `json:"inlineContent,omitempty"`
+	Path          string `json:"path,omitempty"`
+}
+
 // mcpTools returns the read-only tool descriptors advertised by tools/list.
 func mcpTools() []mcpTool {
 	return []mcpTool{
@@ -85,6 +113,18 @@ func mcpTools() []mcpTool {
 				"endpoint, type, and `namespaceVisible`. Only propose an `org-service` dependency when " +
 				"`namespaceVisible` is true; a row with namespaceVisible=false exists but the provider has NOT " +
 				"published it cross-project, so it cannot be consumed yet.",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			Name: "list_org_component_endpoints",
+			Description: "List every org-wide component endpoint published across this organization, each " +
+				"resolved with the provider's real OpenAPI contract (when discoverable) and repo coordinates. " +
+				"Use this INSTEAD of list_org_endpoints when you need the endpoint's actual request/response " +
+				"contract to integrate against it — not just its name and type. Each row's `spec.availability` " +
+				"is `inline` (spec.inlineContent carries the OpenAPI document verbatim — read it directly), " +
+				"`repo` (no inline spec, but owner/repo/subdir/branch locate the provider's source so you can " +
+				"read the contract from there), or `none` (neither is resolvable — treat the integration as " +
+				"undocumented).",
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
@@ -161,6 +201,21 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 			})
 		}
 		writeToolText(w, req.ID, mustJSON(map[string]any{"endpoints": views}))
+	case "list_org_component_endpoints":
+		if h.orgEndpoints == nil {
+			writeToolText(w, req.ID, mustJSON(map[string]any{"endpoints": []any{}}))
+			return
+		}
+		resolved, err := h.orgEndpoints.ListResolved(r.Context(), orgHandle)
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("list org component endpoints: %v", err))
+			return
+		}
+		views := make([]orgComponentEndpointView, 0, len(resolved))
+		for i := range resolved {
+			views = append(views, toOrgComponentEndpointView(&resolved[i]))
+		}
+		writeToolText(w, req.ID, mustJSON(map[string]any{"endpoints": views}))
 	case "list_platform_resource_types":
 		if h.resourceTypes == nil {
 			writeToolText(w, req.ID, mustJSON(map[string]any{"resourceTypes": []any{}}))
@@ -185,4 +240,27 @@ func toExternalResourceView(er *models.ExternalResource) externalResourceView {
 		keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret})
 	}
 	return externalResourceView{Name: er.Name, Description: er.Description, ConfigKeys: keys}
+}
+
+// toOrgComponentEndpointView projects a resolved OrgComponentEndpoint to the
+// agent-facing shape (coords + discovered spec availability).
+func toOrgComponentEndpointView(e *endpoints.OrgComponentEndpoint) orgComponentEndpointView {
+	return orgComponentEndpointView{
+		Project:          e.Project,
+		Component:        e.Component,
+		Endpoint:         e.Endpoint,
+		Type:             e.Type,
+		Port:             e.Port,
+		BasePath:         e.BasePath,
+		NamespaceVisible: e.NamespaceVisible,
+		Owner:            e.Owner,
+		Repo:             e.Repo,
+		Subdir:           e.Subdir,
+		Branch:           e.Branch,
+		Spec: endpointSpecView{
+			Availability:  e.Spec.Availability,
+			InlineContent: e.Spec.InlineContent,
+			Path:          e.Spec.Path,
+		},
+	}
 }

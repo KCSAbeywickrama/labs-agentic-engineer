@@ -31,6 +31,7 @@ import (
 	"context"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -44,9 +45,13 @@ type ExternalResourceReader interface {
 }
 
 // OrgEndpointLister is the read slice of the org endpoint catalog — the
-// published-service targets an `org-service` dependency can point at.
+// published-service targets an `org-service` dependency can point at (List),
+// plus each one resolved with the provider's repo coordinates and a
+// discovered OpenAPI contract (ListResolved) for the A3 MCP tool
+// (list_org_component_endpoints).
 type OrgEndpointLister interface {
 	List(ctx context.Context, orgHandle string) ([]openchoreo.WorkloadEndpointInfo, error)
+	ListResolved(ctx context.Context, orgHandle string) ([]endpoints.OrgComponentEndpoint, error)
 }
 
 // ResourceTypeLister is the read slice of the platform resource-type catalog —
