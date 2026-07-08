@@ -241,7 +241,11 @@ func TestResolve_InlineFromSchema(t *testing.T) {
 		Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080,
 		Visibility: []string{"namespace"}, SchemaType: "openapi", SchemaContent: "openapi: 3.0.3\ninfo: {}\n",
 	}
-	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}))
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+			"hr": {RepoURL: "https://github.com/acme/hr.git", DefaultBranch: "main"},
+		}}),
+	)
 
 	got := cat.Resolve(context.Background(), "org", e)
 	if got.Spec.Availability != "inline" {
@@ -252,6 +256,11 @@ func TestResolve_InlineFromSchema(t *testing.T) {
 	}
 	if !got.NamespaceVisible {
 		t.Fatalf("expected NamespaceVisible=true")
+	}
+	// Repo coords resolve independently of the CR-schema inline spec — the two
+	// sources are orthogonal, so availability=inline must not suppress coords.
+	if got.Owner != "acme" || got.Repo != "hr" || got.Branch != "main" {
+		t.Fatalf("repo coords: want acme/hr@main, got %s/%s@%s", got.Owner, got.Repo, got.Branch)
 	}
 }
 
@@ -287,6 +296,33 @@ func TestResolve_InlineFromDesignBundle(t *testing.T) {
 	// repo coords still resolved for provenance even though availability=inline.
 	if got.Owner != "acme" || got.Repo != "hr" {
 		t.Fatalf("repo coords: want acme/hr, got %s/%s", got.Owner, got.Repo)
+	}
+}
+
+// (b2) The design-bundle component is matched case-insensitively against the
+// endpoint's OC component name — the provenance Path's folder segment must
+// use the MATCHED component's actual committed Name/casing, not the
+// endpoint's (possibly differently-cased) Component.
+func TestResolve_InlineFromDesignBundle_ProvenancePathUsesMatchedComponentCasing(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "hr", Component: "Employee-API", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	spec := "openapi: 3.0.3\ninfo:\n  title: Employee API\n"
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithDesignReader(fakeDesignReader{byProject: map[string]*artifacts.DesignFile{
+			// Committed folder casing differs from the endpoint's Component field.
+			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: spec}),
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "inline" {
+		t.Fatalf("availability: want inline, got %q", got.Spec.Availability)
+	}
+	if got.Spec.Path != "specs/design/components/employee-api/openapi.yaml" {
+		t.Fatalf("provenance path: want matched design component's casing (employee-api), got %q", got.Spec.Path)
 	}
 }
 
@@ -376,6 +412,45 @@ func TestListResolved_NilSafety(t *testing.T) {
 	got, err := nilCatalog.ListResolved(context.Background(), "org")
 	if got != nil || err != nil {
 		t.Fatalf("nil receiver: want (nil, nil), got (%v, %v)", got, err)
+	}
+}
+
+// countingDesignReader tracks how many times ReadDesign was called per
+// project — used to assert ListResolved's per-pass design-bundle memoization
+// (a project publishing several endpoints must trigger at most one remote
+// read per project for the whole pass).
+type countingDesignReader struct {
+	byProject map[string]*artifacts.DesignFile
+	calls     map[string]int
+}
+
+func (f *countingDesignReader) ReadDesign(_ context.Context, _, projectID string) (*artifacts.DesignFile, error) {
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[projectID]++
+	return f.byProject[projectID], nil
+}
+
+func TestListResolved_MemoizesDesignReadPerProject(t *testing.T) {
+	t.Parallel()
+	// Three endpoints owned by the same provider project ("hr") — a naive
+	// per-endpoint resolve would read the design bundle 3 times in this pass.
+	eps := []openchoreo.WorkloadEndpointInfo{
+		{Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080, Visibility: []string{"namespace"}},
+		{Project: "hr", Component: "payroll-api", Name: "http", Type: "HTTP", Port: 8081, Visibility: []string{"namespace"}},
+		{Project: "hr", Component: "benefits-api", Name: "http", Type: "HTTP", Port: 8082, Visibility: []string{"namespace"}},
+	}
+	reader := &countingDesignReader{byProject: map[string]*artifacts.DesignFile{
+		"hr": designWith(models.DesignComponent{Name: "employee-api", OpenAPISpec: "openapi: 3.0.3\n"}),
+	}}
+	cat := NewCatalog(fakeRC(eps), WithDesignReader(reader))
+
+	if _, err := cat.ListResolved(context.Background(), "org"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := reader.calls["hr"]; got != 1 {
+		t.Fatalf("ReadDesign(hr): want 1 call across 3 endpoints in one ListResolved pass, got %d", got)
 	}
 }
 

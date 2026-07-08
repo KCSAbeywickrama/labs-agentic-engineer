@@ -116,6 +116,12 @@ func WithDesignReader(d DesignReader) CatalogOption {
 // ListWorkloadEndpoints error; per-endpoint resolution is fail-open (a repo /
 // design lookup error degrades that one row's availability, never the list).
 // Returns nil when the catalog is not wired (nil receiver or nil client).
+//
+// A project publishing K endpoints would otherwise trigger K redundant
+// ArtifactStore.ReadDesign calls (a remote git-bundle read) in a single pass,
+// so this method memoizes the design-bundle read per provider project in a
+// map scoped to THIS call only — it is never a long-lived/global cache (no
+// staleness risk) and does not affect the single-endpoint Resolve below.
 func (c *Catalog) ListResolved(ctx context.Context, orgHandle string) ([]OrgComponentEndpoint, error) {
 	if c == nil || c.rc == nil {
 		return nil, nil
@@ -124,9 +130,10 @@ func (c *Catalog) ListResolved(ctx context.Context, orgHandle string) ([]OrgComp
 	if err != nil {
 		return nil, err
 	}
+	designCache := make(map[string]*artifacts.DesignFile)
 	out := make([]OrgComponentEndpoint, 0, len(infos))
 	for i := range infos {
-		out = append(out, c.Resolve(ctx, orgHandle, infos[i]))
+		out = append(out, c.resolve(ctx, orgHandle, infos[i], designCache))
 	}
 	return out, nil
 }
@@ -143,7 +150,20 @@ func (c *Catalog) ListResolved(ctx context.Context, orgHandle string) ([]OrgComp
 //
 // All collaborator lookups are fail-open: an error leaves that source
 // unresolved (logged) rather than failing the whole resolution.
+//
+// Resolve always reads the design bundle directly (no memoization) — the
+// per-project cache is a ListResolved-pass-only optimization (see
+// designCache in ListResolved); this single-endpoint entry point's behavior
+// is unchanged.
 func (c *Catalog) Resolve(ctx context.Context, orgHandle string, e openchoreo.WorkloadEndpointInfo) OrgComponentEndpoint {
+	return c.resolve(ctx, orgHandle, e, nil)
+}
+
+// resolve is the shared implementation behind Resolve and ListResolved.
+// designCache, when non-nil, memoizes the provider project's design-bundle
+// read for the duration of one ListResolved pass; nil (the public Resolve's
+// case) means "always read".
+func (c *Catalog) resolve(ctx context.Context, orgHandle string, e openchoreo.WorkloadEndpointInfo, designCache map[string]*artifacts.DesignFile) OrgComponentEndpoint {
 	oce := OrgComponentEndpoint{
 		Project:          e.Project,
 		Component:        e.Component,
@@ -156,7 +176,7 @@ func (c *Catalog) Resolve(ctx context.Context, orgHandle string, e openchoreo.Wo
 
 	// Read the provider's design bundle once — it feeds both the step-2 inline
 	// spec and the component subdir hint used on the repo path.
-	comp := c.providerComponent(ctx, orgHandle, e.Project, e.Component)
+	comp := c.providerComponent(ctx, orgHandle, e.Project, e.Component, designCache)
 
 	// Resolve repo coords (step-3 source + provenance on the inline paths).
 	c.resolveRepoCoords(ctx, orgHandle, e.Project, comp, &oce)
@@ -169,7 +189,10 @@ func (c *Catalog) Resolve(ctx context.Context, orgHandle string, e openchoreo.Wo
 		oce.Spec = EndpointSpec{
 			Availability:  availabilityInline,
 			InlineContent: comp.OpenAPISpec,
-			Path:          designOpenAPIPath(e.Component),
+			// comp is matched case-insensitively (see providerComponent), so use
+			// its actual committed Name — not e.Component — for the folder
+			// segment, matching the real design-bundle path casing.
+			Path: designOpenAPIPath(comp.Name),
 		}
 	case oce.Repo != "":
 		oce.Spec = EndpointSpec{Availability: availabilityRepo, Path: oce.Subdir}
@@ -183,12 +206,13 @@ func (c *Catalog) Resolve(ctx context.Context, orgHandle string, e openchoreo.Wo
 // component named `component` (case-insensitive, mirroring
 // artifacts.ResolveDesignComponent), or nil when the reader is unwired, the
 // project has no design bundle, or the component is absent. Fail-open: a read
-// error is logged and returns nil.
-func (c *Catalog) providerComponent(ctx context.Context, orgHandle, project, component string) *models.DesignComponent {
+// error is logged and returns nil. designCache is forwarded to readDesign
+// (see its doc) — nil for the public single-endpoint Resolve.
+func (c *Catalog) providerComponent(ctx context.Context, orgHandle, project, component string, designCache map[string]*artifacts.DesignFile) *models.DesignComponent {
 	if c.design == nil {
 		return nil
 	}
-	design, err := c.design.ReadDesign(ctx, orgHandle, project)
+	design, err := c.readDesign(ctx, orgHandle, project, designCache)
 	if err != nil {
 		slog.WarnContext(ctx, "endpoint resolver: design read failed",
 			"org", orgHandle, "project", project, "component", component, "error", err)
@@ -203,6 +227,29 @@ func (c *Catalog) providerComponent(ctx context.Context, orgHandle, project, com
 		}
 	}
 	return nil
+}
+
+// readDesign reads a provider project's design bundle, memoizing the result
+// in designCache when it is non-nil (the ListResolved-pass-scoped cache — see
+// ListResolved's doc). A nil designCache (the public Resolve's case) always
+// reads through. Only successful reads (including a genuinely absent design
+// bundle, i.e. a nil *DesignFile) are cached; a read error is neither cached
+// nor swallowed here — it is returned for the caller (providerComponent) to
+// log and fail open on, so a transient error doesn't poison the pass.
+func (c *Catalog) readDesign(ctx context.Context, orgHandle, project string, designCache map[string]*artifacts.DesignFile) (*artifacts.DesignFile, error) {
+	if designCache != nil {
+		if design, ok := designCache[project]; ok {
+			return design, nil
+		}
+	}
+	design, err := c.design.ReadDesign(ctx, orgHandle, project)
+	if err != nil {
+		return nil, err
+	}
+	if designCache != nil {
+		designCache[project] = design
+	}
+	return design, nil
 }
 
 // resolveRepoCoords fills oce.Owner/Repo/Subdir/Branch from the app-factory
