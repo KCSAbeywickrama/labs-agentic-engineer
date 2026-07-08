@@ -38,6 +38,16 @@ BFF, which is its only backend.
    **autonomously** — there is no human code-review gate. Humans intervene
    on failure, not by default.
 
+## Spec versioning
+
+The whole spec — requirements, design, and validation files under the repo's
+`specs/` tree — is versioned as **one incrementing `v<N>` git tag sequence**,
+cut when the user approves/publishes. There are no per-artifact version
+trails (the earlier `v<N>-<M>` design-revision tags are legacy). The console
+reads this via `GET /projects/{p}/tags` (`latest` + `specDirty`): the
+"vN published" chip is the latest tag, and "draft changes" means `specs/`
+moved on GitHub after that tag.
+
 ## Personas
 
 - **Developer/User** — gives requirements *and* owns the design gate: reviews and

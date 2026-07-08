@@ -2977,7 +2977,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List project build tags
+      summary: List spec version tags
       tags:
         - Projects
   /projects/{projectName}/tasks:
