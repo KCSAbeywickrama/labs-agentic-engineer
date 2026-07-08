@@ -112,13 +112,16 @@ type gateInput struct {
 // RegisterDevflow registers the /devflows surface on the code-first Huma API.
 func RegisterDevflow(api huma.API, svc *HumaService) {
 	huma.Register(api, huma.Operation{
-		OperationID:   "start-devflow",
-		Method:        http.MethodPost,
-		Path:          "/projects/{projectName}/devflows",
-		Summary:       "Start the development workflow for a project (async)",
-		Tags:          []string{"Devflows"},
-		Security:      humakit.SecurityUserJWT,
-		DefaultStatus: http.StatusAccepted,
+		OperationID: "start-devflow",
+		Method:      http.MethodPost,
+		Path:        "/projects/{projectName}/devflows",
+		Summary:     "Start the development workflow for a project",
+		Tags:        []string{"Devflows"},
+		Security:    humakit.SecurityUserJWT,
+		// 200, not 202: this returns a meaningful body (the workflow id + run
+		// id) the caller needs. The console REST client drops 202/204 bodies
+		// (they're used for bodyless async-accept elsewhere), so a 202 here
+		// would strand the client with an undefined response.
 	}, svc.start)
 
 	huma.Register(api, huma.Operation{
