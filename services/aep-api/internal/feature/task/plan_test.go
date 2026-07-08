@@ -42,6 +42,9 @@ func (p planVersions) ListRequirementsVersions(context.Context, string, string) 
 func (p planVersions) ListDesignVersions(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
 	return []artifacts.DesignVersionInfo{{Tag: p.designTag}}, nil
 }
+func (p planVersions) LatestDesignTag(context.Context, string, string) string {
+	return p.designTag
+}
 func (planVersions) GetRequirementsAtTag(context.Context, string, string, string) (map[string]string, error) {
 	return map[string]string{}, nil
 }
