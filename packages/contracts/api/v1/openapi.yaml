@@ -249,9 +249,13 @@ components:
           type: string
         name:
           type: string
+        projectName:
+          description: The room's project, resolved by the oracle from `spec-<org>-<project>`; the collab service uses it for the seed read (#114).
+          type: string
       required:
         - name
         - email
+        - projectName
       type: object
     CollectSpecInputBody:
       additionalProperties: false
