@@ -1,19 +1,26 @@
 # Temporal helm values — AEP local k3d labs profile.
 #
-# Deploys a single-replica Temporal server + Web UI backed by the chart's
-# bundled PostgreSQL. Cassandra, Elasticsearch, Prometheus and Grafana are all
-# disabled: this is a demo-scale durable-execution backend for the aep-api
-# devflow workflows, NOT a production topology. aep-api runs the Temporal
-# worker in-process and reaches the frontend via the start.sh host port bridge
+# Deploys a single-node Temporal server + Web UI backed by the chart's bundled
+# Cassandra. This is a demo-scale durable-execution backend for the aep-api
+# devflow workflows, NOT a production topology. aep-api runs the Temporal worker
+# in-process and reaches the frontend via the start.sh host port bridge
 # (host.docker.internal:7233).
+#
+# NOTE: the temporalio/temporal chart bundles ONLY Cassandra as a datastore —
+# there is no `postgresql` subchart, so an external SQL store would have to be
+# provisioned and pointed at separately. We use the bundled single-node
+# Cassandra to keep the install a single `helm install` with no external DB.
 #
 # Consumed by deployments/scripts/setup-temporal.sh (chart temporal/temporal,
 # pinned version there).
 
-# Bundled PostgreSQL as the single persistence + visibility store; the default
-# Cassandra dependency is turned off.
+# Single-node Cassandra (the chart's default datastore). Elasticsearch,
+# Prometheus and Grafana are all disabled to keep the labs footprint small.
 cassandra:
-  enabled: false
+  enabled: true
+  config:
+    cluster_size: 1
+
 elasticsearch:
   enabled: false
 prometheus:
@@ -21,40 +28,10 @@ prometheus:
 grafana:
   enabled: false
 
-postgresql:
-  enabled: true
-
-# Single-replica server; both the default and visibility stores point at the
-# bundled postgres. The chart's schema setup job creates the databases on
-# first install.
+# Single-replica server; the chart wires persistence to the bundled Cassandra
+# automatically, so no persistence override is needed here.
 server:
   replicaCount: 1
-  config:
-    persistence:
-      defaultStore: default
-      visibilityStore: visibility
-      default:
-        driver: sql
-        sql:
-          driver: postgres12
-          host: temporal-postgresql
-          port: 5432
-          database: temporal
-          user: temporal
-          password: temporal
-          maxConns: 20
-          maxIdleConns: 20
-      visibility:
-        driver: sql
-        sql:
-          driver: postgres12
-          host: temporal-postgresql
-          port: 5432
-          database: temporal_visibility
-          user: temporal
-          password: temporal
-          maxConns: 10
-          maxIdleConns: 10
 
 schema:
   setup:

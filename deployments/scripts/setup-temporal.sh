@@ -21,12 +21,16 @@
 # into the k3d cluster, reached from docker-compose via the start.sh port
 # bridge (host.docker.internal:7233).
 #
-# Lean labs profile: single-replica server, Cassandra/Elasticsearch/Prometheus
-# /Grafana disabled, PostgreSQL persistence (the chart's bundled postgres). Not
-# a production topology — a demo-scale durable-execution backend.
+# Lean labs profile: single-replica server, single-node bundled Cassandra
+# (the ONLY datastore the temporalio chart bundles), Elasticsearch/Prometheus/
+# Grafana disabled. Not a production topology — a demo-scale durable-execution
+# backend.
 #
-# Idempotent: helm install is gated by helm_install_if_not_exists; the
-# namespace-register step retries until the frontend answers.
+# Idempotent: `helm upgrade --install` re-applies the current values on every
+# run (so a re-run heals a previously broken release — a plain
+# install-if-not-exists guard would skip a release helm still thinks is
+# "deployed" even when its pods crash-loop). The namespace-register step retries
+# until the frontend answers.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,7 +56,9 @@ kubectl cluster-info --context "$CLUSTER_CONTEXT" &>/dev/null || {
 helm repo add temporal https://go.temporal.io/helm-charts >/dev/null 2>&1 || true
 helm repo update temporal >/dev/null 2>&1 || true
 
-helm_install_if_not_exists temporal "$NS" temporal/temporal \
+echo "📦 Installing/upgrading temporal..."
+helm upgrade --install temporal temporal/temporal \
+    --namespace "$NS" --create-namespace --kube-context "${CLUSTER_CONTEXT}" \
     --version "$TEMPORAL_CHART_VERSION" \
     --values "$VALUES_FILE" \
     --timeout 15m
