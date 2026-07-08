@@ -26,7 +26,9 @@ jobs:
           - name: remote-worker
             dockerfile: runners/remote-worker/Dockerfile
             context: runners/remote-worker
-          # console: apps/console/Dockerfile does not exist yet — add when ready
+          - name: console
+            dockerfile: apps/console/Dockerfile
+            context: .
 
     steps:
       - uses: actions/checkout@v4

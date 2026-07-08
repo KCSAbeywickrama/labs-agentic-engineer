@@ -41,7 +41,9 @@ jobs:
           - name: remote-worker
             dockerfile: runners/remote-worker/Dockerfile
             context: runners/remote-worker
-          # console: add when apps/console/Dockerfile exists
+          - name: console
+            dockerfile: apps/console/Dockerfile
+            context: .
 
     steps:
       - uses: actions/checkout@v4
@@ -163,7 +165,8 @@ jobs:
           - \`ghcr.io/wso2/aep/aep-server:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/aep-api:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/agents:${{ inputs.version }}\`
-          - \`ghcr.io/wso2/aep/remote-worker:${{ inputs.version }}\`"
+          - \`ghcr.io/wso2/aep/remote-worker:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/console:${{ inputs.version }}\`"
 
   # ─── CTL: build CLI binaries ─────────────────────────────────────────────────
   build-ctl-binaries:
