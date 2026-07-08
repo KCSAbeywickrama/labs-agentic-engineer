@@ -229,3 +229,73 @@ func TestRemoteGit_GetFileContents_ContentTooLarge(t *testing.T) {
 		t.Fatalf("expected an error for content over the cap")
 	}
 }
+
+// ---- GitHub "too large to inline" (encoding=none) is refused, not silent --
+
+func TestRemoteGit_GetFileContents_EncodingNoneRefused(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// GitHub's Contents API returns this shape for a file it cannot inline
+		// (roughly 1-100 MiB): content is empty and encoding is "none".
+		fmt.Fprint(w, `{"type":"file","sha":"toolarge","content":"","encoding":"none"}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	_, err := c.GetFileContents(context.Background(), "org-1", "acme", "billing-svc", "huge.bin", "")
+	if !errors.Is(err, ErrFileTooLargeToInline) {
+		t.Fatalf("err = %v, want ErrFileTooLargeToInline", err)
+	}
+}
+
+func TestRemoteGit_GetFileContents_GenuinelyEmptyFileStillOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A real empty file: encoding is still "base64", content is "".
+		fmt.Fprint(w, `{"type":"file","sha":"empty","content":"","encoding":"base64"}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	got, err := c.GetFileContents(context.Background(), "org-1", "acme", "billing-svc", "empty.txt", "")
+	if err != nil {
+		t.Fatalf("GetFileContents: %v", err)
+	}
+	if got.Content != "" {
+		t.Errorf("Content = %q, want empty string for a genuinely empty file", got.Content)
+	}
+}
+
+// ---- SearchCode rejects an agent-embedded scope qualifier ------------------
+
+func TestRemoteGit_SearchCode_EmbeddedRepoQualifierRefused(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	_, err := c.SearchCode(context.Background(), "org-1", "acme", "billing-svc", "secret repo:acme/other-private")
+	if !errors.Is(err, ErrQueryScopeQualifier) {
+		t.Fatalf("err = %v, want ErrQueryScopeQualifier", err)
+	}
+	if called {
+		t.Fatalf("GitHub search was called for a query embedding its own repo: qualifier — the sanitizer must refuse before any network read")
+	}
+}
+
+func TestRemoteGit_SearchCode_EmbeddedOrgQualifierRefused(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	_, err := c.SearchCode(context.Background(), "org-1", "acme", "billing-svc", "secret org:evilcorp")
+	if !errors.Is(err, ErrQueryScopeQualifier) {
+		t.Fatalf("err = %v, want ErrQueryScopeQualifier", err)
+	}
+	if called {
+		t.Fatalf("GitHub search was called for a query embedding its own org: qualifier — the sanitizer must refuse before any network read")
+	}
+}

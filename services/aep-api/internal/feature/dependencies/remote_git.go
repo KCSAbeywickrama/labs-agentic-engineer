@@ -47,6 +47,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,6 +58,26 @@ import (
 // account the caller's org credential is installed on. This is the cross-org
 // read guard — it fires before any GitHub request is issued.
 var ErrOwnerNotInOrg = errors.New("dependencies: repo owner is not owned by the caller's organization")
+
+// ErrQueryScopeQualifier is returned when an agent-supplied SearchCode query
+// embeds its own repo/org/user/fork scope qualifier. GitHub OR-combines
+// multiple `repo:` (and `org:`/`user:`) qualifiers in one search, so an
+// embedded qualifier would widen the search beyond the authorized repo (e.g.
+// query `"secret repo:acme/other-private"` searches BOTH repos). REFUSED
+// before any network call so the appended `repo:{owner}/{repo}` is always the
+// query's sole scope.
+var ErrQueryScopeQualifier = errors.New("dependencies: query must not contain a repo/org/user/fork scope qualifier")
+
+// ErrFileTooLargeToInline is returned when the Contents API reports a file it
+// cannot inline as base64 (encoding "none" — GitHub's signal for a file over
+// its ~1 MiB inline limit, typically sized 1-100 MiB). This client is
+// deliberately read-only/simple and has no blob-API fallback, so such a file
+// is refused rather than silently surfaced as empty content.
+var ErrFileTooLargeToInline = errors.New("dependencies: file too large to inline (GitHub reported encoding=none)")
+
+// scopeQualifierPattern matches a GitHub code-search scope qualifier
+// (repo:, org:, user:, fork:) anywhere in a query, case-insensitively.
+var scopeQualifierPattern = regexp.MustCompile(`(?i)\b(repo|org|user|fork):`)
 
 const (
 	// defaultRemoteGitAPIBase is the real GitHub REST API root (matches the
@@ -237,9 +258,18 @@ func (c *RemoteGitClient) SearchCode(ctx context.Context, ocOrgID, owner, repo, 
 		return nil, err
 	}
 
-	// Scope the query to the org's repo. The repo: qualifier is appended
-	// server-side so the search can NEVER escape the authorized repo, no matter
-	// what the agent-supplied query contains.
+	// Reject an agent-supplied scope qualifier BEFORE building q. Without this,
+	// a query like "secret repo:acme/other-private" would hand GitHub two
+	// repo: qualifiers, which it OR-combines — widening the search to any repo
+	// the token can see, not just the authorized one.
+	if scopeQualifierPattern.MatchString(query) {
+		return nil, fmt.Errorf("%w: %q", ErrQueryScopeQualifier, query)
+	}
+
+	// Scope the query to the org's repo. The sanitizer above guarantees query
+	// carries no scope qualifier of its own, so the repo: qualifier appended
+	// here is the query's SOLE scope — it cannot be OR-combined with another
+	// repo:/org:/user: qualifier to escape the authorized repo.
 	q := strings.TrimSpace(query) + fmt.Sprintf(" repo:%s/%s", owner, repo)
 	u := fmt.Sprintf("%s/search/code?q=%s&per_page=%d", c.apiBase, url.QueryEscape(q), searchPerPage)
 
@@ -299,7 +329,16 @@ func (c *RemoteGitClient) get(ctx context.Context, u, token, label string) ([]by
 // decodeContent base64-decodes the Contents API `content` field, enforcing the
 // size cap. GitHub only inlines base64; any other encoding (or an over-cap
 // file) is refused rather than returned partial/undecoded.
-func decodeContent(content, encoding string, cap int64) (string, error) {
+//
+// encoding "none" is GitHub's explicit "too large to inline" signal (files
+// roughly 1-100 MiB come back with content:"" and encoding:"none"): that is
+// refused via ErrFileTooLargeToInline rather than treated as a genuinely
+// empty file. A real empty file still comes back as encoding:"base64" with
+// content:"" and is returned as an empty string, unaffected by this check.
+func decodeContent(content, encoding string, maxBytes int64) (string, error) {
+	if encoding == "none" {
+		return "", ErrFileTooLargeToInline
+	}
 	if content == "" {
 		return "", nil
 	}
@@ -312,8 +351,8 @@ func decodeContent(content, encoding string, cap int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decode base64 content: %w", err)
 	}
-	if int64(len(decoded)) > cap {
-		return "", fmt.Errorf("file content %d bytes exceeds cap %d", len(decoded), cap)
+	if int64(len(decoded)) > maxBytes {
+		return "", fmt.Errorf("file content %d bytes exceeds cap %d", len(decoded), maxBytes)
 	}
 	return string(decoded), nil
 }
