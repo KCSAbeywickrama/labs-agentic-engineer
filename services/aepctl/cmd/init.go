@@ -1,0 +1,284 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"golang.org/x/term"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+
+	"github.com/wso2/aep/aepctl/internal/adminpb"
+	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
+)
+
+var (
+	initPlatformChart     string
+	initPlatformRelease   string
+	initPlatformNamespace string
+	initConsoleURL        string
+	initAPIURL            string
+)
+
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Provision OpenBao, install the platform, and configure Thunder",
+	Long: `Full AEP initialisation in one command:
+  1. Waits for the OpenBao pod to be ready
+  2. Provisions OpenBao and generates all secrets
+  3. Installs the platform Helm chart
+  4. Waits for all platform pods to be ready
+  5. Registers AEP OAuth clients in Thunder
+
+Configure the server URL first:
+  aep connect --server http://aep-server.openchoreo.localhost:8080`,
+	RunE: runAEPInit,
+}
+
+func init() {
+	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().StringVar(&initPlatformChart, "platform-chart", "", "Path to the platform Helm chart directory (required)")
+	initCmd.Flags().StringVar(&initPlatformRelease, "platform-release", "aep-platform", "Helm release name for the platform chart")
+	initCmd.Flags().StringVar(&initPlatformNamespace, "namespace", "wso2-aep", "Kubernetes namespace")
+	initCmd.Flags().StringVar(&initConsoleURL, "console-url", "http://console.openchoreo.localhost:8080", "Public URL of the AEP console")
+	initCmd.Flags().StringVar(&initAPIURL, "api-url", "http://api.openchoreo.localhost:8080", "Public URL of the AEP API")
+	initCmd.Flags().String("server", "", "AEP server gRPC URL (overrides config file)")
+	viper.BindPFlag("server", initCmd.Flags().Lookup("server"))
+	registerThunderFlags(initCmd)
+	_ = initCmd.MarkFlagRequired("platform-chart")
+}
+
+func runAEPInit(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	if _, err := exec.LookPath("helm"); err != nil {
+		return fmt.Errorf("helm is required but was not found in PATH\nInstall it from https://helm.sh/docs/intro/install/ and try again")
+	}
+
+	k8sClient, err := k8s.NewClient("")
+	if err != nil {
+		return fmt.Errorf("connect to cluster: %w", err)
+	}
+
+	// 1. Wait for OpenBao pod.
+	if err := waitForOpenBaoPod(ctx, k8sClient, initPlatformNamespace); err != nil {
+		return err
+	}
+
+	// 2. Prompt for secrets.
+	anthropicKey, err := readMaskedInput("Anthropic API key")
+	if err != nil {
+		return fmt.Errorf("read Anthropic API key: %w", err)
+	}
+	if anthropicKey == "" {
+		return fmt.Errorf("Anthropic API key is required")
+	}
+
+	// 3. Provision OpenBao via the management server.
+	client, ctx, closeConn, err := dialServer(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeConn()
+
+	fmt.Fprintln(os.Stdout, "Provisioning OpenBao...")
+	stream, err := client.Init(ctx, &adminpb.InitRequest{
+		AnthropicApiKey: anthropicKey,
+	})
+	if err != nil {
+		return fmt.Errorf("call Init: %w", err)
+	}
+
+	var complete *adminpb.InitComplete
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("receive: %w", err)
+		}
+		switch p := event.Payload.(type) {
+		case *adminpb.InitEvent_Progress:
+			fmt.Fprintf(os.Stdout, "  %s\n", p.Progress)
+		case *adminpb.InitEvent_Error:
+			return fmt.Errorf("server error: %s", p.Error)
+		case *adminpb.InitEvent_Complete:
+			complete = p.Complete
+		}
+	}
+
+	if complete != nil && len(complete.UnsealKeys) > 0 {
+		printOpenBaoCredentials(complete.UnsealKeys)
+	}
+
+	// 4. Install the platform chart.
+	fmt.Fprintln(os.Stdout, "Installing platform chart...")
+	thunderURL := viper.GetString("thunder.url")
+	helmCmd := exec.CommandContext(ctx, "helm", "install", initPlatformRelease, initPlatformChart,
+		"-n", initPlatformNamespace,
+		"--set", "console.publicURL="+initConsoleURL,
+		"--set", "aepApi.publicURL="+initAPIURL,
+		"--set", "console.thunderPublicURL="+viper.GetString("thunder.public_url"),
+		"--set", "thunder.adminURL="+thunderURL,
+		"--set", "thunder.jwksURL="+thunderURL+"/oauth2/jwks",
+	)
+	var helmOut bytes.Buffer
+	helmCmd.Stdout = &helmOut
+	helmCmd.Stderr = &helmOut
+	if err := helmCmd.Run(); err != nil {
+		return fmt.Errorf("helm install platform: %w\n%s", err, helmOut.String())
+	}
+	fmt.Fprintln(os.Stdout, "Platform chart installed.")
+
+	// 5. Wait for all platform pods.
+	if err := waitForAllPodsReady(ctx, k8sClient, initPlatformNamespace, 10*time.Minute); err != nil {
+		return err
+	}
+
+	// 6. Register AEP OAuth clients in Thunder.
+	fmt.Fprintln(os.Stdout, "Configuring Thunder OAuth clients...")
+	if err := doThunderSetup(ctx, k8sClient, initPlatformNamespace,
+		viper.GetString("thunder.namespace"),
+		viper.GetString("thunder.url"),
+		viper.GetString("thunder.config_map"),
+		viper.GetString("thunder.deployment"),
+		viper.GetString("thunder.admin_client_id"),
+		initConsoleURL,
+	); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(os.Stdout, "\nAEP is ready. Open the console to get started.")
+	return nil
+}
+
+// waitForOpenBaoPod blocks until the OpenBao pod is Running. Does NOT wait for
+// Ready — the readiness probe fails until after init completes, so waiting for
+// Ready would deadlock.
+func waitForOpenBaoPod(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+	fmt.Fprintf(os.Stdout, "Waiting for OpenBao pod")
+	for {
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/name=aep-openbao",
+		})
+		if err == nil && len(pods.Items) > 0 {
+			pod := pods.Items[0]
+			if pod.Status.Phase == "Running" && len(pod.Status.ContainerStatuses) > 0 {
+				started := pod.Status.ContainerStatuses[0].Started
+				if started != nil && *started {
+					fmt.Fprintln(os.Stdout, " ready")
+					return nil
+				}
+			}
+		}
+		fmt.Fprintf(os.Stdout, ".")
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(os.Stdout)
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+// waitForAllPodsReady blocks until every pod in the namespace is Ready, or the
+// timeout elapses.
+func waitForAllPodsReady(ctx context.Context, client *kubernetes.Clientset, namespace string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	fmt.Fprintf(os.Stdout, "Waiting for platform pods")
+
+	var lastNotReady []string
+	for {
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			fmt.Fprintln(os.Stdout)
+			return fmt.Errorf("list pods: %w", err)
+		}
+
+		var notReady []string
+		for _, p := range pods.Items {
+			ready := false
+			switch p.Status.Phase {
+			case "Succeeded":
+				ready = true
+			case "Running":
+				ready = true
+				for _, c := range p.Status.ContainerStatuses {
+					if !c.Ready {
+						ready = false
+						break
+					}
+				}
+			}
+			if !ready {
+				notReady = append(notReady, p.Name)
+			}
+		}
+
+		if len(pods.Items) > 0 && len(notReady) == 0 {
+			fmt.Fprintln(os.Stdout, " ready")
+			return nil
+		}
+		lastNotReady = notReady
+
+		if time.Now().After(deadline) {
+			fmt.Fprintln(os.Stdout)
+			return fmt.Errorf("timed out after %s waiting for pods: %s", timeout, strings.Join(lastNotReady, ", "))
+		}
+
+		fmt.Fprintf(os.Stdout, ".")
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(os.Stdout)
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func printOpenBaoCredentials(unsealKeys []string) {
+	fmt.Fprintln(os.Stdout, "\n+------------------------------------------------------------------+")
+	fmt.Fprintln(os.Stdout, "|  STORE THESE SECURELY - they cannot be retrieved later           |")
+	fmt.Fprintln(os.Stdout, "|  Unseal keys: need 3 of 5 to unseal after pod restart            |")
+	fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+")
+	for i, k := range unsealKeys {
+		fmt.Fprintf(os.Stdout, "  Key %d: %s\n", i+1, k)
+	}
+	fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+\n")
+}
+
+// readMaskedInput prompts on stderr and reads hidden input from the terminal.
+func readMaskedInput(prompt string) (string, error) {
+	fmt.Fprintf(os.Stderr, "%s: ", prompt)
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
