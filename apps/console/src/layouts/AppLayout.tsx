@@ -20,6 +20,7 @@ import { useState } from "react";
 import {
   AppShell,
   Box,
+  Collapse,
   ColorSchemeToggle,
   Divider,
   Footer,
@@ -165,12 +166,21 @@ export function AppLayout() {
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Outlet />
           </Box>
-          {projectName && chatOpen && (
-            <AgentChatPanel
-              org={orgHandle ?? "default"}
-              projectName={projectName}
-              onClose={() => setChatOpen(false)}
-            />
+          {/* Horizontal Collapse gives the sidebar-style slide; unmountOnExit
+              keeps the closed panel out of the tree (no idle polling). */}
+          {projectName && (
+            <Collapse
+              in={chatOpen}
+              orientation="horizontal"
+              unmountOnExit
+              sx={{ height: "100%", flexShrink: 0 }}
+            >
+              <AgentChatPanel
+                org={orgHandle ?? "default"}
+                projectName={projectName}
+                onClose={() => setChatOpen(false)}
+              />
+            </Collapse>
           )}
         </Box>
       </AppShell.Main>
