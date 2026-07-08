@@ -138,8 +138,9 @@ func Load() (Config, error) {
 		ClusterGatewayProxyURL:  r.readOptionalString("CLUSTER_GATEWAY_PROXY_URL", ""),
 
 		// Agent runner image + ESO CSS for per-run ExternalSecrets.
-		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
-		AgentClusterSecretStore: r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),
+		AgentRunnerImage:           r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
+		AgentValidationRunnerImage: r.readOptionalString("VALIDATION_RUNNER_IMAGE", ""),
+		AgentClusterSecretStore:    r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),
 	}
 
 	if len(r.errors) > 0 {

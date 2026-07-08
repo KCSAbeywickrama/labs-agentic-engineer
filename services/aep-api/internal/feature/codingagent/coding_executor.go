@@ -62,6 +62,11 @@ type CodingExecutor struct {
 	runnerImage        string
 	clusterSecretStore string
 
+	// validationImage is the Playwright-capable runner image for ClassValidation
+	// tasks (Dockerfile.validation). Empty → validation dispatch fails loudly
+	// (the alpine coding image cannot run chromium). Set via WithValidationImage.
+	validationImage string
+
 	// Build-secret staging (nil → unauthenticated clone, correct for public
 	// repos). buildSecrets pre-stages the org's build git credential so a build's
 	// checkout-source step can clone a private repo; authRetryBudget bounds the
@@ -108,6 +113,15 @@ func (e *CodingExecutor) WithProxy(proxy *Dispatcher, db *gorm.DB, idp OrgPublis
 	e.idp = idp
 	e.runnerImage = runnerImage
 	e.clusterSecretStore = clusterSecretStore
+	return e
+}
+
+// WithValidationImage sets the Playwright-capable runner image used for
+// ClassValidation tasks (the same executor serves both classes; validation
+// swaps the image, sets AEP_TASK_KIND=validation, and skips the coding-only
+// component-ensure/wiring pre-flight). Returns the receiver for chaining.
+func (e *CodingExecutor) WithValidationImage(image string) *CodingExecutor {
+	e.validationImage = image
 	return e
 }
 
@@ -174,12 +188,14 @@ func (e *CodingExecutor) Run(ctx context.Context, req execution.DispatchRequest)
 
 func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRequest) error {
 	t := req.Task
-	// Pre-flight (parity with the legacy dispatch service's ensureOCComponent):
+	isValidation := t.Class == taskmeta.ClassValidation
+
+	// Coding pre-flight (skipped for validation, which has no component to build):
 	// provision the OpenChoreo Component CR from the design facts BEFORE the coding
 	// run, so the PR it opens has a Component to build when it merges (otherwise
 	// the spawned build fails "Component not found"). A provisioning failure blocks
 	// dispatch — the funnel Finishes the row failed + flags attention.
-	if e.components != nil {
+	if !isValidation && e.components != nil {
 		if err := e.components.EnsureComponent(ctx, t.OrgID, t.ProjectID, t.Component); err != nil {
 			return fmt.Errorf("ensure component pre-flight: %w", err)
 		}
@@ -196,14 +212,31 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 	if err != nil {
 		return fmt.Errorf("mint runner bearer: %w", err)
 	}
-	prompt := buildPrompt(t.IssueURL, t.IssueNumber)
 
-	// ADR-0004 declarative wiring: post the "Platform-resolved dependencies"
-	// comment on the coding issue so the agent copies it into workload.yaml. The
-	// gate held this consumer until its deps deployed, so their targets/outputs
-	// resolve now. Best-effort — the platform never patches the CR, and a wiring
-	// failure must not fail the dispatch.
-	if e.wiring != nil {
+	// Per-class dispatch shape: validation swaps the Playwright image, the
+	// project-scoped component sentinel, AEP_TASK_KIND=validation, a longer
+	// deadline (browser boot + e2e authoring), and skips the coding-only wiring.
+	disp := dispatchShape{
+		prompt:        buildPrompt(t.IssueURL, t.IssueNumber),
+		componentName: t.Component,
+		image:         e.runnerImage,
+		taskKind:      "",
+		deadline:      0,
+	}
+	if isValidation {
+		disp = dispatchShape{
+			prompt:        buildValidationPrompt(t.IssueURL, t.IssueNumber),
+			componentName: validationComponentSentinel,
+			image:         e.validationImage,
+			taskKind:      string(taskmeta.ClassValidation),
+			deadline:      validationDeadlineSeconds,
+		}
+	} else if e.wiring != nil {
+		// ADR-0004 declarative wiring: post the "Platform-resolved dependencies"
+		// comment on the coding issue so the agent copies it into workload.yaml. The
+		// gate held this consumer until its deps deployed, so their targets/outputs
+		// resolve now. Best-effort — the platform never patches the CR, and a wiring
+		// failure must not fail the dispatch.
 		if werr := e.wiring.PostResolvedDeps(ctx, t.OrgID, t.ProjectID, t.IssueNumber, t.Component); werr != nil {
 			slog.WarnContext(ctx, "coding executor: post resolved-deps comment failed", "issue", t.IssueNumber, "error", werr)
 		}
@@ -211,13 +244,20 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 
 	// Proxy path first (what local uses). Falls back to ClusterWorkflow when the
 	// proxy dispatcher / SM-API triplets are not fully configured.
-	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, prompt, name, email, login, bearer)
+	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, name, email, login, bearer, disp)
 	if perr != nil {
 		return perr
 	}
 	if used {
 		e.startRun(ctx, req.Execution.ID, runName)
 		return nil
+	}
+
+	// Validation has no ClusterWorkflow fallback — it requires the proxy path
+	// (Playwright image + AEP_TASK_KIND). Fail loudly rather than launch a
+	// browserless coding agent.
+	if isValidation {
+		return fmt.Errorf("validation dispatch requires the cluster-gateway-proxy path and a VALIDATION_RUNNER_IMAGE; ClusterWorkflow fallback is not supported for validation")
 	}
 
 	// ClusterWorkflow fallback.
@@ -240,7 +280,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 		// runner in a coordinated pass. The S2S routes the runner calls with
 		// this id (skills + credentials refresh) are already execution-keyed.
 		TaskID:             req.Execution.ID,
-		Prompt:             prompt,
+		Prompt:             disp.prompt,
 		RepoURL:            repo.RepoURL,
 		IdentityName:       name,
 		IdentityEmail:      email,
@@ -263,9 +303,9 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 // configured for the proxy path (fall back). The runner env AEP_TASK_ID carries
 // the EXECUTION id (JobInputs.TaskID) and the bearer's task claim is the
 // execution id — the re-keyed runner contract (§9.2).
-func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.DispatchRequest, repo *models.GitRepository, prompt, name, email, login, bearer string) (bool, string, error) {
+func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.DispatchRequest, repo *models.GitRepository, name, email, login, bearer string, disp dispatchShape) (bool, string, error) {
 	t := req.Task
-	if e.proxy == nil || e.db == nil || e.runnerImage == "" || e.clusterSecretStore == "" {
+	if e.proxy == nil || e.db == nil || disp.image == "" || e.clusterSecretStore == "" {
 		return false, "", nil
 	}
 	var (
@@ -326,27 +366,31 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.Dis
 		// NAMING DEBT: JobInputs.TaskID → the Job's AEP_TASK_ID env carries the
 		// EXECUTION id (see the CodingAgentParams note in runCoding). Un-renamed
 		// this pass to avoid a cluster-workflow + runner rename before Phase 4.
-		TaskID:            req.Execution.ID,
-		OrgID:             t.OrgID,
-		ProjectID:         t.ProjectID,
-		ComponentName:     t.Component,
-		RunnerImage:       e.runnerImage,
-		RepoURL:           repo.RepoURL,
-		Prompt:            prompt,
-		IdentityName:      name,
-		IdentityEmail:     email,
-		IdentityLogin:     login,
-		GitServiceURL:     e.gitServiceURL,
-		CallbackURL:       e.platformURL,
-		Bearer:            bearer,
-		PublisherTokenURL: publisherTokenURL,
+		TaskID:                req.Execution.ID,
+		OrgID:                 t.OrgID,
+		ProjectID:             t.ProjectID,
+		ComponentName:         disp.componentName,
+		RunnerImage:           disp.image,
+		TaskKind:              disp.taskKind,
+		ActiveDeadlineSeconds: disp.deadline,
+		RepoURL:               repo.RepoURL,
+		Prompt:                disp.prompt,
+		IdentityName:          name,
+		IdentityEmail:         email,
+		IdentityLogin:         login,
+		GitServiceURL:         e.gitServiceURL,
+		CallbackURL:           e.platformURL,
+		Bearer:                bearer,
+		PublisherTokenURL:     publisherTokenURL,
 	}
 	// Resolve the component's external-resource secret bundles so the dispatcher
 	// materialises each into a per-run ExternalSecret the runner mounts (the agent
 	// integration-tests against the live service). Best-effort: on failure the run
 	// dispatches without them (identical to no secret-bearing external deps).
+	// Component tasks only — a validation task is project-scoped (no component,
+	// no component-bound external resources).
 	var extResSRs []ExternalResourceSecretInputs
-	if e.runnerSecrets != nil {
+	if e.runnerSecrets != nil && t.Component != "" {
 		if srs, rerr := e.runnerSecrets.ResolveRunnerSecrets(ctx, t.OrgID, t.ProjectID, t.Component, "development"); rerr != nil {
 			slog.WarnContext(ctx, "coding executor: resolve external-resource runner secrets failed — dispatching without", "component", t.Component, "error", rerr)
 		} else {
@@ -527,4 +571,31 @@ func deriveTokenURLFromJWKS(jwksURL string) string {
 // closes it (so the pull_request webhook links the PR back to the Task).
 func buildPrompt(issueURL string, issueNumber int) string {
 	return fmt.Sprintf("Work on this GitHub issue: %s\n\nWhen you open the pull request, include `Closes #%d` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `aep` skill loaded in your session.", issueURL, issueNumber)
+}
+
+// validationComponentSentinel is the AEP_COMPONENT_NAME a validation Job carries.
+// A validation Task is project-scoped (no component); this is a valid k8s label
+// value the Job/pod is stamped with.
+const validationComponentSentinel = "aep-validation"
+
+// validationDeadlineSeconds bounds a validation run (2h): browser boot + live
+// exploration + authoring/healing e2e specs is longer than a coding run.
+const validationDeadlineSeconds int64 = 7200
+
+// dispatchShape carries the per-class knobs runCoding hands to the proxy
+// dispatch: the coding class and the validation class share the executor and
+// the proxy plumbing, differing only in these values.
+type dispatchShape struct {
+	prompt        string
+	componentName string
+	image         string
+	taskKind      string // "" (coding) | "validation"
+	deadline      int64  // 0 → job_template's 1h default
+}
+
+// buildValidationPrompt is the validation-runner directive: it points at the
+// validation issue and defers the workflow to the aep-validation skill (the
+// runner preloads it because AEP_TASK_KIND=validation).
+func buildValidationPrompt(issueURL string, issueNumber int) string {
+	return fmt.Sprintf("This is a validation task. Work on this GitHub validation issue: %s\n\nFollow the `aep-validation` skill's workflow: fetch the validation context, author and run the e2e tests against the deployed system, commit the tests and report, and open a PR whose body includes `Closes #%d` so the platform links it back.", issueURL, issueNumber)
 }

@@ -63,6 +63,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/feature/validation"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
@@ -616,7 +617,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// to build (else "Component not found"). Ported from the legacy dispatch
 	// service's ensureOCComponent; componentService reads the design facts.
 	codingExecutor.WithComponentEnsurer(componentService)
+	codingExecutor.WithValidationImage(cfg.AgentValidationRunnerImage)
 	registry.Register(taskmeta.ClassCoding, codingExecutor)
+	// The same executor serves ClassValidation: its runCoding branch swaps the
+	// Playwright image + AEP_TASK_KIND=validation and skips the coding-only
+	// component-ensure/wiring pre-flight (validation-phase).
+	registry.Register(taskmeta.ClassValidation, codingExecutor)
 
 	// Command surface calls into the funnel; webhook handling splits across the
 	// two package halves: issues.* (task birth / block repair / command labels)
@@ -686,6 +692,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
 	authn.SetRunnerAuthorizer(authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, executionOrgLookup(db)))
 
+	// Validation-context runner callback: resolves the run's deployed endpoint
+	// URLs (and, later, test credentials) so they never enter the public issue.
+	validationContextSvc := validation.NewContextService(
+		validationExecLocator{repo: executionRepo},
+		validationEndpointResolver{store: artifactStore, comp: componentService},
+	)
+
 	// Controllers
 	params := api.AppParams{
 		Config: cfg,
@@ -693,8 +706,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// connect-callback + webhook controllers remain raw handlers. Every other
 		// feature registers code-first via params.HumaDeps below.
 		InternalDeps: api.InternalDeps{
-			ExecSkills:   execSkillsSvc,
-			CredsRefresh: credRefreshService,
+			ExecSkills:        execSkillsSvc,
+			CredsRefresh:      credRefreshService,
+			ValidationContext: validationContextSvc,
 		},
 		WebhookController:   webhookCtrl,
 		OrgGitHubController: orgGitHubCtrl,
@@ -808,6 +822,15 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Mint aep:provision gate issues on design approval (before planning gates any
 	// consumer coding task on them).
 	designService.SetProvisionIssueMinter(provisioningSvc)
+	// Mint the project's single aep:validation Task on design approval. It
+	// dependsOn every component, so the funnel holds it until they all deploy,
+	// then dispatches the validation runner (validation-phase).
+	validationSvc := validation.NewService(validation.Deps{
+		Issues:   issueService,
+		Design:   designComponents{store: artifactStore},
+		Criteria: validationCriteria{files: filesSvc},
+	})
+	designService.SetValidationIssueMinter(validationSvc)
 	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
 	// external dependency's OpenAPI contract and atomically commits the spec file
 	// + the design.json specPath edit (clearing the external-needs-spec gate) via

@@ -83,9 +83,9 @@ var featureEdgeAllowlist = map[string][]string{
 	// services. These two edges ARE the feature — it assembles GET /config and runs
 	// the atomic multi-section PATCH across both services — so the concrete edges
 	// are the deliberate design, not incidental coupling.
-	"orgconfig":    {"idp", "orgcreds"},
-	"orgcreds":     {"gitrepo"},
-	"project":      {"artifacts", "gitrepo"},
+	"orgconfig": {"idp", "orgcreds"},
+	"orgcreds":  {"gitrepo"},
+	"project":   {"artifacts", "gitrepo"},
 	// provisioning is the dependency-provisioning coordinator (dependency-management
 	// §3.6): it drives the provisioner cores (dependencies/resources) and GitHub gate
 	// issues (gitrepo). Every other collaborator — the executions store, the funnel
@@ -97,8 +97,13 @@ var featureEdgeAllowlist = map[string][]string{
 	"skills":        {"artifacts", "gitrepo"},
 	// task is the GitHub-facing half: it never imports feature/execution (the §1
 	// split) — the funnel is reached through the task.Dispatcher consumer port.
-	"task":    {"artifacts", "gitrepo"},
-	"webhook": {"gitrepo", "orgcreds"},
+	"task": {"artifacts", "gitrepo"},
+	// validation mints the project's aep:validation Task issue on design approval
+	// (validation-phase). Its only feature edge is gitrepo (the issue wire types
+	// in its ports); the design-component and criteria-file reads are consumer-
+	// side ports wired at the composition root, so artifacts/files stay out.
+	"validation": {"gitrepo"},
+	"webhook":    {"gitrepo", "orgcreds"},
 }
 
 // depCache memoizes each package's transitive import set so the boundary

@@ -44,13 +44,10 @@ const REPO = "ChamodOrg/hello-ui";
 const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 const LABELS = ["aep", "validation"];
 
-// Deployed endpoint URL per component, keyed by component name. Filled by
-// hand for now; the platform resolves these from OpenChoreo ReleaseBindings
-// once the trigger moves into aep-api.
-const DEPLOYED_ENDPOINTS = {
-  "hello-web": "http://localhost:5173",
-  "hello-api": "http://localhost:9090",
-};
+// Deployed endpoint URLs + test credentials are NOT written into the issue: the
+// runner fetches them at dispatch time from the platform's validation-context
+// endpoint (kept out of the public issue). The interim local harness serves
+// them from token-stub.mjs.
 
 // ---------------------------------------------------------------------------
 
@@ -117,7 +114,9 @@ function renderBody(doc, issueNumber) {
   const lines = [];
 
   lines.push(
-    "Validate the deployed system against its acceptance criteria: author end-to-end tests, run them against the deployed endpoints below, and open a PR containing the tests and a validation report.",
+    "Validate the deployed system against its acceptance criteria: author end-to-end tests, run them against the deployed system, and open a PR containing the tests and a validation report.",
+    "",
+    "The deployed endpoint URLs and any test credentials are provided to the validation runner by the platform at dispatch time — they are not in this issue.",
     "",
     "## Acceptance oracle",
     `The source of truth is \`${CRITERIA_PATH}\` in this repo. Do not edit it except to set \`covered: true\` on e2e criteria whose spec passes.`,
@@ -137,19 +136,7 @@ function renderBody(doc, issueNumber) {
     lines.push("");
   }
 
-  lines.push("## Deployed endpoints");
-  const entries = Object.entries(DEPLOYED_ENDPOINTS);
-  if (entries.length === 0) {
-    lines.push("_Not resolved yet — fill `DEPLOYED_ENDPOINTS` in scripts/create-validation-issue.mjs before dispatching the agent._");
-  } else {
-    lines.push("| Component | URL |", "|---|---|");
-    for (const [name, url] of entries) lines.push(`| ${name} | ${url} |`);
-    if (entries.some(([, url]) => url.includes("localhost"))) {
-      lines.push("", "Localhost endpoints are local dev servers, not a real deployment — start them per the repo's README before running tests.");
-    }
-  }
   lines.push(
-    "",
     "Per-component design docs: `specs/design/components/<name>/design.md` (OpenAPI contract, when present, alongside as `openapi.yaml`); system overview: `specs/design/design.md`.",
     "",
     "## Test layout",

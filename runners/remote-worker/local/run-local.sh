@@ -70,9 +70,17 @@ IMAGE_TAG="${IMAGE_TAG:-aep-remote-worker:local}"
 # distinct IMAGE_TAG so the two variants don't clobber each other.
 DOCKERFILE="${DOCKERFILE:-$WORKER_DIR/Dockerfile}"
 # The container reaches the host-side stub via host.docker.internal.
-# AEP_PLATFORM_URL stays unset: oneshot.ts then skips the per-task skills
-# pull and credhelper/gh fall back to AEP_GIT_SERVICE_URL for refreshes.
 export AEP_GIT_SERVICE_URL="http://host.docker.internal:${STUB_PORT}"
+# AEP_PLATFORM_URL: for an implementation run it stays unset (oneshot.ts skips
+# the per-task skills pull; credhelper/gh fall back to AEP_GIT_SERVICE_URL). A
+# validation run points it at the same stub so the aep-validation skill can
+# fetch its validation-context; the stub answers that path too. The skills-pull
+# to the stub 404s and is a harmless best-effort warning.
+if [ "${AEP_TASK_KIND}" = "validation" ]; then
+  export AEP_PLATFORM_URL="${AEP_PLATFORM_URL:-http://host.docker.internal:${STUB_PORT}}"
+else
+  export AEP_PLATFORM_URL="${AEP_PLATFORM_URL:-}"
+fi
 
 if ! docker info >/dev/null 2>&1; then
   echo "docker daemon not reachable — start it first (e.g. 'colima start')" >&2
@@ -110,7 +118,7 @@ docker run --rm \
   -e ANTHROPIC_API_KEY \
   -e AEP_TASK_ID -e AEP_ORG_ID -e AEP_PROJECT_ID -e AEP_COMPONENT_NAME \
   -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e AEP_GIT_SERVICE_URL \
-  -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL -e AEP_TASK_KIND \
+  -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL -e AEP_TASK_KIND -e AEP_PLATFORM_URL \
   "$IMAGE_TAG" || EXIT_CODE=$?
 
 WS="$SCRIPT_DIR/workspace/$AEP_ORG_ID/$AEP_PROJECT_ID/$AEP_TASK_ID"
