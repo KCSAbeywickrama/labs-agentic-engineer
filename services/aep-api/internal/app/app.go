@@ -791,6 +791,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		FilesSvc:          filesSvc,
 		ArtifactSvc:       artifactSvcGit,
 		GenAISvc:          genaiSvc,
+		DevflowSvc: devflow.NewHumaService(
+			devflowRuntime,
+			workflowRunRepo,
+			repoFullNameLookup{repos: repoRepo},
+			devflowTagger{art: artifactSvcGit},
+		),
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
 		GitHubAppClientID: cfg.GitHubAppClientID,

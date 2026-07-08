@@ -27,8 +27,31 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/repositories"
 )
+
+// repoFullNameLookup resolves a project's "owner/name" from the repo row —
+// the devflow API's RepoLookup port.
+type repoFullNameLookup struct {
+	repos repositories.RepoRepository
+}
+
+func (l repoFullNameLookup) RepoFullName(ctx context.Context, orgID, projectID string) (string, error) {
+	row, err := l.repos.GetByOrgAndProjectID(ctx, orgID, projectID)
+	if err != nil {
+		return "", err
+	}
+	if row == nil {
+		return "", gitrepo.ErrRepoNotFound
+	}
+	owner, name, err := gitrepo.ParseOwnerRepo(row.RepoURL)
+	if err != nil {
+		return "", err
+	}
+	return owner + "/" + name, nil
+}
 
 // This file wires the devflow dev-workflow activity ports onto the existing
 // artifacts / genai / plan services. The adapters live at the composition root
