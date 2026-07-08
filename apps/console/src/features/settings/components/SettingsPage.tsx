@@ -59,7 +59,11 @@ export function SettingsPage() {
       >
         <Card
           variant="outlined"
-          sx={{ width: { xs: "100%", sm: 220 }, height: "fit-content" }}
+          sx={{
+            width: { xs: "100%", sm: 220 },
+            flexShrink: 0,
+            height: "fit-content",
+          }}
         >
           <CardContent sx={{ p: 2 }}>
             <Tabs
