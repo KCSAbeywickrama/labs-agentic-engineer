@@ -149,8 +149,19 @@ export function AppLayout() {
 
       <AppShell.Main>
         {/* Content + the project AI panel side by side: the page shrinks
-            rather than being overlaid; the panel mounts only while open. */}
-        <Box sx={{ display: "flex", height: "100%", minHeight: 0 }}>
+            rather than being overlaid; the panel mounts only while open.
+            AppShell.Main is itself a flex container, so this wrapper must
+            grow (it's a flex ITEM) or it collapses to content width. */}
+        <Box
+          sx={{
+            display: "flex",
+            flexGrow: 1,
+            width: "100%",
+            minWidth: 0,
+            height: "100%",
+            minHeight: 0,
+          }}
+        >
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Outlet />
           </Box>
