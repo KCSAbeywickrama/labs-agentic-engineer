@@ -158,6 +158,12 @@ func (f fakeVersions) ListRequirementsVersions(context.Context, string, string) 
 func (f fakeVersions) ListDesignVersions(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
 	return f.design, nil
 }
+func (f fakeVersions) LatestDesignTag(context.Context, string, string) string {
+	if len(f.design) == 0 {
+		return ""
+	}
+	return f.design[0].Tag
+}
 func (f fakeVersions) GetRequirementsAtTag(context.Context, string, string, string) (map[string]string, error) {
 	return nil, nil
 }
