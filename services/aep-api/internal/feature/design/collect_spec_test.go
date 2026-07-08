@@ -40,8 +40,9 @@ paths:
           description: ok
 `
 
-// fakeCommitter records the Files commit and answers CAS reads: the component's
-// design.json exists (returns a stable sha), the spec file does not yet.
+// fakeCommitter records the Files commit and answers CAS reads: the
+// component's design.json and the root design.md both exist (return a stable
+// sha), the spec file does not yet.
 type fakeCommitter struct {
 	writes    []DesignFileWrite
 	commitErr error
@@ -49,7 +50,7 @@ type fakeCommitter struct {
 }
 
 func (f *fakeCommitter) ReadFile(_ context.Context, _, _, path string) (content, sha string, ok bool, err error) {
-	if strings.HasSuffix(path, "design.json") {
+	if strings.HasSuffix(path, "design.json") || strings.HasSuffix(path, "design.md") {
 		return "{}", "sha-design", true, nil
 	}
 	return "", "", false, nil // spec file is new

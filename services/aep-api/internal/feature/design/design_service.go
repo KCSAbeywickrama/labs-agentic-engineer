@@ -696,7 +696,9 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 	// with ErrResourceCatalogUnavailable rather than silently skipping the
 	// derivation. An explicit conflicting service-required is rejected as
 	// ErrEndUserAuthConflict and the save is blocked, mirroring the
-	// unresolved-dependency proceed-gate immediately below.
+	// unresolved-dependency proceed-gate immediately below. This SAME marker
+	// map is also the one the skill-attach step below keys on (Task G4) — one
+	// catalog fetch serves both consumers in this pass.
 	markers, mErr := s.resourceMarkersForAuthDerivation(ctx, designFile)
 	if mErr != nil {
 		return nil, mErr
@@ -710,6 +712,28 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		designFile, err = s.store.ReadDesign(ctx, orgID, projectID)
 		if err != nil {
 			return nil, fmt.Errorf("re-read design after auth derivation: %w", err)
+		}
+		if designFile == nil {
+			return nil, artifacts.ErrDesignNotFound
+		}
+	}
+
+	// Generic conditional skill attachment (Task G4 — attach_skills.go): every
+	// platform-resource dependency whose CRT carries the `aep.wso2.com/skill`
+	// annotation gets that skill name ensured in the design's skillsApplied,
+	// append-only, persisted to root design.md BEFORE the tag-cut. Reuses the
+	// SAME marker map fetched above for the auth derivation — no second catalog
+	// call, no behavior change when there is no platform-resource dependency or
+	// none of its types carry the annotation.
+	skillsCommit, skErr := s.persistSkillsApplied(ctx, orgID, projectID, designFile, markers)
+	if skErr != nil {
+		return nil, skErr
+	}
+	if skillsCommit {
+		commitSHA = ""
+		designFile, err = s.store.ReadDesign(ctx, orgID, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("re-read design after skill attach: %w", err)
 		}
 		if designFile == nil {
 			return nil, artifacts.ErrDesignNotFound
