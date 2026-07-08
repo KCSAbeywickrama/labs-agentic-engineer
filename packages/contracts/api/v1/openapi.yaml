@@ -99,6 +99,75 @@ components:
         - commitSha
         - files
       type: object
+    BoardTask:
+      additionalProperties: false
+      properties:
+        assignee:
+          type: string
+        componentName:
+          type: string
+        componentTaskId:
+          type: string
+        dependsOnComponents:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnExternalResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnOrgServices:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        dependsOnResources:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        description:
+          type: string
+        dispatchedAt:
+          format: date-time
+          type: string
+        errorMessage:
+          type: string
+        execType:
+          type: string
+        externalResourceName:
+          type: string
+        id:
+          type: string
+        labels:
+          items:
+            $ref: "#/components/schemas/LabelInfo"
+          type:
+            - array
+            - "null"
+        lifecycleStatus:
+          type: string
+        resourceName:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+      required:
+        - id
+        - title
+        - url
+      type: object
     BuildLogEntry:
       additionalProperties: false
       properties:
@@ -958,6 +1027,17 @@ components:
         - status
         - connectedAt
       type: object
+    LabelInfo:
+      additionalProperties: false
+      properties:
+        color:
+          type: string
+        name:
+          type: string
+      required:
+        - name
+        - color
+      type: object
     Lineage:
       additionalProperties: false
       properties:
@@ -1120,6 +1200,56 @@ components:
       required:
         - name
       type: object
+    ProjectBoard:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ProjectBoard.json
+          format: uri
+          readOnly: true
+          type: string
+        done:
+          items:
+            $ref: "#/components/schemas/BoardTask"
+          type:
+            - array
+            - "null"
+        failed:
+          items:
+            $ref: "#/components/schemas/BoardTask"
+          type:
+            - array
+            - "null"
+        inProgress:
+          items:
+            $ref: "#/components/schemas/BoardTask"
+          type:
+            - array
+            - "null"
+        onHold:
+          items:
+            $ref: "#/components/schemas/BoardTask"
+          type:
+            - array
+            - "null"
+        todo:
+          items:
+            $ref: "#/components/schemas/BoardTask"
+          type:
+            - array
+            - "null"
+        url:
+          type: string
+      required:
+        - url
+        - todo
+        - inProgress
+        - done
+        - onHold
+        - failed
+      type: object
     ProjectList:
       additionalProperties: false
       properties:
@@ -1141,6 +1271,64 @@ components:
           type: string
       required:
         - items
+      type: object
+    ProjectStatus:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/ProjectStatus.json
+          format: uri
+          readOnly: true
+          type: string
+        deployStatus:
+          description: >-
+            Result of the latest dev deployment (e.g. in_progress /
+            succeeded / failed); absent when nothing was deployed.
+          type: string
+        deployedVersion:
+          description: >-
+            Version tag currently deployed to the dev environment; absent
+            when nothing deployed.
+          type: string
+        designStatus:
+          type: string
+        hasDesign:
+          type: boolean
+        hasSpec:
+          type: boolean
+        hasTasks:
+          type: boolean
+        phase:
+          type: string
+        repoErrorMessage:
+          type: string
+        repoStatus:
+          type: string
+        repoUrl:
+          type: string
+        specDirty:
+          description: >-
+            True when the spec/design changed after specVersion was
+            published.
+          type: boolean
+        specStatus:
+          type: string
+        specVersion:
+          description: >-
+            Latest published spec version tag (e.g. v1); absent when
+            nothing published.
+          type: string
+      required:
+        - phase
+        - repoStatus
+        - repoUrl
+        - hasSpec
+        - hasDesign
+        - hasTasks
+        - specStatus
+        - designStatus
       type: object
     ProvisionBody:
       additionalProperties: false
@@ -1988,6 +2176,35 @@ paths:
       summary: Get a project
       tags:
         - Projects
+  /projects/{projectName}/board:
+    get:
+      operationId: get-board
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectBoard"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get a project's kanban board
+      tags:
+        - Board
   /projects/{projectName}/build:
     post:
       operationId: build-project
@@ -2874,6 +3091,35 @@ paths:
       summary: Get the collaboration session descriptor for the spec workspace
       tags:
         - Collaboration
+  /projects/{projectName}/status:
+    get:
+      operationId: get-project-status
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectStatus"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get a project's SDLC status
+      tags:
+        - Projects
   /projects/{projectName}/tags:
     get:
       operationId: list-project-tags

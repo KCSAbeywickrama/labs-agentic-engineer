@@ -3,7 +3,8 @@ import type { components } from "../../generated/aep-api";
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
 type ProjectBoard = components["schemas"]["ProjectBoard"];
-type SpecBundle = components["schemas"]["SpecBundle"];
+type FileMeta = components["schemas"]["FileMeta"];
+type FileContent = components["schemas"]["FileContent"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
 // Scenario switch for the project overview (#77) and spec view (#80).
@@ -305,54 +306,82 @@ const validationPlan = `# Demo Shop — Validation plan
 - Each service exposes /healthz returning 200.
 `;
 
-const prdOnlySpec: SpecBundle = {
-  files: [{ path: "requirements/prd.md", group: "requirements", content: seededPrd }],
-};
+// Spec files as the Files API serves them (#113): repo-relative paths under
+// specs/, metadata (list-files) split from content (read-file).
+interface MockSpecFile {
+  path: string;
+  content: string;
+}
 
-const collaborationSpec: SpecBundle = {
-  files: [
-    { path: "requirements/prd.md", group: "requirements", content: seededPrd },
-    {
-      path: "requirements/user-stories.md",
-      group: "requirements",
-      content: userStories,
-    },
-    {
-      path: "design/architecture.md",
-      group: "designs",
-      content: architectureMd,
-    },
-  ],
-};
+const prdOnlyFiles: MockSpecFile[] = [
+  { path: "specs/requirements/prd.md", content: seededPrd },
+];
 
-const fullSpec: SpecBundle = {
-  files: [
-    ...collaborationSpec.files,
-    {
-      path: "design/architecture.excalidraw",
-      group: "designs",
-      content: architectureDiagram,
-    },
-    {
-      path: "validation/validation-plan.md",
-      group: "validation",
-      content: validationPlan,
-    },
-  ],
-};
+const collaborationFiles: MockSpecFile[] = [
+  ...prdOnlyFiles,
+  { path: "specs/requirements/user-stories.md", content: userStories },
+  { path: "specs/design/architecture.md", content: architectureMd },
+];
 
-export const projectSpecs: Record<
+const fullFiles: MockSpecFile[] = [
+  ...collaborationFiles,
+  { path: "specs/design/architecture.excalidraw", content: architectureDiagram },
+  { path: "specs/validation/validation-plan.md", content: validationPlan },
+];
+
+export const projectSpecFiles: Record<
   Exclude<ProjectScenario, "error">,
-  SpecBundle
+  MockSpecFile[]
 > = {
-  fresh: prdOnlySpec,
-  spec: collaborationSpec,
-  "spec-failed": prdOnlySpec,
-  building: fullSpec,
-  deployed: fullSpec,
-  "deploy-failed": fullSpec,
-  "repo-error": prdOnlySpec,
+  fresh: prdOnlyFiles,
+  spec: collaborationFiles,
+  "spec-failed": prdOnlyFiles,
+  building: fullFiles,
+  deployed: fullFiles,
+  "deploy-failed": fullFiles,
+  "repo-error": prdOnlyFiles,
 };
+
+// Deterministic stand-in for the git blob sha: stable per content revision,
+// so the console's (path, sha) content caching behaves like it does live.
+function mockSha(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0").repeat(5);
+}
+
+export function specFileMetas(files: MockSpecFile[]): FileMeta[] {
+  return files
+    .map((f) => ({
+      path: f.path,
+      sha: mockSha(f.path + f.content),
+      size: f.content.length,
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export function specFileContent(
+  files: MockSpecFile[],
+  path: string,
+): FileContent | null {
+  const file = files.find((f) => f.path === path);
+  if (!file) return null;
+  return {
+    path: file.path,
+    content: file.content,
+    sha: mockSha(file.path + file.content),
+  };
+}
+
+export const specFileNotFound = (path: string): ErrorModel => ({
+  type: "about:blank",
+  status: 404,
+  title: "Not Found",
+  detail: `no spec file at ${path}`,
+});
 
 export const projectSectionError: ErrorModel = {
   type: "about:blank",
