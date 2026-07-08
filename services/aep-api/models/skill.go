@@ -18,14 +18,15 @@ package models
 
 import "time"
 
-// Skill is the resolved shape that flows from the `skills` table to the
-// architect input, the tech-lead input, the runner pull endpoint, and the
-// console. Mirrors the row schema 1:1 plus a few derived fields.
+// Skill is the resolved shape that flows from the `org-skills` repo to the
+// architect input, the tech-lead input, and the console. Mirrors the stored
+// SKILL.md 1:1 plus a few derived fields. (The coding runner no longer receives
+// this shape over the wire — it clones `org-skills` and resolves applied skills
+// locally.)
 //
-// Lives in models (the shared value-type layer) so both the skills feature and
-// the task feature (which snapshots resolved skills per design version) can
-// reference it without crossing a feature boundary. The skills package keeps a
-// `type Skill = models.Skill` alias.
+// Lives in models (the shared value-type layer) so the skills feature and its
+// consumers can reference it without crossing a feature boundary. The skills
+// package keeps a `type Skill = models.Skill` alias.
 type Skill struct {
 	OrgID         string            `json:"orgId"`
 	Name          string            `json:"name"`
@@ -55,11 +56,6 @@ const (
 	// SkillKindImported — imported from an AgentSkills tarball; editable.
 	SkillKindImported = "imported"
 )
-
-// MaterializedName / PrefixedID are the pure skill-naming helpers shared by the
-// skills feature and task's skill snapshotting.
-func MaterializedName(kind, name string) string { return kind + "-" + name }
-func PrefixedID(kind, name string) string       { return kind + "/" + name }
 
 // SkillsRepoSentinelProjectID is the reserved git_repositories.project_id under
 // which the per-org skills repo row lives (so it is distinguishable from real

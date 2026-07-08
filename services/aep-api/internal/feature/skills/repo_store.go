@@ -28,8 +28,8 @@ package skills
 //
 // The embedded library (platform + org kinds) is seeded + content-reconciled
 // from the vendored container files (reconcile.go). The exported read surface
-// (Resolve/List/ListSummaries/ResolveMany) is IDENTICAL to the previous store,
-// so the architect and tech-lead resolvers consume it unchanged.
+// (Resolve/List/ListSummaries) is IDENTICAL to the previous store, so the
+// architect and tech-lead resolvers consume it unchanged.
 
 import (
 	"context"
@@ -167,24 +167,6 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 			ContentSHA:  sk.ContentSHA,
 			Editable:    sk.Kind == models.SkillKindCustom || sk.Kind == models.SkillKindImported,
 		})
-	}
-	return out, nil
-}
-
-// ResolveMany fans Resolve over names, preserving order; missing names are
-// omitted (the caller may compare lengths to detect drops).
-func (s *SkillService) ResolveMany(ctx context.Context, orgID string, names []string) ([]Skill, error) {
-	byName := make(map[string]Skill)
-	for _, sk := range s.catalog(ctx, orgID) {
-		byName[sk.Name] = sk
-	}
-	out := make([]Skill, 0, len(names))
-	for _, n := range names {
-		if sk, ok := byName[n]; ok {
-			out = append(out, sk)
-			continue
-		}
-		slog.WarnContext(ctx, "skill resolve missing", "orgID", orgID, "name", n)
 	}
 	return out, nil
 }

@@ -481,9 +481,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
-	// Runner skills S2S (re-keyed to execution, §9.2) + the unified progress
-	// endpoint. execSkillsSvc backs GET /internal/v1/executions/{id}/skills.
-	execSkillsSvc := execution.NewSkillsService(executionRepo, artifactStore, skillSvc)
+	// The unified per-execution progress endpoint. (The runner skills-pull S2S
+	// endpoint is retired — the runner now clones `org-skills` and resolves
+	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
 	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
 
 	// trait_sync is the single shared emitter that reconciles the
@@ -594,6 +594,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		componentClient, repoService, identities{cred: credService},
 		anthropicProvisioner{svc: anthropicCredService}, taskTokens, executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL)
+	// Stamp AEP_SKILLS_REPO_URL so the runner clones `org-skills` and resolves
+	// applied skills locally (the same EnsureProvisioned+GetRepo closure the
+	// genai + task-plan turns use for their SkillsRef).
+	codingExecutor.WithSkillsRepo(skillsRepoForTurns)
 	// The cluster-gateway-proxy dispatch path (the `ca-…` Jobs the local plane
 	// uses): per-org NS + per-run ExternalSecrets + a K8s Job via the proxy.
 	// Publisher-cc is provisioned through idpService (skipped for an http
@@ -693,7 +697,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// connect-callback + webhook controllers remain raw handlers. Every other
 		// feature registers code-first via params.HumaDeps below.
 		InternalDeps: api.InternalDeps{
-			ExecSkills:   execSkillsSvc,
 			CredsRefresh: credRefreshService,
 		},
 		WebhookController:   webhookCtrl,

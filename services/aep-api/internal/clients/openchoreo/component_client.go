@@ -140,10 +140,16 @@ type CodingAgentParams struct {
 	IdentityEmail string
 	IdentityLogin string
 	Bearer        string
+	// SkillsRepoURL is the org's `org-skills` repo clone URL. The runner clones
+	// it to resolve the design's applied skills locally (replacing the retired
+	// S2S skills-pull). Optional — empty stays empty through the ClusterWorkflow
+	// parameter `repository.skillsUrl` → env var AEP_SKILLS_REPO_URL, and the
+	// runner degrades to the base `aep` plugin only.
+	SkillsRepoURL string
 	GitServiceURL string
 	// PlatformURL is the BFF base URL the runner pod uses for its callbacks
-	// (credentials refresh, skills pull). Passed through to the ClusterWorkflow
-	// parameter `bff.platformUrl` → env var AEP_PLATFORM_URL in the pod.
+	// (credentials refresh). Passed through to the ClusterWorkflow parameter
+	// `bff.platformUrl` → env var AEP_PLATFORM_URL in the pod.
 	PlatformURL string
 	// AnthropicSecretRef is the name of the per-org K8s Secret in
 	// workflows-<OrgName> carrying ANTHROPIC_API_KEY. Materialised by
@@ -1093,7 +1099,8 @@ func codingAgentParameters(p CodingAgentParams) map[string]interface{} {
 			"prompt":        p.Prompt,
 		},
 		"repository": map[string]interface{}{
-			"url": p.RepoURL,
+			"url":       p.RepoURL,
+			"skillsUrl": p.SkillsRepoURL,
 			"identity": map[string]interface{}{
 				"name":  p.IdentityName,
 				"email": p.IdentityEmail,

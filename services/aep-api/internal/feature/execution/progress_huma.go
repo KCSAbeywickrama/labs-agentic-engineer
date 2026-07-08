@@ -33,6 +33,16 @@ import (
 // progressSchemaVersion mirrors the runner/observer progress schema version.
 const progressSchemaVersion = 1
 
+// ExecutionLookup resolves an execution id within the acting org (the S2S
+// fence). Shared by the execution-keyed internal endpoints.
+type ExecutionLookup interface {
+	GetByIDScoped(ctx context.Context, orgID, id string) (*models.Execution, error)
+}
+
+// ErrExecutionNotFound is returned when an execution id does not resolve within
+// the acting org (mapped to 404).
+var ErrExecutionNotFound = errors.New("execution not found")
+
 // OCProgress reads an OpenChoreo WorkflowRun's status (build steps). Wired from
 // openchoreo.ComponentClient.
 type OCProgress interface {
