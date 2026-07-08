@@ -549,8 +549,8 @@ echo "✅ ClusterComponentType 'deployment/web-application' created"
 # postgres-cnpg renders a CloudNativePG `Cluster`; its RBAC grant lets OC's
 # data-plane agent apply that foreign CRD into the `dp-*` namespace (without it,
 # provisioning fails with a `clusters.postgresql.cnpg.io is forbidden` denial).
-kubectl apply -f "${SCRIPT_DIR}/../single-cluster/postgres-cnpg-rbac.yaml"
-kubectl apply -f "${SCRIPT_DIR}/../single-cluster/postgres-cnpg-resourcetype.yaml"
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/resource-types/postgres-cnpg/rbac.yaml"
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/resource-types/postgres-cnpg/resourcetype.yaml"
 echo "✅ ClusterResourceType 'postgres-cnpg' + CNPG data-plane RBAC created"
 
 # ── thunder-app-operator (reconciles ThunderApplication CRs → Thunder apps) ──
@@ -564,7 +564,7 @@ echo "🔧 Building + installing thunder-app-operator..."
 docker build -t thunder-app-operator:local "${SCRIPT_DIR}/../../operators/thunder-app-operator"
 k3d image import thunder-app-operator:local -c "${CLUSTER_NAME}"
 helm upgrade --install thunder-app-operator \
-    "${SCRIPT_DIR}/../helm-charts/thunder-app-operator" \
+    "${SCRIPT_DIR}/../../operators/thunder-app-operator/helm" \
     -n thunder-app-operator-system --create-namespace \
     --set image.repository=thunder-app-operator \
     --set image.tag=local \
@@ -578,8 +578,8 @@ echo "✅ thunder-app-operator installed (ns: thunder-app-operator-system)"
 # its RBAC grant lets OC's data-plane agent apply that foreign CRD into the `dp-*`
 # namespace (without it, provisioning fails with a
 # `thunderapplications.aep.wso2.com is forbidden` denial).
-kubectl apply -f "${SCRIPT_DIR}/../single-cluster/thunder-app-rbac.yaml"
-kubectl apply -f "${SCRIPT_DIR}/../single-cluster/thunder-app-resourcetype.yaml"
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/resource-types/thunder-app/rbac.yaml"
+kubectl apply -f "${SCRIPT_DIR}/../single-cluster/resource-types/thunder-app/resourcetype.yaml"
 echo "✅ ClusterResourceType 'thunder-app' + thunder-app data-plane RBAC created"
 
 # ── Per-org NAMESPACED ComponentTypes (local stand-in for cloud's

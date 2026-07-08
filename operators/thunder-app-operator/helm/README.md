@@ -7,6 +7,24 @@ into the cluster as a `<cr-name>-oauth` ConfigMap.
 
 Single replica, leader election off (see `operators/thunder-app-operator/main.go`).
 
+## Optional reference implementation
+
+This chart is **not** part of the platform install — it lives beside the
+operator's Go source (upstream convention: chart-with-its-code, not
+chart-with-every-other-chart) precisely so it reads as optional. Neither the
+`wso2-ae-platform` chart nor the `wso2-agentic-engineer-bundle` chart installs
+it, and no dependency-catalog machinery references it.
+
+The thunder-app operator is one reference implementation of the `thunder-app`
+`ClusterResourceType` contract — analogous to how the CNPG operator is one
+reference implementation for `postgres-cnpg`. On the local dev stack, the
+setup scripts (`deployments/scripts/setup-aep.sh`) install it, acting as the
+cluster platform engineer (PE) would. Real clusters are free to install this
+chart themselves, or bring any other backing (a different operator, a managed
+service, a hand-rolled controller) that satisfies the same
+`ClusterResourceType` contract — the PE authors and owns that choice, not the
+platform.
+
 ## Install (local stack)
 
 The local stack builds the image, imports it into k3d, and installs this chart
@@ -17,7 +35,7 @@ the postgres-cnpg ClusterResourceType). To do it by hand:
 docker build -t thunder-app-operator:local operators/thunder-app-operator
 k3d image import thunder-app-operator:local -c openchoreo
 helm upgrade --install thunder-app-operator \
-  deployments/helm-charts/thunder-app-operator \
+  operators/thunder-app-operator/helm \
   -n thunder-app-operator-system --create-namespace \
   --set image.repository=thunder-app-operator \
   --set image.tag=local \
@@ -34,8 +52,7 @@ and re-copy after any change to `api/v1alpha1`:
 
 ```sh
 cd operators/thunder-app-operator && make generate
-cp config/crd/aep.wso2.com_thunderapplications.yaml \
-   ../../deployments/helm-charts/thunder-app-operator/crds/
+cp config/crd/aep.wso2.com_thunderapplications.yaml helm/crds/
 ```
 
 Helm installs everything under `crds/` before the templated resources and never

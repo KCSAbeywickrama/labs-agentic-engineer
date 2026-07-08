@@ -7,9 +7,13 @@ namespaces — the same shape as the CNPG operator. It is the *only* component
 in the platform that calls Thunder's admin REST API; the BFF never does.
 
 The CR is rendered by the `thunder-app` `ClusterResourceType`
-(`deployments/single-cluster/thunder-app-resourcetype.yaml`), one instance per
-project per `thunder-app` platform-resource dependency. See ADR-0006 for why
-this exists (`docs/decisions/ADR-0006-auth-as-platform-resource.md`).
+(`deployments/single-cluster/resource-types/thunder-app/resourcetype.yaml`),
+one instance per project per `thunder-app` platform-resource dependency. See
+ADR-0006 for why this exists
+(`docs/decisions/ADR-0006-auth-as-platform-resource.md`). The chart that
+installs this operator lives at `operators/thunder-app-operator/helm/` (see
+that chart's README for why it is an optional, PE-installed reference
+implementation rather than part of the platform install).
 
 ## Reconcile loop
 
