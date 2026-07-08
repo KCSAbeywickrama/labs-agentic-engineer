@@ -31,3 +31,18 @@ type WorkflowRunStore interface {
 	Record(ctx context.Context, row *models.DevflowRun) error
 	SetStatus(ctx context.Context, workflowID, status string) error
 }
+
+// CodingDispatcher triggers a coding attempt for a Task through the existing
+// execution funnel (admission + gating + coding executor) and returns the
+// admitted execution's id. Satisfied by an app-root adapter over
+// execution.Funnel — devflow does not import the execution package. A
+// nil dispatcher makes DispatchCoding a not-configured error.
+type CodingDispatcher interface {
+	DispatchCoding(ctx context.Context, orgID, projectID, repo string, issue int) (executionID string, err error)
+}
+
+// PRMerger squash-merges a Task's pull request through the existing issue
+// service. Satisfied by an app-root adapter over gitrepo.IssueService.
+type PRMerger interface {
+	MergePR(ctx context.Context, orgID, projectID string, prNumber int) error
+}

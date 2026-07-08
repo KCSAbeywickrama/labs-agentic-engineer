@@ -115,7 +115,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
 	// serves everything else when Temporal is down. Its worker watcher is
 	// appended to the watcher slice below only when Temporal is configured.
+	// The signaler is nil-safe and no-ops while the runtime is not connected,
+	// so webhook handlers/watchers hold it unconditionally.
 	devflowRuntime := devflow.NewRuntime(cfg.Temporal)
+	devflowSignaler := devflow.NewSignaler(devflowRuntime, workflowRunRepo)
 
 	// Token provider for service-to-service auth. OC authorizes requests by
 	// the service client subject (aep-api-client), so every OC API call
@@ -649,7 +652,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	task.NewWebhookEvents(issueService, repoLocator{db: db}, funnel, platformSender).RegisterHandlers(registerWebhook)
 	// pull_request.* handlers apply NO echo suppression (the platform authors no
 	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
-	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService)
+	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService).
+		WithWorkflowSignaler(devflowSignaler)
 	execEvents.RegisterHandlers(registerWebhook)
 	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
@@ -658,7 +662,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// disaster recovery, §5) + the exec watcher (OC WorkflowRun → execution-row
 	// outcomes; build success re-evaluates the funnel).
 	sweep := execution.NewSweep(funnel, execEvents, executionRepo, repoLister{repos: repoRepo}, issueService, 0)
-	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, funnel, asServiceIdentity, 0)
+	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, funnel, asServiceIdentity, 0).
+		WithWorkflowSignaler(devflowSignaler)
 	// A build that fails at git-clone-auth within budget is re-minted + re-tried
 	// (§7). Only meaningful when a credential can be staged; otherwise a git-auth
 	// failure is terminal like any other.
@@ -936,20 +941,61 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// the coding execution FAILED on Job failure (success rides the PR webhook),
 	// capturing the pod's final log. Only when the proxy path is configured.
 	if cgwClient != nil {
-		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo))
+		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo).
+			WithWorkflowSignaler(devflowSignaler))
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
 	}
 	// Temporal devflow worker. Registered only when Temporal is configured
 	// (TEMPORAL_HOSTPORT set). The watcher dials in a retry loop, so a Temporal
 	// server that is down at boot is not fatal — the worker connects when it
-	// comes up and the devflow endpoints answer 503 until then.
+	// comes up and the devflow endpoints answer 503 until then. Activities are
+	// thin adapters over the funnel (dispatch) + issue service (merge).
 	if cfg.Temporal.Enabled() {
-		devflowActs := devflow.NewActivities(workflowRunRepo)
+		devflowActs := devflow.NewActivities(
+			workflowRunRepo,
+			codingDispatcher{funnel: funnel, execs: executionRepo},
+			prMerger{issues: issueService},
+		)
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)
 	}
 
 	return &App{Handler: handler, Watchers: watchers}, nil
+}
+
+// codingDispatcher adapts the execution funnel + repository onto the devflow
+// CodingDispatcher port: trigger a coding attempt (funnel admission + gating +
+// coding executor), then read the admitted coding execution's id back for the
+// workflow's status. Wired at the composition root so devflow does not import
+// the execution package.
+type codingDispatcher struct {
+	funnel *execution.Funnel
+	execs  repositories.ExecutionRepository
+}
+
+func (d codingDispatcher) DispatchCoding(ctx context.Context, orgID, projectID, repo string, issue int) (string, error) {
+	if err := d.funnel.OnExecuteIntent(ctx, repo, issue); err != nil {
+		return "", err
+	}
+	execs, err := d.execs.LatestPerKind(ctx, repo, issue)
+	if err != nil {
+		return "", err
+	}
+	if coding := execs[string(taskmeta.KindCoding)]; coding != nil {
+		return coding.ID, nil
+	}
+	// No coding row admitted (e.g. closed issue / provision gate) — not an
+	// error; the workflow proceeds and the PR-wait times out if nothing runs.
+	return "", nil
+}
+
+// prMerger adapts the issue service onto the devflow PRMerger port.
+type prMerger struct {
+	issues gitrepo.IssueService
+}
+
+func (m prMerger) MergePR(ctx context.Context, orgID, projectID string, prNumber int) error {
+	return m.issues.MergePullRequest(ctx, orgID, projectID, prNumber)
 }
 
 // buildSecretStagerAdapter maps the concrete *orgcreds.BuildCredentialsService
