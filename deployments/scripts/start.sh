@@ -112,32 +112,18 @@ else
     echo "⚠️  k3d cluster not accessible — git-service will fail OpenBao readiness"
 fi
 
-# 1b. Temporal port bridge — aep-api (in docker-compose) runs the devflow
-#     Temporal worker in-process and must reach the k3d-hosted Temporal
-#     frontend at host.docker.internal:7233, plus the Web UI at :8233. Mirrors
-#     the OpenBao bridge above: try a direct dial first, else port-forward.
-#     Skips silently when Temporal is not installed (setup-temporal.sh is
-#     optional for the non-workflow flows).
+# 1b. Temporal reachability check (informational). aep-api reaches the
+#     in-cluster Temporal frontend directly on the shared k3d docker network
+#     (k3d-openchoreo-server-0:31733 NodePort — no host bridge needed), and the
+#     Web UI is published on host :8233 by setup-temporal.sh via the k3d
+#     loadbalancer. This is just a heads-up when Temporal isn't installed.
 echo ""
-echo "⏱️  Ensuring Temporal reachable on :7233..."
-if nc -z localhost 7233 >/dev/null 2>&1; then
-    echo "   Temporal frontend already reachable on :7233"
-elif kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null \
+echo "⏱️  Checking Temporal (devflow workflow engine)..."
+if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null \
         && kubectl --context "${CLUSTER_CONTEXT}" -n temporal get svc temporal-frontend &>/dev/null; then
-    if pgrep -f "port-forward.*temporal-frontend.*7233" > /dev/null 2>&1; then
-        echo "   Temporal frontend port-forward already running"
-    else
-        kubectl port-forward --context "${CLUSTER_CONTEXT}" -n temporal svc/temporal-frontend 7233:7233 \
-            > /tmp/aep-temporal-portfwd.log 2>&1 &
-        echo "   frontend port-forward PID: $! (logs: /tmp/aep-temporal-portfwd.log)"
-    fi
-    if ! pgrep -f "port-forward.*temporal-web.*8233" > /dev/null 2>&1; then
-        kubectl port-forward --context "${CLUSTER_CONTEXT}" -n temporal svc/temporal-web 8233:8080 \
-            > /tmp/aep-temporal-web-portfwd.log 2>&1 &
-        echo "   Web UI port-forward PID: $! → http://localhost:8233"
-    fi
+    echo "   Temporal installed — aep-api reaches it at k3d-${CLUSTER_NAME}-server-0:31733; Web UI: http://localhost:8233"
 else
-    echo "   Temporal not installed — skipping (run scripts/setup-temporal.sh to enable devflow workflows)"
+    echo "   Temporal not installed — /devflows will answer 503 (run scripts/setup-temporal.sh to enable workflows)"
 fi
 
 # 2. GitHub App private key placeholder — docker-compose mounts the file
@@ -255,6 +241,7 @@ echo "  Console:          http://localhost:8090"
 echo "  Console (new):    http://localhost:8091   (#98 preview, apps/console)"
 echo "  API:              http://localhost:9090"
 echo "  Agents:           http://localhost:4000"
+echo "  Temporal Web UI:  http://localhost:8233   (devflow workflow dashboard)"
 echo ""
 echo "  Coding-agent:     dispatched as a one-shot pod via the"
 echo "                    'aep-coding-agent' ClusterWorkflow"

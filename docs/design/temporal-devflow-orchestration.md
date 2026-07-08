@@ -137,12 +137,16 @@ even when the Temporal server is down.
 
 ## Local deployment
 
-Temporal runs **in-cluster via Helm** in the k3d dev stack:
+Temporal runs **in-cluster as a single-pod dev server** in the k3d dev stack:
 
-- `deployments/scripts/setup-temporal.sh` installs the `temporal` chart with a
-  lean labs profile (`deployments/helm-charts/values/temporal-values.yaml`:
-  single replica, bundled Postgres, Cassandra/Elasticsearch/Prometheus/Grafana
-  off), then registers the `default` namespace. Wired into `setup.sh`.
+- `deployments/scripts/setup-temporal.sh` applies one Deployment + Service
+  running `temporal server start-dev` (temporalio/admin-tools image): in-memory
+  store, frontend on `:7233`, Web UI on `:8233`, `default` namespace
+  auto-registered. No Cassandra, no schema job, no PVC — fast and reliable on a
+  resource-tight k3d already running OpenChoreo. Wired into `setup.sh`.
+  (The temporalio Helm chart was evaluated first but bundles only a heavy,
+  flaky multi-node Cassandra + schema jobs; the dev server is the right fit for
+  a labs demo. Trade-off: workflow state is lost if the pod restarts.)
 - `start.sh` port-forwards the frontend to `localhost:7233` and the Web UI to
   `localhost:8233` (mirroring the OpenBao bridge); `stop.sh` tears them down.
 - `deployments/docker-compose.yml` gives `aep-api`

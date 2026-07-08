@@ -21,16 +21,19 @@
 # into the k3d cluster, reached from docker-compose via the start.sh port
 # bridge (host.docker.internal:7233).
 #
-# Lean labs profile: single-replica server, single-node bundled Cassandra
-# (the ONLY datastore the temporalio chart bundles), Elasticsearch/Prometheus/
-# Grafana disabled. Not a production topology — a demo-scale durable-execution
-# backend.
+# Labs profile: a SINGLE-POD Temporal dev server (`temporal server start-dev`,
+# from the temporalio/admin-tools image). It uses an in-memory store, so there
+# is NO Cassandra, NO schema job, and NO PVC — the whole thing is one
+# Deployment + one Service, which is fast and reliable on a resource-tight k3d.
+# The dev server auto-creates the `default` namespace and serves the Web UI on
+# :8233. Not a production topology — a demo-scale durable-execution backend
+# (workflow state is lost if the pod restarts, which is fine for local demos).
 #
-# Idempotent: `helm upgrade --install` re-applies the current values on every
-# run (so a re-run heals a previously broken release — a plain
-# install-if-not-exists guard would skip a release helm still thinks is
-# "deployed" even when its pods crash-loop). The namespace-register step retries
-# until the frontend answers.
+# We deliberately do NOT use the temporalio/temporal Helm chart: it bundles only
+# a multi-node Cassandra + separate schema jobs, which are heavy and flaky on a
+# local k3d already running OpenChoreo + observability.
+#
+# Idempotent: kubectl apply is server-side; re-running re-applies the manifest.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,14 +41,13 @@ cd "$SCRIPT_DIR"
 source "$SCRIPT_DIR/env.sh"
 source "$SCRIPT_DIR/utils.sh"
 
-# Pin the chart version so a server upgrade is a deliberate bump, not a
-# silent drift on the next setup run.
-TEMPORAL_CHART_VERSION="0.62.0"
+# Pin the admin-tools image (ships the `temporal` CLI + dev server) so a
+# version bump is deliberate.
+TEMPORAL_IMAGE="temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2"
 NS="temporal"
-VALUES_FILE="$SCRIPT_DIR/../helm-charts/values/temporal-values.yaml"
 
 echo "============================================"
-echo "  AEP — Temporal workflow engine"
+echo "  AEP — Temporal workflow engine (dev server)"
 echo "============================================"
 
 kubectl cluster-info --context "$CLUSTER_CONTEXT" &>/dev/null || {
@@ -53,45 +55,96 @@ kubectl cluster-info --context "$CLUSTER_CONTEXT" &>/dev/null || {
     exit 1
 }
 
-helm repo add temporal https://go.temporal.io/helm-charts >/dev/null 2>&1 || true
-helm repo update temporal >/dev/null 2>&1 || true
+# If a previous run installed the (retired) Helm chart, remove it so its
+# crash-looping Cassandra pods + PVCs don't linger next to the dev server.
+if helm status temporal -n "$NS" --kube-context "$CLUSTER_CONTEXT" &>/dev/null; then
+    echo "🧹 Removing the retired Temporal Helm release (moving to the dev server)..."
+    helm uninstall temporal -n "$NS" --kube-context "$CLUSTER_CONTEXT" >/dev/null 2>&1 || true
+    kubectl --context "$CLUSTER_CONTEXT" -n "$NS" delete pvc --all >/dev/null 2>&1 || true
+fi
 
-echo "📦 Installing/upgrading temporal..."
-helm upgrade --install temporal temporal/temporal \
-    --namespace "$NS" --create-namespace --kube-context "${CLUSTER_CONTEXT}" \
-    --version "$TEMPORAL_CHART_VERSION" \
-    --values "$VALUES_FILE" \
-    --timeout 15m
+echo "📦 Applying the Temporal dev-server Deployment + Service..."
+kubectl --context "$CLUSTER_CONTEXT" apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NS}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-frontend
+  namespace: ${NS}
+  labels: { app: temporal-frontend }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: temporal-frontend }
+  template:
+    metadata:
+      labels: { app: temporal-frontend }
+    spec:
+      containers:
+        - name: temporal
+          image: ${TEMPORAL_IMAGE}
+          # start-dev: frontend on :7233, Web UI on :8233, 'default' namespace
+          # auto-registered. --ip 0.0.0.0 so both are reachable in-cluster.
+          command: ["temporal"]
+          args:
+            - server
+            - start-dev
+            - --ip
+            - 0.0.0.0
+            - --namespace
+            - default
+            - --log-level
+            - warn
+          ports:
+            - { name: grpc, containerPort: 7233 }
+            - { name: ui, containerPort: 8233 }
+          readinessProbe:
+            tcpSocket: { port: 7233 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend
+  namespace: ${NS}
+  labels: { app: temporal-frontend }
+spec:
+  # NodePort with FIXED ports so aep-api (in docker-compose, on the shared
+  # k3d-openchoreo network) can reach the frontend at
+  # k3d-openchoreo-server-0:31733 — a docker-DNS-resolvable target, unlike a
+  # host.docker.internal bridge (see docker-compose.yml TEMPORAL_HOSTPORT).
+  type: NodePort
+  selector: { app: temporal-frontend }
+  ports:
+    - { name: grpc, port: 7233, targetPort: 7233, nodePort: 31733 }
+    - { name: ui, port: 8233, targetPort: 8233, nodePort: 31823 }
+EOF
 
-echo "⏳ Waiting for the Temporal frontend to become ready..."
-kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout status deployment/temporal-frontend --timeout=600s || true
+echo "⏳ Waiting for the Temporal dev server to become ready..."
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout status deployment/temporal-frontend --timeout=180s
 
-# The chart does not auto-create the 'default' namespace the worker connects
-# to. Register it via the admintools pod (tctl), retrying while the frontend
-# settles.
-echo "🧬 Registering the 'default' Temporal namespace..."
-ADMIN_POD="$(kubectl --context "$CLUSTER_CONTEXT" -n "$NS" get pod -l app.kubernetes.io/component=admintools -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-if [ -n "$ADMIN_POD" ]; then
-    for i in $(seq 1 20); do
-        if kubectl --context "$CLUSTER_CONTEXT" -n "$NS" exec "$ADMIN_POD" -- \
-            tctl --namespace default namespace describe >/dev/null 2>&1; then
-            echo "   'default' namespace already registered"
-            break
-        fi
-        if kubectl --context "$CLUSTER_CONTEXT" -n "$NS" exec "$ADMIN_POD" -- \
-            tctl --namespace default namespace register --retention 72h >/dev/null 2>&1; then
-            echo "✅ 'default' namespace registered"
-            break
-        fi
-        echo "   frontend not ready yet — retry $i/20"
-        sleep 6
-    done
-else
-    echo "⚠️  admintools pod not found — register the 'default' namespace manually with tctl."
+# Expose the Web UI on the host via the k3d loadbalancer (host :8233 → nodePort
+# 31823), so the browser can open http://localhost:8233. Idempotent: skip if the
+# serverlb already publishes 8233. (aep-api does NOT use this — it reaches the
+# frontend by the docker-DNS NodePort above; this is browser-only.)
+if ! docker ps --filter "name=k3d-${CLUSTER_NAME}-serverlb" --format '{{.Ports}}' 2>/dev/null | grep -q "8233->"; then
+    echo "🌐 Publishing the Temporal Web UI on host :8233 via the k3d loadbalancer..."
+    k3d cluster edit "${CLUSTER_NAME}" --port-add "8233:31823@loadbalancer" >/dev/null 2>&1 \
+        && echo "   host :8233 → Temporal Web UI" \
+        || echo "   ⚠️  could not add the LB port (open the UI with: kubectl -n ${NS} port-forward svc/temporal-frontend 8233:8233)"
 fi
 
 echo ""
-echo "✅ Temporal installed."
-echo "   Frontend (gRPC): temporal-frontend.$NS.svc:7233 (host bridge added by start.sh → localhost:7233)"
-echo "   Web UI:          port-forwarded to http://localhost:8233 by start.sh"
+echo "✅ Temporal dev server installed."
+echo "   Frontend (gRPC): k3d-${CLUSTER_NAME}-server-0:31733 (aep-api reaches this on the k3d docker network)"
+echo "   Web UI:          http://localhost:8233 (via the k3d loadbalancer)"
+echo "   Namespace:       'default' (auto-registered by start-dev)"
 echo ""
