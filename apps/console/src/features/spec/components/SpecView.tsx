@@ -131,7 +131,11 @@ export function SpecView({ projectName }: { projectName: string }) {
   const displayName = project.data?.displayName ?? projectName;
 
   return (
-    <PageContent fullWidth noPadding>
+    // height:100% is load-bearing: PageContent is otherwise an auto-height
+    // block, which breaks the percentage chain down to the file-list/editor
+    // panes — they then grow with the document and the PAGE scrolls instead
+    // of each pane scrolling independently.
+    <PageContent fullWidth noPadding sx={{ height: "100%" }}>
       <Box
         sx={{
           height: "100%",
