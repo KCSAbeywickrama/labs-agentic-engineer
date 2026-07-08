@@ -208,6 +208,14 @@ func (c *Catalog) resolve(ctx context.Context, orgHandle string, e openchoreo.Wo
 // project has no design bundle, or the component is absent. Fail-open: a read
 // error is logged and returns nil. designCache is forwarded to readDesign
 // (see its doc) — nil for the public single-endpoint Resolve.
+//
+// The raw component name is tried first. An app-factory-created component's
+// OC name (spec.owner.componentName, carried on the endpoint's Component
+// field) is project-prefixed — e.g. "myproj-svc" — but the design bundle
+// stores it under its unprefixed authored name ("svc"), so a raw-name miss on
+// a "<project>-" prefixed component retries once with the prefix stripped.
+// Hand-applied / non-app-factory components (unprefixed to begin with) are
+// unaffected: the raw-name lookup already finds them.
 func (c *Catalog) providerComponent(ctx context.Context, orgHandle, project, component string, designCache map[string]*artifacts.DesignFile) *models.DesignComponent {
 	if c.design == nil {
 		return nil
@@ -221,8 +229,20 @@ func (c *Catalog) providerComponent(ctx context.Context, orgHandle, project, com
 	if design == nil {
 		return nil
 	}
+	if comp := findDesignComponent(design, component); comp != nil {
+		return comp
+	}
+	if prefix := project + "-"; strings.HasPrefix(component, prefix) {
+		return findDesignComponent(design, strings.TrimPrefix(component, prefix))
+	}
+	return nil
+}
+
+// findDesignComponent returns the design bundle component named `name`
+// (case-insensitive), or nil when absent.
+func findDesignComponent(design *artifacts.DesignFile, name string) *models.DesignComponent {
 	for i := range design.Components {
-		if strings.EqualFold(design.Components[i].Name, component) {
+		if strings.EqualFold(design.Components[i].Name, name) {
 			return &design.Components[i]
 		}
 	}

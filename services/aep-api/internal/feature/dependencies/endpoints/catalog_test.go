@@ -326,6 +326,37 @@ func TestResolve_InlineFromDesignBundle_ProvenancePathUsesMatchedComponentCasing
 	}
 }
 
+// (b3) app-factory OC components are project-prefixed
+// (spec.owner.componentName = "<project>-<design-component-name>"), but the
+// design bundle stores components under their unprefixed authored name. The
+// design-component lookup must retry with the project prefix stripped so the
+// inline-from-design-bundle path still fires for app-factory providers.
+func TestResolve_InlineFromDesignBundle_ProjectPrefixedComponentName(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "myproj", Component: "myproj-svc", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	spec := "openapi: 3.0.3\ninfo:\n  title: Svc\n"
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithDesignReader(fakeDesignReader{byProject: map[string]*artifacts.DesignFile{
+			// Design bundle stores the component under its UNPREFIXED authored name.
+			"myproj": designWith(models.DesignComponent{Name: "svc", OpenAPISpec: spec}),
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "inline" {
+		t.Fatalf("availability: want inline, got %q", got.Spec.Availability)
+	}
+	if got.Spec.InlineContent != spec {
+		t.Fatalf("inline content: want design-bundle spec, got %q", got.Spec.InlineContent)
+	}
+	if got.Spec.Path != "specs/design/components/svc/openapi.yaml" {
+		t.Fatalf("provenance path: want unprefixed design component name (svc), got %q", got.Spec.Path)
+	}
+}
+
 // (c) No schema anywhere, but repo coords resolve (git_repositories row) →
 // availability=repo with the component subdir as the hint.
 func TestResolve_RepoCoords(t *testing.T) {
