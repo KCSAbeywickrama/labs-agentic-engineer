@@ -16,11 +16,47 @@
 # CEL context (per OC 1.1.1 ResourceType CRD docs): readyWhen/outputs are evaluated
 # against metadata.*, parameters.*, environmentConfigs.*, dataplane.*, and — once the
 # manifest is applied — applied.<id>.status.* (the rendered object's live status).
+#
+# ── Marker vocabulary (metadata labels/annotations) ────────────────────────────
+# The labels/annotations below are how the PE (the type author) TELLS AEP which
+# consumption behaviors this resource type needs. AEP keys its behavior ONLY on
+# these markers — it has NO hardcoded type names, so "thunder-app" is just data.
+# Adding a new auth flavor (or any new type) is a cluster install + a skill, never
+# an app-factory release. The four markers AEP understands:
+#
+#   aep.wso2.com/role: end-user-auth
+#     A service declaring a dependency of this type gets
+#     `exposesAPI.auth: end-user-required` stamped at design save (an explicit
+#     conflicting `service-required` is a validation error).
+#
+#   aep.wso2.com/consumer-url-env-config: redirectUris
+#     Once the consuming web-app's public URL resolves, the platform patches
+#     `<spaOrigin><consumer-url-path>` into this env-config key on the dep's
+#     dev binding — here that fills `environmentConfigs.redirectUris` below.
+#
+#   aep.wso2.com/consumer-url-path: <path>   (OMITTED here on purpose)
+#     Path appended to the consumer origin for the patch above. Absent, the
+#     platform defaults to `/callback`, which is exactly what this type wants,
+#     so we leave it off and let the default apply.
+#
+#   aep.wso2.com/skill: thunder-authentication
+#     Design save ensures this skill is present in the design's `skillsApplied`
+#     whenever a dependency of this type exists — the per-type teaching lives in
+#     the skill, not in platform code.
 ---
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterResourceType
 metadata:
   name: thunder-app
+  labels:
+    # role → design-save stamps end-user-required auth on services that depend on this type.
+    aep.wso2.com/role: end-user-auth
+  annotations:
+    # consumer-url-env-config → platform patches <spaOrigin><path> into this env-config key.
+    aep.wso2.com/consumer-url-env-config: redirectUris
+    # consumer-url-path omitted → defaults to /callback (the path this OAuth app expects).
+    # skill → design-save appends this skill to the design's skillsApplied when this dep is present.
+    aep.wso2.com/skill: thunder-authentication
 spec:
   retainPolicy: Delete
   parameters:
@@ -80,7 +116,7 @@ spec:
     # `value` makes OC deliver a LITERAL string in the binding's status.outputs
     # — which the aep-api runtimeconfig env-config.js path requires (it reads
     # `output.value` only; a configMapKeyRef-shaped output carries no value in
-    # binding status, leaving THUNDER_CLIENT_ID unresolvable). Verified
+    # binding status, leaving the client_id output unresolvable). Verified
     # empirically on OC 1.1.1: outputs share readyWhen's CEL context, including
     # `applied.<id>.status.*`. The readyWhen gate above means outputs are only
     # surfaced once `status.ready=true`, and the operator sets `clientId`

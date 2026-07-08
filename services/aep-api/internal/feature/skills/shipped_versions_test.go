@@ -52,8 +52,8 @@ type shippedSkill struct {
 var shippedBuiltins = map[string]shippedSkill{
 	"api-management":         {Version: 3, ContentSHA: "1042e0e2957367d5f1db1050dee387b70c46025274086678961163c711c4cf96"},
 	"go":                     {Version: 2, ContentSHA: "cb7c65ac587947310146adcebf015bfe13365492d700d1b1f4a1cf45b8b0f3a8"},
-	"react-webapp":           {Version: 3, ContentSHA: "ae0f28d1bb90c032378769fd1de8ab969f2c4fbd49c8e4f713fbc88ab0daad22"},
-	"thunder-authentication": {Version: 3, ContentSHA: "ee1ed214f99693958e1924b3dcd7a874c36d9c7b179c6579c00521c56ac0535e"},
+	"react-webapp":           {Version: 4, ContentSHA: "76cbd13aee4425b3ee79426048b6a360b01a1b7712f2078d51fe03b6b1475ed4"},
+	"thunder-authentication": {Version: 4, ContentSHA: "d6eb8e89afd268d51b6d9082527b0153b1b1b60c9c1c9aa10ae0e82166687077"},
 }
 
 var shippedFlow = map[string]shippedSkill{
