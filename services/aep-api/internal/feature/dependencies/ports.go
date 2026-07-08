@@ -59,3 +59,15 @@ type OrgEndpointLister interface {
 type ResourceTypeLister interface {
 	List(ctx context.Context) ([]resources.PlatformResourceType, error)
 }
+
+// RemoteGitReader reads an org's OWN GitHub repos over the REST API (Contents +
+// Code Search, no clone) for endpoint spec discovery — the two MCP tools an
+// agent uses to read a provider's OpenAPI file straight from its repo. Both
+// methods take ocOrgID (the verified MCP claim, never a tool parameter) and
+// MUST refuse (ErrOwnerNotInOrg) any `owner` that is not the org credential's
+// GitHub account, so a caller in one org can never read another org's repos.
+// Satisfied by *RemoteGitClient (remote_git.go).
+type RemoteGitReader interface {
+	GetFileContents(ctx context.Context, ocOrgID, owner, repo, path, ref string) (*RemoteGitFile, error)
+	SearchCode(ctx context.Context, ocOrgID, owner, repo, query string) ([]RemoteGitSearchHit, error)
+}

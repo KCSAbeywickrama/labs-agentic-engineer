@@ -71,16 +71,19 @@ type mcpHandler struct {
 	resources     ExternalResourceReader
 	orgEndpoints  OrgEndpointLister
 	resourceTypes ResourceTypeLister
+	remoteGit     RemoteGitReader
 }
 
 // NewMCPHandler returns the JSON-RPC MCP handler over the external-resource
-// reader, the org endpoint lister, and the platform resource-type lister. The
-// acting org is resolved from the request context (bound by the auth
-// middleware), never from the request itself. A nil external-resource reader
-// makes the surface unavailable (503 — it is the surface's core catalog). A nil
-// orgEndpoints/resourceTypes degrades that one tool to an empty result.
-func NewMCPHandler(er ExternalResourceReader, ep OrgEndpointLister, rt ResourceTypeLister) http.Handler {
-	h := &mcpHandler{resources: er, orgEndpoints: ep, resourceTypes: rt}
+// reader, the org endpoint lister, the platform resource-type lister, and the
+// read-only remote-git reader (endpoint spec discovery). The acting org is
+// resolved from the request context (bound by the auth middleware), never from
+// the request itself. A nil external-resource reader makes the surface
+// unavailable (503 — it is the surface's core catalog). A nil
+// orgEndpoints/resourceTypes degrades that one tool to an empty result; a nil
+// remoteGit makes the two remote-git tools return a tool error.
+func NewMCPHandler(er ExternalResourceReader, ep OrgEndpointLister, rt ResourceTypeLister, rg RemoteGitReader) http.Handler {
+	h := &mcpHandler{resources: er, orgEndpoints: ep, resourceTypes: rt, remoteGit: rg}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h.resources == nil {
 			http.Error(w, "external resource registry not configured", http.StatusServiceUnavailable)

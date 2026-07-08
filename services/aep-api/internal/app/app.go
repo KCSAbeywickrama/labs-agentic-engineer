@@ -47,6 +47,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
@@ -791,6 +792,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	params.MCPOrgEndpoints = orgEndpointCatalog
 	resourceTypeCatalog := resources.NewResourceTypeCatalog(resourceClient)
 	params.MCPResourceTypes = resourceTypeCatalog
+	// Endpoint spec discovery: the read-only remote-git reader an agent uses to
+	// read a provider's OpenAPI file from its own repo (Contents + Code Search,
+	// no clone). It resolves the org's credential (token + owner) from
+	// credResolver and refuses any owner that is not the org's GitHub account.
+	params.MCPRemoteGit = dependencies.NewRemoteGitClient(credResolver)
 	// design-save keys end-user-auth derivation on the CRT role marker read from
 	// this catalog (thunder-app generalization); wired consumer-side so design
 	// holds only a narrow MarkersByName port. When the design declares a
