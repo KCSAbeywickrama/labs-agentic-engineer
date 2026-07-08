@@ -125,7 +125,7 @@ func TestDeriveEndUserAuth_WebAppUntouched(t *testing.T) {
 	t.Parallel()
 	comps := []models.DesignComponent{{
 		Name:          "storefront-web",
-		ComponentType: "web-app",
+		ComponentType: "web-application",
 		Dependencies:  []models.Dependency{thunderDep("user-auth")},
 	}}
 
@@ -223,7 +223,7 @@ func TestDeriveEndUserAuth_MixedComponentsOnlyQualifyingServiceStamped(t *testin
 	comps := []models.DesignComponent{
 		{Name: "orders-api", ComponentType: "service", Dependencies: []models.Dependency{thunderDep("user-auth")}},
 		{Name: "billing-api", ComponentType: "service"},
-		{Name: "storefront-web", ComponentType: "web-app", Dependencies: []models.Dependency{thunderDep("user-auth")}},
+		{Name: "storefront-web", ComponentType: "web-application", Dependencies: []models.Dependency{thunderDep("user-auth")}},
 	}
 
 	if err := deriveEndUserAuth(comps, authRole("thunder-app")); err != nil {

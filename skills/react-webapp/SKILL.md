@@ -15,7 +15,7 @@ values flow in at request time via `window._env_` — not at build time.
 
 ## Platform facts
 
-- Web-app components have `componentType: web-app`, `entrypoint:
+- Web-app components have `componentType: web-application`, `entrypoint:
   deployment/web-application`, `buildpack: docker`, default port 9090.
 - They do NOT get an OpenAPI spec — `set_openapi` for a web-app is
   rejected.

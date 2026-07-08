@@ -8,7 +8,7 @@ metadata:
 
 # Wireframes (Excalidraw DSL)
 
-Every `webapp` component gets its wireframes as ONE DSL source file at
+Every `web-application` component gets its wireframes as ONE DSL source file at
 `specs/design/components/<name>/wireframes.dsl` — all screens in one file.
 Write ONLY the `.dsl`; the platform compiles it to the `.excalidraw`
 deterministically. NEVER write a `.excalidraw` file by hand.

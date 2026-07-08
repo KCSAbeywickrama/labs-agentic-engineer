@@ -220,15 +220,17 @@ func serviceComponentMd() string {
 // prDep is a platform-resource dependency spec for the fixtures.
 type prDep struct{ name, resourceType string }
 
-// webappMd renders a web-app component with only component-kind dependencies.
+// webappMd renders a web-application component with only component-kind
+// dependencies (canonical type: models.ComponentTypeWebApplication —
+// OpenChoreo's own term).
 func webappMd(name string, deps ...string) string {
-	return buildComponentJSON(name, "web-app", deps, nil)
+	return buildComponentJSON(name, "web-application", deps, nil)
 }
 
-// webappWithPR renders a web-app that declares the given platform-resource
-// dependencies, plus optional component-kind deps.
+// webappWithPR renders a web-application that declares the given
+// platform-resource dependencies, plus optional component-kind deps.
 func webappWithPR(name string, prDeps []prDep, deps ...string) string {
-	return buildComponentJSON(name, "web-app", deps, prDeps)
+	return buildComponentJSON(name, "web-application", deps, prDeps)
 }
 
 // buildComponentJSON assembles a `components/<name>/design.json` body:
@@ -272,10 +274,14 @@ func Test_platformResourceDeps(t *testing.T) {
 		wantN []string // dep names, in order
 	}{
 		{"nil component", nil, nil},
-		{"web-app no deps", &models.DesignComponent{ComponentType: "web-app"}, nil},
-		{"service with a PR dep is not a web-app", &models.DesignComponent{ComponentType: "service", Dependencies: []models.Dependency{auth}}, nil},
-		{"web-app with only component deps", &models.DesignComponent{ComponentType: "web-app", Dependencies: []models.Dependency{comp}}, nil},
-		{"web-app with two PR deps, in order", &models.DesignComponent{ComponentType: "web-app", Dependencies: []models.Dependency{comp, auth, db}}, []string{"user-auth", "orders-db"}},
+		{"web-application no deps", &models.DesignComponent{ComponentType: models.ComponentTypeWebApplication}, nil},
+		{"service with a PR dep is not a web application", &models.DesignComponent{ComponentType: models.ComponentTypeService, Dependencies: []models.Dependency{auth}}, nil},
+		{"web-application with only component deps", &models.DesignComponent{ComponentType: models.ComponentTypeWebApplication, Dependencies: []models.Dependency{comp}}, nil},
+		{"web-application with two PR deps, in order", &models.DesignComponent{ComponentType: models.ComponentTypeWebApplication, Dependencies: []models.Dependency{comp, auth, db}}, []string{"user-auth", "orders-db"}},
+		// Retired spellings are not understood anywhere — no shims, no
+		// normalization. Designs carrying them must be migrated.
+		{"retired webapp spelling does not match", &models.DesignComponent{ComponentType: "webapp", Dependencies: []models.Dependency{auth}}, nil},
+		{"retired web-app spelling does not match", &models.DesignComponent{ComponentType: "web-app", Dependencies: []models.Dependency{auth}}, nil},
 	}
 	for _, c := range cases {
 		c := c
@@ -832,6 +838,34 @@ func Test_EmitForComponent(t *testing.T) {
 		}
 		if strings.Contains(f.Value, "THUNDER_") {
 			t.Errorf("no legacy THUNDER_* key must appear in env-config.js:\n%s", f.Value)
+		}
+	})
+
+	t.Run("retired type spellings are not web applications: no emit", func(t *testing.T) {
+		// Regression for the vocabulary-drift bug, inverted for the final
+		// vocabulary: only the canonical "web-application" (OC's own term)
+		// emits. The retired "webapp"/"web-app" spellings pass the codec
+		// verbatim and are simply not web applications — designs carrying
+		// them must be migrated.
+		t.Parallel()
+		for _, retired := range []string{"webapp", "web-app"} {
+			files := map[string]string{
+				artifacts.DesignRootFile:     rootDesignMd(),
+				"components/web/design.json": buildComponentJSON("web", retired, []string{"api"}, nil),
+				"components/api/design.json": serviceComponentMd(),
+			}
+			oc := ocResolving(map[string]string{"api": "http://api.local/todo"})
+			oc.UpdateComponentWorkflowFilesFunc = func(context.Context, string, string, string, []models.WorkflowFileVar) error {
+				return nil
+			}
+			svc := NewRuntimeConfigService(oc, nil, storeWith(files))
+
+			if err := svc.EmitForComponent(ctx, "acme", "proj", "web"); err != nil {
+				t.Fatalf("EmitForComponent(%q): %v", retired, err)
+			}
+			if n := len(oc.UpdateComponentWorkflowFilesCalls()); n != 0 {
+				t.Fatalf("retired spelling %q must not emit env-config.js; got %d emits", retired, n)
+			}
 		}
 	})
 

@@ -31,8 +31,10 @@ export interface ComponentDesign {
   /** Must equal the component's directory name (kebab-case). */
   name: string;
   /**
-   * Component kind. "service" and "webapp" carry full platform conventions
-   * (openapi.yaml / wireframes.dsl and deployment support); any other kind
+   * Component kind. "service" and "web-application" carry full platform
+   * conventions (openapi.yaml / wireframes.dsl and deployment support) and
+   * mirror OpenChoreo's own terms (deployment/service,
+   * deployment/web-application — the same words minus the prefix); any other kind
    * the requirements imply (e.g. "scheduled-task", "worker") is CAPTURED at
    * design time — support-gating happens in later phases, not here.
    */
