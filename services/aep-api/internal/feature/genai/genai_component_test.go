@@ -432,7 +432,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	}
 	fx := workspacetest.New(t, seed)
 	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
-		"skills/flow/high-level-architecture/SKILL.md": "---\nname: high-level-architecture\ndescription: d\n---\nbody",
+		"skills/high-level-architecture/SKILL.md": "---\nname: high-level-architecture\ndescription: d\nmetadata:\n  aep:\n    kind: platform\n---\nbody",
 	}, "seed skills"))
 
 	rec := &models.GitRepository{

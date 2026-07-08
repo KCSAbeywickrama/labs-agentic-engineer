@@ -1,6 +1,9 @@
 ---
 name: openapi-conventions
 description: Use when creating or editing an openapi.yaml for a service component — designing endpoints, request/response schemas, errors, pagination, or security for a REST API.
+metadata:
+  aep:
+    kind: platform
 ---
 
 # OpenAPI conventions

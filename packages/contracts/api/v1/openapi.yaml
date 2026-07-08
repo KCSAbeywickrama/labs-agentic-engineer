@@ -565,7 +565,6 @@ components:
       required:
         - name
         - skillMd
-        - references
       type: object
     DeleteOp:
       additionalProperties: false
@@ -1264,9 +1263,6 @@ components:
         updatedAt:
           format: date-time
           type: string
-        version:
-          format: int64
-          type: integer
       required:
         - editable
         - orgId
@@ -1275,7 +1271,6 @@ components:
         - description
         - skillMd
         - references
-        - version
         - contentSha
         - updatedAt
       type: object
@@ -1553,7 +1548,6 @@ components:
           type: string
       required:
         - skillMd
-        - references
       type: object
     Warning:
       additionalProperties: false

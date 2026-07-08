@@ -1,8 +1,6 @@
 ---
 name: thunder-authentication
 description: How the platform's Thunder IDP is wired into SPAs that sign users in. Covers the callerIdentity.mode design field, the per-project Thunder OAuth client (BFF-owned — agent never sees client_id), the window._env_.THUNDER_* key set, and OIDC client wiring with oidc-client-ts. Pairs with react-webapp when the SPA wiring patterns apply. Apply on any project whose spec implies users sign in.
-metadata:
-  aep.version: "1"
 ---
 
 # Thunder Authentication

@@ -2,7 +2,8 @@
 name: high-level-architecture
 description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, or writing a component's design.json.
 metadata:
-  aep.version: "2"
+  aep:
+    kind: platform
 ---
 
 # High-level architecture
@@ -178,6 +179,11 @@ web research (the API homepage, a docs page, a spec URL) so the user can verify
 the sources. Declare the intent (kind + name + fields above) and let the
 platform resolve it. An `external` dependency should almost always carry at
 least one `config` key — the value-collection gate needs something to collect.
+
+Every dependency carries a one-line `description`: what the target is and how
+the component uses it (for an `external`, which endpoints/SDK and auth scheme;
+for a `platform-resource`, what it stores). The console shows it in the
+dependency drawer and the coding agent relies on it to integrate correctly.
 
 One component per directory. Every `service` gets an `openapi.yaml`
 (load `openapi-conventions` before writing it); every `webapp` gets a

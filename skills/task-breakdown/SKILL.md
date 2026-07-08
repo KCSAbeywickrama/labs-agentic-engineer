@@ -1,6 +1,9 @@
 ---
 name: task-breakdown
 description: Use when turning a published design into implementation tasks — planning a task batch from design.json components, ordering tasks by their dependencies, or writing the issue brief for one planned task.
+metadata:
+  aep:
+    kind: platform
 ---
 
 # Task breakdown

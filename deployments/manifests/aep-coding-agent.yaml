@@ -132,7 +132,7 @@ spec:
             # counts against the registry's pull rate limits). When stabilising
             # for a long-lived dev/stage, pin to an immutable SHA tag and switch
             # to `imagePullPolicy: IfNotPresent`.
-            image: docker.io/xlight05/aep-coding-agent-runner:v5
+            image: docker.io/xlight05/aep-coding-agent-runner:v6
             imagePullPolicy: Always
             # Explicit command/args is the OC convention — every ClusterWorkflow
             # in this directory and Agent-Manager's amp-monitor-evaluation set
