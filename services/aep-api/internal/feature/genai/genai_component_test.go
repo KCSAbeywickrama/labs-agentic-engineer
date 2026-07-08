@@ -58,13 +58,13 @@ const (
 )
 
 func turnsPath(uuid string) string {
-	return "/api/v1/projects/" + testProj + "/conversations/" + uuid + "/turns"
+	return "/api/v1/projects/" + testProj + "/agents/" + uuid + "/messages"
 }
 func turnPath(turnID string) string {
 	return "/api/v1/projects/" + testProj + "/turns/" + turnID
 }
 func convPath(uuid string) string {
-	return "/api/v1/projects/" + testProj + "/conversations/" + uuid
+	return "/api/v1/projects/" + testProj + "/agents/" + uuid + "/messages"
 }
 
 // ---- SSE script helpers ------------------------------------------------------

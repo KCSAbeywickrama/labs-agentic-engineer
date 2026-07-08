@@ -18,11 +18,11 @@ package genai
 
 // genai_huma.go — the committed-truth turn HTTP edge (design §6 API delta):
 //
-//	POST …/conversations/{id}/turns {useCase,instruction,target?} → 202 {turnId}
+//	POST …/agents/{id}/messages {useCase,instruction,target?}    → 202 {turnId}
 //	GET  …/turns/{turnId}                                         → status
 //	GET  …/turns/active                                           → status | 204
 //	GET  …/turns/{turnId}/stream?from=N (SSE, Last-Event-ID)      → replay + tail
-//	GET  …/conversations/{id}                                     → rehydrate
+//	GET  …/agents/{id}/messages                                   → rehydrate
 //
 // The stream events are the raw agents StreamParts plus ONE aep-api terminal
 // event (turn-committed / turn-failed), each stamped with `id: <index>`; the
@@ -121,7 +121,7 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 	huma.Register(api, huma.Operation{
 		OperationID:   "create-turn",
 		Method:        http.MethodPost,
-		Path:          "/projects/{projectName}/conversations/{conversationId}/turns",
+		Path:          "/projects/{projectName}/agents/{conversationId}/messages",
 		Summary:       "Start a generation/chat turn (202 — runs detached; attach via the turn stream)",
 		Tags:          []string{"GenAI"},
 		Security:      humakit.SecurityUserJWT,
@@ -214,7 +214,7 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-conversation",
 		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/conversations/{conversationId}",
+		Path:        "/projects/{projectName}/agents/{conversationId}/messages",
 		Summary:     "Rehydrate a chat conversation (messages only)",
 		Tags:        []string{"GenAI"},
 		Security:    humakit.SecurityUserJWT,
