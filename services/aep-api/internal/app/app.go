@@ -778,7 +778,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// The provisioning surface (value/param collection + the aep:provision issue
 	// funnel) is wired in the Phase-6 block further below.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
-	orgEndpointCatalog := endpoints.NewCatalog(resourceClient)
+	// The resolver collaborators (repo locator + design reader) let the endpoint
+	// catalog discover each org-service's real OpenAPI contract + repo coords
+	// (endpoint spec discovery). Wired here so the A3 MCP tool projects them;
+	// the read-only List/Resolve* surface degrades gracefully if either is nil.
+	orgEndpointCatalog := endpoints.NewCatalog(resourceClient,
+		endpoints.WithRepoLocator(repoRepo),
+		endpoints.WithDesignReader(artifactStore),
+	)
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
 	params.MCPExternalResources = externalResourceRepo
 	params.MCPOrgEndpoints = orgEndpointCatalog
