@@ -1,8 +1,6 @@
 ---
 name: react-webapp
 description: How to build a React SPA on the platform — Vite project layout, multi-stage Dockerfile → nginx:alpine runtime, synchronous /env-config.js load before the bundle, the authoritative window._env_ key set, throw-on-missing-key rule, and stock static-only nginx config (no envsubst, no proxy). Apply to every web-app component.
-metadata:
-  aep.version: "2"
 ---
 
 # React Webapp

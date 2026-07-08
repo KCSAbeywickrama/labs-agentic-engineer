@@ -80,7 +80,7 @@ func newPlanRig(t *testing.T, seed map[string]string, designTag string) *planRig
 	t.Helper()
 	fx := workspacetest.New(t, seed)
 	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
-		"skills/flow/task-planning/SKILL.md": "---\nname: task-planning\ndescription: plan tasks\n---\n# Task planning",
+		"skills/task-planning/SKILL.md": "---\nname: task-planning\ndescription: plan tasks\nmetadata:\n  aep:\n    kind: platform\n---\n# Task planning",
 	}, "seed skills"))
 	repoRow := &models.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: fx.Origin.URL(),
 		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}
@@ -161,7 +161,7 @@ func TestStartPlan_DispatchesWorkspaceShape(t *testing.T) {
 			t.Errorf("snapshot dir not materialized: %s (%v)", dir, err)
 		}
 	}
-	if _, err := os.Stat(skillsSnap + "/skills/flow/task-planning/SKILL.md"); err != nil {
+	if _, err := os.Stat(skillsSnap + "/skills/task-planning/SKILL.md"); err != nil {
 		t.Errorf("task-planning flow skill missing from skills snapshot: %v", err)
 	}
 	if !strings.HasPrefix(req.Instruction, planInstruction) {

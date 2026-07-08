@@ -173,7 +173,7 @@ async function main(): Promise<number> {
   // only after all attempts fail do we log LOUDLY and continue without the
   // per-task plugin (runner falls back to the base aep plugin only).
   // See docs/design/skills-system.md > "Coding agent".
-  let preloadBuiltinNames: string[] = [];
+  let preloadSkillNames: string[] = [];
   let skillsPluginDir: string | undefined;
   if (platformURL) {
     try {
@@ -189,9 +189,9 @@ async function main(): Promise<number> {
       const result = await materializeSkills(layout.workspace, skills.skills);
       if (result) {
         skillsPluginDir = result.pluginDir;
-        preloadBuiltinNames = result.builtinNames;
+        preloadSkillNames = result.preloadNames;
         console.log(
-          `[oneshot] materialised ${skills.skills.length} skill(s); preload=${preloadBuiltinNames.length} builtin(s)`,
+          `[oneshot] materialised ${skills.skills.length} skill(s); preload=${preloadSkillNames.length} org skill(s)`,
         );
       } else {
         console.log("[oneshot] no per-task skills to materialise");
@@ -209,7 +209,7 @@ async function main(): Promise<number> {
   const log = openTaskLog(layout.workspace);
   const { completion } = runClaudeQuery(req, layout, log, {
     skillsPluginDir,
-    preloadBuiltinNames,
+    preloadSkillNames,
   });
   const result = await completion;
   return result.exitCode;

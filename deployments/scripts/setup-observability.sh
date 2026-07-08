@@ -64,10 +64,18 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v9 —
-#                   the handoff agent's classify/dedupe/tag/dispatch-guard
-#                   logic moved out of the prompt into deterministic code
-#                   (src/agent/handoff_logic.py) plus a pluggable Skill
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v10 —
+#                   fixes ae_create_issue result parsing in the dispatch guard
+#                   (src/agent/handoff_logic.py): the real MCP/LangChain tool
+#                   result is a content-block list (`[{"type":"text","text":
+#                   "<json>"}]`), not a bare string — handoff-v9's parser only
+#                   handled the bare-string shape, so it silently failed to
+#                   read the created issue's number/deduped flag and always
+#                   blocked the subsequent ae_dispatch_coding_agent call.
+#                   Verified live against a real MCP round trip before this
+#                   build. handoff-v9 carried the handoff agent's
+#                   classify/dedupe/tag/dispatch-guard logic moved out of the
+#                   prompt into deterministic code plus a pluggable Skill
 #                   mechanism (src/agent/skills.py, src/skills/issue-fix/) for
 #                   the remaining judgment-based work — see AE-HANDOFF-DESIGN.md.
 #                   handoff-v8 carried dynamic Anthropic-key resolution
@@ -179,8 +187,8 @@ echo "1️⃣b RCA agent image + secret"
 #                             to the local name so the helm values stay stable
 #   3. local anthropic-patched (older tag: RCA works, handoff stage ABSENT)
 RCA_IMAGE_REPO="openchoreo-sre-agent"
-RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v9}"
-RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v9}"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v10}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v10}"
 if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
     echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
     if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then
@@ -299,11 +307,23 @@ EOF
 # so re-runs pick up value changes from /tmp/obs-plane-values.yaml. The
 # helper skips already-installed releases, which would silently bypass any
 # future tuning here.
+#
+# --force-conflicts: this Helm (v4+) defaults --server-side to "auto", which
+# uses SSA once a release's prior revision did. Step 3b below kubectl-patches
+# observer-config/rca-agent-config/the ai-rca-agent deployment AFTER every
+# helm run (deliberately — see that step's comment), which stamps those
+# fields with fieldManager "kubectl-patch". Without --force-conflicts, the
+# NEXT re-run of this same `helm upgrade` fails outright ("Apply failed with
+# 1 conflict: conflict with \"kubectl-patch\"") because SSA sees a foreign
+# owner on a field the chart also sets. Safe to force here: step 3b
+# unconditionally re-asserts the authoritative values right after this
+# command anyway, so which side wins THIS apply doesn't matter.
 helm upgrade --install observability-plane \
     "oci://ghcr.io/openchoreo/helm-charts/openchoreo-observability-plane" \
     --namespace "$NS" --create-namespace --kube-context "${CLUSTER_CONTEXT}" \
     --version "$OBS_PLANE_VERSION" \
     --values /tmp/obs-plane-values.yaml \
+    --force-conflicts \
     --timeout 10m
 echo "⏳ Waiting for Observer + controller-manager..."
 kubectl --context "$CLUSTER_CONTEXT" -n "$NS" wait --for=condition=Available deployment/observer --timeout=300s
