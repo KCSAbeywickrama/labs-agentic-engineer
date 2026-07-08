@@ -42,9 +42,12 @@ paths:
 
 // fakeCommitter records the Files commit and answers CAS reads: the
 // component's design.json and the root design.md both exist (return a stable
-// sha), the spec file does not yet.
+// sha), the spec file does not yet. `writes` holds the LAST commit's batch
+// (the single-commit tests' shorthand); `commitLog` keeps every batch in
+// commit order for multi-commit composition tests.
 type fakeCommitter struct {
 	writes    []DesignFileWrite
+	commitLog [][]DesignFileWrite
 	commitErr error
 	commits   int
 }
@@ -62,6 +65,7 @@ func (f *fakeCommitter) Commit(_ context.Context, _, _ string, writes []DesignFi
 		return f.commitErr
 	}
 	f.writes = writes
+	f.commitLog = append(f.commitLog, writes)
 	return nil
 }
 

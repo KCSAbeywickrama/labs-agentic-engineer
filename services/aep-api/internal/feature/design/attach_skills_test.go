@@ -312,6 +312,99 @@ func TestSaveAndProceed_MultipleDepsSameSkillPersistsOneEntry(t *testing.T) {
 	}
 }
 
+// Composition pin: a SINGLE resource type whose markers carry BOTH the
+// end-user-auth role AND a skill annotation (the real thunder-app CRT shape
+// once G5 lands), declared by a service component, on a design that already
+// has a skillsApplied entry. The save must land exactly TWO commits in order
+// — first the auth-derivation design.json commit, then the skillsApplied
+// design.md commit — with disjoint paths, fetch the marker map exactly once,
+// and only THEN cut the tag at HEAD (CommitSHA "" — the re-read-after-commit
+// convention guarantees the tagged tree includes both changes). This pins the
+// two-commit composition so a future coalescing refactor can't silently
+// break it.
+func TestSaveAndProceed_AuthRoleAndSkillMarkerComposeTwoCommitsThenTag(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
+	files := designFilesWithDepsAndSkills(deps, []string{"manually-added-skill"})
+	fake := happySave(files)
+	fc := &fakeCommitter{}
+
+	// Pin the initial read to a commit: both persistence steps must drop the
+	// pin (re-read at HEAD) before the tag-cut.
+	fake.GetDesignAtCommitFunc = func(context.Context, string, string, string) (map[string]string, error) {
+		return files, nil
+	}
+
+	// Capture the tag-cut moment: how many derive/attach commits had landed by
+	// the time SaveDesign ran, and which CommitSHA it was asked to tag.
+	commitsAtTagCut := -1
+	tagCutCommitSHA := "sentinel-not-called"
+	inner := fake.SaveDesignFunc
+	fake.SaveDesignFunc = func(ctx context.Context, org, project string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
+		commitsAtTagCut = fc.commits
+		tagCutCommitSHA = req.CommitSHA
+		return inner(ctx, org, project, req)
+	}
+
+	svc := newService(fake)
+	svc.fileCommitter = fc
+	cat := &fakeMarkerCatalog{markers: map[string]resources.TypeMarkers{
+		"thunder-app": {EndUserAuth: true, Skill: "thunder-authentication"},
+	}}
+	svc.resourceCatalog = cat
+
+	got, err := svc.SaveAndProceed(context.Background(), "acme", "web", "pinned-sha")
+	if err != nil {
+		t.Fatalf("SaveAndProceed: unexpected error: %v", err)
+	}
+	if got.Status != "approved" {
+		t.Fatalf("status = %q, want approved", got.Status)
+	}
+
+	// (4) one catalog fetch serves both consumers.
+	if cat.calls != 1 {
+		t.Fatalf("marker map must be fetched exactly once, got %d calls", cat.calls)
+	}
+
+	// (1) exactly two commits, auth derivation first, skill attach second,
+	// disjoint paths.
+	if fc.commits != 2 || len(fc.commitLog) != 2 {
+		t.Fatalf("want exactly two commits (auth derivation + skill attach), got %d (%d logged)", fc.commits, len(fc.commitLog))
+	}
+	authWrites, skillWrites := fc.commitLog[0], fc.commitLog[1]
+	if len(authWrites) != 1 || !strings.HasSuffix(authWrites[0].Path, "components/consumer/design.json") {
+		t.Fatalf("first commit must be the consumer design.json auth derivation, got %+v", authWrites)
+	}
+	if !strings.Contains(authWrites[0].Content, `"auth": "end-user-required"`) {
+		t.Fatalf("first commit missing the derived auth:\n%s", authWrites[0].Content)
+	}
+	if len(skillWrites) != 1 || strings.Contains(skillWrites[0].Path, "components/") ||
+		!strings.HasSuffix(skillWrites[0].Path, "design.md") {
+		t.Fatalf("second commit must be the root design.md skill attach, got %+v", skillWrites)
+	}
+	if authWrites[0].Path == skillWrites[0].Path {
+		t.Fatalf("the two commits must touch disjoint paths, both hit %q", authWrites[0].Path)
+	}
+
+	// (2) the skill commit carries the pre-existing entry AND the attached one.
+	if !strings.Contains(skillWrites[0].Content, "manually-added-skill") {
+		t.Fatalf("skill commit lost the pre-existing entry:\n%s", skillWrites[0].Content)
+	}
+	if !strings.Contains(skillWrites[0].Content, "thunder-authentication") {
+		t.Fatalf("skill commit missing the attached skill:\n%s", skillWrites[0].Content)
+	}
+
+	// (3) the tag-cut ran after BOTH commits and resolved at HEAD (the pinned
+	// sha was dropped by the re-read-after-commit convention, so the tagged
+	// tree includes both changes).
+	if commitsAtTagCut != 2 {
+		t.Fatalf("SaveDesign must run after both commits, saw %d at tag-cut", commitsAtTagCut)
+	}
+	if tagCutCommitSHA != "" {
+		t.Fatalf("tag-cut CommitSHA = %q, want \"\" (HEAD, past the pinned sha and both commits)", tagCutCommitSHA)
+	}
+}
+
 // (e) existing skillsApplied entries preserved verbatim through a save that
 // also attaches a new one.
 func TestSaveAndProceed_ExistingSkillsAppliedPreservedOnAttach(t *testing.T) {
