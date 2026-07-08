@@ -16,6 +16,16 @@
 
 package models
 
+// Component type vocabulary. AEP uses OpenChoreo's OWN terms end-to-end —
+// these are OC's ComponentType names minus the `deployment/` prefix (OC:
+// `deployment/service`, `deployment/web-application`), so no translation
+// layer exists anywhere: the agent contract emits these values, design.json
+// stores them verbatim, and platform code compares them directly.
+const (
+	ComponentTypeService        = "service"
+	ComponentTypeWebApplication = "web-application"
+)
+
 // DesignComponent describes a single component within a design.
 // This matches the structured output schema from the AI Agent SDK.
 type DesignComponent struct {

@@ -118,7 +118,7 @@ const builtComponents: ComponentList = {
       name: "storefront",
       displayName: "Storefront",
       description: "Customer-facing web app",
-      type: "webapp",
+      type: "deployment/web-application",
       status: "active",
     },
     {
@@ -140,7 +140,7 @@ const builtComponents: ComponentList = {
 
 const deployedComponents: ComponentList = {
   items: (builtComponents.items ?? []).map((c) =>
-    c.type === "webapp"
+    c.type === "deployment/web-application"
       ? { ...c, endpointUrl: "https://storefront.dev.acme-aep.io" }
       : c,
   ),
@@ -257,7 +257,7 @@ Three components behind the project cell:
 
 | Component | Type | Responsibility |
 |---|---|---|
-| storefront | webapp | Customer-facing UI |
+| storefront | web-application | Customer-facing UI |
 | catalog-api | service | Product catalog CRUD + search |
 | orders-api | service | Cart, checkout, order history |
 
@@ -267,7 +267,7 @@ The storefront talks to both services; services share nothing.
 const architectureDiagram = `{
   "type": "excalidraw-dsl",
   "components": [
-    { "id": "storefront", "kind": "webapp" },
+    { "id": "storefront", "kind": "web-application" },
     { "id": "catalog-api", "kind": "service" },
     { "id": "orders-api", "kind": "service" }
   ],

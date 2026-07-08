@@ -127,7 +127,7 @@ func (s *RuntimeConfigService) EmitForComponent(ctx context.Context, orgID, proj
 			break
 		}
 	}
-	if match == nil || match.ComponentType != "web-app" {
+	if match == nil || match.ComponentType != models.ComponentTypeWebApplication {
 		return nil
 	}
 
@@ -192,7 +192,7 @@ func (s *RuntimeConfigService) EmitForProjectSPAs(ctx context.Context, orgID, pr
 		return nil
 	}
 	for _, c := range design.Components {
-		if c.ComponentType != "web-app" {
+		if c.ComponentType != models.ComponentTypeWebApplication {
 			continue
 		}
 		k8sName := k8sname.ToK8sName(c.Name)
@@ -242,7 +242,7 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 			continue
 		}
 		// Skip non-service deps (peer webapps aren't called over HTTP).
-		if sibling.ComponentType != "service" {
+		if sibling.ComponentType != models.ComponentTypeService {
 			continue
 		}
 		k8sName := k8sname.ToK8sName(dep)
@@ -303,7 +303,7 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 // layer — including the single CRT-marker catalog fetch — so an auth-free /
 // resource-free SPA never touches the resource client or the catalog.
 func platformResourceDeps(c *models.DesignComponent) []models.Dependency {
-	if c == nil || c.ComponentType != "web-app" {
+	if c == nil || c.ComponentType != models.ComponentTypeWebApplication {
 		return nil
 	}
 	var out []models.Dependency

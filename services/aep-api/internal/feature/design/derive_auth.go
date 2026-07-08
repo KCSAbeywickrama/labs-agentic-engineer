@@ -60,7 +60,7 @@ const (
 func deriveEndUserAuth(components []models.DesignComponent, markers map[string]resources.TypeMarkers) error {
 	for i := range components {
 		comp := &components[i]
-		if comp.ComponentType != "service" {
+		if comp.ComponentType != models.ComponentTypeService {
 			continue
 		}
 		dep, ok := endUserAuthDependency(comp.Dependencies, markers)

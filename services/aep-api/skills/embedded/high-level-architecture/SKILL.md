@@ -95,7 +95,7 @@ violations:
 ```json
 {
   "name": "expense-api",              // MUST equal the directory name
-  "type": "service",                  // "service" | "webapp" | any kind the requirements imply ("scheduled-task", "worker", ...)
+  "type": "service",                  // "service" | "web-application" | any kind the requirements imply ("scheduled-task", "worker", ...)
   "version": "0.1.0",                 // semantic version; 0.1.0 for a new component
   "language": "Go",                   // implementation language, e.g. "Go", "TypeScript"
   "buildpack": "docker",              // always "docker"
@@ -196,7 +196,7 @@ for a `platform-resource`, what it stores). The console shows it in the
 dependency drawer and the coding agent relies on it to integrate correctly.
 
 One component per directory. Every `service` gets an `openapi.yaml`
-(load `openapi-conventions` before writing it); every `webapp` gets a
+(load `openapi-conventions` before writing it); every `web-application` gets a
 `wireframes.dsl` (load `excalidraw-wireframes` before writing it). Other
 kinds (scheduled tasks, workers, ...) carry no extra artifact yet — capture
 their behavior fully in `description` and `dependencies`.
