@@ -113,6 +113,51 @@ test("untouched blocks keep concurrent user edits", () => {
   assert.match(md, /improved by the agent/);
 });
 
+test("sequential agent writes keep EVERY insertion highlighted", () => {
+  // Regression: y-prosemirror's updateYText negates attributes absent from
+  // the (plain-markdown) target node, so each write used to strip all
+  // previous writes' marks — only the last insert stayed highlighted.
+  const doc = new Y.Doc();
+  setDocFile(
+    doc,
+    "requirements/prd.md",
+    "# PRD\n\nFirst paragraph.\n\nSecond paragraph.",
+  );
+  setDocFileAsAgent(
+    doc,
+    "requirements/prd.md",
+    "# PRD\n\nFirst paragraph with alpha.\n\nSecond paragraph.",
+    "agent",
+    META,
+  );
+  setDocFileAsAgent(
+    doc,
+    "requirements/prd.md",
+    "# PRD\n\nFirst paragraph with alpha.\n\nSecond paragraph with beta.",
+    "agent",
+    META,
+  );
+  const runs = markedRuns(doc, "requirements/prd.md").join("|");
+  assert.match(runs, /alpha/, "first write's insert still marked");
+  assert.match(runs, /beta/, "second write's insert marked");
+  assert.ok(!runs.includes("First paragraph with alpha.".slice(0, 15)), "untouched text stays unmarked");
+});
+
+test("a later write deleting an earlier insert clears its mark", () => {
+  const doc = new Y.Doc();
+  setDocFile(doc, "requirements/prd.md", "# PRD\n\nBody.");
+  setDocFileAsAgent(
+    doc,
+    "requirements/prd.md",
+    "# PRD\n\nBody. Temporary sentence.",
+    "agent",
+    META,
+  );
+  setDocFileAsAgent(doc, "requirements/prd.md", "# PRD\n\nBody.", "agent", META);
+  assert.equal(readDocFile(doc, "requirements/prd.md")?.trim(), "# PRD\n\nBody.");
+  assert.equal(hasPendingAgentMarks(doc, "requirements/prd.md"), false);
+});
+
 test("markdown serialization strips the mark (committer output stays clean)", () => {
   const doc = new Y.Doc();
   setDocFile(doc, "requirements/prd.md", "# PRD\n\nBody.");

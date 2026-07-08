@@ -159,6 +159,51 @@ interface InsertedRun {
   length: number;
 }
 
+interface PreservedRun {
+  start: Y.RelativePosition;
+  end: Y.RelativePosition;
+  attrs: unknown;
+}
+
+// Existing agentInsertion runs, anchored as relative positions so they
+// survive updateYFragment. Needed because y-prosemirror's updateYText
+// "negates" every Y attribute absent from the target node's marks — and the
+// target is parsed from plain markdown, so each agent write would strip all
+// PREVIOUS writes' highlights, leaving only the last one marked.
+function snapshotAgentRuns(
+  node: Y.XmlFragment | Y.XmlElement | Y.XmlText,
+  out: PreservedRun[],
+): void {
+  if (node instanceof Y.XmlText) {
+    let index = 0;
+    const deltas = node.toDelta() as {
+      insert?: unknown;
+      attributes?: Record<string, unknown>;
+    }[];
+    for (const d of deltas) {
+      const length = typeof d.insert === "string" ? d.insert.length : 1;
+      const attrs = d.attributes?.[AGENT_INSERTION];
+      if (attrs !== undefined && length > 0) {
+        out.push({
+          // start sticks right (to the first marked char), end sticks left
+          // (to the last) so boundary insertions don't stretch the range.
+          start: Y.createRelativePositionFromTypeIndex(node, index),
+          end: Y.createRelativePositionFromTypeIndex(node, index + length, -1),
+          attrs,
+        });
+      }
+      index += length;
+    }
+    return;
+  }
+  for (let i = 0; i < node.length; i++) {
+    const child = node.get(i);
+    if (child instanceof Y.XmlElement || child instanceof Y.XmlText) {
+      snapshotAgentRuns(child, out);
+    }
+  }
+}
+
 /**
  * Character-exact agent write (#86 phase 6): apply the new markdown as a
  * MINIMAL diff onto the fragment (updateYFragment — concurrent user edits in
@@ -236,6 +281,8 @@ export function setDocFileAsAgent(
   };
 
   const fragment = doc.getXmlFragment(path);
+  const preserved: PreservedRun[] = [];
+  snapshotAgentRuns(fragment, preserved);
   fragment.observeDeep(collect);
   try {
     doc.transact(() => {
@@ -249,8 +296,20 @@ export function setDocFileAsAgent(
   }
 
   let caret: CaretJSON | null = null;
-  if (inserted.length > 0) {
+  if (inserted.length > 0 || preserved.length > 0) {
     doc.transact(() => {
+      // Restore earlier writes' highlights first (updateYText stripped
+      // them); runs whose content the new write deleted resolve to empty
+      // ranges and drop out — exactly the review state they should have.
+      for (const run of preserved) {
+        const start = Y.createAbsolutePositionFromRelativePosition(run.start, doc);
+        const end = Y.createAbsolutePositionFromRelativePosition(run.end, doc);
+        if (!start || !end || start.type !== end.type) continue;
+        if (!(start.type instanceof Y.XmlText)) continue;
+        const length = end.index - start.index;
+        if (length <= 0) continue;
+        start.type.format(start.index, length, { [AGENT_INSERTION]: run.attrs });
+      }
       for (const run of inserted) {
         if (run.length === 0) continue;
         run.text.format(run.index, run.length, {
@@ -258,6 +317,8 @@ export function setDocFileAsAgent(
         });
       }
     }, origin);
+  }
+  if (inserted.length > 0) {
     const last = inserted[inserted.length - 1]!;
     caret = Y.relativePositionToJSON(
       Y.createRelativePositionFromTypeIndex(last.text, last.index + last.length),
