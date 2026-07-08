@@ -36,7 +36,11 @@ import {
 import { ArrowLeft, Hammer } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
-import { useProject, useProjectStatus } from "../../projects/api/queries";
+import {
+  useProject,
+  useProjectStatus,
+  useProjectTags,
+} from "../../projects/api/queries";
 import { useSpecFileContent, useSpecFiles } from "../api/queries";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
@@ -75,6 +79,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   const { actions } = useAppShell();
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
+  const tags = useProjectTags(projectName);
   const spec = useSpecFiles(projectName);
   const { user, orgHandle } = useSession();
   // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
@@ -197,15 +202,17 @@ export function SpecView({ projectName }: { projectName: string }) {
             </Tooltip>
           )}
 
-          {status.data?.specVersion && (
+          {/* Version chips from the tag resource (#117): latest user tag +
+              whether specs/ moved on GitHub since. */}
+          {tags.data?.latest && (
             <Chip
               size="small"
               variant="outlined"
               color="success"
-              label={`${status.data.specVersion} published`}
+              label={`${tags.data.latest} published`}
             />
           )}
-          {status.data?.specDirty && (
+          {tags.data?.specDirty && (
             <Chip size="small" color="warning" label="draft changes" />
           )}
           {chip && <Chip size="small" color={chip.color} label={chip.label} />}

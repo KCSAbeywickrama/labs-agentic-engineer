@@ -1,10 +1,11 @@
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
-  projectBoards,
   projectComponents,
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
+  projectTags,
+  projectTasks,
   specFileContent,
   specFileMetas,
   specFileNotFound,
@@ -40,8 +41,11 @@ export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/components", () =>
     respond((s) => projectComponents[s]),
   ),
-  http.get("*/api/v1/projects/:projectName/board", () =>
-    respond((s) => projectBoards[s]),
+  http.get("*/api/v1/projects/:projectName/tasks", () =>
+    respond((s) => projectTasks[s]),
+  ),
+  http.get("*/api/v1/projects/:projectName/tags", () =>
+    respond((s) => projectTags[s]),
   ),
   // Files API (#113): list-files metadata + per-file content reads, exactly
   // as aep-api serves them (repo-relative specs/ paths).

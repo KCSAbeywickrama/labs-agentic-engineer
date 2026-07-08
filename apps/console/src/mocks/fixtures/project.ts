@@ -2,7 +2,8 @@ import type { components } from "../../generated/aep-api";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
-type ProjectBoard = components["schemas"]["ProjectBoard"];
+type TaskView = components["schemas"]["TaskView"];
+type TagList = components["schemas"]["TagList"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ErrorModel = components["schemas"]["ErrorModel"];
@@ -72,10 +73,8 @@ export const projectStatuses: Record<
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
-    specVersion: "v1",
-    specDirty: false,
   },
-  // v1 deployed to dev successfully; spec has drifted since.
+  // v1 deployed to dev; spec has drifted since (see projectTags).
   deployed: {
     phase: "components",
     repoStatus: "ready",
@@ -85,10 +84,6 @@ export const projectStatuses: Record<
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
-    specVersion: "v1",
-    specDirty: true,
-    deployedVersion: "v1",
-    deployStatus: "succeeded",
   },
   // v1 build done but the dev deployment failed.
   "deploy-failed": {
@@ -100,9 +95,6 @@ export const projectStatuses: Record<
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
-    specVersion: "v1",
-    specDirty: false,
-    deployStatus: "failed",
   },
   // Repo bootstrap went sideways before any spec work.
   "repo-error": {
@@ -167,83 +159,70 @@ export const projectComponents: Record<
   "repo-error": emptyComponents,
 };
 
-const emptyBoard: ProjectBoard = {
-  url: BOARD_URL,
-  todo: [],
-  inProgress: [],
-  onHold: [],
-  done: [],
-  failed: [],
-};
+// Tasks backing the Build card (list-tasks; the card buckets derivedStatus
+// client-side — see features/projects/api/taskBuckets.ts).
+function task(
+  issueNumber: number,
+  title: string,
+  derivedStatus: string,
+  component?: string,
+): TaskView {
+  return {
+    issueNumber,
+    title,
+    derivedStatus,
+    issueUrl: `${BOARD_URL}/${issueNumber}`,
+    ...(component !== undefined && { component }),
+    attention: null,
+    dependsOn: null,
+    executions: {},
+    hold: false,
+    lineage: { specTag: "v1" },
+  };
+}
 
-const buildingBoard: ProjectBoard = {
-  url: BOARD_URL,
-  todo: [
-    {
-      id: "12",
-      title: "Checkout flow with cart persistence",
-      url: `${BOARD_URL}/12`,
-      componentName: "storefront",
-      status: "todo",
-    },
-  ],
-  inProgress: [
-    {
-      id: "10",
-      title: "Product catalog CRUD endpoints",
-      url: `${BOARD_URL}/10`,
-      componentName: "catalog-api",
-      status: "in_progress",
-      assignee: "coding-agent",
-    },
-  ],
-  onHold: [],
-  done: [
-    {
-      id: "9",
-      title: "Scaffold storefront app shell",
-      url: `${BOARD_URL}/9`,
-      componentName: "storefront",
-      status: "done",
-    },
-  ],
-  failed: [
-    {
-      id: "11",
-      title: "Orders service payment integration",
-      url: `${BOARD_URL}/11`,
-      componentName: "orders-api",
-      status: "failed",
-      errorMessage: "Build failed: missing PAYMENT_GATEWAY_URL config",
-    },
-  ],
-};
+const buildingTasks: TaskView[] = [
+  task(12, "Checkout flow with cart persistence", "pending", "storefront"),
+  task(10, "Product catalog CRUD endpoints", "in_progress", "catalog-api"),
+  task(9, "Scaffold storefront app shell", "merged", "storefront"),
+  task(11, "Orders service payment integration", "failed", "orders-api"),
+];
 
-const doneBoard: ProjectBoard = {
-  url: BOARD_URL,
-  todo: [],
-  inProgress: [],
-  onHold: [],
-  done: [
-    ...(buildingBoard.inProgress ?? []),
-    ...(buildingBoard.todo ?? []),
-    ...(buildingBoard.failed ?? []),
-    ...(buildingBoard.done ?? []),
-  ].map((t) => ({ ...t, status: "done" })),
-  failed: [],
-};
+const doneTasks: TaskView[] = buildingTasks.map((t) => ({
+  ...t,
+  derivedStatus: "deployed",
+}));
 
-export const projectBoards: Record<
+export const projectTasks: Record<
   Exclude<ProjectScenario, "error">,
-  ProjectBoard
+  TaskView[]
 > = {
-  fresh: emptyBoard,
-  spec: emptyBoard,
-  "spec-failed": emptyBoard,
-  building: buildingBoard,
-  deployed: doneBoard,
-  "deploy-failed": doneBoard,
-  "repo-error": emptyBoard,
+  fresh: [],
+  spec: [],
+  "spec-failed": [],
+  building: buildingTasks,
+  deployed: doneTasks,
+  "deploy-failed": doneTasks,
+  "repo-error": [],
+};
+
+// Spec version tags (#117): latest = newest user tag; specDirty = specs/
+// moved on GitHub since. The 'deployed' scenario drifts to exercise the
+// "draft changes" chip.
+const noTags: TagList = { tags: [] };
+const v1Tags: TagList = { tags: ["v1"], latest: "v1", specDirty: false };
+
+export const projectTags: Record<
+  Exclude<ProjectScenario, "error">,
+  TagList
+> = {
+  fresh: noTags,
+  spec: noTags,
+  "spec-failed": noTags,
+  building: v1Tags,
+  deployed: { ...v1Tags, specDirty: true },
+  "deploy-failed": v1Tags,
+  "repo-error": noTags,
 };
 
 // Spec bundle backing the spec view (#80). The backend seeds a PRD at repo
