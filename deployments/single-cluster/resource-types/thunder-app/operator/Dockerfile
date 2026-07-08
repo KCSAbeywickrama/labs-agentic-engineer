@@ -17,7 +17,7 @@
 # Multi-stage build. This module is self-contained (its own go.mod), so the
 # build context is the operator directory only — the monorepo root is NOT
 # required. Build with:
-#   docker build -t thunder-app-operator:local operators/thunder-app-operator
+#   docker build -t thunder-app-operator:local deployments/single-cluster/resource-types/thunder-app/operator
 
 # ── builder ──────────────────────────────────────────────────────────────
 FROM golang:1.26 AS builder

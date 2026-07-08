@@ -561,10 +561,10 @@ echo "✅ ClusterResourceType 'postgres-cnpg' + CNPG data-plane RBAC created"
 # the chart's values.yaml). CRD ships under the chart's crds/.
 echo ""
 echo "🔧 Building + installing thunder-app-operator..."
-docker build -t thunder-app-operator:local "${SCRIPT_DIR}/../../operators/thunder-app-operator"
+docker build -t thunder-app-operator:local "${SCRIPT_DIR}/../single-cluster/resource-types/thunder-app/operator"
 k3d image import thunder-app-operator:local -c "${CLUSTER_NAME}"
 helm upgrade --install thunder-app-operator \
-    "${SCRIPT_DIR}/../../operators/thunder-app-operator/helm" \
+    "${SCRIPT_DIR}/../single-cluster/resource-types/thunder-app/operator/helm" \
     -n thunder-app-operator-system --create-namespace \
     --set image.repository=thunder-app-operator \
     --set image.tag=local \

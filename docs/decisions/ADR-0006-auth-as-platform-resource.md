@@ -25,8 +25,9 @@ sides resolve to the one OAuth application.
 The `thunder-app` `ClusterResourceType`
 (`deployments/single-cluster/resource-types/thunder-app/resourcetype.yaml`)
 renders a namespaced `ThunderApplication` CR (`aep.wso2.com/v1alpha1`). A new
-in-repo operator, `operators/thunder-app-operator/` (Helm chart at
-`operators/thunder-app-operator/helm/`), deployed cluster-wide — the same
+in-repo operator, `deployments/single-cluster/resource-types/thunder-app/operator/`
+(Helm chart at
+`deployments/single-cluster/resource-types/thunder-app/operator/helm/`), deployed cluster-wide — the same
 shape as the CNPG operator — reconciles it: it creates a public PKCE OAuth
 application against the shared Platform IdP's admin REST API, publishes the
 assigned `client_id` to a `<cr-name>-oauth` ConfigMap and to

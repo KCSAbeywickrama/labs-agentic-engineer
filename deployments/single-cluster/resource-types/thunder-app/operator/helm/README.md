@@ -5,7 +5,8 @@ Installs the **thunder-app-operator**: a Kubernetes operator that reconciles
 clients on the platform Thunder IdP, publishing each assigned `client_id` back
 into the cluster as a `<cr-name>-oauth` ConfigMap.
 
-Single replica, leader election off (see `operators/thunder-app-operator/main.go`).
+Single replica, leader election off (see `main.go` in the operator module one
+level up).
 
 ## Optional reference implementation
 
@@ -32,10 +33,10 @@ automatically — see `deployments/scripts/setup-aep.sh` (the block right after
 the postgres-cnpg ClusterResourceType). To do it by hand:
 
 ```sh
-docker build -t thunder-app-operator:local operators/thunder-app-operator
+docker build -t thunder-app-operator:local deployments/single-cluster/resource-types/thunder-app/operator
 k3d image import thunder-app-operator:local -c openchoreo
 helm upgrade --install thunder-app-operator \
-  operators/thunder-app-operator/helm \
+  deployments/single-cluster/resource-types/thunder-app/operator/helm \
   -n thunder-app-operator-system --create-namespace \
   --set image.repository=thunder-app-operator \
   --set image.tag=local \
@@ -46,12 +47,12 @@ helm upgrade --install thunder-app-operator \
 
 `crds/aep.wso2.com_thunderapplications.yaml` is **copied verbatim** from the
 operator module's generated manifest at
-`operators/thunder-app-operator/config/crd/aep.wso2.com_thunderapplications.yaml`.
+`deployments/single-cluster/resource-types/thunder-app/operator/config/crd/aep.wso2.com_thunderapplications.yaml`.
 It is the single source of truth — regenerate it from the `+kubebuilder` markers
 and re-copy after any change to `api/v1alpha1`:
 
 ```sh
-cd operators/thunder-app-operator && make generate
+cd deployments/single-cluster/resource-types/thunder-app/operator && make generate
 cp config/crd/aep.wso2.com_thunderapplications.yaml helm/crds/
 ```
 

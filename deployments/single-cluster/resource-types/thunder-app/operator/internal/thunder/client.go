@@ -31,7 +31,8 @@
 // thunder-bootstrap.sh is NOT what that instance accepts; do not mirror it.)
 //
 // This package intentionally does NOT import services/aep-api — it is a
-// separate Go module by design (operators/thunder-app-operator), so the
+// separate Go module by design
+// (deployments/single-cluster/resource-types/thunder-app/operator), so the
 // minimal request/response shapes needed here are copied rather than
 // shared.
 package thunder

@@ -8,4 +8,4 @@ go 1.26.0
 // needed to adopt a new Go module.
 use ./services/aep-api
 
-use ./operators/thunder-app-operator
+use ./deployments/single-cluster/resource-types/thunder-app/operator
