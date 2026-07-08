@@ -1,6 +1,9 @@
 ---
 name: excalidraw-wireframes
 description: Use when creating or updating UI wireframes for a webapp component — sketching screens, forms, tables, or navigation flow.
+metadata:
+  aep:
+    kind: platform
 ---
 
 # Wireframes (Excalidraw DSL)

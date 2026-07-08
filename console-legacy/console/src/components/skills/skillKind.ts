@@ -19,10 +19,12 @@
 import type { SkillKind } from '../../services/api/orgSkills';
 
 /** Chip color per skill kind — matches the Oxygen UI Chip color enum. */
-export function kindChipColor(kind: SkillKind): 'primary' | 'success' | 'info' {
+export function kindChipColor(kind: SkillKind): 'primary' | 'secondary' | 'success' | 'info' {
   switch (kind) {
-    case 'builtin':
+    case 'org':
       return 'primary';
+    case 'platform':
+      return 'secondary';
     case 'custom':
       return 'success';
     case 'imported':
@@ -33,8 +35,10 @@ export function kindChipColor(kind: SkillKind): 'primary' | 'success' | 'info' {
 /** Human label per kind. */
 export function kindLabel(kind: SkillKind): string {
   switch (kind) {
-    case 'builtin':
-      return 'Built-in';
+    case 'org':
+      return 'Org';
+    case 'platform':
+      return 'Platform';
     case 'custom':
       return 'Custom';
     case 'imported':

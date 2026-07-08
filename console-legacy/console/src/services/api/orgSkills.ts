@@ -106,7 +106,7 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 // Types
 // ----------------------------------------------------------------------------
 
-export type SkillKind = 'builtin' | 'custom' | 'imported';
+export type SkillKind = 'org' | 'platform' | 'custom' | 'imported';
 
 export interface SkillSummary {
   name: string;

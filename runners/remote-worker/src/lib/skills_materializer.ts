@@ -25,16 +25,16 @@
 //     .claude-plugin/
 //       plugin.json                                 # {"name":"aep-task-skills","version":"1.0"}
 //     skills/
-//       builtin-api-management/
-//         SKILL.md                                  # rewritten name: builtin-api-management
+//       org-api-management/
+//         SKILL.md                                  # rewritten name: org-api-management
 //         references/<file>.md                      # optional
-//       builtin-go/
+//       org-go/
 //         SKILL.md
 //       custom-payments-pci-handling/
 //         SKILL.md
 //
 // All kinds land in one plugin directory. The materialisation prefix
-// (`builtin-`, `custom-`, `imported-`) is applied to both the directory
+// (`org-`, `custom-`, `imported-`) is applied to both the directory
 // name AND the `name:` frontmatter field; the original name is preserved
 // under metadata.aep.canonical-name.
 
@@ -44,7 +44,7 @@ import type { SkillResolution } from "./skills_pull.js";
 
 export interface MaterializeResult {
   pluginDir: string;
-  builtinNames: string[]; // for the SDK `skills:` preload array
+  preloadNames: string[]; // platform-shipped (org-kind) skills for the SDK `skills:` preload array
 }
 
 export async function materializeSkills(
@@ -67,7 +67,7 @@ export async function materializeSkills(
     { mode: 0o644 },
   );
 
-  const builtinNames: string[] = [];
+  const preloadNames: string[] = [];
 
   for (const sk of skills) {
     const skillDir = path.join(skillsDir, sk.materializedName);
@@ -86,12 +86,14 @@ export async function materializeSkills(
       }
     }
 
-    if (sk.kind === "builtin") {
-      builtinNames.push(sk.materializedName);
+    // Platform-shipped stack skills are preloaded into the session; "builtin"
+    // is the legacy kind name from a not-yet-upgraded BFF.
+    if (sk.kind === "org" || sk.kind === "builtin") {
+      preloadNames.push(sk.materializedName);
     }
   }
 
-  return { pluginDir, builtinNames };
+  return { pluginDir, preloadNames };
 }
 
 // Rewrite the `name:` field in the SKILL.md frontmatter to the

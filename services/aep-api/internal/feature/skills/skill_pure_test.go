@@ -169,3 +169,36 @@ func TestMapSkillError(t *testing.T) {
 		})
 	}
 }
+
+// frontmatterKind derivation: metadata.aep.kind names the skill's kind; absent,
+// empty, or unparseable metadata defaults to "org" (the platform-shipped,
+// page-visible kind). docs/design/skills-unified-library-migration.md §3.2.
+func TestFrontmatterKind(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		fm   string
+		want string
+	}{
+		{"platform", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: platform\n---\nbody", "platform"},
+		{"org explicit", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: org\n---\nbody", "org"},
+		{"custom stamped", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: custom\n---\nbody", "custom"},
+		{"imported stamped", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: imported\n---\nbody", "imported"},
+		{"absent metadata", "---\nname: s\ndescription: d.\n---\nbody", "org"},
+		{"empty kind", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: \"\"\n---\nbody", "org"},
+		{"unknown kind", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: wat\n---\nbody", "org"},
+		{"whitespace kind", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: '  platform  '\n---\nbody", "platform"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fm, _, err := parseSkillMD(tc.fm)
+			if err != nil {
+				t.Fatalf("parseSkillMD: %v", err)
+			}
+			if got := frontmatterKind(fm); got != tc.want {
+				t.Fatalf("frontmatterKind = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

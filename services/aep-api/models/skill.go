@@ -29,7 +29,7 @@ import "time"
 type Skill struct {
 	OrgID         string            `json:"orgId"`
 	Name          string            `json:"name"`
-	Kind          string            `json:"kind"` // builtin | custom | imported
+	Kind          string            `json:"kind"` // platform | org | custom | imported
 	Description   string            `json:"description"`
 	SkillMD       string            `json:"skillMd"`
 	References    map[string]string `json:"references"`
@@ -38,6 +38,23 @@ type Skill struct {
 	Compatibility string            `json:"compatibility,omitempty"`
 	UpdatedAt     time.Time         `json:"updatedAt"`
 }
+
+// Skill kinds (docs/design/skills-unified-library-migration.md §3.2). A
+// SKILL.md declares its kind in frontmatter `metadata.aep.kind`; absent means
+// SkillKindOrg. platform + org are platform-shipped and reconciled from the
+// embedded library; custom + imported are user-owned and stamped on write.
+const (
+	// SkillKindPlatform — generation-flow guidance; hidden from the skills
+	// page and the updates badge (was kind "flow").
+	SkillKindPlatform = "platform"
+	// SkillKindOrg — the org-visible stack skills; read-only on the skills
+	// page, feeds coding-runner skillsApplied (was kind "builtin").
+	SkillKindOrg = "org"
+	// SkillKindCustom — user-authored via create/update; editable.
+	SkillKindCustom = "custom"
+	// SkillKindImported — imported from an AgentSkills tarball; editable.
+	SkillKindImported = "imported"
+)
 
 // MaterializedName / PrefixedID are the pure skill-naming helpers shared by the
 // skills feature and task's skill snapshotting.

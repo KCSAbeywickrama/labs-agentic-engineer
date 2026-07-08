@@ -565,7 +565,6 @@ components:
       required:
         - name
         - skillMd
-        - references
       type: object
     DeleteOp:
       additionalProperties: false
@@ -1499,7 +1498,6 @@ components:
           type: string
       required:
         - skillMd
-        - references
       type: object
     Warning:
       additionalProperties: false

@@ -37,9 +37,11 @@ import https from "node:https";
 import { URL } from "node:url";
 
 export interface SkillResolution {
-  id: string;               // e.g. "builtin/api-management"
-  materializedName: string; // e.g. "builtin-api-management"
-  kind: "builtin" | "custom" | "imported";
+  id: string; // e.g. "org/api-management"
+  materializedName: string; // e.g. "org-api-management"
+  // "org" = platform-shipped stack skill (preloaded); "builtin" is the
+  // legacy name for the same class, accepted from a not-yet-upgraded BFF.
+  kind: "org" | "custom" | "imported" | "builtin";
   skillMd: string;
   references: Record<string, string>;
 }

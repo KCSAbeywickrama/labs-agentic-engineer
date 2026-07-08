@@ -51,7 +51,7 @@ type fakeSkillResolver struct{}
 func (fakeSkillResolver) ResolveMany(_ context.Context, _ string, names []string) ([]models.Skill, error) {
 	out := make([]models.Skill, len(names))
 	for i, n := range names {
-		out[i] = models.Skill{Name: n, Kind: "builtin", SkillMD: "# " + n}
+		out[i] = models.Skill{Name: n, Kind: models.SkillKindOrg, SkillMD: "# " + n}
 	}
 	return out, nil
 }
@@ -64,7 +64,7 @@ func TestSkillsForExecution_ResolvesDesignSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SkillsForExecution: %v", err)
 	}
-	if len(resp.Skills) != 2 || resp.Skills[0].Kind != "builtin" || resp.Skills[0].MaterializedName != "builtin-go" {
+	if len(resp.Skills) != 2 || resp.Skills[0].Kind != models.SkillKindOrg || resp.Skills[0].MaterializedName != "org-go" {
 		t.Fatalf("resolved skills wrong: %+v", resp.Skills)
 	}
 }
