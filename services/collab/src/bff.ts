@@ -39,6 +39,8 @@ export interface CollabIdentity {
 export interface SpecFile {
   path: string;
   content: string;
+  /** Git blob sha at read time — the committer's baseSha precondition (#133). */
+  sha: string;
 }
 
 /** The Files API serves repo-relative paths; rooms key by the remainder. */
@@ -50,11 +52,47 @@ export function toRoomPath(repoPath: string): string | null {
     : null;
 }
 
+/** One write in a commit batch: room-keyed path + full content + baseSha. */
+export interface ApplyWrite {
+  path: string;
+  content: string;
+  /** Blob sha this write supersedes; "" = the file must not exist yet. */
+  baseSha: string;
+}
+
+export interface ApplyDelete {
+  path: string;
+  baseSha: string;
+}
+
+export interface ApplyOutcome {
+  /** New per-file shas on success (room-keyed paths). */
+  files: { path: string; sha: string }[];
+  commitSha: string;
+}
+
+/** A stale-baseSha rejection: nothing was applied (#133 doc-wins retry). */
+export class ApplyConflictError extends Error {
+  constructor(readonly paths: string[]) {
+    super(`apply conflict on: ${paths.join(", ")}`);
+    this.name = "ApplyConflictError";
+  }
+}
+
 export interface BffClient {
   /** Resolves to the caller's display identity, or throws on deny. */
   validateAccess(token: string, roomId: string): Promise<CollabIdentity>;
   /** Spec files for seeding, read via the Files API as the connecting user. */
   fetchSpecFiles(token: string, projectName: string): Promise<SpecFile[]>;
+  /**
+   * Land a batch as ONE bot commit via the Files API's apply (#133): the
+   * committer's tier-2. Throws ApplyConflictError on stale baseShas.
+   */
+  applyFiles(
+    token: string,
+    projectName: string,
+    batch: { writes: ApplyWrite[]; deletes: ApplyDelete[]; message: string },
+  ): Promise<ApplyOutcome>;
 }
 
 export class BffAccessDeniedError extends Error {
@@ -118,12 +156,59 @@ export function createBffClient(
                   `Failed to read ${meta.path} for ${projectName} (${res.status})`,
                 );
               }
-              const body = (await res.json()) as { content: string };
-              return { path: roomPath, content: body.content };
+              const body = (await res.json()) as { content: string; sha: string };
+              return { path: roomPath, content: body.content, sha: body.sha };
             })(),
           ];
         }),
       );
+    },
+
+    async applyFiles(token, projectName, batch) {
+      const project = encodeURIComponent(projectName);
+      const res = await fetchImpl(`${base}/projects/${project}/files/apply`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          writes: batch.writes.map((w) => ({
+            path: SPECS_PREFIX + w.path,
+            content: w.content,
+            baseSha: w.baseSha,
+          })),
+          deletes: batch.deletes.map((d) => ({
+            path: SPECS_PREFIX + d.path,
+            baseSha: d.baseSha,
+          })),
+          message: batch.message,
+        }),
+      });
+      if (res.status === 409) {
+        const body = (await res.json()) as {
+          conflicts?: { path: string }[];
+        };
+        throw new ApplyConflictError(
+          (body.conflicts ?? []).map((c) => toRoomPath(c.path) ?? c.path),
+        );
+      }
+      if (!res.ok) {
+        throw new Error(
+          `Failed to apply spec files for ${projectName} (${res.status})`,
+        );
+      }
+      const body = (await res.json()) as {
+        commitSha: string;
+        files?: { path: string; sha: string }[] | null;
+      };
+      return {
+        commitSha: body.commitSha,
+        files: (body.files ?? []).flatMap((f) => {
+          const roomPath = toRoomPath(f.path);
+          return roomPath === null ? [] : [{ path: roomPath, sha: f.sha }];
+        }),
+      };
     },
   };
 }

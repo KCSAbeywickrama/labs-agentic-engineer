@@ -18,14 +18,23 @@
 
 import { Server } from "@hocuspocus/server";
 import type {
+  afterUnloadDocumentPayload,
   onAuthenticatePayload,
   onLoadDocumentPayload,
+  onStoreDocumentPayload,
 } from "@hocuspocus/server";
 import type { CollabConfig } from "./env.js";
 import type { BffClient } from "./bff.js";
 import { isSpecRoom } from "./room.js";
 import { seedDocument } from "./seed.js";
 import { devSeedFiles } from "./fixtures.js";
+import { flushRoom } from "./committer.js";
+import {
+  addParticipant,
+  dropRoomState,
+  ensureRoomState,
+  roomState,
+} from "./rooms.js";
 
 // Connection context established by onAuthenticate and consumed by later
 // hooks. The token is retained for the seed read (performed as the first
@@ -67,6 +76,13 @@ export function buildAuthenticateHook(config: CollabConfig, deps: CollabDeps) {
     // itself (#86: identity stays the BFF's problem). It also resolves the
     // room into a project name for the seed read.
     const identity = await deps.bff.validateAccess(token, documentName);
+    // Committer bookkeeping (#133): the session's participants become the
+    // commit's Co-authored-by trailers.
+    ensureRoomState(documentName, identity.projectName);
+    addParticipant(documentName, {
+      name: identity.name,
+      email: identity.email,
+    });
     return {
       user: { name: identity.name, email: identity.email, kind: "user" },
       token,
@@ -106,6 +122,12 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
         context.projectName,
       );
       seedDocument(document, files);
+      // Committer baseline (#133): the flush diffs the live doc against what
+      // was seeded (content) and preconditions on the shas we read.
+      const state = ensureRoomState(documentName, context.projectName);
+      for (const f of files) {
+        state.baseline.set(f.path, { content: f.content, sha: f.sha });
+      }
       deps.log?.(`seeded ${documentName} (${files.length} files) from BFF`);
     } catch (err) {
       deps.log?.(
@@ -116,19 +138,64 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
   };
 }
 
+// buildStoreDocumentHook is the #133 committer trigger: Hocuspocus debounces
+// it per document (Server debounce/maxDebounce) and runs it one final time
+// before unload, so "quiet period", "max age", and "last leave" all funnel
+// here. Dev mode has no BFF-backed rooms to commit.
+export function buildStoreDocumentHook(config: CollabConfig, deps: CollabDeps) {
+  return async (
+    data: Pick<onStoreDocumentPayload, "document" | "documentName"> & {
+      lastContext: CollabContext | null;
+    },
+  ) => {
+    if (config.devMode || !deps.bff) return;
+    if (!roomState(data.documentName)) return;
+    try {
+      await flushRoom(
+        { bff: deps.bff, log: deps.log },
+        data.documentName,
+        data.document,
+        data.lastContext ?? undefined,
+      );
+    } catch (err) {
+      // A failed flush must not kill connections; the doc stays live and the
+      // next store attempt (or session end) retries from the same baseline.
+      deps.log?.(
+        `committer: flush failed for ${data.documentName} (${String(err)})`,
+      );
+    }
+  };
+}
+
+export function buildAfterUnloadHook(deps: CollabDeps) {
+  return (data: Pick<afterUnloadDocumentPayload, "documentName">) => {
+    dropRoomState(data.documentName);
+    deps.log?.(`room ${data.documentName} unloaded — committer state dropped`);
+    return Promise.resolve();
+  };
+}
+
 export function createCollabServer(
   config: CollabConfig,
   deps: CollabDeps,
 ): Server<CollabContext> {
   return new Server<CollabContext>({
     name: "aep-collab",
-    // No persistence extension yet: the committer worker is #86 phase 3.
-    // Until then a doc's life is its room's life; the seed is the recovery
-    // story. Keep docs loaded only while connections exist.
+    // The committer (#86 phase 3 / #133): onStoreDocument is Hocuspocus's
+    // debounced persistence seam — a quiet period commits, maxDebounce caps
+    // the wait during continuous editing, and unload runs one final store.
+    // A doc's life is still its room's life; git is the durable truth and
+    // rejoin reseeds from HEAD.
     unloadImmediately: true,
+    debounce: config.commitDebounceMs,
+    maxDebounce: config.commitMaxDebounceMs,
     onAuthenticate: buildAuthenticateHook(config, deps),
     onLoadDocument: buildLoadDocumentHook(config, deps) as (
       data: onLoadDocumentPayload<CollabContext>,
     ) => Promise<unknown>,
+    onStoreDocument: buildStoreDocumentHook(config, deps) as (
+      data: onStoreDocumentPayload<CollabContext>,
+    ) => Promise<unknown>,
+    afterUnloadDocument: buildAfterUnloadHook(deps),
   });
 }

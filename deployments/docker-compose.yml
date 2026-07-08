@@ -424,6 +424,10 @@ services:
     environment:
       COLLAB_PORT: "3400"
       AEP_API_BASE: "http://aep-api:9090/api/v1"
+      # Committer cadence (#133): quiet-period debounce + continuous-editing
+      # cap; the final flush always runs when the last participant leaves.
+      COLLAB_COMMIT_DEBOUNCE_MS: "${COLLAB_COMMIT_DEBOUNCE_MS:-60000}"
+      COLLAB_COMMIT_MAX_DEBOUNCE_MS: "${COLLAB_COMMIT_MAX_DEBOUNCE_MS:-300000}"
     networks:
       - aep
 

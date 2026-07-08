@@ -86,5 +86,7 @@ The storefront talks to both services; services share nothing.
 /** The same files keyed for seeding (specs/ stripped — the room key scheme). */
 export const devSeedFiles: SpecFile[] = devSpecFiles.flatMap((f) => {
   const path = toRoomPath(f.path);
-  return path === null ? [] : [{ path, content: f.content }];
+  return path === null
+    ? []
+    : [{ path, content: f.content, sha: `dev-${path}` }];
 });
