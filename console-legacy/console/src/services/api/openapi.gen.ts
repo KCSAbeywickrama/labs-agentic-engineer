@@ -383,7 +383,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectName}/conversations/{conversationId}": {
+    "/projects/{projectName}/agents/{conversationId}/messages": {
         parameters: {
             query?: never;
             header?: never;
@@ -392,22 +392,6 @@ export interface paths {
         };
         /** Rehydrate a chat conversation (messages only) */
         get: operations["get-conversation"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectName}/conversations/{conversationId}/turns": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
         put?: never;
         /** Start a generation/chat turn (202 — runs detached; attach via the turn stream) */
         post: operations["create-turn"];
