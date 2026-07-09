@@ -44,12 +44,7 @@ import {
   useSkills,
   useSyncSkills,
 } from "../api/queries";
-import {
-  SKILL_GROUPS,
-  kindChipColor,
-  kindLabel,
-  normalizeKind,
-} from "../skillKind";
+import { SKILL_GROUPS, kindLabel, normalizeKind } from "../skillKind";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
 import { SkillViewerDialog } from "./SkillViewerDialog";
@@ -140,13 +135,17 @@ export function SkillsSection() {
   const syncedCount = syncSkills.data?.updated ?? 0;
 
   // Client-side filter (issue #96 re-grill): the catalogue is fully loaded and
-  // tens of skills at most — name, description, and kind all match.
+  // tens of skills at most. Match the displayed kind label as well as the raw
+  // value — the chip reads "Organization", so that is what people will type.
   const query = search.trim().toLowerCase();
   const matches = (skill: SkillSummary) =>
     !query ||
-    [skill.name, skill.description, skill.kind].some((field) =>
-      (field ?? "").toLowerCase().includes(query),
-    );
+    [
+      skill.name,
+      skill.description,
+      skill.kind,
+      kindLabel(normalizeKind(skill.kind)),
+    ].some((field) => (field ?? "").toLowerCase().includes(query));
 
   const visible = skills.filter(matches);
   const grouped = SKILL_GROUPS.map((group) => ({
@@ -225,16 +224,9 @@ export function SkillsSection() {
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
         {grouped.map(({ kind, heading, blurb, rows }) => (
           <Box key={kind}>
-            <Box
-              sx={{ display: "flex", alignItems: "baseline", gap: 1, mb: 0.5 }}
-            >
-              <Typography variant="subtitle1" fontWeight={700}>
-                {heading}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                — {rows.length}
-              </Typography>
-            </Box>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+              {heading}
+            </Typography>
             <Typography variant="caption" color="text.secondary">
               {blurb}
             </Typography>
@@ -251,7 +243,6 @@ export function SkillsSection() {
               <Card variant="outlined" sx={{ mt: 1 }}>
                 <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
                   {rows.map((skill, idx) => {
-                    const skillKind = normalizeKind(skill.kind);
                     return (
                       <Box key={skill.name}>
                         {idx > 0 && <Divider />}
@@ -277,15 +268,9 @@ export function SkillsSection() {
                               <Typography variant="body1" fontWeight={600}>
                                 {skill.name}
                               </Typography>
-                              {/* Outlined: a filled kind chip fights the
-                                  filled "update available" chip, and Oxygen's
-                                  filled `secondary` has too little contrast. */}
-                              <Chip
-                                size="small"
-                                variant="outlined"
-                                color={kindChipColor(skillKind)}
-                                label={kindLabel(skillKind)}
-                              />
+                              {/* No kind chip: the group heading above already
+                                  names the kind. Only state that the grouping
+                                  can't convey gets a chip. */}
                               {updatable.has(skill.name) && (
                                 <Chip
                                   size="small"
@@ -293,13 +278,18 @@ export function SkillsSection() {
                                   label="update available"
                                 />
                               )}
-                              {!skill.editable && (
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  label="read-only"
-                                />
-                              )}
+                              {/* Org and platform groups are read-only by
+                                  definition (the blurb says so), so only flag
+                                  it where the grouping doesn't imply it. */}
+                              {!skill.editable &&
+                                kind !== "org" &&
+                                kind !== "platform" && (
+                                  <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    label="read-only"
+                                  />
+                                )}
                             </Box>
                             <Typography
                               variant="body2"

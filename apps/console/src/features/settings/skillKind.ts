@@ -35,7 +35,7 @@ export function normalizeKind(kind: string): SkillKind {
 export function kindLabel(kind: SkillKind): string {
   switch (kind) {
     case "org":
-      return "Org";
+      return "Organization";
     case "platform":
       return "Platform";
     case "custom":
@@ -72,7 +72,7 @@ export const SKILL_GROUPS: {
 }[] = [
   {
     kind: "org",
-    heading: "Org",
+    heading: "Organization",
     blurb: "Shipped with the platform. Read-only — view to inspect the body.",
   },
   {
@@ -83,7 +83,7 @@ export const SKILL_GROUPS: {
   },
   {
     kind: "custom",
-    heading: "Custom (org-authored)",
+    heading: "Custom",
     blurb: "Authored by your organization.",
   },
   {
