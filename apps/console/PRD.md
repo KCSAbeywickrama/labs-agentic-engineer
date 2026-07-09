@@ -78,6 +78,12 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Project overview — "Generate spec" CTA on the Spec card: persists the create
+  prompt to localStorage and, when `hasSpec` is false, seeds a live room turn
+  to generate requirements (create does not auto-derive) —
+  [#150](https://github.com/wso2/labs-agentic-engineer/issues/150)
+  (no contract change; duplicate-generation guard deferred to
+  [#151](https://github.com/wso2/labs-agentic-engineer/issues/151))
 - Settings — org GitHub PAT + Anthropic key credentials, and skills catalogue
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
