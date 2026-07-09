@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -44,7 +45,7 @@ type Service struct {
 	store  RunStore
 	repos  RepoLookup
 	tagger SpecTagger
-	titles TaskTitles
+	tasks  TaskReader
 }
 
 // Deps carries the service's ports.
@@ -53,12 +54,12 @@ type Deps struct {
 	Store  RunStore
 	Repos  RepoLookup
 	Tagger SpecTagger
-	Titles TaskTitles
+	Tasks  TaskReader
 }
 
 // NewService wires the build service.
 func NewService(d Deps) *Service {
-	return &Service{runner: d.Runner, store: d.Store, repos: d.Repos, tagger: d.Tagger, titles: d.Titles}
+	return &Service{runner: d.Runner, store: d.Store, repos: d.Repos, tagger: d.Tagger, tasks: d.Tasks}
 }
 
 // --- wire shapes (names drive the generated schema names — keep them exactly
@@ -72,10 +73,13 @@ type BuildResponse struct {
 	Tag string `json:"tag"`
 }
 
-// BuildStatusTask is one task's progress inside a build.
+// BuildStatusTask is one task's progress inside a build. IssueNumber links the
+// row to its GitHub issue (and the task-log stream) — the identity that
+// replaced the old title-join.
 type BuildStatusTask struct {
-	Title  string `json:"title"`
-	Status string `json:"status" enum:"started,in_progress,completed,failed"`
+	IssueNumber int64  `json:"issueNumber"`
+	Title       string `json:"title"`
+	Status      string `json:"status" enum:"started,in_progress,completed,failed"`
 }
 
 // BuildStatus is the get-project-build response.
@@ -206,44 +210,81 @@ func (s *Service) get(ctx context.Context, in *getBuildInput) (*getBuildOutput, 
 	out := &getBuildOutput{}
 	st, qerr := s.runner.BuildStatus(ctx, workflowID)
 	if qerr != nil {
-		// Live query unavailable (Temporal down, run archived) — degrade to the
-		// indexed terminal status rather than failing the read.
-		out.Body = BuildStatus{Status: statusFromRow(row.Status), WorkflowStatus: row.Status}
+		// Live query unavailable (Temporal down, run archived) — degrade the
+		// overall status to the indexed terminal row status, but STILL list the
+		// build's tasks from the durable lineage read (an archived run no longer
+		// answers a query, yet its planned issues are permanent).
+		out.Body = BuildStatus{
+			Status:         statusFromRow(row.Status),
+			WorkflowStatus: row.Status,
+			Tasks:          s.taskStatuses(ctx, in.OrgHandle, in.ProjectName, in.Tag, nil),
+		}
 		return out, nil
 	}
 	out.Body = BuildStatus{
 		Status:         statusFromPhase(st.Phase),
 		WorkflowStatus: st.Phase,
-		Tasks:          s.taskStatuses(ctx, in.OrgHandle, in.ProjectName, st.Tasks),
+		Tasks:          s.taskStatuses(ctx, in.OrgHandle, in.ProjectName, in.Tag, st.Tasks),
 	}
 	return out, nil
 }
 
-// taskStatuses joins the workflow's task refs (issue numbers) with the live
-// issue titles. A title-fetch failure degrades to numbered placeholders —
-// build status must never 500 because GitHub reads hiccuped.
-func (s *Service) taskStatuses(ctx context.Context, orgID, projectID string, refs []devflow.DevTaskRef) []BuildStatusTask {
-	if len(refs) == 0 {
-		return nil
-	}
-	titles := map[int]string{}
-	if s.titles != nil {
-		views, err := s.titles.List(ctx, orgID, projectID, "all")
+// taskStatuses builds the version's task list, DURABLE-first: the source is the
+// lineage-tag read (every task stamped with this build's tag), so an archived
+// run still answers with its full list and every row carries its issueNumber.
+// The live workflow refs (empty for an archived/failed query) then REFINE the
+// status of tasks still in flight. A durable-read hiccup degrades to whatever
+// the workflow refs carry (numbered placeholders) — build status must never
+// 500 because a GitHub read stumbled.
+func (s *Service) taskStatuses(ctx context.Context, orgID, projectID, tag string, refs []devflow.DevTaskRef) []BuildStatusTask {
+	byIssue := map[int]*BuildStatusTask{}
+	order := make([]int, 0)
+
+	// 1. Durable base: the tasks stamped with this build's lineage tag.
+	if s.tasks != nil {
+		views, err := s.tasks.List(ctx, orgID, projectID, "all")
 		if err != nil {
-			slog.WarnContext(ctx, "build status: task title read failed",
+			slog.WarnContext(ctx, "build status: durable task read failed",
 				"org", orgID, "project", projectID, "error", err)
 		}
 		for _, v := range views {
-			titles[v.IssueNumber] = v.Title
+			if v.Lineage.SpecTag != tag {
+				continue // a different version's task
+			}
+			bt := BuildStatusTask{
+				IssueNumber: int64(v.IssueNumber),
+				Title:       v.Title,
+				Status:      statusFromDerived(v.DerivedStatus),
+			}
+			byIssue[v.IssueNumber] = &bt
+			order = append(order, v.IssueNumber)
 		}
 	}
-	out := make([]BuildStatusTask, 0, len(refs))
+
+	// 2. In-flight refinement: the running workflow's own view of each task
+	// wins while it is live; a ref for an issue the durable read has not yet
+	// surfaced is appended as a numbered placeholder.
 	for _, ref := range refs {
-		title := titles[ref.Issue]
-		if title == "" {
-			title = fmt.Sprintf("Task #%d", ref.Issue)
+		if bt, ok := byIssue[ref.Issue]; ok {
+			bt.Status = taskStatus(ref)
+			continue
 		}
-		out = append(out, BuildStatusTask{Title: title, Status: taskStatus(ref)})
+		bt := BuildStatusTask{
+			IssueNumber: int64(ref.Issue),
+			Title:       fmt.Sprintf("Task #%d", ref.Issue),
+			Status:      taskStatus(ref),
+		}
+		byIssue[ref.Issue] = &bt
+		order = append(order, ref.Issue)
+	}
+
+	if len(order) == 0 {
+		return nil
+	}
+	sort.Ints(order)
+	out := make([]BuildStatusTask, 0, len(order))
+	for _, n := range order {
+		out = append(out, *byIssue[n])
 	}
 	return out
 }

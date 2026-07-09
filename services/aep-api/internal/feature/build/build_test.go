@@ -92,17 +92,17 @@ func (f *fakeTagger) TagSpec(context.Context, string, string) (*artifacts.SpecSa
 	return f.res, f.err
 }
 
-type fakeTitles struct {
+type fakeTasks struct {
 	views []task.TaskView
 	err   error
 }
 
-func (f fakeTitles) List(context.Context, string, string, string) ([]task.TaskView, error) {
+func (f fakeTasks) List(context.Context, string, string, string) ([]task.TaskView, error) {
 	return f.views, f.err
 }
 
-func newSvc(runner *fakeRunner, store *fakeStore, repos fakeRepos, tagger *fakeTagger, titles TaskTitles) *Service {
-	return NewService(Deps{Runner: runner, Store: store, Repos: repos, Tagger: tagger, Titles: titles})
+func newSvc(runner *fakeRunner, store *fakeStore, repos fakeRepos, tagger *fakeTagger, tasks TaskReader) *Service {
+	return NewService(Deps{Runner: runner, Store: store, Repos: repos, Tagger: tagger, Tasks: tasks})
 }
 
 func buildReq(project string) *buildInput {
@@ -132,7 +132,7 @@ func TestBuild_TagsAndStartsWorkflow(t *testing.T) {
 	runner := &fakeRunner{}
 	store := &fakeStore{}
 	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Status: "approved", Tag: "v1", Version: 1}}
-	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTitles{})
+	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTasks{})
 
 	out, err := svc.build(context.Background(), buildReq("shop"))
 	if err != nil {
@@ -170,7 +170,7 @@ func TestBuild_TagsAndStartsWorkflow(t *testing.T) {
 func TestBuild_UnchangedSpec_ReturnsExistingTagAndStillStarts(t *testing.T) {
 	runner := &fakeRunner{}
 	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Status: "unchanged", Tag: "v2", Version: 2}}
-	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTasks{})
 
 	out, err := svc.build(context.Background(), buildReq("shop"))
 	if err != nil {
@@ -190,7 +190,7 @@ func TestBuild_SpecValidationFails_422_NoWorkflow(t *testing.T) {
 		{Path: "specs/requirements/requirements.md", Code: "MISSING_REQUIREMENTS", Message: "missing"},
 		{Path: "specs/design/design.md", Code: "MISSING_DESIGN", Message: "missing"},
 	}}}
-	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTasks{})
 
 	_, err := svc.build(context.Background(), buildReq("shop"))
 	if got := statusOf(t, err); got != 422 {
@@ -205,7 +205,7 @@ func TestBuild_AlreadyRunning_409_TaggerUntouched(t *testing.T) {
 	runner := &fakeRunner{}
 	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
 	store := &fakeStore{running: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1"}}
-	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTitles{})
+	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTasks{})
 
 	_, err := svc.build(context.Background(), buildReq("shop"))
 	if got := statusOf(t, err); got != 409 {
@@ -218,7 +218,7 @@ func TestBuild_AlreadyRunning_409_TaggerUntouched(t *testing.T) {
 
 func TestBuild_NoRepo_404(t *testing.T) {
 	svc := newSvc(&fakeRunner{}, &fakeStore{}, fakeRepos{err: gitrepo.ErrRepoNotFound},
-		&fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}, fakeTitles{})
+		&fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}, fakeTasks{})
 	_, err := svc.build(context.Background(), buildReq("shop"))
 	if got := statusOf(t, err); got != 404 {
 		t.Fatalf("status = %d, want 404", got)
@@ -228,7 +228,7 @@ func TestBuild_NoRepo_404(t *testing.T) {
 func TestBuild_TemporalDown_503_NoTag(t *testing.T) {
 	runner := &fakeRunner{readyErr: ErrTemporalUnavailable}
 	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
-	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTasks{})
 
 	_, err := svc.build(context.Background(), buildReq("shop"))
 	if got := statusOf(t, err); got != 503 {
@@ -241,7 +241,7 @@ func TestBuild_TemporalDown_503_NoTag(t *testing.T) {
 
 func TestBuild_RepoNotReady_409(t *testing.T) {
 	tagger := &fakeTagger{err: gitrepo.ErrRepoNotReady}
-	svc := newSvc(&fakeRunner{}, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+	svc := newSvc(&fakeRunner{}, &fakeStore{}, fakeRepos{}, tagger, fakeTasks{})
 	_, err := svc.build(context.Background(), buildReq("shop"))
 	if got := statusOf(t, err); got != 409 {
 		t.Fatalf("status = %d, want 409", got)
@@ -250,7 +250,7 @@ func TestBuild_RepoNotReady_409(t *testing.T) {
 
 // ----- GET /build/{tag} --------------------------------------------------------
 
-func TestGetBuild_MapsPhasesAndJoinsTitles(t *testing.T) {
+func TestGetBuild_MapsPhasesAndSourcesTasksFromLineage(t *testing.T) {
 	cases := []struct {
 		phase string
 		want  string
@@ -271,8 +271,14 @@ func TestGetBuild_MapsPhasesAndJoinsTitles(t *testing.T) {
 			},
 		}}
 		store := &fakeStore{row: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1", Status: models.WorkflowStatusRunning}}
-		titles := fakeTitles{views: []task.TaskView{{IssueNumber: 7, Title: "Implement api"}}}
-		svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, titles)
+		// The DURABLE source is the lineage-tag read: issues 7 & 8 are stamped
+		// v1 (this build); issue 99 belongs to an older tag and must be excluded.
+		tasks := fakeTasks{views: []task.TaskView{
+			{IssueNumber: 8, Title: "Build widget", Lineage: task.Lineage{SpecTag: "v1"}, DerivedStatus: "deployed"},
+			{IssueNumber: 7, Title: "Implement api", Lineage: task.Lineage{SpecTag: "v1"}, DerivedStatus: "in_progress"},
+			{IssueNumber: 99, Title: "Old version task", Lineage: task.Lineage{SpecTag: "v0"}, DerivedStatus: "deployed"},
+		}}
+		svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, tasks)
 
 		out, err := svc.get(context.Background(), statusReq("shop", "v1"))
 		if err != nil {
@@ -285,19 +291,48 @@ func TestGetBuild_MapsPhasesAndJoinsTitles(t *testing.T) {
 			t.Errorf("workflow_status = %q, want the raw phase %q", out.Body.WorkflowStatus, tc.phase)
 		}
 		if len(out.Body.Tasks) != 2 {
-			t.Fatalf("tasks = %+v, want 2", out.Body.Tasks)
+			t.Fatalf("tasks = %+v, want 2 (issue 99 filtered by lineage)", out.Body.Tasks)
 		}
-		if out.Body.Tasks[0].Title != "Implement api" || out.Body.Tasks[0].Status != "in_progress" {
-			t.Errorf("task 7 = %+v, want joined title + in_progress", out.Body.Tasks[0])
+		// Sorted by issue number; each row carries issueNumber + the durable title.
+		if got := out.Body.Tasks[0]; got.IssueNumber != 7 || got.Title != "Implement api" || got.Status != "in_progress" {
+			t.Errorf("task 7 = %+v, want {7, Implement api, in_progress} (ref refines coding→in_progress)", got)
 		}
-		if out.Body.Tasks[1].Title != "Task #8" || out.Body.Tasks[1].Status != "completed" {
-			t.Errorf("task 8 = %+v, want placeholder title + completed", out.Body.Tasks[1])
+		// Issue 8 is deployed durably AND done/succeeded in the live refs → completed.
+		if got := out.Body.Tasks[1]; got.IssueNumber != 8 || got.Title != "Build widget" || got.Status != "completed" {
+			t.Errorf("task 8 = %+v, want {8, Build widget, completed}", got)
 		}
 	}
 }
 
+// The durability payoff: even when the live query is gone (archived run), the
+// build still lists its tasks from the lineage read, with each row's derived
+// status — no more empty task list on a completed/archived build.
+func TestGetBuild_QueryFails_StillListsDurableTasks(t *testing.T) {
+	runner := &fakeRunner{statusErr: errors.New("run archived — no live query")}
+	store := &fakeStore{row: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1", Status: models.WorkflowStatusCompleted}}
+	tasks := fakeTasks{views: []task.TaskView{
+		{IssueNumber: 5, Title: "Ship it", Lineage: task.Lineage{SpecTag: "v1"}, DerivedStatus: "deployed"},
+		{IssueNumber: 6, Title: "Other build", Lineage: task.Lineage{SpecTag: "v2"}, DerivedStatus: "deployed"},
+	}}
+	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, tasks)
+
+	out, err := svc.get(context.Background(), statusReq("shop", "v1"))
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if out.Body.Status != "completed" {
+		t.Errorf("status = %q, want completed (from the archived row)", out.Body.Status)
+	}
+	if len(out.Body.Tasks) != 1 {
+		t.Fatalf("tasks = %+v, want 1 (only v1 lineage)", out.Body.Tasks)
+	}
+	if got := out.Body.Tasks[0]; got.IssueNumber != 5 || got.Title != "Ship it" || got.Status != "completed" {
+		t.Errorf("task = %+v, want {5, Ship it, completed} from the durable derived status", got)
+	}
+}
+
 func TestGetBuild_UnknownTag_404(t *testing.T) {
-	svc := newSvc(&fakeRunner{}, &fakeStore{row: nil}, fakeRepos{}, &fakeTagger{}, fakeTitles{})
+	svc := newSvc(&fakeRunner{}, &fakeStore{row: nil}, fakeRepos{}, &fakeTagger{}, fakeTasks{})
 	_, err := svc.get(context.Background(), statusReq("shop", "v9"))
 	if got := statusOf(t, err); got != 404 {
 		t.Fatalf("status = %d, want 404 (org fence / unknown build)", got)
@@ -307,7 +342,7 @@ func TestGetBuild_UnknownTag_404(t *testing.T) {
 func TestGetBuild_QueryFails_FallsBackToRowStatus(t *testing.T) {
 	runner := &fakeRunner{statusErr: errors.New("temporal query failed")}
 	store := &fakeStore{row: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1", Status: models.WorkflowStatusFailed}}
-	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, fakeTitles{})
+	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, fakeTasks{})
 
 	out, err := svc.get(context.Background(), statusReq("shop", "v1"))
 	if err != nil {
@@ -324,7 +359,7 @@ func TestGetBuild_TitleFetchFailure_Degrades(t *testing.T) {
 		Tasks: []devflow.DevTaskRef{{Issue: 3, Phase: devflow.TaskPhaseBuilding}},
 	}}
 	store := &fakeStore{row: &models.DevflowRun{Status: models.WorkflowStatusRunning}}
-	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, fakeTitles{err: errors.New("github down")})
+	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, fakeTasks{err: errors.New("github down")})
 
 	out, err := svc.get(context.Background(), statusReq("shop", "v1"))
 	if err != nil {
