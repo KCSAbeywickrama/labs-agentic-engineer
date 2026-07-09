@@ -37,7 +37,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Eye, EyeOff, GitHub } from "@wso2/oxygen-ui-icons-react";
+import { ExternalLink, Eye, EyeOff, GitHub, Lightbulb } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import { useConnectGitHubPat, useDisconnectGitProvider } from "../api/queries";
 
@@ -91,6 +91,14 @@ export function GitHubCredentialCard({
 
         {connected ? (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: 3 }}>
+            {(gitProvider.githubLogin ?? gitProvider.identityLogin) && (
+              <Typography variant="body2">
+                Organization:{" "}
+                <strong>
+                  {gitProvider.githubLogin ?? gitProvider.identityLogin}
+                </strong>
+              </Typography>
+            )}
             <Typography variant="body2">
               Connected as{" "}
               <strong>
@@ -109,11 +117,21 @@ export function GitHubCredentialCard({
             </Typography>
           </Box>
         ) : (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Not connected. A GitHub personal access token is needed to read and
-            write project spec and code repos, and to host the org's skills
-            catalogue.
-          </Typography>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 3 }}>
+            <Typography variant="body2" color="text.secondary">
+              Connect a GitHub personal access token with{" "}
+              <strong>organization-level access</strong> so the platform can
+              read and write this org's spec and code repos and host its skills
+              catalogue. Use a fine-grained token with the organization set as
+              the resource owner, or a classic token with the{" "}
+              <code>repo</code> scope owned by a member of the org.
+            </Typography>
+            <Alert severity="info" icon={<Lightbulb size={18} />}>
+              Pro tip: create a dedicated GitHub organization for this platform
+              so its agents' repos, tokens, and skills catalogue stay isolated
+              from your team's main org.
+            </Alert>
+          </Box>
         )}
 
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -151,6 +169,17 @@ export function GitHubCredentialCard({
             onChange={(e) => setGithubLogin(e.target.value)}
             fullWidth
           />
+          <Button
+            variant="text"
+            size="small"
+            href="https://github.com/settings/personal-access-tokens/new"
+            target="_blank"
+            rel="noreferrer"
+            endIcon={<ExternalLink size={14} />}
+            sx={{ alignSelf: "flex-start" }}
+          >
+            Create a token on GitHub
+          </Button>
           {connect.isError && (
             <Alert severity="error">{connect.error.message}</Alert>
           )}
