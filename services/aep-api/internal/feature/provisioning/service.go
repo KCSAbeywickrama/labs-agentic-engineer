@@ -203,6 +203,15 @@ func (s *Service) completeProvisionRow(ctx context.Context, orgID, projectID str
 // failProvisionRow finishes a provision Execution failed and comments the gate
 // issue (kept open for retry). The reason carries no secret values.
 func (s *Service) failProvisionRow(ctx context.Context, orgID, projectID string, issueNumber int, execID, reason string) {
+	// Detach from the request context: the most common failure reason is a
+	// client disconnect (the provision blocks synchronously and the caller times
+	// out), which cancels ctx. If we marked the row failed on that same canceled
+	// ctx the Finish itself would fail — leaving the row 'queued', which the
+	// admission partial-unique index then treats as an active run and refuses to
+	// re-admit, permanently wedging re-provisioning of that dependency. Marking
+	// terminal must always succeed, so it runs on a cancellation-free context
+	// (values — the user JWT for the issue comment — are preserved).
+	ctx = context.WithoutCancel(ctx)
 	if _, err := s.execs.Finish(ctx, execID, string(taskmeta.ExecFailed), reason); err != nil {
 		slog.WarnContext(ctx, "provisioning: finish provision run (failed) failed", "execution", execID, "error", err)
 	}
