@@ -17,8 +17,8 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { SettingsLayout } from "../features/settings/components/SettingsLayout";
+import { CredentialsSection } from "../features/settings/components/CredentialsSection";
 
-export const Route = createFileRoute("/settings")({
-  component: SettingsLayout,
+export const Route = createFileRoute("/settings/credentials")({
+  component: CredentialsSection,
 });

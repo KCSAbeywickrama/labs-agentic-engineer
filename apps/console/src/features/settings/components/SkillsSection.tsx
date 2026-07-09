@@ -21,6 +21,8 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -28,20 +30,29 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  ListingTable,
+  Divider,
   SearchBar,
   Typography,
 } from "@wso2/oxygen-ui";
 import { FolderGit2, Upload } from "@wso2/oxygen-ui-icons-react";
+import type { components } from "../../../generated/aep-api";
 import {
   useConfig,
   useDeleteSkill,
   useSkillUpdates,
   useSkills,
 } from "../api/queries";
+import {
+  SKILL_GROUPS,
+  kindChipColor,
+  kindLabel,
+  normalizeKind,
+} from "../skillKind";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
 import { SyncUpdatesPanel } from "./SyncUpdatesPanel";
+
+type SkillSummary = components["schemas"]["SkillSummary"];
 
 export function SkillsSection() {
   const { data: config, isLoading: configLoading } = useConfig();
@@ -89,17 +100,22 @@ export function SkillsSection() {
   }
 
   const { skills, repoUrl } = data;
+  const updatable = new Set((updates ?? []).map((u) => u.name));
 
-  // Client-side filter (issue #96 re-grill): the catalogue is fully loaded
-  // and tens of skills at most — name, description, and kind all match.
+  // Client-side filter (issue #96 re-grill): the catalogue is fully loaded and
+  // tens of skills at most — name, description, and kind all match.
   const query = search.trim().toLowerCase();
-  const visibleSkills = query
-    ? skills.filter((skill) =>
-        [skill.name, skill.description, skill.kind].some((field) =>
-          field.toLowerCase().includes(query),
-        ),
-      )
-    : skills;
+  const matches = (skill: SkillSummary) =>
+    !query ||
+    [skill.name, skill.description, skill.kind].some((field) =>
+      (field ?? "").toLowerCase().includes(query),
+    );
+
+  const visible = skills.filter(matches);
+  const grouped = SKILL_GROUPS.map((group) => ({
+    ...group,
+    rows: visible.filter((s) => normalizeKind(s.kind) === group.kind),
+  }));
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
@@ -110,6 +126,13 @@ export function SkillsSection() {
 
   return (
     <Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Skills shape what the platform's agents emit — code patterns,
+        conventions, and project layout. Org and platform skills ship with the
+        platform and are read-only; import AgentSkills from the ecosystem to
+        extend them.
+      </Typography>
+
       <SyncUpdatesPanel updates={updates ?? []} />
 
       <Box
@@ -119,7 +142,7 @@ export function SkillsSection() {
           alignItems: "center",
           flexWrap: "wrap",
           gap: 1,
-          mb: 2,
+          mb: 3,
         }}
       >
         <Box sx={{ width: { xs: "100%", sm: 320 } }}>
@@ -138,81 +161,123 @@ export function SkillsSection() {
         </Button>
       </Box>
 
-      <Box sx={{ overflowX: "auto" }}>
-        <ListingTable.Container>
-          <ListingTable>
-            <ListingTable.Head>
-              <ListingTable.Row>
-                <ListingTable.Cell>Name</ListingTable.Cell>
-                <ListingTable.Cell>Kind</ListingTable.Cell>
-                <ListingTable.Cell>Version</ListingTable.Cell>
-                <ListingTable.Cell>Description</ListingTable.Cell>
-                <ListingTable.Cell align="right">Actions</ListingTable.Cell>
-              </ListingTable.Row>
-            </ListingTable.Head>
-            <ListingTable.Body>
-              {visibleSkills.length === 0 ? (
-                <ListingTable.Row>
-                  <ListingTable.Cell colSpan={5}>
-                    {skills.length === 0 ? (
-                      <ListingTable.EmptyState
-                        title="No skills yet"
-                        description="Import a skill, or sync the platform's built-ins."
-                      />
-                    ) : (
-                      <ListingTable.EmptyState
-                        title="No matching skills"
-                        description={`No skills match “${search.trim()}”.`}
-                      />
-                    )}
-                  </ListingTable.Cell>
-                </ListingTable.Row>
-              ) : (
-                visibleSkills.map((skill) => (
-                  <ListingTable.Row key={skill.name}>
-                    <ListingTable.Cell>
-                      <Typography variant="body2">{skill.name}</Typography>
-                    </ListingTable.Cell>
-                    <ListingTable.Cell>
-                      <Chip
-                        label={skill.kind}
-                        size="small"
-                        variant="outlined"
-                      />
-                    </ListingTable.Cell>
-                    <ListingTable.Cell>v{skill.version}</ListingTable.Cell>
-                    <ListingTable.Cell>
-                      <Typography variant="body2" color="text.secondary">
-                        {skill.description}
-                      </Typography>
-                    </ListingTable.Cell>
-                    <ListingTable.Cell align="right">
-                      {skill.editable ? (
-                        <ListingTable.RowActions>
-                          <Button
-                            size="small"
-                            onClick={() => setEditTarget(skill.name)}
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {grouped.map(({ kind, heading, blurb, rows }) => (
+          <Box key={kind}>
+            <Box
+              sx={{ display: "flex", alignItems: "baseline", gap: 1, mb: 0.5 }}
+            >
+              <Typography variant="subtitle1" fontWeight={700}>
+                {heading}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                — {rows.length}
+              </Typography>
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              {blurb}
+            </Typography>
+
+            {rows.length === 0 ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 1, fontStyle: "italic" }}
+              >
+                {query ? "No matches." : "None yet."}
+              </Typography>
+            ) : (
+              <Card variant="outlined" sx={{ mt: 1 }}>
+                <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
+                  {rows.map((skill, idx) => {
+                    const skillKind = normalizeKind(skill.kind);
+                    return (
+                      <Box key={skill.name}>
+                        {idx > 0 && <Divider />}
+                        <Box
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 1.5,
+                            px: 2,
+                            py: 1.5,
+                            "&:hover": { bgcolor: "action.hover" },
+                          }}
+                        >
+                          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 1,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <Typography variant="body1" fontWeight={600}>
+                                {skill.name}
+                              </Typography>
+                              {/* Outlined: a filled kind chip fights the
+                                  filled "update available" chip, and Oxygen's
+                                  filled `secondary` has too little contrast. */}
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                color={kindChipColor(skillKind)}
+                                label={kindLabel(skillKind)}
+                              />
+                              {updatable.has(skill.name) && (
+                                <Chip
+                                  size="small"
+                                  color="warning"
+                                  label="update available"
+                                />
+                              )}
+                              {!skill.editable && (
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  label="read-only"
+                                />
+                              )}
+                            </Box>
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                              sx={{ mt: 0.5 }}
+                            >
+                              {skill.description}
+                            </Typography>
+                          </Box>
+                          <Box
+                            sx={{ display: "flex", gap: 0.5, flexShrink: 0 }}
                           >
-                            Edit
-                          </Button>
-                          <Button
-                            size="small"
-                            color="error"
-                            onClick={() => setDeleteTarget(skill.name)}
-                          >
-                            Delete
-                          </Button>
-                        </ListingTable.RowActions>
-                      ) : (
-                        <Chip label="read-only" size="small" />
-                      )}
-                    </ListingTable.Cell>
-                  </ListingTable.Row>
-                ))
-              )}
-            </ListingTable.Body>
-          </ListingTable>
-        </ListingTable.Container>
+                            {skill.editable && (
+                              <>
+                                <Button
+                                  size="small"
+                                  onClick={() => setEditTarget(skill.name)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  onClick={() => setDeleteTarget(skill.name)}
+                                >
+                                  Delete
+                                </Button>
+                              </>
+                            )}
+                          </Box>
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            )}
+          </Box>
+        ))}
       </Box>
 
       <ImportSkillDialog
@@ -230,7 +295,11 @@ export function SkillsSection() {
       >
         <DialogTitle>Delete {deleteTarget}?</DialogTitle>
         <DialogContent>
-          <DialogContentText>This can't be undone.</DialogContentText>
+          <DialogContentText>
+            This removes the skill from your organization's skills repo. Agents
+            read skills at the repo's latest commit, so in-flight tasks simply
+            stop seeing it.
+          </DialogContentText>
           {deleteSkill.isError && (
             <Alert severity="error" sx={{ mt: 2 }}>
               {deleteSkill.error.message}

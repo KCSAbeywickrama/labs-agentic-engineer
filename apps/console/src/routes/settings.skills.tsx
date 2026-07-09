@@ -17,8 +17,8 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { SettingsLayout } from "../features/settings/components/SettingsLayout";
+import { SkillsSection } from "../features/settings/components/SkillsSection";
 
-export const Route = createFileRoute("/settings")({
-  component: SettingsLayout,
+export const Route = createFileRoute("/settings/skills")({
+  component: SkillsSection,
 });

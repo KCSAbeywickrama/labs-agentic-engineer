@@ -73,8 +73,7 @@ export function SyncUpdatesPanel({ updates }: { updates: SkillUpdate[] }) {
                 <Typography variant="body2">
                   {u.name}{" "}
                   <Typography component="span" variant="body2" color="text.secondary">
-                    ({u.repoVersion === -1 ? "not yet installed" : `v${u.repoVersion}`} → v
-                    {u.embeddedVersion})
+                    (update available)
                   </Typography>
                 </Typography>
               }

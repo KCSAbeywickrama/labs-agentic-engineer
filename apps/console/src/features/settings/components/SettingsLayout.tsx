@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useState } from "react";
+import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import {
   Box,
   Card,
@@ -28,18 +28,26 @@ import {
   useMediaQuery,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { KeyRound, Puzzle } from "@wso2/oxygen-ui-icons-react";
-import { CredentialsSection } from "./CredentialsSection";
-import { SkillsSection } from "./SkillsSection";
+import { KeyRound, Sparkles } from "@wso2/oxygen-ui-icons-react";
+
+// Each section is its own route (issue #143): deep-linkable and back/forward
+// correct, matching the legacy console's settings/<section> URLs.
+const SECTIONS = [
+  { path: "/settings/credentials", label: "Credentials", Icon: KeyRound },
+  { path: "/settings/skills", label: "Skills", Icon: Sparkles },
+] as const;
 
 // v1 note (issue #96): no role gate here — any authenticated org member who
 // reaches /settings gets full access. Architect/SRE is the intended owner,
 // not an enforced restriction (no server-side RBAC on /config or /skills*
 // today, and no reliable client-side role signal either).
-export function SettingsPage() {
-  const [tab, setTab] = useState(0);
+export function SettingsLayout() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const { pathname } = useLocation();
+
+  const active =
+    SECTIONS.find((s) => pathname.startsWith(s.path))?.path ?? SECTIONS[0].path;
 
   return (
     <PageContent>
@@ -57,6 +65,8 @@ export function SettingsPage() {
           gap: 3,
         }}
       >
+        {/* flexShrink:0 — the skills table's intrinsic width would otherwise
+            squeeze this rail and clip the tabs. */}
         <Card
           variant="outlined"
           sx={{
@@ -69,26 +79,25 @@ export function SettingsPage() {
             <Tabs
               orientation={isMobile ? "horizontal" : "vertical"}
               variant={isMobile ? "fullWidth" : "standard"}
-              value={tab}
-              onChange={(_, v) => setTab(v)}
+              value={active}
             >
-              <Tab
-                icon={<KeyRound size={18} />}
-                iconPosition="start"
-                label="Credentials"
-              />
-              <Tab
-                icon={<Puzzle size={18} />}
-                iconPosition="start"
-                label="Skills"
-              />
+              {SECTIONS.map(({ path, label, Icon }) => (
+                <Tab
+                  key={path}
+                  value={path}
+                  component={Link}
+                  to={path}
+                  icon={<Icon size={18} />}
+                  iconPosition="start"
+                  label={label}
+                />
+              ))}
             </Tabs>
           </CardContent>
         </Card>
 
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          {tab === 0 && <CredentialsSection />}
-          {tab === 1 && <SkillsSection />}
+          <Outlet />
         </Box>
       </Box>
     </PageContent>

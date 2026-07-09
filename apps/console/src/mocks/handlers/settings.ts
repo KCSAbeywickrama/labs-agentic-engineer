@@ -85,11 +85,14 @@ function toSummary(s: SkillDetailBody): SkillSummary {
   return {
     name: s.name,
     kind: s.kind,
-    version: s.version,
     description: s.description,
     contentSha: s.contentSha,
     editable: s.editable,
   };
+}
+
+function nextContentSha(name: string): string {
+  return `sha-${name}-${Date.now()}`;
 }
 
 function extractDescription(skillMd: string): string {
@@ -114,8 +117,7 @@ function importSkill(name: string, source: string): ImportResult {
   const withWarnings = name.includes(IMPORT_WARN_SENTINEL);
   const existing = skills.find((s) => s.name === name);
   if (existing) {
-    existing.version += 1;
-    existing.contentSha = `sha-${name}-${existing.version}`;
+    existing.contentSha = nextContentSha(name);
     existing.updatedAt = new Date().toISOString();
   } else {
     skills.push({
@@ -126,8 +128,7 @@ function importSkill(name: string, source: string): ImportResult {
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
-      version: 1,
-      contentSha: `sha-${name}-1`,
+      contentSha: nextContentSha(name),
       updatedAt: new Date().toISOString(),
     });
   }
@@ -265,19 +266,20 @@ export const settingsHandlers = [
     for (const t of targets) {
       const existing = skills.find((s) => s.name === t.name);
       if (existing) {
-        existing.version = t.embeddedVersion;
+        existing.contentSha = nextContentSha(t.name);
         existing.updatedAt = new Date().toISOString();
       } else {
+        // A synced-in skill the repo didn't have yet. Unmarked frontmatter is
+        // an `org` skill, matching the BE's frontmatterKind default.
         skills.push({
           orgId: "org-1",
           name: t.name,
-          kind: "builtin",
+          kind: "org",
           editable: false,
-          description: `${t.name} (built-in)`,
-          skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (built-in)\n---\n\nBuilt-in skill body.`,
+          description: `${t.name} (platform-shipped)`,
+          skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
-          version: t.embeddedVersion,
-          contentSha: `sha-${t.name}-${t.embeddedVersion}`,
+          contentSha: nextContentSha(t.name),
           updatedAt: new Date().toISOString(),
         });
       }
@@ -324,9 +326,8 @@ export const settingsHandlers = [
       editable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
-      references: body.references,
-      version: 1,
-      contentSha: `sha-${body.name}-1`,
+      references: body.references ?? {},
+      contentSha: nextContentSha(body.name),
       updatedAt: new Date().toISOString(),
     };
     skills.push(created);
@@ -366,9 +367,9 @@ export const settingsHandlers = [
     }
     const body = (await request.json()) as UpdateSkillInput;
     skill.skillMd = body.skillMd;
-    skill.references = body.references;
+    skill.references = body.references ?? {};
     skill.description = extractDescription(body.skillMd);
-    skill.version += 1;
+    skill.contentSha = nextContentSha(skill.name);
     skill.updatedAt = new Date().toISOString();
     return HttpResponse.json(skill);
   }),

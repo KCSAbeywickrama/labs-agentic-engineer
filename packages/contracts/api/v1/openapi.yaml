@@ -1324,13 +1324,9 @@ components:
           type: string
         name:
           type: string
-        version:
-          format: int64
-          type: integer
       required:
         - name
         - kind
-        - version
         - description
         - contentSha
         - editable
@@ -1379,6 +1375,9 @@ components:
       type: object
     SkillUpdate:
       additionalProperties: false
+      description: >
+        One built-in whose embedded (platform) content differs from the org's
+        repo copy. Reconcile compares ContentSHA, not a hand-maintained version.
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
@@ -1387,19 +1386,10 @@ components:
           format: uri
           readOnly: true
           type: string
-        embeddedVersion:
-          format: int64
-          type: integer
         name:
           type: string
-        repoVersion:
-          description: -1 when the skill has no repo row yet
-          format: int64
-          type: integer
       required:
         - name
-        - repoVersion
-        - embeddedVersion
       type: object
     SkillUpdateList:
       additionalProperties: false
