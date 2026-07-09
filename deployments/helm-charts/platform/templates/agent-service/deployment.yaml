@@ -19,6 +19,10 @@ spec:
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
       serviceAccountName: aep-agents
+      securityContext:
+        # Snapshots on the shared workspaces PVC stay readable for the
+        # non-root runtime user (uid 1000) via the pod's fsGroup.
+        fsGroup: 1000
       containers:
         - name: aep-agents
           image: "{{ .Values.aepAgents.image.repository }}:{{ .Values.aepAgents.image.tag }}"
@@ -39,9 +43,22 @@ spec:
             - name: AGENT_BODY_LIMIT
               value: {{ .Values.aepAgents.bodyLimit | quote }}
 
+            - name: WORKSPACE_MOUNT_ROOT
+              value: "/workspaces"
+
             # secrets
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: aep-agents-secrets
                   key: ANTHROPIC_API_KEY
+
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+              readOnly: true
+
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces

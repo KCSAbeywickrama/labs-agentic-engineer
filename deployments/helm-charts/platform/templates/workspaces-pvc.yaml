@@ -1,0 +1,22 @@
+---
+# Shared git-workspaces volume — bare repo mirrors + per-SHA snapshots.
+# aep-api is the sole writer; agents mounts it read-only. ReadWriteMany so
+# both Deployments (and future replicas) can mount it simultaneously.
+# See docs/design/shared-volume-clone-architecture.md §13.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aep-workspaces
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-aep
+spec:
+  accessModes:
+    - ReadWriteMany
+  {{- if .Values.workspaces.storageClassName }}
+  storageClassName: {{ .Values.workspaces.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.workspaces.storage | quote }}

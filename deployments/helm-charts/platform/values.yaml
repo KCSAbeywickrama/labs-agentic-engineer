@@ -74,6 +74,16 @@ openbao:
   # Address of the OpenBao service. Matches: helm install aep ./bundle -n wso2-aep
   addr: "http://aep-aep-openbao.wso2-aep.svc.cluster.local:8200"
 
+# Shared git workspaces (RWX PVC) — bare repo mirrors + per-SHA snapshots.
+# aep-api is the sole writer; agents mounts read-only.
+# See docs/design/shared-volume-clone-architecture.md §13.
+workspaces:
+  storage: "10Gi"
+  # StorageClass for the ReadWriteMany claim. Empty = cluster default.
+  # A real RWX class (NFS/EFS/CephFS) is required for multi-replica aep-api;
+  # single-node k3d fakes RWX on local-path, which is fine locally.
+  storageClassName: ""
+
 postgres:
   version: "16"
   database: aep

@@ -19,6 +19,10 @@ spec:
         app.kubernetes.io/part-of: wso2-agentic-engineer
     spec:
       serviceAccountName: aep-api
+      securityContext:
+        # Shared workspaces PVC is handed to the pod's fsGroup so the
+        # non-root runtime user (uid 1000) can write it.
+        fsGroup: 1000
       containers:
         - name: aep-api
           image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
@@ -40,6 +44,8 @@ spec:
               value: "false"
             - name: LOCAL_OPENBAO_REPAIR
               value: "false"
+            - name: AEP_WORKSPACE_ROOT
+              value: "/workspaces"
             - name: JWT_AUDIENCE
               value: "aep-*"
             - name: SERVICE_AUTH_CLIENT_ID
@@ -104,7 +110,12 @@ spec:
             - name: task-signing-key
               mountPath: /app/keys
               readOnly: true
+            - name: workspaces
+              mountPath: /workspaces
       volumes:
         - name: task-signing-key
           secret:
             secretName: aep-task-signing-key
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces
