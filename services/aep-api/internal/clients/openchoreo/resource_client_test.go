@@ -645,7 +645,7 @@ func TestListWorkloadEndpoints_Success(t *testing.T) {
 				"spec":{
 					"owner":{"projectName":"orders","componentName":"orders-api"},
 					"endpoints":{
-						"http":{"type":"HTTP","port":8080,"basePath":"/","visibility":["namespace"]},
+						"http":{"type":"HTTP","port":8080,"basePath":"/","visibility":["namespace"],"schema":{"type":"openapi","content":"openapi: 3.0.0"}},
 						"admin":{"type":"HTTP","port":9090,"basePath":"/admin","visibility":[]}
 					}
 				}
@@ -673,12 +673,18 @@ func TestListWorkloadEndpoints_Success(t *testing.T) {
 	if httpEP.Project != "orders" || httpEP.Component != "orders-api" || httpEP.Port != 8080 || !httpEP.NamespaceVisible() {
 		t.Errorf("unexpected http endpoint: %+v", httpEP)
 	}
+	if httpEP.SchemaType != "openapi" || httpEP.SchemaContent != "openapi: 3.0.0" {
+		t.Errorf("expected schema decoded onto http endpoint, got SchemaType=%q SchemaContent=%q", httpEP.SchemaType, httpEP.SchemaContent)
+	}
 	adminEP, ok := byName["admin"]
 	if !ok {
 		t.Fatalf("missing admin endpoint in %+v", got)
 	}
 	if adminEP.NamespaceVisible() {
 		t.Errorf("admin endpoint should not be namespace-visible: %+v", adminEP)
+	}
+	if adminEP.SchemaType != "" || adminEP.SchemaContent != "" {
+		t.Errorf("expected admin endpoint (no schema in payload) to have empty schema fields, got SchemaType=%q SchemaContent=%q", adminEP.SchemaType, adminEP.SchemaContent)
 	}
 }
 

@@ -67,6 +67,12 @@ function readDispatchFromEnv(): DispatchRequest {
   const identityEmail = requireEnv("AEP_IDENTITY_EMAIL");
   const identityLogin = process.env.AEP_IDENTITY_LOGIN || "";
   const correlationId = process.env.AEP_CORRELATION_ID || randomUUID();
+  // Endpoint Spec Discovery (B1/B2) — BFF MCP server coordinates. The BFF
+  // stamps AEP_MCP_URL unconditionally but only stamps AEP_MCP_TOKEN when
+  // minting succeeded, so both are optional here; runner.ts guards on BOTH
+  // being present before registering the in-process mcpServers entry.
+  const mcpUrl = process.env.AEP_MCP_URL || "";
+  const mcpToken = process.env.AEP_MCP_TOKEN || "";
 
   const publisherClientId = process.env.PUBLISHER_CLIENT_ID ?? "";
   const publisherClientSecret = process.env.PUBLISHER_CLIENT_SECRET ?? "";
@@ -97,6 +103,8 @@ function readDispatchFromEnv(): DispatchRequest {
     gitServiceUrl,
     prompt,
     correlationId,
+    mcpUrl: mcpUrl || undefined,
+    mcpToken: mcpToken || undefined,
   };
 }
 
@@ -150,7 +158,7 @@ async function main(): Promise<number> {
     }
   }
 
-  primeScrubber([process.env.ANTHROPIC_API_KEY, req.bearer, publisherClientSecret]);
+  primeScrubber([process.env.ANTHROPIC_API_KEY, req.bearer, publisherClientSecret, req.mcpToken]);
 
   emit({
     kind: "phase",

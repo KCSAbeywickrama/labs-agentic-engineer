@@ -71,12 +71,16 @@ var featureEdgeAllowlist = map[string][]string{
 	"codingagent": {"execution", "devflow"},
 	"component":   {"artifacts", "gitrepo"},
 	// dependencies is the dependency-management feature: the parent package (MCP
-	// discovery server + endpoints catalog) composes its own resources subpackage
-	// (external/platform provisioner cores). endpoints/ and resources/ hold no
+	// discovery server + endpoints catalog) composes its own resources and
+	// endpoints subpackages (external/platform provisioner cores; the org
+	// endpoint catalog). ports.go's OrgEndpointLister.ListResolved return type is
+	// endpoints.OrgComponentEndpoint (A3's list_org_component_endpoints MCP
+	// tool), so the parent package names its own child package's type — the same
+	// shape as the resources edge below. endpoints/ and resources/ hold no
 	// cross-feature edges of their own — every other collaborator (OC client,
 	// external-resource repo, secret writer, design reader) is a consumer-side
 	// port wired at the composition root, keeping the feature edge surface minimal.
-	"dependencies": {"dependencies/resources"},
+	"dependencies": {"dependencies/resources", "dependencies/endpoints"},
 	// design imports dependencies/resources for the CRT metadata vocabulary
 	// (resources.TypeMarkers + the marker catalog port): design-save keys
 	// end-user-auth derivation on the PE-authored role marker instead of a

@@ -110,8 +110,13 @@ type Dependency struct {
 	// external: the config key schema the consuming component codes against.
 	Config []ConfigKey `json:"config,omitempty"`
 	// platform-resource: the registered (Cluster)ResourceType + provisioning params.
-	ResourceType string            `json:"resourceType,omitempty"`
-	Parameters   map[string]string `json:"parameters,omitempty"`
+	// Parameter values are mixed scalar types (string | number | bool) per the
+	// target (Cluster)ResourceType's OpenAPI v3 schema — e.g. postgres-cnpg's
+	// `instances` is an integer while `storage`/`version` are strings — so the
+	// map is any-valued and marshalled verbatim into the OC Resource
+	// spec.parameters (numbers must stay JSON numbers for CRD validation).
+	ResourceType string         `json:"resourceType,omitempty"`
+	Parameters   map[string]any `json:"parameters,omitempty"`
 	// resolution UI: candidates attached when Status == ambiguous.
 	Candidates []DependencyCandidate `json:"candidates,omitempty"`
 }

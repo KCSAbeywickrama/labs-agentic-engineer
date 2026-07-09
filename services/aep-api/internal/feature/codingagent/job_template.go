@@ -117,6 +117,16 @@ type JobInputs struct {
 	// and uses Bearer only as a fallback.
 	Bearer string
 
+	// MCPToken is a dedicated BFF-signed identity token (aud aep-api-mcp,
+	// minted via auth.IssueServiceToken — see coding_executor.go) that
+	// authenticates the runner pod to the BFF's internal MCP discovery surface
+	// (POST /internal/v1/mcp: list_org_component_endpoints,
+	// get_remote_git_file_contents, search_remote_git_code). Bearer's audience
+	// (git-service) is rejected by the MCP verifier, hence this separate token.
+	// Optional: empty (minting failed / not wired) stamps no AEP_MCP_TOKEN env,
+	// mirroring the Bearer contract — the runner then skips MCP-backed tools.
+	MCPToken string
+
 	// ActiveDeadlineSeconds bounds the agent run. Zero falls back to 1h.
 	ActiveDeadlineSeconds int64
 }
@@ -143,6 +153,10 @@ func Build(in JobInputs) (map[string]any, error) {
 		{"name": "AEP_PROMPT", "value": in.Prompt},
 		{"name": "AEP_GIT_SERVICE_URL", "value": in.GitServiceURL},
 		{"name": "AEP_PLATFORM_URL", "value": in.CallbackURL},
+		// AEP_MCP_URL is the BFF's internal MCP discovery endpoint, derived from
+		// the same callback URL as AEP_PLATFORM_URL — always rendered (parity
+		// with AEP_PLATFORM_URL) since CallbackURL is a required field.
+		{"name": "AEP_MCP_URL", "value": strings.TrimRight(in.CallbackURL, "/") + "/internal/v1/mcp"},
 		{"name": "AEP_IDENTITY_NAME", "value": in.IdentityName},
 		{"name": "AEP_IDENTITY_EMAIL", "value": in.IdentityEmail},
 		{"name": "AEP_IDENTITY_LOGIN", "value": in.IdentityLogin},
@@ -152,6 +166,11 @@ func Build(in JobInputs) (map[string]any, error) {
 	if in.Bearer != "" {
 		envVars = append(envVars, map[string]any{
 			"name": "AEP_BEARER", "value": in.Bearer,
+		})
+	}
+	if in.MCPToken != "" {
+		envVars = append(envVars, map[string]any{
+			"name": "AEP_MCP_TOKEN", "value": in.MCPToken,
 		})
 	}
 	// Optional: only stamped when the org's skills repo resolved. Absent → the

@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -53,6 +54,55 @@ type orgEndpointView struct {
 	Endpoint         string `json:"endpoint"`         // endpoint name on the provider
 	Type             string `json:"type"`             // HTTP | gRPC | …
 	NamespaceVisible bool   `json:"namespaceVisible"` // consumable cross-project as an org-service
+}
+
+// orgComponentEndpointView is the JSON shape returned to the agent for one
+// resolved org-wide component endpoint — list_org_endpoints's rows enriched
+// with the provider's repo coordinates and a discovered OpenAPI contract
+// (endpoint spec discovery). Mirrors endpoints.OrgComponentEndpoint.
+type orgComponentEndpointView struct {
+	Project          string           `json:"project"`
+	Component        string           `json:"component"`
+	Endpoint         string           `json:"endpoint"`
+	Type             string           `json:"type"`
+	Port             int32            `json:"port,omitempty"`
+	BasePath         string           `json:"basePath,omitempty"`
+	NamespaceVisible bool             `json:"namespaceVisible"`
+	Owner            string           `json:"owner,omitempty"`
+	Repo             string           `json:"repo,omitempty"`
+	Subdir           string           `json:"subdir,omitempty"`
+	Branch           string           `json:"branch,omitempty"`
+	Spec             endpointSpecView `json:"spec"`
+}
+
+// endpointSpecView is the JSON shape for an OrgComponentEndpoint's discovered
+// OpenAPI contract availability (see endpoints.EndpointSpec).
+type endpointSpecView struct {
+	Availability  string `json:"availability"`
+	InlineContent string `json:"inlineContent,omitempty"`
+	Path          string `json:"path,omitempty"`
+}
+
+// remoteGitFileView is the JSON shape returned by get_remote_git_file_contents —
+// a file's decoded content + sha, or a directory's entries (folded like
+// github-mcp-server's get_file_contents).
+type remoteGitFileView struct {
+	Content     string               `json:"content,omitempty"`
+	SHA         string               `json:"sha,omitempty"`
+	IsDirectory bool                 `json:"isDirectory"`
+	Entries     []remoteGitEntryView `json:"entries,omitempty"`
+}
+
+type remoteGitEntryView struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
+// remoteGitSearchHitView is one item of search_remote_git_code's result.
+type remoteGitSearchHitView struct {
+	Path string `json:"path"`
+	SHA  string `json:"sha"`
 }
 
 // mcpTools returns the read-only tool descriptors advertised by tools/list.
@@ -88,6 +138,18 @@ func mcpTools() []mcpTool {
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
+			Name: "list_org_component_endpoints",
+			Description: "List every org-wide component endpoint published across this organization, each " +
+				"resolved with the provider's real OpenAPI contract (when discoverable) and repo coordinates. " +
+				"Use this INSTEAD of list_org_endpoints when you need the endpoint's actual request/response " +
+				"contract to integrate against it — not just its name and type. Each row's `spec.availability` " +
+				"is `inline` (spec.inlineContent carries the OpenAPI document verbatim — read it directly), " +
+				"`repo` (no inline spec, but owner/repo/subdir/branch locate the provider's source so you can " +
+				"read the contract from there), or `none` (neither is resolvable — treat the integration as " +
+				"undocumented).",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
 			Name: "list_platform_resource_types",
 			Description: "List the platform-provisioned resource types (databases, caches, queues) installed " +
 				"on the cluster. Each entry is a resourceType you can reference in a platform-resource " +
@@ -95,6 +157,43 @@ func mcpTools() []mcpTool {
 				"provisioning parameters, and the outputs it exposes. Pick the type whose description " +
 				"matches the need. Read-only — you never author these.",
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			Name: "get_remote_git_file_contents",
+			Description: "Read a file (or list a directory) from a repository in THIS organization over the " +
+				"GitHub API — no clone. Use this AFTER list_org_component_endpoints reports a provider whose " +
+				"`spec.availability` is `repo`: pass that row's owner/repo plus the spec path to read the real " +
+				"OpenAPI document. A file returns decoded `content` + `sha`; a directory returns `entries[]` " +
+				"(each with path/type/sha) so you can drill down. `ref` is optional (branch/tag/commit; " +
+				"defaults to the repo's default branch). Read-only, and restricted to your own organization's " +
+				"repos — a request for any other owner is refused.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"owner": map[string]any{"type": "string", "description": "repo owner — MUST be your organization's GitHub account"},
+					"repo":  map[string]any{"type": "string", "description": "repository name"},
+					"path":  map[string]any{"type": "string", "description": "repo-relative file or directory path (empty = repo root)"},
+					"ref":   map[string]any{"type": "string", "description": "optional branch/tag/commit"},
+				},
+				"required": []string{"owner", "repo", "path"},
+			},
+		},
+		{
+			Name: "search_remote_git_code",
+			Description: "Search code in a repository in THIS organization over the GitHub API to LOCATE a " +
+				"file when you do not know its exact path (e.g. find where an `openapi.yaml` lives before " +
+				"reading it with get_remote_git_file_contents). Returns matching `items[]` of {path, sha}. " +
+				"Read-only, and restricted to your own organization's repos — a request for any other owner " +
+				"is refused.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"owner": map[string]any{"type": "string", "description": "repo owner — MUST be your organization's GitHub account"},
+					"repo":  map[string]any{"type": "string", "description": "repository name"},
+					"query": map[string]any{"type": "string", "description": "code search query (the repo scope is added for you)"},
+				},
+				"required": []string{"owner", "repo", "query"},
+			},
 		},
 	}
 }
@@ -104,7 +203,12 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 	var call struct {
 		Name      string `json:"name"`
 		Arguments struct {
-			Name string `json:"name"`
+			Name  string `json:"name"`
+			Owner string `json:"owner"`
+			Repo  string `json:"repo"`
+			Path  string `json:"path"`
+			Ref   string `json:"ref"`
+			Query string `json:"query"`
 		} `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &call); err != nil {
@@ -161,6 +265,21 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 			})
 		}
 		writeToolText(w, req.ID, mustJSON(map[string]any{"endpoints": views}))
+	case "list_org_component_endpoints":
+		if h.orgEndpoints == nil {
+			writeToolText(w, req.ID, mustJSON(map[string]any{"endpoints": []any{}}))
+			return
+		}
+		resolved, err := h.orgEndpoints.ListResolved(r.Context(), orgHandle)
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("list org component endpoints: %v", err))
+			return
+		}
+		views := make([]orgComponentEndpointView, 0, len(resolved))
+		for i := range resolved {
+			views = append(views, toOrgComponentEndpointView(&resolved[i]))
+		}
+		writeToolText(w, req.ID, mustJSON(map[string]any{"endpoints": views}))
 	case "list_platform_resource_types":
 		if h.resourceTypes == nil {
 			writeToolText(w, req.ID, mustJSON(map[string]any{"resourceTypes": []any{}}))
@@ -172,6 +291,45 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 			return
 		}
 		writeToolText(w, req.ID, mustJSON(map[string]any{"resourceTypes": types}))
+	case "get_remote_git_file_contents":
+		if h.remoteGit == nil {
+			writeToolError(w, req.ID, "remote git reader not configured")
+			return
+		}
+		if call.Arguments.Owner == "" || call.Arguments.Repo == "" {
+			writeToolError(w, req.ID, "missing required arguments: owner and repo")
+			return
+		}
+		// orgHandle is the verified ocOrgId claim — the reader resolves the org's
+		// credential from it and refuses any owner that is not the org's own
+		// GitHub account. The owner is NEVER trusted to name the org.
+		file, err := h.remoteGit.GetFileContents(r.Context(), orgHandle,
+			call.Arguments.Owner, call.Arguments.Repo, call.Arguments.Path, call.Arguments.Ref)
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("get remote git file contents: %v", err))
+			return
+		}
+		writeToolText(w, req.ID, mustJSON(toRemoteGitFileView(file)))
+	case "search_remote_git_code":
+		if h.remoteGit == nil {
+			writeToolError(w, req.ID, "remote git reader not configured")
+			return
+		}
+		if call.Arguments.Owner == "" || call.Arguments.Repo == "" || call.Arguments.Query == "" {
+			writeToolError(w, req.ID, "missing required arguments: owner, repo and query")
+			return
+		}
+		hits, err := h.remoteGit.SearchCode(r.Context(), orgHandle,
+			call.Arguments.Owner, call.Arguments.Repo, call.Arguments.Query)
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("search remote git code: %v", err))
+			return
+		}
+		items := make([]remoteGitSearchHitView, 0, len(hits))
+		for _, hit := range hits {
+			items = append(items, remoteGitSearchHitView{Path: hit.Path, SHA: hit.SHA})
+		}
+		writeToolText(w, req.ID, mustJSON(map[string]any{"items": items}))
 	default:
 		writeRPCError(w, req.ID, -32602, "unknown tool: "+call.Name)
 	}
@@ -185,4 +343,43 @@ func toExternalResourceView(er *models.ExternalResource) externalResourceView {
 		keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret})
 	}
 	return externalResourceView{Name: er.Name, Description: er.Description, ConfigKeys: keys}
+}
+
+// toRemoteGitFileView projects a Contents API read to the agent-facing shape.
+func toRemoteGitFileView(f *RemoteGitFile) remoteGitFileView {
+	v := remoteGitFileView{
+		Content:     f.Content,
+		SHA:         f.SHA,
+		IsDirectory: f.IsDirectory,
+	}
+	if len(f.Entries) > 0 {
+		v.Entries = make([]remoteGitEntryView, 0, len(f.Entries))
+		for _, e := range f.Entries {
+			v.Entries = append(v.Entries, remoteGitEntryView{Path: e.Path, Type: e.Type, SHA: e.SHA})
+		}
+	}
+	return v
+}
+
+// toOrgComponentEndpointView projects a resolved OrgComponentEndpoint to the
+// agent-facing shape (coords + discovered spec availability).
+func toOrgComponentEndpointView(e *endpoints.OrgComponentEndpoint) orgComponentEndpointView {
+	return orgComponentEndpointView{
+		Project:          e.Project,
+		Component:        e.Component,
+		Endpoint:         e.Endpoint,
+		Type:             e.Type,
+		Port:             e.Port,
+		BasePath:         e.BasePath,
+		NamespaceVisible: e.NamespaceVisible,
+		Owner:            e.Owner,
+		Repo:             e.Repo,
+		Subdir:           e.Subdir,
+		Branch:           e.Branch,
+		Spec: endpointSpecView{
+			Availability:  e.Spec.Availability,
+			InlineContent: e.Spec.InlineContent,
+			Path:          e.Spec.Path,
+		},
+	}
 }
