@@ -64,39 +64,20 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v12 —
-#                   makes every SRE-created issue a well-formed, dispatchable AE
-#                   Task at creation (src/agent/handoff_logic.py): stamps the
-#                   aep:task/aep:coding/aep:origin/incident labels + the taskmeta
-#                   block, and normalises the component to AE's design
-#                   (unprefixed) name via design_component_name() —
-#                   testyello-service1 → service1 — on BOTH the block and the
-#                   ae_dispatch_coding_agent call, so the funnel gate no longer
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v12).
+#                   handoff-v12 makes every SRE-created issue a well-formed,
+#                   dispatchable AE Task at creation (src/agent/handoff_logic.py):
+#                   it stamps the aep:task/aep:coding/aep:origin/incident labels
+#                   plus the taskmeta block, and normalises the component to AE's
+#                   design (unprefixed) name via design_component_name()
+#                   (testyello-service1 → service1) on BOTH the block and the
+#                   ae_dispatch_coding_agent call — so the funnel gate no longer
 #                   cancels with "component not in design at HEAD" and a
-#                   partially-labelled issue is never left inert (no aep:task
-#                   marker → funnel ignores it). Pair with the rca-agent
-#                   component:create grant in setup-aep.sh (without it the
-#                   synchronous EnsureComponent pre-check 403s). handoff-v10
-#                   fixed ae_create_issue result parsing in the dispatch guard
-#                   (src/agent/handoff_logic.py): the real MCP/LangChain tool
-#                   result is a content-block list (`[{"type":"text","text":
-#                   "<json>"}]`), not a bare string — handoff-v9's parser only
-#                   handled the bare-string shape, so it silently failed to
-#                   read the created issue's number/deduped flag and always
-#                   blocked the subsequent ae_dispatch_coding_agent call.
-#                   Verified live against a real MCP round trip before this
-#                   build. handoff-v9 carried the handoff agent's
-#                   classify/dedupe/tag/dispatch-guard logic moved out of the
-#                   prompt into deterministic code plus a pluggable Skill
-#                   mechanism (src/agent/skills.py, src/skills/issue-fix/) for
-#                   the remaining judgment-based work — see AE-HANDOFF-DESIGN.md.
-#                   handoff-v8 carried dynamic Anthropic-key resolution
-#                   [resolve_api_key: console/OpenBao-backed file first,
-#                   static RCA_LLM_API_KEY fallback, applied consistently at
-#                   boot AND at runtime] plus a non-fatal boot path when no
-#                   key is configured anywhere yet [warns and stays up instead
-#                   of crash-looping]. Falls back to anthropic-patched if it
-#                   isn't built or pullable)
+#                   partially-labelled issue is never left inert (missing the
+#                   aep:task marker → the funnel ignores it). Requires the
+#                   rca-agent component:create grant in setup-aep.sh (without it
+#                   the synchronous EnsureComponent pre-check 403s).
+#                   Falls back to anthropic-patched if not built or pullable.
 #   AE_HANDOFF      enable the RCA→AEP coding-agent handoff (default: true)
 #   AE_AUTO_DISPATCH auto-dispatch the coding agent after issue creation
 #                   (default: true; false = issue-only, human dispatches)
