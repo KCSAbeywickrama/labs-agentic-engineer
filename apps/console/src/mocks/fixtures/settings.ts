@@ -137,7 +137,6 @@ export const seedSkills: SkillDetailBody[] = [
     skillMd:
       "---\nname: high-level-architecture\ndescription: Derives component architecture from requirements.\n---\n\nDerive the component architecture from the approved requirements.",
     references: {},
-    version: 1,
     contentSha: "sha-hla-1",
     updatedAt: "2026-05-01T00:00:00Z",
   },
@@ -150,7 +149,6 @@ export const seedSkills: SkillDetailBody[] = [
     skillMd:
       "---\nname: task-breakdown\ndescription: Breaks a design into buildable tasks.\n---\n\nBreak the approved design into a sequence of buildable tasks.",
     references: {},
-    version: 1,
     contentSha: "sha-tb-1",
     updatedAt: "2026-05-01T00:00:00Z",
   },
@@ -163,7 +161,6 @@ export const seedSkills: SkillDetailBody[] = [
     skillMd:
       "---\nname: flow-orchestration\ndescription: Coordinates the multi-agent generation flow.\n---\n\nCoordinate hand-off between the generation-flow agents.",
     references: {},
-    version: 2,
     contentSha: "sha-fo-2",
     updatedAt: "2026-05-15T00:00:00Z",
   },
@@ -176,7 +173,6 @@ export const seedSkills: SkillDetailBody[] = [
     skillMd:
       "---\nname: acme-deploy-checklist\ndescription: Acme's internal pre-deploy checklist.\n---\n\nRun through Acme's pre-deploy checklist before shipping.",
     references: {},
-    version: 1,
     contentSha: "sha-adc-1",
     updatedAt: "2026-06-20T00:00:00Z",
   },

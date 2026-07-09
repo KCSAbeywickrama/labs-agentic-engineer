@@ -37,12 +37,13 @@ import (
 )
 
 var (
-	initPlatformChart     string
-	initPlatformVersion   string
-	initPlatformRelease   string
-	initPlatformNamespace string
-	initConsoleURL        string
-	initAPIURL            string
+	initPlatformChart        string
+	initPlatformVersion      string
+	initPlatformRelease      string
+	initPlatformNamespace    string
+	initConsoleURL           string
+	initAPIURL               string
+	initWorkspacesAccessMode string
 )
 
 var initCmd = &cobra.Command{
@@ -68,6 +69,10 @@ func init() {
 	initCmd.Flags().StringVar(&initPlatformNamespace, "namespace", "wso2-aep", "Kubernetes namespace")
 	initCmd.Flags().StringVar(&initConsoleURL, "console-url", "http://console.openchoreo.localhost:8080", "Public URL of the AEP console")
 	initCmd.Flags().StringVar(&initAPIURL, "api-url", "http://api.openchoreo.localhost:8080", "Public URL of the AEP API")
+	initCmd.Flags().StringVar(&initWorkspacesAccessMode, "workspaces-access-mode", "", "PVC access mode for the shared workspaces volume (e.g. ReadWriteOnce for local k3d, ReadWriteMany for production)")
+	viper.BindPFlag("platform.workspaces.access_mode", initCmd.Flags().Lookup("workspaces-access-mode"))
+	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API (overrides config file)")
+	viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
 	initCmd.Flags().String("server", "", "AEP server gRPC URL (overrides config file)")
 	viper.BindPFlag("server", initCmd.Flags().Lookup("server"))
 	registerThunderFlags(initCmd)
@@ -148,6 +153,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		"--set", "console.thunderPublicURL=" + viper.GetString("thunder.public_url"),
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
+		"--set", "platformAPI.baseURL=" + viper.GetString("oc.api_url"),
 	}
 	if initPlatformChart != "" {
 		// Local chart path — used for dev/local testing.
@@ -158,6 +164,9 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		if initPlatformVersion != "latest" {
 			helmArgs = append(helmArgs, "--version", initPlatformVersion)
 		}
+	}
+	if mode := viper.GetString("platform.workspaces.access_mode"); mode != "" {
+		helmArgs = append(helmArgs, "--set", "workspaces.accessMode="+mode)
 	}
 	var helmOut bytes.Buffer
 	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)

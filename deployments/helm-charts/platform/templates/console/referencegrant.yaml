@@ -15,3 +15,6 @@ spec:
     - group: ""
       kind: Service
       name: aep-console
+    - group: ""
+      kind: Service
+      name: aep-api

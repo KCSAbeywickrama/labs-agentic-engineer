@@ -68,7 +68,16 @@ let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
 let skills: SkillDetailBody[] = [];
 let skillUpdates: SkillUpdate[] = [];
+// version is not stored in SkillDetailBody (removed from schema); tracked here.
+let skillVersions = new Map<string, number>();
 let initialized = false;
+
+const SEED_VERSIONS: Record<string, number> = {
+  "high-level-architecture": 1,
+  "task-breakdown": 1,
+  "flow-orchestration": 2,
+  "acme-deploy-checklist": 1,
+};
 
 function ensureInitialized() {
   if (initialized) return;
@@ -79,13 +88,14 @@ function ensureInitialized() {
   }
   skills = seedSkills.map((s) => ({ ...s }));
   skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
+  skillVersions = new Map(Object.entries(SEED_VERSIONS));
 }
 
 function toSummary(s: SkillDetailBody): SkillSummary {
   return {
     name: s.name,
     kind: s.kind,
-    version: s.version,
+    version: skillVersions.get(s.name) ?? 1,
     description: s.description,
     contentSha: s.contentSha,
     editable: s.editable,
@@ -114,10 +124,12 @@ function importSkill(name: string, source: string): ImportResult {
   const withWarnings = name.includes(IMPORT_WARN_SENTINEL);
   const existing = skills.find((s) => s.name === name);
   if (existing) {
-    existing.version += 1;
-    existing.contentSha = `sha-${name}-${existing.version}`;
+    const nextVer = (skillVersions.get(name) ?? 1) + 1;
+    skillVersions.set(name, nextVer);
+    existing.contentSha = `sha-${name}-${nextVer}`;
     existing.updatedAt = new Date().toISOString();
   } else {
+    skillVersions.set(name, 1);
     skills.push({
       orgId: "org-1",
       name,
@@ -126,7 +138,6 @@ function importSkill(name: string, source: string): ImportResult {
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
-      version: 1,
       contentSha: `sha-${name}-1`,
       updatedAt: new Date().toISOString(),
     });
@@ -263,11 +274,13 @@ export const settingsHandlers = [
         : skillUpdates;
 
     for (const t of targets) {
+      const ver = t.embeddedVersion ?? 1;
       const existing = skills.find((s) => s.name === t.name);
       if (existing) {
-        existing.version = t.embeddedVersion;
+        skillVersions.set(t.name, ver);
         existing.updatedAt = new Date().toISOString();
       } else {
+        skillVersions.set(t.name, ver);
         skills.push({
           orgId: "org-1",
           name: t.name,
@@ -276,8 +289,7 @@ export const settingsHandlers = [
           description: `${t.name} (built-in)`,
           skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (built-in)\n---\n\nBuilt-in skill body.`,
           references: {},
-          version: t.embeddedVersion,
-          contentSha: `sha-${t.name}-${t.embeddedVersion}`,
+          contentSha: `sha-${t.name}-${ver}`,
           updatedAt: new Date().toISOString(),
         });
       }
@@ -317,6 +329,7 @@ export const settingsHandlers = [
         409,
       );
     }
+    skillVersions.set(body.name, 1);
     const created: SkillDetailBody = {
       orgId: "org-1",
       name: body.name,
@@ -324,8 +337,7 @@ export const settingsHandlers = [
       editable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
-      references: body.references,
-      version: 1,
+      references: body.references ?? {},
       contentSha: `sha-${body.name}-1`,
       updatedAt: new Date().toISOString(),
     };
@@ -366,9 +378,9 @@ export const settingsHandlers = [
     }
     const body = (await request.json()) as UpdateSkillInput;
     skill.skillMd = body.skillMd;
-    skill.references = body.references;
+    skill.references = body.references ?? {};
     skill.description = extractDescription(body.skillMd);
-    skill.version += 1;
+    skillVersions.set(skill.name, (skillVersions.get(skill.name) ?? 1) + 1);
     skill.updatedAt = new Date().toISOString();
     return HttpResponse.json(skill);
   }),
@@ -376,6 +388,7 @@ export const settingsHandlers = [
   http.delete("*/api/v1/skills/:name", ({ params }) => {
     ensureInitialized();
     skills = skills.filter((s) => s.name !== params.name);
+    skillVersions.delete(String(params.name));
     return HttpResponse.json({ status: "deleted" });
   }),
 ];

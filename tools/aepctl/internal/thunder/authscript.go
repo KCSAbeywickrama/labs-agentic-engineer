@@ -119,7 +119,6 @@ confidential "Workload Publisher"                    "OC Workload Publisher Clie
 confidential "OpenChoreo Observer Resource Reader"   "BFF token for OC Observer service"         "openchoreo-observer-resource-reader-client" "$OC_OBSERVER_READER_SECRET"
 confidential "AEP API Service"                       "AEP API service-to-service client"         "aep-api-client"             "$AEP_API_CLIENT_SECRET"
 confidential "AEP BFF to git-service"                "BFF outbound JWT, audience: git-service"   "aep-bff-to-git-service"     "$BFF_TO_GIT_SERVICE_SECRET"
-confidential "AEP BFF to agents-service"             "BFF outbound JWT, audience: agents-service" "aep-bff-to-agents-service"  "$BFF_TO_AGENTS_SERVICE_SECRET"
 confidential "AEP BFF to remote-worker"              "BFF outbound JWT, audience: remote-worker" "aep-bff-to-remote-worker"   "$BFF_TO_REMOTE_WORKER_SECRET"
 confidential "AEP Local Dev Seeder"                  "Local-dev convenience client"              "aep-local-dev-seeder"       "$LOCAL_DEV_SEEDER_SECRET"
 confidential "AEP System Client"                     "System-level Thunder admin client"         "aep-system-client"          "$AEP_SYSTEM_CLIENT_SECRET"
@@ -132,7 +131,7 @@ upsert_app "aep-console-client" "{
   \"ou_id\":\"$OU_ID\",\"auth_flow_id\":\"$AUTH_FLOW_ID\",
   \"inbound_auth_config\":[{\"type\":\"oauth2\",\"config\":{
     \"client_id\":\"aep-console-client\",
-    \"redirect_uris\":[\"http://localhost:8090\",\"$CONSOLE_URL\"],
+    \"redirect_uris\":[\"${CONSOLE_URL}\",\"${CONSOLE_URL}/\",\"${CONSOLE_URL}/callback\"],
     \"grant_types\":[\"authorization_code\",\"refresh_token\"],
     \"response_types\":[\"code\"],
     \"token_endpoint_auth_method\":\"none\",

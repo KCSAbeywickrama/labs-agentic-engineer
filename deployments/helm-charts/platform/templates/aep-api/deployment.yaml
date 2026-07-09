@@ -87,8 +87,15 @@ spec:
                   key: THUNDER_ADMIN_URL
             - name: THUNDER_SYSTEM_CLIENT_ID
               value: "aep-system-client"
+            - name: AGENTS_SVC_BASE_URL
+              value: "http://aep-agents.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepAgents.port }}"
 
             # secrets — all values sourced from ESO-synced K8s Secrets (written by aep init)
+            - name: AGENTS_SVC_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-agents-secrets
+                  key: AGENTS_JWT_SECRET
             - name: THUNDER_SYSTEM_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

@@ -40,6 +40,16 @@ func Init() {
 	viper.SetEnvPrefix("AEP")
 	viper.AutomaticEnv()
 
+	// Platform install defaults — overridable via ~/.aep/config.yaml.
+	// platform.workspaces.access_mode: PVC access mode for the shared git workspaces volume.
+	// Use ReadWriteOnce for local k3d (local-path does not support ReadWriteMany).
+	// Use ReadWriteMany in production with NFS/EFS/CephFS.
+	// Empty string means use the chart default (ReadWriteMany).
+	viper.SetDefault("platform.workspaces.access_mode", "")
+
+	// OpenChoreo platform API defaults — overridable via ~/.aep/config.yaml.
+	viper.SetDefault("oc.api_url", "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080")
+
 	// Thunder defaults — all overridable via ~/.aep/config.yaml or AEP_THUNDER_* env vars.
 	viper.SetDefault("thunder.namespace", "thunder")
 	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")

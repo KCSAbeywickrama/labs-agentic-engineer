@@ -145,7 +145,6 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		"oc-observer-reader",
 		"aep-api-client",
 		"bff-git-service",
-		"bff-agents-service",
 		"bff-remote-worker",
 		"local-dev-seeder",
 		"system-client",
@@ -159,11 +158,17 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		thunderClientSecrets[name] = s
 	}
 
+	agentsJWTSecret, err := bootstrap.GeneratePassword(32)
+	if err != nil {
+		return fatal(fmt.Sprintf("generate agents JWT secret: %v", err))
+	}
+
 	secrets := []struct{ path, value string }{
 		{"aep/anthropic-api-key", req.AnthropicApiKey},
 		{"aep/postgres-password", postgresPassword},
 		{"aep/task-signing-key", signingKey},
 		{"aep/oauth-state-key", oauthStateKey},
+		{"aep/agents-jwt-secret", agentsJWTSecret},
 	}
 	for _, name := range thunderClientNames {
 		secrets = append(secrets, struct{ path, value string }{

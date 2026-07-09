@@ -1,9 +1,9 @@
 aepApi:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/aep-api
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: aep-api
+    pullPolicy: Always
   port: 9090
   logLevel: "info"
   deploymentTier: "dev"
@@ -21,9 +21,9 @@ aepApi:
 aepAgents:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/agents
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: agents
+    pullPolicy: Always
   port: 9090
   logLevel: "info"
   model: "claude-sonnet-5"
@@ -41,9 +41,9 @@ aepAgents:
 console:
   replicas: 1
   image:
-    repository: ghcr.io/wso2/aep/console
-    tag: latest
-    pullPolicy: IfNotPresent
+    repository: senithkay/ae
+    tag: console-legacy
+    pullPolicy: Always
   port: 3000
   resources:
     requests:
@@ -65,6 +65,10 @@ taskSigning:
 observer:
   clientId: "openchoreo-observer-resource-reader-client"
 
+platformAPI:
+  # In-cluster URL for the OpenChoreo platform API. aep init passes this from oc.api_url in ~/.aep/config.yaml.
+  baseURL: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
+
 thunder:
   # In-cluster URL for the Thunder service. Override if Thunder is deployed in a different namespace or port.
   adminURL: "http://thunder-service.thunder.svc.cluster.local:8090"
@@ -79,10 +83,11 @@ openbao:
 # See docs/design/shared-volume-clone-architecture.md §13.
 workspaces:
   storage: "10Gi"
-  # StorageClass for the ReadWriteMany claim. Empty = cluster default.
-  # A real RWX class (NFS/EFS/CephFS) is required for multi-replica aep-api;
-  # single-node k3d fakes RWX on local-path, which is fine locally.
+  # StorageClass for the claim. Empty = cluster default.
   storageClassName: ""
+  # Access mode. Use ReadWriteOnce for local k3d (local-path does not support RWX).
+  # Use ReadWriteMany in production with NFS/EFS/CephFS.
+  accessMode: "ReadWriteMany"
 
 postgres:
   version: "16"
