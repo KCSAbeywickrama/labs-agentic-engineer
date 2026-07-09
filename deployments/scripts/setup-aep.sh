@@ -695,8 +695,48 @@ spec:
   - roleRef:
       kind: ClusterAuthzRole
       name: workload-publisher
+---
+# The SRE/RCA agent's handoff stage auto-dispatches a coding-agent run for a
+# code-level incident (AE_AUTO_DISPATCH): ae_dispatch_coding_agent → aep-api's
+# PromoteAndExecute, whose SYNCHRONOUS EnsureComponent pre-check forwards the
+# agent's own service-account token (sub=openchoreo-rca-agent) to the OC API's
+# CreateComponent. The control-plane chart's `rca-agent` role is read-only
+# (*:view + incidents:update), so that one call 403s and dispatch never fires.
+# Grant the agent's identity `component:create` via this ADDITIVE role/binding
+# (Casbin unions it with the chart's rca-agent role — we don't edit the
+# Helm-managed role, so a control-plane `helm upgrade` can't revert it) so the
+# whole alert→RCA→issue→dispatch loop completes for every org/project under the
+# one shared service identity — no per-user provisioning. Everything downstream
+# of the pre-check (the funnel's own EnsureComponent, workflowrun:create, the
+# Anthropic secret write) runs in aep-api's detached goroutine as
+# sub=aep-api-client (admin *), so `component:create` is the ONLY action this
+# identity needs. A normal user hitting the same promote-from-issue route still
+# forwards THEIR token and is still gated by their own OC permissions — this
+# grant is scoped to the SRE agent's dedicated credential, which no human holds.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRole
+metadata:
+  name: rca-agent-dispatch
+spec:
+  description: "SRE/RCA agent handoff: create the Component CR when auto-dispatching a coding-agent run"
+  actions:
+  - component:create
+---
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRoleBinding
+metadata:
+  name: rca-agent-dispatch-binding
+spec:
+  effect: allow
+  entitlement:
+    claim: sub
+    value: openchoreo-rca-agent
+  roleMappings:
+  - roleRef:
+      kind: ClusterAuthzRole
+      name: rca-agent-dispatch
 OCEOF
-echo "✅ AEP API service account + Administrators group + workload publisher authorized"
+echo "✅ AEP API service account + Administrators group + workload publisher + RCA-agent dispatch authorized"
 
 # ============================================================================
 # Generate .env file

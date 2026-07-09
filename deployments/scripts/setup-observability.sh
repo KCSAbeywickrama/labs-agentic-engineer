@@ -64,8 +64,20 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v10 —
-#                   fixes ae_create_issue result parsing in the dispatch guard
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v12 —
+#                   makes every SRE-created issue a well-formed, dispatchable AE
+#                   Task at creation (src/agent/handoff_logic.py): stamps the
+#                   aep:task/aep:coding/aep:origin/incident labels + the taskmeta
+#                   block, and normalises the component to AE's design
+#                   (unprefixed) name via design_component_name() —
+#                   testyello-service1 → service1 — on BOTH the block and the
+#                   ae_dispatch_coding_agent call, so the funnel gate no longer
+#                   cancels with "component not in design at HEAD" and a
+#                   partially-labelled issue is never left inert (no aep:task
+#                   marker → funnel ignores it). Pair with the rca-agent
+#                   component:create grant in setup-aep.sh (without it the
+#                   synchronous EnsureComponent pre-check 403s). handoff-v10
+#                   fixed ae_create_issue result parsing in the dispatch guard
 #                   (src/agent/handoff_logic.py): the real MCP/LangChain tool
 #                   result is a content-block list (`[{"type":"text","text":
 #                   "<json>"}]`), not a bare string — handoff-v9's parser only
@@ -179,16 +191,27 @@ echo ""
 echo "1️⃣b RCA agent image + secret"
 # Preferred tag `handoff` carries the Anthropic structured-output fix AND the
 # AEP coding-agent handoff stage (AE_HANDOFF). Resolution order:
-#   1. local build            docker build -t openchoreo-sre-agent:handoff \
+#   1. local build            docker build -t tharindulak/openchoreo-sre-agent:handoff \
 #                               <openchoreo-repo>/agents/sre-agent
 #      (preferred — developers iterating on the agent aren't surprised by a
 #       stale registry copy)
-#   2. registry pull          ${RCA_IMAGE_PULL} (Docker Hub mirror), retagged
-#                             to the local name so the helm values stay stable
+#   2. registry pull          ${RCA_IMAGE_PULL} (Docker Hub mirror)
 #   3. local anthropic-patched (older tag: RCA works, handoff stage ABSENT)
-RCA_IMAGE_REPO="openchoreo-sre-agent"
-RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v10}"
-RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v10}"
+#
+# RCA_IMAGE_REPO is the FULLY QUALIFIED name (tharindulak/openchoreo-sre-agent),
+# not a short local alias — deliberately. An earlier version used a short repo
+# name here and retagged the pulled image to it before `k3d image import`; the
+# Deployment then referenced that short, unqualified name. That worked right
+# after import, but k3d/containerd's image GC can evict it later — and because
+# the reference had no registry/namespace, kubelet's re-pull attempt resolved
+# to docker.io/library/<name> (Docker Hub's default namespace for official
+# images) instead of our actual image, and failed outright
+# (ImagePullBackOff: "pull access denied, repository does not exist"). Using
+# the fully-qualified name everywhere means a cache-evicted image can always
+# be re-pulled from the real registry — no more silent long-term fragility.
+RCA_IMAGE_REPO="tharindulak/openchoreo-sre-agent"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v12}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v12}"
 if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
     echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
     if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then
