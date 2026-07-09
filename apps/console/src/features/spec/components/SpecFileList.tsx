@@ -26,7 +26,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FileText, Plus } from "@wso2/oxygen-ui-icons-react";
+import { FileText, Plus, RefreshCw } from "@wso2/oxygen-ui-icons-react";
 import type { SpecFileEntry, SpecGroup } from "../api/mapping";
 
 const GROUPS: { id: SpecGroup; title: string }[] = [
@@ -44,6 +44,7 @@ export function SpecFileList({
   selectedPath,
   onSelect,
   onAddArtifact,
+  onRegenerateDesign,
   deriving,
   failed,
 }: {
@@ -51,6 +52,9 @@ export function SpecFileList({
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onAddArtifact: () => void;
+  /** Re-generate the design (#159) — shown in the Designs header once a design
+   *  exists; fires the same design-generation room turn as the header CTA. */
+  onRegenerateDesign: () => void;
   /** Agents are still shaping the spec — empty groups say so. */
   deriving: boolean;
   /** Derivation failed — empty groups say that instead. */
@@ -82,6 +86,17 @@ export function SpecFileList({
                     onClick={onAddArtifact}
                   >
                     <Plus size={16} />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {group.id === "designs" && groupFiles.length > 0 && (
+                <Tooltip title="Re-generate design from the current requirements">
+                  <IconButton
+                    size="small"
+                    aria-label="Re-generate design"
+                    onClick={onRegenerateDesign}
+                  >
+                    <RefreshCw size={16} />
                   </IconButton>
                 </Tooltip>
               )}

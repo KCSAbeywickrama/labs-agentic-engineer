@@ -68,3 +68,19 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
     ? `${base} based on the following idea:\n\n${prompt.trim()}`
     : `${base}.`;
 }
+
+/**
+ * The instruction the "Generate / Re-generate design" CTA sends into the room
+ * turn (#159): derive the component design from the current requirements. No
+ * user prompt — the agent designs FROM the requirements already in the repo;
+ * the agent's system prompt carries the design-file structure and schema.
+ */
+export function buildDesignGenerationInstruction(): string {
+  return (
+    "Generate the complete component design for this project based on the " +
+    "current requirements: the overall architecture in specs/design/design.md, " +
+    "and for each component specs/design/components/<name>/design.json (plus " +
+    "openapi.yaml for services). If a design already exists, regenerate it to " +
+    "match the current requirements."
+  );
+}

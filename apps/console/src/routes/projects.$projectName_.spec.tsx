@@ -23,12 +23,15 @@ import { SpecView } from "../features/spec/components/SpecView";
 // /projects/$projectName layout: the spec view is a full-screen workspace
 // without the shared project header (#80).
 //
-// `?generate=1` (#150): arriving from the Spec card's "Generate spec" CTA —
-// AppLayout opens the agent panel and auto-sends the first requirements turn.
+// `?generate=requirements|design` (#150/#159): arriving from a "Generate spec"
+// or "Generate/Re-generate design" CTA — AppLayout opens the agent panel and
+// auto-sends the matching generation turn.
 export const Route = createFileRoute("/projects/$projectName_/spec")({
-  validateSearch: (search: Record<string, unknown>): { generate?: boolean } =>
-    search.generate === true || search.generate === "1" || search.generate === "true"
-      ? { generate: true }
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { generate?: "requirements" | "design" } =>
+    search.generate === "requirements" || search.generate === "design"
+      ? { generate: search.generate }
       : {},
   component: SpecRoute,
 });

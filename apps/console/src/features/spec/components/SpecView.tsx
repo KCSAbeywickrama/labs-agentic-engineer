@@ -33,7 +33,7 @@ import {
   Typography,
   useAppShell,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Hammer } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
@@ -143,6 +143,17 @@ export function SpecView({ projectName }: { projectName: string }) {
   const chip = status.data ? specChip(status.data) : null;
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
+  // #159: design is derived FROM requirements, so its CTA needs them first.
+  const hasRequirementsFiles = files.some((f) => f.group === "requirements");
+
+  // Generate/Re-generate design (#159): open the agent panel and auto-send the
+  // design turn via the shared ?generate=design signal (AppLayout + the panel).
+  const generateDesign = () =>
+    void navigate({
+      to: "/projects/$projectName/spec",
+      params: { projectName },
+      search: { generate: "design" },
+    });
 
   const displayName = project.data?.displayName ?? projectName;
 
@@ -239,19 +250,14 @@ export function SpecView({ projectName }: { projectName: string }) {
 
           <Divider orientation="vertical" flexItem />
 
-          <Tooltip
-            title={
-              hasDesignFiles
-                ? "Start building from this spec"
-                : "Available once design files are generated"
-            }
-          >
-            {/* span so the tooltip works while the button is disabled */}
-            <span>
+          {/* Phase-aware primary CTA (#159): the prominent action is always the
+              next pipeline step — Generate design until a design exists, then
+              Build. A dead disabled Build hid what to do next. */}
+          {hasDesignFiles ? (
+            <Tooltip title="Start building from this spec">
               <Button
                 variant="contained"
                 startIcon={<Hammer size={18} />}
-                disabled={!hasDesignFiles}
                 onClick={() =>
                   void navigate({
                     to: "/projects/$projectName",
@@ -261,8 +267,28 @@ export function SpecView({ projectName }: { projectName: string }) {
               >
                 Build
               </Button>
-            </span>
-          </Tooltip>
+            </Tooltip>
+          ) : (
+            <Tooltip
+              title={
+                hasRequirementsFiles
+                  ? "Derive the component design from your requirements"
+                  : "Generate requirements first"
+              }
+            >
+              {/* span so the tooltip works while the button is disabled */}
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Sparkles size={18} />}
+                  disabled={!hasRequirementsFiles}
+                  onClick={generateDesign}
+                >
+                  Generate design
+                </Button>
+              </span>
+            </Tooltip>
+          )}
         </Box>
 
         {failed && (
@@ -312,6 +338,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 selectedPath={selected?.path ?? null}
                 onSelect={setSelectedPath}
                 onAddArtifact={() => setAddArtifactOpen(true)}
+                onRegenerateDesign={generateDesign}
                 deriving={deriving}
                 failed={failed}
               />

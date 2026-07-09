@@ -259,7 +259,7 @@ function GenerateSpecCard({ projectName }: { projectName: string }) {
               void navigate({
                 to: "/projects/$projectName/spec",
                 params: { projectName },
-                search: { generate: true },
+                search: { generate: "requirements" },
               })
             }
           >
