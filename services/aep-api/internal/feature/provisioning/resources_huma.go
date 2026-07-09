@@ -52,7 +52,7 @@ type saveValuesInput struct {
 }
 
 type provisionBody struct {
-	Params       map[string]string `json:"params,omitempty" doc:"Provisioning parameters (override the design defaults)"`
+	Params       map[string]any `json:"params,omitempty" doc:"Provisioning parameters (override the design defaults); scalar values (string, number, or boolean) per the resource type schema"`
 	Environments []string          `json:"environments,omitempty" doc:"Environments to provision (default: [development])"`
 }
 
@@ -174,7 +174,7 @@ func RegisterResources(api huma.API, svc *Service) {
 		if svc == nil {
 			return nil, huma.Error503ServiceUnavailable("provisioning is not configured")
 		}
-		var params map[string]string
+		var params map[string]any
 		var envs []string
 		if in.Body != nil {
 			params, envs = in.Body.Params, in.Body.Environments
