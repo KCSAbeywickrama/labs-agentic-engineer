@@ -257,7 +257,7 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 				started[t.Issue] = true
 				failed[strings.ToLower(t.Key)] = true
 				finished++
-				setTaskRef(status, t.Issue, "", "", OutcomeSkippedDepFai)
+				setTaskRef(status, t.Issue, "", TaskPhaseFailed, OutcomeSkippedDepFai)
 				continue
 			}
 			if !depsSatisfied(t, succeeded, present) {
@@ -291,7 +291,7 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 					started[t.Issue] = true
 					failed[strings.ToLower(t.Key)] = true
 					finished++
-					setTaskRef(status, t.Issue, "", "", OutcomeSkippedDepFai)
+					setTaskRef(status, t.Issue, "", TaskPhaseFailed, OutcomeSkippedDepFai)
 				}
 			}
 			break

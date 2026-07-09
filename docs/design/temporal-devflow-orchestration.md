@@ -123,7 +123,7 @@ Org is derived from the JWT; the project is the path slug.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/projects/{p}/devflows` | start (202; 409 if one running; 503 if Temporal down) |
+| POST | `/projects/{p}/devflows` | start (200; 409 if one running; 503 if Temporal down) |
 | GET | `/projects/{p}/devflows` | list this project's runs |
 | GET | `/projects/{p}/devflows/{workflowId}` | live status via `QueryWorkflow` |
 | POST | `/projects/{p}/devflows/{workflowId}/gates/{gate}` | send a gate decision (dev, or a task child via `taskIssue`) |

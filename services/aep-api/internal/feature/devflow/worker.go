@@ -62,7 +62,18 @@ func (w *WorkerWatcher) Run(ctx context.Context) {
 		if err != nil {
 			continue // raced with close; re-dial
 		}
-		wk := worker.New(c, w.rt.TaskQueue(), worker.Options{})
+		// worker.Start returns as soon as the worker is running, so a later
+		// fatal error would otherwise go unnoticed. OnFatalError surfaces it on
+		// fatalCh; the select below then tears the client down and re-dials.
+		fatalCh := make(chan error, 1)
+		wk := worker.New(c, w.rt.TaskQueue(), worker.Options{
+			OnFatalError: func(err error) {
+				select {
+				case fatalCh <- err:
+				default:
+				}
+			},
+		})
 		registerAll(wk, w.acts)
 
 		if err := wk.Start(); err != nil {
@@ -73,9 +84,16 @@ func (w *WorkerWatcher) Run(ctx context.Context) {
 		slog.Info("devflow: temporal worker started",
 			"hostPort", w.rt.cfg.HostPort, "namespace", w.rt.cfg.Namespace, "taskQueue", w.rt.TaskQueue())
 
-		<-ctx.Done()
-		wk.Stop()
-		w.rt.close()
-		return
+		select {
+		case <-ctx.Done():
+			wk.Stop()
+			w.rt.close()
+			return
+		case err := <-fatalCh:
+			slog.Error("devflow: temporal worker fatal error, re-dialing", "error", err)
+			wk.Stop()
+			w.rt.close()
+			// loop re-enters the dial retry
+		}
 	}
 }

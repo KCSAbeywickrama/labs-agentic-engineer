@@ -19,9 +19,15 @@ package devflow
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/wso2/aep/aep-api/models"
 )
+
+// signalTimeout bounds a single SignalWorkflow call so a slow Temporal server
+// cannot tie up the calling webhook handler / watcher goroutine. Signaling is
+// best-effort — a timeout is logged, not propagated.
+const signalTimeout = 5 * time.Second
 
 // SignalLookup resolves which running workflow (if any) wants an event.
 // Satisfied by repositories.WorkflowRunRepository.
@@ -89,6 +95,8 @@ func (s *Signaler) send(ctx context.Context, workflowID, name string, payload an
 	if err != nil {
 		return // not connected — best-effort
 	}
+	ctx, cancel := context.WithTimeout(ctx, signalTimeout)
+	defer cancel()
 	if err := c.SignalWorkflow(ctx, workflowID, "", name, payload); err != nil {
 		slog.WarnContext(ctx, "devflow signaler: SignalWorkflow failed",
 			"workflowId", workflowID, "signal", name, "error", err)

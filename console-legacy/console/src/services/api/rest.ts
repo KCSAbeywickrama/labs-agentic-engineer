@@ -552,7 +552,7 @@ export const restApi = {
   // -- Devflow (Temporal-backed development workflow) ---------------------------
 
   // Start the development workflow for a project. `gates` is optional per-gate
-  // auto/manual config (default: everything auto). 202 → {workflowId, runId}.
+  // auto/manual config (default: everything auto). 200 → {workflowId, runId}.
   async startDevflow(
     projectId: string, body?: DevflowStartRequest,
   ): Promise<DevflowStartResponse> {

@@ -201,7 +201,7 @@ services:
       KUBECONFIG: "/app/.kube/config"
 
       # ── Temporal (devflow workflows). aep-api runs the worker in-process and
-      # dials the k3d-hosted Temporal frontend via the start.sh host bridge.
+      # dials the k3d-hosted Temporal frontend via the k3d docker network.
       # Reaches the in-cluster Temporal dev server via the k3d node container on
       # the shared k3d-openchoreo docker network (NodePort 31733 from
       # setup-temporal.sh). The `passthrough:///` scheme is REQUIRED: aep-api is
