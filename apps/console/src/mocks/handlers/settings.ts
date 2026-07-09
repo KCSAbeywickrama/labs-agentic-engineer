@@ -235,19 +235,10 @@ export const settingsHandlers = [
     });
   }),
 
-  http.post("*/api/v1/skills/sync", async ({ request }) => {
+  // All-or-nothing, mirroring the BE: no request body, reconcile everything.
+  http.post("*/api/v1/skills/sync", () => {
     ensureInitialized();
-    let names: string[] | undefined;
-    try {
-      const body = (await request.json()) as { names?: string[] } | null;
-      names = body?.names ?? undefined;
-    } catch {
-      names = undefined;
-    }
-    const targets =
-      names && names.length > 0
-        ? skillUpdates.filter((u) => names.includes(u.name))
-        : skillUpdates;
+    const targets = skillUpdates;
 
     for (const t of targets) {
       const existing = skills.find((s) => s.name === t.name);
@@ -270,10 +261,10 @@ export const settingsHandlers = [
         });
       }
     }
-    const targetNames = new Set(targets.map((t) => t.name));
-    skillUpdates = skillUpdates.filter((u) => !targetNames.has(u.name));
+    const updated = targets.length;
+    skillUpdates = [];
 
-    return HttpResponse.json({ status: "synced", updated: targets.length });
+    return HttpResponse.json({ status: "synced", updated });
   }),
 
   http.get("*/api/v1/skills/updates", () => {

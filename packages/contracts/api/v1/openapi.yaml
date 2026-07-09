@@ -1442,24 +1442,6 @@ components:
       required:
         - status
       type: object
-    SyncSkillsInput:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SyncSkillsInput.json
-          format: uri
-          readOnly: true
-          type: string
-        names:
-          description: Skill names to sync. Omitted or empty syncs every embedded built-in/flow skill (default behavior).
-          items:
-            type: string
-          type:
-            - array
-            - "null"
-      type: object
     TagList:
       additionalProperties: false
       properties:
@@ -3329,11 +3311,6 @@ paths:
   /skills/sync:
     post:
       operationId: sync-skills
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SyncSkillsInput"
       responses:
         "200":
           content:

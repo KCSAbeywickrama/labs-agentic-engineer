@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   Alert,
   Box,
@@ -41,6 +42,7 @@ import {
   useDeleteSkill,
   useSkillUpdates,
   useSkills,
+  useSyncSkills,
 } from "../api/queries";
 import {
   SKILL_GROUPS,
@@ -51,13 +53,19 @@ import {
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
 import { SkillViewerDialog } from "./SkillViewerDialog";
-import { SyncUpdatesPanel } from "./SyncUpdatesPanel";
+import { SyncUpdatesControl } from "./SyncUpdatesControl";
 
 type SkillSummary = components["schemas"]["SkillSummary"];
 
 export function SkillsSection() {
-  const { data: config, isLoading: configLoading } = useConfig();
-  const { data, isLoading, isError, error } = useSkills();
+  const {
+    data: config,
+    isLoading: configLoading,
+    isError: configIsError,
+    error: configError,
+    refetch: refetchConfig,
+  } = useConfig();
+  const { data, isLoading, isError, error, refetch } = useSkills();
   const { data: updates } = useSkillUpdates();
 
   const [importOpen, setImportOpen] = useState(false);
@@ -67,6 +75,7 @@ export function SkillsSection() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const deleteSkill = useDeleteSkill();
+  const syncSkills = useSyncSkills();
 
   if (configLoading) {
     return (
@@ -76,11 +85,33 @@ export function SkillsSection() {
     );
   }
 
+  // A failed GET /config leaves `config` undefined, which would otherwise fall
+  // through to the not-connected branch below and blame the user for a server
+  // error. Distinguish the two.
+  if (configIsError) {
+    return (
+      <Alert
+        severity="error"
+        action={<Button onClick={() => void refetchConfig()}>Retry</Button>}
+      >
+        {configError?.message ?? "Failed to load the organization configuration"}
+      </Alert>
+    );
+  }
+
   if (!config?.gitProvider) {
     return (
-      <Alert severity="info" icon={<FolderGit2 size={20} />}>
-        The skills catalogue lives in the org's GitHub repo — connect GitHub in
-        the Credentials tab first.
+      <Alert
+        severity="info"
+        icon={<FolderGit2 size={20} />}
+        action={
+          <Button component={Link} to="/settings/credentials">
+            Connect GitHub
+          </Button>
+        }
+      >
+        The skills catalogue lives in the org's GitHub repo — connect GitHub
+        first.
       </Alert>
     );
   }
@@ -95,7 +126,10 @@ export function SkillsSection() {
 
   if (isError || !data) {
     return (
-      <Alert severity="error">
+      <Alert
+        severity="error"
+        action={<Button onClick={() => void refetch()}>Retry</Button>}
+      >
         {error?.message ?? "Failed to load skills"}
       </Alert>
     );
@@ -103,6 +137,7 @@ export function SkillsSection() {
 
   const { skills, repoUrl } = data;
   const updatable = new Set((updates ?? []).map((u) => u.name));
+  const syncedCount = syncSkills.data?.updated ?? 0;
 
   // Client-side filter (issue #96 re-grill): the catalogue is fully loaded and
   // tens of skills at most — name, description, and kind all match.
@@ -135,8 +170,6 @@ export function SkillsSection() {
         extend them.
       </Typography>
 
-      <SyncUpdatesPanel updates={updates ?? []} />
-
       <Box
         sx={{
           display: "flex",
@@ -144,7 +177,7 @@ export function SkillsSection() {
           alignItems: "center",
           flexWrap: "wrap",
           gap: 1,
-          mb: 3,
+          mb: 2,
         }}
       >
         <Box sx={{ width: { xs: "100%", sm: 320 } }}>
@@ -154,14 +187,40 @@ export function SkillsSection() {
             placeholder="Search skills..."
           />
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<Upload size={18} />}
-          onClick={() => setImportOpen(true)}
+        <Box
+          sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
         >
-          Import
-        </Button>
+          <SyncUpdatesControl
+            count={updates?.length ?? 0}
+            pending={syncSkills.isPending}
+            onSync={() => syncSkills.mutate()}
+          />
+          <Button
+            variant="contained"
+            startIcon={<Upload size={18} />}
+            onClick={() => setImportOpen(true)}
+          >
+            Import
+          </Button>
+        </Box>
       </Box>
+
+      {syncSkills.isSuccess && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          onClose={() => syncSkills.reset()}
+        >
+          {syncedCount > 0
+            ? `Synced ${syncedCount} built-in skill${syncedCount === 1 ? "" : "s"} to the latest content.`
+            : "Built-in skills are already up to date."}
+        </Alert>
+      )}
+      {syncSkills.isError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => syncSkills.reset()}>
+          {syncSkills.error.message}
+        </Alert>
+      )}
 
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
         {grouped.map(({ kind, heading, blurb, rows }) => (
