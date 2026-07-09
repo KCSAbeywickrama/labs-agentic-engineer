@@ -410,6 +410,35 @@ export interface TaskProgressResponse {
   final: boolean;
 }
 
+// -- Task-log SSE stream (GET /projects/{p}/tasks/{n}/log) --------------------
+// One connection carries the Task's whole live state: a `task` frame (header),
+// an `execution` frame per attempt, and a `line` frame per timeline entry,
+// ending in `done` when the Task settles. Frame type is a `type` field IN the
+// JSON payload (the shared SSE parser keeps only `data:` lines), never an SSE
+// `event:` name. See docs/design/task-log-stream.md.
+
+/**
+ * One unified-timeline entry: a ProgressEvent plus the execution attempt it
+ * came from. The console renders one row per TimelineEvent and groups rows by
+ * executionId/executionKind — the identity that replaced the old per-execution
+ * log fetch.
+ */
+export interface TimelineEvent extends TaskProgressEvent {
+  executionId: string;
+  executionKind: string; // coding | build | ops
+}
+
+/**
+ * One SSE frame on the task-log stream, discriminated by `type`: `task` upserts
+ * the header (by issue), `execution` upserts an attempt (by id), `line` appends
+ * a timeline entry (deduped), `done` reports the settled status then closes.
+ */
+export type TaskStreamFrame =
+  | { type: "task"; task: TaskView }
+  | { type: "execution"; execution: ExecutionView }
+  | { type: "line"; line: TimelineEvent }
+  | { type: "done"; derivedStatus: TaskStatus };
+
 // -- Component Config (Environment Variables) ---------------------------------
 
 export interface EnvVar {
@@ -460,4 +489,33 @@ export interface Deployment {
   endpointUrl: string;
   createdAt: string;
   status: string;
+}
+
+// -- Project build (single-tag spec version + dev workflow) -------------------
+
+// POST /projects/{p}/build → the spec version tag the build runs for.
+export interface ProjectBuildResponse {
+  tag: string;
+}
+
+export type ProjectBuildState = 'started' | 'in_progress' | 'completed' | 'failed';
+
+export interface ProjectBuildTask {
+  issueNumber?: number; // links a build-status row to its issue + task-log stream
+  title: string;
+  status: ProjectBuildState;
+}
+
+// GET /projects/{p}/build/{tag} → live build progress.
+export interface ProjectBuildStatus {
+  status: ProjectBuildState;
+  workflow_status: string;
+  tasks?: ProjectBuildTask[] | null;
+}
+
+// GET /projects/{p}/tags → the spec version tag list.
+export interface TagList {
+  tags: string[] | null;
+  latest?: string;
+  specDirty?: boolean;
 }

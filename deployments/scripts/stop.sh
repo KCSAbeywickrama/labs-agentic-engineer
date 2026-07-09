@@ -27,6 +27,10 @@ echo "=== Stopping AEP Platform ==="
 echo "🛑 Stopping OpenBao port-forward..."
 pkill -f "port-forward.*openbao.*8200" 2>/dev/null && echo "   Stopped" || echo "   Not running"
 
+echo "🛑 Stopping Temporal port-forwards..."
+pkill -f "port-forward.*temporal-frontend.*7233" 2>/dev/null && echo "   Stopped frontend" || echo "   Frontend not running"
+pkill -f "port-forward.*temporal-frontend.*8233" 2>/dev/null && echo "   Stopped web" || echo "   Web not running"
+
 echo "🐳 Stopping Docker services..."
 cd "$DEPLOY_DIR"
 docker compose down

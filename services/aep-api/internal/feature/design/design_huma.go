@@ -113,40 +113,9 @@ func RegisterDesign(api huma.API, svc DesignService) {
 		return &designBundleOutput{Body: bundle}, nil
 	})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "save-design",
-		Method:      http.MethodPost,
-		Path:        "/projects/{projectName}/design/save",
-		Summary:     "Save the design and proceed",
-		Tags:        []string{"Design(Deprecated)"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *designSaveInput) (*designOutput, error) {
-		design, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName, in.commitSHA())
-		if err != nil {
-			slog.ErrorContext(ctx, "design save failed",
-				"project", in.ProjectName, "error", err)
-			if errors.Is(err, artifacts.ErrDesignNotFound) {
-				return nil, huma.Error404NotFound("design not found")
-			}
-			if errors.Is(err, ErrSpecNotApproved) {
-				return nil, huma.Error409Conflict("save requirements first — no v<N> baseline tag")
-			}
-			if errors.Is(err, ErrUnresolvedDependency) {
-				return nil, huma.Error409Conflict(err.Error())
-			}
-			if errors.Is(err, ErrEndUserAuthConflict) {
-				return nil, huma.Error409Conflict(err.Error())
-			}
-			if errors.Is(err, ErrResourceCatalogUnavailable) {
-				return nil, huma.Error503ServiceUnavailable(err.Error(), err)
-			}
-			if de := asDesignValidationError(err); de != nil {
-				return nil, de
-			}
-			return nil, huma.Error500InternalServerError("failed to save and proceed design")
-		}
-		return &designOutput{Body: design}, nil
-	})
+	// save-design is GONE from the public surface: the single-tag build flow
+	// (build-project) validates the whole spec and cuts the one v<N> tag —
+	// the legacy v<N>-<M> design-revision tags are no longer created.
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "collect-dependency-spec",

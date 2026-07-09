@@ -48,4 +48,11 @@ export type {
   TaskProgressEvent,
   TaskProgressResponse,
   TaskProgressKind,
+  TimelineEvent,
+  TaskStreamFrame,
+  ProjectBuildResponse,
+  ProjectBuildStatus,
+  ProjectBuildState,
+  ProjectBuildTask,
+  TagList,
 } from './types';

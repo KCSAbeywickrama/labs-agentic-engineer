@@ -54,11 +54,21 @@ const mod = "github.com/wso2/aep/aep-api"
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
 	"artifacts": {"gitrepo"},
+	// build is the public single-tag build surface (build-project /
+	// get-project-build). It deliberately composes the machinery it fronts:
+	// artifacts (SpecSaveResult + SpecValidationError — the 422 detail must
+	// survive errors.As across the port boundary), devflow (workflow name/id/
+	// status vocabulary + the Temporal runtime the runner wraps), task
+	// (TaskView for the status title join), gitrepo (typed repo errors).
+	// Heavy collaborators (SaveSpec, workflow_runs, repo lookup) stay behind
+	// consumer-side ports wired at the composition root.
+	"build": {"artifacts", "devflow", "gitrepo", "task"},
 	// codingagent is the funnel's one registered executor: it implements the
 	// execution.Executor port (hence the execution edge) and reaches every other
 	// service — identities, anthropic, repos, OC — through consumer ports wired
-	// at the composition root, so it holds no other feature edge.
-	"codingagent": {"execution"},
+	// at the composition root. It also holds the devflow signaler (nil-safe) so
+	// the coding/build/deploy watchers can signal a waiting TaskFlow workflow.
+	"codingagent": {"execution", "devflow"},
 	"component":   {"artifacts", "gitrepo"},
 	// dependencies is the dependency-management feature: the parent package (MCP
 	// discovery server + endpoints catalog) composes its own resources and
@@ -78,11 +88,17 @@ var featureEdgeAllowlist = map[string][]string{
 	// runtimeconfig edge below — both features read the same single source of
 	// truth for CRT markers rather than re-deriving the vocabulary.
 	"design": {"artifacts", "dependencies/resources"},
+	// devflow hosts the Temporal dev/task workflows + activities. Its activity
+	// ports are all devflow-local (the funnel/genai/plan/issue adapters live at
+	// the composition root), so it holds NO cross-feature edge — other features
+	// depend on IT (the signaler), never the reverse.
+	"devflow": {},
 	// execution is the platform-owned half of the Task/Execution split: it reads
-	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
-	// (artifacts). It NEVER imports feature/task — the §1 split is a package
-	// boundary (enforced by the absence of "task" here and below).
-	"execution":    {"artifacts", "gitrepo"},
+	// GitHub Task facts (gitrepo) and, on PR events, signals a waiting devflow
+	// TaskFlow workflow (devflow, nil-safe). Design at HEAD is read through a
+	// consumer-side port, not a direct artifacts import. It NEVER imports
+	// feature/task — the §1 split is a package boundary.
+	"execution":    {"gitrepo", "devflow"},
 	"files":        {"gitrepo"},
 	"genai":        {"gitrepo"},
 	"gitrepo":      {},

@@ -30,4 +30,11 @@ var steeringByUseCase = map[string]string{
 	useCaseDesignGenerate: "\n\nGenerate the design under specs/design/ from the approved requirements in specs/requirements/. Load every relevant skill in ONE loadSkill call, then emit files in EXACTLY this order: " +
 		"(1) a concise specs/design/design.md, (2) EVERY component's design.json — they drive the live architecture diagram, so all of them come before any other artifact, " +
 		"(3) wireframes.dsl per web app, (4) openapi.yaml per service LAST. The skills define each artifact.",
+	// useCaseGeneral is the no-useCase turn (the "useCase" field was omitted):
+	// a generic spec turn that is NOT scoped to requirements or design. The
+	// steering names neither flow — it only tells the model where the spec
+	// sources live so new files land on their full path, and lets the
+	// instruction alone decide what to touch.
+	useCaseGeneral: "\n\nApply the requested change to the spec bundle, or answer the question if no change is requested. " +
+		"Spec sources live under specs/ (requirements under specs/requirements/, design under specs/design/) — when creating a file that does not exist yet, always use its full path, never a bare filename.",
 }

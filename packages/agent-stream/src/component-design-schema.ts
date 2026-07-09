@@ -64,7 +64,12 @@ const dependencySchema = z.strictObject({
   specUrl: z.string().optional(),
   config: z.array(configKeySchema).optional(),
   resourceType: z.string().optional(),
-  parameters: z.record(z.string(), z.string()).optional(),
+  // Values are typed per the target (Cluster)ResourceType's OpenAPI v3 schema —
+  // e.g. postgres-cnpg declares `instances` as integer and `storage`/`version`
+  // as string, so parameters are mixed scalar types, not string-only. The map
+  // is marshalled verbatim into the OpenChoreo Resource spec.parameters, so a
+  // number must survive as a JSON number for CRD validation to pass.
+  parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   candidates: z.array(dependencyCandidateSchema).optional(),
 });
 

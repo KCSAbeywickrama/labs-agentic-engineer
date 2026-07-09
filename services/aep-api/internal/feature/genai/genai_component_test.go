@@ -490,7 +490,13 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 
 func (r *genaiRig) post(t *testing.T, uuid, useCase, instruction string) *httptest.ResponseRecorder {
 	t.Helper()
-	body, _ := json.Marshal(map[string]any{"useCase": useCase, "instruction": instruction})
+	// An empty useCase models the field being OMITTED (the generic turn), so it
+	// is left out of the body entirely rather than sent as "".
+	payload := map[string]any{"instruction": instruction}
+	if useCase != "" {
+		payload["useCase"] = useCase
+	}
+	body, _ := json.Marshal(payload)
 	return r.h.AsOrg(testOrg).Post(turnsPath(uuid), string(body))
 }
 
@@ -721,6 +727,75 @@ func Test202Flow_CommitLandsAndStreamReplays(t *testing.T) {
 	}
 }
 
+// TestGenericTurn_NoUseCase pins the no-useCase path: an OMITTED "useCase" runs
+// the internal general turn — generic steering (naming neither requirements nor
+// design), the `--general--` conversation namespace, the served general use
+// case — and, crucially, it COMMITS NOTHING: the fold streams for display but
+// main never advances.
+func TestGenericTurn_NoUseCase(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	baseRef := r.fx.Origin.HeadSHA(t)
+
+	// The agent proposes a design.md edit; the manifest vouches for it. A
+	// committing use case would land it — the general turn must not.
+	r.fake.parts = []string{
+		textPart("working"),
+		addFilePart("specs/design/design.md", "# Design\n"),
+	}
+	m := manifestPart(map[string]string{"specs/design/design.md": "# Design\n"}, nil)
+	r.fake.manifest = &m
+
+	// useCase "" → the post helper omits the field entirely.
+	turnID := r.startTurn(t, convUUID, "", "touch the design")
+	st := r.waitTerminal(t, turnID)
+
+	// Completes WITHOUT committing: reported like a no-op (base sha pinned).
+	if st.Status != "completed" || !st.NoChanges {
+		t.Fatalf("terminal = %+v, want completed with noChanges", st)
+	}
+	if st.UseCase != "general" {
+		t.Errorf("status useCase = %q, want general", st.UseCase)
+	}
+	if st.CommitSHA != baseRef {
+		t.Errorf("commitSha = %s, want base %s (no commit)", st.CommitSHA, baseRef)
+	}
+	// The strongest proof: origin main never advanced.
+	if head := r.fx.Origin.HeadSHA(t); head != baseRef {
+		t.Errorf("origin head advanced to %s — a generic turn must not commit", head)
+	}
+
+	// Dispatch still carries the general namespace + generic steering.
+	sent := r.fake.sentTurn(t, 0)
+	wantConv := "org_" + testOrg + "--proj_" + testProj + "--general--" + convUUID
+	if sent.req.Workspace.ConversationID != wantConv || !strings.Contains(sent.path, wantConv) {
+		t.Errorf("namespaced conversation = %q (path %q), want %q", sent.req.Workspace.ConversationID, sent.path, wantConv)
+	}
+	// Generic steering names the whole spec bundle, not a requirements/design flow.
+	if !strings.Contains(sent.req.Instruction, "spec bundle") {
+		t.Errorf("instruction missing generic steering: %q", sent.req.Instruction)
+	}
+	if strings.Contains(sent.req.Instruction, "requirements draft") {
+		t.Errorf("general turn leaked requirements-chat steering: %q", sent.req.Instruction)
+	}
+}
+
+// TestGenericTurn_NoDesignGate proves the general turn skips the design-generate
+// requirements gate: on a repo with no requirements content, a general turn is
+// accepted (202) where a design-generate turn is rejected (409).
+func TestGenericTurn_NoDesignGate(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"README.md": "no requirements yet\n"})
+	r.fake.parts = []string{textPart("ok")}
+	m := manifestPart(nil, nil)
+	r.fake.manifest = &m
+
+	if rec := r.post(t, convUUID, "design-generate", "design it"); rec.Code != http.StatusConflict {
+		t.Fatalf("design-generate on requirements-less repo: code %d, want 409 (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := r.post(t, "general-conv-uuid", "", "do something"); rec.Code != http.StatusAccepted {
+		t.Fatalf("general turn on requirements-less repo: code %d, want 202 (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 // TestManifestGate_MismatchSeveredEmpty pins the D14 outcomes: hash mismatch →
 // fold-parity (no commit); severed stream → stream-died (no commit); empty
 // manifest → completed noChanges (no commit).
@@ -892,21 +967,41 @@ func TestD18_OneActiveTurnPerProject(t *testing.T) {
 	}
 }
 
-// TestD19_DesignGateAndHeadRead pins the design gate: no requirements v-tag →
-// 409 requirements_not_approved and agents never dispatched; with a tag the
-// turn proceeds reading HEAD (not the tagged sha) and stamps SpecTag.
-func TestD19_DesignGateAndHeadRead(t *testing.T) {
-	t.Run("no tag → 409", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+// TestDesignGateAndHeadRead pins the single-tag-flow design gate: missing
+// requirements CONTENT → 409 requirements_missing and agents never
+// dispatched; content with NO tag proceeds (the build endpoint cuts the tag
+// AFTER design exists — requiring one here deadlocked new projects); with a
+// tag the turn reads HEAD (not the tagged sha) and stamps SpecTag.
+func TestDesignGateAndHeadRead(t *testing.T) {
+	t.Run("no requirements content → 409", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"README.md": "no requirements yet\n"})
 		rec := r.post(t, convUUID, "design-generate", "design it")
 		if rec.Code != http.StatusConflict {
-			t.Fatalf("no-tag design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
+			t.Fatalf("no-content design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), `"requirements_not_approved"`) {
+		if !strings.Contains(rec.Body.String(), `"requirements_missing"`) {
 			t.Errorf("409 body = %s", rec.Body.String())
 		}
 		if r.fake.turns(t) != 0 {
 			t.Error("agents dispatched despite failed gate")
+		}
+	})
+
+	t.Run("untagged requirements → proceeds with empty SpecTag", func(t *testing.T) {
+		// The deadlock-fix pin: a first-build project has requirements content
+		// but no v<N> tag yet — design generation MUST still start.
+		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r.fake.parts = []string{textPart("designing")}
+		m := manifestPart(nil, nil)
+		r.fake.manifest = &m
+
+		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
+		st := r.waitTerminal(t, turnID)
+		if st.Status != "completed" {
+			t.Fatalf("terminal = %+v", st)
+		}
+		if row := r.turns.row(t, turnID); row.SpecTag != "" {
+			t.Errorf("SpecTag = %q, want empty on a first build", row.SpecTag)
 		}
 	})
 

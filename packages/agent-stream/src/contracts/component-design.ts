@@ -120,8 +120,13 @@ export interface Dependency {
   config?: ConfigKey[];
   /** platform-resource: the registered (Cluster)ResourceType. */
   resourceType?: string;
-  /** platform-resource: provisioning parameters. */
-  parameters?: Record<string, string>;
+  /**
+   * platform-resource: provisioning parameters. Values are mixed scalar types
+   * per the target (Cluster)ResourceType schema (e.g. postgres-cnpg: `instances`
+   * is an integer, `storage`/`version` are strings), marshalled verbatim into
+   * the OpenChoreo Resource spec.parameters.
+   */
+  parameters?: Record<string, string | number | boolean>;
   /** resolution UI: options attached when the platform marks a dep ambiguous. */
   candidates?: DependencyCandidate[];
 }

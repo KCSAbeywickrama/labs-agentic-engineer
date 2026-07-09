@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
@@ -59,7 +60,7 @@ type HumaDeps struct {
 	TaskReads         *task.Reads
 	TaskCommands      *task.Commands
 	TaskPlan          *task.PlanService
-	ExecProgress      *execution.ProgressService
+	TaskStream        *execution.TaskStreamService
 	ComponentClient   openchoreo.ComponentClient
 	IDPSvc            idp.IDPService
 	CredentialSvc     *orgcreds.CredentialService
@@ -74,6 +75,7 @@ type HumaDeps struct {
 	FilesSvc          files.FilesService
 	ArtifactSvc       artifacts.ArtifactService
 	GenAISvc          genai.GenAIService
+	BuildSvc          *build.Service
 	GitHubAppSlug     string
 	BFFPublicURL      string
 	GitHubAppClientID string
@@ -92,12 +94,13 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	design.RegisterDesign(api, d.DesignSvc)
 	provisioning.RegisterResources(api, d.ProvisioningSvc)
 	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
-	execution.RegisterProgress(api, d.ExecProgress)
+	execution.RegisterTaskStream(api, d.TaskStream)
 	orgconfig.RegisterConfig(api, d.OrgConfigSvc)
 	skills.RegisterSkill(api, d.SkillSvc, d.SkillMutationSvc, d.SkillImportSvc)
 	files.RegisterFiles(api, d.FilesSvc)
 	artifacts.RegisterTags(api, d.ArtifactSvc)
 	genai.RegisterGenAI(api, d.GenAISvc)
+	build.RegisterBuild(api, d.BuildSvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)

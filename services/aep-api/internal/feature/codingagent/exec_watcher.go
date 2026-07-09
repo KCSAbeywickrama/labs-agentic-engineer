@@ -23,6 +23,8 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -62,6 +64,28 @@ type ExecWatcher struct {
 	// deployObserver is notified when a component deploys (build success), so the
 	// provisioning feature can grant pending cross-project access (nil → skipped).
 	deployObserver DeployObserver
+
+	// signaler feeds build + deploy terminals to a waiting devflow TaskFlow
+	// workflow. Nil-safe: a nil signaler is a no-op, so the watcher behaves
+	// exactly as before when no workflow is driving.
+	signaler *devflow.Signaler
+	// notifier wakes any attached task-log stream on a build/deploy terminal.
+	// Nil-safe.
+	notifier *execution.TaskStreamHub
+}
+
+// WithWorkflowSignaler wires the devflow signaler so build/deploy terminals
+// reach a waiting TaskFlow workflow. Optional. Returns the receiver.
+func (w *ExecWatcher) WithWorkflowSignaler(s *devflow.Signaler) *ExecWatcher {
+	w.signaler = s
+	return w
+}
+
+// WithTaskNotifier wires the task-log stream hub so build/deploy terminals wake
+// attached console streams instantly. Optional — nil-safe.
+func (w *ExecWatcher) WithTaskNotifier(h *execution.TaskStreamHub) *ExecWatcher {
+	w.notifier = h
+	return w
 }
 
 // NewExecWatcher wires the watcher. asService may be nil (tests); tick defaults
@@ -149,6 +173,14 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 			if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
 				slog.WarnContext(ctx, "exec watcher: finish coding failed", "execution", row.ID, "error", err)
 			}
+			// Tell any waiting TaskFlow workflow the coding attempt failed (success
+			// rides the PR-opened webhook, not this watcher).
+			w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigJobStatus, devflow.RunStatusSignal{
+				ExecutionID: row.ID,
+				Phase:       devflow.PhaseFailed,
+				Message:     workflowReason(run),
+			})
+			w.notifier.Notify(row.Repo, row.IssueNumber)
 		}
 		// A succeeded coding run rides the pull_request-opened webhook — no action.
 	case string(taskmeta.KindBuild):
@@ -163,6 +195,11 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 					slog.WarnContext(ctx, "exec watcher: reevaluate after build success failed", "error", rerr)
 				}
 			}
+			// The build succeeded — tell any waiting TaskFlow workflow.
+			w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigBuildStatus, devflow.RunStatusSignal{
+				ExecutionID: row.ID,
+				Phase:       devflow.PhaseSucceeded,
+			})
 			if w.deployObserver != nil {
 				// The component deployed — grant any pending cross-project access
 				// request targeting it (best-effort; the grant read no-ops otherwise).
@@ -170,6 +207,15 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 					slog.WarnContext(ctx, "exec watcher: deploy observer failed", "component", row.Component, "error", derr)
 				}
 			}
+			// Deploy is observed as part of build success in this topology (the
+			// build produces the ReleaseBinding that deploys). Signal deploy-ready
+			// keyed by the build row's issue — the one place the issue is known,
+			// so the TaskFlow workflow needs no component→issue resolution.
+			w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigDeployStatus, devflow.RunStatusSignal{
+				ExecutionID: row.ID,
+				Phase:       devflow.PhaseSucceeded,
+			})
+			w.notifier.Notify(row.Repo, row.IssueNumber)
 			return
 		}
 		w.reconcileBuildFailure(ctx, row, run)
@@ -187,6 +233,10 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Exe
 		if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
 			slog.WarnContext(ctx, "exec watcher: finish build failed", "execution", row.ID, "error", err)
 		}
+		w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigBuildStatus, devflow.RunStatusSignal{
+			ExecutionID: row.ID, Phase: devflow.PhaseFailed, Message: workflowReason(run),
+		})
+		w.notifier.Notify(row.Repo, row.IssueNumber)
 		return
 	}
 	attempt := parseBuildAuthRetryAttempt(row.Reason)
@@ -196,6 +246,10 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Exe
 		} else {
 			slog.WarnContext(ctx, "exec watcher: build git-auth retry budget exhausted", "execution", row.ID, "attempts", attempt, "budget", w.authBudget)
 		}
+		w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigBuildStatus, devflow.RunStatusSignal{
+			ExecutionID: row.ID, Phase: devflow.PhaseFailed, Message: buildAuthRetryExceededReason,
+		})
+		w.notifier.Notify(row.Repo, row.IssueNumber)
 		return
 	}
 	newRun, err := w.buildRetrier.RetryAuthFailedBuild(ctx, row)
