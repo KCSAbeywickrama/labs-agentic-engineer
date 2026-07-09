@@ -1,0 +1,104 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import {
+  Badge,
+  IconButton,
+  NotificationPanel,
+  Tooltip,
+  formatRelativeTime,
+  useAppShell,
+} from "@wso2/oxygen-ui";
+import { Bell } from "@wso2/oxygen-ui-icons-react";
+import { useNavigate } from "@tanstack/react-router";
+import { useRecentAlerts } from "../features/alerts/api/queries";
+import { useAlertsUnread } from "../features/alerts/hooks/useAlertsUnread";
+import { classificationLabel } from "../features/alerts/components/ClassificationChip";
+
+// Top-nav notification bell (#154) — global, read-only, client-tracked
+// unread state (no server read-state; see the issue's grilling decisions).
+// Must be a child of AppShell to reach useAppShell()'s panel toggle.
+export function NotificationButton() {
+  const { actions } = useAppShell();
+  const { data: reports = [] } = useRecentAlerts();
+  const { unreadCount, markAllSeen } = useAlertsUnread(reports);
+
+  return (
+    <Tooltip title="Alerts">
+      <IconButton
+        onClick={() => {
+          actions.toggleNotificationPanel();
+          markAllSeen();
+        }}
+        size="small"
+        sx={{ color: "text.secondary" }}
+        aria-label="Alerts"
+      >
+        <Badge badgeContent={unreadCount} color="error" max={99} invisible={unreadCount === 0}>
+          <Bell size={20} />
+        </Badge>
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+// Panel body — no per-item read state (the badge clears as a whole on open,
+// per #154's decision), so this only needs the report list itself.
+export function AlertsNotificationPanel() {
+  const navigate = useNavigate();
+  const { actions } = useAppShell();
+  const { data: reports = [], isPending } = useRecentAlerts();
+
+  const openAlert = (alertId: string) => {
+    // Close the overlay so it doesn't linger over the destination page.
+    actions.toggleNotificationPanel();
+    void navigate({ to: "/alerts/$alertId", params: { alertId } });
+  };
+
+  return (
+    <NotificationPanel>
+      <NotificationPanel.Header>
+        <NotificationPanel.HeaderIcon>
+          <Bell size={20} />
+        </NotificationPanel.HeaderIcon>
+        <NotificationPanel.HeaderTitle>Alerts</NotificationPanel.HeaderTitle>
+        <NotificationPanel.HeaderClose />
+      </NotificationPanel.Header>
+      {isPending || reports.length === 0 ? (
+        <NotificationPanel.EmptyState />
+      ) : (
+        <NotificationPanel.List>
+          {reports.map((report) => (
+            <NotificationPanel.Item key={report.id} id={report.id!} type="info" read>
+              <NotificationPanel.ItemTitle>{report.title}</NotificationPanel.ItemTitle>
+              <NotificationPanel.ItemMessage>
+                {report.project} · {classificationLabel(report.classification)}
+              </NotificationPanel.ItemMessage>
+              <NotificationPanel.ItemTimestamp>
+                {report.createdAt ? formatRelativeTime(new Date(report.createdAt)) : ""}
+              </NotificationPanel.ItemTimestamp>
+              <NotificationPanel.ItemAction onClick={() => openAlert(report.id!)}>
+                View
+              </NotificationPanel.ItemAction>
+            </NotificationPanel.Item>
+          ))}
+        </NotificationPanel.List>
+      )}
+    </NotificationPanel>
+  );
+}
