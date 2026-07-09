@@ -19,14 +19,9 @@ package execution
 import (
 	"context"
 	"errors"
-	"net/http"
-	"strconv"
-
-	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
-	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -49,14 +44,6 @@ type OCProgress interface {
 	GetWorkflowRun(ctx context.Context, orgName, runName string) (*models.WorkflowRun, error)
 }
 
-// LatestExecutionResolver resolves a Task's newest execution row — the
-// default source for the task log when no executionId is pinned. Wired at the
-// composition root over the repo row + executions store; execution never
-// imports feature/task (§1 split).
-type LatestExecutionResolver interface {
-	LatestByIssue(ctx context.Context, orgID, projectID string, issueNumber int) (*models.Execution, error)
-}
-
 // CodingProgress serves a coding execution's live activity — the ca-… pod-log
 // tail while the Job runs, or the captured coding_agent_logs snapshot once
 // terminal — as progress events. Wired from codingagent at the composition root
@@ -66,17 +53,18 @@ type CodingProgress interface {
 	AgentProgress(ctx context.Context, row *models.Execution, sinceMillis int64) (*contracts.ProgressResponse, error)
 }
 
-// ProgressService serves the unified progress endpoint keyed by execution id
-// (§9.1): the kind selects the source — build reads the WorkflowRun's step
-// deltas; coding surfaces the runner's activity via the CodingProgress source
-// (live pod-log tail while running, captured coding_agent_logs snapshot once
+// ProgressService derives one execution's progress lines keyed by execution id:
+// the kind selects the source — build reads the WorkflowRun's step deltas;
+// coding surfaces the runner's activity via the CodingProgress source (live
+// pod-log tail while running, captured coding_agent_logs snapshot once
 // terminal). A nil codingProgress degrades the coding branch to terminal-ness
-// only.
+// only. It is the per-execution line source the task-log SSE stream
+// (task_stream.go) walks across every attempt — no longer an HTTP handler of
+// its own (the cursor-poll endpoint it once backed is retired).
 type ProgressService struct {
 	execs          ExecutionLookup
 	oc             OCProgress
 	codingProgress CodingProgress
-	latest         LatestExecutionResolver
 }
 
 // NewProgressService wires the progress reader.
@@ -90,32 +78,6 @@ func NewProgressService(execs ExecutionLookup, oc OCProgress) *ProgressService {
 func (s *ProgressService) WithCodingProgress(cp CodingProgress) *ProgressService {
 	s.codingProgress = cp
 	return s
-}
-
-// WithLatestExecutions attaches the default-execution resolver for the
-// issue-keyed task log. nil-safe: unset, an unpinned log read answers 404.
-func (s *ProgressService) WithLatestExecutions(r LatestExecutionResolver) *ProgressService {
-	s.latest = r
-	return s
-}
-
-// GetTaskLog returns the progress feed for a Task: the pinned execution when
-// executionID is set (history browsing), else the Task's newest execution.
-func (s *ProgressService) GetTaskLog(ctx context.Context, orgHandle, projectName string, issueNumber int, executionID string, sinceMillis int64) (*contracts.ProgressResponse, error) {
-	if executionID == "" {
-		if s.latest == nil {
-			return nil, ErrExecutionNotFound
-		}
-		row, err := s.latest.LatestByIssue(ctx, orgHandle, projectName, issueNumber)
-		if err != nil {
-			return nil, err
-		}
-		if row == nil {
-			return nil, ErrExecutionNotFound
-		}
-		executionID = row.ID
-	}
-	return s.GetProgress(ctx, orgHandle, executionID, sinceMillis)
 }
 
 // GetProgress returns the progress for one execution, fenced to orgHandle.
@@ -171,42 +133,4 @@ func buildStepEvents(run *models.WorkflowRun) []contracts.ProgressEvent {
 		})
 	}
 	return out
-}
-
-type progressInput struct {
-	humakit.OrgScopedInput
-	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
-	IssueNumber int64  `path:"issueNumber" doc:"GitHub issue number of the Task"`
-	ExecutionID string `query:"executionId" doc:"Execution id to read (defaults to the Task's most recent execution)"`
-	SinceMillis string `query:"sinceMillis" doc:"Cursor: only lines after this epoch-millis (0 ⇒ initial load)"`
-}
-
-type progressOutput struct{ Body *contracts.ProgressResponse }
-
-// RegisterProgress registers the Task-keyed log endpoint on the public Huma
-// API (contract: GET /projects/{p}/tasks/{issueNumber}/log — the rename of
-// the old /executions/{executionId}/progress; the execution stays selectable
-// via the optional executionId query for history browsing).
-func RegisterProgress(api huma.API, svc *ProgressService) {
-	huma.Register(api, huma.Operation{
-		OperationID: "get-execution-progress",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/tasks/{issueNumber}/log",
-		Summary:     "Poll an Execution's progress (build steps / coding status)",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *progressInput) (*progressOutput, error) {
-		if svc == nil {
-			return nil, huma.Error503ServiceUnavailable("progress not configured")
-		}
-		sinceMillis, _ := strconv.ParseInt(in.SinceMillis, 10, 64)
-		resp, err := svc.GetTaskLog(ctx, in.OrgHandle, in.ProjectName, int(in.IssueNumber), in.ExecutionID, sinceMillis)
-		if err != nil {
-			if errors.Is(err, ErrExecutionNotFound) {
-				return nil, huma.Error404NotFound("execution not found")
-			}
-			return nil, huma.Error500InternalServerError("progress failed")
-		}
-		return &progressOutput{Body: resp}, nil
-	})
 }

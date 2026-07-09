@@ -48,6 +48,12 @@ const (
 	useCaseRequirementsGenerate = "requirements-generate"
 	useCaseRequirementsChat     = "requirements-chat"
 	useCaseDesignGenerate       = "design-generate"
+	// useCaseGeneral is the INTERNAL use case a turn runs under when the client
+	// omits "useCase" — a generic spec turn with generic steering, a generic
+	// commit message, and no requirements/design gating. It is not a client
+	// value (absent from validUseCases): the edge reaches it only by normalizing
+	// an absent field, so the wire enum stays the three real flows.
+	useCaseGeneral = "general"
 )
 
 var validUseCases = map[string]bool{
@@ -270,8 +276,16 @@ func NewService(d ServiceDeps) GenAIService {
 }
 
 func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in TurnInput) (string, error) {
-	if !validUseCases[in.UseCase] {
+	// useCase is optional. An ABSENT value runs the generic turn (useCaseGeneral):
+	// generic steering + commit message, no requirements/design gate. A PRESENT
+	// value must be one of the three real flows (the wire enum already fences
+	// HTTP callers; this guards direct service/test callers too).
+	if in.UseCase != "" && !validUseCases[in.UseCase] {
 		return "", ErrInvalidUseCase
+	}
+	useCase := in.UseCase
+	if useCase == "" {
+		useCase = useCaseGeneral
 	}
 	if !validConversationID(in.ConversationID) {
 		return "", ErrInvalidConversationID
@@ -329,7 +343,7 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// build endpoint cuts the tag AFTER the design exists, so requiring one
 	// here deadlocked every new project. The latest v<N>, when one exists,
 	// still stamps the turn's lineage specTag ("" on a first build).
-	if in.UseCase == useCaseDesignGenerate {
+	if useCase == useCaseDesignGenerate {
 		if err := s.requireRequirementsContent(ctx, ref, baseRef); err != nil {
 			return "", err
 		}
@@ -363,7 +377,7 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		OrgID:          orgID,
 		ProjectID:      projectID,
 		ConversationID: in.ConversationID,
-		UseCase:        in.UseCase,
+		UseCase:        useCase,
 		BaseRef:        baseRef,
 		SkillsRef:      skillsRef,
 		Status:         turnStatusRunning,
@@ -381,10 +395,10 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		turnID:           row.ID,
 		orgID:            orgID,
 		projectID:        projectID,
-		useCase:          in.UseCase,
+		useCase:          useCase,
 		conversationID:   in.ConversationID,
-		nsConversationID: namespacedID(repo, in.UseCase, in.ConversationID),
-		instruction:      in.Instruction + steeringByUseCase[in.UseCase] + targetSuffix(in.Target),
+		nsConversationID: namespacedID(repo, useCase, in.ConversationID),
+		instruction:      in.Instruction + steeringByUseCase[useCase] + targetSuffix(in.Target),
 		summary:          in.Instruction,
 		repoRef:          ref,
 		baseRef:          baseRef,
