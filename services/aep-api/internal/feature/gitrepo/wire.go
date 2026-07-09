@@ -47,12 +47,16 @@ type CreateOrgRepoRequest struct {
 //
 // DedupeKey is aep-api-only and never reaches GitHub (issueService clears it
 // before the GitHub call; omitempty keeps it off the wire). When set, issue
-// creation is idempotent per open issue: the key becomes a `dedupe:<key>`
-// label, and if an OPEN issue carrying that label already exists the existing
-// issue is returned instead of creating a duplicate. This is the correctness
-// layer for callers that may fire concurrently for one incident (e.g. the
-// OpenChoreo SRE/RCA handoff, one run per alert rule) — they pass a stable
-// key like `sre-rca/<component>` so only the first run files an issue.
+// creation is idempotent per open issue: the key is normalised into a
+// `dedupe:<normalised-key>` label (lowercased, whitespace runs collapsed to
+// "-", then truncated to GitHub's 50-char label limit — see dedupeLabelFor in
+// issue_service.go), and if an OPEN issue carrying that label already exists
+// the existing issue is returned instead of creating a duplicate. Because the
+// label is a lossy transform of the raw key, callers cannot reconstruct the
+// exact label name from the key alone. This is the correctness layer for
+// callers that may fire concurrently for one incident (e.g. the OpenChoreo
+// SRE/RCA handoff, one run per alert rule) — they pass a stable key like
+// `sre-rca/<component>` so only the first run files an issue.
 type CreateIssueRequest struct {
 	Title     string   `json:"title"`
 	Body      string   `json:"body"`

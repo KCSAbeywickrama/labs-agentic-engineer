@@ -76,8 +76,12 @@ app.post("/mcp", async (req, res) => {
     await server.connect(transport as unknown as Transport);
     await transport.handleRequest(req, res, req.body);
   } catch (err) {
+    // Log the full error server-side (stack, upstream message, URLs) but never
+    // return it to the caller — the raw detail can leak internal information.
+    // The client gets a generic 500 only.
+    process.stderr.write(`mcp request failed: ${String(err)}\n`);
     if (!res.headersSent) {
-      res.status(500).json({ error: `internal error: ${String(err)}` });
+      res.status(500).json({ error: "internal error" });
     }
   }
 });

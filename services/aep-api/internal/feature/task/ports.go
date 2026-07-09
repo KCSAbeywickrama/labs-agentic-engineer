@@ -37,6 +37,9 @@ import (
 type IssueClient interface {
 	CreateIssue(ctx context.Context, orgID, projectID string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error)
 	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]gitrepo.IssueInfo, error)
+	// GetIssue fetches one issue by number (O(1)); returns gitrepo.ErrIssueNotFound
+	// when it doesn't exist. Preferred over ListIssues when the number is known.
+	GetIssue(ctx context.Context, orgID, projectID string, number int) (*gitrepo.IssueInfo, error)
 	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
 	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
 	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error

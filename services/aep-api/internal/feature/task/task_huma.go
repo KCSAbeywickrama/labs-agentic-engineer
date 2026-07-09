@@ -264,6 +264,8 @@ func mapCommandError(err error) error {
 		return huma.Error404NotFound(ErrProjectRepoNotFound.Error())
 	case errors.Is(err, ErrIssueClosed):
 		return huma.Error409Conflict("issue is closed")
+	case errors.Is(err, ErrComponentNameRequired):
+		return huma.Error400BadRequest(ErrComponentNameRequired.Error())
 	default:
 		return huma.Error500InternalServerError("internal error")
 	}

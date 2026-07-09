@@ -92,6 +92,44 @@ func TestCommands_PromoteAndExecute_UnknownComponent_FailsSynchronously(t *testi
 	}
 }
 
+func TestCommands_PromoteAndExecute_BlankComponent_ReturnsComponentNameRequired(t *testing.T) {
+	issues := newFakeIssues()
+	issues.seed(adHocIssue(46))
+	disp := newFakeDispatcher()
+	ensurer := &fakeComponentEnsurer{}
+
+	err := newCommandsWithEnsurer(issues, disp, ensurer).PromoteAndExecute(
+		context.Background(), "org1", "proj1", "  ", 46)
+
+	// A client input error (mapped to 400 at the edge), not a generic failure —
+	// and caught before the pre-check or any issue mutation.
+	if !errors.Is(err, ErrComponentNameRequired) {
+		t.Fatalf("expected ErrComponentNameRequired, got %v", err)
+	}
+	if ensurer.callCount() != 0 {
+		t.Errorf("pre-check should not run for a blank component, got %d calls", ensurer.callCount())
+	}
+	if got := disp.executed(); len(got) != 0 {
+		t.Errorf("dispatcher should never be reached, got %v", got)
+	}
+}
+
+func TestCommands_PromoteAndExecute_UnknownIssue_ReturnsTaskNotFound(t *testing.T) {
+	issues := newFakeIssues() // nothing seeded → GetIssue returns ErrIssueNotFound
+	disp := newFakeDispatcher()
+	ensurer := &fakeComponentEnsurer{}
+
+	err := newCommandsWithEnsurer(issues, disp, ensurer).PromoteAndExecute(
+		context.Background(), "org1", "proj1", "service1", 404)
+
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound for a missing issue, got %v", err)
+	}
+	if got := disp.executed(); len(got) != 0 {
+		t.Errorf("dispatcher should never be reached, got %v", got)
+	}
+}
+
 func TestCommands_PromoteAndExecute_KnownComponent_PromotesAndDispatches(t *testing.T) {
 	issues := newFakeIssues()
 	issues.seed(adHocIssue(43))

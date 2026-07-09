@@ -48,6 +48,10 @@ var (
 	// ErrIssueClosed is returned when execute is requested on a closed issue
 	// (closed = no new dispatches, §4). Mapped to 409.
 	ErrIssueClosed = errors.New("issue is closed")
+	// ErrComponentNameRequired is returned by PromoteAndExecute when the caller
+	// omits the component name — a client input error, not a server fault, so
+	// the HTTP edge maps it to 400 rather than a generic 500.
+	ErrComponentNameRequired = errors.New("componentName is required")
 	// ErrNoAnthropicKey is returned pre-stream when the org has no Anthropic key.
 	// Mapped to 400.
 	ErrNoAnthropicKey = errors.New("organization has no Anthropic API key configured")

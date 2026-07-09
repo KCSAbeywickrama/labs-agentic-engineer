@@ -83,6 +83,15 @@ func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, want []string) (
 	}
 	return out, nil
 }
+func (f *fakeIssues) GetIssue(_ context.Context, _, _ string, n int) (*gitrepo.IssueInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := f.byNum[n]; i != nil {
+		cp := *i
+		return &cp, nil
+	}
+	return nil, gitrepo.ErrIssueNotFound
+}
 func (f *fakeIssues) CommentIssue(context.Context, string, string, int, string) error { return nil }
 func (f *fakeIssues) EditIssueBody(context.Context, string, string, int, string) error {
 	return nil

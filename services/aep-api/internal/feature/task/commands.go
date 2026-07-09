@@ -119,7 +119,7 @@ func (c *Commands) Unhold(ctx context.Context, orgID, projectID string, issueNum
 // the existing block/labels are left alone and this just re-issues Execute.
 func (c *Commands) PromoteAndExecute(ctx context.Context, orgID, projectID, componentName string, issueNumber int) error {
 	if strings.TrimSpace(componentName) == "" {
-		return fmt.Errorf("promote task from issue: componentName is required")
+		return ErrComponentNameRequired
 	}
 	if c.components != nil {
 		if err := c.components.EnsureComponent(ctx, orgID, projectID, componentName); err != nil {
@@ -127,19 +127,15 @@ func (c *Commands) PromoteAndExecute(ctx context.Context, orgID, projectID, comp
 		}
 	}
 
-	issues, err := c.issues.ListIssues(ctx, orgID, projectID, nil)
+	// Fetch the one issue by number (O(1)) rather than paging the whole repo —
+	// ListIssues stops at 100, so a scan would silently miss issues beyond that
+	// on a busy repo.
+	issue, err := c.issues.GetIssue(ctx, orgID, projectID, issueNumber)
 	if err != nil {
-		return fmt.Errorf("promote task from issue: list issues: %w", err)
-	}
-	var issue *gitrepo.IssueInfo
-	for i := range issues {
-		if issues[i].Number == issueNumber {
-			issue = &issues[i]
-			break
+		if errors.Is(err, gitrepo.ErrIssueNotFound) {
+			return ErrTaskNotFound
 		}
-	}
-	if issue == nil {
-		return ErrTaskNotFound
+		return fmt.Errorf("promote task from issue: get issue: %w", err)
 	}
 
 	if _, parseErr := taskmeta.ParseBlock(issue.Body); parseErr != nil {

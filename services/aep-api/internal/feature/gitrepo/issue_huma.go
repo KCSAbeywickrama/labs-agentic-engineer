@@ -46,7 +46,7 @@ type listIssuesInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
 	Labels      string `query:"labels" doc:"Comma-separated GitHub labels to filter by"`
-	Query       string `query:"q" doc:"Case-insensitive substring match against issue title/body, applied client-side after the GitHub label filter — used to dedup/find related issues before filing a new one"`
+	Query       string `query:"q" doc:"Keyword search over issue title/body, applied client-side after the GitHub label filter. The query is lowercased and tokenised (split on non-alphanumeric boundaries; stopwords and tokens shorter than 3 chars dropped), and issues are ranked by how many DISTINCT query terms they contain (title matches weighted double). Highest-scoring first, capped at 25; a non-overlapping query returns nothing, an empty/all-stopword query returns all. Optimised for recall — used to surface related issues before filing a new one."`
 }
 
 type issueOutput struct{ Body *IssueResult }
