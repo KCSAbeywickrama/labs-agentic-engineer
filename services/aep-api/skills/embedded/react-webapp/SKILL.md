@@ -109,7 +109,35 @@ Project layout (Vite + TS):
 └── Dockerfile
 ```
 
-`index.html` — `<script src="/env-config.js">` is **synchronous**,
+#### Subpath-aware build — REQUIRED
+
+The platform serves every web-app under a gateway **subpath**, not a host
+root: `https://<gateway>/<project>-<component>-<endpointName>/` (the
+endpoint you declared in `workload.yaml`, which for the HTTP endpoint MUST
+be named `http` — so the path is `/<project>-<component>-http/`). The
+gateway strips that prefix back to `/` for nginx, but the browser reads the
+asset URLs out of your `index.html` and requests them at the gateway root,
+so **any absolute `/asset` reference 404s and the page renders blank.**
+Build the SPA base-aware:
+
+- **`vite.config.ts`** — set `base` to the deploy subpath so Vite emits
+  base-prefixed asset URLs:
+  `base: "/<project>-<component>-http/"` (leading + trailing slash).
+- **`index.html`** — load env-config **relative**: `<script src="./env-config.js">`
+  (NOT `/env-config.js`), so it resolves under the base.
+- **react-router** — set the router `basename` to the same subpath:
+  `<BrowserRouter basename={import.meta.env.BASE_URL}>` so routes (incl.
+  `/callback`) match.
+- **OAuth `redirect_uri`** (if a thunder-app dep) — derive it from the base,
+  `window.location.origin + import.meta.env.BASE_URL + "callback"`, because
+  the platform registers the callback as `<spaOrigin>/callback` under the
+  subpath — a root `origin + "/callback"` will not match.
+- **`src/vite-env.d.ts`** — must exist with `/// <reference types="vite/client" />`
+  (it does in a stock `npm create vite` project). Without it, `import.meta.env`
+  is untyped and `tsc` fails the build with `TS2339: Property 'env' does not
+  exist on type 'ImportMeta'`.
+
+`index.html` — `<script src="./env-config.js">` is **synchronous**,
 BEFORE the bundle. No `async`, no `defer`, no `type="module"` on this
 tag. This guarantees `window._env_` is populated before any ES module
 evaluates.
@@ -120,7 +148,7 @@ evaluates.
   <head>
     <meta charset="utf-8" />
     <title>App</title>
-    <script src="/env-config.js"></script>
+    <script src="./env-config.js"></script>
   </head>
   <body>
     <div id="root"></div>

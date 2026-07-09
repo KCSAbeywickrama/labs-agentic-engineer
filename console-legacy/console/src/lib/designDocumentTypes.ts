@@ -157,7 +157,7 @@ export function componentOpenApiPath(name: string): string {
  */
 export function defaultComponentDesignMd(opts: {
   name: string;
-  type: 'service' | 'web-app';
+  type: 'service' | 'web-application';
   language: string;
 }): string {
   const { name, type, language } = opts;
