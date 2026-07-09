@@ -1721,7 +1721,7 @@ components:
           description: Optional target (e.g. a doc type)
           type: string
         useCase:
-          description: Which generation/chat flow
+          description: Which generation/chat flow. Omit to run a generic spec turn.
           enum:
             - requirements-generate
             - requirements-chat

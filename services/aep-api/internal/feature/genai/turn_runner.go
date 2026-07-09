@@ -293,6 +293,14 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		// terminal still carries the base sha as the "content as of" pin.
 		return TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}
 	}
+	if job.useCase == useCaseGeneral {
+		// The generic turn (no useCase) is conversational/preview-only: its file
+		// mutations stream to the client for display via the fold, but NOTHING is
+		// committed to main. A non-empty fold is reported like a no-op completion
+		// (base sha pinned, noChanges), so a refetch on the terminal reconciles
+		// the live preview back to the unchanged tree.
+		return TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}
+	}
 	return s.commitFold(ctx, job, fold)
 }
 
@@ -427,7 +435,8 @@ func (s *service) turnBaseReader(ref gitrepo.RepoRef, baseRef string) agentfold.
 
 // commitMessage renders the D20 conventional message:
 // generate(requirements|design)/chat(requirements): <first line of the user
-// instruction, truncated>.
+// instruction, truncated>. The generic turn (useCaseGeneral) never commits, so
+// it is deliberately absent here.
 func commitMessage(useCase, summary string) string {
 	verb := "generate"
 	scope := "requirements"
