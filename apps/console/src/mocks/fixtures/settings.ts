@@ -53,14 +53,6 @@ export const importWarningsFixture = [
 // envelope repoUrl — powers the Import dialog's via-pull-request guidance).
 export const skillsRepoUrl = "https://github.com/acme-dev/org-skills";
 
-export const importUrlInvalidError: ErrorModel = {
-  type: "about:blank",
-  status: 422,
-  title: "Unprocessable Entity",
-  detail:
-    "body.url: the URL did not yield a valid skill (expected a raw SKILL.md or a gzip AgentSkills tarball)",
-};
-
 export const importFileInvalidError: ErrorModel = {
   type: "about:blank",
   status: 422,

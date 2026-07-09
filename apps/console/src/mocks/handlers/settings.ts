@@ -26,7 +26,6 @@ import {
   IMPORT_INVALID_SENTINEL,
   IMPORT_WARN_SENTINEL,
   importFileInvalidError,
-  importUrlInvalidError,
   importWarningsFixture,
   INVALID_CREDENTIAL_VALUE,
   llmConnectedFixture,
@@ -234,19 +233,6 @@ export const settingsHandlers = [
     return HttpResponse.json(importSkill(name, "an AgentSkills tarball"), {
       status: 201,
     });
-  }),
-
-  http.post("*/api/v1/skills/import-url", async ({ request }) => {
-    ensureInitialized();
-    const body = (await request.json()) as { url?: string } | null;
-    const url = body?.url ?? "";
-    if (!url || url.includes(IMPORT_INVALID_SENTINEL)) {
-      return problem(importUrlInvalidError, 422);
-    }
-    const basename = url.split("/").pop() ?? "";
-    const name =
-      slugFromFileName(basename) || `imported-skill-${skills.length + 1}`;
-    return HttpResponse.json(importSkill(name, url), { status: 201 });
   }),
 
   http.post("*/api/v1/skills/sync", async ({ request }) => {

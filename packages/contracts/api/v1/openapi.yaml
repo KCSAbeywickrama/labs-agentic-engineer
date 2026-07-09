@@ -942,23 +942,6 @@ components:
         - kind
         - warnings
       type: object
-    ImportSkillUrlInput:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ImportSkillUrlInput.json
-          format: uri
-          readOnly: true
-          type: string
-        url:
-          description: Direct file URL — a raw SKILL.md or a gzip-compressed AgentSkills tarball. Fetched server-side.
-          format: uri
-          type: string
-      required:
-        - url
-      type: object
     LLMProjection:
       additionalProperties: false
       properties:
@@ -3341,33 +3324,6 @@ paths:
       security:
         - userJWT: []
       summary: Import an AgentSkills tarball
-      tags:
-        - Skills
-  /skills/import-url:
-    post:
-      operationId: import-skill-url
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ImportSkillUrlInput"
-        required: true
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ImportResult"
-          description: Created
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Import a skill from a URL
       tags:
         - Skills
   /skills/sync:

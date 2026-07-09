@@ -257,26 +257,6 @@ export function useImportSkill() {
   });
 }
 
-// Server-side fetch of a direct file URL (raw SKILL.md or tarball) — the
-// BE fetches so the browser never hits CORS (issue #96 re-grill decision).
-export function useImportSkillUrl() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (url: string) => {
-      const { data, error } = await client.POST("/skills/import-url", {
-        body: { url },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to import from the URL"));
-      }
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-    },
-  });
-}
-
 export function useSyncSkills() {
   const queryClient = useQueryClient();
   return useMutation({
