@@ -36,6 +36,7 @@ import {
   skillsLoadError,
   skillsRepoUrl,
   type SettingsScenario,
+  type SkillRecord,
 } from "../fixtures/settings";
 
 type ConfigPatch = components["schemas"]["ConfigPatch"];
@@ -66,7 +67,7 @@ function problem(body: object, status: number) {
 // handlers/projects.ts's createdProjects pattern.
 let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
-let skills: SkillDetailBody[] = [];
+let skills: SkillRecord[] = [];
 let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
 
@@ -81,7 +82,7 @@ function ensureInitialized() {
   skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
 }
 
-function toSummary(s: SkillDetailBody): SkillSummary {
+function toSummary(s: SkillRecord): SkillSummary {
   return {
     name: s.name,
     kind: s.kind,
@@ -90,6 +91,13 @@ function toSummary(s: SkillDetailBody): SkillSummary {
     contentSha: s.contentSha,
     editable: s.editable,
   };
+}
+
+// The contract's SkillDetailBody has no `version` field, so strip the
+// mock-only tracking field before returning it over the wire.
+function toDetail(s: SkillRecord): SkillDetailBody {
+  const { version: _version, ...detail } = s;
+  return detail;
 }
 
 function extractDescription(skillMd: string): string {
@@ -317,20 +325,20 @@ export const settingsHandlers = [
         409,
       );
     }
-    const created: SkillDetailBody = {
+    const created: SkillRecord = {
       orgId: "org-1",
       name: body.name,
       kind: "custom",
       editable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
-      references: body.references,
+      references: body.references ?? {},
       version: 1,
       contentSha: `sha-${body.name}-1`,
       updatedAt: new Date().toISOString(),
     };
     skills.push(created);
-    return HttpResponse.json(created, { status: 201 });
+    return HttpResponse.json(toDetail(created), { status: 201 });
   }),
 
   http.get("*/api/v1/skills/:name", ({ params }) => {
@@ -347,7 +355,7 @@ export const settingsHandlers = [
         404,
       );
     }
-    return HttpResponse.json(skill);
+    return HttpResponse.json(toDetail(skill));
   }),
 
   http.put("*/api/v1/skills/:name", async ({ params, request }) => {
@@ -366,11 +374,11 @@ export const settingsHandlers = [
     }
     const body = (await request.json()) as UpdateSkillInput;
     skill.skillMd = body.skillMd;
-    skill.references = body.references;
+    skill.references = body.references ?? {};
     skill.description = extractDescription(body.skillMd);
     skill.version += 1;
     skill.updatedAt = new Date().toISOString();
-    return HttpResponse.json(skill);
+    return HttpResponse.json(toDetail(skill));
   }),
 
   http.delete("*/api/v1/skills/:name", ({ params }) => {

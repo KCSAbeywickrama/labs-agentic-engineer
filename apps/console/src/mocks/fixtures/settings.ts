@@ -24,6 +24,12 @@ type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
+// Mock-only state record. The contract's SkillDetailBody has no `version`
+// (only SkillSummary does), but the mock needs to track a version per skill
+// to build summaries and bump it on import/update/sync. This internal type
+// carries it; handlers strip it before returning a SkillDetailBody.
+export type SkillRecord = SkillDetailBody & { version: number };
+
 // Scenario switch for the Settings feature (#96). Toggle in devtools:
 //   localStorage.setItem('aep:mock:settings', 'empty' | 'connected' | 'error')
 // "empty": nothing connected yet (the default — exercises the not-connected
@@ -127,7 +133,7 @@ export const skillsLoadError: ErrorModel = {
 
 // Two built-ins, one flow skill, one custom (editable) — enough spread to
 // exercise editable/read-only rendering and the updates-available list.
-export const seedSkills: SkillDetailBody[] = [
+export const seedSkills: SkillRecord[] = [
   {
     orgId: "org-1",
     name: "high-level-architecture",
