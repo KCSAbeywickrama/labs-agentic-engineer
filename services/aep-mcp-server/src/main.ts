@@ -43,7 +43,9 @@ app.use(express.json());
 app.get("/healthz", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
-
+// TODO: We have Two MCP servers, one for the AEP API and one for the AEP coding agent.
+// The coding agent's MCP server is used by the coding agent to communicate with the AEP API. 
+// We should consider merging these two servers into one.
 app.post("/mcp", async (req, res) => {
   const bearer = req.headers.authorization;
   if (!bearer) {
