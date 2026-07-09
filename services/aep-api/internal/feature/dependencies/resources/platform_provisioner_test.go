@@ -34,7 +34,7 @@ import (
 func TestBuildPlatformResource_ReferencesClusterResourceType(t *testing.T) {
 	t.Parallel()
 
-	r := BuildPlatformResource("shop", "maindb", "postgres-cnpg", map[string]string{"version": "16"})
+	r := BuildPlatformResource("shop", "maindb", "postgres-cnpg", map[string]any{"version": "16"})
 	if r.Spec.Type.Kind != "ClusterResourceType" || r.Spec.Type.Name != "postgres-cnpg" {
 		t.Fatalf("type ref: %+v", r.Spec.Type)
 	}
@@ -51,6 +51,48 @@ func TestBuildPlatformResource_ReferencesClusterResourceType(t *testing.T) {
 	}
 }
 
+func TestCoerceParams(t *testing.T) {
+	t.Parallel()
+
+	// postgres-cnpg: instances is integer, storage/version are strings. The
+	// integer must be coerced off its string form or the ResourceRelease
+	// admission webhook rejects it.
+	pgTypes := map[string]string{"instances": "integer", "storage": "string", "version": "string"}
+	got := coerceParams(map[string]string{"instances": "1", "storage": "1Gi", "version": "16"}, pgTypes)
+	if got["instances"] != 1 {
+		t.Fatalf("instances: want int 1, got %#v", got["instances"])
+	}
+	if got["storage"] != "1Gi" || got["version"] != "16" {
+		t.Fatalf("string params altered: %#v", got)
+	}
+
+	// A key the schema does not declare is routed out (e.g. design params
+	// pushed at a binding whose environmentConfigs schema is empty).
+	if out := coerceParams(map[string]string{"instances": "1"}, map[string]string{}); out != nil {
+		t.Fatalf("undeclared key must be dropped, got %#v", out)
+	}
+
+	// Schema unavailable (nil) → keep everything verbatim as strings.
+	raw := coerceParams(map[string]string{"instances": "1"}, nil)
+	if raw["instances"] != "1" {
+		t.Fatalf("nil types must keep strings, got %#v", raw["instances"])
+	}
+
+	// number + boolean coercion.
+	nb := coerceParams(map[string]string{"ratio": "0.5", "enabled": "true"},
+		map[string]string{"ratio": "number", "enabled": "boolean"})
+	if nb["ratio"] != 0.5 || nb["enabled"] != true {
+		t.Fatalf("number/boolean coercion: %#v", nb)
+	}
+
+	// A value that will not parse as its declared type is left a string for the
+	// webhook to reject precisely, not silently altered.
+	bad := coerceParams(map[string]string{"instances": "notanint"}, map[string]string{"instances": "integer"})
+	if bad["instances"] != "notanint" {
+		t.Fatalf("unparseable value must stay a string, got %#v", bad["instances"])
+	}
+}
+
 func TestBuildPlatformResource_NoParamsOmitsParameters(t *testing.T) {
 	t.Parallel()
 
@@ -63,7 +105,7 @@ func TestBuildPlatformResource_NoParamsOmitsParameters(t *testing.T) {
 func TestBuildPlatformBinding_PinsRelease(t *testing.T) {
 	t.Parallel()
 
-	b, err := BuildPlatformBinding("shop", "maindb", "development", "shop-maindb-r1", map[string]string{"size": "small"})
+	b, err := BuildPlatformBinding("shop", "maindb", "development", "shop-maindb-r1", map[string]any{"size": "small"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +149,9 @@ func newPlatformRC(latest string) *ocmocks.ResourceClientMock {
 		},
 		DeleteBindingFunc:  func(_ context.Context, _, _ string) error { return nil },
 		DeleteResourceFunc: func(_ context.Context, _, _ string) error { return nil },
+		ListClusterResourceTypesFunc: func(_ context.Context) ([]openchoreo.ResourceType, error) {
+			return nil, nil // schema unavailable → params kept as strings (legacy path)
+		},
 	}
 }
 
@@ -198,6 +243,9 @@ func TestPlatformProvision_ReconcileWaitsForNewRelease(t *testing.T) {
 		},
 		EnsureBindingFunc: func(_ context.Context, _ string, b *openchoreo.ResourceReleaseBinding) (*openchoreo.ResourceReleaseBinding, error) {
 			return b, nil
+		},
+		ListClusterResourceTypesFunc: func(_ context.Context) ([]openchoreo.ResourceType, error) {
+			return nil, nil
 		},
 	}
 	p := NewOCNativeProvisioner(rc)

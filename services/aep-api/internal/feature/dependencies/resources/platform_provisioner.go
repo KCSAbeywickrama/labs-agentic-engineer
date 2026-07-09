@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -114,9 +115,22 @@ func (p *OCNativeProvisioner) Provision(
 		return nil, fmt.Errorf("resources: resourceType (ClusterResourceType name) required")
 	}
 
+	// The design carries provisioning params as strings (design.json
+	// `parameters` is map[string]string), but a ClusterResourceType schema can
+	// declare a param as integer/number/boolean — the ResourceRelease admission
+	// webhook rejects a string where the schema wants an integer (e.g.
+	// postgres-cnpg `instances`). Coerce each value to its schema-declared JSON
+	// type and route it to the schema it belongs to (spec.parameters vs the
+	// binding's environmentConfigs). When the CRT can't be read, keep the raw
+	// string values so behaviour is unchanged.
+	paramTypes, envTypes, schemaOK := p.schemaTypes(ctx, resourceType)
+	if !schemaOK {
+		paramTypes, envTypes = nil, nil
+	}
+
 	// 1. Resource (one per project; references the discovered ClusterResourceType).
 	// NO EnsureResourceType — AEP never authors the type.
-	res := BuildPlatformResource(projectName, depName, resourceType, params)
+	res := BuildPlatformResource(projectName, depName, resourceType, coerceParams(params, paramTypes))
 	applied, err := p.rc.ApplyResource(ctx, orgHandle, res)
 	if err != nil {
 		return nil, fmt.Errorf("resources: apply resource: %w", err)
@@ -135,7 +149,7 @@ func (p *OCNativeProvisioner) Provision(
 	// waiting on the binding Ready condition — a real DB takes minutes.
 	result := &PlatformProvisionResult{ResourceName: res.Metadata.Name, BindingByEnv: map[string]string{}}
 	for _, env := range envs {
-		binding, berr := BuildPlatformBinding(projectName, depName, env, latest, params)
+		binding, berr := BuildPlatformBinding(projectName, depName, env, latest, coerceParams(params, envTypes))
 		if berr != nil {
 			return nil, berr
 		}
@@ -183,7 +197,7 @@ func platformBindingName(project, depName, env string) string {
 // = "ClusterResourceType") — unlike the external-resource provisioner's
 // namespaced per-resource ResourceType, AEP never authors this type. User
 // provisioning params go to spec.parameters as JSON.
-func BuildPlatformResource(project, depName, rtName string, params map[string]string) *openchoreo.Resource {
+func BuildPlatformResource(project, depName, rtName string, params map[string]any) *openchoreo.Resource {
 	res := &openchoreo.Resource{
 		Metadata: openchoreo.OCObjectMeta{Name: platformResourceName(project, depName)},
 		Spec: openchoreo.ResourceSpec{
@@ -201,7 +215,7 @@ func BuildPlatformResource(project, depName, rtName string, params map[string]st
 
 // BuildPlatformBinding authors a per-env binding pinned to latestRelease.
 // Per-env params go to spec.resourceTypeEnvironmentConfigs as JSON.
-func BuildPlatformBinding(project, depName, env, latestRelease string, params map[string]string) (*openchoreo.ResourceReleaseBinding, error) {
+func BuildPlatformBinding(project, depName, env, latestRelease string, params map[string]any) (*openchoreo.ResourceReleaseBinding, error) {
 	resourceName := platformResourceName(project, depName)
 	b := &openchoreo.ResourceReleaseBinding{
 		Metadata: openchoreo.OCObjectMeta{Name: platformBindingName(project, depName, env)},
@@ -219,6 +233,90 @@ func BuildPlatformBinding(project, depName, env, latestRelease string, params ma
 		b.Spec.ResourceTypeEnvironmentConfigs = json.RawMessage(raw)
 	}
 	return b, nil
+}
+
+// schemaTypes reads the ClusterResourceType `resourceType` and returns the
+// property→JSON-type maps for its `parameters` and `environmentConfigs` schemas.
+// ok is false when the type cannot be read (or is not installed): callers then
+// keep the raw string params rather than coercing/routing, so a discovery
+// failure never silently drops a user's params.
+func (p *OCNativeProvisioner) schemaTypes(ctx context.Context, resourceType string) (params, envConfigs map[string]string, ok bool) {
+	cts, err := p.rc.ListClusterResourceTypes(ctx)
+	if err != nil {
+		return nil, nil, false
+	}
+	for i := range cts {
+		if cts[i].Metadata.Name == resourceType {
+			return propTypes(cts[i].Spec.Parameters), propTypes(cts[i].Spec.EnvironmentConfigs), true
+		}
+	}
+	return nil, nil, false
+}
+
+// propTypes projects a ClusterResourceType schema section to a
+// property-name→JSON-type map (e.g. {"instances":"integer","version":"string"}).
+// A nil section (the type declares no such schema) yields an empty — but
+// non-nil — map, which coerceParams reads as "this schema accepts no keys".
+func propTypes(section *openchoreo.SchemaSection) map[string]string {
+	types := map[string]string{}
+	if section == nil {
+		return types
+	}
+	props, ok := section.OpenAPIV3Schema["properties"].(map[string]any)
+	if !ok {
+		return types
+	}
+	for name, raw := range props {
+		if m, ok := raw.(map[string]any); ok {
+			if t, ok := m["type"].(string); ok {
+				types[name] = t
+			}
+		}
+	}
+	return types
+}
+
+// coerceParams converts the design's string param values to the JSON types the
+// ClusterResourceType schema declares (integer/number/boolean; everything else
+// stays a string) and drops keys the schema does not declare — so params reach
+// the schema they belong to and pass the OC admission webhook. types==nil means
+// the schema was unavailable: every value is kept verbatim as a string (no
+// coercion, no routing) so behaviour is unchanged. A value that fails to parse
+// as its declared type is left as a string for the webhook to reject with a
+// precise message rather than being silently altered.
+func coerceParams(params map[string]string, types map[string]string) map[string]any {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		t, known := types[k]
+		if types != nil && !known {
+			continue // schema present but does not declare this key → route it out
+		}
+		switch t {
+		case "integer":
+			if n, err := strconv.Atoi(v); err == nil {
+				out[k] = n
+				continue
+			}
+		case "number":
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				out[k] = f
+				continue
+			}
+		case "boolean":
+			if b, err := strconv.ParseBool(v); err == nil {
+				out[k] = b
+				continue
+			}
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // OCNativeProvisioner is the only registered ResourceProvisioner impl today.
