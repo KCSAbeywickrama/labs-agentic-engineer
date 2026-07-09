@@ -37,7 +37,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Eye, EyeOff, GitHub } from "@wso2/oxygen-ui-icons-react";
+import { ExternalLink, Eye, EyeOff, GitHub, Lightbulb } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import { useConnectGitHubPat, useDisconnectGitProvider } from "../api/queries";
 
@@ -49,7 +49,9 @@ export function GitHubCredentialCard({
   gitProvider: GitProviderProjection | null;
 }) {
   const [pat, setPat] = useState("");
-  const [githubLogin, setGithubLogin] = useState("");
+  // Pre-fill the org when already connected so a token rotation is PAT-only;
+  // the field is required (below), so an empty org can't reach the BE.
+  const [githubLogin, setGithubLogin] = useState(gitProvider?.githubLogin ?? "");
   const [showPat, setShowPat] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [uninstall, setUninstall] = useState(true);
@@ -60,14 +62,11 @@ export function GitHubCredentialCard({
   const connected = gitProvider !== null;
 
   const submit = () => {
+    const org = githubLogin.trim();
+    if (!pat || !org) return;
     connect.mutate(
-      { pat, ...(githubLogin ? { githubLogin } : {}) },
-      {
-        onSuccess: () => {
-          setPat("");
-          setGithubLogin("");
-        },
-      },
+      { pat, githubLogin: org },
+      { onSuccess: () => setPat("") },
     );
   };
 
@@ -83,14 +82,24 @@ export function GitHubCredentialCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
           <GitHub size={22} />
           <Typography variant="h6">GitHub</Typography>
-          {connected && (
+          {connected ? (
             <Chip label={gitProvider.status} size="small" color="success" />
+          ) : (
+            <Chip label="not connected" size="small" color="warning" />
           )}
         </Box>
         <Divider sx={{ mb: 3 }} />
 
         {connected ? (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: 3 }}>
+            {(gitProvider.githubLogin ?? gitProvider.identityLogin) && (
+              <Typography variant="body2">
+                Organization:{" "}
+                <strong>
+                  {gitProvider.githubLogin ?? gitProvider.identityLogin}
+                </strong>
+              </Typography>
+            )}
             <Typography variant="body2">
               Connected as{" "}
               <strong>
@@ -109,11 +118,21 @@ export function GitHubCredentialCard({
             </Typography>
           </Box>
         ) : (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Not connected. A GitHub personal access token is needed to read and
-            write project spec and code repos, and to host the org's skills
-            catalogue.
-          </Typography>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 3 }}>
+            <Typography variant="body2" color="text.secondary">
+              Connect a GitHub personal access token with{" "}
+              <strong>organization-level access</strong> so the platform can
+              read and write this org's spec and code repos and host its skills
+              catalogue. Use a fine-grained token with the organization set as
+              the resource owner, or a classic token with the{" "}
+              <code>repo</code> scope owned by a member of the org.
+            </Typography>
+            <Alert severity="info" icon={<Lightbulb size={18} />}>
+              Pro tip: create a dedicated GitHub organization for this platform
+              so its agents' repos, tokens, and skills catalogue stay isolated
+              from your team's main org.
+            </Alert>
+          </Box>
         )}
 
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -145,12 +164,25 @@ export function GitHubCredentialCard({
             }}
           />
           <TextField
+            required
             label="GitHub organization name"
             placeholder="octocat"
             value={githubLogin}
             onChange={(e) => setGithubLogin(e.target.value)}
+            helperText="The GitHub organization the platform reads and writes repos in."
             fullWidth
           />
+          <Button
+            variant="text"
+            size="small"
+            href="https://github.com/settings/personal-access-tokens/new"
+            target="_blank"
+            rel="noreferrer"
+            endIcon={<ExternalLink size={14} />}
+            sx={{ alignSelf: "flex-start" }}
+          >
+            Create a token on GitHub
+          </Button>
           {connect.isError && (
             <Alert severity="error">{connect.error.message}</Alert>
           )}
@@ -165,7 +197,7 @@ export function GitHubCredentialCard({
             <Button
               variant="contained"
               onClick={submit}
-              disabled={!pat || connect.isPending}
+              disabled={!pat || !githubLogin.trim() || connect.isPending}
             >
               {connect.isPending
                 ? "Validating…"

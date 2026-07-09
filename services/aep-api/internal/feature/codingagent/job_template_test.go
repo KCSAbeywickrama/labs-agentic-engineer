@@ -92,3 +92,47 @@ func TestBuild_OmitsSkillsRepoURLWhenEmpty(t *testing.T) {
 		t.Errorf("AEP_SKILLS_REPO_URL must be absent when SkillsRepoURL is empty, got %q", env["AEP_SKILLS_REPO_URL"])
 	}
 }
+
+// TestBuild_StampsMCPTokenAndURL pins the coding-agent MCP wiring (task B1):
+// the rendered Job carries a dedicated AEP_MCP_TOKEN (aud aep-api-mcp, distinct
+// from AEP_BEARER's git-service audience) and an AEP_MCP_URL derived from the
+// BFF callback URL, so the runner pod can call the BFF's internal MCP surface
+// (POST /internal/v1/mcp) for endpoint discovery / remote-file / code-search.
+func TestBuild_StampsMCPTokenAndURL(t *testing.T) {
+	in := validJobInputs()
+	in.CallbackURL = "http://aep-api:9090"
+	in.MCPToken = "mcp-token-xyz"
+
+	job, err := Build(in)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	env := jobEnv(t, job)
+	if got, want := env["AEP_MCP_TOKEN"], "mcp-token-xyz"; got != want {
+		t.Errorf("AEP_MCP_TOKEN = %q, want %q", got, want)
+	}
+	if got, want := env["AEP_MCP_URL"], "http://aep-api:9090/internal/v1/mcp"; got != want {
+		t.Errorf("AEP_MCP_URL = %q, want %q", got, want)
+	}
+}
+
+// TestBuild_OmitsMCPTokenWhenEmpty mirrors the AEP_BEARER contract: an empty
+// MCPToken (minting failed / not wired) stamps no AEP_MCP_TOKEN env, but
+// AEP_MCP_URL still renders unconditionally (parity with AEP_PLATFORM_URL) —
+// the runner can then tell "no MCP token" apart from "empty token value".
+func TestBuild_OmitsMCPTokenWhenEmpty(t *testing.T) {
+	in := validJobInputs() // MCPToken left empty
+	in.CallbackURL = "http://aep-api:9090"
+
+	job, err := Build(in)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	env := jobEnv(t, job)
+	if _, present := env["AEP_MCP_TOKEN"]; present {
+		t.Errorf("AEP_MCP_TOKEN must be absent when MCPToken is empty, got %q", env["AEP_MCP_TOKEN"])
+	}
+	if got, want := env["AEP_MCP_URL"], "http://aep-api:9090/internal/v1/mcp"; got != want {
+		t.Errorf("AEP_MCP_URL = %q, want %q (must render even without a token)", got, want)
+	}
+}

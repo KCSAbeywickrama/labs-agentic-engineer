@@ -46,6 +46,22 @@ check_required_ports() {
     echo "✅ All ports available"
 }
 
+# helm_release_deployed <release> <namespace> — succeeds ONLY when the release
+# exists AND its status is `deployed`. A `failed` or `pending-*` release returns
+# false, so a caller guarding `helm upgrade --install` on this re-drives the
+# install instead of skipping it — the release then self-heals on the next run.
+# A bare `helm status … &>/dev/null` existence check does NOT distinguish a
+# failed release from a healthy one (the trap the workflow-plane install hit:
+# a cert-manager webhook race left the release `failed`, and the existence check
+# skipped the reinstall that would have recreated the certs).
+helm_release_deployed() {
+    # `rel_status`, not `status`: `status` is a read-only special var in zsh.
+    local release="$1" ns="$2" rel_status
+    rel_status="$(helm status "$release" -n "$ns" --kube-context "${CLUSTER_CONTEXT}" -o json 2>/dev/null \
+        | grep -o '"status":"[a-z-]*"' | head -1)" || true
+    [ "$rel_status" = '"status":"deployed"' ]
+}
+
 helm_install_if_not_exists() {
     local release="$1" ns="$2" chart="$3"; shift 3
     if helm status "$release" -n "$ns" --kube-context "${CLUSTER_CONTEXT}" &>/dev/null; then

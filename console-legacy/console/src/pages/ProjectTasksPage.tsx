@@ -26,6 +26,7 @@ import { useProjectTasks, type TaskListState } from '../hooks/useProjectTasks';
 import { AnimatedBanner } from '../components/tasks/AnimatedBanner';
 import { TaskSection } from '../components/tasks/TaskSection';
 import { TasksPageHeader } from '../components/tasks/TasksPageHeader';
+import { DevflowPanel } from '../components/devflow/DevflowPanel';
 import { EXECUTABLE_STATUSES, TASK_SECTIONS, type SectionKey } from '../components/tasks/types';
 
 const STATE_FILTERS: { key: TaskListState; label: string }[] = [
@@ -122,6 +123,9 @@ export default function ProjectTasksPage() {
           onExecuteAll={handleExecuteAll}
           onRefresh={handleRefresh}
         />
+
+        {/* Temporal-backed development workflow (demo) */}
+        <DevflowPanel projectId={projectId ?? ''} />
 
         {/* State filter */}
         <Stack direction="row" spacing={0.5} sx={{ mb: 2 }}>

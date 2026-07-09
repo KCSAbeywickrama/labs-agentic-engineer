@@ -42,6 +42,11 @@ import type {
   TaskView,
   TaskDetail,
   TaskProgressResponse,
+  DevflowStartRequest,
+  DevflowStartResponse,
+  DevflowRun,
+  DevflowStatus,
+  DevflowGateRequest,
 } from './types';
 
 import { env } from '../../config/env';
@@ -542,6 +547,43 @@ export const restApi = {
     } catch {
       return undefined;
     }
+  },
+
+  // -- Devflow (Temporal-backed development workflow) ---------------------------
+
+  // Start the development workflow for a project. `gates` is optional per-gate
+  // auto/manual config (default: everything auto). 200 → {workflowId, runId}.
+  async startDevflow(
+    projectId: string, body?: DevflowStartRequest,
+  ): Promise<DevflowStartResponse> {
+    return fetchJSON<DevflowStartResponse>(`${projectPrefix(projectId)}/devflows`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    });
+  },
+
+  // List a project's dev workflow runs (newest first).
+  async listDevflows(projectId: string): Promise<DevflowRun[]> {
+    const data = await fetchJSON<DevflowRun[] | null>(`${projectPrefix(projectId)}/devflows`);
+    return data ?? [];
+  },
+
+  // Live status of one dev workflow (queried from Temporal).
+  async getDevflow(projectId: string, workflowId: string): Promise<DevflowStatus> {
+    return fetchJSON<DevflowStatus>(
+      `${projectPrefix(projectId)}/devflows/${encodeURIComponent(workflowId)}`,
+    );
+  },
+
+  // Approve/reject a human-in-the-loop gate. Set `taskIssue` to target a task
+  // child workflow instead of the dev workflow. 204 on success.
+  async decideDevflowGate(
+    projectId: string, workflowId: string, gate: string, body: DevflowGateRequest,
+  ): Promise<void> {
+    await fetchJSON<void>(
+      `${projectPrefix(projectId)}/devflows/${encodeURIComponent(workflowId)}/gates/${encodeURIComponent(gate)}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
   },
 
 };

@@ -140,7 +140,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 	if params.HumaDeps.TaskTokens != nil {
 		mcpVerifier := auth.NewAgentsScopedVerifier(params.HumaDeps.TaskTokens)
 		mcpHandler := dependencies.NewMCPHandler(
-			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes)
+			params.MCPExternalResources, params.MCPOrgEndpoints, params.MCPResourceTypes, params.MCPRemoteGit)
 		mux.Handle("POST "+internalV1+"/mcp", mcpVerifier.Middleware(mcpHandler))
 
 		// ── playground-token mint (POST /internal/v1/mcp/playground-token) ────

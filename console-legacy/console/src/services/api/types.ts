@@ -461,3 +461,56 @@ export interface Deployment {
   createdAt: string;
   status: string;
 }
+
+// -- Devflow (Temporal-backed development workflow) --------------------------
+
+export interface DevflowStartRequest {
+  tag?: string;
+  gates?: {
+    auto?: Record<string, boolean>;
+    approvalTimeoutSeconds?: number;
+  };
+}
+
+export interface DevflowStartResponse {
+  workflowId: string;
+  runId: string;
+}
+
+// A row from the workflow_runs lookup index (list endpoint).
+export interface DevflowRun {
+  workflowId: string;
+  runId: string;
+  kind: string;
+  projectId: string;
+  tag?: string;
+  repo?: string;
+  issueNumber?: number;
+  parentWorkflowId?: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DevflowTaskRef {
+  issue: number;
+  workflowId?: string;
+  phase?: string;
+  outcome?: string;
+}
+
+// Live status queried from the dev workflow.
+export interface DevflowStatus {
+  phase: string;
+  tag?: string;
+  designTag?: string;
+  pendingGate?: string;
+  tasks?: DevflowTaskRef[];
+  error?: string;
+}
+
+export interface DevflowGateRequest {
+  approve: boolean;
+  note?: string;
+  taskIssue?: number;
+}

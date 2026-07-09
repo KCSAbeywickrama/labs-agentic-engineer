@@ -135,5 +135,34 @@ func validateDependency(i int, d any) *designProblem {
 	if !ok || name == "" {
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].name: must be a non-empty string", i)}
 	}
+	if p := validateDependencyParameters(i, dep["parameters"]); p != nil {
+		return p
+	}
+	return nil
+}
+
+// validateDependencyParameters mirrors the zod
+// `parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))`:
+// when present, parameters must be an object whose values are scalar (string,
+// number, or boolean). Objects/arrays/null values reject. Enforcing this keeps
+// the write-gate in parity with the agent's zod gate — WITHOUT it the Go fold
+// would accept a parameter shape the agent rejected (or vice versa), diverging
+// the fold. (JSON numbers unmarshal to float64 through encoding/json.)
+func validateDependencyParameters(i int, raw any) *designProblem {
+	if raw == nil {
+		return nil // absent (optional)
+	}
+	params, ok := raw.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].parameters: must be an object", i)}
+	}
+	for k, v := range params {
+		switch v.(type) {
+		case string, float64, bool:
+			// scalar — allowed
+		default:
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].parameters.%s: must be a string, number, or boolean", i, k)}
+		}
+	}
 	return nil
 }

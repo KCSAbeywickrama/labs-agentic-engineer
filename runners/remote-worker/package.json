@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/oneshot.ts",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts"
   },
