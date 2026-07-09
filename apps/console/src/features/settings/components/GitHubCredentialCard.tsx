@@ -49,7 +49,9 @@ export function GitHubCredentialCard({
   gitProvider: GitProviderProjection | null;
 }) {
   const [pat, setPat] = useState("");
-  const [githubLogin, setGithubLogin] = useState("");
+  // Pre-fill the org when already connected so a token rotation is PAT-only;
+  // the field is required (below), so an empty org can't reach the BE.
+  const [githubLogin, setGithubLogin] = useState(gitProvider?.githubLogin ?? "");
   const [showPat, setShowPat] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [uninstall, setUninstall] = useState(true);
@@ -60,14 +62,11 @@ export function GitHubCredentialCard({
   const connected = gitProvider !== null;
 
   const submit = () => {
+    const org = githubLogin.trim();
+    if (!pat || !org) return;
     connect.mutate(
-      { pat, ...(githubLogin ? { githubLogin } : {}) },
-      {
-        onSuccess: () => {
-          setPat("");
-          setGithubLogin("");
-        },
-      },
+      { pat, githubLogin: org },
+      { onSuccess: () => setPat("") },
     );
   };
 
@@ -163,10 +162,12 @@ export function GitHubCredentialCard({
             }}
           />
           <TextField
+            required
             label="GitHub organization name"
             placeholder="octocat"
             value={githubLogin}
             onChange={(e) => setGithubLogin(e.target.value)}
+            helperText="The GitHub organization the platform reads and writes repos in."
             fullWidth
           />
           <Button
@@ -194,7 +195,7 @@ export function GitHubCredentialCard({
             <Button
               variant="contained"
               onClick={submit}
-              disabled={!pat || connect.isPending}
+              disabled={!pat || !githubLogin.trim() || connect.isPending}
             >
               {connect.isPending
                 ? "Validating…"
