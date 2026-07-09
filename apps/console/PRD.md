@@ -78,6 +78,17 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Alerts — top-nav notification bell for RCA-agent alert reports
+  (org-wide, read-only, client-tracked unread state) —
+  [#154](https://github.com/wso2/labs-agentic-engineer/issues/154)
+  (BE handshake: [#156](https://github.com/wso2/labs-agentic-engineer/issues/156),
+  ADR-0008)
+- Alerts — dedicated left-nav section (cursor-paginated list + per-alert
+  Stepper progress view: Alert Received / Issue Created / Coding Handover
+  / Verify Fix) —
+  [#155](https://github.com/wso2/labs-agentic-engineer/issues/155)
+  (BE handshake: [#156](https://github.com/wso2/labs-agentic-engineer/issues/156),
+  ADR-0008)
 - Settings — org GitHub PAT + Anthropic key credentials, and skills catalogue
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE

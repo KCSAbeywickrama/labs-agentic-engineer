@@ -26,19 +26,28 @@ import {
   UserMenu,
   version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
-import { FolderOpen, LogOut, Settings, User as UserIcon, WSO2 } from "@wso2/oxygen-ui-icons-react";
+import {
+  FolderOpen,
+  LogOut,
+  Settings,
+  Siren,
+  User as UserIcon,
+  WSO2,
+} from "@wso2/oxygen-ui-icons-react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
+import { AlertsNotificationPanel, NotificationButton } from "./NotificationBell";
 
 // Sidebar highlight follows the route; grows one mapping per top-level route.
 function activeItemFor(pathname: string): string {
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/alerts")) return "alerts";
   return "projects";
 }
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
-// Main(Outlet) + Footer. NotificationPanel arrives with its feature.
+// Main(Outlet) + Footer + NotificationPanel (Alerts, #154/#155).
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeItem = activeItemFor(pathname);
@@ -73,6 +82,7 @@ export function AppLayout() {
           <Header.Spacer />
           <Header.Actions>
             <ColorSchemeToggle />
+            <NotificationButton />
             <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
             <UserMenu>
               <UserMenu.Trigger name={user.name} />
@@ -99,6 +109,13 @@ export function AppLayout() {
                   <FolderOpen />
                 </Sidebar.ItemIcon>
                 <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
+              </Sidebar.Item>
+              {/* Global Alerts section (#155) — RCA-agent reports across every project. */}
+              <Sidebar.Item id="alerts" link={<Link to="/alerts" />}>
+                <Sidebar.ItemIcon>
+                  <Siren />
+                </Sidebar.ItemIcon>
+                <Sidebar.ItemLabel>Alerts</Sidebar.ItemLabel>
               </Sidebar.Item>
             </Sidebar.Category>
           </Sidebar.Nav>
@@ -130,6 +147,10 @@ export function AppLayout() {
           <Footer.Version>oxygen-ui-v{OXYGEN_UI_VERSION}</Footer.Version>
         </Footer>
       </AppShell.Footer>
+
+      <AppShell.NotificationPanel>
+        <AlertsNotificationPanel />
+      </AppShell.NotificationPanel>
     </AppShell>
   );
 }
