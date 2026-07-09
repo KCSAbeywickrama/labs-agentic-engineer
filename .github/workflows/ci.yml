@@ -7,28 +7,76 @@ on:
     branches: [aep-rewrite]
 
 jobs:
+  # ── Detect which paths changed ───────────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has-images: ${{ steps.set-matrix.outputs.has-images }}
+      go: ${{ steps.filter.outputs.go }}
+      ts: ${{ steps.filter.outputs.ts }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            aep-server:
+              - 'tools/aepctl/**'
+            aep-api:
+              - 'services/aep-api/**'
+            agents:
+              - 'services/agents/**'
+              - 'packages/**'
+            console:
+              - 'apps/console/**'
+              - 'packages/**'
+            remote-worker:
+              - 'runners/remote-worker/**'
+            go:
+              - 'services/aep-api/**'
+              - 'tools/aepctl/**'
+              - 'deployments/single-cluster/resource-types/**'
+              - 'go.work'
+              - 'go.work.sum'
+            ts:
+              - 'apps/**'
+              - 'services/agents/**'
+              - 'services/collab/**'
+              - 'packages/**'
+              - 'pnpm-workspace.yaml'
+              - 'package.json'
+              - 'tsconfig.base.json'
+
+      - id: set-matrix
+        run: |
+          ALL='{
+            "aep-server":   {"dockerfile":"tools/aepctl/Dockerfile.server","context":"tools/aepctl"},
+            "aep-api":      {"dockerfile":"services/aep-api/Dockerfile","context":"services/aep-api"},
+            "agents":       {"dockerfile":"services/agents/Dockerfile","context":"."},
+            "remote-worker":{"dockerfile":"runners/remote-worker/Dockerfile","context":"runners/remote-worker"},
+            "console":      {"dockerfile":"apps/console/Dockerfile","context":"."}
+          }'
+          CHANGES='${{ steps.filter.outputs.changes }}'
+          matrix=$(echo "$CHANGES" | jq -c --argjson all "$ALL" \
+            '[.[] | {name: ., dockerfile: $all[.].dockerfile, context: $all[.].context}]')
+          echo "matrix={\"include\":$matrix}" >> "$GITHUB_OUTPUT"
+          if [ "$CHANGES" = "[]" ]; then
+            echo "has-images=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-images=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Build changed images (no push) ──────────────────────────────────────────
   build-images:
     name: Build ${{ matrix.name }} image
+    needs: changes
+    if: needs.changes.outputs.has-images == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: aep-server
-            dockerfile: tools/aepctl/Dockerfile.server
-            context: tools/aepctl
-          - name: aep-api
-            dockerfile: services/aep-api/Dockerfile
-            context: services/aep-api
-          - name: agents
-            dockerfile: services/agents/Dockerfile
-            context: .
-          - name: remote-worker
-            dockerfile: runners/remote-worker/Dockerfile
-            context: runners/remote-worker
-          - name: console
-            dockerfile: apps/console/Dockerfile
-            context: .
+      matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -45,8 +93,11 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+  # ── Go build + test (only when Go files change) ─────────────────────────────
   go-checks:
     name: Go build + test
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,8 +112,11 @@ jobs:
       - name: Test all Go modules
         run: go test ./...
 
+  # ── TypeScript typecheck + test (only when TS files change) ─────────────────
   ts-checks:
     name: TypeScript typecheck + test
+    needs: changes
+    if: needs.changes.outputs.ts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
