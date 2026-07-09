@@ -110,7 +110,7 @@ func TestDependency_JSONRoundTrip(t *testing.T) {
 			Kind:         DependencyKindPlatformResource,
 			Name:         "orders-db",
 			ResourceType: "postgres-cnpg",
-			Parameters:   map[string]string{"size": "10Gi"},
+			Parameters:   map[string]any{"size": "10Gi"},
 		},
 	}
 	for name, in := range cases {
