@@ -38,8 +38,7 @@ type Activities struct {
 	runs       WorkflowRunStore
 	dispatcher CodingDispatcher
 	merger     PRMerger
-	tagger     Tagger
-	design     DesignPort
+	spec       SpecValidator
 	planner    Planner
 	validator  Validator
 }
@@ -51,8 +50,7 @@ type Deps struct {
 	Runs       WorkflowRunStore
 	Dispatcher CodingDispatcher
 	Merger     PRMerger
-	Tagger     Tagger
-	Design     DesignPort
+	Spec       SpecValidator
 	Planner    Planner
 	Validator  Validator
 }
@@ -63,8 +61,7 @@ func NewActivities(d Deps) *Activities {
 		runs:       d.Runs,
 		dispatcher: d.Dispatcher,
 		merger:     d.Merger,
-		tagger:     d.Tagger,
-		design:     d.Design,
+		spec:       d.Spec,
 		planner:    d.Planner,
 		validator:  d.Validator,
 	}
@@ -153,67 +150,20 @@ type ProjectRef struct {
 	ProjectID string `json:"projectId"`
 }
 
-// CreateVersionTag cuts (idempotently) the requirements version tag the build
-// is based on and returns it.
-func (a *Activities) CreateVersionTag(ctx context.Context, in ProjectRef) (string, error) {
-	if a.tagger == nil {
-		return "", errNotConfigured
-	}
-	return a.tagger.CreateVersionTag(ctx, in.OrgID, in.ProjectID)
-}
-
-// DesignExistsInput asks whether a design already exists for a requirements tag.
-type DesignExistsInput struct {
+// ValidateSpecInput carries the project + tag for the pre-plan spec check.
+type ValidateSpecInput struct {
 	OrgID     string `json:"orgId"`
 	ProjectID string `json:"projectId"`
-	ReqTag    string `json:"reqTag"`
+	Tag       string `json:"tag"`
 }
 
-// CheckDesignExists reports whether the design for reqTag is already generated.
-func (a *Activities) CheckDesignExists(ctx context.Context, in DesignExistsInput) (bool, error) {
-	if a.design == nil {
-		return false, errNotConfigured
-	}
-	return a.design.DesignExists(ctx, in.OrgID, in.ProjectID, in.ReqTag)
-}
-
-// StartDesignTurn starts the design-generate turn and returns its id.
-func (a *Activities) StartDesignTurn(ctx context.Context, in ProjectRef) (string, error) {
-	if a.design == nil {
-		return "", errNotConfigured
-	}
-	return a.design.StartDesignTurn(ctx, in.OrgID, in.ProjectID)
-}
-
-// DesignTurnOutcomeInput asks for a turn's terminal state.
-type DesignTurnOutcomeInput struct {
-	OrgID     string `json:"orgId"`
-	ProjectID string `json:"projectId"`
-	TurnID    string `json:"turnId"`
-}
-
-// DesignTurnOutcomeResult is the fallback poll result.
-type DesignTurnOutcomeResult struct {
-	Done    bool   `json:"done"`
-	Outcome string `json:"outcome"`
-}
-
-// PollDesignTurn reads a design turn's terminal state (the signal-miss fallback).
-func (a *Activities) PollDesignTurn(ctx context.Context, in DesignTurnOutcomeInput) (DesignTurnOutcomeResult, error) {
-	if a.design == nil {
-		return DesignTurnOutcomeResult{}, errNotConfigured
-	}
-	done, outcome, err := a.design.DesignTurnOutcome(ctx, in.OrgID, in.ProjectID, in.TurnID)
-	return DesignTurnOutcomeResult{Done: done, Outcome: outcome}, err
-}
-
-// ApproveDesign cuts the design version tag from the generated design so the
-// plan step can proceed (planning requires an approved design).
-func (a *Activities) ApproveDesign(ctx context.Context, in ProjectRef) error {
-	if a.design == nil {
+// ValidateSpecAtTag re-runs the whole-spec hard gate at the tag this run
+// builds — the defensive check that what the workflow plans from is buildable.
+func (a *Activities) ValidateSpecAtTag(ctx context.Context, in ValidateSpecInput) error {
+	if a.spec == nil {
 		return errNotConfigured
 	}
-	return a.design.ApproveDesign(ctx, in.OrgID, in.ProjectID)
+	return a.spec.ValidateSpecAtTag(ctx, in.OrgID, in.ProjectID, in.Tag)
 }
 
 // RunPlan runs task planning and returns the planned tasks.

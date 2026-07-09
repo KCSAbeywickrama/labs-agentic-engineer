@@ -45,6 +45,30 @@ func (r repoLocator) ByFullName(_ context.Context, fullName string) (string, str
 	return repositories.LookupOrgProjectByRepoURL(r.db, fullName)
 }
 
+// latestExecutionByIssue resolves a Task's newest execution row (repo full
+// name via the repo row, then the org-fenced by-issue history) — the task-log
+// endpoint's default when no executionId is pinned. Satisfies
+// execution.LatestExecutionResolver.
+type latestExecutionByIssue struct {
+	repos repositories.RepoRepository
+	execs repositories.ExecutionRepository
+}
+
+func (l latestExecutionByIssue) LatestByIssue(ctx context.Context, orgID, projectID string, issueNumber int) (*models.Execution, error) {
+	full, err := repoFullNameLookup{repos: l.repos}.RepoFullName(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := l.execs.ListByIssueScoped(ctx, orgID, full, issueNumber)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[len(rows)-1], nil // created_at ASC — the last row is newest
+}
+
 // designComponents exposes the design's component names at HEAD for the funnel's
 // dispatch-time re-verification. Satisfies execution.DesignReader.
 type designComponents struct{ store *artifacts.ArtifactStore }
@@ -121,7 +145,9 @@ func (r runnerSecretResolver) ResolveRunnerSecrets(ctx context.Context, orgID, p
 // URL — project-wide, mirroring the retired dispatch cascade). The deployed
 // component name is unused; emission fans over the project's web-apps. Satisfies
 // codingagent.DeployObserver.
-type spaDeployObserver struct{ svc *runtimeconfig.RuntimeConfigService }
+type spaDeployObserver struct {
+	svc *runtimeconfig.RuntimeConfigService
+}
 
 func (o spaDeployObserver) OnComponentDeployed(ctx context.Context, orgID, projectID, _ string) error {
 	return o.svc.EmitForProjectSPAs(ctx, orgID, projectID)

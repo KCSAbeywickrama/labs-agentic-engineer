@@ -169,8 +169,8 @@ func TestDesignComponent_VersionsMatchesGolden(t *testing.T) {
 // TestDesignComponent_ErrorMapping drives every design error branch that maps
 // to an HTTP status through the real chain:
 //   - the two mapDesignError branches (opaque→500, ErrDesignNotFound→404), and
-//   - the two inline branches the save/bundle-at-tag handlers carry themselves
-//     (ErrSpecNotApproved→409, artifact-not-found→404).
+//   - the inline branch the bundle-at-tag handler carries itself
+//     (artifact-not-found→404).
 //
 // Note on the mapDesignError 404: in production the read ops fold a missing
 // artifact into an empty 200, so a store returning ErrDesignNotFound to the
@@ -213,25 +213,6 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 		}
 	})
 
-	t.Run("save without a requirements baseline is 409", func(t *testing.T) {
-		t.Parallel()
-		fake := &artifactstest.FakeArtifactService{
-			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-				return validDesignTree(), nil
-			},
-			SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
-				return nil, artifacts.ErrNoRequirementsBaseline
-			},
-		}
-		resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")
-		if resp.Code != 409 {
-			t.Fatalf("want 409, got %d body=%s", resp.Code, resp.Body.String())
-		}
-		if p := componenttest.DecodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "no v<N> baseline") {
-			t.Fatalf("409 detail drifted: %q", p.Detail)
-		}
-	})
-
 	t.Run("bundle at a missing tag is 404", func(t *testing.T) {
 		t.Parallel()
 		fake := &artifactstest.FakeArtifactService{
@@ -249,37 +230,15 @@ func TestDesignComponent_ErrorMapping(t *testing.T) {
 	})
 }
 
-// The publish flow pins the commit its files-apply just created: the save's
-// pre-gate read must hit that exact commit (GetDesignAtCommit — never the
-// HEAD-resolving ListDesignFiles, whose ref read can lag the apply) and the
-// artifact save must receive the same sha to gate + tag.
-func TestDesignComponent_Save_CommitShaPinsReadAndTag(t *testing.T) {
+// save-design left the public surface with the single-tag build flow (the
+// build endpoint validates the whole spec and cuts the one v<N> tag). The
+// route must stay gone.
+func TestDesignComponent_SaveRoute_Deregistered(t *testing.T) {
 	t.Parallel()
-	const sha = "1362ed59a59033f2f066c5bb7720c9880fa35ec0"
-	var readAt, savedAt string
-	fake := &artifactstest.FakeArtifactService{
-		GetDesignAtCommitFunc: func(_ context.Context, _, _, commitSHA string) (map[string]string, error) {
-			readAt = commitSHA
-			return validDesignTree(), nil
-		},
-		SaveDesignFunc: func(_ context.Context, _, _ string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
-			savedAt = req.CommitSHA
-			return &artifacts.DesignSaveResult{Status: "approved", Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}, nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			t.Error("save with commitSha must not resolve HEAD (ListDesignFiles called)")
-			return validDesignTree(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", `{"commitSha":"`+sha+`"}`)
-	if resp.Code != 200 {
-		t.Fatalf("save with commitSha: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if readAt != sha || savedAt != sha {
-		t.Fatalf("pinned sha lost: pre-gate read at %q, artifact save got %q, want %q", readAt, savedAt, sha)
+	h := newHarness(t, &artifactstest.FakeArtifactService{})
+
+	if resp := h.AsOrg("acme").Post("/api/v1/projects/web/design/save", "{}"); resp.Code != 404 {
+		t.Fatalf("save must be de-registered: want 404, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -327,39 +286,4 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// TestDesignComponent_Save_UnresolvedDependencyIs409 drives the REAL handler
-// chain: a design whose only component carries an `external` dependency flagged
-// needsSpec but with no collected spec must fail the tag-cut with 409
-// (ErrUnresolvedDependency → Error409Conflict), and SaveDesign must never be
-// reached.
-func TestDesignComponent_Save_UnresolvedDependencyIs409(t *testing.T) {
-	t.Parallel()
-	tree := map[string]string{
-		artifacts.DesignRootFile: "---\nsourceSpec: v1\n---\n\nOverview.\n",
-		"components/consumer/design.json": "{\n" +
-			"  \"name\": \"consumer\",\n" +
-			"  \"type\": \"service\",\n" +
-			"  \"language\": \"Go\",\n" +
-			"  \"description\": \"Consumes an external API.\",\n" +
-			"  \"dependencies\": [{\"kind\": \"external\", \"name\": \"stripe\", \"needsSpec\": true}]\n" +
-			"}\n",
-	}
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return tree, nil
-		},
-		SaveDesignFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.DesignSaveResult, error) {
-			t.Error("proceed-gate should have blocked before SaveDesign was reached")
-			return nil, errors.New("SaveDesign must not be called")
-		},
-	}
-	resp := newHarness(t, fake).AsOrg("acme").Post("/api/v1/projects/web/design/save", "")
-	if resp.Code != 409 {
-		t.Fatalf("unresolved dependency: want 409, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if p := componenttest.DecodeProblem(t, resp.Body.String()); !strings.Contains(p.Detail, "unresolved") {
-		t.Fatalf("409 detail drifted: %q", p.Detail)
-	}
 }

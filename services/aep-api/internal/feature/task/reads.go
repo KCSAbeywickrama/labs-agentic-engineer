@@ -98,7 +98,7 @@ func (r *Reads) List(ctx context.Context, orgID, projectID, state string) ([]Tas
 	if err != nil {
 		return nil, err
 	}
-	latestDesignTag := r.latestDesignTag(ctx, orgID, projectID)
+	latestSpecTag := r.latestSpecTag(ctx, orgID, projectID)
 
 	// One batch query for the whole repo's latest-per-kind rows (not one per
 	// issue); a load failure degrades to empty executions, as before.
@@ -113,7 +113,7 @@ func (r *Reads) List(ctx context.Context, orgID, projectID, state string) ([]Tas
 		if !matchesState(issue.State, state) {
 			continue
 		}
-		view, ok := buildView(issue, latestDesignTag, execsByIssue[issue.Number])
+		view, ok := buildView(issue, latestSpecTag, execsByIssue[issue.Number])
 		if !ok {
 			continue
 		}
@@ -142,13 +142,13 @@ func (r *Reads) Get(ctx context.Context, orgID, projectID string, issueNumber in
 	if found == nil {
 		return nil, ErrTaskNotFound
 	}
-	latestDesignTag := r.latestDesignTag(ctx, orgID, projectID)
+	latestSpecTag := r.latestSpecTag(ctx, orgID, projectID)
 	execs, err := r.execs.LatestPerKindScoped(ctx, orgID, repoFullName, issueNumber)
 	if err != nil {
 		slog.WarnContext(ctx, "reads: load executions failed", "issue", issueNumber, "error", err)
 		execs = map[string]*models.Execution{}
 	}
-	view, ok := buildView(*found, latestDesignTag, execs)
+	view, ok := buildView(*found, latestSpecTag, execs)
 	if !ok {
 		return nil, ErrTaskNotFound
 	}
@@ -166,7 +166,7 @@ func (r *Reads) Get(ctx context.Context, orgID, projectID string, issueNumber in
 // buildView fuses one live issue with its latest-per-kind executions into a
 // TaskView. ok is false when the issue is not a Task (no marker) — the caller
 // skips it.
-func buildView(issue gitrepo.IssueInfo, latestDesignTag string, execs map[string]*models.Execution) (TaskView, bool) {
+func buildView(issue gitrepo.IssueInfo, latestSpecTag string, execs map[string]*models.Execution) (TaskView, bool) {
 	labels := taskmeta.ParseLabels(issue.Labels)
 	if !labels.IsTask {
 		return TaskView{}, false
@@ -195,7 +195,7 @@ func buildView(issue gitrepo.IssueInfo, latestDesignTag string, execs map[string
 		Lineage:       Lineage{SpecTag: block.SpecTag, DesignTag: block.DesignTag},
 		DerivedStatus: string(derived),
 		Hold:          labels.Hold,
-		Attention:     computeAttention(labels, block, blockErr, latestDesignTag),
+		Attention:     computeAttention(labels, block, blockErr, latestSpecTag),
 		Executions:    latestViews(execs),
 	}
 	return view, true
@@ -203,8 +203,8 @@ func buildView(issue gitrepo.IssueInfo, latestDesignTag string, execs map[string
 
 // computeAttention derives the standing attention flags for a Task: a mangled
 // machine block, an ambiguous executor class, a stale lineage vs the current
-// approved design, or a platform-set aep:attention with no more-specific reason.
-func computeAttention(labels taskmeta.ParsedLabels, block taskmeta.Block, blockErr error, latestDesignTag string) []string {
+// spec version, or a platform-set aep:attention with no more-specific reason.
+func computeAttention(labels taskmeta.ParsedLabels, block taskmeta.Block, blockErr error, latestSpecTag string) []string {
 	var flags []string
 	if blockErr != nil && !errors.Is(blockErr, taskmeta.ErrNoBlock) {
 		flags = append(flags, "mangled-block")
@@ -212,7 +212,7 @@ func computeAttention(labels taskmeta.ParsedLabels, block taskmeta.Block, blockE
 	if labels.ClassAmbiguous {
 		flags = append(flags, "ambiguous-class")
 	}
-	if latestDesignTag != "" && block.DesignTag != "" && block.DesignTag != latestDesignTag {
+	if latestSpecTag != "" && block.DesignTag != "" && block.DesignTag != latestSpecTag {
 		flags = append(flags, "stale-design")
 	}
 	if labels.Attention && len(flags) == 0 {
@@ -245,16 +245,16 @@ func executionView(e *models.Execution) ExecutionView {
 	}
 }
 
-// latestDesignTag returns the newest approved design tag, or "" when
-// unavailable. Best-effort — used only for the stale-design attention flag, so
-// it reads the local mirror WITHOUT a fetch (VersionReader.LatestDesignTag)
-// rather than forcing a live ListDesignVersions round-trip on every task-list
-// call (docs/design/gitfs-fetch-on-read-followup.md §2).
-func (r *Reads) latestDesignTag(ctx context.Context, orgID, projectID string) string {
+// latestSpecTag returns the newest spec version tag, or "" when unavailable.
+// Best-effort — used only for the stale-design attention flag, so it reads
+// the local mirror WITHOUT a fetch (VersionReader.LatestSpecTag) rather than
+// forcing a live ListRequirementsVersions round-trip on every task-list call
+// (docs/design/gitfs-fetch-on-read-followup.md §2).
+func (r *Reads) latestSpecTag(ctx context.Context, orgID, projectID string) string {
 	if r.versions == nil {
 		return ""
 	}
-	return r.versions.LatestDesignTag(ctx, orgID, projectID)
+	return r.versions.LatestSpecTag(ctx, orgID, projectID)
 }
 
 func matchesState(issueState, filter string) bool {

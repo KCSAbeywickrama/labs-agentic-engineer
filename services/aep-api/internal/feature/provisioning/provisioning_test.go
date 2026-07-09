@@ -193,13 +193,13 @@ func (f *fakeExtProv) ResolveRunnerSecrets(_ context.Context, _, _, _ string, na
 
 type fakePlatProv struct {
 	calls         int
-	params        map[string]string
+	params        map[string]any
 	result        *resources.PlatformProvisionResult
 	err           error
 	deprovisioned []string
 }
 
-func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, params map[string]string, _ []string) (*resources.PlatformProvisionResult, error) {
+func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, params map[string]any, _ []string) (*resources.PlatformProvisionResult, error) {
 	f.calls++
 	f.params = params
 	if f.err != nil {
@@ -344,7 +344,7 @@ func designWithDeps() []models.DesignComponent {
 			{Kind: models.DependencyKindExternal, Name: "stripe", Config: []models.ConfigKey{
 				{Key: "api_key", Secret: true}, {Key: "region"},
 			}},
-			{Kind: models.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg", Parameters: map[string]string{"size": "small"}},
+			{Kind: models.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg", Parameters: map[string]any{"size": "small"}},
 		},
 	}}
 }

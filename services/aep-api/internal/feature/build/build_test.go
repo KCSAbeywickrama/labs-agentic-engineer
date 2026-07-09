@@ -1,0 +1,336 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package build
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/platform/humakit"
+	"github.com/wso2/aep/aep-api/models"
+)
+
+// ----- fakes -----------------------------------------------------------------
+
+type fakeRunner struct {
+	readyErr  error
+	startErr  error
+	started   []devflow.DevFlowInput
+	startedID string
+	status    devflow.DevFlowStatus
+	statusErr error
+}
+
+func (f *fakeRunner) Ready() error { return f.readyErr }
+func (f *fakeRunner) StartBuild(_ context.Context, workflowID string, in devflow.DevFlowInput) (string, error) {
+	if f.startErr != nil {
+		return "", f.startErr
+	}
+	f.startedID = workflowID
+	f.started = append(f.started, in)
+	return "run-1", nil
+}
+func (f *fakeRunner) BuildStatus(context.Context, string) (devflow.DevFlowStatus, error) {
+	return f.status, f.statusErr
+}
+
+type fakeStore struct {
+	running  *models.DevflowRun
+	row      *models.DevflowRun
+	recorded []*models.DevflowRun
+}
+
+func (f *fakeStore) RunningDevByProject(context.Context, string, string) (*models.DevflowRun, error) {
+	return f.running, nil
+}
+func (f *fakeStore) GetByWorkflowID(context.Context, string, string) (*models.DevflowRun, error) {
+	return f.row, nil
+}
+func (f *fakeStore) Record(_ context.Context, row *models.DevflowRun) error {
+	f.recorded = append(f.recorded, row)
+	return nil
+}
+
+type fakeRepos struct{ err error }
+
+func (f fakeRepos) RepoFullName(context.Context, string, string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return "acme/shop", nil
+}
+
+type fakeTagger struct {
+	res    *artifacts.SpecSaveResult
+	err    error
+	called int
+}
+
+func (f *fakeTagger) TagSpec(context.Context, string, string) (*artifacts.SpecSaveResult, error) {
+	f.called++
+	return f.res, f.err
+}
+
+type fakeTitles struct {
+	views []task.TaskView
+	err   error
+}
+
+func (f fakeTitles) List(context.Context, string, string, string) ([]task.TaskView, error) {
+	return f.views, f.err
+}
+
+func newSvc(runner *fakeRunner, store *fakeStore, repos fakeRepos, tagger *fakeTagger, titles TaskTitles) *Service {
+	return NewService(Deps{Runner: runner, Store: store, Repos: repos, Tagger: tagger, Titles: titles})
+}
+
+func buildReq(project string) *buildInput {
+	in := &buildInput{ProjectName: project}
+	in.OrgScopedInput = humakit.OrgScopedInput{OrgHandle: "acme"}
+	return in
+}
+
+func statusReq(project, tag string) *getBuildInput {
+	in := &getBuildInput{ProjectName: project, Tag: tag}
+	in.OrgScopedInput = humakit.OrgScopedInput{OrgHandle: "acme"}
+	return in
+}
+
+func statusOf(t *testing.T, err error) int {
+	t.Helper()
+	var se huma.StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v, want a huma.StatusError", err)
+	}
+	return se.GetStatus()
+}
+
+// ----- POST /build ------------------------------------------------------------
+
+func TestBuild_TagsAndStartsWorkflow(t *testing.T) {
+	runner := &fakeRunner{}
+	store := &fakeStore{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Status: "approved", Tag: "v1", Version: 1}}
+	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTitles{})
+
+	out, err := svc.build(context.Background(), buildReq("shop"))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if out.Body.Tag != "v1" {
+		t.Errorf("tag = %q, want v1", out.Body.Tag)
+	}
+	if runner.startedID != "devflow-acme-shop-v1" {
+		t.Errorf("workflow id = %q, want devflow-acme-shop-v1", runner.startedID)
+	}
+	if len(runner.started) != 1 {
+		t.Fatalf("started %d workflows, want 1", len(runner.started))
+	}
+	in := runner.started[0]
+	if in.OrgID != "acme" || in.ProjectID != "shop" || in.Repo != "acme/shop" || in.Tag != "v1" {
+		t.Errorf("workflow input = %+v", in)
+	}
+	if in.Gates.Auto != nil {
+		t.Errorf("gates must be the zero config (all auto), got %+v", in.Gates)
+	}
+	// The run row is recorded synchronously so an immediate status GET (the
+	// tasks page lands right after) never 404s on the org fence.
+	if len(store.recorded) != 1 {
+		t.Fatalf("recorded %d run rows, want 1", len(store.recorded))
+	}
+	row := store.recorded[0]
+	if row.WorkflowID != "devflow-acme-shop-v1" || row.RunID != "run-1" ||
+		row.Kind != models.WorkflowKindDev || row.OrgID != "acme" ||
+		row.Tag != "v1" || row.Status != models.WorkflowStatusRunning {
+		t.Errorf("recorded row = %+v", row)
+	}
+}
+
+func TestBuild_UnchangedSpec_ReturnsExistingTagAndStillStarts(t *testing.T) {
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Status: "unchanged", Tag: "v2", Version: 2}}
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+
+	out, err := svc.build(context.Background(), buildReq("shop"))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if out.Body.Tag != "v2" {
+		t.Errorf("tag = %q, want the existing v2", out.Body.Tag)
+	}
+	if len(runner.started) != 1 {
+		t.Errorf("rebuild of an unchanged spec must still start the workflow")
+	}
+}
+
+func TestBuild_SpecValidationFails_422_NoWorkflow(t *testing.T) {
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{err: &artifacts.SpecValidationError{Files: []artifacts.FileValidationError{
+		{Path: "specs/requirements/requirements.md", Code: "MISSING_REQUIREMENTS", Message: "missing"},
+		{Path: "specs/design/design.md", Code: "MISSING_DESIGN", Message: "missing"},
+	}}}
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+
+	_, err := svc.build(context.Background(), buildReq("shop"))
+	if got := statusOf(t, err); got != 422 {
+		t.Fatalf("status = %d, want 422", got)
+	}
+	if len(runner.started) != 0 {
+		t.Errorf("workflow started despite a failed spec gate")
+	}
+}
+
+func TestBuild_AlreadyRunning_409_TaggerUntouched(t *testing.T) {
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	store := &fakeStore{running: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1"}}
+	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTitles{})
+
+	_, err := svc.build(context.Background(), buildReq("shop"))
+	if got := statusOf(t, err); got != 409 {
+		t.Fatalf("status = %d, want 409", got)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times while a build is running, want 0", tagger.called)
+	}
+}
+
+func TestBuild_NoRepo_404(t *testing.T) {
+	svc := newSvc(&fakeRunner{}, &fakeStore{}, fakeRepos{err: gitrepo.ErrRepoNotFound},
+		&fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}, fakeTitles{})
+	_, err := svc.build(context.Background(), buildReq("shop"))
+	if got := statusOf(t, err); got != 404 {
+		t.Fatalf("status = %d, want 404", got)
+	}
+}
+
+func TestBuild_TemporalDown_503_NoTag(t *testing.T) {
+	runner := &fakeRunner{readyErr: ErrTemporalUnavailable}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+
+	_, err := svc.build(context.Background(), buildReq("shop"))
+	if got := statusOf(t, err); got != 503 {
+		t.Fatalf("status = %d, want 503", got)
+	}
+	if tagger.called != 0 {
+		t.Errorf("a tag was cut while Temporal was unavailable — the probe must run first")
+	}
+}
+
+func TestBuild_RepoNotReady_409(t *testing.T) {
+	tagger := &fakeTagger{err: gitrepo.ErrRepoNotReady}
+	svc := newSvc(&fakeRunner{}, &fakeStore{}, fakeRepos{}, tagger, fakeTitles{})
+	_, err := svc.build(context.Background(), buildReq("shop"))
+	if got := statusOf(t, err); got != 409 {
+		t.Fatalf("status = %d, want 409", got)
+	}
+}
+
+// ----- GET /build/{tag} --------------------------------------------------------
+
+func TestGetBuild_MapsPhasesAndJoinsTitles(t *testing.T) {
+	cases := []struct {
+		phase string
+		want  string
+	}{
+		{devflow.DevPhaseValidatingSpec, "started"},
+		{devflow.DevPhasePlanning, "in_progress"},
+		{devflow.DevPhaseExecuting, "in_progress"},
+		{devflow.DevPhaseValidating, "in_progress"},
+		{devflow.DevPhaseDone, "completed"},
+		{devflow.DevPhaseFailed, "failed"},
+	}
+	for _, tc := range cases {
+		runner := &fakeRunner{status: devflow.DevFlowStatus{
+			Phase: tc.phase,
+			Tasks: []devflow.DevTaskRef{
+				{Issue: 7, Phase: devflow.TaskPhaseCoding},
+				{Issue: 8, Phase: devflow.TaskPhaseDone, Outcome: devflow.OutcomeSucceeded},
+			},
+		}}
+		store := &fakeStore{row: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1", Status: models.WorkflowStatusRunning}}
+		titles := fakeTitles{views: []task.TaskView{{IssueNumber: 7, Title: "Implement api"}}}
+		svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, titles)
+
+		out, err := svc.get(context.Background(), statusReq("shop", "v1"))
+		if err != nil {
+			t.Fatalf("get(%s): %v", tc.phase, err)
+		}
+		if out.Body.Status != tc.want {
+			t.Errorf("phase %s → status %q, want %q", tc.phase, out.Body.Status, tc.want)
+		}
+		if out.Body.WorkflowStatus != tc.phase {
+			t.Errorf("workflow_status = %q, want the raw phase %q", out.Body.WorkflowStatus, tc.phase)
+		}
+		if len(out.Body.Tasks) != 2 {
+			t.Fatalf("tasks = %+v, want 2", out.Body.Tasks)
+		}
+		if out.Body.Tasks[0].Title != "Implement api" || out.Body.Tasks[0].Status != "in_progress" {
+			t.Errorf("task 7 = %+v, want joined title + in_progress", out.Body.Tasks[0])
+		}
+		if out.Body.Tasks[1].Title != "Task #8" || out.Body.Tasks[1].Status != "completed" {
+			t.Errorf("task 8 = %+v, want placeholder title + completed", out.Body.Tasks[1])
+		}
+	}
+}
+
+func TestGetBuild_UnknownTag_404(t *testing.T) {
+	svc := newSvc(&fakeRunner{}, &fakeStore{row: nil}, fakeRepos{}, &fakeTagger{}, fakeTitles{})
+	_, err := svc.get(context.Background(), statusReq("shop", "v9"))
+	if got := statusOf(t, err); got != 404 {
+		t.Fatalf("status = %d, want 404 (org fence / unknown build)", got)
+	}
+}
+
+func TestGetBuild_QueryFails_FallsBackToRowStatus(t *testing.T) {
+	runner := &fakeRunner{statusErr: errors.New("temporal query failed")}
+	store := &fakeStore{row: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1", Status: models.WorkflowStatusFailed}}
+	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, fakeTitles{})
+
+	out, err := svc.get(context.Background(), statusReq("shop", "v1"))
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if out.Body.Status != "failed" || out.Body.WorkflowStatus != models.WorkflowStatusFailed {
+		t.Errorf("fallback body = %+v, want failed/failed", out.Body)
+	}
+}
+
+func TestGetBuild_TitleFetchFailure_Degrades(t *testing.T) {
+	runner := &fakeRunner{status: devflow.DevFlowStatus{
+		Phase: devflow.DevPhaseExecuting,
+		Tasks: []devflow.DevTaskRef{{Issue: 3, Phase: devflow.TaskPhaseBuilding}},
+	}}
+	store := &fakeStore{row: &models.DevflowRun{Status: models.WorkflowStatusRunning}}
+	svc := newSvc(runner, store, fakeRepos{}, &fakeTagger{}, fakeTitles{err: errors.New("github down")})
+
+	out, err := svc.get(context.Background(), statusReq("shop", "v1"))
+	if err != nil {
+		t.Fatalf("get must not fail on a title-read hiccup: %v", err)
+	}
+	if out.Body.Tasks[0].Title != "Task #3" {
+		t.Errorf("title = %q, want the numbered placeholder", out.Body.Tasks[0].Title)
+	}
+}

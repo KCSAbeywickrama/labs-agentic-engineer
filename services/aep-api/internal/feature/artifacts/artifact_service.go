@@ -147,6 +147,16 @@ type ArtifactService interface {
 	ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
 
 	// Save / Discard.
+	// SaveSpec is the single-tag save: whole-spec hard gate (requirements +
+	// design) at the save commit, then the next `v<N>` tag covering the whole
+	// specs/ tree. Validation failure returns *SpecValidationError (422).
+	SaveSpec(ctx context.Context, orgID, projectID string, req SaveRequest) (*SpecSaveResult, error)
+	// ValidateSpecAtTag re-runs the whole-spec gate at a `v<N>` tag — the dev
+	// workflow's defensive pre-plan check.
+	ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error
+	// LatestSpecTag returns the newest `v<N>` tag name from the local mirror
+	// WITHOUT a fetch, degrading to "" — the task stale-spec attention read.
+	LatestSpecTag(ctx context.Context, orgID, projectID string) string
 	SaveRequirements(ctx context.Context, orgID, projectID string, req SaveRequest) (*RequirementsSaveResult, error)
 	SaveDesign(ctx context.Context, orgID, projectID string, req SaveRequest) (*DesignSaveResult, error)
 	DiscardRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error)

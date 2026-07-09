@@ -37,10 +37,10 @@ var (
 	// ErrProjectRepoNotFound is returned when the project has no provisioned git
 	// repository yet. Mapped to 404.
 	ErrProjectRepoNotFound = errors.New("project repository not found")
-	// ErrNoApprovedDesign is returned when a plan turn is requested but the
-	// project has no approved (tagged) design version. Mapped to 400 (the
-	// approve-first gate, as with design generation).
-	ErrNoApprovedDesign = errors.New("planning requires an approved (tagged) design version")
+	// ErrNoSpecVersion is returned when a plan turn is requested but the
+	// project has no versioned (tagged) spec. Mapped to 400 (the build-first
+	// gate — the `v<N>` tag certifies a validated requirements+design pair).
+	ErrNoSpecVersion = errors.New("planning requires a versioned spec — build the project first")
 	// ErrPlanInProgress is returned when a plan turn is already running for the
 	// project (the one-active-plan-turn invariant, §6). Mapped to 409
 	// {code:"plan_in_progress"}.

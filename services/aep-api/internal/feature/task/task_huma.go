@@ -228,8 +228,8 @@ func mapPlanError(err error) error {
 	switch {
 	case errors.Is(err, ErrPlanInProgress):
 		return &planInProgressError{Code: "plan_in_progress"}
-	case errors.Is(err, ErrNoApprovedDesign):
-		return huma.Error400BadRequest(ErrNoApprovedDesign.Error())
+	case errors.Is(err, ErrNoSpecVersion):
+		return huma.Error400BadRequest(ErrNoSpecVersion.Error())
 	case errors.Is(err, ErrNoAnthropicKey):
 		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
 	case errors.Is(err, ErrProjectRepoNotFound):

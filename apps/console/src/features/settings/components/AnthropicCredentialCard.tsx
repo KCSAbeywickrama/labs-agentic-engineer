@@ -35,7 +35,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Eye, EyeOff, Key } from "@wso2/oxygen-ui-icons-react";
+import { ExternalLink, Eye, EyeOff, Key } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import { useConnectAnthropic, useDisconnectAnthropic } from "../api/queries";
 
@@ -73,13 +73,22 @@ export function AnthropicCredentialCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
           <Key size={22} />
           <Typography variant="h6">Anthropic</Typography>
-          {connected && (
+          {connected ? (
             <Chip label={llm.status} size="small" color="success" />
+          ) : (
+            <Chip label="not connected" size="small" color="warning" />
           )}
         </Box>
         <Divider sx={{ mb: 3 }} />
 
-        {connected ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Configure an Anthropic API key to dispatch the remote coding agent
+          for this organization. Requirements, architecture, and task
+          generation use the platform-provided key as a fallback if you don't
+          configure one here.
+        </Typography>
+
+        {connected && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: 3 }}>
             <Typography variant="body2" fontFamily="monospace">
               {llm.keyPrefix}•••••••••{llm.keyLast4}
@@ -93,11 +102,6 @@ export function AnthropicCredentialCard({
               <Alert severity="warning">{llm.validationError}</Alert>
             )}
           </Box>
-        ) : (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Not connected. An Anthropic API key is needed for the platform and
-            coding agents to call Claude.
-          </Typography>
         )}
 
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -124,6 +128,17 @@ export function AnthropicCredentialCard({
               },
             }}
           />
+          <Button
+            variant="text"
+            size="small"
+            href="https://console.anthropic.com/settings/keys"
+            target="_blank"
+            rel="noreferrer"
+            endIcon={<ExternalLink size={14} />}
+            sx={{ alignSelf: "flex-start" }}
+          >
+            Get an API key
+          </Button>
           {connect.isError && (
             <Alert severity="error">{connect.error.message}</Alert>
           )}

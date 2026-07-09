@@ -19,20 +19,22 @@
 import { api } from '../services/api';
 import { useCursorPolling } from './useCursorPolling';
 
-// useExecutionProgress polls the unified /executions/{id}/progress feed, keyed
-// by execution id and kind-agnostic (the BFF selects the source — coding-agent
-// pod logs, synthetic build steps, etc. — from the execution's kind). It fetches
-// once for any execution (so a terminal one shows its historical feed) and only
-// polls while `isRunning`; a final:true response freezes the feed.
+// useExecutionProgress polls the Task log feed (/tasks/{issueNumber}/log),
+// pinned to the selected execution and kind-agnostic (the BFF selects the
+// source — coding-agent pod logs, synthetic build steps, etc. — from the
+// execution's kind). It fetches once for any execution (so a terminal one
+// shows its historical feed) and only polls while `isRunning`; a final:true
+// response freezes the feed.
 export function useExecutionProgress(
   projectId: string | undefined,
+  issueNumber: number | undefined,
   executionId: string | undefined,
   isRunning: boolean,
 ) {
   const { lines, phase, final, isLoading, error } = useCursorPolling({
-    queryKey: ['executionProgress', projectId, executionId],
-    fetcher: (cursor) => api.getExecutionProgress(projectId!, executionId!, cursor),
-    enabled: !!projectId && !!executionId,
+    queryKey: ['executionProgress', projectId, issueNumber, executionId],
+    fetcher: (cursor) => api.getExecutionProgress(projectId!, issueNumber!, cursor, executionId),
+    enabled: !!projectId && Number.isFinite(issueNumber) && !!executionId,
     isLive: isRunning,
     taskIdentity: executionId,
     trackPhase: true,

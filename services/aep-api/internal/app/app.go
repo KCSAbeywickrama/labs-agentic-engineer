@@ -45,6 +45,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
@@ -456,19 +457,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
-		// Signal a waiting devflow workflow when a design-generate turn ends.
-		// Best-effort + nil-safe; other use cases are ignored (the workflow also
-		// filters by turn id).
-		TurnFinishHook: func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string) {
-			if useCase != designGenerateUseCase {
-				return
-			}
-			devflowSignaler.SignalDev(ctx, orgID, projectID, devflow.SigDesignTurnDone, devflow.DesignTurnDoneSignal{
-				TurnID:  turnID,
-				UseCase: useCase,
-				Outcome: outcome,
-			})
-		},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
@@ -512,10 +500,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
-	// The unified per-execution progress endpoint. (The runner skills-pull S2S
-	// endpoint is retired — the runner now clones `org-skills` and resolves
+	// The Task-keyed log endpoint (issue number → newest execution by default,
+	// executionId query pins one for history browsing). (The runner skills-pull
+	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
-	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
+	execProgressSvc := execution.NewProgressService(executionRepo, componentClient).
+		WithLatestExecutions(latestExecutionByIssue{repos: repoRepo, execs: executionRepo})
 	// Coding-execution activity feed: live-tail the ca-… pod log while running,
 	// serve the captured coding_agent_logs snapshot once terminal. Wired only on
 	// the proxy dispatch path (cgwClient present); otherwise coding executions
@@ -798,12 +788,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		FilesSvc:         filesSvc,
 		ArtifactSvc:      artifactSvcGit,
 		GenAISvc:         genaiSvc,
-		DevflowSvc: devflow.NewHumaService(
-			devflowRuntime,
-			workflowRunRepo,
-			repoFullNameLookup{repos: repoRepo},
-			devflowTagger{art: artifactSvcGit},
-		),
+		BuildSvc: build.NewService(build.Deps{
+			Runner: build.NewTemporalRunner(devflowRuntime),
+			Store:  workflowRunRepo,
+			Repos:  repoFullNameLookup{repos: repoRepo},
+			Tagger: buildSpecTagger{art: artifactSvcGit},
+			Titles: taskReads,
+		}),
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
 		GitHubAppClientID: cfg.GitHubAppClientID,
@@ -993,8 +984,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			Runs:       workflowRunRepo,
 			Dispatcher: codingDispatcher{funnel: funnel, execs: executionRepo},
 			Merger:     prMerger{issues: issueService},
-			Tagger:     devflowTagger{art: artifactSvcGit},
-			Design:     devflowDesign{art: artifactSvcGit, genai: genaiSvc, design: designService},
+			Spec:       devflowSpecValidator{art: artifactSvcGit},
 			Planner:    devflowPlanner{plan: taskPlan, reads: taskReads},
 			Validator:  devflowValidator{},
 		})

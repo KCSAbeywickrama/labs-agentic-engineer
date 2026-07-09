@@ -100,7 +100,7 @@ type dependencyJSON struct {
 	SpecUrl      string                    `json:"specUrl,omitempty"`
 	Config       []configKeyJSON           `json:"config,omitempty"`
 	ResourceType string                    `json:"resourceType,omitempty"`
-	Parameters   map[string]string         `json:"parameters,omitempty"`
+	Parameters   map[string]any            `json:"parameters,omitempty"`
 	Candidates   []dependencyCandidateJSON `json:"candidates,omitempty"`
 }
 

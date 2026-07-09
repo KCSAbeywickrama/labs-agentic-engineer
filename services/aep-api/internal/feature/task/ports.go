@@ -67,14 +67,12 @@ type ComponentEnsurer interface {
 // at a tag — the lineage stamps and the incremental-plan baseline diff (§6).
 type VersionReader interface {
 	ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
-	ListDesignVersions(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
-	// LatestDesignTag is the newest design tag name (`v<N>-<M>`) read WITHOUT a
-	// network fetch — the best-effort input to the stale-design attention flag.
-	// The list read path (ListDesignVersions) still fetches; this one must not,
-	// so a task-list page load pays no per-read GitHub round-trip for it.
-	LatestDesignTag(ctx context.Context, orgID, projectID string) string
+	// LatestSpecTag is the newest spec tag name (`v<N>`) read WITHOUT a
+	// network fetch — the best-effort input to the stale-spec attention flag.
+	// The list read path (ListRequirementsVersions) still fetches; this one
+	// must not, so a task-list page load pays no per-read GitHub round-trip.
+	LatestSpecTag(ctx context.Context, orgID, projectID string) string
 	GetRequirementsAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
-	GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 }
 
 // GitReader is the workspace-backed git surface the plan turn drives: the

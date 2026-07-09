@@ -45,7 +45,7 @@ type ResourceProvisioner interface {
 	// native Ready condition). resourceType is a DISCOVERED ClusterResourceType
 	// name. params are user-supplied provisioning parameters (spec.parameters).
 	Provision(ctx context.Context, orgHandle, projectName, depName, resourceType string,
-		params map[string]string, envs []string) (*PlatformProvisionResult, error)
+		params map[string]any, envs []string) (*PlatformProvisionResult, error)
 
 	// Deprovision tears down what Provision authored: the per-env bindings
 	// (their retainPolicy cascades the rendered backing instance), then the
@@ -104,7 +104,7 @@ func NewOCNativeProvisioner(rc openchoreo.ResourceClient) *OCNativeProvisioner {
 func (p *OCNativeProvisioner) Provision(
 	ctx context.Context,
 	orgHandle, projectName, depName, resourceType string,
-	params map[string]string,
+	params map[string]any,
 	envs []string,
 ) (*PlatformProvisionResult, error) {
 	if orgHandle == "" || projectName == "" || depName == "" {
@@ -183,7 +183,7 @@ func platformBindingName(project, depName, env string) string {
 // = "ClusterResourceType") — unlike the external-resource provisioner's
 // namespaced per-resource ResourceType, AEP never authors this type. User
 // provisioning params go to spec.parameters as JSON.
-func BuildPlatformResource(project, depName, rtName string, params map[string]string) *openchoreo.Resource {
+func BuildPlatformResource(project, depName, rtName string, params map[string]any) *openchoreo.Resource {
 	res := &openchoreo.Resource{
 		Metadata: openchoreo.OCObjectMeta{Name: platformResourceName(project, depName)},
 		Spec: openchoreo.ResourceSpec{
@@ -201,7 +201,7 @@ func BuildPlatformResource(project, depName, rtName string, params map[string]st
 
 // BuildPlatformBinding authors a per-env binding pinned to latestRelease.
 // Per-env params go to spec.resourceTypeEnvironmentConfigs as JSON.
-func BuildPlatformBinding(project, depName, env, latestRelease string, params map[string]string) (*openchoreo.ResourceReleaseBinding, error) {
+func BuildPlatformBinding(project, depName, env, latestRelease string, params map[string]any) (*openchoreo.ResourceReleaseBinding, error) {
 	resourceName := platformResourceName(project, depName)
 	b := &openchoreo.ResourceReleaseBinding{
 		Metadata: openchoreo.OCObjectMeta{Name: platformBindingName(project, depName, env)},
