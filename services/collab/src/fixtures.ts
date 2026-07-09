@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { toRoomPath, type SpecFile } from "./bff.js";
+import { type SpecFile } from "./bff.js";
 
 // Dev-mode seed content. Mirrors the console mock layer's demo-shop project
 // (apps/console/src/mocks/fixtures/project.ts) so `make dev` shows the same
@@ -83,10 +83,9 @@ The storefront talks to both services; services share nothing.
   },
 ];
 
-/** The same files keyed for seeding (specs/ stripped — the room key scheme). */
-export const devSeedFiles: SpecFile[] = devSpecFiles.flatMap((f) => {
-  const path = toRoomPath(f.path);
-  return path === null
-    ? []
-    : [{ path, content: f.content, sha: `dev-${path}` }];
-});
+/** The same files as SpecFile records — full specs/ paths (verbatim doc keys). */
+export const devSeedFiles: SpecFile[] = devSpecFiles.map((f) => ({
+  path: f.path,
+  content: f.content,
+  sha: `dev-${f.path}`,
+}));

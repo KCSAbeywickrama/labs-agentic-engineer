@@ -24,10 +24,10 @@ import type { SpecFile } from "./bff.js";
 // itself (Y.Map('files') + md fragments) lives in @aep/collab-doc, shared
 // with the agents service's live-peer path (#86 phase 4).
 //
-// KEY SCHEME INVARIANT (#113 decision 2 / #114): doc keys are the repo path
-// with the `specs/` prefix stripped (requirements/prd.md). The console's spec
-// feature strips identically at its API boundary; agent peers (#86 phase 4)
-// inherit it via @aep/collab-doc. The strip lives in bff.ts (toRoomPath).
+// KEY SCHEME INVARIANT: doc keys are the FULL repo-relative path, verbatim
+// (specs/requirements/prd.md). The console's spec feature, the committer, and
+// agent peers (#86 phase 4) all use this one scheme — no strip/re-add. (Retires
+// #113 decision 2's stripped keys, which double-prefixed agent-created files.)
 export { FILES_MAP, filesMap } from "@aep/collab-doc";
 
 /**

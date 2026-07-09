@@ -31,10 +31,13 @@ export interface CollabIdentity {
 }
 
 /**
- * One spec file ready for seeding. `path` is the ROOM KEY — the repo path
- * with the `specs/` prefix stripped (e.g. requirements/prd.md), matching what
- * the console looks up (#113 decision 2). The strip happens here, at the
- * Files API boundary, and nowhere else.
+ * One spec file ready for seeding. `path` is the FULL repo-relative path
+ * (e.g. specs/requirements/prd.md). Doc keys, commits, the console's file
+ * model, and the agents' live-peer writes all share this ONE verbatim scheme
+ * — no strip/re-add anywhere. (Retires #113 decision 2's stripped room-key
+ * scheme, whose only rationale was matching a historical unprefixed console
+ * model; the strip-here/re-add-on-commit dance double-prefixed agent-created
+ * files into specs/specs/…, so it's gone.)
  */
 export interface SpecFile {
   path: string;
@@ -43,16 +46,10 @@ export interface SpecFile {
   sha: string;
 }
 
-/** The Files API serves repo-relative paths; rooms key by the remainder. */
+/** The Files API is scoped under specs/; the spec room seeds only these. */
 export const SPECS_PREFIX = "specs/";
 
-export function toRoomPath(repoPath: string): string | null {
-  return repoPath.startsWith(SPECS_PREFIX)
-    ? repoPath.slice(SPECS_PREFIX.length)
-    : null;
-}
-
-/** One write in a commit batch: room-keyed path + full content + baseSha. */
+/** One write in a commit batch: full repo path + full content + baseSha. */
 export interface ApplyWrite {
   path: string;
   content: string;
@@ -66,7 +63,7 @@ export interface ApplyDelete {
 }
 
 export interface ApplyOutcome {
-  /** New per-file shas on success (room-keyed paths). */
+  /** New per-file shas on success (full repo paths). */
   files: { path: string; sha: string }[];
   commitSha: string;
 }
@@ -139,8 +136,8 @@ export function createBffClient(
 
       return Promise.all(
         metas.flatMap((meta) => {
-          const roomPath = toRoomPath(meta.path);
-          if (roomPath === null) return [];
+          // Spec room seeds only specs/ files; the path is kept VERBATIM.
+          if (!meta.path.startsWith(SPECS_PREFIX)) return [];
           const encoded = meta.path
             .split("/")
             .map(encodeURIComponent)
@@ -157,7 +154,7 @@ export function createBffClient(
                 );
               }
               const body = (await res.json()) as { content: string; sha: string };
-              return { path: roomPath, content: body.content, sha: body.sha };
+              return { path: meta.path, content: body.content, sha: body.sha };
             })(),
           ];
         }),
@@ -173,13 +170,14 @@ export function createBffClient(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          // Paths are already full repo paths (verbatim doc keys) — apply as-is.
           writes: batch.writes.map((w) => ({
-            path: SPECS_PREFIX + w.path,
+            path: w.path,
             content: w.content,
             baseSha: w.baseSha,
           })),
           deletes: batch.deletes.map((d) => ({
-            path: SPECS_PREFIX + d.path,
+            path: d.path,
             baseSha: d.baseSha,
           })),
           message: batch.message,
@@ -190,12 +188,16 @@ export function createBffClient(
           conflicts?: { path: string }[];
         };
         throw new ApplyConflictError(
-          (body.conflicts ?? []).map((c) => toRoomPath(c.path) ?? c.path),
+          (body.conflicts ?? []).map((c) => c.path),
         );
       }
       if (!res.ok) {
+        // Surface the BFF's error body — a bare status hides the reason a
+        // batch was rejected (bad path, oversized file, precondition detail).
+        const detail = await res.text().catch(() => "");
         throw new Error(
-          `Failed to apply spec files for ${projectName} (${res.status})`,
+          `Failed to apply spec files for ${projectName} (${res.status})` +
+            (detail ? `: ${detail.slice(0, 500)}` : ""),
         );
       }
       const body = (await res.json()) as {
@@ -204,10 +206,7 @@ export function createBffClient(
       };
       return {
         commitSha: body.commitSha,
-        files: (body.files ?? []).flatMap((f) => {
-          const roomPath = toRoomPath(f.path);
-          return roomPath === null ? [] : [{ path: roomPath, sha: f.sha }];
-        }),
+        files: (body.files ?? []).map((f) => ({ path: f.path, sha: f.sha })),
       };
     },
   };

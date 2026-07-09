@@ -20,24 +20,25 @@ import type { components } from "../../../generated/aep-api";
 
 type FileMeta = components["schemas"]["FileMeta"];
 
-// The Files API serves repo-relative `specs/...` paths (#113 decision 2);
-// the console's file model, collab room keys (`Y.Map('files')`), and
-// components all keep the historical unprefixed scheme (`requirements/prd.md`).
-// This module is the single place where the two schemes meet.
+// Paths are the FULL repo-relative path verbatim (`specs/requirements/prd.md`)
+// — the same scheme the Files API serves, the collab doc keys, and the agents'
+// live-peer writes use. This module only classifies each file into a spec-view
+// section; it no longer translates between two path schemes (the stripped
+// room-key scheme of #113 decision 2 is retired — it double-prefixed
+// agent-created files).
 
 export type SpecGroup = "requirements" | "designs" | "validation";
 
 export interface SpecFileEntry {
-  /** Unprefixed path (e.g. requirements/prd.md) — the collab room key. */
+  /** Full repo-relative path (e.g. specs/requirements/prd.md) — also the
+   *  collab doc key and the Files API read path. */
   path: string;
   /** Git blob sha at HEAD; changes when content changes. */
   sha: string;
   group: SpecGroup;
 }
 
-const SPECS_PREFIX = "specs/";
-
-// Spec-view section per top-level folder under specs/. Files outside these
+// Spec-view section per folder directly under specs/. Files outside these
 // folders are hidden from the view (#113 decision 3).
 const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   requirements: "requirements",
@@ -46,21 +47,17 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
 };
 
 export function toSpecEntry(meta: FileMeta): SpecFileEntry | null {
-  if (!meta.path.startsWith(SPECS_PREFIX)) return null;
-  const path = meta.path.slice(SPECS_PREFIX.length);
-  const folder = path.split("/")[0] ?? "";
-  const group = GROUP_BY_FOLDER[folder];
-  if (!group || !path.slice(folder.length + 1)) return null;
-  return { path, sha: meta.sha, group };
+  // specs/<folder>/<…file>: needs the prefix, a known folder, and a file name
+  // beyond it (segments.length >= 3).
+  const segments = meta.path.split("/");
+  if (segments[0] !== "specs" || segments.length < 3) return null;
+  const group = GROUP_BY_FOLDER[segments[1] ?? ""];
+  if (!group) return null;
+  return { path: meta.path, sha: meta.sha, group };
 }
 
 export function toSpecEntries(metas: FileMeta[]): SpecFileEntry[] {
   return metas
     .map(toSpecEntry)
     .filter((e): e is SpecFileEntry => e !== null);
-}
-
-/** Unprefixed path → the repo-relative path the Files API expects. */
-export function toRepoPath(path: string): string {
-  return SPECS_PREFIX + path;
 }

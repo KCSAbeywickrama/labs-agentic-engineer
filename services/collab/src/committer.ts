@@ -117,6 +117,11 @@ export async function flushRoom(
       );
     }
     if (writes.length === 0 && deletes.length === 0) return;
+    deps.log?.(
+      `committer: ${documentName} applying writes=[${writes
+        .map((w) => w.path)
+        .join(", ")}] deletes=[${deletes.map((d) => d.path).join(", ")}]`,
+    );
 
     try {
       const outcome = await deps.bff.applyFiles(token, state.projectName, {
