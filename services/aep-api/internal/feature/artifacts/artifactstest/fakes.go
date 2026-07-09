@@ -37,6 +37,9 @@ import (
 type FakeArtifactService struct {
 	ListRequirementFilesFunc     func(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	ListDesignFilesFunc          func(ctx context.Context, orgID, projectID string) (map[string]string, error)
+	SaveSpecFunc                 func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.SpecSaveResult, error)
+	ValidateSpecAtTagFunc        func(ctx context.Context, orgID, projectID, tag string) error
+	LatestSpecTagFunc            func(ctx context.Context, orgID, projectID string) string
 	SaveRequirementsFunc         func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error)
 	SaveDesignFunc               func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error)
 	DiscardRequirementsFunc      func(ctx context.Context, orgID, projectID string) (map[string]string, error)
@@ -64,6 +67,27 @@ func (f *FakeArtifactService) ListDesignFiles(ctx context.Context, orgID, projec
 		panic("artifactstest: ListDesignFiles called but ListDesignFilesFunc is not set")
 	}
 	return f.ListDesignFilesFunc(ctx, orgID, projectID)
+}
+
+func (f *FakeArtifactService) SaveSpec(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.SpecSaveResult, error) {
+	if f.SaveSpecFunc == nil {
+		panic("artifactstest: SaveSpec called but SaveSpecFunc is not set")
+	}
+	return f.SaveSpecFunc(ctx, orgID, projectID, req)
+}
+
+func (f *FakeArtifactService) ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error {
+	if f.ValidateSpecAtTagFunc == nil {
+		panic("artifactstest: ValidateSpecAtTag called but ValidateSpecAtTagFunc is not set")
+	}
+	return f.ValidateSpecAtTagFunc(ctx, orgID, projectID, tag)
+}
+
+func (f *FakeArtifactService) LatestSpecTag(ctx context.Context, orgID, projectID string) string {
+	if f.LatestSpecTagFunc == nil {
+		panic("artifactstest: LatestSpecTag called but LatestSpecTagFunc is not set")
+	}
+	return f.LatestSpecTagFunc(ctx, orgID, projectID)
 }
 
 func (f *FakeArtifactService) SaveRequirements(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {

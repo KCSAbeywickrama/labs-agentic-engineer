@@ -95,25 +95,10 @@ func RegisterRequirements(api huma.API, svc RequirementsService) {
 		return &requirementsBundleOutput{Body: out}, nil
 	})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "save-requirements",
-		Method:      http.MethodPost,
-		Path:        prefix + "/save",
-		Summary:     "Save the requirements bundle (cut a new version)",
-		Tags:        []string{"Requirements(Deprecated)"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *reqSaveInput) (*requirementsBundleOutput, error) {
-		out, err := svc.SaveAndProceed(ctx, in.OrgHandle, in.ProjectName, in.commitSHA())
-		if err != nil {
-			slog.ErrorContext(ctx, "requirements save failed",
-				"project", in.ProjectName, "error", err)
-			if errors.Is(err, artifacts.ErrSpecNotFound) {
-				return nil, huma.Error404NotFound("requirements not found")
-			}
-			return nil, huma.Error500InternalServerError("failed to save requirements")
-		}
-		return &requirementsBundleOutput{Body: out}, nil
-	})
+	// save-requirements is GONE from the public surface: the single-tag build
+	// flow (build-project) owns version tagging, and a requirements-only save
+	// would cut a v<N> that bypasses the design gate — corrupting the "every
+	// v<N> is a buildable spec" invariant.
 
 	huma.Register(api, huma.Operation{
 		OperationID: "discard-requirements",

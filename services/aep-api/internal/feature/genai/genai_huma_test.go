@@ -72,7 +72,7 @@ func TestMapTurnError_Table(t *testing.T) {
 		t.Errorf("turn-in-progress = %d, want 409", got)
 	}
 	// The design gate renders its pinned 409 conflict body.
-	if got := statusOf(t, mapTurnError(ctx, ErrRequirementsNotApproved)); got != 409 {
+	if got := statusOf(t, mapTurnError(ctx, ErrRequirementsMissing)); got != 409 {
 		t.Errorf("requirements-not-approved = %d, want 409", got)
 	}
 }

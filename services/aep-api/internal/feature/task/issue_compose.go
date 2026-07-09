@@ -22,8 +22,8 @@ import (
 
 // plannedTask is the fully-resolved facts of a Task the plan tap is about to
 // create (from a planTask tool result). The idempotency key is derived from the
-// project + designTag + target + title so a crash re-run dedupes against issues
-// created on an earlier run (§2, §6).
+// project + lineage tag (the spec tag `v<N>`) + target + title so a crash
+// re-run dedupes against issues created on an earlier run (§2, §6).
 type plannedTask struct {
 	Component string
 	Title     string
