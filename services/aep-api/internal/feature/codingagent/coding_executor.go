@@ -30,6 +30,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -258,6 +259,15 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 	if err != nil {
 		return fmt.Errorf("mint runner bearer: %w", err)
 	}
+	// Dedicated MCP identity token (aud aep-api-mcp): the runner bearer above
+	// (aud git-service) is pinned-rejected by the MCP verifier, so the pod needs
+	// a separate token to call the BFF's internal MCP surface (list endpoints /
+	// read remote file / search remote code). One token stamped at dispatch,
+	// TTL matching the runner bearer's 24h Job lifetime — no refresh route.
+	mcpToken, err := e.tokens.IssueServiceToken(auth.AudienceMCP, t.OrgID, 24*time.Hour)
+	if err != nil {
+		return fmt.Errorf("mint MCP token: %w", err)
+	}
 	// Resolve the org's skills repo URL (provisioning on first touch) so the
 	// runner can clone it and resolve applied skills locally. Best-effort — ""
 	// on any failure, the runner then degrades to the base plugin.
@@ -277,7 +287,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 
 	// Proxy path first (what local uses). Falls back to ClusterWorkflow when the
 	// proxy dispatcher / SM-API triplets are not fully configured.
-	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, prompt, name, email, login, bearer, skillsRepoURL)
+	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, prompt, name, email, login, bearer, mcpToken, skillsRepoURL)
 	if perr != nil {
 		return perr
 	}
@@ -330,7 +340,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 // configured for the proxy path (fall back). The runner env AEP_TASK_ID carries
 // the EXECUTION id (JobInputs.TaskID) and the bearer's task claim is the
 // execution id — the re-keyed runner contract (§9.2).
-func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.DispatchRequest, repo *models.GitRepository, prompt, name, email, login, bearer, skillsRepoURL string) (bool, string, error) {
+func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.DispatchRequest, repo *models.GitRepository, prompt, name, email, login, bearer, mcpToken, skillsRepoURL string) (bool, string, error) {
 	t := req.Task
 	if e.proxy == nil || e.db == nil || e.runnerImage == "" || e.clusterSecretStore == "" {
 		return false, "", nil
@@ -406,6 +416,7 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.Dis
 		GitServiceURL:     e.gitServiceURL,
 		CallbackURL:       e.platformURL,
 		Bearer:            bearer,
+		MCPToken:          mcpToken,
 		SkillsRepoURL:     skillsRepoURL,
 		PublisherTokenURL: publisherTokenURL,
 	}

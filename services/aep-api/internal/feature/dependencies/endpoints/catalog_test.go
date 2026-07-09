@@ -24,6 +24,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Structural compile-time check (dependency-management Phase 5): *Catalog is the
@@ -205,6 +206,282 @@ func TestCatalog_FindByComponent(t *testing.T) {
 	// Unknown component must not resolve (the not-found case).
 	if _, ok, _ := cat.FindByComponent(context.Background(), "ns", "nope"); ok {
 		t.Fatalf("unknown component must not resolve")
+	}
+}
+
+// ---- Resolve / ListResolved (Task A2: per-endpoint spec discovery) ---------
+
+// fakeRepoLocator resolves an app-factory provider's git repo row by project id.
+type fakeRepoLocator struct {
+	byProject map[string]*models.GitRepository
+}
+
+func (f fakeRepoLocator) GetByOrgAndProjectID(_ context.Context, _, projectID string) (*models.GitRepository, error) {
+	return f.byProject[projectID], nil
+}
+
+// fakeDesignReader returns a provider project's assembled design bundle.
+type fakeDesignReader struct {
+	byProject map[string]*artifacts.DesignFile
+}
+
+func (f fakeDesignReader) ReadDesign(_ context.Context, _, projectID string) (*artifacts.DesignFile, error) {
+	return f.byProject[projectID], nil
+}
+
+func designWith(comp models.DesignComponent) *artifacts.DesignFile {
+	return &artifacts.DesignFile{Components: []models.DesignComponent{comp}}
+}
+
+// (a) An endpoint whose deployed Workload CR already carries an inline schema
+// resolves to availability=inline straight from the CR — no repo/design probe.
+func TestResolve_InlineFromSchema(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"}, SchemaType: "openapi", SchemaContent: "openapi: 3.0.3\ninfo: {}\n",
+	}
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+			"hr": {RepoURL: "https://github.com/acme/hr.git", DefaultBranch: "main"},
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "inline" {
+		t.Fatalf("availability: want inline, got %q", got.Spec.Availability)
+	}
+	if got.Spec.InlineContent != e.SchemaContent {
+		t.Fatalf("inline content: want CR schema, got %q", got.Spec.InlineContent)
+	}
+	if !got.NamespaceVisible {
+		t.Fatalf("expected NamespaceVisible=true")
+	}
+	// Repo coords resolve independently of the CR-schema inline spec — the two
+	// sources are orthogonal, so availability=inline must not suppress coords.
+	if got.Owner != "acme" || got.Repo != "hr" || got.Branch != "main" {
+		t.Fatalf("repo coords: want acme/hr@main, got %s/%s@%s", got.Owner, got.Repo, got.Branch)
+	}
+}
+
+// (b) No CR schema, but the app-factory provider committed a design-bundle
+// openapi.yaml → read it server-side → inline, with Path set for provenance.
+// Repo coords are also resolved but step 2 wins over step 3.
+func TestResolve_InlineFromDesignBundle(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	spec := "openapi: 3.0.3\ninfo:\n  title: Employee API\n"
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithDesignReader(fakeDesignReader{byProject: map[string]*artifacts.DesignFile{
+			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: spec}),
+		}}),
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+			"hr": {RepoURL: "https://github.com/acme/hr.git", DefaultBranch: "main"},
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "inline" {
+		t.Fatalf("availability: want inline, got %q", got.Spec.Availability)
+	}
+	if got.Spec.InlineContent != spec {
+		t.Fatalf("inline content: want design-bundle spec, got %q", got.Spec.InlineContent)
+	}
+	if got.Spec.Path != "specs/design/components/employee-api/openapi.yaml" {
+		t.Fatalf("provenance path: got %q", got.Spec.Path)
+	}
+	// repo coords still resolved for provenance even though availability=inline.
+	if got.Owner != "acme" || got.Repo != "hr" {
+		t.Fatalf("repo coords: want acme/hr, got %s/%s", got.Owner, got.Repo)
+	}
+}
+
+// (b2) The design-bundle component is matched case-insensitively against the
+// endpoint's OC component name — the provenance Path's folder segment must
+// use the MATCHED component's actual committed Name/casing, not the
+// endpoint's (possibly differently-cased) Component.
+func TestResolve_InlineFromDesignBundle_ProvenancePathUsesMatchedComponentCasing(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "hr", Component: "Employee-API", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	spec := "openapi: 3.0.3\ninfo:\n  title: Employee API\n"
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithDesignReader(fakeDesignReader{byProject: map[string]*artifacts.DesignFile{
+			// Committed folder casing differs from the endpoint's Component field.
+			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: spec}),
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "inline" {
+		t.Fatalf("availability: want inline, got %q", got.Spec.Availability)
+	}
+	if got.Spec.Path != "specs/design/components/employee-api/openapi.yaml" {
+		t.Fatalf("provenance path: want matched design component's casing (employee-api), got %q", got.Spec.Path)
+	}
+}
+
+// (b3) app-factory OC components are project-prefixed
+// (spec.owner.componentName = "<project>-<design-component-name>"), but the
+// design bundle stores components under their unprefixed authored name. The
+// design-component lookup must retry with the project prefix stripped so the
+// inline-from-design-bundle path still fires for app-factory providers.
+func TestResolve_InlineFromDesignBundle_ProjectPrefixedComponentName(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "myproj", Component: "myproj-svc", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	spec := "openapi: 3.0.3\ninfo:\n  title: Svc\n"
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		WithDesignReader(fakeDesignReader{byProject: map[string]*artifacts.DesignFile{
+			// Design bundle stores the component under its UNPREFIXED authored name.
+			"myproj": designWith(models.DesignComponent{Name: "svc", OpenAPISpec: spec}),
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "inline" {
+		t.Fatalf("availability: want inline, got %q", got.Spec.Availability)
+	}
+	if got.Spec.InlineContent != spec {
+		t.Fatalf("inline content: want design-bundle spec, got %q", got.Spec.InlineContent)
+	}
+	if got.Spec.Path != "specs/design/components/svc/openapi.yaml" {
+		t.Fatalf("provenance path: want unprefixed design component name (svc), got %q", got.Spec.Path)
+	}
+}
+
+// (c) No schema anywhere, but repo coords resolve (git_repositories row) →
+// availability=repo with the component subdir as the hint.
+func TestResolve_RepoCoords(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
+		// design bundle present but component has NO openapi.yaml → not inline.
+		WithDesignReader(fakeDesignReader{byProject: map[string]*artifacts.DesignFile{
+			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "services/employee"}),
+		}}),
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+			"hr": {RepoURL: "https://github.com/acme/hr", DefaultBranch: "main"},
+		}}),
+	)
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "repo" {
+		t.Fatalf("availability: want repo, got %q", got.Spec.Availability)
+	}
+	if got.Spec.InlineContent != "" {
+		t.Fatalf("repo availability must not carry inline content, got %q", got.Spec.InlineContent)
+	}
+	if got.Owner != "acme" || got.Repo != "hr" || got.Branch != "main" {
+		t.Fatalf("repo coords: want acme/hr@main, got %s/%s@%s", got.Owner, got.Repo, got.Branch)
+	}
+	if got.Subdir != "services/employee" || got.Spec.Path != "services/employee" {
+		t.Fatalf("subdir hint: got Subdir=%q Path=%q", got.Subdir, got.Spec.Path)
+	}
+}
+
+// (d) BYO-image provider: no CR schema, no design bundle, no repo coords →
+// availability=none.
+func TestResolve_None(t *testing.T) {
+	t.Parallel()
+	e := openchoreo.WorkloadEndpointInfo{
+		Project: "hr", Component: "byo", Name: "http", Type: "HTTP", Port: 8080,
+		Visibility: []string{"namespace"},
+	}
+	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}))
+
+	got := cat.Resolve(context.Background(), "org", e)
+	if got.Spec.Availability != "none" {
+		t.Fatalf("availability: want none, got %q", got.Spec.Availability)
+	}
+	if got.Owner != "" || got.Repo != "" || got.Spec.InlineContent != "" {
+		t.Fatalf("none case must carry no coords/content, got %+v", got)
+	}
+}
+
+func TestListResolved(t *testing.T) {
+	t.Parallel()
+	eps := []openchoreo.WorkloadEndpointInfo{
+		{Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080,
+			Visibility: []string{"namespace"}, SchemaContent: "openapi: 3.0.3\n"},
+		{Project: "hr", Component: "byo", Name: "http", Type: "HTTP", Port: 8081},
+	}
+	cat := NewCatalog(fakeRC(eps))
+
+	got, err := cat.ListResolved(context.Background(), "org")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 resolved endpoints, got %d", len(got))
+	}
+	byComp := map[string]OrgComponentEndpoint{}
+	for _, r := range got {
+		byComp[r.Component] = r
+	}
+	if byComp["employee-api"].Spec.Availability != "inline" {
+		t.Fatalf("employee-api: want inline, got %q", byComp["employee-api"].Spec.Availability)
+	}
+	if byComp["byo"].Spec.Availability != "none" {
+		t.Fatalf("byo: want none, got %q", byComp["byo"].Spec.Availability)
+	}
+}
+
+func TestListResolved_NilSafety(t *testing.T) {
+	t.Parallel()
+	var nilCatalog *Catalog
+	got, err := nilCatalog.ListResolved(context.Background(), "org")
+	if got != nil || err != nil {
+		t.Fatalf("nil receiver: want (nil, nil), got (%v, %v)", got, err)
+	}
+}
+
+// countingDesignReader tracks how many times ReadDesign was called per
+// project — used to assert ListResolved's per-pass design-bundle memoization
+// (a project publishing several endpoints must trigger at most one remote
+// read per project for the whole pass).
+type countingDesignReader struct {
+	byProject map[string]*artifacts.DesignFile
+	calls     map[string]int
+}
+
+func (f *countingDesignReader) ReadDesign(_ context.Context, _, projectID string) (*artifacts.DesignFile, error) {
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[projectID]++
+	return f.byProject[projectID], nil
+}
+
+func TestListResolved_MemoizesDesignReadPerProject(t *testing.T) {
+	t.Parallel()
+	// Three endpoints owned by the same provider project ("hr") — a naive
+	// per-endpoint resolve would read the design bundle 3 times in this pass.
+	eps := []openchoreo.WorkloadEndpointInfo{
+		{Project: "hr", Component: "employee-api", Name: "http", Type: "HTTP", Port: 8080, Visibility: []string{"namespace"}},
+		{Project: "hr", Component: "payroll-api", Name: "http", Type: "HTTP", Port: 8081, Visibility: []string{"namespace"}},
+		{Project: "hr", Component: "benefits-api", Name: "http", Type: "HTTP", Port: 8082, Visibility: []string{"namespace"}},
+	}
+	reader := &countingDesignReader{byProject: map[string]*artifacts.DesignFile{
+		"hr": designWith(models.DesignComponent{Name: "employee-api", OpenAPISpec: "openapi: 3.0.3\n"}),
+	}}
+	cat := NewCatalog(fakeRC(eps), WithDesignReader(reader))
+
+	if _, err := cat.ListResolved(context.Background(), "org"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := reader.calls["hr"]; got != 1 {
+		t.Fatalf("ReadDesign(hr): want 1 call across 3 endpoints in one ListResolved pass, got %d", got)
 	}
 }
 

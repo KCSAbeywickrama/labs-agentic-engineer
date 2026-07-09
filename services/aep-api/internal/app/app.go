@@ -47,6 +47,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
@@ -810,12 +811,24 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// The provisioning surface (value/param collection + the aep:provision issue
 	// funnel) is wired in the Phase-6 block further below.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
-	orgEndpointCatalog := endpoints.NewCatalog(resourceClient)
+	// The resolver collaborators (repo locator + design reader) let the endpoint
+	// catalog discover each org-service's real OpenAPI contract + repo coords
+	// (endpoint spec discovery). Wired here so the A3 MCP tool projects them;
+	// the read-only List/Resolve* surface degrades gracefully if either is nil.
+	orgEndpointCatalog := endpoints.NewCatalog(resourceClient,
+		endpoints.WithRepoLocator(repoRepo),
+		endpoints.WithDesignReader(artifactStore),
+	)
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
 	params.MCPExternalResources = externalResourceRepo
 	params.MCPOrgEndpoints = orgEndpointCatalog
 	resourceTypeCatalog := resources.NewResourceTypeCatalog(resourceClient)
 	params.MCPResourceTypes = resourceTypeCatalog
+	// Endpoint spec discovery: the read-only remote-git reader an agent uses to
+	// read a provider's OpenAPI file from its own repo (Contents + Code Search,
+	// no clone). It resolves the org's credential (token + owner) from
+	// credResolver and refuses any owner that is not the org's GitHub account.
+	params.MCPRemoteGit = dependencies.NewRemoteGitClient(credResolver)
 	// design-save keys end-user-auth derivation on the CRT role marker read from
 	// this catalog (thunder-app generalization); wired consumer-side so design
 	// holds only a narrow MarkersByName port. When the design declares a

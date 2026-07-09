@@ -170,6 +170,17 @@ tools, USE them before authoring an `external`, `org-service`, or
   rather than inventing a parallel one.
 - `list_org_endpoints` — find the real provider component name for an
   `org-service` before referencing it.
+- `list_org_component_endpoints` — once you have the provider's name, call this
+  to read its REAL contract before writing the dependency's `description`:
+  each row resolves to a `spec.availability` of `inline` (read
+  `spec.inlineContent` directly — it IS the OpenAPI document), `repo` (no
+  inline spec, but the row's `owner`/`repo`/`subdir`/`branch` locate the
+  provider's source — use `search_remote_git_code` under that `subdir` to find
+  the spec file if you don't know its exact path, then
+  `get_remote_git_file_contents` to read it), or `none` (no contract is
+  resolvable). Base the dependency's `description` on the ACTUAL
+  operations/paths/schemas the contract exposes; on `none`, say so plainly in
+  the `description` instead of inventing a shape.
 - `list_platform_resource_types` — get a valid `resourceType` (and its
   parameters) before declaring a `platform-resource`. Read each type's
   `description` and pick the type whose description matches the need; when
@@ -192,7 +203,9 @@ least one `config` key — the value-collection gate needs something to collect.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;
-for a `platform-resource`, what it stores). The console shows it in the
+for an `org-service`, the specific operations/paths it calls from the
+provider's discovered contract — or that no contract was resolvable, never a
+guess; for a `platform-resource`, what it stores). The console shows it in the
 dependency drawer and the coding agent relies on it to integrate correctly.
 
 One component per directory. Every `service` gets an `openapi.yaml`
