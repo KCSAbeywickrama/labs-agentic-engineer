@@ -255,77 +255,106 @@ export function ImportSkillDialog({
 
             {method === "pr" && (
               <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <Box>
-                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-                    1. Find a skill
-                  </Typography>
-                  <DialogContentText>
-                    Community skills are shared through the AgentSkills
-                    ecosystem (the <code>npx skills</code> registry). Browse the
-                    catalogue and copy the skill&apos;s <code>SKILL.md</code>{" "}
-                    (plus any <code>references/</code> files).
-                  </DialogContentText>
+                <DialogContentText>
+                  Skills are plain files in your organization&apos;s skills
+                  repo. The catalogue reads that repo directly, so a merged pull
+                  request shows up here — nothing to upload.
+                </DialogContentText>
+
+                {repoUrl ? (
                   <Button
-                    variant="outlined"
-                    size="small"
+                    variant="contained"
                     endIcon={<ExternalLink size={16} />}
-                    href={SKILLS_SH_URL}
+                    href={repoUrl}
                     target="_blank"
                     rel="noreferrer"
-                    sx={{ mt: 1 }}
+                    sx={{ alignSelf: "flex-start" }}
                   >
-                    Browse skills.sh
+                    Open the org skills repo
                   </Button>
+                ) : (
+                  <Alert severity="info">
+                    The org skills repo isn&apos;t available yet — connect
+                    GitHub and the platform will provision it.
+                  </Alert>
+                )}
+
+                <Box component="ol" sx={{ m: 0, pl: 3, "& li": { mb: 1.5 } }}>
+                  <li>
+                    <Typography variant="body2">
+                      Create a branch off the repo&apos;s default branch.
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2">
+                      Add a folder <code>skills/&lt;skill-name&gt;/</code> — a
+                      lowercase, hyphenated name.
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      Inside it, write <code>SKILL.md</code>: YAML frontmatter
+                      naming the skill and saying when an agent should apply it,
+                      then the instructions as markdown.
+                    </Typography>
+                    <Box
+                      component="pre"
+                      sx={{
+                        m: 0,
+                        p: 1.5,
+                        borderRadius: 1,
+                        bgcolor: "action.hover",
+                        fontFamily: "monospace",
+                        fontSize: 12,
+                        overflowX: "auto",
+                      }}
+                    >
+                      {`---
+name: my-skill
+description: What it does, and when to apply it.
+---
+
+# My skill
+
+Instructions the agent should follow…`}
+                    </Box>
+                  </li>
+                  <li>
+                    <Typography variant="body2">
+                      Put any supporting files alongside it in{" "}
+                      <code>references/</code>.
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2">
+                      Commit, open a pull request, and get it reviewed. On merge
+                      the skill appears in this catalogue.
+                    </Typography>
+                  </li>
                 </Box>
 
                 <Divider />
 
+                {/* Secondary: where to find something to adapt, not a step. */}
                 <Box>
-                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-                    2. Open a pull request
+                  <Typography variant="caption" color="text.secondary">
+                    Looking for a skill to adapt? Community skills are shared
+                    through the AgentSkills ecosystem (the{" "}
+                    <code>npx skills</code> registry).
                   </Typography>
-                  <Box component="ol" sx={{ m: 0, pl: 3 }}>
-                    <li>
-                      <Typography variant="body2">
-                        Create a branch on the org skills repo.
-                      </Typography>
-                    </li>
-                    <li>
-                      <Typography variant="body2">
-                        Add <code>skills/&lt;name&gt;/SKILL.md</code> (and any{" "}
-                        <code>references/</code> files) and commit.
-                      </Typography>
-                    </li>
-                    <li>
-                      <Typography variant="body2">
-                        Open a pull request, get it reviewed, and merge it.
-                      </Typography>
-                    </li>
-                    <li>
-                      <Typography variant="body2">
-                        Done — the catalogue reads the repo directly, so the
-                        skill appears here on merge.
-                      </Typography>
-                    </li>
-                  </Box>
-                  {repoUrl ? (
+                  <Box>
                     <Button
-                      variant="contained"
+                      variant="text"
                       size="small"
-                      endIcon={<ExternalLink size={16} />}
-                      href={repoUrl}
+                      endIcon={<ExternalLink size={14} />}
+                      href={SKILLS_SH_URL}
                       target="_blank"
                       rel="noreferrer"
-                      sx={{ mt: 1.5 }}
+                      sx={{ mt: 0.5, ml: -1 }}
                     >
-                      Open the org skills repo
+                      Browse skills.sh
                     </Button>
-                  ) : (
-                    <Alert severity="info" sx={{ mt: 1.5 }}>
-                      The org skills repo isn&apos;t available yet — connect
-                      GitHub to have the platform provision it.
-                    </Alert>
-                  )}
+                  </Box>
                 </Box>
               </Box>
             )}
