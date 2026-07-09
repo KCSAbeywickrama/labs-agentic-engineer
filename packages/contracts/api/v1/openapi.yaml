@@ -135,6 +135,14 @@ components:
       type: object
     BuildRequest:
       additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/BuildRequest.json
+          format: uri
+          readOnly: true
+          type: string
       type: object
     BuildResponse:
       additionalProperties: false
@@ -1498,12 +1506,13 @@ components:
           readOnly: true
           type: string
         latest:
-          description: Newest user-tagged spec version (e.g. v3); absent when nothing is tagged. Proposed frontend-first (#117).
+          description: Newest spec version tag (e.g. v3); absent when nothing is tagged.
           type: string
         specDirty:
-          description: True when specs/ changed on GitHub after `latest` was tagged. Proposed frontend-first (#117).
+          description: True when specs/ changed after latest was tagged.
           type: boolean
         tags:
+          description: Spec version tags (v<N>), newest first.
           items:
             type: string
           type:
