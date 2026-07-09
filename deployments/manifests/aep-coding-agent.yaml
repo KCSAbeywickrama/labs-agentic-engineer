@@ -134,13 +134,6 @@ spec:
             # counts against the registry's pull rate limits). When stabilising
             # for a long-lived dev/stage, pin to an immutable SHA tag and switch
             # to `imagePullPolicy: IfNotPresent`.
-            # xlight05/aep-coding-agent-runner — the platform's own default
-            # (config_loader.go's runnerImageRepo), not a personal fork. Keep the
-            # tag in sync with runnerImageVersion in config_loader.go and with
-            # AGENT_RUNNER_IMAGE in deployments/docker-compose.yml: that env feeds
-            # the proxy dispatch path, while THIS manifest feeds the legacy
-            # ClusterWorkflow path (used when per-org SM-API secrets are absent,
-            # e.g. right after a fresh setup).
             image: docker.io/xlight05/aep-coding-agent-runner:v7
             imagePullPolicy: Always
             # Explicit command/args is the OC convention — every ClusterWorkflow
