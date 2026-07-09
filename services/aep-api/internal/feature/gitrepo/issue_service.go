@@ -55,6 +55,9 @@ type IssueService interface {
 	// GetPullRequestState returns a pull request's live state — the sweep's
 	// PR-state reconciliation input (§5).
 	GetPullRequestState(ctx context.Context, orgID, projectID string, number int) (*PullRequestState, error)
+	// MergePullRequest squash-merges an open pull request. Used by the devflow
+	// task workflow's auto merge-pr gate.
+	MergePullRequest(ctx context.Context, orgID, projectID string, number int) error
 }
 
 type issueService struct {
@@ -254,6 +257,14 @@ func (s *issueService) GetPullRequestState(ctx context.Context, orgID, projectID
 		return nil, err
 	}
 	return s.github.GetPullRequest(ctx, owner, repoName, cred, number)
+}
+
+func (s *issueService) MergePullRequest(ctx context.Context, orgID, projectID string, number int) error {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.github.MergePullRequest(ctx, owner, repoName, cred, number)
 }
 
 // resolveRepoAndCredential looks up the project's git repository, parses its

@@ -219,6 +219,19 @@ services:
       # coding-agent dispatch fails on the pre-flight.
       KUBECONFIG: "/app/.kube/config"
 
+      # ── Temporal (devflow workflows). aep-api runs the worker in-process and
+      # dials the k3d-hosted Temporal frontend via the k3d docker network.
+      # Reaches the in-cluster Temporal dev server via the k3d node container on
+      # the shared k3d-openchoreo docker network (NodePort 31733 from
+      # setup-temporal.sh). The `passthrough:///` scheme is REQUIRED: aep-api is
+      # built CGO_ENABLED=0 (pure-Go resolver) and the Temporal SDK's gRPC-Go
+      # client otherwise does SRV lookups that hang against docker's embedded
+      # DNS — passthrough skips gRPC's resolver and dials the hostname directly
+      # via Go's net dialer. Unset disables the feature (no worker, /devflows 503).
+      TEMPORAL_HOSTPORT: "${TEMPORAL_HOSTPORT:-passthrough:///k3d-openchoreo-server-0:31733}"
+      TEMPORAL_NAMESPACE: "${TEMPORAL_NAMESPACE:-default}"
+      TEMPORAL_TASKQUEUE: "${TEMPORAL_TASKQUEUE:-aep-devflow}"
+
       # ── Observer (task-progress) — reads workflow logs via OC Observer.
       # Optional: leave empty to disable; the BFF returns 503 on /progress.
       #

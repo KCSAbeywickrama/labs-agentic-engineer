@@ -391,6 +391,17 @@ func (s *service) finishTurn(ctx context.Context, job turnJob, term TurnTerminal
 		return
 	}
 	s.broker.Terminal(job.turnID, terminalEventJSON(term))
+	// Notify any waiting devflow workflow of the terminal outcome (best-effort).
+	// The hook does I/O (a DB lookup + a Temporal signal), so it runs detached
+	// with its own bounded context — a slow hook must never delay or fail the
+	// turn (the documented TurnFinishHook contract).
+	if hook := s.finishHook; hook != nil {
+		go func() {
+			hookCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			hook(hookCtx, job.orgID, job.projectID, job.turnID, job.useCase, term.Status)
+		}()
+	}
 }
 
 // turnBaseReader adapts Workspace.ReadFile at the turn's base ref into the

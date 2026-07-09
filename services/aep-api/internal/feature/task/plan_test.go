@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -210,5 +211,41 @@ func TestStartPlan_InstructionCarriesExistingTasksAndLineageDiff(t *testing.T) {
 	// The diff carries real hunks (the gitfs Diff Patch extension).
 	if !strings.Contains(instr, "```diff") || !strings.Contains(instr, "+# design v1 CHANGED") {
 		t.Errorf("lineage diff patch hunks missing: %q", instr)
+	}
+}
+
+// TestStartPlan_SkillsRepoGone_TypedError pins the incident's plan-turn failure
+// shape: a stale _skills row over a gone repo must surface as the typed
+// ErrSkillsRepoUnavailable (mapped to a logged 503 at the edge), never an
+// anonymous wrap that falls into the opaque 500 — and the turn must not start.
+func TestStartPlan_SkillsRepoGone_TypedError(t *testing.T) {
+	fx := workspacetest.New(t, map[string]string{
+		"specs/design/design.md":                              "# design",
+		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
+		"specs/requirements/requirements.md":                  "# reqs",
+	})
+	repoRow := &models.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: fx.Origin.URL(),
+		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}
+	staleSkills := &models.GitRepository{OrgID: "org1", ProjectID: models.SkillsRepoSentinelProjectID,
+		RepoURL: "file:///nonexistent/skills-repo-gone.git", DefaultBranch: "main", RepoSlug: "org-skills", Status: "ready"}
+
+	turn := &capturingTurn{}
+	svc := NewPlanService(
+		fakeRepos{repo: repoRow},
+		planVersions{designTag: "design-v1"},
+		gitrepo.NewGitOpsService(nilResolver{}, fx.Engine),
+		func(context.Context, string) (string, error) { return "sk-test", nil },
+		turn,
+		newFakeIssues(),
+		fx.Engine,
+		func(context.Context, string) (*models.GitRepository, error) { return staleSkills, nil },
+	)
+
+	_, err := svc.StartPlan(context.Background(), "org1", "proj1")
+	if !errors.Is(err, ErrSkillsRepoUnavailable) {
+		t.Fatalf("StartPlan error = %v, want ErrSkillsRepoUnavailable", err)
+	}
+	if turn.req != nil {
+		t.Error("plan turn dispatched despite an unavailable skills repo")
 	}
 }

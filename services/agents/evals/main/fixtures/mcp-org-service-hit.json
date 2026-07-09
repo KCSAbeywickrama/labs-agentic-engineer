@@ -1,6 +1,6 @@
 {
   "name": "mcp-org-service-hit",
-  "description": "MCP discovery (Task E2): the org already publishes an `employee-api` endpoint from project `hr-directory` (mock catalog). The agent should call list_org_endpoints and reuse the exact provider component name for the org-service dependency instead of inventing one.",
+  "description": "MCP discovery (Task E2, extended by Task C3): the org already publishes an `employee-api` endpoint from project `hr-directory` (mock catalog), and the mock also resolves that endpoint's real (inline) OpenAPI contract via list_org_component_endpoints. The agent should call list_org_endpoints to reuse the exact provider component name, then list_org_component_endpoints to read its actual contract before writing the org-service dependency's description — never inventing either the name or the API shape.",
   "difficulty": "medium",
   "turns": [
     {
@@ -8,7 +8,7 @@
     }
   ],
   "expect": {
-    "toolsUsed": ["list_org_endpoints"],
+    "toolsUsed": ["list_org_endpoints", "list_org_component_endpoints"],
     "fileMatches": [
       {
         "path": "specs/design/components/onboarding-api/design.json",

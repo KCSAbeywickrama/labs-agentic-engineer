@@ -32,7 +32,7 @@ import (
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
 	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
-	runnerImageVersion = "v6"
+	runnerImageVersion = "v7"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
@@ -143,6 +143,13 @@ func Load() (Config, error) {
 		// live-synced Anthropic key (e.g. the OpenChoreo SRE/RCA agent).
 		RCAAgentAnthropicPushNamespace:  r.readOptionalString("RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE", ""),
 		RCAAgentAnthropicPushSecretName: r.readOptionalString("RCA_AGENT_ANTHROPIC_PUSH_SECRET_NAME", ""),
+
+		// Temporal (devflow workflows). Enabled iff TEMPORAL_HOSTPORT is set.
+		Temporal: TemporalConfig{
+			HostPort:  r.readOptionalString("TEMPORAL_HOSTPORT", ""),
+			Namespace: r.readOptionalString("TEMPORAL_NAMESPACE", "default"),
+			TaskQueue: r.readOptionalString("TEMPORAL_TASKQUEUE", "aep-devflow"),
+		},
 
 		// Agent runner image + ESO CSS for per-run ExternalSecrets.
 		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),

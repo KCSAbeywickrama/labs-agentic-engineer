@@ -20,6 +20,13 @@ apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterResourceType
 metadata:
   name: postgres-cnpg
+  annotations:
+    # description → the type's prose self-description; surfaced to the architect
+    # via list_platform_resource_types (it picks the type whose description
+    # matches the need) and to users in the console dependency drawer.
+    aep.wso2.com/description: >-
+      A dedicated PostgreSQL database cluster provisioned inside the platform
+      (CloudNativePG). Declare on the service that owns the data.
 spec:
   retainPolicy: Delete
   parameters:

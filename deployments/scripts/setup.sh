@@ -31,7 +31,9 @@ echo "  4. Observability Plane (Observer + OpenSearch + Fluent Bit +"
 echo "     logs-adapter + AI RCA agent — in-UI Live Progress streaming,"
 echo "     plus the alert → AI-RCA → coding-agent handoff pipeline:"
 echo "     docs/developer-guide/sre-handoff-runbook.md)"
-echo "  5. AEP-specific config (ClusterWorkflows, ComponentTypes,"
+echo "  5. Temporal workflow engine (drives the devflow workflows; aep-api"
+echo "     runs the worker in-process)"
+echo "  6. AEP-specific config (ClusterWorkflows, ComponentTypes,"
 echo "     Environment, AuthzRoleBindings, .env file)"
 echo ""
 
@@ -45,6 +47,9 @@ bash "$SCRIPT_DIR/setup-openchoreo.sh"
 echo ""
 
 bash "$SCRIPT_DIR/setup-observability.sh"
+echo ""
+
+bash "$SCRIPT_DIR/setup-temporal.sh"
 echo ""
 
 bash "$SCRIPT_DIR/setup-aep.sh"

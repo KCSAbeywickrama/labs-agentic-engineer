@@ -94,6 +94,8 @@ spec:
             value: ${parameters.task.correlationId}
           - name: repo-url
             value: ${parameters.repository.url}
+          - name: skills-repo-url
+            value: ${parameters.repository.skillsUrl}
           - name: identity-name
             value: ${parameters.repository.identity.name}
           - name: identity-email
@@ -132,21 +134,14 @@ spec:
             # counts against the registry's pull rate limits). When stabilising
             # for a long-lived dev/stage, pin to an immutable SHA tag and switch
             # to `imagePullPolicy: IfNotPresent`.
-            # xlight05/aep-coding-agent-runner:v5 — the platform's own default
-            # (config_loader.go's runnerImageRepo), not a personal fork.
-            # Verified (2026-07-08): no `related-issues` skill (related-issue
-            # discovery/linking moved to the SRE agent's handoff stage — a
-            # "## Related issues" section in the issue body, GitHub #N mentions
-            # back-link automatically — see AE-HANDOFF-DESIGN.md in
-            # openchoreo/agents/sre-agent); already uses the executions-keyed
-            # skills-pull + credentials-refresh routes (tasks-github-native
-            # re-key — the old tasks-keyed routes are retired and would fail
-            # every git op); pulls natively on arm64. Keep in sync with
-            # AGENT_RUNNER_IMAGE in deployments/docker-compose.yml: that env
-            # feeds the proxy dispatch path, while THIS manifest feeds the
-            # legacy ClusterWorkflow path (used when per-org SM-API secrets
-            # are absent, e.g. right after a fresh setup).
-            image: docker.io/xlight05/aep-coding-agent-runner:v5
+            # xlight05/aep-coding-agent-runner — the platform's own default
+            # (config_loader.go's runnerImageRepo), not a personal fork. Keep the
+            # tag in sync with runnerImageVersion in config_loader.go and with
+            # AGENT_RUNNER_IMAGE in deployments/docker-compose.yml: that env feeds
+            # the proxy dispatch path, while THIS manifest feeds the legacy
+            # ClusterWorkflow path (used when per-org SM-API secrets are absent,
+            # e.g. right after a fresh setup).
+            image: docker.io/xlight05/aep-coding-agent-runner:v7
             imagePullPolicy: Always
             # Explicit command/args is the OC convention — every ClusterWorkflow
             # in this directory and Agent-Manager's amp-monitor-evaluation set
@@ -167,6 +162,8 @@ spec:
                 value: '{{workflow.parameters.component-name}}'
               - name: AEP_REPO_URL
                 value: '{{workflow.parameters.repo-url}}'
+              - name: AEP_SKILLS_REPO_URL
+                value: '{{workflow.parameters.skills-repo-url}}'
               - name: AEP_IDENTITY_NAME
                 value: '{{workflow.parameters.identity-name}}'
               - name: AEP_IDENTITY_EMAIL

@@ -107,6 +107,33 @@ func TestWiring_PostsResolvedDependencies(t *testing.T) {
 	if strings.Contains(body, "password") {
 		t.Errorf("unexpected token in wiring comment (no values should appear):\n%s", body)
 	}
+	// Consumed API contract guidance: org-service dep names the resolved
+	// provider + instructs the agent to fetch the real contract via MCP.
+	for _, want := range []string{
+		"### Consumed API contract — employee-api",
+		"project `hr`, component `hr-employee-api`, endpoint `http`",
+		"list_org_component_endpoints",
+		"Do NOT invent endpoints.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("wiring comment missing consumed-contract text %q:\n%s", want, body)
+		}
+	}
+	// Same-project component dep gets the "local" variant: read the sibling's
+	// checked-out openapi.yaml, no MCP round-trip needed.
+	for _, want := range []string{
+		"### Consumed API contract — orders (local)",
+		"specs/design/components/orders/openapi.yaml",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("wiring comment missing local consumed-contract text %q:\n%s", want, body)
+		}
+	}
+	// External/platform-resource deps are untouched by this feature — no
+	// contract section is rendered for them.
+	if strings.Contains(body, "Consumed API contract — stripe") || strings.Contains(body, "Consumed API contract — orders-db") {
+		t.Errorf("unexpected consumed-contract section for a non-endpoint dep:\n%s", body)
+	}
 }
 
 func TestWiring_EmptyResolutionPostsNothing(t *testing.T) {

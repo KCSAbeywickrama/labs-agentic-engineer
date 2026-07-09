@@ -4,7 +4,6 @@ import {
   deleteProjectError,
   duplicateProjectError,
   emptyProjects,
-  orgConfig,
   projectsError,
   PROJECTS_PAGE_SIZE,
   seedProjects,
@@ -132,7 +131,6 @@ export const projectsHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // get-config: the create flow reads the connected GitHub org for the
-  // repo-URL preview from the org-config projection.
-  http.get("*/api/v1/config", () => HttpResponse.json(orgConfig)),
+  // GitHub connection status (for the create flow's repo-URL preview) now
+  // comes from GET /config — mocked in mocks/handlers/settings.ts.
 ];

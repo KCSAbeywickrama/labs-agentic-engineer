@@ -19,6 +19,7 @@ package codingagent
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/models"
@@ -74,6 +75,28 @@ func (f *fakeEnsurer) calls() [][3]string {
 	return append([][3]string{}, f.args...)
 }
 
+// fakeRuntimeConfig records EmitForComponent calls at the ensure pre-flight and
+// can be scripted to fail (emission is best-effort — a failure must not block the
+// coding dispatch). Satisfies codingagent.ComponentRuntimeConfigEmitter.
+type fakeRuntimeConfig struct {
+	err  error
+	mu   sync.Mutex
+	args [][3]string // (org, project, component) per call
+}
+
+func (f *fakeRuntimeConfig) EmitForComponent(_ context.Context, org, project, component string) error {
+	f.mu.Lock()
+	f.args = append(f.args, [3]string{org, project, component})
+	f.mu.Unlock()
+	return f.err
+}
+
+func (f *fakeRuntimeConfig) calls() [][3]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][3]string{}, f.args...)
+}
+
 // fakeIdentities / fakeTokens satisfy the coding-dispatch ports for the
 // ClusterWorkflow path (proxy unset).
 type fakeIdentities struct{}
@@ -85,6 +108,10 @@ func (fakeIdentities) IdentityFor(context.Context, string) (string, string, stri
 type fakeTokens struct{}
 
 func (fakeTokens) Issue(string, string, string) (string, error) { return "bearer-xyz", nil }
+
+func (fakeTokens) IssueServiceToken(string, string, time.Duration) (string, error) {
+	return "mcp-token-xyz", nil
+}
 
 // fakeReeval records Reevaluate calls (the build-success release path).
 type fakeReeval struct {

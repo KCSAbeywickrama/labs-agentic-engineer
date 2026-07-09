@@ -112,6 +112,20 @@ else
     echo "⚠️  k3d cluster not accessible — git-service will fail OpenBao readiness"
 fi
 
+# 1b. Temporal reachability check (informational). aep-api reaches the
+#     in-cluster Temporal frontend directly on the shared k3d docker network
+#     (k3d-openchoreo-server-0:31733 NodePort — no host bridge needed), and the
+#     Web UI is published on host :8233 by setup-temporal.sh via the k3d
+#     loadbalancer. This is just a heads-up when Temporal isn't installed.
+echo ""
+echo "⏱️  Checking Temporal (devflow workflow engine)..."
+if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null \
+        && kubectl --context "${CLUSTER_CONTEXT}" -n temporal get svc temporal-frontend &>/dev/null; then
+    echo "   Temporal installed — aep-api reaches it at k3d-${CLUSTER_NAME}-server-0:31733; Web UI: http://localhost:8233"
+else
+    echo "   Temporal not installed — /devflows will answer 503 (run scripts/setup-temporal.sh to enable workflows)"
+fi
+
 # 2. GitHub App private key placeholder — docker-compose mounts the file
 #    into git-service. If the operator hasn't dropped a real key, we touch
 #    a placeholder so the volume mount succeeds; the seed skips silently
@@ -326,6 +340,7 @@ echo "  API:              http://localhost:9090"
 echo "  Agents:           http://localhost:4000"
 echo "  SRE-handoff MCP:  http://localhost:3401 (alert → AI-RCA → issue → coding agent;"
 echo "                    see docs/developer-guide/sre-handoff-runbook.md)"
+echo "  Temporal Web UI:  http://localhost:8233   (devflow workflow dashboard)"
 echo ""
 echo "  Coding-agent:     dispatched as a one-shot pod via the"
 echo "                    'aep-coding-agent' ClusterWorkflow"
