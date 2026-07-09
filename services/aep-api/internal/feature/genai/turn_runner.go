@@ -75,6 +75,12 @@ type turnJob struct {
 	anthropicKey     string
 	author           *gitrepo.GitIdentity
 	committer        *gitrepo.GitIdentity
+	// Room-scoped turn (#86 phase 4): non-empty collabRoomID makes the agents
+	// service a live peer of this room (joining with collabToken, the
+	// prompting user's bearer). The doc is the write surface — the runner
+	// relays frames but folds nothing and commits nothing.
+	collabRoomID string
+	collabToken  string
 }
 
 // baseMovedError is the D15 overlap conflict: main moved past the turn's base
@@ -168,6 +174,10 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		}
 	}
 
+	var collab *agentsvc.CollabBlock
+	if job.collabRoomID != "" {
+		collab = &agentsvc.CollabBlock{RoomID: job.collabRoomID, Token: job.collabToken}
+	}
 	body, err := s.client.Turn(ctx, job.nsConversationID, job.orgID, job.anthropicKey, agentsvc.TurnRequest{
 		Instruction: instruction,
 		Workspace: agentsvc.WorkspaceRef{
@@ -179,6 +189,7 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		},
 		FilesChangedExternally: filesChangedExternally,
 		MCP:                    s.mcpForTurn(ctx, job),
+		Collab:                 collab,
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "genai: turn dispatch failed", "turn", job.turnID, "error", err)
@@ -233,6 +244,12 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		}
 	}()
 
+	// Room-scoped turn (#86 phase 4): the doc is the write surface — the fold
+	// would run against the SNAPSHOT while the agents-side bundle started from
+	// the DOC, so parity is undefined by construction. Relay frames only;
+	// nothing folds, nothing commits, no manifest gate.
+	roomMode := job.collabRoomID != ""
+
 	fold := agentfold.New(s.turnBaseReader(job.repoRef, job.baseRef))
 	var manifest *agentfold.Manifest
 	var foldErr error
@@ -246,12 +263,37 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			return nil // backend integrity plumbing — never forwarded (D14)
 		}
 		s.broker.Append(job.turnID, raw)
+		if roomMode {
+			return nil // doc-applied on the agents side — nothing to fold
+		}
 		if _, err := fold.ApplyToolCall(ctx, part); err != nil {
 			foldErr = err
 			return err
 		}
 		return nil
 	})
+
+	if roomMode {
+		switch {
+		case readErr != nil:
+			msg := "agents stream read failed: " + readErr.Error()
+			if idleAborted.Load() {
+				msg = "agents stream idle past deadline"
+			}
+			return failedTerminal(turnReasonStreamDied, msg, nil)
+		case manifest == nil:
+			// Same severed/errored semantics as the committed path — the agents
+			// service vouched for nothing.
+			msg := "stream ended without a manifest"
+			if end == agentfold.StreamEOF {
+				msg = "stream severed before the manifest"
+			}
+			return failedTerminal(turnReasonStreamDied, msg, nil)
+		}
+		// Edits live in the room's doc; git is untouched (persistence is the
+		// #86 phase-3 committer). The base sha stays the "content as of" pin.
+		return TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}
+	}
 
 	switch {
 	case foldErr != nil:

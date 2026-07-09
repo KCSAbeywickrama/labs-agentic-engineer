@@ -69,6 +69,7 @@ type turnInput struct {
 		UseCase     *string `json:"useCase,omitempty" enum:"requirements-generate,requirements-chat,design-generate" doc:"Which generation/chat flow. Omit to run a generic spec turn."`
 		Instruction string  `json:"instruction" doc:"User message / generation directive"`
 		Target      string  `json:"target,omitempty" doc:"Optional target (e.g. a doc type)"`
+		Collab      bool    `json:"collab,omitempty" doc:"Room-scoped turn (#86 phase 4): the agent joins the project's spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git."`
 	}
 }
 
@@ -141,6 +142,7 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 			ConversationID: in.ConversationID,
 			Instruction:    in.Body.Instruction,
 			Target:         in.Body.Target,
+			Collab:         in.Body.Collab,
 		})
 		if err != nil {
 			return nil, mapTurnError(ctx, err)
@@ -311,6 +313,8 @@ func mapTurnError(ctx context.Context, err error) error {
 		return huma.Error400BadRequest("invalid conversation id")
 	case errors.Is(err, ErrEmptyInstruction):
 		return huma.Error400BadRequest(ErrEmptyInstruction.Error())
+	case errors.Is(err, ErrCollabNoToken):
+		return huma.Error400BadRequest(ErrCollabNoToken.Error())
 	case errors.Is(err, ErrNoAnthropicKey):
 		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
 	case errors.Is(err, ErrRequirementsMissing):

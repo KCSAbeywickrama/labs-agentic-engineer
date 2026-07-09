@@ -19,8 +19,8 @@
 // Headless markdown ↔ ProseMirror plumbing (#86 phase 6). Markdown files are
 // shared as Y.XmlFragments (Tiptap's collaboration binding needs rich
 // structure, not Y.Text); this module owns the conversion at the seams:
-// parse on seed here, serialize on flush when the committer lands (phase 3).
-// The extension set MUST match the console editor's, or content drifts.
+// parse on seed, serialize for committer/agent reads. The extension set MUST
+// match the console editor's, or content drifts.
 
 import { getSchema } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -30,11 +30,21 @@ import {
   yXmlFragmentToProsemirrorJSON,
 } from "y-prosemirror";
 import type * as Y from "yjs";
+import type { Node as ProseMirrorNode } from "prosemirror-model";
+import { AgentInsertion } from "./agent-mark.js";
 
-const extensions = [StarterKit];
+// AgentInsertion rides in the ONE shared schema (console editor, seeding,
+// committer serialization, agent diff application) — its markdown render is
+// a passthrough, so committed files never carry review state.
+const extensions = [StarterKit, AgentInsertion];
 
 const manager = new MarkdownManager({ extensions });
 const schema = getSchema(extensions);
+
+/** Parse markdown into a ProseMirror Node (the diff-apply input, #86 ph6). */
+export function markdownToNode(markdown: string): ProseMirrorNode {
+  return schema.nodeFromJSON(manager.parse(markdown));
+}
 
 export function isMarkdownPath(path: string): boolean {
   return path.endsWith(".md");
@@ -48,7 +58,7 @@ export function markdownToFragment(
   prosemirrorJSONToYXmlFragment(schema, manager.parse(markdown), fragment);
 }
 
-/** Serialize a fragment back to markdown (committer seam, phase 3). */
+/** Serialize a fragment back to markdown (committer + agent-read seam). */
 export function fragmentToMarkdown(fragment: Y.XmlFragment): string {
   return manager.serialize(yXmlFragmentToProsemirrorJSON(fragment));
 }

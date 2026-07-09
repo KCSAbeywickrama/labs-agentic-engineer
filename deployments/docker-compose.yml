@@ -285,6 +285,9 @@ services:
       # written by aep-api. The :ro mount enforces the reader-only contract
       # structurally (design D3).
       WORKSPACE_MOUNT_ROOT: "/workspaces"
+      # Room-scoped turns (#86 phase 4): the agents service joins spec rooms
+      # as a live Yjs peer through the in-network collab server.
+      AGENT_COLLAB_WS_URL: "ws://collab-server:3400"
     volumes:
       - aep-workspaces:/workspaces:ro
     networks:
@@ -434,6 +437,10 @@ services:
     environment:
       COLLAB_PORT: "3400"
       AEP_API_BASE: "http://aep-api:9090/api/v1"
+      # Committer cadence (#133): quiet-period debounce + continuous-editing
+      # cap; the final flush always runs when the last participant leaves.
+      COLLAB_COMMIT_DEBOUNCE_MS: "${COLLAB_COMMIT_DEBOUNCE_MS:-60000}"
+      COLLAB_COMMIT_MAX_DEBOUNCE_MS: "${COLLAB_COMMIT_MAX_DEBOUNCE_MS:-300000}"
     networks:
       - aep
 

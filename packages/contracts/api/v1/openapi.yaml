@@ -1714,6 +1714,9 @@ components:
           format: uri
           readOnly: true
           type: string
+        collab:
+          description: 'Room-scoped turn (#86 phase 4): the agent joins the project''s spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git.'
+          type: boolean
         instruction:
           description: User message / generation directive
           type: string
@@ -1745,6 +1748,54 @@ components:
           type: string
       required:
         - turnId
+      type: object
+    TurnStatus:
+      additionalProperties: false
+      description: One turn's lifecycle view (create-turn 202 → poll/attach).
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnStatus.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          type: string
+        conversationId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        message:
+          type: string
+        noChanges:
+          type: boolean
+        paths:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        reason:
+          type: string
+        status:
+          description: running, completed, failed
+          type: string
+        turnId:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        useCase:
+          type: string
+      required:
+        - turnId
+        - conversationId
+        - useCase
+        - status
+        - createdAt
+        - updatedAt
       type: object
     UpdateConfigBody:
       additionalProperties: false
@@ -3339,6 +3390,116 @@ paths:
       summary: Stream a Task's live state (status + executions + unified timeline) as SSE
       tags:
         - Tasks
+  /projects/{projectName}/turns/active:
+    get:
+      operationId: get-active-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnStatus"
+          description: OK
+        "204":
+          description: No running turn
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the project's running turn (204 when none)
+      tags:
+        - GenAI
+  /projects/{projectName}/turns/{turnId}:
+    get:
+      operationId: get-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Turn id from the 202 create response
+          in: path
+          name: turnId
+          required: true
+          schema:
+            description: Turn id from the 202 create response
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnStatus"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get one turn's status
+      tags:
+        - GenAI
+  /projects/{projectName}/turns/{turnId}/stream:
+    get:
+      operationId: stream-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Turn id from the 202 create response
+          in: path
+          name: turnId
+          required: true
+          schema:
+            description: Turn id from the 202 create response
+            type: string
+        - description: Replay from this absolute event index (wins over Last-Event-ID)
+          in: query
+          name: from
+          schema:
+            description: Replay from this absolute event index (wins over Last-Event-ID)
+            type: integer
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                description: Raw agent StreamPart frames + one terminal event, id-stamped; ends with [DONE]
+                type: string
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Attach to a turn's event stream (SSE replay + live tail)
+      tags:
+        - GenAI
   /skills:
     get:
       operationId: list-skills

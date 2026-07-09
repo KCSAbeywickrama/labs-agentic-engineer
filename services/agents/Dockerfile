@@ -39,10 +39,11 @@ COPY services/agents ./services/agents
 RUN pnpm install --frozen-lockfile --filter @aep/agents...
 
 # @aep/agents runs from TypeScript source via tsx (no build of its own), but it
-# imports @aep/agent-stream as a package whose `exports` resolve to ./dist — so
-# that package MUST be compiled before the service can start. Without this step
-# the container crashes at boot with "Cannot find module .../@aep/agent-stream/dist".
-RUN pnpm --filter @aep/agent-stream build
+# imports @aep/agent-stream and @aep/collab-doc as packages whose `exports`
+# resolve to ./dist — both MUST be compiled before the service can start.
+# Without this step the container crashes at boot with "Cannot find module
+# .../@aep/agent-stream/dist" (or the collab-doc analog).
+RUN pnpm --filter @aep/agent-stream build && pnpm --filter @aep/collab-doc build
 
 WORKDIR /repo/services/agents
 
