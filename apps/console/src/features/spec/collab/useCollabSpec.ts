@@ -59,7 +59,16 @@ export interface CollabSpec {
   isLocalTransaction: (transaction: Y.Transaction) => boolean;
   /** Bumped on any files-map change so selections can re-resolve. */
   version: number;
+  /** Force the room's pending doc edits to commit to git NOW and resolve once
+   *  done (#162) — the console awaits this before triggering a build, which
+   *  tags HEAD. Resolves immediately when offline (nothing shared to commit);
+   *  rejects on a flush error or timeout. */
+  flush: () => Promise<void>;
 }
+
+// A forced flush is one files/apply commit — quick, but allow slack for the
+// git op before the build is blocked on a hung reply.
+const FLUSH_TIMEOUT_MS = 30_000;
 
 const PEER_COLORS = [
   "#e57373", "#64b5f6", "#81c784", "#ffb74d",
@@ -87,10 +96,18 @@ export function useCollabSpec(
   // Last-seen file-path set (serialized) so we re-render the list only when a
   // file is added/removed/created — not on every keystroke within a file.
   const pathKeyRef = useRef("");
+  // In-flight flush requests keyed by correlation id (#162): the server acks
+  // via a stateless message that resolves/rejects the matching promise.
+  const pendingFlushes = useRef(
+    new Map<string, { resolve: () => void; reject: (e: Error) => void }>(),
+  );
 
   useEffect(() => {
     const doc = new Y.Doc();
     docRef.current = doc;
+    // Stable across this effect — captured so the cleanup doesn't read a ref
+    // that could have moved (react-hooks/exhaustive-deps).
+    const flushes = pendingFlushes.current;
     const provider = new HocuspocusProvider({
       url: collabWsUrl(),
       name: `spec-${orgHandle}-${projectName}`,
@@ -143,10 +160,34 @@ export function useCollabSpec(
     };
     doc.on("afterAllTransactions", onDocChange);
 
+    // Flush acks (#162): the server replies to a flush request with a stateless
+    // {type:"flushed"|"flush-error", id} — resolve/reject the matching promise.
+    const onStateless = ({ payload }: { payload: string }) => {
+      let msg: { type?: string; id?: string; message?: string };
+      try {
+        msg = JSON.parse(payload) as typeof msg;
+      } catch {
+        return;
+      }
+      if (!msg.id) return;
+      const pending = pendingFlushes.current.get(msg.id);
+      if (!pending) return;
+      pendingFlushes.current.delete(msg.id);
+      if (msg.type === "flushed") pending.resolve();
+      else if (msg.type === "flush-error")
+        pending.reject(new Error(msg.message ?? "Failed to commit the workspace."));
+    };
+    provider.on("stateless", onStateless);
+
     provider.attach();
     return () => {
       doc.off("afterAllTransactions", onDocChange);
       awareness?.off("change", onAwareness);
+      provider.off("stateless", onStateless);
+      // Fail any in-flight flush so a caller (Build) never hangs on teardown.
+      for (const p of flushes.values())
+        p.reject(new Error("Collaboration session ended before the commit finished."));
+      flushes.clear();
       provider.destroy();
       doc.destroy();
       docRef.current = null;
@@ -179,6 +220,30 @@ export function useCollabSpec(
           "#888",
       },
       isLocalTransaction: (transaction: Y.Transaction) => transaction.local,
+      flush: () =>
+        new Promise<void>((resolve, reject) => {
+          const provider = providerRef.current;
+          if (status !== "connected" || !provider) {
+            resolve(); // offline / solo — nothing shared to commit
+            return;
+          }
+          const id = crypto.randomUUID();
+          const timer = setTimeout(() => {
+            pendingFlushes.current.delete(id);
+            reject(new Error("Timed out waiting for the workspace to commit."));
+          }, FLUSH_TIMEOUT_MS);
+          pendingFlushes.current.set(id, {
+            resolve: () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            reject: (e) => {
+              clearTimeout(timer);
+              reject(e);
+            },
+          });
+          provider.sendStateless(JSON.stringify({ type: "flush", id }));
+        }),
     }),
     [status, peers, version, user.name],
   );

@@ -37,6 +37,7 @@ import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
+  useBuildProject,
   useProject,
   useProjectStatus,
   useProjectTags,
@@ -88,6 +89,13 @@ export function SpecView({ projectName }: { projectName: string }) {
   const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
+  // Build (#162): commit-then-build. buildPhase drives the button label /
+  // loading; an agent peer in the room means a turn is writing → block Build.
+  const build = useBuildProject(projectName);
+  const [buildPhase, setBuildPhase] = useState<"committing" | "building" | null>(
+    null,
+  );
+  const [buildError, setBuildError] = useState<string | null>(null);
 
   // Collapse the sidebar while focused on the spec, expand when leaving.
   useEffect(() => {
@@ -154,6 +162,35 @@ export function SpecView({ projectName }: { projectName: string }) {
       params: { projectName },
       search: { generate: "design" },
     });
+
+  // An agent turn is in flight iff an agent peer is present in the room (#86 d7
+  // renders them with kind:"agent"). Building a half-written design is wrong,
+  // so Build is disabled — with a tooltip — while one is working (#162).
+  const agentBusy = collab.peers.some((p) => p.kind === "agent");
+
+  // Build (#162): commit the room's live edits FIRST (POST /build tags HEAD),
+  // then trigger the build, then go watch progress on the overview.
+  const onBuild = () => {
+    setBuildError(null);
+    setBuildPhase("committing");
+    void (async () => {
+      try {
+        await collab.flush(); // no-op when offline
+        setBuildPhase("building");
+        await build.mutateAsync();
+        void navigate({
+          to: "/projects/$projectName",
+          params: { projectName },
+        });
+      } catch (e) {
+        setBuildError(
+          e instanceof Error ? e.message : "Failed to start the build.",
+        );
+      } finally {
+        setBuildPhase(null);
+      }
+    })();
+  };
 
   const displayName = project.data?.displayName ?? projectName;
 
@@ -254,19 +291,29 @@ export function SpecView({ projectName }: { projectName: string }) {
               next pipeline step — Generate design until a design exists, then
               Build. A dead disabled Build hid what to do next. */}
           {hasDesignFiles ? (
-            <Tooltip title="Start building from this spec">
-              <Button
-                variant="contained"
-                startIcon={<Hammer size={18} />}
-                onClick={() =>
-                  void navigate({
-                    to: "/projects/$projectName",
-                    params: { projectName },
-                  })
-                }
-              >
-                Build
-              </Button>
+            <Tooltip
+              title={
+                agentBusy
+                  ? "An agent is still working — Build is available once it finishes"
+                  : "Commit your latest changes and start building"
+              }
+            >
+              {/* span so the tooltip works while the button is disabled */}
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Hammer size={18} />}
+                  disabled={agentBusy || buildPhase !== null}
+                  loading={buildPhase !== null}
+                  onClick={onBuild}
+                >
+                  {buildPhase === "committing"
+                    ? "Committing…"
+                    : buildPhase === "building"
+                      ? "Building…"
+                      : "Build"}
+                </Button>
+              </span>
             </Tooltip>
           ) : (
             <Tooltip
@@ -295,6 +342,17 @@ export function SpecView({ projectName }: { projectName: string }) {
           <Alert severity="error" sx={{ borderRadius: 0 }}>
             Spec derivation hit a problem. Existing files remain browsable;
             the agents' error details will surface here in a follow-up.
+          </Alert>
+        )}
+
+        {/* Build failed to start (#162): commit or POST /build errored. */}
+        {buildError && (
+          <Alert
+            severity="error"
+            sx={{ borderRadius: 0 }}
+            onClose={() => setBuildError(null)}
+          >
+            {buildError}
           </Alert>
         )}
 

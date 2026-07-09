@@ -22,6 +22,7 @@ import type {
   beforeUnloadDocumentPayload,
   onAuthenticatePayload,
   onLoadDocumentPayload,
+  onStatelessPayload,
   onStoreDocumentPayload,
 } from "@hocuspocus/server";
 import type { CollabConfig } from "./env.js";
@@ -204,6 +205,62 @@ export function buildAfterUnloadHook(deps: CollabDeps) {
   };
 }
 
+// Flush-on-demand (#162): the console requests a commit BEFORE triggering a
+// build. `POST /build` tags git HEAD, so the room's live doc edits (which
+// otherwise reach git only on the debounce / last-peer-leave) must land first.
+// A stateless `{type:"flush",id}` message force-flushes the room through the
+// committer (accept-by-default for held agent suggestions) and acks the
+// requesting connection; the console awaits the ack, then builds. Unknown
+// payloads are ignored; a clean/dev/no-BFF room acks immediately (nothing to
+// commit → HEAD is already the truth).
+export function buildStatelessHook(config: CollabConfig, deps: CollabDeps) {
+  return async (
+    data: Pick<
+      onStatelessPayload,
+      "connection" | "documentName" | "document" | "payload"
+    >,
+  ) => {
+    let msg: { type?: string; id?: string };
+    try {
+      msg = JSON.parse(data.payload) as { type?: string; id?: string };
+    } catch {
+      return; // not our protocol
+    }
+    if (msg.type !== "flush") return;
+
+    const ack = (extra: Record<string, unknown> = {}) =>
+      data.connection.sendStateless(
+        JSON.stringify({ type: "flushed", id: msg.id, ...extra }),
+      );
+
+    if (config.devMode || !deps.bff || !roomState(data.documentName)) {
+      ack(); // nothing to commit — proceed to build against current HEAD
+      return;
+    }
+    try {
+      await flushRoom(
+        { bff: deps.bff, log: deps.log },
+        data.documentName,
+        data.document,
+        undefined,
+        true,
+      );
+      ack();
+    } catch (err) {
+      deps.log?.(
+        `committer: on-demand flush failed for ${data.documentName} (${String(err)})`,
+      );
+      data.connection.sendStateless(
+        JSON.stringify({
+          type: "flush-error",
+          id: msg.id,
+          message: err instanceof Error ? err.message : "flush failed",
+        }),
+      );
+    }
+  };
+}
+
 export function createCollabServer(
   config: CollabConfig,
   deps: CollabDeps,
@@ -229,5 +286,8 @@ export function createCollabServer(
       data: beforeUnloadDocumentPayload,
     ) => Promise<unknown>,
     afterUnloadDocument: buildAfterUnloadHook(deps),
+    onStateless: buildStatelessHook(config, deps) as (
+      data: onStatelessPayload,
+    ) => Promise<unknown>,
   });
 }
