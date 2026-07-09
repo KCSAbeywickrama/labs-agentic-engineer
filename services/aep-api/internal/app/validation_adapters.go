@@ -19,6 +19,8 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
@@ -113,4 +115,48 @@ func firstDeploymentURL(list *models.DeploymentList) string {
 		}
 	}
 	return ""
+}
+
+// devflowValidator is the dev workflow's post-execution consistency check
+// (the Validate activity): every design component must have a Ready deployment
+// (a reachable external URL). It is the author's intended check for the
+// validating phase, implemented — an independent OpenChoreo verification of
+// what the task outcomes already imply.
+type devflowValidator struct {
+	store *artifacts.ArtifactStore
+	comp  componentDeployLister
+}
+
+func (v devflowValidator) Validate(ctx context.Context, orgID, projectID, _ string) error {
+	df, err := v.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("validate: read design: %w", err)
+	}
+	var undeployed []string
+	for i := range df.Components {
+		name := df.Components[i].Name
+		list, lerr := v.comp.ListDeployments(ctx, orgID, projectID, name)
+		if lerr != nil || firstDeploymentURL(list) == "" {
+			undeployed = append(undeployed, name)
+		}
+	}
+	if len(undeployed) > 0 {
+		return fmt.Errorf("components without a ready deployment: %s", strings.Join(undeployed, ", "))
+	}
+	return nil
+}
+
+// devflowValidationResolver adapts the validation service onto the devflow
+// ValidationResolver port: ensure the project's validation issue exists
+// (idempotent) and return its number (0 = no acceptance criteria). The design
+// tag is resolved here so the devflow package stays free of the artifacts +
+// validation features.
+type devflowValidationResolver struct {
+	svc *validation.Service
+	art artifacts.ArtifactService
+}
+
+func (r devflowValidationResolver) ResolveValidationTask(ctx context.Context, orgID, projectID string) (int, error) {
+	designTag := r.art.LatestDesignTag(ctx, orgID, projectID)
+	return r.svc.ResolveValidationTask(ctx, orgID, projectID, designTag)
 }

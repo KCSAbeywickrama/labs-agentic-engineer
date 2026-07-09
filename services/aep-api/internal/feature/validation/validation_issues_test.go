@@ -92,9 +92,9 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 	}
 	got := iss.created[0]
 
-	// Labels: marker + validation class + spec-plan origin + execute (autonomous
-	// dispatch — the sweep picks it up and the funnel holds on deps).
-	wantLabels := []string{"aep:task", "aep:validation", "aep:origin/spec-plan", "aep:execute"}
+	// Labels: marker + validation class + spec-plan origin. No aep:execute —
+	// dispatch is driven by the dev workflow's validating phase, not the sweep.
+	wantLabels := []string{"aep:task", "aep:validation", "aep:origin/spec-plan"}
 	if !reflect.DeepEqual(got.Labels, wantLabels) {
 		t.Errorf("labels = %v; want %v", got.Labels, wantLabels)
 	}

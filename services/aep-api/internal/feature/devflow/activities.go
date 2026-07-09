@@ -35,38 +35,41 @@ var errNotConfigured = errors.New("devflow: activity dependency not configured")
 // are added as later phases wire each adapter; the workflow-run index
 // activities land first because both workflows record themselves on entry.
 type Activities struct {
-	runs       WorkflowRunStore
-	dispatcher CodingDispatcher
-	merger     PRMerger
-	tagger     Tagger
-	design     DesignPort
-	planner    Planner
-	validator  Validator
+	runs               WorkflowRunStore
+	dispatcher         CodingDispatcher
+	merger             PRMerger
+	tagger             Tagger
+	design             DesignPort
+	planner            Planner
+	validator          Validator
+	validationResolver ValidationResolver
 }
 
 // Deps carries the activity adapters. Any field may be nil in narrow contexts
 // (the corresponding activity then returns a not-configured error); the app
 // root wires all of them.
 type Deps struct {
-	Runs       WorkflowRunStore
-	Dispatcher CodingDispatcher
-	Merger     PRMerger
-	Tagger     Tagger
-	Design     DesignPort
-	Planner    Planner
-	Validator  Validator
+	Runs               WorkflowRunStore
+	Dispatcher         CodingDispatcher
+	Merger             PRMerger
+	Tagger             Tagger
+	Design             DesignPort
+	Planner            Planner
+	Validator          Validator
+	ValidationResolver ValidationResolver
 }
 
 // NewActivities wires the activity adapters.
 func NewActivities(d Deps) *Activities {
 	return &Activities{
-		runs:       d.Runs,
-		dispatcher: d.Dispatcher,
-		merger:     d.Merger,
-		tagger:     d.Tagger,
-		design:     d.Design,
-		planner:    d.Planner,
-		validator:  d.Validator,
+		runs:               d.Runs,
+		dispatcher:         d.Dispatcher,
+		merger:             d.Merger,
+		tagger:             d.Tagger,
+		design:             d.Design,
+		planner:            d.Planner,
+		validator:          d.Validator,
+		validationResolver: d.ValidationResolver,
 	}
 }
 
@@ -237,4 +240,14 @@ func (a *Activities) Validate(ctx context.Context, in ValidateInput) error {
 		return errNotConfigured
 	}
 	return a.validator.Validate(ctx, in.OrgID, in.ProjectID, in.Tag)
+}
+
+// ResolveValidationTask ensures the project's aep:validation Task exists
+// (idempotent) and returns its open issue number, or 0 when there are no
+// acceptance criteria (the validating phase then skips the validation run).
+func (a *Activities) ResolveValidationTask(ctx context.Context, in ProjectRef) (int, error) {
+	if a.validationResolver == nil {
+		return 0, errNotConfigured
+	}
+	return a.validationResolver.ResolveValidationTask(ctx, in.OrgID, in.ProjectID)
 }

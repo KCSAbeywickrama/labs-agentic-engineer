@@ -31,14 +31,24 @@ const QueryStatus = "status"
 // for the PR, merge, build, deploy. Repo is "owner/name"; Issue is the task's
 // GitHub issue number.
 type TaskFlowInput struct {
-	OrgID            string     `json:"orgId"`
-	ProjectID        string     `json:"projectId"`
-	Repo             string     `json:"repo"`
-	Issue            int        `json:"issue"`
-	Tag              string     `json:"tag"`
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	Repo      string `json:"repo"`
+	Issue     int    `json:"issue"`
+	Tag       string `json:"tag"`
+	// Class discriminates the task lifecycle. Empty (default) is a coding task:
+	// coding → merge → build → deploy. TaskClassValidation ends at merge — the
+	// validation task produces a PR (committed e2e tests + report) but no
+	// component build/deploy (validation-phase).
+	Class            string     `json:"class,omitempty"`
 	ParentWorkflowID string     `json:"parentWorkflowId,omitempty"`
 	Gates            GateConfig `json:"gates"`
 }
+
+// TaskClassValidation is the TaskFlowInput.Class value for the project's
+// validation task. It dispatches like a coding task (the funnel resolves the
+// Playwright runner from the issue's aep:validation label) but ends at merge.
+const TaskClassValidation = "validation"
 
 // TaskFlowStatus is the QueryStatus result for a task workflow.
 type TaskFlowStatus struct {
@@ -251,6 +261,16 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 		if !merged {
 			return fail("pull request was not merged")
 		}
+	}
+
+	// A validation task ends at merge: its merged PR carries the committed e2e
+	// tests + report, and the runner spawns no component build/deploy (the merge
+	// webhook's build-spawn is skipped for the validation class), so no
+	// build/deploy signals will ever arrive. Report success to the parent.
+	if in.Class == TaskClassValidation {
+		status.Phase = TaskPhaseDone
+		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted)
+		return TaskFlowResult{Issue: in.Issue, Outcome: OutcomeSucceeded}, nil
 	}
 
 	// Wait for the build (spawned by the merge webhook, driven by the funnel).

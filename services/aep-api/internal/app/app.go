@@ -1007,13 +1007,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// thin adapters over the funnel (dispatch) + issue service (merge).
 	if cfg.Temporal.Enabled() {
 		devflowActs := devflow.NewActivities(devflow.Deps{
-			Runs:       workflowRunRepo,
-			Dispatcher: codingDispatcher{funnel: funnel, execs: executionRepo},
-			Merger:     prMerger{issues: issueService},
-			Tagger:     devflowTagger{art: artifactSvcGit},
-			Design:     devflowDesign{art: artifactSvcGit, genai: genaiSvc, design: designService},
-			Planner:    devflowPlanner{plan: taskPlan, reads: taskReads},
-			Validator:  devflowValidator{},
+			Runs:               workflowRunRepo,
+			Dispatcher:         codingDispatcher{funnel: funnel, execs: executionRepo},
+			Merger:             prMerger{issues: issueService},
+			Tagger:             devflowTagger{art: artifactSvcGit},
+			Design:             devflowDesign{art: artifactSvcGit, genai: genaiSvc, design: designService},
+			Planner:            devflowPlanner{plan: taskPlan, reads: taskReads},
+			Validator:          devflowValidator{store: artifactStore, comp: componentService},
+			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},
 		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

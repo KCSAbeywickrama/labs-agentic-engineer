@@ -109,15 +109,15 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID, d
 		Rationale: rationale(doc.summarize()),
 		Body:      renderScope(doc),
 	})
-	// Stamp aep:execute at creation so the task dispatches autonomously: the
-	// execution sweep picks the label up, admits the run, and the funnel holds it
-	// on dependsOn until every component deploys (no human Execute click, unlike
-	// coding tasks). The label is consumed once the run is admitted.
-	labels := append(taskmeta.NewTaskLabels(taskmeta.ClassValidation, taskmeta.OriginSpecPlan), taskmeta.LabelExecute)
+	// No aep:execute stamp: validation dispatch is driven by the dev workflow's
+	// validating phase (after every component deploys), not the reactive sweep.
+	// Without Temporal, a human clicks Execute on the issue (same as a coding
+	// task); either way the funnel's deps-gate holds the run until all
+	// components deploy.
 	req := gitrepo.CreateIssueRequest{
 		Title:  validationTitle,
 		Body:   body,
-		Labels: labels,
+		Labels: taskmeta.NewTaskLabels(taskmeta.ClassValidation, taskmeta.OriginSpecPlan),
 	}
 	if _, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req); cerr != nil {
 		return fmt.Errorf("validation: create issue: %w", cerr)
@@ -126,22 +126,41 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID, d
 	return nil
 }
 
+// ResolveValidationTask ensures the project's validation Task exists (idempotent
+// — covers acceptance criteria authored after the initial design approval) and
+// returns its open issue number, or 0 when there are no criteria (nothing to
+// validate). The dev workflow's validating phase calls this before running the
+// validation child.
+func (s *Service) ResolveValidationTask(ctx context.Context, orgID, projectID, designTag string) (int, error) {
+	if err := s.EnsureValidationIssue(ctx, orgID, projectID, designTag); err != nil {
+		return 0, err
+	}
+	return s.findOpenValidationIssue(ctx, orgID, projectID)
+}
+
 // hasOpenValidationIssue reports whether an open aep:validation Task already
 // exists for the project (dedup — mirrors provisioning's openProvisionDeps).
 func (s *Service) hasOpenValidationIssue(ctx context.Context, orgID, projectID string) (bool, error) {
+	number, err := s.findOpenValidationIssue(ctx, orgID, projectID)
+	return number > 0, err
+}
+
+// findOpenValidationIssue returns the open aep:validation Task's issue number,
+// or 0 when none exists.
+func (s *Service) findOpenValidationIssue(ctx context.Context, orgID, projectID string) (int, error) {
 	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{taskmeta.LabelMarker})
 	if err != nil {
-		return false, fmt.Errorf("validation: list issues: %w", err)
+		return 0, fmt.Errorf("validation: list issues: %w", err)
 	}
 	for _, issue := range issues {
 		if !strings.EqualFold(issue.State, "open") {
 			continue
 		}
 		if taskmeta.ParseLabels(issue.Labels).Class == taskmeta.ClassValidation {
-			return true, nil
+			return issue.Number, nil
 		}
 	}
-	return false, nil
+	return 0, nil
 }
 
 // componentNames returns the design component names (the validation task's
