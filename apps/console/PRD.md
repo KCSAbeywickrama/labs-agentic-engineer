@@ -78,6 +78,11 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Spec view — Build button invokes the build resource: commit-then-build
+  (collab flush-on-demand → `POST /build`), lands on the overview; Build
+  disabled with a tooltip while an agent turn runs —
+  [#162](https://github.com/wso2/labs-agentic-engineer/issues/162)
+  (no aep-api change; collab-service flush handler; ADR-0007 amended on ship)
 - Project overview — "Generate spec" CTA on the Spec card: persists the create
   prompt to localStorage and, when `hasSpec` is false, seeds a live room turn
   to generate requirements (create does not auto-derive) —
