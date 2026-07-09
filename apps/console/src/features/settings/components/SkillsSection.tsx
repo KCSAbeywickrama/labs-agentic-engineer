@@ -34,7 +34,7 @@ import {
   SearchBar,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FolderGit2, Upload } from "@wso2/oxygen-ui-icons-react";
+import { Eye, FolderGit2, Pencil, Trash2, Upload } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import {
   useConfig,
@@ -50,6 +50,7 @@ import {
 } from "../skillKind";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
+import { SkillViewerDialog } from "./SkillViewerDialog";
 import { SyncUpdatesPanel } from "./SyncUpdatesPanel";
 
 type SkillSummary = components["schemas"]["SkillSummary"];
@@ -61,6 +62,7 @@ export function SkillsSection() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [viewTarget, setViewTarget] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
@@ -251,10 +253,21 @@ export function SkillsSection() {
                           <Box
                             sx={{ display: "flex", gap: 0.5, flexShrink: 0 }}
                           >
+                            {/* View is available for every kind — inspecting a
+                                read-only org/platform skill's body is the whole
+                                point of the viewer. */}
+                            <Button
+                              size="small"
+                              startIcon={<Eye size={16} />}
+                              onClick={() => setViewTarget(skill.name)}
+                            >
+                              View
+                            </Button>
                             {skill.editable && (
                               <>
                                 <Button
                                   size="small"
+                                  startIcon={<Pencil size={16} />}
                                   onClick={() => setEditTarget(skill.name)}
                                 >
                                   Edit
@@ -262,6 +275,7 @@ export function SkillsSection() {
                                 <Button
                                   size="small"
                                   color="error"
+                                  startIcon={<Trash2 size={16} />}
                                   onClick={() => setDeleteTarget(skill.name)}
                                 >
                                   Delete
@@ -284,6 +298,10 @@ export function SkillsSection() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         repoUrl={repoUrl}
+      />
+      <SkillViewerDialog
+        name={viewTarget}
+        onClose={() => setViewTarget(null)}
       />
       <EditSkillDialog name={editTarget} onClose={() => setEditTarget(null)} />
 
