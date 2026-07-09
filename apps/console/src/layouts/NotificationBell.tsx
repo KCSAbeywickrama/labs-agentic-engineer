@@ -18,9 +18,12 @@
 
 import {
   Badge,
+  Box,
+  Button,
   IconButton,
   NotificationPanel,
   Tooltip,
+  Typography,
   formatRelativeTime,
   useAppShell,
 } from "@wso2/oxygen-ui";
@@ -62,7 +65,7 @@ export function NotificationButton() {
 export function AlertsNotificationPanel() {
   const navigate = useNavigate();
   const { actions } = useAppShell();
-  const { data: reports = [], isPending } = useRecentAlerts();
+  const { data: reports = [], isPending, isError, error, refetch } = useRecentAlerts();
 
   const openAlert = (alertId: string) => {
     // Close the overlay so it doesn't linger over the destination page.
@@ -79,7 +82,22 @@ export function AlertsNotificationPanel() {
         <NotificationPanel.HeaderTitle>Alerts</NotificationPanel.HeaderTitle>
         <NotificationPanel.HeaderClose />
       </NotificationPanel.Header>
-      {isPending || reports.length === 0 ? (
+      {isPending ? (
+        <NotificationPanel.EmptyState />
+      ) : isError && reports.length === 0 ? (
+        // Initial load failed with no last-known data to fall back on —
+        // surface it distinctly from "no alerts yet" (api-guidelines: every
+        // view ships an error state, not just empty/loading).
+        <Box sx={{ px: 3, py: 4, textAlign: "center" }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Failed to load alerts
+            {error instanceof Error && error.message ? `: ${error.message}` : ""}
+          </Typography>
+          <Button size="small" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </Box>
+      ) : reports.length === 0 ? (
         <NotificationPanel.EmptyState />
       ) : (
         <NotificationPanel.List>

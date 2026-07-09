@@ -34,19 +34,27 @@ function readSeenUntil(): string {
   }
 }
 
+// Pure logic, exported for unit testing (see useAlertsUnread.test.ts) —
+// reports without a createdAt are treated as already-seen (never counted
+// unread, never advance the watermark), since there's no timestamp to
+// compare against seenUntil.
+
+export function countUnread(reports: RcaAgentReport[], seenUntil: string): number {
+  if (!seenUntil) return reports.filter((r) => Boolean(r.createdAt)).length;
+  return reports.filter((r) => (r.createdAt ?? "") > seenUntil).length;
+}
+
+export function nextSeenUntil(reports: RcaAgentReport[], seenUntil: string): string {
+  return reports.reduce((max, r) => ((r.createdAt ?? "") > max ? (r.createdAt ?? "") : max), seenUntil);
+}
+
 export function useAlertsUnread(reports: RcaAgentReport[]) {
   const [seenUntil, setSeenUntil] = useState<string>(readSeenUntil);
 
-  const unreadCount = useMemo(() => {
-    if (!seenUntil) return reports.length;
-    return reports.filter((r) => (r.createdAt ?? "") > seenUntil).length;
-  }, [reports, seenUntil]);
+  const unreadCount = useMemo(() => countUnread(reports, seenUntil), [reports, seenUntil]);
 
   const markAllSeen = useCallback(() => {
-    const newest = reports.reduce(
-      (max, r) => ((r.createdAt ?? "") > max ? (r.createdAt ?? "") : max),
-      seenUntil,
-    );
+    const newest = nextSeenUntil(reports, seenUntil);
     if (newest && newest !== seenUntil) {
       try {
         localStorage.setItem(SEEN_UNTIL_KEY, newest);
