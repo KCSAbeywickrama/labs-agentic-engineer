@@ -107,7 +107,7 @@ type rehydrateOutput struct{ Body json.RawMessage }
 
 // turnConflictError renders the pinned 409 bodies verbatim (Huma writes a
 // StatusError value directly): {"code":"turn_in_progress","activeTurnId":…}
-// and {"code":"requirements_not_approved"}.
+// and {"code":"requirements_missing"}.
 type turnConflictError struct {
 	Code         string `json:"code"`
 	ActiveTurnID string `json:"activeTurnId,omitempty"`
@@ -306,8 +306,8 @@ func mapTurnError(ctx context.Context, err error) error {
 		return huma.Error400BadRequest(ErrEmptyInstruction.Error())
 	case errors.Is(err, ErrNoAnthropicKey):
 		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
-	case errors.Is(err, ErrRequirementsNotApproved):
-		return &turnConflictError{Code: "requirements_not_approved"}
+	case errors.Is(err, ErrRequirementsMissing):
+		return &turnConflictError{Code: "requirements_missing"}
 	case errors.Is(err, ErrTurnBufferTruncated):
 		return huma.Error409Conflict(ErrTurnBufferTruncated.Error())
 	case errors.Is(err, ErrSkillsRepoUnavailable):

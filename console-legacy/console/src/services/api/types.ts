@@ -462,55 +462,30 @@ export interface Deployment {
   status: string;
 }
 
-// -- Devflow (Temporal-backed development workflow) --------------------------
+// -- Project build (single-tag spec version + dev workflow) -------------------
 
-export interface DevflowStartRequest {
-  tag?: string;
-  gates?: {
-    auto?: Record<string, boolean>;
-    approvalTimeoutSeconds?: number;
-  };
+// POST /projects/{p}/build → the spec version tag the build runs for.
+export interface ProjectBuildResponse {
+  tag: string;
 }
 
-export interface DevflowStartResponse {
-  workflowId: string;
-  runId: string;
+export type ProjectBuildState = 'started' | 'in_progress' | 'completed' | 'failed';
+
+export interface ProjectBuildTask {
+  title: string;
+  status: ProjectBuildState;
 }
 
-// A row from the workflow_runs lookup index (list endpoint).
-export interface DevflowRun {
-  workflowId: string;
-  runId: string;
-  kind: string;
-  projectId: string;
-  tag?: string;
-  repo?: string;
-  issueNumber?: number;
-  parentWorkflowId?: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
+// GET /projects/{p}/build/{tag} → live build progress.
+export interface ProjectBuildStatus {
+  status: ProjectBuildState;
+  workflow_status: string;
+  tasks?: ProjectBuildTask[] | null;
 }
 
-export interface DevflowTaskRef {
-  issue: number;
-  workflowId?: string;
-  phase?: string;
-  outcome?: string;
-}
-
-// Live status queried from the dev workflow.
-export interface DevflowStatus {
-  phase: string;
-  tag?: string;
-  designTag?: string;
-  pendingGate?: string;
-  tasks?: DevflowTaskRef[];
-  error?: string;
-}
-
-export interface DevflowGateRequest {
-  approve: boolean;
-  note?: string;
-  taskIssue?: number;
+// GET /projects/{p}/tags → the spec version tag list.
+export interface TagList {
+  tags: string[] | null;
+  latest?: string;
+  specDirty?: boolean;
 }

@@ -58,14 +58,18 @@ var validUseCases = map[string]bool{
 
 // Errors — pre-202, mapped to HTTP status by the huma layer.
 var (
-	ErrProjectRepoNotFound     = errors.New("project repository not found")
-	ErrInvalidUseCase          = errors.New("invalid use case")
-	ErrInvalidConversationID   = errors.New("invalid conversation id")
-	ErrEmptyInstruction        = errors.New("instruction must not be empty")
-	ErrNoAnthropicKey          = errors.New("organization has no Anthropic API key configured")
-	ErrRequirementsNotApproved = errors.New("design generation requires an approved (tagged) requirements version")
-	ErrConversationNotFound    = errors.New("conversation not found")
-	ErrTurnNotFound            = errors.New("turn not found")
+	ErrProjectRepoNotFound   = errors.New("project repository not found")
+	ErrInvalidUseCase        = errors.New("invalid use case")
+	ErrInvalidConversationID = errors.New("invalid conversation id")
+	ErrEmptyInstruction      = errors.New("instruction must not be empty")
+	ErrNoAnthropicKey        = errors.New("organization has no Anthropic API key configured")
+	// ErrRequirementsMissing gates design generation on requirements CONTENT
+	// at HEAD (single-tag build flow: the version tag is cut by the build
+	// endpoint AFTER the design exists, so a tag can never be a precondition
+	// for generating the first design).
+	ErrRequirementsMissing  = errors.New("design generation requires requirements content — write or generate requirements first")
+	ErrConversationNotFound = errors.New("conversation not found")
+	ErrTurnNotFound         = errors.New("turn not found")
 	// ErrSkillsRepoUnavailable means the org's _skills repo (the turn's
 	// SkillsRef source) could not be resolved — its row is missing or
 	// unprovisionable, or the backing repo is gone/unreachable (live incident:
@@ -280,16 +284,7 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		return "", fmt.Errorf("resolve workspace ref: %w", err)
 	}
 
-	// D19 design gate: an approved (tagged) requirements version must exist.
-	// The turn then reads HEAD (one real sha, no synthetic merge); the latest
-	// vN is stamped as the lineage specTag.
 	specTag := ""
-	if in.UseCase == useCaseDesignGenerate {
-		specTag, err = s.latestRequirementsTag(ctx, ref)
-		if err != nil {
-			return "", err
-		}
-	}
 
 	key, err := s.resolveKey(ctx, orgID)
 	if err != nil {
@@ -307,6 +302,22 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	if err != nil {
 		return "", fmt.Errorf("resolve base ref: %w", err)
 	}
+
+	// Design gate (single-tag build flow): requirements CONTENT must exist at
+	// HEAD — generating a design from an empty spec is always a user error.
+	// The old D19 approve-first gate (a v<N> tag as precondition) is gone: the
+	// build endpoint cuts the tag AFTER the design exists, so requiring one
+	// here deadlocked every new project. The latest v<N>, when one exists,
+	// still stamps the turn's lineage specTag ("" on a first build).
+	if in.UseCase == useCaseDesignGenerate {
+		if err := s.requireRequirementsContent(ctx, ref, baseRef); err != nil {
+			return "", err
+		}
+		if specTag, err = s.latestRequirementsTag(ctx, ref); err != nil {
+			return "", err
+		}
+	}
+
 	// Skills resolve failures are typed: both arms mean the org's _skills repo
 	// is unusable right now (row missing/unprovisionable, or the backing repo
 	// gone/unreachable — e.g. deleted externally under a lingering row). The
@@ -472,9 +483,9 @@ func (s *service) resolveKey(ctx context.Context, orgID string) (string, error) 
 	return key, nil
 }
 
-// latestRequirementsTag lists the v* tags and returns the highest `v<N>`
-// requirements tag name, or ErrRequirementsNotApproved when none exists — the
-// D19 gate.
+// latestRequirementsTag lists the v* tags and returns the highest `v<N>` spec
+// tag name, or "" when none exists yet (a first-build project) — the design
+// turn's lineage stamp, no longer a gate.
 func (s *service) latestRequirementsTag(ctx context.Context, ref gitrepo.RepoRef) (string, error) {
 	tags, err := s.git.Workspace().ListTags(ctx, ref, "v")
 	if err != nil {
@@ -495,10 +506,23 @@ func (s *service) latestRequirementsTag(ctx context.Context, ref gitrepo.RepoRef
 			bestN, best = n, tag.Name
 		}
 	}
-	if bestN < 0 {
-		return "", ErrRequirementsNotApproved
-	}
 	return best, nil
+}
+
+// requireRequirementsContent is the design-generate gate: the requirements
+// main doc must be non-empty at the turn's base ref.
+func (s *service) requireRequirementsContent(ctx context.Context, ref gitrepo.RepoRef, at string) error {
+	const mainDoc = "specs/requirements/requirements.md"
+	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, at, func(rel string) bool {
+		return rel == mainDoc
+	})
+	if err != nil {
+		return fmt.Errorf("read requirements at %s: %w", at, err)
+	}
+	if strings.TrimSpace(files[mainDoc]) == "" {
+		return ErrRequirementsMissing
+	}
+	return nil
 }
 
 // captureIdentities resolves the D20 commit identities at POST time: author =

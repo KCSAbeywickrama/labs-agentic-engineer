@@ -2789,7 +2789,7 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
-  /projects/{projectName}/agents/{conversationId}/messages: #rename from convo
+  /projects/{projectName}/agents/{conversationId}/messages: 
     get:
       operationId: get-conversation
       parameters:

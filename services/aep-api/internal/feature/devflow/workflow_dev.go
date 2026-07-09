@@ -28,12 +28,10 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// designTurnWaitTimeout bounds the wait for the design-generate turn to finish.
-const designTurnWaitTimeout = 30 * time.Minute
-
-// DevFlowInput starts a per-version development workflow: create the version
-// tag, generate design (if missing), plan tasks, fan out task workflows,
-// validate. Tag is the spec version this run builds.
+// DevFlowInput starts a per-version development workflow: re-validate the
+// spec at the tag, plan tasks, fan out task workflows, validate. Tag is the
+// spec version this run builds — always cut by the build endpoint (after the
+// whole-spec hard gate) BEFORE the workflow starts.
 type DevFlowInput struct {
 	OrgID     string `json:"orgId"`
 	ProjectID string `json:"projectId"`
@@ -48,7 +46,6 @@ type DevFlowInput struct {
 type DevFlowStatus struct {
 	Phase       string       `json:"phase"`
 	Tag         string       `json:"tag,omitempty"`
-	DesignTag   string       `json:"designTag,omitempty"`
 	PendingGate string       `json:"pendingGate,omitempty"`
 	Tasks       []DevTaskRef `json:"tasks,omitempty"`
 	Error       string       `json:"error,omitempty"`
@@ -64,21 +61,22 @@ type DevTaskRef struct {
 
 // DevFlow phase values.
 const (
-	DevPhaseTagging    = "tagging"
-	DevPhaseDesigning  = "designing"
-	DevPhasePlanning   = "planning"
-	DevPhaseExecuting  = "executing"
-	DevPhaseValidating = "validating"
-	DevPhaseDone       = "done"
-	DevPhaseFailed     = "failed"
+	DevPhaseValidatingSpec = "validating-spec"
+	DevPhasePlanning       = "planning"
+	DevPhaseExecuting      = "executing"
+	DevPhaseValidating     = "validating"
+	DevPhaseDone           = "done"
+	DevPhaseFailed         = "failed"
 )
 
-// DevFlowWorkflow is the per-version development lifecycle: cut the version
-// tag, generate the design (unless it already exists), plan the tasks, fan out
-// dependency-aware task child workflows, validate, complete. Each gate can
-// pause for human approval (default auto).
+// DevFlowWorkflow is the per-version development lifecycle: re-validate the
+// spec the endpoint tagged, plan the tasks, fan out dependency-aware task
+// child workflows, validate, complete. Each gate can pause for human approval
+// (default auto). Design generation is NOT part of the workflow — the build
+// endpoint rejects an unbuildable spec before the tag is cut, so the tag this
+// run receives always names a validated requirements+design pair.
 func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, error) {
-	status := DevFlowStatus{Phase: DevPhaseTagging, Tag: in.Tag}
+	status := DevFlowStatus{Phase: DevPhaseValidatingSpec, Tag: in.Tag}
 	if err := workflow.SetQueryHandler(ctx, QueryStatus, func() (DevFlowStatus, error) {
 		return status, nil
 	}); err != nil {
@@ -105,44 +103,18 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 		return fail("record workflow run: " + err.Error())
 	}
 
-	// 1. Create the version tag (idempotent — returns the existing tag when the
-	// requirements are unchanged).
+	// 1. Defensive re-validation at the pinned tag: the endpoint validated the
+	// spec before cutting it, but the tag is what this run plans from — an
+	// externally-cut or corrupted tag must fail here, not mid-execution.
 	ref := ProjectRef{OrgID: in.OrgID, ProjectID: in.ProjectID}
-	var reqTag string
-	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).CreateVersionTag, ref).Get(ctx, &reqTag); err != nil {
-		return fail("create version tag: " + err.Error())
-	}
-	if reqTag != "" {
-		status.Tag = reqTag
-	} else {
-		reqTag = in.Tag
+	reqTag := in.Tag
+	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).ValidateSpecAtTag, ValidateSpecInput{
+		OrgID: in.OrgID, ProjectID: in.ProjectID, Tag: reqTag,
+	}).Get(ctx, nil); err != nil {
+		return fail("validate spec at tag: " + err.Error())
 	}
 
-	// 2. Design — skip when already generated for this requirements version.
-	var designExists bool
-	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).CheckDesignExists, DesignExistsInput{
-		OrgID: in.OrgID, ProjectID: in.ProjectID, ReqTag: reqTag,
-	}).Get(ctx, &designExists); err != nil {
-		return fail("check design exists: " + err.Error())
-	}
-	if !designExists {
-		if ok, d := gates.await(ctx, GateDesign); !ok {
-			return fail("design gate rejected: " + d.Note)
-		}
-		status.Phase = DevPhaseDesigning
-		if outcome, err := runDesignTurn(ctx, in); err != nil {
-			return fail(err.Error())
-		} else if outcome != "completed" {
-			return fail("design generation did not complete: " + outcome)
-		}
-		// Approve (tag) the freshly generated design — the "design gate = build
-		// trigger" step. Planning requires an approved design version.
-		if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).ApproveDesign, ref).Get(ctx, nil); err != nil {
-			return fail("approve design: " + err.Error())
-		}
-	}
-
-	// 3. Plan the tasks.
+	// 2. Plan the tasks.
 	if ok, d := gates.await(ctx, GatePlan); !ok {
 		return fail("plan gate rejected: " + d.Note)
 	}
@@ -155,11 +127,11 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 		return fail("dependency cycle detected: " + strings.Join(cyc, " → "))
 	}
 
-	// 4. Execute — dependency-aware task child workflows.
+	// 3. Execute — dependency-aware task child workflows.
 	status.Phase = DevPhaseExecuting
 	scheduleTasks(ctx, in, reqTag, tasks, &status)
 
-	// 5. Validate.
+	// 4. Validate.
 	if ok, d := gates.await(ctx, GateValidate); !ok {
 		return fail("validate gate rejected: " + d.Note)
 	}
@@ -178,46 +150,11 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 	return status, nil
 }
 
-// runDesignTurn starts the design-generate turn and waits for its terminal
-// state via the design-turn-done signal, falling back to a status poll on
-// timeout. Returns the outcome ("completed" | "failed" | "timeout").
-func runDesignTurn(ctx workflow.Context, in DevFlowInput) (string, error) {
-	var turnID string
-	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).StartDesignTurn, ProjectRef{
-		OrgID: in.OrgID, ProjectID: in.ProjectID,
-	}).Get(ctx, &turnID); err != nil {
-		return "", fmt.Errorf("start design turn: %w", err)
-	}
-
-	ch := workflow.GetSignalChannel(ctx, SigDesignTurnDone)
-	timer := workflow.NewTimer(ctx, designTurnWaitTimeout)
-	var outcome string
-	done := false
-	for !done {
-		sel := workflow.NewSelector(ctx)
-		sel.AddReceive(ch, func(c workflow.ReceiveChannel, _ bool) {
-			var s DesignTurnDoneSignal
-			c.Receive(ctx, &s)
-			if turnID != "" && s.TurnID != turnID {
-				return // a different turn — keep waiting
-			}
-			outcome, done = s.Outcome, true
-		})
-		sel.AddFuture(timer, func(workflow.Future) {
-			// Signal missed? Poll the turn's terminal state once before giving up.
-			var res DesignTurnOutcomeResult
-			if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).PollDesignTurn, DesignTurnOutcomeInput{
-				OrgID: in.OrgID, ProjectID: in.ProjectID, TurnID: turnID,
-			}).Get(ctx, &res); err == nil && res.Done {
-				outcome = res.Outcome
-			} else {
-				outcome = "timeout"
-			}
-			done = true
-		})
-		sel.Select(ctx)
-	}
-	return outcome, nil
+// DevWorkflowID builds the deterministic dev workflow id
+// (devflow-<org>-<project>-<tag>) — shared by the build endpoint (start +
+// status lookup) and the workflow_runs index.
+func DevWorkflowID(orgID, projectID, tag string) string {
+	return fmt.Sprintf("devflow-%s-%s-%s", orgID, projectID, tag)
 }
 
 // scheduleTasks runs the planned tasks as child workflows, respecting the

@@ -59,6 +59,7 @@ import (
 )
 
 const reqPrefix = "/api/v1/projects/web/requirements"
+const specPrefix = "/api/v1/projects/web/spec"
 
 // --- fakes / harness ---------------------------------------------------------
 
@@ -217,12 +218,9 @@ func TestReqComponent_GetRequirements_OpaqueErrorIs500(t *testing.T) {
 
 // --- save / discard ----------------------------------------------------------
 
-func TestReqComponent_SaveAndDiscard_Happy(t *testing.T) {
+func TestReqComponent_Discard_Happy(t *testing.T) {
 	t.Parallel()
 	fake := &artifactstest.FakeArtifactService{
-		SaveRequirementsFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {
-			return &artifacts.RequirementsSaveResult{Status: "approved", Tag: "v2", Version: 2}, nil
-		},
 		DiscardRequirementsFunc: func(context.Context, string, string) (map[string]string, error) {
 			return map[string]string{"requirements.md": "# R\n"}, nil
 		},
@@ -235,61 +233,19 @@ func TestReqComponent_SaveAndDiscard_Happy(t *testing.T) {
 	}
 	h := newReqHarness(t, fake, nil)
 
-	if resp := h.AsOrg("acme").Post(reqPrefix+"/save", "{}"); resp.Code != 200 {
-		t.Fatalf("save: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
 	if resp := h.AsOrg("acme").Post(reqPrefix+"/discard", "{}"); resp.Code != 200 {
 		t.Fatalf("discard: want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
-// The publish flow pins the commit its files-apply just created; the optional
-// `{commitSha}` body must reach the artifact save verbatim (and its absence —
-// a bare `{}` or no body at all — must mean "resolve HEAD", i.e. empty).
-func TestReqComponent_Save_CommitShaBodyPassesThrough(t *testing.T) {
+// save-requirements left the public surface with the single-tag build flow
+// (build-project owns version tagging). The route must stay gone.
+func TestReqComponent_SaveRoute_Deregistered(t *testing.T) {
 	t.Parallel()
-	var got []string
-	fake := &artifactstest.FakeArtifactService{
-		SaveRequirementsFunc: func(_ context.Context, _, _ string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {
-			got = append(got, req.CommitSHA)
-			return &artifacts.RequirementsSaveResult{Status: "approved", Tag: "v1", Version: 1}, nil
-		},
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{"requirements.md": "# R\n"}, nil
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	h := newReqHarness(t, fake, nil)
+	h := newReqHarness(t, &artifactstest.FakeArtifactService{}, nil)
 
-	if resp := h.AsOrg("acme").Post(reqPrefix+"/save", `{"commitSha":"c6659d085ea2217c7a8a633f360ab6deabb3cc71"}`); resp.Code != 200 {
-		t.Fatalf("save with commitSha: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if resp := h.AsOrg("acme").Post(reqPrefix+"/save", "{}"); resp.Code != 200 {
-		t.Fatalf("save with empty body: want 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	want := []string{"c6659d085ea2217c7a8a633f360ab6deabb3cc71", ""}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("CommitSHA seen by artifact save = %v, want %v", got, want)
-	}
-}
-
-func TestReqComponent_Save_SpecNotFoundMapsTo404(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		SaveRequirementsFunc: func(context.Context, string, string, artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error) {
-			return nil, artifacts.ErrSpecNotFound
-		},
-	}
-	h := newReqHarness(t, fake, nil)
-
-	resp := h.AsOrg("acme").Post(reqPrefix+"/save", "{}")
-	if resp.Code != 404 {
-		t.Fatalf("save spec-not-found: want 404, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if p := componenttest.DecodeProblem(t, resp.Body.String()); p.Detail != "requirements not found" {
-		t.Fatalf("404 detail: got %q", p.Detail)
+	if resp := h.AsOrg("acme").Post(reqPrefix+"/save", "{}"); resp.Code != 404 {
+		t.Fatalf("save must be de-registered: want 404, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -357,7 +313,7 @@ func TestReqComponent_CollabSession_HappyMatchesGoldenFieldSet(t *testing.T) {
 	}
 	h := newReqHarness(t, &artifactstest.FakeArtifactService{}, repos)
 
-	resp := h.AsOrg("acme").Get(reqPrefix + "/collab-session")
+	resp := h.AsOrg("acme").Get(specPrefix + "/collab-session")
 	if resp.Code != 200 {
 		t.Fatalf("collab-session: want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
@@ -391,7 +347,7 @@ func TestReqComponent_CollabSession_UnknownProjectIs404(t *testing.T) {
 	}
 	h := newReqHarness(t, &artifactstest.FakeArtifactService{}, repos)
 
-	resp := h.AsOrg("acme").Get(reqPrefix + "/collab-session")
+	resp := h.AsOrg("acme").Get(specPrefix + "/collab-session")
 	if resp.Code != 404 {
 		t.Fatalf("collab-session unknown project: want 404, got %d body=%s", resp.Code, resp.Body.String())
 	}

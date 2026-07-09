@@ -18,16 +18,11 @@ package app
 
 import (
 	"context"
-	"errors"
-	"strings"
 
-	"github.com/google/uuid"
 	"go.temporal.io/sdk/activity"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
-	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
-	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -58,75 +53,14 @@ func (l repoFullNameLookup) RepoFullName(ctx context.Context, orgID, projectID s
 // artifacts / genai / plan services. The adapters live at the composition root
 // so the devflow package imports none of those features (§6.8).
 
-// devflowTagger cuts the requirements version tag via the artifacts service.
-type devflowTagger struct {
+// devflowSpecValidator re-runs the whole-spec hard gate at the build tag via
+// the artifacts service — the dev workflow's pre-plan defensive check.
+type devflowSpecValidator struct {
 	art artifacts.ArtifactService
 }
 
-func (t devflowTagger) CreateVersionTag(ctx context.Context, orgID, projectID string) (string, error) {
-	res, err := t.art.SaveRequirements(ctx, orgID, projectID, artifacts.SaveRequest{Message: "Build: snapshot requirements"})
-	if err != nil {
-		return "", err
-	}
-	if res == nil {
-		return "", nil
-	}
-	return res.Tag, nil
-}
-
-// devflowDesign adapts design existence + generation + approval onto the
-// artifacts + genai + design services.
-type devflowDesign struct {
-	art    artifacts.ArtifactService
-	genai  genai.GenAIService
-	design design.DesignService
-}
-
-// designGenerateUseCase is the genai use case for the design-generate turn
-// (mirrors genai's internal useCaseDesignGenerate).
-const designGenerateUseCase = "design-generate"
-
-func (d devflowDesign) DesignExists(ctx context.Context, orgID, projectID, reqTag string) (bool, error) {
-	// A design tag for requirements v<N> has the form "v<N>-<M>"; a design
-	// exists for reqTag iff the latest design tag is a revision of it.
-	latest := d.art.LatestDesignTag(ctx, orgID, projectID)
-	return latest != "" && strings.HasPrefix(latest, reqTag+"-"), nil
-}
-
-func (d devflowDesign) StartDesignTurn(ctx context.Context, orgID, projectID string) (string, error) {
-	turnID, err := d.genai.StartTurn(ctx, orgID, projectID, genai.TurnInput{
-		UseCase:        designGenerateUseCase,
-		ConversationID: uuid.NewString(),
-		Instruction:    "Generate the architecture design, wireframes, and OpenAPI specifications for this project.",
-	})
-	if err == nil {
-		return turnID, nil
-	}
-	// A turn is already running for this project — reuse it (idempotent restart).
-	var inProgress *genai.TurnInProgressError
-	if errors.As(err, &inProgress) {
-		return inProgress.ActiveTurnID, nil
-	}
-	return "", err
-}
-
-func (d devflowDesign) DesignTurnOutcome(ctx context.Context, orgID, projectID, turnID string) (bool, string, error) {
-	st, err := d.genai.TurnStatus(ctx, orgID, projectID, turnID)
-	if err != nil {
-		return false, "", err
-	}
-	if st == nil {
-		return false, "", nil
-	}
-	done := st.Status == "completed" || st.Status == "failed"
-	return done, st.Status, nil
-}
-
-func (d devflowDesign) ApproveDesign(ctx context.Context, orgID, projectID string) error {
-	// Empty commitSHA → SaveAndProceed reads + tags HEAD (the design the turn
-	// just committed). Cuts the next v<N>-<M> design tag.
-	_, err := d.design.SaveAndProceed(ctx, orgID, projectID, "")
-	return err
+func (v devflowSpecValidator) ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error {
+	return v.art.ValidateSpecAtTag(ctx, orgID, projectID, tag)
 }
 
 // devflowPlanner runs the plan turn and reads back the planned tasks.

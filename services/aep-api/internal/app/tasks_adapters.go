@@ -121,7 +121,9 @@ func (r runnerSecretResolver) ResolveRunnerSecrets(ctx context.Context, orgID, p
 // URL — project-wide, mirroring the retired dispatch cascade). The deployed
 // component name is unused; emission fans over the project's web-apps. Satisfies
 // codingagent.DeployObserver.
-type spaDeployObserver struct{ svc *runtimeconfig.RuntimeConfigService }
+type spaDeployObserver struct {
+	svc *runtimeconfig.RuntimeConfigService
+}
 
 func (o spaDeployObserver) OnComponentDeployed(ctx context.Context, orgID, projectID, _ string) error {
 	return o.svc.EmitForProjectSPAs(ctx, orgID, projectID)

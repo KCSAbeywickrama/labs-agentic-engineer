@@ -892,21 +892,41 @@ func TestD18_OneActiveTurnPerProject(t *testing.T) {
 	}
 }
 
-// TestD19_DesignGateAndHeadRead pins the design gate: no requirements v-tag →
-// 409 requirements_not_approved and agents never dispatched; with a tag the
-// turn proceeds reading HEAD (not the tagged sha) and stamps SpecTag.
-func TestD19_DesignGateAndHeadRead(t *testing.T) {
-	t.Run("no tag → 409", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+// TestDesignGateAndHeadRead pins the single-tag-flow design gate: missing
+// requirements CONTENT → 409 requirements_missing and agents never
+// dispatched; content with NO tag proceeds (the build endpoint cuts the tag
+// AFTER design exists — requiring one here deadlocked new projects); with a
+// tag the turn reads HEAD (not the tagged sha) and stamps SpecTag.
+func TestDesignGateAndHeadRead(t *testing.T) {
+	t.Run("no requirements content → 409", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"README.md": "no requirements yet\n"})
 		rec := r.post(t, convUUID, "design-generate", "design it")
 		if rec.Code != http.StatusConflict {
-			t.Fatalf("no-tag design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
+			t.Fatalf("no-content design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), `"requirements_not_approved"`) {
+		if !strings.Contains(rec.Body.String(), `"requirements_missing"`) {
 			t.Errorf("409 body = %s", rec.Body.String())
 		}
 		if r.fake.turns(t) != 0 {
 			t.Error("agents dispatched despite failed gate")
+		}
+	})
+
+	t.Run("untagged requirements → proceeds with empty SpecTag", func(t *testing.T) {
+		// The deadlock-fix pin: a first-build project has requirements content
+		// but no v<N> tag yet — design generation MUST still start.
+		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r.fake.parts = []string{textPart("designing")}
+		m := manifestPart(nil, nil)
+		r.fake.manifest = &m
+
+		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
+		st := r.waitTerminal(t, turnID)
+		if st.Status != "completed" {
+			t.Fatalf("terminal = %+v", st)
+		}
+		if row := r.turns.row(t, turnID); row.SpecTag != "" {
+			t.Errorf("SpecTag = %q, want empty on a first build", row.SpecTag)
 		}
 	})
 
