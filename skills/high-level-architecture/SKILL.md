@@ -16,7 +16,7 @@ Derive the design tree from `requirements.md`. The design lives under
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
 specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
-specs/design/components/<name>/wireframes.dsl  # webapps only (excalidraw-wireframes skill)
+specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
 ```
 
 ## The top-level design.md
@@ -63,7 +63,7 @@ requirements state>". Write that justification into the component's
 A requirement justifies a SEPARATE component when it shows:
 
 - a distinct user-facing surface — e.g. an internal admin portal AND a
-  customer-facing app with different users and lifecycles → two webapps;
+  customer-facing app with different users and lifecycles → two web-applications;
 - a genuinely different runtime or scaling profile — e.g. an async
   worker/batch processor beside an interactive API, or a long-running
   AI/inference service;
@@ -82,7 +82,7 @@ Do NOT split by:
   components; the platform provides them.
 
 When nothing above forces a split, a small system naturally lands at one
-service + one webapp — that is an outcome of the rule, not a target. Name
+service + one web-application — that is an outcome of the rule, not a target. Name
 components in kebab-case after their responsibility (`expense-api`,
 `expense-webapp`, `report-worker`).
 
@@ -103,7 +103,8 @@ violations:
   "entrypoint": "deployment/service", // deploy entry
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
-  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do."
+  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
+  "endpoint": { "name": "http" } // optional; see below
 }
 ```
 
@@ -112,6 +113,12 @@ violations:
 design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
+
+`endpoint` is optional: omit it and a service's endpoint takes the default name
+`"http"`. Declare `{ "name": "<endpoint-name>" }` only when the endpoint must be
+named otherwise — `name` is the single source of truth the coding agent copies
+into `workload.yaml` and the managed-API gateway binds to. The port lives in
+`workload.yaml`, not here.
 
 Do NOT author `exposesAPI`, `componentAgentInstructions`, or any dependency
 `status`/`reason` — those are PLATFORM-owned. If the platform has already
