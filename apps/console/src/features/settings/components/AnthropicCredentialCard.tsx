@@ -73,8 +73,10 @@ export function AnthropicCredentialCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
           <Key size={22} />
           <Typography variant="h6">Anthropic</Typography>
-          {connected && (
+          {connected ? (
             <Chip label={llm.status} size="small" color="success" />
+          ) : (
+            <Chip label="not connected" size="small" color="warning" />
           )}
         </Box>
         <Divider sx={{ mb: 3 }} />

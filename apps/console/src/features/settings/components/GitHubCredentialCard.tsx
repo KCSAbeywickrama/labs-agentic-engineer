@@ -82,8 +82,10 @@ export function GitHubCredentialCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
           <GitHub size={22} />
           <Typography variant="h6">GitHub</Typography>
-          {connected && (
+          {connected ? (
             <Chip label={gitProvider.status} size="small" color="success" />
+          ) : (
+            <Chip label="not connected" size="small" color="warning" />
           )}
         </Box>
         <Divider sx={{ mb: 3 }} />
