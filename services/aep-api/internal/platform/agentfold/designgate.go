@@ -55,7 +55,7 @@ var (
 		"name": true, "type": true, "version": true, "language": true,
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
-		"exposesAPI": true, "componentAgentInstructions": true,
+		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
 	}
 )
 
@@ -104,11 +104,39 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
+	if ep, present := obj["endpoint"]; present {
+		if p := validateEndpoint(ep); p != nil {
+			return p
+		}
+	}
 	if name := obj["name"].(string); name != dirName {
 		return &designProblem{
 			code:    ErrSchemaViolation,
 			message: fmt.Sprintf("name %q must equal the component directory name %q", name, dirName),
 		}
+	}
+	return nil
+}
+
+// validateEndpoint mirrors the zod endpointSchema.strictObject: an optional
+// block whose only key is `name` (a non-empty string). The port must accept
+// exactly what the zod gate accepts — a design.json with an `endpoint` block
+// passes the FileBundle's write-gate, so it MUST fold here too or the manifest
+// check fails a healthy turn (the endpoint field was added by the endpoint-name
+// single-source change; component-design-schema.ts is the source of truth).
+func validateEndpoint(v any) *designProblem {
+	ep, ok := v.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "endpoint: must be an object"}
+	}
+	for k := range ep {
+		if k != "name" {
+			return &designProblem{code: ErrSchemaViolation, message: "endpoint: unknown property " + k}
+		}
+	}
+	name, ok := ep["name"].(string)
+	if !ok || name == "" {
+		return &designProblem{code: ErrSchemaViolation, message: "endpoint.name: must be at least 1 characters"}
 	}
 	return nil
 }
