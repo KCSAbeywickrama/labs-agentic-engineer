@@ -207,6 +207,15 @@ func (a *Activities) PollDesignTurn(ctx context.Context, in DesignTurnOutcomeInp
 	return DesignTurnOutcomeResult{Done: done, Outcome: outcome}, err
 }
 
+// ApproveDesign cuts the design version tag from the generated design so the
+// plan step can proceed (planning requires an approved design).
+func (a *Activities) ApproveDesign(ctx context.Context, in ProjectRef) error {
+	if a.design == nil {
+		return errNotConfigured
+	}
+	return a.design.ApproveDesign(ctx, in.OrgID, in.ProjectID)
+}
+
 // RunPlan runs task planning and returns the planned tasks.
 func (a *Activities) RunPlan(ctx context.Context, in ProjectRef) ([]PlannedTask, error) {
 	if a.planner == nil {

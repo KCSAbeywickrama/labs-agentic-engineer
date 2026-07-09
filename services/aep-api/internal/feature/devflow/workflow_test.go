@@ -163,6 +163,7 @@ func registerDevActivities(env *testsuite.TestWorkflowEnvironment, designExists 
 	env.RegisterActivity(acts.CheckDesignExists)
 	env.RegisterActivity(acts.StartDesignTurn)
 	env.RegisterActivity(acts.PollDesignTurn)
+	env.RegisterActivity(acts.ApproveDesign)
 	env.RegisterActivity(acts.RunPlan)
 	env.RegisterActivity(acts.Validate)
 	env.OnActivity(acts.RecordWorkflowRun, mock.Anything, mock.Anything).Return(nil)
@@ -171,6 +172,7 @@ func registerDevActivities(env *testsuite.TestWorkflowEnvironment, designExists 
 	env.OnActivity(acts.CheckDesignExists, mock.Anything, mock.Anything).Return(designExists, nil)
 	env.OnActivity(acts.StartDesignTurn, mock.Anything, mock.Anything).Return("turn1", nil)
 	env.OnActivity(acts.PollDesignTurn, mock.Anything, mock.Anything).Return(DesignTurnOutcomeResult{Done: true, Outcome: "completed"}, nil)
+	env.OnActivity(acts.ApproveDesign, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.RunPlan, mock.Anything, mock.Anything).Return(plannedTasks, nil)
 	env.OnActivity(acts.Validate, mock.Anything, mock.Anything).Return(nil)
 }

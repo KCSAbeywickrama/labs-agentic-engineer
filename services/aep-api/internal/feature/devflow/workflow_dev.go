@@ -135,6 +135,11 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 		} else if outcome != "completed" {
 			return fail("design generation did not complete: " + outcome)
 		}
+		// Approve (tag) the freshly generated design — the "design gate = build
+		// trigger" step. Planning requires an approved design version.
+		if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).ApproveDesign, ref).Get(ctx, nil); err != nil {
+			return fail("approve design: " + err.Error())
+		}
 	}
 
 	// 3. Plan the tasks.

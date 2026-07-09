@@ -975,7 +975,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			Dispatcher: codingDispatcher{funnel: funnel, execs: executionRepo},
 			Merger:     prMerger{issues: issueService},
 			Tagger:     devflowTagger{art: artifactSvcGit},
-			Design:     devflowDesign{art: artifactSvcGit, genai: genaiSvc},
+			Design:     devflowDesign{art: artifactSvcGit, genai: genaiSvc, design: designService},
 			Planner:    devflowPlanner{plan: taskPlan, reads: taskReads},
 			Validator:  devflowValidator{},
 		})

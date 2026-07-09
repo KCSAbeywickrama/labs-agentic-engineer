@@ -25,6 +25,7 @@ import (
 	"go.temporal.io/sdk/activity"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -73,11 +74,12 @@ func (t devflowTagger) CreateVersionTag(ctx context.Context, orgID, projectID st
 	return res.Tag, nil
 }
 
-// devflowDesign adapts design existence + generation onto the artifacts +
-// genai services.
+// devflowDesign adapts design existence + generation + approval onto the
+// artifacts + genai + design services.
 type devflowDesign struct {
-	art   artifacts.ArtifactService
-	genai genai.GenAIService
+	art    artifacts.ArtifactService
+	genai  genai.GenAIService
+	design design.DesignService
 }
 
 // designGenerateUseCase is the genai use case for the design-generate turn
@@ -118,6 +120,13 @@ func (d devflowDesign) DesignTurnOutcome(ctx context.Context, orgID, projectID, 
 	}
 	done := st.Status == "completed" || st.Status == "failed"
 	return done, st.Status, nil
+}
+
+func (d devflowDesign) ApproveDesign(ctx context.Context, orgID, projectID string) error {
+	// Empty commitSHA → SaveAndProceed reads + tags HEAD (the design the turn
+	// just committed). Cuts the next v<N>-<M> design tag.
+	_, err := d.design.SaveAndProceed(ctx, orgID, projectID, "")
+	return err
 }
 
 // devflowPlanner runs the plan turn and reads back the planned tasks.

@@ -66,6 +66,11 @@ type DesignPort interface {
 	// DesignTurnOutcome reads a turn's terminal state — the workflow's fallback
 	// when the design-turn-done signal is missed. done=false while running.
 	DesignTurnOutcome(ctx context.Context, orgID, projectID, turnID string) (done bool, outcome string, err error)
+	// ApproveDesign cuts the next design version tag (v<N>-<M>) from the
+	// generated design at HEAD — the "design gate = build trigger" step
+	// (ADR-0007). Planning requires an approved (tagged) design, so a
+	// freshly-generated design must be approved before the plan step.
+	ApproveDesign(ctx context.Context, orgID, projectID string) error
 }
 
 // Planner runs task planning and returns the planned tasks (issue number +
