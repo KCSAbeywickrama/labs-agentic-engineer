@@ -68,6 +68,14 @@ const dependencySchema = z.strictObject({
   candidates: z.array(dependencyCandidateSchema).optional(),
 });
 
+// The component's single network endpoint (mirrors Go models.ComponentEndpoint).
+// Only `name` is declared — the shared key the coding agent's workload.yaml and
+// the platform's api-configuration trait both reference. Defaults to "http"
+// downstream when the whole block is omitted.
+const endpointSchema = z.strictObject({
+  name: z.string().min(1),
+});
+
 // Managed-API exposure policy (platform-owned; mirrors Go models.ExposesAPI).
 const exposesAPISchema = z.strictObject({
   managed: z.boolean().optional(),
@@ -87,6 +95,7 @@ export const componentDesignSchema = z.strictObject({
   exposure: z.enum(["internet", "intranet"]),
   dependencies: z.array(dependencySchema),
   description: z.string().min(1),
+  endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
 });
