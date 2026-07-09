@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import { listDocPaths } from "@aep/collab-doc";
 import { getAccessToken } from "../../../auth/token";
 
 // Console side of #86 phase 5: connect the spec view to the collab service.
@@ -47,6 +48,9 @@ export interface CollabSpec {
   getFileText: (path: string) => Y.Text | null;
   /** Y.XmlFragment for an md path, once synced (#86 phase 6 doc model). */
   getFileFragment: (path: string) => Y.XmlFragment | null;
+  /** Live file paths in the doc (Y.Map entries + md fragments) — the source
+   *  for the reactive spec list; empty until connected. */
+  docPaths: string[];
   /** The live provider (for CollaborationCaret); null until connected. */
   provider: HocuspocusProvider | null;
   /** This client's presence identity (name/color) for caret labels. */
@@ -80,6 +84,9 @@ export function useCollabSpec(
   const [version, setVersion] = useState(0);
   const docRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<HocuspocusProvider | null>(null);
+  // Last-seen file-path set (serialized) so we re-render the list only when a
+  // file is added/removed/created — not on every keystroke within a file.
+  const pathKeyRef = useRef("");
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -121,13 +128,24 @@ export function useCollabSpec(
     };
     awareness?.on("change", onAwareness);
 
-    const files = doc.getMap<Y.Text>("files");
-    const onFiles = () => setVersion((v) => v + 1);
-    files.observeDeep(onFiles);
+    // Re-render the list when the FILE SET changes. Watching the whole doc
+    // (not just Y.Map('files')) is load-bearing: markdown files are top-level
+    // Y.XmlFragments, so a new agent-created .md file appears as a new share,
+    // which a Y.Map observer never sees. afterAllTransactions fires on local
+    // and synced remote changes alike; we diff the path set so content edits
+    // (which bind to the editor directly) don't thrash the list.
+    const onDocChange = () => {
+      const key = listDocPaths(doc).join("\n");
+      if (key !== pathKeyRef.current) {
+        pathKeyRef.current = key;
+        setVersion((v) => v + 1);
+      }
+    };
+    doc.on("afterAllTransactions", onDocChange);
 
     provider.attach();
     return () => {
-      files.unobserveDeep(onFiles);
+      doc.off("afterAllTransactions", onDocChange);
       awareness?.off("change", onAwareness);
       provider.destroy();
       doc.destroy();
@@ -149,6 +167,10 @@ export function useCollabSpec(
         status === "connected"
           ? (docRef.current?.getXmlFragment(path) ?? null)
           : null,
+      docPaths:
+        status === "connected" && docRef.current
+          ? listDocPaths(docRef.current)
+          : [],
       provider: status === "connected" ? providerRef.current : null,
       self: {
         name: user.name,

@@ -75,6 +75,47 @@ test("agent edit marks exactly the inserted words and returns a caret", () => {
   assert.ok(hasPendingAgentMarks(doc, "requirements/prd.md"));
 });
 
+test("a brand-new agent file is NOT marked (accept-by-default, no review)", () => {
+  const doc = new Y.Doc();
+  // The file does not exist yet — no prior setDocFile.
+  const { caret } = setDocFileAsAgent(
+    doc,
+    "design/new-note.md",
+    "# New Note\n\nFresh content authored by the agent.",
+    "agent",
+    META,
+  );
+  assert.equal(
+    markedRuns(doc, "design/new-note.md").length,
+    0,
+    "a brand-new file carries no agentInsertion marks",
+  );
+  assert.equal(hasPendingAgentMarks(doc, "design/new-note.md"), false);
+  // Content still lands, and the caret is still returned (the agent's cursor
+  // shows while it writes, even though the file isn't held for review).
+  assert.equal(
+    readDocFile(doc, "design/new-note.md")?.trim(),
+    "# New Note\n\nFresh content authored by the agent.",
+  );
+  assert.ok(caret, "caret returned for the live cursor");
+});
+
+test("editing that same file AFTER it exists IS marked (review applies)", () => {
+  const doc = new Y.Doc();
+  setDocFile(doc, "design/note.md", "# Note\n\nOriginal body.");
+  setDocFileAsAgent(
+    doc,
+    "design/note.md",
+    "# Note\n\nOriginal body, extended by the agent.",
+    "agent",
+    META,
+  );
+  assert.ok(
+    hasPendingAgentMarks(doc, "design/note.md"),
+    "a change to an existing file is held for review",
+  );
+});
+
 test("new blocks are fully marked", () => {
   const doc = new Y.Doc();
   setDocFile(doc, "requirements/prd.md", "# PRD\n\nBody.");

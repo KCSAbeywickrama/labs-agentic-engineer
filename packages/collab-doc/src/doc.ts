@@ -281,8 +281,16 @@ export function setDocFileAsAgent(
   };
 
   const fragment = doc.getXmlFragment(path);
+  // A brand-new file needs no review: there is nothing to diff it against, so
+  // it is accept-by-default. Skipping the agentInsertion marks means the
+  // committer never holds it (hasPendingAgentMarks stays false) and it commits
+  // on the normal cadence with no review bar. Only CHANGES to files that
+  // already had content are marked/held. (Detection is fragment-empty at write
+  // time; a delete+recreate of an existing file would read as new, but that is
+  // an agent-behavior bug tracked separately, not something to guard here.)
+  const isNewFile = fragment.length === 0;
   const preserved: PreservedRun[] = [];
-  snapshotAgentRuns(fragment, preserved);
+  if (!isNewFile) snapshotAgentRuns(fragment, preserved);
   fragment.observeDeep(collect);
   try {
     doc.transact(() => {
@@ -296,7 +304,7 @@ export function setDocFileAsAgent(
   }
 
   let caret: CaretJSON | null = null;
-  if (inserted.length > 0 || preserved.length > 0) {
+  if (!isNewFile && (inserted.length > 0 || preserved.length > 0)) {
     doc.transact(() => {
       // Restore earlier writes' highlights first (updateYText stripped
       // them); runs whose content the new write deleted resolve to empty

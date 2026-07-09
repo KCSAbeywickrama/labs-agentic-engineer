@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Avatar,
@@ -42,6 +42,7 @@ import {
   useProjectTags,
 } from "../../projects/api/queries";
 import { useSpecFileContent, useSpecFiles } from "../api/queries";
+import { toSpecEntry } from "../api/mapping";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
@@ -96,7 +97,22 @@ export function SpecView({ projectName }: { projectName: string }) {
     };
   }, [actions]);
 
-  const files = spec.data ?? [];
+  // The spec list is git (one-shot, committed truth + offline fallback)
+  // UNIONed with the live collab doc (agent-created files and edits arrive
+  // here in real time, before they commit). Deduped by path; the git entry
+  // wins when both have it (it carries the real blob sha). Sorted by path so
+  // the order is stable as live files appear.
+  const files = useMemo(() => {
+    const byPath = new Map<string, ReturnType<typeof toSpecEntry>>();
+    for (const path of collab.docPaths) {
+      const entry = toSpecEntry({ path, sha: "" });
+      if (entry) byPath.set(entry.path, entry);
+    }
+    for (const entry of spec.data ?? []) byPath.set(entry.path, entry);
+    return [...byPath.values()]
+      .filter((e): e is NonNullable<typeof e> => e !== null)
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }, [spec.data, collab.docPaths]);
   // Default selection: the first requirements file (the seeded PRD).
   const selected =
     files.find((f) => f.path === selectedPath) ??
