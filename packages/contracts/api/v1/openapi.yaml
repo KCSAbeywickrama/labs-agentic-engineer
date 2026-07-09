@@ -135,6 +135,14 @@ components:
       type: object
     BuildRequest:
       additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/BuildRequest.json
+          format: uri
+          readOnly: true
+          type: string
       type: object
     BuildResponse:
       additionalProperties: false
@@ -322,6 +330,11 @@ components:
         status:
           type: string
         type:
+          description: >-
+            Component kind in AEP's design vocabulary — "web-application" or
+            "service" (matching design.json's componentType). OpenChoreo's
+            prefixed ComponentType names (deployment/*) never appear on this
+            API.
           type: string
         uid:
           type: string
@@ -1493,12 +1506,13 @@ components:
           readOnly: true
           type: string
         latest:
-          description: Newest user-tagged spec version (e.g. v3); absent when nothing is tagged. Proposed frontend-first (#117).
+          description: Newest spec version tag (e.g. v3); absent when nothing is tagged.
           type: string
         specDirty:
-          description: True when specs/ changed on GitHub after `latest` was tagged. Proposed frontend-first (#117).
+          description: True when specs/ changed after latest was tagged.
           type: boolean
         tags:
+          description: Spec version tags (v<N>), newest first.
           items:
             type: string
           type:
@@ -2835,7 +2849,7 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
-  /projects/{projectName}/agents/{conversationId}/messages: #rename from convo
+  /projects/{projectName}/agents/{conversationId}/messages: 
     get:
       operationId: get-conversation
       parameters:
@@ -3271,7 +3285,7 @@ paths:
       summary: Get one Task with its full Execution history
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{issueNumber}/log: #old /projects/{projectName}/executions/{executionId}/progress
+  /projects/{projectName}/tasks/{issueNumber}/log:
     get:
       operationId: get-execution-progress
       parameters:
@@ -3282,12 +3296,20 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Execution id
+        - description: GitHub issue number of the Task
           in: path
-          name: executionId
+          name: issueNumber
           required: true
           schema:
-            description: Execution id
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
+        - description: Execution id to read (defaults to the Task's most recent execution)
+          explode: false
+          in: query
+          name: executionId
+          schema:
+            description: Execution id to read (defaults to the Task's most recent execution)
             type: string
         - description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
           explode: false

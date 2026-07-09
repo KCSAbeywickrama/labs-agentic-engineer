@@ -461,3 +461,31 @@ export interface Deployment {
   createdAt: string;
   status: string;
 }
+
+// -- Project build (single-tag spec version + dev workflow) -------------------
+
+// POST /projects/{p}/build → the spec version tag the build runs for.
+export interface ProjectBuildResponse {
+  tag: string;
+}
+
+export type ProjectBuildState = 'started' | 'in_progress' | 'completed' | 'failed';
+
+export interface ProjectBuildTask {
+  title: string;
+  status: ProjectBuildState;
+}
+
+// GET /projects/{p}/build/{tag} → live build progress.
+export interface ProjectBuildStatus {
+  status: ProjectBuildState;
+  workflow_status: string;
+  tasks?: ProjectBuildTask[] | null;
+}
+
+// GET /projects/{p}/tags → the spec version tag list.
+export interface TagList {
+  tags: string[] | null;
+  latest?: string;
+  specDirty?: boolean;
+}

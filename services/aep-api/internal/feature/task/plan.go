@@ -87,7 +87,7 @@ func (s *PlanSession) Stream(w io.Writer, flush func()) {
 }
 
 // StartPlan assembles context and starts the plan turn. Pre-stream failures are
-// typed errors (ErrNoApprovedDesign, ErrNoAnthropicKey, ErrProjectRepoNotFound,
+// typed errors (ErrNoSpecVersion, ErrNoAnthropicKey, ErrProjectRepoNotFound,
 // ErrPlanInProgress) or an *agentsvc.UpstreamError; on any pre-stream failure
 // the in-flight lock is released before returning.
 func (s *PlanService) StartPlan(ctx context.Context, orgID, projectID string) (*PlanSession, error) {
@@ -123,16 +123,14 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 		return nil, ErrProjectRepoNotFound
 	}
 
-	// Gate: an approved (tagged) design version must exist (§6, approve-first).
-	designVersions, err := s.versions.ListDesignVersions(ctx, orgID, projectID)
-	if err != nil || len(designVersions) == 0 {
-		return nil, ErrNoApprovedDesign
+	// Gate: a versioned (tagged) spec must exist (§6, build-first). The `v<N>`
+	// tag is cut by the build endpoint AFTER the whole-spec hard gate, so its
+	// presence certifies a buildable requirements+design pair.
+	reqVersions, err := s.versions.ListRequirementsVersions(ctx, orgID, projectID)
+	if err != nil || len(reqVersions) == 0 {
+		return nil, ErrNoSpecVersion
 	}
-	currentDesignTag := designVersions[0].Tag
-	var currentSpecTag string
-	if reqVersions, verr := s.versions.ListRequirementsVersions(ctx, orgID, projectID); verr == nil && len(reqVersions) > 0 {
-		currentSpecTag = reqVersions[0].Tag
-	}
+	currentSpecTag := reqVersions[0].Tag
 
 	apiKey, err := s.keys(ctx, orgID)
 	if err != nil {
@@ -151,8 +149,8 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// These are platform state (GitHub issues), not repository files, so they
 	// ride in the instruction — the snapshot carries only committed content.
 	contextFiles := map[string]string{}
-	preload, existingKeys, olderTags := s.assembleExistingTasks(ctx, orgID, projectID, currentDesignTag, contextFiles)
-	s.appendLineageDiffs(ctx, ref, currentDesignTag, olderTags, contextFiles)
+	preload, existingKeys, olderTags := s.assembleExistingTasks(ctx, orgID, projectID, currentSpecTag, contextFiles)
+	s.appendLineageDiffs(ctx, ref, currentSpecTag, olderTags, contextFiles)
 	// Freeze the set of issue numbers the agent actually received as context: an
 	// updateTask{issueNumber} ref is fenced to it (a hallucinated / out-of-context
 	// number must never be written — plan_tap.resolveRef).
@@ -169,14 +167,18 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	if err != nil {
 		return nil, fmt.Errorf("resolve base ref: %w", err)
 	}
+	// Skills resolve failures are typed: both arms mean the org's _skills repo
+	// is unusable right now (row missing/unprovisionable, or the backing repo
+	// gone/unreachable — e.g. deleted externally under a lingering row). The
+	// edge maps this to a logged 503 rather than an opaque 500.
 	skillsRow, err := s.skillsRepo(ctx, orgID)
 	if err != nil {
-		return nil, fmt.Errorf("resolve skills repo: %w", err)
+		return nil, fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
 	}
 	skillsRepoRef := gitrepo.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
 	skillsRef, err := ws.Head(ctx, skillsRepoRef, "")
 	if err != nil {
-		return nil, fmt.Errorf("resolve skills ref: %w", err)
+		return nil, fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
 	}
 	if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
 		return nil, fmt.Errorf("ensure repo snapshot: %w", err)
@@ -208,11 +210,14 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	}
 
 	tap := &planTap{
-		ctx:            detached,
-		orgID:          orgID,
+		ctx:   detached,
+		orgID: orgID,
+		// One tag family post-build: the spec tag `v<N>` is both the lineage
+		// stamp and the idempotency baseline (designTag keeps its wire name so
+		// pre-single-tag issues stay comparable as older lineage).
 		projectID:      projectID,
 		specTag:        currentSpecTag,
-		designTag:      currentDesignTag,
+		designTag:      currentSpecTag,
 		issues:         s.issues,
 		state:          preload,
 		existingKeys:   existingKeys,
@@ -225,9 +230,10 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 
 // assembleExistingTasks renders each open Task as a tasks/<n>.md context file
 // (with machine-block facts), preloads the tap state for updateTask{issueNumber},
-// collects the dedupe key set, and reports the distinct older design tags whose
-// lineage diff the assembler should include (§6).
-func (s *PlanService) assembleExistingTasks(ctx context.Context, orgID, projectID, currentDesignTag string, files map[string]string) (map[int]taskState, map[string]bool, map[string]bool) {
+// collects the dedupe key set, and reports the distinct older lineage tags
+// (spec `v<N>` or legacy design `v<N>-<M>`) whose lineage diff the assembler
+// should include (§6).
+func (s *PlanService) assembleExistingTasks(ctx context.Context, orgID, projectID, currentSpecTag string, files map[string]string) (map[int]taskState, map[string]bool, map[string]bool) {
 	preload := map[int]taskState{}
 	existingKeys := map[string]bool{}
 	olderTags := map[string]bool{}
@@ -262,27 +268,28 @@ func (s *PlanService) assembleExistingTasks(ctx context.Context, orgID, projectI
 		if block.Key != "" {
 			existingKeys[block.Key] = true
 		}
-		if block.DesignTag != "" && block.DesignTag != currentDesignTag {
+		if block.DesignTag != "" && block.DesignTag != currentSpecTag {
 			olderTags[block.DesignTag] = true
 		}
 	}
 	return preload, existingKeys, olderTags
 }
 
-// appendLineageDiffs includes the spec/design delta between each older lineage
-// tag and the current design tag so incremental planning reasons over the real
-// change (§6 — Workspace.Diff on the local mirror, was GitHub CompareRefs).
-func (s *PlanService) appendLineageDiffs(ctx context.Context, ref gitrepo.RepoRef, currentDesignTag string, olderTags map[string]bool, files map[string]string) {
+// appendLineageDiffs includes the spec delta between each older lineage tag
+// (spec or legacy design — both are real git tags) and the current spec tag so
+// incremental planning reasons over the real change (§6 — Workspace.Diff on
+// the local mirror, was GitHub CompareRefs).
+func (s *PlanService) appendLineageDiffs(ctx context.Context, ref gitrepo.RepoRef, currentSpecTag string, olderTags map[string]bool, files map[string]string) {
 	if s.git == nil || len(olderTags) == 0 {
 		return
 	}
 	for oldTag := range olderTags {
-		cmp, cerr := s.git.Workspace().Diff(ctx, ref, oldTag, currentDesignTag)
+		cmp, cerr := s.git.Workspace().Diff(ctx, ref, oldTag, currentSpecTag)
 		if cerr != nil {
-			slog.WarnContext(ctx, "plan: lineage compare failed", "from", oldTag, "to", currentDesignTag, "error", cerr)
+			slog.WarnContext(ctx, "plan: lineage compare failed", "from", oldTag, "to", currentSpecTag, "error", cerr)
 			continue
 		}
-		files["context/lineage-diff-"+oldTag+".md"] = renderCompare(oldTag, currentDesignTag, cmp)
+		files["context/lineage-diff-"+oldTag+".md"] = renderCompare(oldTag, currentSpecTag, cmp)
 	}
 }
 

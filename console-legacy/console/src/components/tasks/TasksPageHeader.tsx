@@ -33,16 +33,15 @@ import {
   Tooltip,
   Typography,
 } from '@wso2/oxygen-ui';
-import { AlertCircle, ChevronDown, Cloud, ExternalLink, Laptop, Play, RefreshCw, Sparkles } from '@wso2/oxygen-ui-icons-react';
+import { AlertCircle, ChevronDown, Cloud, ExternalLink, Laptop, Play, RefreshCw } from '@wso2/oxygen-ui-icons-react';
 import { useOrgAnthropic } from '../../hooks/useOrgAnthropic';
 
 interface TasksPageHeaderProps {
   projectId: string;
   totalTasks: number;
-  isPlanning: boolean;
+  isBuilding: boolean;
   isExecutingAll: boolean;
   isRefreshing: boolean;
-  onPlan: () => void;
   onExecuteAll: () => void;
   onRefresh: () => void;
 }
@@ -50,10 +49,9 @@ interface TasksPageHeaderProps {
 export function TasksPageHeader({
   projectId,
   totalTasks,
-  isPlanning,
+  isBuilding,
   isExecutingAll,
   isRefreshing,
-  onPlan,
   onExecuteAll,
   onRefresh,
 }: TasksPageHeaderProps) {
@@ -89,21 +87,11 @@ export function TasksPageHeader({
         <Stack direction="row" spacing={1} alignItems="center">
           <Tooltip title="Refresh">
             <span>
-              <IconButton size="small" onClick={onRefresh} disabled={isRefreshing || isPlanning}>
+              <IconButton size="small" onClick={onRefresh} disabled={isRefreshing}>
                 {isRefreshing ? <CircularProgress size={16} /> : <RefreshCw size={16} />}
               </IconButton>
             </span>
           </Tooltip>
-
-          <Button
-            variant={totalTasks === 0 ? 'contained' : 'outlined'}
-            size="small"
-            startIcon={isPlanning ? <CircularProgress size={14} color="inherit" /> : <Sparkles size={15} />}
-            disabled={isPlanning}
-            onClick={onPlan}
-          >
-            {isPlanning ? 'Planning…' : totalTasks === 0 ? 'Plan Tasks' : 'Re-plan'}
-          </Button>
 
           {totalTasks > 0 && (
             <>
@@ -112,7 +100,7 @@ export function TasksPageHeader({
                 size="small"
                 startIcon={isExecutingAll ? <CircularProgress size={14} color="inherit" /> : <Play size={14} />}
                 endIcon={!isExecutingAll && <ChevronDown size={14} />}
-                disabled={isExecutingAll || isPlanning}
+                disabled={isExecutingAll || isBuilding}
                 onClick={(e) => setImplMenuAnchor(e.currentTarget)}
                 aria-haspopup="menu"
                 aria-expanded={Boolean(implMenuAnchor)}

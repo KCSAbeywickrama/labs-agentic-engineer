@@ -77,7 +77,9 @@ func (o Origin) Valid() bool {
 // issue body. Exactly one of Component (coding tasks) or Operation (ops tasks)
 // is set (§2, §11). DependsOn holds component names — never issue numbers (the
 // phase-5 lesson). SpecTag/DesignTag are the lineage; DesignTag doubles as the
-// idempotency baseline (§2). Key is the idempotency key (see Key).
+// idempotency baseline (§2) — since the single-tag build flow both carry the
+// spec tag `v<N>` (historic issues hold legacy `v<N>-<M>` design tags and are
+// treated as older lineage). Key is the idempotency key (see Key).
 type Block struct {
 	Component string   // coding tasks; empty for ops
 	Operation string   // ops tasks; empty for coding
@@ -246,8 +248,10 @@ func Repair(body string) (repaired string, changed bool, err error) {
 }
 
 // Key computes a Task's idempotency key: the first 12 hex characters of
-// SHA-256 over the newline-joined tuple (project, designTag, target,
-// titleComponent), where target is the component (coding) or operation (ops).
+// SHA-256 over the newline-joined tuple (project, lineageTag, target,
+// titleComponent), where lineageTag is the Task's baseline tag (the spec tag
+// `v<N>`; legacy issues used the `v<N>-<M>` design tag) and target is the
+// component (coding) or operation (ops).
 // titleComponent is TitleSlug(title), but falls back to
 // hex(sha256(trimmed title))[:12] when the slug would be empty — an
 // all-non-ASCII, emoji, or pure-punctuation title slugifies to "", which would
@@ -258,7 +262,7 @@ func Repair(body string) (repaired string, changed bool, err error) {
 // dedup within a single project+designTag, and the short form keeps the block
 // readable. The recipe is stable and reproducible so the plan tap can dedupe a
 // re-run against issues it created on an earlier run (§6).
-func Key(project, designTag, target, title string) string {
+func Key(project, lineageTag, target, title string) string {
 	titleComponent := TitleSlug(title)
 	if titleComponent == "" {
 		// Slug empty (non-ASCII/emoji/punctuation-only title) — fall back to a
@@ -267,7 +271,7 @@ func Key(project, designTag, target, title string) string {
 		titleComponent = hex.EncodeToString(sum[:])[:12]
 	}
 	sum := sha256.Sum256([]byte(strings.Join(
-		[]string{project, designTag, target, titleComponent}, "\n")))
+		[]string{project, lineageTag, target, titleComponent}, "\n")))
 	return hex.EncodeToString(sum[:])[:12]
 }
 

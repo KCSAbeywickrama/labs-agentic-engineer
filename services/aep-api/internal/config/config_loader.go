@@ -32,7 +32,7 @@ import (
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
 	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
-	runnerImageVersion = "v6"
+	runnerImageVersion = "v7"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
@@ -136,6 +136,13 @@ func Load() (Config, error) {
 		SecretManagerAPIURL:     r.readOptionalString("SECRET_MANAGER_API_URL", ""),
 		SecretManagerAPITimeout: r.readOptionalDuration("SECRET_MANAGER_API_TIMEOUT", 30*time.Second),
 		ClusterGatewayProxyURL:  r.readOptionalString("CLUSTER_GATEWAY_PROXY_URL", ""),
+
+		// Temporal (devflow workflows). Enabled iff TEMPORAL_HOSTPORT is set.
+		Temporal: TemporalConfig{
+			HostPort:  r.readOptionalString("TEMPORAL_HOSTPORT", ""),
+			Namespace: r.readOptionalString("TEMPORAL_NAMESPACE", "default"),
+			TaskQueue: r.readOptionalString("TEMPORAL_TASKQUEUE", "aep-devflow"),
+		},
 
 		// Agent runner image + ESO CSS for per-run ExternalSecrets.
 		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),

@@ -463,7 +463,10 @@ export default function ProjectArchitecturePage() {
     }
   }, [projectId, generating, attachDesignTurn]);
 
-  const handlePublish = useCallback(async () => {
+  // Build = flush the design buffers as ONE commit, then POST /build: the
+  // backend validates the WHOLE spec (requirements + design), cuts the single
+  // v<N> version tag, and starts the dev workflow (plan → execute) async.
+  const handleBuild = useCallback(async () => {
     if (!projectId || publishing) return;
     setPublishing(true);
     setPublishError(null);
@@ -487,7 +490,6 @@ export default function ProjectArchitecturePage() {
         deletes.push({ path: p, baseSha: shas[p] });
       }
 
-      let commitSha: string | undefined;
       if (writes.length > 0 || deletes.length > 0) {
         let outcome;
         try {
@@ -504,24 +506,23 @@ export default function ProjectArchitecturePage() {
           setApplyConflict(outcome.conflicts.map((c) => c.path));
           return;
         }
-        commitSha = outcome.commitSha;
       }
 
-      // 2. Cut the design tag (hard semantic validation happens here). The
-      // {commitSha} pin is optional now — the backend reads its own mirror —
-      // but pass the fresh sha when the flush just minted one.
+      // 2. Trigger the build: the whole-spec hard gate runs server-side BEFORE
+      // the tag is cut, so the returned tag always names a buildable spec.
+      let tag: string;
       try {
-        await api.saveAndProceedDesign(projectId, commitSha);
+        ({ tag } = await api.buildProject(projectId));
       } catch (err) {
-        // A 422 arrives with joined validation errors already in `.message`.
+        // A 422 arrives with joined per-file validation errors in `.message`.
         setPublishError(
-          err instanceof Error && err.message ? err.message : 'Failed to save the design.',
+          err instanceof Error && err.message ? err.message : 'Failed to start the build.',
         );
         await refreshBundle();
         return;
       }
       updateBuffers(() => ({}));
-      navigate(projectTasksPath(routeOrgId, projectId));
+      navigate(projectTasksPath(routeOrgId, projectId), { state: { buildTag: tag } });
     } finally {
       setPublishing(false);
     }
@@ -874,16 +875,18 @@ export default function ProjectArchitecturePage() {
         {!viewingHistorical && (
           <>
             <Divider orientation="vertical" flexItem />
-            <Tooltip title={generating ? 'A generation is writing the design — publishing is disabled until it finishes.' : ''}>
+            <Tooltip title={generating ? 'A generation is writing the design — building is disabled until it finishes.' : ''}>
               <span>
+                {/* Build stays enabled with a clean editor — the normal path is
+                    "design generated server-side, press Build". */}
                 <Button
                   variant="contained"
                   size="small"
                   startIcon={publishing ? <CircularProgress size={14} color="inherit" /> : <Rocket size={16} />}
-                  onClick={handlePublish}
-                  disabled={!dirty || publishing || generating}
+                  onClick={handleBuild}
+                  disabled={publishing || generating}
                 >
-                  {publishing ? 'Publishing…' : 'Publish'}
+                  {publishing ? 'Starting build…' : 'Build'}
                 </Button>
               </span>
             </Tooltip>

@@ -42,6 +42,9 @@ import type {
   TaskView,
   TaskDetail,
   TaskProgressResponse,
+  ProjectBuildResponse,
+  ProjectBuildStatus,
+  TagList,
 } from './types';
 
 import { env } from '../../config/env';
@@ -266,21 +269,8 @@ export const restApi = {
     }
   },
 
-  /**
-   * Cut the requirements version tag. The `commitSha` pin is OPTIONAL and
-   * vestigial now: the backend resolves HEAD from its own git mirror (the
-   * shared-volume workspace), so the GitHub ref-read lag that once made the
-   * pin load-bearing is gone. Pass it when a just-landed apply naturally
-   * provides a fresh sha; call unpinned otherwise. Let ApiError bubble —
-   * Publish must stop (show the message) when the tag fails, not navigate on
-   * as if it succeeded.
-   */
-  async saveRequirements(projectId: string, commitSha?: string): Promise<RequirementsBundle> {
-    return fetchJSON<RequirementsBundle>(`${projectPrefix(projectId)}/requirements/save`, {
-      method: 'POST',
-      body: JSON.stringify(commitSha ? { commitSha } : {}),
-    });
-  },
+  // saveRequirements is GONE: the Save button only commits (files/apply);
+  // version tags are cut by buildProject (single-tag build flow).
 
   async discardRequirements(projectId: string): Promise<RequirementsBundle | undefined> {
     try {
@@ -316,11 +306,11 @@ export const restApi = {
     }
   },
 
-  // -- Collaboration (still scoped to the requirements editor session) ------
+  // -- Collaboration (the unified spec editor session) -----------------------
   async getCollabSession(projectId: string): Promise<CollabSession | undefined> {
     try {
       return await fetchJSON<CollabSession>(
-        `${projectPrefix(projectId)}/requirements/collab-session`,
+        `${projectPrefix(projectId)}/spec/collab-session`,
       );
     } catch {
       return undefined;
@@ -329,16 +319,8 @@ export const restApi = {
 
   // -- Designs (real backend) ------------------------------------------------
 
-  /** `commitSha` pin: optional-and-vestigial, see saveRequirements. */
-  async saveAndProceedDesign(projectId: string, commitSha?: string): Promise<Design> {
-    // Let ApiError bubble — Publish needs to surface the server's error
-    // message (e.g. missing requirements baseline, save-via-API failures)
-    // rather than collapsing every failure into a generic toast.
-    return fetchJSON<Design>(`${projectPrefix(projectId)}/design/save`, {
-      method: 'POST',
-      body: JSON.stringify(commitSha ? { commitSha } : {}),
-    });
-  },
+  // saveAndProceedDesign is GONE: the Build button commits (files/apply) and
+  // calls buildProject, which validates the whole spec and cuts the one tag.
 
   async discardDesignChanges(projectId: string): Promise<Design | undefined> {
     try {
@@ -504,12 +486,15 @@ export const restApi = {
   // Unified execution progress feed keyed by execution id (kind selects the
   // source server-side). Same cursor/NDJSON contract as the legacy per-task
   // progress endpoints, so `useCursorPolling` drives it unchanged.
+  // The Task log feed. `executionId` pins one execution from the history
+  // browser; omitted, the server reads the Task's most recent execution.
   async getExecutionProgress(
-    projectId: string, executionId: string, sinceMillis: number,
+    projectId: string, issueNumber: number, sinceMillis: number, executionId?: string,
   ): Promise<TaskProgressResponse> {
     const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
+    if (executionId) q.set('executionId', executionId);
     return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/executions/${executionId}/progress?${q.toString()}`,
+      `${projectPrefix(projectId)}/tasks/${issueNumber}/log?${q.toString()}`,
     );
   },
 
@@ -539,6 +524,35 @@ export const restApi = {
           body: JSON.stringify({ envVars }),
         },
       );
+    } catch {
+      return undefined;
+    }
+  },
+
+  // -- Project build (single-tag spec version + dev workflow) -------------------
+
+  // Trigger a build: the backend validates the whole spec (requirements +
+  // design), cuts the next v<N> tag, starts the dev workflow asynchronously,
+  // and returns the tag. 422 (ApiError with per-file detail) when the spec is
+  // not buildable — let it bubble so the Build button can surface it.
+  async buildProject(projectId: string): Promise<ProjectBuildResponse> {
+    return fetchJSON<ProjectBuildResponse>(`${projectPrefix(projectId)}/build`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  // Live status of the build for a spec version tag. 404 → no build for it.
+  async getProjectBuild(projectId: string, tag: string): Promise<ProjectBuildStatus> {
+    return fetchJSON<ProjectBuildStatus>(
+      `${projectPrefix(projectId)}/build/${encodeURIComponent(tag)}`,
+    );
+  },
+
+  // The spec version tags (v<N>, newest first) + latest + dirty flag.
+  async listProjectTags(projectId: string): Promise<TagList | undefined> {
+    try {
+      return await fetchJSON<TagList>(`${projectPrefix(projectId)}/tags`);
     } catch {
       return undefined;
     }

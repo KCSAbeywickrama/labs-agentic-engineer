@@ -37,10 +37,10 @@ var (
 	// ErrProjectRepoNotFound is returned when the project has no provisioned git
 	// repository yet. Mapped to 404.
 	ErrProjectRepoNotFound = errors.New("project repository not found")
-	// ErrNoApprovedDesign is returned when a plan turn is requested but the
-	// project has no approved (tagged) design version. Mapped to 400 (the
-	// approve-first gate, as with design generation).
-	ErrNoApprovedDesign = errors.New("planning requires an approved (tagged) design version")
+	// ErrNoSpecVersion is returned when a plan turn is requested but the
+	// project has no versioned (tagged) spec. Mapped to 400 (the build-first
+	// gate — the `v<N>` tag certifies a validated requirements+design pair).
+	ErrNoSpecVersion = errors.New("planning requires a versioned spec — build the project first")
 	// ErrPlanInProgress is returned when a plan turn is already running for the
 	// project (the one-active-plan-turn invariant, §6). Mapped to 409
 	// {code:"plan_in_progress"}.
@@ -51,4 +51,13 @@ var (
 	// ErrNoAnthropicKey is returned pre-stream when the org has no Anthropic key.
 	// Mapped to 400.
 	ErrNoAnthropicKey = errors.New("organization has no Anthropic API key configured")
+	// ErrSkillsRepoUnavailable means the org's _skills repo (the plan turn's
+	// SkillsRef source) could not be resolved — its row is missing or
+	// unprovisionable, or the backing repo is gone/unreachable (live incident:
+	// the GitHub repo was deleted externally while its git_repositories row
+	// lingered). Mapped to a LOGGED 503 with a clear message instead of an
+	// opaque 500. Recovery is a manual operator action today: delete the stale
+	// `_skills` git_repositories row — the next resolve re-provisions and
+	// re-seeds the repo.
+	ErrSkillsRepoUnavailable = errors.New("org skills repository unavailable")
 )

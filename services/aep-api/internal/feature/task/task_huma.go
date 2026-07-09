@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -193,12 +194,18 @@ func mapPlanError(err error) error {
 	switch {
 	case errors.Is(err, ErrPlanInProgress):
 		return &planInProgressError{Code: "plan_in_progress"}
-	case errors.Is(err, ErrNoApprovedDesign):
-		return huma.Error400BadRequest(ErrNoApprovedDesign.Error())
+	case errors.Is(err, ErrNoSpecVersion):
+		return huma.Error400BadRequest(ErrNoSpecVersion.Error())
 	case errors.Is(err, ErrNoAnthropicKey):
 		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
 	case errors.Is(err, ErrProjectRepoNotFound):
 		return huma.Error404NotFound(ErrProjectRepoNotFound.Error())
+	case errors.Is(err, ErrSkillsRepoUnavailable):
+		// Platform-side dependency down (see ErrSkillsRepoUnavailable) — a clear
+		// 503 with the cause logged. (This mapper is not ctx-threaded yet; a
+		// broader mapper ctx-threading + default-500-logging pass is a follow-up.)
+		slog.ErrorContext(context.Background(), "task plan: org skills repository unavailable", "error", err)
+		return huma.Error503ServiceUnavailable("org skills repository unavailable — contact your platform admin")
 	default:
 		return huma.Error500InternalServerError("internal error")
 	}

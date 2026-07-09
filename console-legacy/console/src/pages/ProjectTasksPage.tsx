@@ -17,7 +17,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import { alpha, Box, ButtonBase, CircularProgress, IconButton, PageContent, Stack, Typography } from '@wso2/oxygen-ui';
 import { Info, X } from '@wso2/oxygen-ui-icons-react';
 import { api } from '../services/api';
@@ -47,23 +47,27 @@ function groupBySection(tasks: TaskView[]): Record<SectionKey, TaskView[]> {
 
 export default function ProjectTasksPage() {
   const { orgId, projectId } = useParams<{ orgId: string; projectId: string }>();
+  // The Build navigation passes the fresh tag so the watcher starts on the
+  // right run immediately (a reload falls back to the latest server tag).
+  const location = useLocation();
+  const buildTagHint = (location.state as { buildTag?: string } | null)?.buildTag;
   // Default to "All": a PR merge auto-closes the issue, so a task whose build
   // then fails would be hidden under a default "Open" filter. The sections
   // already separate settled from active work; Open/Closed remain as filters.
   const [stateFilter, setStateFilter] = useState<TaskListState>('all');
   const [isExecutingAll, setIsExecutingAll] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [buildBannerDismissed, setBuildBannerDismissed] = useState(false);
 
   const {
     tasks,
     isLoading,
     error,
     refresh,
-    plan,
-    isPlanning,
-    planError,
-    clearPlanError,
-  } = useProjectTasks(projectId, stateFilter);
+    build,
+    buildTag,
+    isBuilding,
+  } = useProjectTasks(projectId, stateFilter, buildTagHint);
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(TASK_SECTIONS.map((s) => [s.key, s.key === 'active' || s.key === 'pending'])),
@@ -109,16 +113,17 @@ export default function ProjectTasksPage() {
     );
   }
 
+  const buildFailed = build?.status === 'failed';
+
   return (
     <PageContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <TasksPageHeader
           projectId={projectId ?? ''}
           totalTasks={tasks.length}
-          isPlanning={isPlanning}
+          isBuilding={isBuilding}
           isExecutingAll={isExecutingAll}
           isRefreshing={isRefreshing}
-          onPlan={plan}
           onExecuteAll={handleExecuteAll}
           onRefresh={handleRefresh}
         />
@@ -149,24 +154,32 @@ export default function ProjectTasksPage() {
           })}
         </Stack>
 
-        {/* Errors */}
-        <AnimatedBanner show={!!planError}>
-          <ErrorBanner message={planError ?? ''} onClose={clearPlanError} />
+        {/* Build progress / failure */}
+        <AnimatedBanner show={isBuilding}>
+          <BuildBanner tag={buildTag ?? ''} workflowStatus={build?.workflow_status ?? ''} />
         </AnimatedBanner>
+        <AnimatedBanner show={buildFailed && !buildBannerDismissed}>
+          <ErrorBanner
+            message={`Build ${buildTag ?? ''} failed (${build?.workflow_status ?? 'failed'}).`}
+            onClose={() => setBuildBannerDismissed(true)}
+          />
+        </AnimatedBanner>
+
+        {/* Errors */}
         <AnimatedBanner show={!!error}>
           <ErrorBanner message={error ?? ''} onClose={handleRefresh} />
         </AnimatedBanner>
 
         {/* Sections */}
         <Box sx={{ flex: 1, overflowY: 'auto', pr: 0.25 }}>
-          {tasks.length === 0 && !isPlanning && (
+          {tasks.length === 0 && !isBuilding && (
             <EmptyState />
           )}
-          {tasks.length === 0 && isPlanning && (
+          {tasks.length === 0 && isBuilding && (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, pt: 8 }}>
               <CircularProgress size={16} thickness={4} />
               <Typography variant="body2" color="text.disabled">
-                Planning tasks — issues appear below as they are created…
+                Build in progress — tasks appear below as they are planned…
               </Typography>
             </Box>
           )}
@@ -186,6 +199,32 @@ export default function ProjectTasksPage() {
         </Box>
       </Box>
     </PageContent>
+  );
+}
+
+function BuildBanner({ tag, workflowStatus }: { tag: string; workflowStatus: string }) {
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.5,
+        px: 2,
+        py: 1.5,
+        mb: 2,
+        borderRadius: 1.25,
+        bgcolor: (t) => alpha(t.palette.info.main, 0.08),
+        border: '1px solid',
+        borderColor: (t) => alpha(t.palette.info.main, 0.2),
+      }}
+      data-testid="build-progress-banner"
+    >
+      <CircularProgress size={14} thickness={4} />
+      <Typography variant="body2" sx={{ flex: 1, color: 'info.main', lineHeight: 1.3 }}>
+        Building {tag}{workflowStatus ? ` — ${workflowStatus.replace(/-/g, ' ')}` : ''}. Tasks are
+        planned and executed automatically.
+      </Typography>
+    </Box>
   );
 }
 
@@ -239,7 +278,8 @@ function EmptyState() {
           No tasks yet
         </Typography>
         <Typography variant="caption" sx={{ color: 'text.primary', lineHeight: 1.3 }}>
-          Plan tasks from the approved design to create the GitHub issues that drive implementation.
+          Press Build on the Design page — the build versions the spec, plans the GitHub issues
+          that drive implementation, and executes them.
         </Typography>
       </Box>
     </Box>

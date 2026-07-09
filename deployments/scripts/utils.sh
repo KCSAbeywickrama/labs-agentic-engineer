@@ -16,6 +16,46 @@
 
 # Shared utilities — sourced by setup scripts.
 
+# fetch_gh_raw <raw.githubusercontent.com URL> <dest-file>
+# Downloads a raw GitHub file with bounded retries. Anonymous raw fetches are
+# per-IP throttled (bursty 429s observed during repeated bring-ups); when
+# LOCAL_DEV_ADMIN_GITHUB_PAT is available (env or deployments/.env) the fetch
+# goes through the authenticated contents API instead — a far higher limit.
+# Falls back to the plain unauthenticated raw URL when no PAT is configured.
+fetch_gh_raw() {
+    local url="$1" dest="$2"
+    local pat="${LOCAL_DEV_ADMIN_GITHUB_PAT:-}"
+    if [ -z "$pat" ]; then
+        local envfile
+        envfile="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.env"
+        if [ -f "$envfile" ]; then
+            pat=$(grep -E '^LOCAL_DEV_ADMIN_GITHUB_PAT=' "$envfile" | tail -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+        fi
+    fi
+    # raw.githubusercontent.com/<owner>/<repo>/<ref>/<path> → API coordinates.
+    local rest="${url#https://raw.githubusercontent.com/}"
+    local owner="${rest%%/*}"; rest="${rest#*/}"
+    local repo="${rest%%/*}"; rest="${rest#*/}"
+    local ref="${rest%%/*}"; local path="${rest#*/}"
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        if [ -n "$pat" ]; then
+            if curl -fsSL -H "Authorization: Bearer $pat" -H "Accept: application/vnd.github.raw+json" \
+                "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$ref" -o "$dest"; then
+                return 0
+            fi
+        else
+            if curl -fsSL "$url" -o "$dest"; then
+                return 0
+            fi
+        fi
+        echo "⚠️  fetch $url failed (attempt $attempt/5) — retrying in $((attempt * 15))s..."
+        sleep $((attempt * 15))
+    done
+    echo "❌ Could not fetch $url after 5 attempts"
+    return 1
+}
+
 is_port_in_use() {
     lsof -i :"$1" -sTCP:LISTEN &>/dev/null
 }
@@ -44,6 +84,22 @@ check_required_ports() {
         return 1
     fi
     echo "✅ All ports available"
+}
+
+# helm_release_deployed <release> <namespace> — succeeds ONLY when the release
+# exists AND its status is `deployed`. A `failed` or `pending-*` release returns
+# false, so a caller guarding `helm upgrade --install` on this re-drives the
+# install instead of skipping it — the release then self-heals on the next run.
+# A bare `helm status … &>/dev/null` existence check does NOT distinguish a
+# failed release from a healthy one (the trap the workflow-plane install hit:
+# a cert-manager webhook race left the release `failed`, and the existence check
+# skipped the reinstall that would have recreated the certs).
+helm_release_deployed() {
+    # `rel_status`, not `status`: `status` is a read-only special var in zsh.
+    local release="$1" ns="$2" rel_status
+    rel_status="$(helm status "$release" -n "$ns" --kube-context "${CLUSTER_CONTEXT}" -o json 2>/dev/null \
+        | grep -o '"status":"[a-z-]*"' | head -1)" || true
+    [ "$rel_status" = '"status":"deployed"' ]
 }
 
 helm_install_if_not_exists() {

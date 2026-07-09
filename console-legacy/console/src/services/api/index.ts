@@ -44,4 +44,9 @@ export type {
   TaskProgressEvent,
   TaskProgressResponse,
   TaskProgressKind,
+  ProjectBuildResponse,
+  ProjectBuildStatus,
+  ProjectBuildState,
+  ProjectBuildTask,
+  TagList,
 } from './client';

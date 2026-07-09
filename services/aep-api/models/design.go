@@ -16,6 +16,16 @@
 
 package models
 
+// Component type vocabulary. AEP uses OpenChoreo's OWN terms end-to-end —
+// these are OC's ComponentType names minus the `deployment/` prefix (OC:
+// `deployment/service`, `deployment/web-application`), so no translation
+// layer exists anywhere: the agent contract emits these values, design.json
+// stores them verbatim, and platform code compares them directly.
+const (
+	ComponentTypeService        = "service"
+	ComponentTypeWebApplication = "web-application"
+)
+
 // DesignComponent describes a single component within a design.
 // This matches the structured output schema from the AI Agent SDK.
 type DesignComponent struct {
@@ -100,8 +110,13 @@ type Dependency struct {
 	// external: the config key schema the consuming component codes against.
 	Config []ConfigKey `json:"config,omitempty"`
 	// platform-resource: the registered (Cluster)ResourceType + provisioning params.
-	ResourceType string            `json:"resourceType,omitempty"`
-	Parameters   map[string]string `json:"parameters,omitempty"`
+	// Parameter values are mixed scalar types (string | number | bool) per the
+	// target (Cluster)ResourceType's OpenAPI v3 schema — e.g. postgres-cnpg's
+	// `instances` is an integer while `storage`/`version` are strings — so the
+	// map is any-valued and marshalled verbatim into the OC Resource
+	// spec.parameters (numbers must stay JSON numbers for CRD validation).
+	ResourceType string         `json:"resourceType,omitempty"`
+	Parameters   map[string]any `json:"parameters,omitempty"`
 	// resolution UI: candidates attached when Status == ambiguous.
 	Candidates []DependencyCandidate `json:"candidates,omitempty"`
 }

@@ -326,6 +326,42 @@ func TestParseComponentDesignJSON_NeedsSpecComputesUnresolved(t *testing.T) {
 	}
 }
 
+// TestParseComponentDesignJSON_TypePassesThroughVerbatim pins the codec's
+// type handling: NO normalization, NO shims. The vocabulary is OpenChoreo's
+// own terms (models.ComponentTypeService / ComponentTypeWebApplication) used
+// end-to-end, so the codec maps `type` verbatim in both directions. Older
+// spellings ("webapp", "web-app") also pass through untouched — they are
+// simply NOT web applications; stored designs carrying them must be migrated
+// (a one-line design.json edit).
+func TestParseComponentDesignJSON_TypePassesThroughVerbatim(t *testing.T) {
+	cases := []string{
+		"web-application", // canonical (OC's deployment/web-application)
+		"service",         // canonical (OC's deployment/service)
+		"webapp",          // retired spelling: verbatim, not a web application
+		"web-app",         // retired spelling: verbatim, not a web application
+		"scheduled-task",  // unknown kind: verbatim
+	}
+	for _, diskType := range cases {
+		t.Run(diskType, func(t *testing.T) {
+			raw := `{"name":"checkout","type":"` + diskType + `","dependencies":[]}`
+			comp, err := parseComponentDesignJSON("checkout", raw)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if comp.ComponentType != diskType {
+				t.Fatalf("ComponentType = %q, want verbatim %q", comp.ComponentType, diskType)
+			}
+			out, err := marshalComponentDesignJSON("checkout", comp)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if !strings.Contains(string(out), `"type": "`+diskType+`"`) {
+				t.Fatalf("re-save must persist the type verbatim (%q):\n%s", diskType, out)
+			}
+		})
+	}
+}
+
 func TestSplitAssembleDesign_ComponentRoundTrip(t *testing.T) {
 	// End-to-end through the store split/assemble seam: a DesignFile with one
 	// component survives Split → Assemble with the design.json codec.

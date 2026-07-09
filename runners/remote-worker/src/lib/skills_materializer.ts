@@ -40,7 +40,21 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { SkillResolution } from "./skills_pull.js";
+
+// SkillKind mirrors the platform's frontmatter `metadata.aep.kind` vocabulary
+// (docs/design/skills-unified-library-migration.md §3.2); absent → "org".
+export type SkillKind = "platform" | "org" | "custom" | "imported";
+
+// SkillResolution is one applied skill resolved from the org-skills clone,
+// ready to materialize into the AgentSkills plugin tree. Built locally by
+// skills_resolver.ts (the retired S2S skills-pull returned the same shape over
+// the wire).
+export interface SkillResolution {
+  materializedName: string; // e.g. "org-api-management" — kind-prefixed dir + `name:`
+  kind: SkillKind; // frontmatter metadata.aep.kind (absent → "org")
+  skillMd: string; // the SKILL.md body, verbatim
+  references: Record<string, string>; // references/<file>.md → content
+}
 
 export interface MaterializeResult {
   pluginDir: string;
@@ -86,9 +100,9 @@ export async function materializeSkills(
       }
     }
 
-    // Platform-shipped stack skills are preloaded into the session; "builtin"
-    // is the legacy kind name from a not-yet-upgraded BFF.
-    if (sk.kind === "org" || sk.kind === "builtin") {
+    // Platform-shipped stack skills (kind "org") are preloaded into the
+    // session; the other kinds are available on-demand only.
+    if (sk.kind === "org") {
       preloadNames.push(sk.materializedName);
     }
   }

@@ -413,13 +413,20 @@ type genaiRig struct {
 type rigOption func(*rigConfig)
 
 type rigConfig struct {
-	client agentsvc.Client // overrides the default real-over-fake-HTTP client
+	client     agentsvc.Client // overrides the default real-over-fake-HTTP client
+	skillsRepo genai.SkillsRepoResolver
 }
 
 // withAgentsClient swaps the agents client (e.g. a panicking fake) — everything
 // else in the rig stays real.
 func withAgentsClient(c agentsvc.Client) rigOption {
 	return func(rc *rigConfig) { rc.client = c }
+}
+
+// withSkillsRepo overrides the skills-repo resolver (e.g. to hand back a row
+// whose backing repo is gone, exercising the skills-unavailable 503 path).
+func withSkillsRepo(fn genai.SkillsRepoResolver) rigOption {
+	return func(rc *rigConfig) { rc.skillsRepo = fn }
 }
 
 // newGenaiRig wires the real genai service over a real engine + origins and
@@ -461,17 +468,21 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	if cfg.client != nil {
 		client = cfg.client
 	}
+	skillsRepo := genai.SkillsRepoResolver(func(context.Context, string) (*models.GitRepository, error) {
+		return skillsRow, nil
+	})
+	if cfg.skillsRepo != nil {
+		skillsRepo = cfg.skillsRepo
+	}
 	svc := genai.NewService(genai.ServiceDeps{
-		Repos:     stubRepoResolver{rec: rec},
-		Git:       gitrepo.NewGitOpsService(stubResolver{}, fx.Engine),
-		Keys:      func(context.Context, string) (string, error) { return rig.key, nil },
-		Client:    client,
-		Turns:     turns,
-		Broker:    broker,
-		Snapshots: fx.Engine,
-		SkillsRepo: func(context.Context, string) (*models.GitRepository, error) {
-			return skillsRow, nil
-		},
+		Repos:      stubRepoResolver{rec: rec},
+		Git:        gitrepo.NewGitOpsService(stubResolver{}, fx.Engine),
+		Keys:       func(context.Context, string) (string, error) { return rig.key, nil },
+		Client:     client,
+		Turns:      turns,
+		Broker:     broker,
+		Snapshots:  fx.Engine,
+		SkillsRepo: skillsRepo,
 	})
 	rig.h = componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{GenAISvc: svc}})
 	return rig
@@ -936,21 +947,41 @@ func TestD18_OneActiveTurnPerProject(t *testing.T) {
 	}
 }
 
-// TestD19_DesignGateAndHeadRead pins the design gate: no requirements v-tag →
-// 409 requirements_not_approved and agents never dispatched; with a tag the
-// turn proceeds reading HEAD (not the tagged sha) and stamps SpecTag.
-func TestD19_DesignGateAndHeadRead(t *testing.T) {
-	t.Run("no tag → 409", func(t *testing.T) {
-		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+// TestDesignGateAndHeadRead pins the single-tag-flow design gate: missing
+// requirements CONTENT → 409 requirements_missing and agents never
+// dispatched; content with NO tag proceeds (the build endpoint cuts the tag
+// AFTER design exists — requiring one here deadlocked new projects); with a
+// tag the turn reads HEAD (not the tagged sha) and stamps SpecTag.
+func TestDesignGateAndHeadRead(t *testing.T) {
+	t.Run("no requirements content → 409", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"README.md": "no requirements yet\n"})
 		rec := r.post(t, convUUID, "design-generate", "design it")
 		if rec.Code != http.StatusConflict {
-			t.Fatalf("no-tag design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
+			t.Fatalf("no-content design POST: code %d, want 409 (%s)", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), `"requirements_not_approved"`) {
+		if !strings.Contains(rec.Body.String(), `"requirements_missing"`) {
 			t.Errorf("409 body = %s", rec.Body.String())
 		}
 		if r.fake.turns(t) != 0 {
 			t.Error("agents dispatched despite failed gate")
+		}
+	})
+
+	t.Run("untagged requirements → proceeds with empty SpecTag", func(t *testing.T) {
+		// The deadlock-fix pin: a first-build project has requirements content
+		// but no v<N> tag yet — design generation MUST still start.
+		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r.fake.parts = []string{textPart("designing")}
+		m := manifestPart(nil, nil)
+		r.fake.manifest = &m
+
+		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
+		st := r.waitTerminal(t, turnID)
+		if st.Status != "completed" {
+			t.Fatalf("terminal = %+v", st)
+		}
+		if row := r.turns.row(t, turnID); row.SpecTag != "" {
+			t.Errorf("SpecTag = %q, want empty on a first build", row.SpecTag)
 		}
 	})
 

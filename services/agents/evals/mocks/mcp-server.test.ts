@@ -28,13 +28,21 @@ import assert from "node:assert/strict";
 import { loadMcpTools } from "../../src/shared/mcp-client.js";
 import { startMockMcpServer } from "./mcp-server.js";
 
-test("tools/list advertises the four read-only dependency-discovery tools", async () => {
+test("tools/list advertises the seven read-only dependency-discovery tools", async () => {
   const mock = await startMockMcpServer();
   try {
     const tools = await loadMcpTools({ url: mock.baseUrl, token: mock.token });
     assert.deepEqual(
       Object.keys(tools).sort(),
-      ["get_external_resource_schema", "list_external_resources", "list_org_endpoints", "list_platform_resource_types"].sort(),
+      [
+        "get_external_resource_schema",
+        "get_remote_git_file_contents",
+        "list_external_resources",
+        "list_org_component_endpoints",
+        "list_org_endpoints",
+        "list_platform_resource_types",
+        "search_remote_git_code",
+      ].sort(),
     );
   } finally {
     await mock.close();
@@ -83,6 +91,68 @@ test("list_org_endpoints returns the namespace-visible employee-api endpoint", a
     assert.equal(parsed.endpoints[0]?.name, "employee-api");
     assert.equal(parsed.endpoints[0]?.project, "hr-directory");
     assert.equal(parsed.endpoints[0]?.namespaceVisible, true);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("list_org_component_endpoints returns employee-api's resolved (inline) contract + repo coords", async () => {
+  const mock = await startMockMcpServer();
+  try {
+    const tools = await loadMcpTools({ url: mock.baseUrl, token: mock.token });
+    const raw = await tools.list_org_component_endpoints!.execute!({}, {} as never);
+    const parsed = JSON.parse(String(raw)) as {
+      endpoints: {
+        component: string;
+        project: string;
+        owner: string;
+        repo: string;
+        subdir: string;
+        spec: { availability: string; inlineContent: string };
+      }[];
+    };
+    assert.equal(parsed.endpoints.length, 1);
+    const ep = parsed.endpoints[0]!;
+    assert.equal(ep.component, "employee-api");
+    assert.equal(ep.project, "hr-directory");
+    assert.equal(ep.owner, "acme-org");
+    assert.equal(ep.repo, "hr-directory");
+    assert.equal(ep.subdir, "employee-api");
+    assert.equal(ep.spec.availability, "inline");
+    assert.match(ep.spec.inlineContent, /getEmployee/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("get_remote_git_file_contents returns the file for a known coordinate, errors for an unknown one", async () => {
+  const mock = await startMockMcpServer();
+  try {
+    const tools = await loadMcpTools({ url: mock.baseUrl, token: mock.token });
+    const exec = tools.get_remote_git_file_contents!.execute!;
+
+    const hit = JSON.parse(
+      String(await exec({ owner: "acme-org", repo: "hr-directory", path: "employee-api/openapi.yaml" }, {} as never)),
+    ) as { content: string; sha: string; isDirectory: boolean };
+    assert.match(hit.content, /getEmployee/);
+    assert.equal(hit.isDirectory, false);
+
+    await assert.rejects(exec({ owner: "acme-org", repo: "hr-directory", path: "nope.yaml" }, {} as never), /not found/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("search_remote_git_code returns the matching file's path + sha", async () => {
+  const mock = await startMockMcpServer();
+  try {
+    const tools = await loadMcpTools({ url: mock.baseUrl, token: mock.token });
+    const raw = await tools.search_remote_git_code!.execute!(
+      { owner: "acme-org", repo: "hr-directory", query: "openapi" },
+      {} as never,
+    );
+    const parsed = JSON.parse(String(raw)) as { items: { path: string; sha: string }[] };
+    assert.deepEqual(parsed.items, [{ path: "employee-api/openapi.yaml", sha: "deadbeef" }]);
   } finally {
     await mock.close();
   }

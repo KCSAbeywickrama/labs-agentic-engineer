@@ -31,6 +31,7 @@ import (
 	"context"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -44,13 +45,29 @@ type ExternalResourceReader interface {
 }
 
 // OrgEndpointLister is the read slice of the org endpoint catalog — the
-// published-service targets an `org-service` dependency can point at.
+// published-service targets an `org-service` dependency can point at (List),
+// plus each one resolved with the provider's repo coordinates and a
+// discovered OpenAPI contract (ListResolved) for the A3 MCP tool
+// (list_org_component_endpoints).
 type OrgEndpointLister interface {
 	List(ctx context.Context, orgHandle string) ([]openchoreo.WorkloadEndpointInfo, error)
+	ListResolved(ctx context.Context, orgHandle string) ([]endpoints.OrgComponentEndpoint, error)
 }
 
 // ResourceTypeLister is the read slice of the platform resource-type catalog —
 // the installed cluster ResourceTypes a platform-resource dependency references.
 type ResourceTypeLister interface {
 	List(ctx context.Context) ([]resources.PlatformResourceType, error)
+}
+
+// RemoteGitReader reads an org's OWN GitHub repos over the REST API (Contents +
+// Code Search, no clone) for endpoint spec discovery — the two MCP tools an
+// agent uses to read a provider's OpenAPI file straight from its repo. Both
+// methods take ocOrgID (the verified MCP claim, never a tool parameter) and
+// MUST refuse (ErrOwnerNotInOrg) any `owner` that is not the org credential's
+// GitHub account, so a caller in one org can never read another org's repos.
+// Satisfied by *RemoteGitClient (remote_git.go).
+type RemoteGitReader interface {
+	GetFileContents(ctx context.Context, ocOrgID, owner, repo, path, ref string) (*RemoteGitFile, error)
+	SearchCode(ctx context.Context, ocOrgID, owner, repo, query string) ([]RemoteGitSearchHit, error)
 }

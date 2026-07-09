@@ -149,25 +149,21 @@ func (f *fakeDispatcher) OnExecuteIntent(_ context.Context, _ string, n int) err
 }
 func (f *fakeDispatcher) Reevaluate(context.Context) error { return nil }
 
-// fakeVersions drives the plan approved-design gate.
-type fakeVersions struct{ design, req []artifacts.DesignVersionInfo }
+// fakeVersions drives the plan versioned-spec gate.
+type fakeVersions struct {
+	spec []artifacts.RequirementsVersionInfo
+}
 
 func (f fakeVersions) ListRequirementsVersions(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-	return nil, nil
+	return f.spec, nil
 }
-func (f fakeVersions) ListDesignVersions(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-	return f.design, nil
-}
-func (f fakeVersions) LatestDesignTag(context.Context, string, string) string {
-	if len(f.design) == 0 {
+func (f fakeVersions) LatestSpecTag(context.Context, string, string) string {
+	if len(f.spec) == 0 {
 		return ""
 	}
-	return f.design[0].Tag
+	return f.spec[0].Tag
 }
 func (f fakeVersions) GetRequirementsAtTag(context.Context, string, string, string) (map[string]string, error) {
-	return nil, nil
-}
-func (f fakeVersions) GetDesignAtTag(context.Context, string, string, string) (map[string]string, error) {
 	return nil, nil
 }
 
@@ -199,12 +195,12 @@ type rig struct {
 	disp *fakeDispatcher
 }
 
-func newRig(t *testing.T, iss *fakeIssues, execs fakeExecs, designVersions []artifacts.DesignVersionInfo) *rig {
+func newRig(t *testing.T, iss *fakeIssues, execs fakeExecs, specVersions []artifacts.RequirementsVersionInfo) *rig {
 	t.Helper()
 	disp := &fakeDispatcher{signal: make(chan struct{}, 8)}
 	reads := task.NewReads(iss, fakeRepos{}, execs, nil)
 	commands := task.NewCommands(iss, fakeRepos{}, disp)
-	plan := task.NewPlanService(fakeRepos{}, fakeVersions{design: designVersions}, nil,
+	plan := task.NewPlanService(fakeRepos{}, fakeVersions{spec: specVersions}, nil,
 		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, iss, nil, nil)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{
 		TaskReads: reads, TaskCommands: commands, TaskPlan: plan,
@@ -306,11 +302,11 @@ func TestHoldUnhold_204(t *testing.T) {
 	}
 }
 
-func TestPlan_NoApprovedDesign_400(t *testing.T) {
-	r := newRig(t, newIssues(), fakeExecs{}, nil) // empty design versions
+func TestPlan_NoSpecVersion_400(t *testing.T) {
+	r := newRig(t, newIssues(), fakeExecs{}, nil) // no versioned spec yet
 	rec := r.h.AsOrg(org).Post(tasks+"/plan", "")
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("plan without approved design: code %d, want 400 (%s)", rec.Code, rec.Body.String())
+		t.Fatalf("plan without a versioned spec: code %d, want 400 (%s)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -333,7 +329,7 @@ func TestPlan_InProgress_409(t *testing.T) {
 		RepoURL: skillsOrigin.URL(), DefaultBranch: "main", RepoSlug: "org-skills", Status: "ready"}
 	git := gitrepo.NewGitOpsService(nilCredResolver{}, fx.Engine)
 	plan := task.NewPlanService(fixedRepos{repo: repoRow},
-		fakeVersions{design: []artifacts.DesignVersionInfo{{Tag: "v1-1"}}}, git,
+		fakeVersions{spec: []artifacts.RequirementsVersionInfo{{Tag: "v1"}}}, git,
 		func(context.Context, string) (string, error) { return "sk-key", nil }, bt, iss, fx.Engine,
 		func(context.Context, string) (*models.GitRepository, error) { return skillsRow, nil })
 

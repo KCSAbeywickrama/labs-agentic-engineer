@@ -34,13 +34,24 @@ import (
 // added, is uniform across dependencies, not special-cased here.)
 type Catalog struct {
 	rc openchoreo.ResourceClient
+	// repos/design are optional resolver collaborators (see resolve.go). Nil
+	// when a caller wires only the raw catalog reads; the resolver then degrades
+	// its availability computation rather than panicking.
+	repos  RepoLocator
+	design DesignReader
 }
 
 // NewCatalog wires a Catalog over the given OC resource client. A nil rc
 // leaves the Catalog "not wired" — every read then degrades to a documented
-// no-op (nil, nil) rather than a nil-pointer panic.
-func NewCatalog(rc openchoreo.ResourceClient) *Catalog {
-	return &Catalog{rc: rc}
+// no-op (nil, nil) rather than a nil-pointer panic. Optional CatalogOptions
+// wire the spec-discovery resolver's collaborators (repo locator, design
+// reader); omit them for the read-only catalog surface.
+func NewCatalog(rc openchoreo.ResourceClient, opts ...CatalogOption) *Catalog {
+	c := &Catalog{rc: rc}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // List returns every provider-side endpoint across the org's Workloads (one

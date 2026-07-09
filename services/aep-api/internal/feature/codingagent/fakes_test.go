@@ -19,6 +19,7 @@ package codingagent
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/models"
@@ -107,6 +108,10 @@ func (fakeIdentities) IdentityFor(context.Context, string) (string, string, stri
 type fakeTokens struct{}
 
 func (fakeTokens) Issue(string, string, string) (string, error) { return "bearer-xyz", nil }
+
+func (fakeTokens) IssueServiceToken(string, string, time.Duration) (string, error) {
+	return "mcp-token-xyz", nil
+}
 
 // fakeReeval records Reevaluate calls (the build-success release path).
 type fakeReeval struct {

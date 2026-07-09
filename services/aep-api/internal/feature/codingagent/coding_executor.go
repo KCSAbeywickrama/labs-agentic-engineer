@@ -30,6 +30,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -81,12 +82,23 @@ type CodingExecutor struct {
 	// the proxy dispatch mounts them into the runner (nil → none). Best-effort.
 	runnerSecrets RunnerSecretResolver
 
+	// skillsRepo resolves (provisioning if needed) the org's `org-skills` repo
+	// row so its clone URL can be stamped as AEP_SKILLS_REPO_URL — the runner
+	// clones it to resolve the design's applied skills locally (nil → the URL
+	// is not stamped and the runner degrades to the base plugin). Best-effort.
+	skillsRepo SkillsRepoResolver
+
 	// runtimeConfig emits env-config.js onto a web-app's ReleaseBindings at the
 	// component-ensure pre-flight (nil → skipped). Best-effort — a failure warns
 	// but never fails the dispatch. The web-app gate lives in the emitter, so a
 	// call for a non-web-app component is a self-no-op.
 	runtimeConfig ComponentRuntimeConfigEmitter
 }
+
+// SkillsRepoResolver ensures the org's skills repo exists and returns its row.
+// Satisfied at the composition root by the same EnsureProvisioned+GetRepo
+// closure the genai + task-plan turns use, so this feature grows no skills edge.
+type SkillsRepoResolver func(ctx context.Context, orgID string) (*models.GitRepository, error)
 
 // NewCodingExecutor wires the ClusterWorkflow-path executor. anthropic may be
 // nil. Call WithProxy to enable the cluster-gateway-proxy dispatch path.
@@ -151,6 +163,32 @@ func (e *CodingExecutor) WithDependencyWiring(w DependencyWiring) *CodingExecuto
 func (e *CodingExecutor) WithRunnerSecrets(r RunnerSecretResolver) *CodingExecutor {
 	e.runnerSecrets = r
 	return e
+}
+
+// WithSkillsRepo enables stamping AEP_SKILLS_REPO_URL onto the coding dispatch
+// so the runner clones the org's `org-skills` repo to resolve applied skills
+// locally (nil → not stamped; the runner degrades to the base plugin). Returns
+// the receiver for chained construction.
+func (e *CodingExecutor) WithSkillsRepo(r SkillsRepoResolver) *CodingExecutor {
+	e.skillsRepo = r
+	return e
+}
+
+// resolveSkillsRepoURL returns the org's `org-skills` clone URL, provisioning
+// the repo on first touch. Best-effort: any failure (no resolver wired,
+// provisioning error, missing row) yields "" — the dispatch proceeds without
+// the skills URL and the runner degrades to the base plugin rather than failing
+// the coding run over a skills-guidance gap.
+func (e *CodingExecutor) resolveSkillsRepoURL(ctx context.Context, orgID string) string {
+	if e.skillsRepo == nil {
+		return ""
+	}
+	repo, err := e.skillsRepo(ctx, orgID)
+	if err != nil || repo == nil {
+		slog.WarnContext(ctx, "coding executor: resolve skills repo failed — dispatching without AEP_SKILLS_REPO_URL", "org", orgID, "error", err)
+		return ""
+	}
+	return repo.RepoURL
 }
 
 // WithComponentRuntimeConfig enables best-effort env-config.js emission at the
@@ -221,6 +259,19 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 	if err != nil {
 		return fmt.Errorf("mint runner bearer: %w", err)
 	}
+	// Dedicated MCP identity token (aud aep-api-mcp): the runner bearer above
+	// (aud git-service) is pinned-rejected by the MCP verifier, so the pod needs
+	// a separate token to call the BFF's internal MCP surface (list endpoints /
+	// read remote file / search remote code). One token stamped at dispatch,
+	// TTL matching the runner bearer's 24h Job lifetime — no refresh route.
+	mcpToken, err := e.tokens.IssueServiceToken(auth.AudienceMCP, t.OrgID, 24*time.Hour)
+	if err != nil {
+		return fmt.Errorf("mint MCP token: %w", err)
+	}
+	// Resolve the org's skills repo URL (provisioning on first touch) so the
+	// runner can clone it and resolve applied skills locally. Best-effort — ""
+	// on any failure, the runner then degrades to the base plugin.
+	skillsRepoURL := e.resolveSkillsRepoURL(ctx, t.OrgID)
 	prompt := buildPrompt(t.IssueURL, t.IssueNumber)
 
 	// ADR-0004 declarative wiring: post the "Platform-resolved dependencies"
@@ -236,7 +287,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 
 	// Proxy path first (what local uses). Falls back to ClusterWorkflow when the
 	// proxy dispatcher / SM-API triplets are not fully configured.
-	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, prompt, name, email, login, bearer)
+	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, prompt, name, email, login, bearer, mcpToken, skillsRepoURL)
 	if perr != nil {
 		return perr
 	}
@@ -271,6 +322,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 		IdentityEmail:      email,
 		IdentityLogin:      login,
 		Bearer:             bearer,
+		SkillsRepoURL:      skillsRepoURL,
 		GitServiceURL:      e.gitServiceURL,
 		PlatformURL:        e.platformURL,
 		AnthropicSecretRef: anthropicRef,
@@ -288,7 +340,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 // configured for the proxy path (fall back). The runner env AEP_TASK_ID carries
 // the EXECUTION id (JobInputs.TaskID) and the bearer's task claim is the
 // execution id — the re-keyed runner contract (§9.2).
-func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.DispatchRequest, repo *models.GitRepository, prompt, name, email, login, bearer string) (bool, string, error) {
+func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.DispatchRequest, repo *models.GitRepository, prompt, name, email, login, bearer, mcpToken, skillsRepoURL string) (bool, string, error) {
 	t := req.Task
 	if e.proxy == nil || e.db == nil || e.runnerImage == "" || e.clusterSecretStore == "" {
 		return false, "", nil
@@ -364,6 +416,8 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req execution.Dis
 		GitServiceURL:     e.gitServiceURL,
 		CallbackURL:       e.platformURL,
 		Bearer:            bearer,
+		MCPToken:          mcpToken,
+		SkillsRepoURL:     skillsRepoURL,
 		PublisherTokenURL: publisherTokenURL,
 	}
 	// Resolve the component's external-resource secret bundles so the dispatcher
