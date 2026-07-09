@@ -49,6 +49,21 @@ export interface DispatchRequest {
    */
   refreshUrl?: string;
   /**
+   * Endpoint Spec Discovery (B1/B2) — the BFF's in-process MCP endpoint
+   * (`<platform>/internal/v1/mcp`), stamped unconditionally by the BFF's
+   * coding-agent Job template as AEP_MCP_URL. Paired with `mcpToken`; the
+   * runner only registers the MCP server when BOTH are present, since older
+   * dispatches (or a failed token mint) may render the URL without a token.
+   */
+  mcpUrl?: string;
+  /**
+   * Dedicated `aep-api-mcp`-audience identity token minted by the BFF for
+   * runner→BFF MCP calls (distinct from AEP_BEARER's git-service audience).
+   * Read from AEP_MCP_TOKEN; absent when minting failed or the dispatch
+   * predates Endpoint Spec Discovery.
+   */
+  mcpToken?: string;
+  /**
    * Task kind from AEP_TASK_KIND (default "implementation"). Validation
    * tasks preload the `aep:aep-validation` skill body alongside `aep:aep`
    * so the workflow is in context at startup — description-triggered

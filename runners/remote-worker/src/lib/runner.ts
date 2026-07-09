@@ -18,7 +18,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
 import type { TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
@@ -29,8 +29,52 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
-// tools. MCP is retired.
-const ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+// tools. Endpoint Spec Discovery (B2) re-introduces MCP — but only as an
+// in-process remote HTTP server (see buildMcpOptions below), never the
+// file-based .mcp.json that settingSources: [] deliberately blocks.
+const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+
+// The server key the BFF MCP endpoint is registered under. The SDK
+// namespaces MCP tools as `mcp__<serverKey>__<toolName>` (confirmed from
+// node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts, SDKControlMcpCallRequest
+// doc comment: "Fully-qualified MCP tool name, e.g. mcp__server__tool_name.").
+const MCP_SERVER_KEY = "aep";
+
+// The three read-only tools the BFF's aep-api-mcp server exposes (see
+// services/aep-api/internal/feature/dependencies/mcp_tools.go). Namespaced
+// per the SDK's mcp__<server>__<tool> convention above.
+const MCP_TOOL_NAMES = [
+  `mcp__${MCP_SERVER_KEY}__list_org_component_endpoints`,
+  `mcp__${MCP_SERVER_KEY}__get_remote_git_file_contents`,
+  `mcp__${MCP_SERVER_KEY}__search_remote_git_code`,
+];
+
+export interface McpQueryOptions {
+  mcpServers?: Record<string, McpServerConfig>;
+  allowedTools: string[];
+}
+
+// buildMcpOptions is a pure seam so the env-presence guard is unit-testable
+// without constructing a full query(). Both mcpUrl and mcpToken must be
+// present — the BFF's coding-agent Job template stamps AEP_MCP_URL
+// unconditionally but only stamps AEP_MCP_TOKEN when minting succeeded
+// (see job_template.go), so a URL-without-token dispatch must still omit
+// the server rather than register it unauthenticated.
+export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | undefined): McpQueryOptions {
+  if (!mcpUrl || !mcpToken) {
+    return { allowedTools: BASE_ALLOWED_TOOLS };
+  }
+  return {
+    mcpServers: {
+      [MCP_SERVER_KEY]: {
+        type: "http",
+        url: mcpUrl,
+        headers: { Authorization: `Bearer ${mcpToken}` },
+      },
+    },
+    allowedTools: [...BASE_ALLOWED_TOOLS, ...MCP_TOOL_NAMES],
+  };
+}
 
 export interface RunResult {
   exitCode: number;
@@ -47,16 +91,17 @@ export interface StartedRun {
 //
 // `skillsPluginDir` is the absolute path to .aep/skills-plugin/. If
 // set, runner.ts adds a second `{type:"local"}` plugin entry pointing
-// at it. `preloadBuiltinNames` lists the materialised names of every
-// `kind: builtin` skill in that plugin, which we push into the SDK's
-// `skills:` array so their full bodies inject at startup. Custom and
-// imported skills sit in the same plugin and surface via the SDK's
-// standard skill listing (description in context, body on invoke) —
-// they are NOT in the preload array. See the design doc's
-// "Why skills: <built-in names> and not skills: 'all'" rationale.
+// at it. `preloadSkillNames` lists the materialised names of every
+// platform-shipped (`kind: org`) skill in that plugin, which we push
+// into the SDK's `skills:` array so their full bodies inject at
+// startup. Custom and imported skills sit in the same plugin and
+// surface via the SDK's standard skill listing (description in
+// context, body on invoke) — they are NOT in the preload array. See
+// the design doc's "Why skills: <built-in names> and not skills:
+// 'all'" rationale.
 export interface PerTaskSkills {
   skillsPluginDir?: string;
-  preloadBuiltinNames: string[];
+  preloadSkillNames: string[];
 }
 
 export function runClaudeQuery(
@@ -88,7 +133,7 @@ export function runClaudeQuery(
   // Two-tier plugin list: the base `aep` plugin (workflow + base
   // conventions) is always loaded; the per-task `aep-task-skills`
   // plugin (project-attached skills) is loaded conditionally when
-  // workspace.ts materialised it. Per-task built-ins land in the
+  // workspace.ts materialised it. Per-task org skills land in the
   // `skills:` preload so the SDK injects their full bodies at startup;
   // custom + imported sit in the same plugin and surface via the SDK's
   // standard discovery (description in context, body on invoke).
@@ -104,10 +149,16 @@ export function runClaudeQuery(
   }
   if (perTaskSkills?.skillsPluginDir) {
     plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });
-    for (const name of perTaskSkills.preloadBuiltinNames) {
+    for (const name of perTaskSkills.preloadSkillNames) {
       skillPreload.push(`aep-task-skills:${name}`);
     }
   }
+
+  // Endpoint Spec Discovery (B2) — register the BFF's MCP server in-process
+  // when the dispatch carries both AEP_MCP_URL and AEP_MCP_TOKEN. Older
+  // dispatches (or a failed token mint) omit one or both, in which case the
+  // runner falls back to the base tool set unchanged.
+  const { mcpServers, allowedTools } = buildMcpOptions(req.mcpUrl, req.mcpToken);
 
   // SDK v0.2.126 auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
@@ -120,7 +171,8 @@ export function runClaudeQuery(
       // Force built-in skill bodies into context at startup. Do NOT
       // replace with 'all' — see docs/design/skills-system.md.
       skills: skillPreload as unknown as string[],
-      allowedTools: ALLOWED_TOOLS,
+      allowedTools,
+      ...(mcpServers ? { mcpServers } : {}),
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       persistSession: false,

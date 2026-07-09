@@ -25,7 +25,8 @@ import {
 } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
-import { githubKeys, projectKeys } from "./keys";
+import { useConfig } from "../../settings/api/queries";
+import { projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 
@@ -117,15 +118,32 @@ export function useProjectComponents(projectName: string) {
   );
 }
 
-export function useProjectBoard(projectName: string) {
+export function useProjectTasks(projectName: string) {
   return useProjectResource(
-    projectKeys.board(projectName),
+    projectKeys.tasks(projectName),
     () =>
-      client.GET("/projects/{projectName}/board", {
+      client.GET("/projects/{projectName}/tasks", {
         params: { path: { projectName } },
       }),
-    "build board",
+    "tasks",
   );
+}
+
+// Spec version tags (#117). The BE hasn't implemented /tags yet, so a failed
+// read degrades to "no tags" instead of an error card — the version chips
+// simply don't render until the endpoint lands.
+export function useProjectTags(projectName: string) {
+  return useQuery({
+    queryKey: projectKeys.tags(projectName),
+    queryFn: async () => {
+      const { data, error } = await client.GET("/projects/{projectName}/tags", {
+        params: { path: { projectName } },
+      });
+      if (error || data === undefined) return null;
+      return data;
+    },
+    refetchInterval: OVERVIEW_POLL_MS,
+  });
 }
 
 export function useCreateProject() {
@@ -169,17 +187,14 @@ export function useDeleteProject() {
 }
 
 // The connected GitHub org, for the repo-URL preview in the create flow.
-// Read from the consolidated org-config projection (GET /config replaced
-// /org/credentials/github when the contract consolidated org config).
+// GitHub connection state now lives on the org config (issue #96 moved it
+// off the old /org/credentials/github onto GET /config's gitProvider
+// section), so this rides the settings feature's shared useConfig query
+// instead of a second, independent fetch of the same endpoint. gitProvider
+// is nullable (not connected yet), hence the optional chaining.
 export function useGithubOrg() {
-  return useQuery({
-    queryKey: githubKeys.status,
-    queryFn: async () => {
-      const { data, error } = await client.GET("/config");
-      if (error || !data) return null;
-      return data.gitProvider.githubLogin ?? null;
-    },
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
+  const { data } = useConfig();
+  return {
+    data: data?.gitProvider?.githubLogin ?? data?.gitProvider?.identityLogin ?? null,
+  };
 }

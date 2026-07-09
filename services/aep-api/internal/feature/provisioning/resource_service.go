@@ -35,7 +35,7 @@ import (
 // Parameters merge the design's authored parameters (baseline) with any
 // request-supplied overrides (request wins). params carry no secrets — a
 // platform resource's credentials are surfaced as binding outputs, never inputs.
-func (s *Service) Provision(ctx context.Context, orgID, projectID, depName string, params map[string]string, envs []string) error {
+func (s *Service) Provision(ctx context.Context, orgID, projectID, depName string, params map[string]any, envs []string) error {
 	dep, err := s.findDepInProject(ctx, orgID, projectID, depName, models.DependencyKindPlatformResource)
 	if err != nil {
 		return err
@@ -43,7 +43,7 @@ func (s *Service) Provision(ctx context.Context, orgID, projectID, depName strin
 	if dep.ResourceType == "" {
 		return fmt.Errorf("%w: platform-resource %q has no resourceType in the design", resources.ErrDepNotFound, depName)
 	}
-	merged := make(map[string]string, len(dep.Parameters)+len(params))
+	merged := make(map[string]any, len(dep.Parameters)+len(params))
 	for k, v := range dep.Parameters {
 		merged[k] = v
 	}

@@ -110,7 +110,7 @@ func TestDependency_JSONRoundTrip(t *testing.T) {
 			Kind:         DependencyKindPlatformResource,
 			Name:         "orders-db",
 			ResourceType: "postgres-cnpg",
-			Parameters:   map[string]string{"size": "10Gi"},
+			Parameters:   map[string]any{"size": "10Gi"},
 		},
 	}
 	for name, in := range cases {
@@ -141,5 +141,19 @@ func TestDependency_StatusReasonOmittedWhenEmpty(t *testing.T) {
 	got := string(b)
 	if want := `{"kind":"component","name":"cart"}`; got != want {
 		t.Fatalf("marshal = %s, want %s", got, want)
+	}
+}
+
+// TestComponentTypeConstants pins the component-type vocabulary to
+// OpenChoreo's OWN terms (its ComponentType names minus the `deployment/`
+// prefix: `deployment/service`, `deployment/web-application`). AEP uses these
+// values end-to-end — agent contract, design.json, platform comparisons —
+// with zero translation, so a drift here is a platform-wide vocabulary break.
+func TestComponentTypeConstants(t *testing.T) {
+	if ComponentTypeService != "service" {
+		t.Errorf("ComponentTypeService = %q, want %q (OC: deployment/service)", ComponentTypeService, "service")
+	}
+	if ComponentTypeWebApplication != "web-application" {
+		t.Errorf("ComponentTypeWebApplication = %q, want %q (OC: deployment/web-application)", ComponentTypeWebApplication, "web-application")
 	}
 }

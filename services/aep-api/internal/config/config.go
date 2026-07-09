@@ -188,6 +188,11 @@ type Config struct {
 	// cloud release-binding should resolve to a digest.
 	AgentRunnerImage string
 
+	// Temporal holds the workflow-engine connection settings for the devflow
+	// feature. Enabled iff HostPort is set — unset leaves aep-api fully
+	// functional with the workflow endpoints answering 503.
+	Temporal TemporalConfig
+
 	// AgentValidationRunnerImage is the docker image a VALIDATION Job uses:
 	// the Playwright-capable runner variant (Dockerfile.validation — Debian
 	// base + baked chromium + playwright-cli). Empty disables validation
@@ -314,3 +319,16 @@ type PlatformAPIConfig struct {
 	BaseURL    string
 	HostHeader string
 }
+
+// TemporalConfig holds connection settings for the Temporal server that
+// drives the devflow workflows (internal/feature/devflow). HostPort empty ⇒
+// the feature is disabled: no worker starts and the devflow endpoints
+// return 503 temporal_unavailable.
+type TemporalConfig struct {
+	HostPort  string // TEMPORAL_HOSTPORT, e.g. host.docker.internal:7233
+	Namespace string // TEMPORAL_NAMESPACE, default "default"
+	TaskQueue string // TEMPORAL_TASKQUEUE, default "aep-devflow"
+}
+
+// Enabled reports whether the Temporal integration is configured.
+func (t TemporalConfig) Enabled() bool { return t.HostPort != "" }

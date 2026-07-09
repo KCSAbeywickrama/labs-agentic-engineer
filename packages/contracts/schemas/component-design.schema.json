@@ -98,7 +98,17 @@
               "type": "string"
             },
             "additionalProperties": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
             }
           },
           "candidates": {
@@ -151,18 +161,6 @@
           "type": "boolean"
         }
       },
-      "additionalProperties": false
-    },
-    "callerIdentity": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "mode"
-      ],
       "additionalProperties": false
     },
     "componentAgentInstructions": {

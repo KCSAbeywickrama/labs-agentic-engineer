@@ -85,7 +85,7 @@ func (w *WiringResolver) PostResolvedDeps(ctx context.Context, orgID, projectID 
 	if w.issues == nil || issueNumber == 0 {
 		return nil
 	}
-	block, err := w.resolveDependenciesYAML(ctx, orgID, projectID, component)
+	block, contracts, err := w.resolveDependenciesYAML(ctx, orgID, projectID, component)
 	if err != nil {
 		return err
 	}
@@ -96,23 +96,33 @@ func (w *WiringResolver) PostResolvedDeps(ctx context.Context, orgID, projectID 
 		"`workload.yaml` (merge into any existing `dependencies:`). The platform has " +
 		"already resolved the targets + env-var bindings; copy it verbatim. OpenChoreo " +
 		"injects these addresses/outputs into your pod env at runtime:\n\n```yaml\n" + block + "```"
+	if contracts != "" {
+		body += "\n\n---\n\n**Consumed API contracts** — before writing any client code, fetch " +
+			"the exact contract for each provider below. Do not guess at request/response shapes " +
+			"or endpoint paths:\n\n" + contracts
+	}
 	return w.issues.CommentIssue(ctx, orgID, projectID, issueNumber, body)
 }
 
 // resolveDependenciesYAML resolves a component's consumer deps — cross-project
 // org-service endpoints, same-project component siblings, bound external-resource
 // outputs, and platform-resource outputs — into the workload.yaml dependencies
-// block. Returns "" when nothing resolves. orgID is the OC namespace (orgHandle).
-func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, projectID, component string) (string, error) {
+// block, plus a human-readable "Consumed API contract" section (one per
+// org-service/same-project endpoint dep) instructing the coding agent to fetch
+// the provider's real contract instead of guessing at endpoints. Returns ""
+// for the yaml block when nothing resolves. orgID is the OC namespace
+// (orgHandle).
+func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, projectID, component string) (yamlBlock, contracts string, err error) {
 	comp, ok, err := w.findComponent(ctx, orgID, projectID, component)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !ok {
-		return "", nil
+		return "", "", nil
 	}
 
 	var deps workloadDeps
+	var contractSections []string
 
 	if w.endpoints != nil {
 		// org-service endpoints (cross-project, visibility namespace). Skip any
@@ -120,7 +130,7 @@ func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, pro
 		for _, name := range comp.OrgServiceDependsOn() {
 			target, ok, rerr := w.endpoints.ResolveNamespaceVisible(ctx, orgID, name)
 			if rerr != nil {
-				return "", fmt.Errorf("resolve org-service %q: %w", name, rerr)
+				return "", "", fmt.Errorf("resolve org-service %q: %w", name, rerr)
 			}
 			if !ok {
 				continue
@@ -132,6 +142,7 @@ func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, pro
 				Visibility:  "namespace",
 				EnvBindings: map[string]string{"address": orgServiceURLEnv(name)},
 			})
+			contractSections = append(contractSections, orgServiceContractSection(name, target))
 		}
 		// same-project component siblings (visibility project). The sibling's OC
 		// component name is `<project>-<logicalName>`; the env var keys on the
@@ -140,7 +151,7 @@ func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, pro
 			ocComponent := projectID + "-" + depName
 			target, ok, rerr := w.endpoints.ResolveProjectEndpoint(ctx, orgID, projectID, ocComponent)
 			if rerr != nil {
-				return "", fmt.Errorf("resolve same-project component %q: %w", depName, rerr)
+				return "", "", fmt.Errorf("resolve same-project component %q: %w", depName, rerr)
 			}
 			if !ok {
 				continue
@@ -151,6 +162,7 @@ func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, pro
 				Visibility:  "project",
 				EnvBindings: map[string]string{"address": orgServiceURLEnv(depName)},
 			})
+			contractSections = append(contractSections, localComponentContractSection(depName))
 		}
 	}
 
@@ -191,13 +203,52 @@ func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, pro
 	}
 
 	if len(deps.Endpoints) == 0 && len(deps.Resources) == 0 {
-		return "", nil
+		return "", "", nil
 	}
 	out, err := yaml.Marshal(map[string]workloadDeps{"dependencies": deps})
 	if err != nil {
-		return "", fmt.Errorf("marshal dependencies yaml: %w", err)
+		return "", "", fmt.Errorf("marshal dependencies yaml: %w", err)
 	}
-	return string(out), nil
+	return string(out), strings.Join(contractSections, "\n\n"), nil
+}
+
+// orgServiceContractSection renders the "Consumed API contract" guidance for
+// a resolved cross-project org-service dependency: names the provider (from
+// the already-resolved openchoreo.WorkloadEndpointInfo) and tells the coding
+// agent to fetch the real contract via MCP rather than guessing at endpoints.
+//
+// Owner/repo/subdir are intentionally omitted here: WorkloadEndpointInfo (the
+// EndpointResolver DTO used at this dispatch-time call site) carries only
+// Project/Component/Name/Type/Port/BasePath/Schema — no repo coordinates.
+// Those live on the separate endpoints.OrgComponentEndpoint DTO behind
+// list_org_component_endpoints, which the agent calls anyway and which
+// returns owner/repo/subdir directly — wiring in that enriched resolver here
+// too would duplicate a lookup the agent is about to make itself.
+func orgServiceContractSection(depName string, target openchoreo.WorkloadEndpointInfo) string {
+	return fmt.Sprintf(
+		"### Consumed API contract — %s\n"+
+			"Provider: project `%s`, component `%s`, endpoint `%s`.\n"+
+			"Call the `list_org_component_endpoints` MCP tool to get this provider's API "+
+			"contract (inline spec, or via `get_remote_git_file_contents`/`search_remote_git_code` "+
+			"when the spec lives in the repo). Implement the client against the EXACT operations. "+
+			"Do NOT invent endpoints.",
+		depName, target.Project, target.Component, target.Name,
+	)
+}
+
+// localComponentContractSection renders the "local" variant of the
+// "Consumed API contract" guidance for a same-project component dependency:
+// the sibling's OpenAPI contract is checked out alongside this component's
+// own code (same repo), so no MCP round-trip is needed.
+func localComponentContractSection(depName string) string {
+	return fmt.Sprintf(
+		"### Consumed API contract — %s (local)\n"+
+			"Provider: sibling component `%s` in this same project — no MCP call needed, its "+
+			"contract is in your own checked-out repo.\n"+
+			"Read `specs/design/components/%s/openapi.yaml` and implement the client against the "+
+			"EXACT operations. Do NOT invent endpoints.",
+		depName, depName, depName,
+	)
 }
 
 func (w *WiringResolver) findComponent(ctx context.Context, orgID, projectID, component string) (models.DesignComponent, bool, error) {
@@ -241,17 +292,10 @@ func orgServiceURLEnv(name string) string {
 }
 
 // envVarName builds a valid C_IDENTIFIER env-var name from a dep name + output
-// name (every char outside [A-Za-z0-9_] → '_', upper-cased). Mirrors the upstream
-// builder: "orders-db" + "host" → "ORDERS_DB_HOST".
+// name. Delegates to resources.EnvVarName — the single source of truth shared
+// with runtimeconfig's window._env_ keys, so the pod env var and the SPA config
+// key for the same dep+output are byte-identical. "orders-db" + "host" →
+// "ORDERS_DB_HOST".
 func envVarName(depName, outName string) string {
-	joined := depName + "_" + outName
-	mapped := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
-			return r
-		default:
-			return '_'
-		}
-	}, joined)
-	return strings.ToUpper(mapped)
+	return resources.EnvVarName(depName, outName)
 }

@@ -38,7 +38,7 @@ project):
 
 - `go` — Dockerfile base image pin, `modernc.org/sqlite` driver, layout, port.
 - `react-webapp` — Vite + nginx layout, `/env-config.js` + `window._env_`.
-- `thunder-authentication` — OIDC + PKCE, `THUNDER_*` runtime keys.
+- `thunder-authentication` — OIDC + PKCE, generic `<DEP>_<OUTPUT>` runtime keys.
 - `api-management` — gateway JWT validation, `X-User-Id` header, CORS.
 
 When the issue body's Scope section says something like "Wire upstream
@@ -301,3 +301,34 @@ comment, your component has no consumer-side dependencies — add no
 `dependencies:` block. The build's `generate-workload-cr` step propagates
 this block into the OpenChoreo `Workload` CR, and OpenChoreo resolves +
 injects the addresses; you never hardcode an upstream URL.
+
+### Consuming an org-service's API contract
+
+The "Platform-resolved dependencies" comment may also carry one or more
+**"Consumed API contract — `<depName>`"** sections — one per `org-service`
+(cross-project) or same-project component dependency. When you see one,
+follow this procedure before writing any client code. Do not guess at
+request/response shapes or endpoint paths:
+
+1. Call the `list_org_component_endpoints` MCP tool (a tool the platform
+   provides alongside `get_remote_git_file_contents` and
+   `search_remote_git_code`) and find the entry matching the provider
+   component named in the issue's contract section.
+2. `spec.availability: inline` — the OpenAPI document is right there;
+   implement the client against `spec.inlineContent`.
+3. `spec.availability: repo` — the spec is a file in the provider's repo.
+   Use `search_remote_git_code` to locate an OpenAPI file (e.g.
+   `openapi.yaml`/`openapi.json`) and/or `get_remote_git_file_contents`
+   under the returned `subdir` to read it, then implement against it.
+4. `spec.availability: local` — a same-project sibling (the issue's
+   contract section is suffixed `(local)`). No MCP call needed: read
+   `specs/design/components/<sibling>/openapi.yaml` directly from your
+   own checked-out repo.
+5. `spec.availability: none` — there is no published contract. Implement
+   a minimal client against the injected address + `basePath` only. Do
+   NOT fabricate operations or paths.
+6. **Always:** implement the EXACT operations, parameters, and schemas
+   from the contract you found — never invent endpoints. Read
+   configuration via the injected env-var **names** only; never hardcode
+   or echo secret values — the pre-push guard scans for leaked secret
+   values.

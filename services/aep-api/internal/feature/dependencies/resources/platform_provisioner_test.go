@@ -34,7 +34,7 @@ import (
 func TestBuildPlatformResource_ReferencesClusterResourceType(t *testing.T) {
 	t.Parallel()
 
-	r := BuildPlatformResource("shop", "maindb", "postgres-cnpg", map[string]string{"version": "16"})
+	r := BuildPlatformResource("shop", "maindb", "postgres-cnpg", map[string]any{"version": "16", "instances": 1})
 	if r.Spec.Type.Kind != "ClusterResourceType" || r.Spec.Type.Name != "postgres-cnpg" {
 		t.Fatalf("type ref: %+v", r.Spec.Type)
 	}
@@ -44,10 +44,17 @@ func TestBuildPlatformResource_ReferencesClusterResourceType(t *testing.T) {
 	if r.Spec.Owner.ProjectName != "shop" {
 		t.Fatalf("owner: %+v", r.Spec.Owner)
 	}
-	var got map[string]string
+	var got map[string]any
 	_ = json.Unmarshal(r.Spec.Parameters, &got)
 	if got["version"] != "16" {
 		t.Fatalf("params: %s", r.Spec.Parameters)
+	}
+	// A number param must survive as a JSON number, NOT a quoted string — the
+	// postgres-cnpg CRD declares `instances` integer, so a string-typed params
+	// map (the pre-fix bug) would fail CRD validation. Unmarshalling into `any`
+	// yields float64 for a JSON number and string for a quoted one.
+	if n, ok := got["instances"].(float64); !ok || n != 1 {
+		t.Fatalf("instances must round-trip as a JSON number, got %#v: %s", got["instances"], r.Spec.Parameters)
 	}
 }
 
@@ -63,7 +70,7 @@ func TestBuildPlatformResource_NoParamsOmitsParameters(t *testing.T) {
 func TestBuildPlatformBinding_PinsRelease(t *testing.T) {
 	t.Parallel()
 
-	b, err := BuildPlatformBinding("shop", "maindb", "development", "shop-maindb-r1", map[string]string{"size": "small"})
+	b, err := BuildPlatformBinding("shop", "maindb", "development", "shop-maindb-r1", map[string]any{"size": "small"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +126,7 @@ func TestPlatformProvision_AuthorsResourceModelAsync(t *testing.T) {
 	res, err := p.Provision(
 		context.Background(),
 		"default", "shop", "maindb", "postgres-cnpg",
-		map[string]string{"version": "16"},
+		map[string]any{"version": "16"},
 		[]string{"development", "production"},
 	)
 	if err != nil {

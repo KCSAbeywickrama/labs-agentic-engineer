@@ -44,4 +44,10 @@ export type {
   TaskProgressEvent,
   TaskProgressResponse,
   TaskProgressKind,
+  DevflowStartRequest,
+  DevflowStartResponse,
+  DevflowRun,
+  DevflowTaskRef,
+  DevflowStatus,
+  DevflowGateRequest,
 } from './client';

@@ -22,7 +22,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
-	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/validation"
 )
@@ -55,7 +54,6 @@ func newInternalAPI(internalMux *http.ServeMux) huma.API {
 // fills it with real services; GenerateInternalOpenAPIYAML passes the zero
 // value (nil deps — registration never invokes them).
 type InternalDeps struct {
-	ExecSkills        *execution.SkillsService
 	CredsRefresh      orgcreds.CredentialsRefreshService
 	ValidationContext validation.ContextProvider
 }
@@ -64,7 +62,6 @@ type InternalDeps struct {
 // The single canonical list — used by NewHandler (real deps) and the internal
 // spec generator (zero deps).
 func RegisterAllInternal(api huma.API, d InternalDeps) {
-	execution.RegisterInternalSkills(api, d.ExecSkills)
 	orgcreds.RegisterInternalCredentials(api, d.CredsRefresh)
 	validation.RegisterInternalValidation(api, d.ValidationContext)
 }
