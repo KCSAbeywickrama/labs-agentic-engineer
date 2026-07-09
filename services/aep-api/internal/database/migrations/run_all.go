@@ -96,6 +96,9 @@ func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
 		// no component_tasks ALTER (dependency gating lives on aep:provision GitHub
 		// issues + the funnel depsGate, not DB columns).
 		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
+		// workflow_runs (Temporal devflow lookup index, AutoMigrated from the
+		// model) gains its one-running-task-per-issue partial unique index.
+		ctxStep("workflow_runs", RunWorkflowRuns),
 		// coding_agent_logs (GitHub-native): create the JobWatcher's final-log
 		// sidecar keyed to executions(id). Runs after `executions` (FK target) and
 		// `tasks_github_native` (cascade-drops any legacy component_tasks-keyed

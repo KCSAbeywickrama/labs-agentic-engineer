@@ -29,7 +29,9 @@ echo "  2. Prerequisites (cert-manager, Kgateway, ESO, OpenBao)"
 echo "  3. OpenChoreo (Control Plane, Data Plane, Workflow Plane, Thunder)"
 echo "  4. Observability Plane (Observer + OpenSearch + Fluent Bit — for"
 echo "     in-UI Live Progress streaming during coding-agent + build runs)"
-echo "  5. AEP-specific config (ClusterWorkflows, ComponentTypes,"
+echo "  5. Temporal workflow engine (drives the devflow workflows; aep-api"
+echo "     runs the worker in-process)"
+echo "  6. AEP-specific config (ClusterWorkflows, ComponentTypes,"
 echo "     Environment, AuthzRoleBindings, .env file)"
 echo ""
 
@@ -43,6 +45,9 @@ bash "$SCRIPT_DIR/setup-openchoreo.sh"
 echo ""
 
 bash "$SCRIPT_DIR/setup-observability.sh"
+echo ""
+
+bash "$SCRIPT_DIR/setup-temporal.sh"
 echo ""
 
 bash "$SCRIPT_DIR/setup-aep.sh"

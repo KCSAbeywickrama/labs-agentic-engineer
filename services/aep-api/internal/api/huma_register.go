@@ -27,6 +27,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
@@ -74,6 +75,7 @@ type HumaDeps struct {
 	FilesSvc          files.FilesService
 	ArtifactSvc       artifacts.ArtifactService
 	GenAISvc          genai.GenAIService
+	DevflowSvc        *devflow.HumaService
 	GitHubAppSlug     string
 	BFFPublicURL      string
 	GitHubAppClientID string
@@ -98,6 +100,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	files.RegisterFiles(api, d.FilesSvc)
 	artifacts.RegisterTags(api, d.ArtifactSvc)
 	genai.RegisterGenAI(api, d.GenAISvc)
+	devflow.RegisterDevflow(api, d.DevflowSvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)

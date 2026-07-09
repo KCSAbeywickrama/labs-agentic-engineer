@@ -137,6 +137,13 @@ func Load() (Config, error) {
 		SecretManagerAPITimeout: r.readOptionalDuration("SECRET_MANAGER_API_TIMEOUT", 30*time.Second),
 		ClusterGatewayProxyURL:  r.readOptionalString("CLUSTER_GATEWAY_PROXY_URL", ""),
 
+		// Temporal (devflow workflows). Enabled iff TEMPORAL_HOSTPORT is set.
+		Temporal: TemporalConfig{
+			HostPort:  r.readOptionalString("TEMPORAL_HOSTPORT", ""),
+			Namespace: r.readOptionalString("TEMPORAL_NAMESPACE", "default"),
+			TaskQueue: r.readOptionalString("TEMPORAL_TASKQUEUE", "aep-devflow"),
+		},
+
 		// Agent runner image + ESO CSS for per-run ExternalSecrets.
 		AgentRunnerImage:        r.readOptionalString("AGENT_RUNNER_IMAGE", defaultRunnerImage),
 		AgentClusterSecretStore: r.readOptionalString("AGENT_CLUSTER_SECRET_STORE", "default"),

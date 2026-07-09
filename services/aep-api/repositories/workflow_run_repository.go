@@ -1,0 +1,145 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package repositories
+
+import (
+	"context"
+	"errors"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/wso2/aep/aep-api/models"
+)
+
+// WorkflowRunRepository is the lookup index for Temporal devflow workflows
+// (internal/feature/devflow). Temporal is the source of truth for workflow
+// state; these rows exist so webhook handlers and watchers can resolve
+// "which running workflow wants this event?" and so the list endpoint can
+// enumerate a project's runs. Lookups miss with (nil, nil) — never
+// gorm.ErrRecordNotFound — matching the house convention.
+type WorkflowRunRepository interface {
+	// Record upserts the row for a workflow execution (keyed by workflow_id +
+	// run_id). Written from workflow activities, so a workflow retry re-runs it
+	// — the upsert makes that idempotent.
+	Record(ctx context.Context, row *models.DevflowRun) error
+
+	// SetStatus marks the row for workflowID terminal (or running again).
+	SetStatus(ctx context.Context, workflowID, status string) error
+
+	// RunningTaskByIssue returns the running task-kind row for a Task, or
+	// (nil, nil) when none — the webhook signaler's point lookup.
+	RunningTaskByIssue(ctx context.Context, repo string, issueNumber int) (*models.DevflowRun, error)
+
+	// RunningDevByProject returns the running dev-kind row for a project, or
+	// (nil, nil) when none. At most one dev workflow runs per project (the
+	// start endpoint enforces it via this lookup).
+	RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error)
+
+	// ListByProject returns a project's rows, newest first, optionally
+	// filtered to one kind ("" = all).
+	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error)
+
+	// GetByWorkflowID returns the row for a workflow ID fenced to orgID, or
+	// (nil, nil) when absent / another org's.
+	GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error)
+}
+
+type workflowRunRepository struct{ db *gorm.DB }
+
+// NewWorkflowRunRepository wires the gorm-backed repository.
+func NewWorkflowRunRepository(db *gorm.DB) WorkflowRunRepository {
+	return &workflowRunRepository{db: db}
+}
+
+func (r *workflowRunRepository) Record(ctx context.Context, row *models.DevflowRun) error {
+	if row.Status == "" {
+		row.Status = models.WorkflowStatusRunning
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "workflow_id"}, {Name: "run_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"kind", "org_id", "project_id", "tag", "repo", "issue_number",
+			"parent_workflow_id", "status", "updated_at",
+		}),
+	}).Create(row).Error
+}
+
+func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status string) error {
+	return r.db.WithContext(ctx).Model(&models.DevflowRun{}).
+		Where("workflow_id = ?", workflowID).
+		Update("status", status).Error
+}
+
+func (r *workflowRunRepository) RunningTaskByIssue(ctx context.Context, repo string, issueNumber int) (*models.DevflowRun, error) {
+	var row models.DevflowRun
+	err := r.db.WithContext(ctx).
+		Where("kind = ? AND repo = ? AND issue_number = ? AND status = ?",
+			models.WorkflowKindTask, repo, issueNumber, models.WorkflowStatusRunning).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *workflowRunRepository) RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error) {
+	var row models.DevflowRun
+	err := r.db.WithContext(ctx).
+		Where("kind = ? AND org_id = ? AND project_id = ? AND status = ?",
+			models.WorkflowKindDev, orgID, projectID, models.WorkflowStatusRunning).
+		Order("created_at DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *workflowRunRepository) ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error) {
+	q := r.db.WithContext(ctx).
+		Where("org_id = ? AND project_id = ?", orgID, projectID).
+		Order("created_at DESC")
+	if kind != "" {
+		q = q.Where("kind = ?", kind)
+	}
+	var rows []models.DevflowRun
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *workflowRunRepository) GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error) {
+	var row models.DevflowRun
+	err := r.db.WithContext(ctx).
+		Where("org_id = ? AND workflow_id = ?", orgID, workflowID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}

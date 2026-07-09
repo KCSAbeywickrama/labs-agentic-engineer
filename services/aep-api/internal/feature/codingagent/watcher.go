@@ -28,6 +28,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -49,6 +50,10 @@ type JobWatcher struct {
 
 	pollInterval time.Duration
 	once         sync.Once
+
+	// signaler feeds a coding-job failure to a waiting devflow TaskFlow
+	// workflow. Nil-safe (no-op when absent).
+	signaler *devflow.Signaler
 }
 
 // NewJobWatcher constructs a watcher. db + proxy + execRows required.
@@ -57,6 +62,13 @@ func NewJobWatcher(db *gorm.DB, proxy *clustergatewayproxy.Client, execRows repo
 		panic("codingagent.JobWatcher: db + proxy + execRows are required")
 	}
 	return &JobWatcher{db: db, proxy: proxy, execRows: execRows, pollInterval: 30 * time.Second}
+}
+
+// WithWorkflowSignaler wires the devflow signaler so a coding-job failure
+// reaches a waiting TaskFlow workflow. Optional. Returns the receiver.
+func (w *JobWatcher) WithWorkflowSignaler(s *devflow.Signaler) *JobWatcher {
+	w.signaler = s
+	return w
 }
 
 // Run blocks until ctx is canceled, ticking immediately then on pollInterval.
@@ -136,6 +148,10 @@ func (w *JobWatcher) finishFailed(ctx context.Context, row *models.Execution, re
 		return
 	}
 	slog.InfoContext(ctx, "codingagent.JobWatcher: coding execution failed", "execution", row.ID, "reason", reason)
+	// Tell any waiting TaskFlow workflow the coding attempt failed.
+	w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigJobStatus, devflow.RunStatusSignal{
+		ExecutionID: row.ID, Phase: devflow.PhaseFailed, Message: reason,
+	})
 }
 
 // cleanupPerRunExternalSecrets deletes the per-run ExternalSecrets the
