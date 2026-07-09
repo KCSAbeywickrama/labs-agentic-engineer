@@ -3234,7 +3234,7 @@ paths:
       summary: Get one Task with its full Execution history
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{issueNumber}/log: #old /projects/{projectName}/executions/{executionId}/progress
+  /projects/{projectName}/tasks/{issueNumber}/log:
     get:
       operationId: get-execution-progress
       parameters:
@@ -3245,12 +3245,20 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Execution id
+        - description: GitHub issue number of the Task
           in: path
-          name: executionId
+          name: issueNumber
           required: true
           schema:
-            description: Execution id
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
+        - description: Execution id to read (defaults to the Task's most recent execution)
+          explode: false
+          in: query
+          name: executionId
+          schema:
+            description: Execution id to read (defaults to the Task's most recent execution)
             type: string
         - description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
           explode: false

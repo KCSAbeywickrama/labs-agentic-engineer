@@ -486,12 +486,15 @@ export const restApi = {
   // Unified execution progress feed keyed by execution id (kind selects the
   // source server-side). Same cursor/NDJSON contract as the legacy per-task
   // progress endpoints, so `useCursorPolling` drives it unchanged.
+  // The Task log feed. `executionId` pins one execution from the history
+  // browser; omitted, the server reads the Task's most recent execution.
   async getExecutionProgress(
-    projectId: string, executionId: string, sinceMillis: number,
+    projectId: string, issueNumber: number, sinceMillis: number, executionId?: string,
   ): Promise<TaskProgressResponse> {
     const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
+    if (executionId) q.set('executionId', executionId);
     return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/executions/${executionId}/progress?${q.toString()}`,
+      `${projectPrefix(projectId)}/tasks/${issueNumber}/log?${q.toString()}`,
     );
   },
 

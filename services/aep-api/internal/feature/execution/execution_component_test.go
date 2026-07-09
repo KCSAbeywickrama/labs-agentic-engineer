@@ -14,13 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Component tier for the unified progress endpoint: the REAL Huma handler (via
+// Component tier for the Task-keyed log endpoint: the REAL Huma handler (via
 // componenttest, tenant gate in ENFORCE) over GET
-// /projects/{p}/executions/{id}/progress, with only the executions store faked.
+// /projects/{p}/tasks/{issueNumber}/log, with only the executions store faked.
 // Proves the HTTP contract — the ProgressResponse shape, the terminal `final`
-// flag, the no-claims 401, and the org fence: an execution owned by another org
-// resolves (nil,nil) through GetByIDScoped and surfaces as 404, the S2S/read
-// IDOR fence tasks-github-native §9.1 relies on.
+// flag, the default-to-newest-execution resolution, the no-claims 401, and the
+// org fence: an execution owned by another org resolves (nil,nil) through
+// GetByIDScoped and surfaces as 404, the S2S/read IDOR fence
+// tasks-github-native §9.1 relies on.
 package execution_test
 
 import (
@@ -59,7 +60,8 @@ func newProgressHarness(t *testing.T, lookup execution.ExecutionLookup) *compone
 	return componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{ExecProgress: svc}})
 }
 
-const progressPath = "/api/v1/projects/widgets/executions/e1/progress"
+// The pinned-execution read (history browsing) — executionId rides the query.
+const progressPath = "/api/v1/projects/widgets/tasks/7/log?executionId=e1"
 
 func TestProgress_Terminal_ReturnsFinal(t *testing.T) {
 	row := &models.Execution{ID: "e1", OrgID: "acme", ProjectID: "widgets",
@@ -98,5 +100,46 @@ func TestProgress_NoAuth_401(t *testing.T) {
 	h := newProgressHarness(t, fakeLookup{org: "acme"})
 	if rec := h.NoAuth().Get(progressPath); rec.Code != http.StatusUnauthorized {
 		t.Errorf("no-auth progress: code %d, want 401", rec.Code)
+	}
+}
+
+// fakeLatest resolves the Task's newest execution (the unpinned default).
+type fakeLatest struct{ row *models.Execution }
+
+func (f fakeLatest) LatestByIssue(context.Context, string, string, int) (*models.Execution, error) {
+	return f.row, nil
+}
+
+// TestProgress_UnpinnedDefaultsToNewestExecution pins the rename's semantics:
+// GET /tasks/{n}/log with NO executionId reads the Task's newest execution.
+func TestProgress_UnpinnedDefaultsToNewestExecution(t *testing.T) {
+	row := &models.Execution{ID: "e9", OrgID: "acme", ProjectID: "widgets",
+		Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecSucceeded)}
+	svc := execution.NewProgressService(fakeLookup{org: "acme", row: row}, nil).
+		WithLatestExecutions(fakeLatest{row: row})
+	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{ExecProgress: svc}})
+
+	rec := h.AsOrg("acme").Get("/api/v1/projects/widgets/tasks/7/log")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unpinned log: code %d (%s)", rec.Code, rec.Body.String())
+	}
+	var resp contracts.ProgressResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode progress: %v", err)
+	}
+	if !resp.Final {
+		t.Errorf("newest execution is terminal — final=true expected, got %+v", resp)
+	}
+}
+
+// TestProgress_UnpinnedNoExecutions_404 — a Task with no executions yet has no
+// log to read.
+func TestProgress_UnpinnedNoExecutions_404(t *testing.T) {
+	svc := execution.NewProgressService(fakeLookup{org: "acme"}, nil).
+		WithLatestExecutions(fakeLatest{})
+	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{ExecProgress: svc}})
+
+	if rec := h.AsOrg("acme").Get("/api/v1/projects/widgets/tasks/7/log"); rec.Code != http.StatusNotFound {
+		t.Fatalf("no-executions log: code %d, want 404 (%s)", rec.Code, rec.Body.String())
 	}
 }

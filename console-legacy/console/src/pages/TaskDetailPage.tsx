@@ -101,7 +101,7 @@ export default function TaskDetailPage() {
     () => task?.executionHistory.find((e) => e.id === selectedExecId),
     [task, selectedExecId],
   );
-  const progress = useExecutionProgress(projectId, selectedExecId, selectedExec?.status === 'running');
+  const progress = useExecutionProgress(projectId, issueNum, selectedExecId, selectedExec?.status === 'running');
 
   if (isLoading) {
     return (

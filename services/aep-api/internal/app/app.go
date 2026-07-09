@@ -494,10 +494,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
-	// The unified per-execution progress endpoint. (The runner skills-pull S2S
-	// endpoint is retired — the runner now clones `org-skills` and resolves
+	// The Task-keyed log endpoint (issue number → newest execution by default,
+	// executionId query pins one for history browsing). (The runner skills-pull
+	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
-	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
+	execProgressSvc := execution.NewProgressService(executionRepo, componentClient).
+		WithLatestExecutions(latestExecutionByIssue{repos: repoRepo, execs: executionRepo})
 	// Coding-execution activity feed: live-tail the ca-… pod log while running,
 	// serve the captured coding_agent_logs snapshot once terminal. Wired only on
 	// the proxy dispatch path (cgwClient present); otherwise coding executions
