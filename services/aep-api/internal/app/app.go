@@ -499,8 +499,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// executionId query pins one for history browsing). (The runner skills-pull
 	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
-	execProgressSvc := execution.NewProgressService(executionRepo, componentClient).
-		WithLatestExecutions(latestExecutionByIssue{repos: repoRepo, execs: executionRepo})
+	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
 	// Coding-execution activity feed: live-tail the ca-… pod log while running,
 	// serve the captured coding_agent_logs snapshot once terminal. Wired only on
 	// the proxy dispatch path (cgwClient present); otherwise coding executions
@@ -508,6 +507,19 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	if cgwClient != nil {
 		execProgressSvc.WithCodingProgress(codingagent.NewAgentProgressReader(cgwClient, db))
 	}
+	// The task-log SSE stream: one connection per open task-detail page carries
+	// the Task's whole live state (status + executions + unified timeline across
+	// attempts). The hub is the in-proc change bus the PR webhook + job/exec
+	// watchers ping so an attached stream re-derives instantly; a slow re-derive
+	// tick on each connection is the safety net (no durable event table).
+	taskStreamHub := execution.NewTaskStreamHub()
+	taskStreamSvc := execution.NewTaskStreamService(
+		execProgressSvc,
+		taskSnapshotAdapter{reads: taskReads},
+		executionsByIssueAdapter{repos: repoRepo, execs: executionRepo},
+		repoFullNameLookup{repos: repoRepo},
+		taskStreamHub,
+	)
 
 	// trait_sync is the single shared emitter that reconciles the
 	// `api-configuration` ClusterTrait on a Component CR + per-environment
@@ -657,7 +669,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// pull_request.* handlers apply NO echo suppression (the platform authors no
 	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
 	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService).
-		WithWorkflowSignaler(devflowSignaler)
+		WithWorkflowSignaler(devflowSignaler).
+		WithTaskNotifier(taskStreamHub)
 	execEvents.RegisterHandlers(registerWebhook)
 	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
@@ -667,7 +680,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// outcomes; build success re-evaluates the funnel).
 	sweep := execution.NewSweep(funnel, execEvents, executionRepo, repoLister{repos: repoRepo}, issueService, 0)
 	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, funnel, asServiceIdentity, 0).
-		WithWorkflowSignaler(devflowSignaler)
+		WithWorkflowSignaler(devflowSignaler).
+		WithTaskNotifier(taskStreamHub)
 	// A build that fails at git-clone-auth within budget is re-minted + re-tried
 	// (§7). Only meaningful when a credential can be staged; otherwise a git-auth
 	// failure is terminal like any other.
@@ -767,7 +781,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskPlan:         taskPlan,
-		ExecProgress:     execProgressSvc,
+		TaskStream:       taskStreamSvc,
 		ComponentClient:  componentClient,
 		IDPSvc:           idpService,
 		CredentialSvc:    credService,
@@ -787,7 +801,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			Store:  workflowRunRepo,
 			Repos:  repoFullNameLookup{repos: repoRepo},
 			Tagger: buildSpecTagger{art: artifactSvcGit},
-			Titles: taskReads,
+			Tasks:  taskReads,
 		}),
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
@@ -965,7 +979,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// capturing the pod's final log. Only when the proxy path is configured.
 	if cgwClient != nil {
 		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo).
-			WithWorkflowSignaler(devflowSignaler))
+			WithWorkflowSignaler(devflowSignaler).
+			WithTaskNotifier(taskStreamHub))
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
 	}
 	// Temporal devflow worker. Registered only when Temporal is configured

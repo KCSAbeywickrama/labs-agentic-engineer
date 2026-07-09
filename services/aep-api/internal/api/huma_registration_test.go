@@ -38,7 +38,9 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 		"get-requirements", "get-spec-collab-session", "get-design-bundle",
 		// Tasks-github-native surface (§9.1): the board/dispatch/retry ops are gone.
 		"list-tasks", "get-task", "plan-tasks", "execute-task", "hold-task", "unhold-task",
-		"get-execution-progress",
+		// The task-log endpoint is now one SSE stream (status + executions +
+		// unified timeline), not the cursor-poll it replaced.
+		"stream-task-log",
 		// Consolidated org-config surface (replaces the Anthropic/GitHub/IDP tag groups).
 		"get-config", "update-config", "list-skills",
 		// Single-tag build surface (the contract's build-project/get-project-build).

@@ -68,8 +68,11 @@ type WorkflowRunner interface {
 	BuildStatus(ctx context.Context, workflowID string) (devflow.DevFlowStatus, error)
 }
 
-// TaskTitles resolves issue titles for the build-status task join. Satisfied
-// by *task.Reads.
-type TaskTitles interface {
+// TaskReader is the DURABLE task source behind a build's task list: the live
+// GitHub ⋈ executions read (the same one behind GET /tasks), which the build
+// scopes to its own lineage tag. It survives an archived Temporal run — the
+// workflow query only refines in-flight status on top of it. Satisfied by
+// *task.Reads.
+type TaskReader interface {
 	List(ctx context.Context, orgID, projectID, state string) ([]task.TaskView, error)
 }

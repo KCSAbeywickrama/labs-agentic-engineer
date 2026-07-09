@@ -205,7 +205,11 @@ func buildView(issue gitrepo.IssueInfo, latestSpecTag string, execs map[string]*
 // machine block, an ambiguous executor class, a stale lineage vs the current
 // spec version, or a platform-set aep:attention with no more-specific reason.
 func computeAttention(labels taskmeta.ParsedLabels, block taskmeta.Block, blockErr error, latestSpecTag string) []string {
-	var flags []string
+	// Never nil: TaskView.attention is contractually "[] when clean" (the console
+	// maps over it directly). A nil slice would marshal as JSON null and crash a
+	// consumer that trusts the contract — which is exactly what the task-log
+	// stream's `task` frame does.
+	flags := []string{}
 	if blockErr != nil && !errors.Is(blockErr, taskmeta.ErrNoBlock) {
 		flags = append(flags, "mangled-block")
 	}

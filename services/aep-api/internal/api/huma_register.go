@@ -60,7 +60,7 @@ type HumaDeps struct {
 	TaskReads         *task.Reads
 	TaskCommands      *task.Commands
 	TaskPlan          *task.PlanService
-	ExecProgress      *execution.ProgressService
+	TaskStream        *execution.TaskStreamService
 	ComponentClient   openchoreo.ComponentClient
 	IDPSvc            idp.IDPService
 	CredentialSvc     *orgcreds.CredentialService
@@ -94,7 +94,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	design.RegisterDesign(api, d.DesignSvc)
 	provisioning.RegisterResources(api, d.ProvisioningSvc)
 	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
-	execution.RegisterProgress(api, d.ExecProgress)
+	execution.RegisterTaskStream(api, d.TaskStream)
 	orgconfig.RegisterConfig(api, d.OrgConfigSvc)
 	skills.RegisterSkill(api, d.SkillSvc, d.SkillMutationSvc, d.SkillImportSvc)
 	files.RegisterFiles(api, d.FilesSvc)

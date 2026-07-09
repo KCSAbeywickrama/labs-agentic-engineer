@@ -24,6 +24,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -68,12 +69,22 @@ type ExecWatcher struct {
 	// workflow. Nil-safe: a nil signaler is a no-op, so the watcher behaves
 	// exactly as before when no workflow is driving.
 	signaler *devflow.Signaler
+	// notifier wakes any attached task-log stream on a build/deploy terminal.
+	// Nil-safe.
+	notifier *execution.TaskStreamHub
 }
 
 // WithWorkflowSignaler wires the devflow signaler so build/deploy terminals
 // reach a waiting TaskFlow workflow. Optional. Returns the receiver.
 func (w *ExecWatcher) WithWorkflowSignaler(s *devflow.Signaler) *ExecWatcher {
 	w.signaler = s
+	return w
+}
+
+// WithTaskNotifier wires the task-log stream hub so build/deploy terminals wake
+// attached console streams instantly. Optional — nil-safe.
+func (w *ExecWatcher) WithTaskNotifier(h *execution.TaskStreamHub) *ExecWatcher {
+	w.notifier = h
 	return w
 }
 
@@ -169,6 +180,7 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 				Phase:       devflow.PhaseFailed,
 				Message:     workflowReason(run),
 			})
+			w.notifier.Notify(row.Repo, row.IssueNumber)
 		}
 		// A succeeded coding run rides the pull_request-opened webhook — no action.
 	case string(taskmeta.KindBuild):
@@ -203,6 +215,7 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *models.Execution, run 
 				ExecutionID: row.ID,
 				Phase:       devflow.PhaseSucceeded,
 			})
+			w.notifier.Notify(row.Repo, row.IssueNumber)
 			return
 		}
 		w.reconcileBuildFailure(ctx, row, run)
@@ -223,6 +236,7 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Exe
 		w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigBuildStatus, devflow.RunStatusSignal{
 			ExecutionID: row.ID, Phase: devflow.PhaseFailed, Message: workflowReason(run),
 		})
+		w.notifier.Notify(row.Repo, row.IssueNumber)
 		return
 	}
 	attempt := parseBuildAuthRetryAttempt(row.Reason)
@@ -235,6 +249,7 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *models.Exe
 		w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigBuildStatus, devflow.RunStatusSignal{
 			ExecutionID: row.ID, Phase: devflow.PhaseFailed, Message: buildAuthRetryExceededReason,
 		})
+		w.notifier.Notify(row.Repo, row.IssueNumber)
 		return
 	}
 	newRun, err := w.buildRetrier.RetryAuthFailedBuild(ctx, row)

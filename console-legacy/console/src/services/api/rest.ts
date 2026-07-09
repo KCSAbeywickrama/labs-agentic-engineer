@@ -41,7 +41,6 @@ import type {
   Organization,
   TaskView,
   TaskDetail,
-  TaskProgressResponse,
   ProjectBuildResponse,
   ProjectBuildStatus,
   TagList,
@@ -483,20 +482,8 @@ export const restApi = {
     });
   },
 
-  // Unified execution progress feed keyed by execution id (kind selects the
-  // source server-side). Same cursor/NDJSON contract as the legacy per-task
-  // progress endpoints, so `useCursorPolling` drives it unchanged.
-  // The Task log feed. `executionId` pins one execution from the history
-  // browser; omitted, the server reads the Task's most recent execution.
-  async getExecutionProgress(
-    projectId: string, issueNumber: number, sinceMillis: number, executionId?: string,
-  ): Promise<TaskProgressResponse> {
-    const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
-    if (executionId) q.set('executionId', executionId);
-    return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/tasks/${issueNumber}/log?${q.toString()}`,
-    );
-  },
+  // The Task log is now an SSE stream (status + executions + unified timeline);
+  // it is consumed by useTaskStream (raw fetch + parseSseStream), not fetchJSON.
 
   // -- Component Configs (Environment Variables) --------------------------------
 
