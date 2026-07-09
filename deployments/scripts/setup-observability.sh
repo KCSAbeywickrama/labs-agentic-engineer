@@ -162,17 +162,20 @@ echo "✅ ExternalSecrets applied"
 # ── 1b. RCA (SRE) agent image + secret ───────────────────────────────────
 # The RCA agent runs the patched image (Anthropic ToolStrategy fix). It's a
 # locally-built image, so import it into the k3d cluster (a cluster rebuild
-# loses imported images — this makes the import part of setup). Build once with:
-#   docker build -t openchoreo-sre-agent:anthropic-patched <openchoreo-repo>/agents/sre-agent
+# loses imported images — this makes the import part of setup). Build once with
+# (repo:tag must match RCA_IMAGE_REPO:RCA_IMAGE_TAG below so this local build is
+# picked up instead of a registry pull):
+#   docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 <openchoreo-repo>/agents/sre-agent
 # The agent reads its LLM key + OAuth client secret from the rca-agent-secret
 # Secret (envFrom). RCA_LLM_API_KEY comes from ANTHROPIC_API_KEY in deployments/.env;
 # OAUTH_CLIENT_SECRET must equal the openchoreo-rca-agent client secret registered
 # by the Thunder bootstrap (values-thunder.yaml CONFIDENTIAL_APPS).
 echo ""
 echo "1️⃣b RCA agent image + secret"
-# Preferred tag `handoff` carries the Anthropic structured-output fix AND the
-# AEP coding-agent handoff stage (AE_HANDOFF). Resolution order:
-#   1. local build            docker build -t tharindulak/openchoreo-sre-agent:handoff \
+# Preferred tag `handoff-v12` (= RCA_IMAGE_TAG default below) carries the
+# Anthropic structured-output fix AND the AEP coding-agent handoff stage
+# (AE_HANDOFF). Resolution order:
+#   1. local build            docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 \
 #                               <openchoreo-repo>/agents/sre-agent
 #      (preferred — developers iterating on the agent aren't surprised by a
 #       stale registry copy)

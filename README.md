@@ -69,12 +69,15 @@ docker logs aep-api 2>&1 | grep "Inbound JWT verifier"
 
 **OpenChoreo side**
 ```bash
-# 7. Deploy an RCA-agent image that includes the handoff stage
+# 7. Deploy an RCA-agent image that includes the handoff stage.
+#    Use the same repo:tag as RCA_IMAGE_TAG in scripts/setup-observability.sh
+#    (currently tharindulak/openchoreo-sre-agent:handoff-v12) so a later
+#    setup-observability.sh re-run picks up this local build instead of pulling.
 cd <openchoreo-repo>/agents/sre-agent
-docker build -t openchoreo-sre-agent:handoff .
-k3d image import openchoreo-sre-agent:handoff -c <cluster>
+docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 .
+k3d image import tharindulak/openchoreo-sre-agent:handoff-v12 -c <cluster>
 kubectl set image deploy/ai-rca-agent -n openchoreo-observability-plane \
-  "*=openchoreo-sre-agent:handoff"
+  "*=tharindulak/openchoreo-sre-agent:handoff-v12"
 
 # 8. Enable the handoff (AE_AUTO_DISPATCH=false → issue-only, human dispatches)
 kubectl patch cm rca-agent-config -n openchoreo-observability-plane --type=merge -p \

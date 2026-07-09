@@ -14,7 +14,10 @@ LangChain's `ProviderStrategy` for structured output, which **Anthropic rejects
 with many tools** ("grammar too large"). The fix switches to `ToolStrategy` for
 `anthropic:` models (`openchoreo/agents/sre-agent/src/agent/agent.py`, plus the
 `langchain-anthropic` dependency) and is baked into the local image
-`openchoreo-sre-agent:anthropic-patched`.
+`tharindulak/openchoreo-sre-agent:handoff-v12` — the same tag
+`setup-observability.sh` deploys (`RCA_IMAGE_TAG`), which also carries the AEP
+coding-agent handoff stage. (An older `anthropic-patched` tag has the Anthropic
+fix but **no** handoff stage; it's only the script's RCA-only fallback.)
 
 ⚠️ The fix is currently **staged/uncommitted** in the `openchoreo` repo and **not
 upstream** — verified by inspecting `:latest-dev`, which still imports only
@@ -25,9 +28,11 @@ stock image works and you can drop the image override.)
 ## Prerequisite you supply
 
 1. **Build the patched image** (once; a k3d rebuild re-imports it automatically via
-   step 1b of `setup-observability.sh`):
+   step 1b of `setup-observability.sh`). Use the same repo:tag as `RCA_IMAGE_TAG`
+   in `setup-observability.sh` (`tharindulak/openchoreo-sre-agent:handoff-v12`) so
+   the script picks up this local build instead of pulling:
    ```bash
-   docker build -t openchoreo-sre-agent:anthropic-patched <openchoreo-repo>/agents/sre-agent
+   docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 <openchoreo-repo>/agents/sre-agent
    ```
 2. **Anthropic key in `deployments/.env`**: `ANTHROPIC_API_KEY=...` (already used by the
    platform; `setup-observability.sh` reads it into `rca-agent-secret`).
@@ -37,7 +42,7 @@ stock image works and you can drop the image override.)
 | # | File | Change |
 |---|---|---|
 | 1 | `single-cluster/values-thunder.yaml` | Added `openchoreo-rca-agent` row to `CONFIDENTIAL_APPS`. The Thunder **bootstrap job** registers this OAuth client automatically during `setup-openchoreo.sh` — this is what removes the manual/gated registration. |
-| 2 | `scripts/setup-observability.sh` — obs-plane values | `rca.enabled=true` + patched image (`openchoreo-sre-agent:anthropic-patched`, `pullPolicy: IfNotPresent`), `llm.modelName: anthropic:claude-sonnet-4-6`, `secretName: rca-agent-secret`, `oauth.clientId: openchoreo-rca-agent`, in-cluster `openchoreoApiUrl`, and a CPU/mem bump (`limits cpu:1/mem:2Gi`) so trace-heavy analyses don't trip the liveness probe (`exit 137` → report stuck `pending`). |
+| 2 | `scripts/setup-observability.sh` — obs-plane values | `rca.enabled=true` + patched image (`tharindulak/openchoreo-sre-agent:handoff-v12`, `pullPolicy: IfNotPresent`), `llm.modelName: anthropic:claude-sonnet-4-6`, `secretName: rca-agent-secret`, `oauth.clientId: openchoreo-rca-agent`, in-cluster `openchoreoApiUrl`, and a CPU/mem bump (`limits cpu:1/mem:2Gi`) so trace-heavy analyses don't trip the liveness probe (`exit 137` → report stuck `pending`). |
 | 3 | `scripts/setup-observability.sh` — step 1b | Imports the patched image into k3d (if present in local docker) and creates `rca-agent-secret` (`RCA_LLM_API_KEY` from `.env`'s `ANTHROPIC_API_KEY`, `OAUTH_CLIENT_SECRET=openchoreo-rca-agent-secret`). |
 | 4 | `scripts/setup-observability.sh` — `ClusterObservabilityPlane` CR | Added `rcaAgentURL` so RCA reports surface in the portal. |
 
@@ -49,7 +54,7 @@ installed by `setup-openchoreo.sh` — nothing extra needed.
 
 ```bash
 # 0. Prereqs
-docker build -t openchoreo-sre-agent:anthropic-patched <openchoreo-repo>/agents/sre-agent
+docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 <openchoreo-repo>/agents/sre-agent
 # ensure ANTHROPIC_API_KEY is set in deployments/.env
 
 # 1. Provision the platform (cluster + planes + Thunder + observability + AEP config).
