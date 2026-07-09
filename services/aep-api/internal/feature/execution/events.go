@@ -24,6 +24,7 @@ import (
 	"strconv"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -50,12 +51,23 @@ type Events struct {
 	funnel   *Funnel
 	registry *Registry
 	prs      PRReader // for the sweep's PR-state reconciliation (may be nil)
+	// signaler feeds PR events to a waiting devflow TaskFlow workflow. Nil-safe:
+	// a nil signaler (old-console flow, or Temporal disabled) is a no-op, so the
+	// webhook handlers behave exactly as before when no workflow is driving.
+	signaler *devflow.Signaler
 }
 
 // NewEvents wires the pull_request handlers. prs may be nil (then the sweep
 // healer no-ops).
 func NewEvents(store ExecutionStore, funnel *Funnel, registry *Registry, prs PRReader) *Events {
 	return &Events{store: store, funnel: funnel, registry: registry, prs: prs}
+}
+
+// WithWorkflowSignaler wires the devflow signaler so PR events reach a waiting
+// TaskFlow workflow. Optional — unset leaves the old behavior unchanged.
+func (e *Events) WithWorkflowSignaler(s *devflow.Signaler) *Events {
+	e.signaler = s
+	return e
 }
 
 // RegisterHandlers installs the pull_request handlers on the webhook router.
@@ -132,6 +144,13 @@ func (e *Events) PullRequestOpened(ctx context.Context, _, _ string, payload []b
 	if _, err := e.store.Finish(ctx, coding.ID, string(taskmeta.ExecSucceeded), reasonPROpenPrefix+strconv.Itoa(p.PullRequest.Number)); err != nil {
 		return err
 	}
+	// The coding attempt is done (PR made) — tell any waiting TaskFlow workflow.
+	e.signaler.SignalTask(ctx, p.Repository.FullName, issueNumber, devflow.SigPROpened, devflow.PRSignal{
+		Repo:     p.Repository.FullName,
+		Issue:    issueNumber,
+		PRNumber: p.PullRequest.Number,
+		HeadSHA:  p.PullRequest.MergeCommitSHA,
+	})
 	return nil
 }
 
@@ -152,11 +171,23 @@ func (e *Events) PullRequestClosed(ctx context.Context, _, _ string, payload []b
 		// PR closed without merging → record the coding attempt as rejected by
 		// appending a terminal coding row (never mutate a terminal row). The
 		// derived status flips to rejected via prState (§4).
+		e.signaler.SignalTask(ctx, p.Repository.FullName, issueNumber, devflow.SigPRRejected, devflow.PRSignal{
+			Repo:     p.Repository.FullName,
+			Issue:    issueNumber,
+			PRNumber: p.PullRequest.Number,
+		})
 		return e.recordRejection(ctx, p.Repository.FullName, issueNumber)
 	}
 
 	// Merged → spawn a build Execution and dispatch it through the registered
 	// executor (§7). Builds do not pass the deps gate — a merged PR proceeds.
+	// Tell any waiting TaskFlow workflow the PR merged (it then awaits the build).
+	e.signaler.SignalTask(ctx, p.Repository.FullName, issueNumber, devflow.SigPRMerged, devflow.PRSignal{
+		Repo:     p.Repository.FullName,
+		Issue:    issueNumber,
+		PRNumber: p.PullRequest.Number,
+		MergeSHA: p.PullRequest.MergeCommitSHA,
+	})
 	return e.spawnBuild(ctx, p.Repository.FullName, issueNumber, p.PullRequest.MergeCommitSHA)
 }
 

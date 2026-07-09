@@ -57,22 +57,39 @@ var featureEdgeAllowlist = map[string][]string{
 	// codingagent is the funnel's one registered executor: it implements the
 	// execution.Executor port (hence the execution edge) and reaches every other
 	// service — identities, anthropic, repos, OC — through consumer ports wired
-	// at the composition root, so it holds no other feature edge.
-	"codingagent": {"execution"},
+	// at the composition root. It also holds the devflow signaler (nil-safe) so
+	// the coding/build/deploy watchers can signal a waiting TaskFlow workflow.
+	"codingagent": {"execution", "devflow"},
 	"component":   {"artifacts", "gitrepo"},
 	// dependencies is the dependency-management feature: the parent package (MCP
-	// discovery server + endpoints catalog) composes its own resources subpackage
-	// (external/platform provisioner cores). endpoints/ and resources/ hold no
+	// discovery server + endpoints catalog) composes its own resources and
+	// endpoints subpackages (external/platform provisioner cores; the org
+	// endpoint catalog). ports.go's OrgEndpointLister.ListResolved return type is
+	// endpoints.OrgComponentEndpoint (A3's list_org_component_endpoints MCP
+	// tool), so the parent package names its own child package's type — the same
+	// shape as the resources edge below. endpoints/ and resources/ hold no
 	// cross-feature edges of their own — every other collaborator (OC client,
 	// external-resource repo, secret writer, design reader) is a consumer-side
 	// port wired at the composition root, keeping the feature edge surface minimal.
-	"dependencies": {"dependencies/resources"},
-	"design":       {"artifacts"},
+	"dependencies": {"dependencies/resources", "dependencies/endpoints"},
+	// design imports dependencies/resources for the CRT metadata vocabulary
+	// (resources.TypeMarkers + the marker catalog port): design-save keys
+	// end-user-auth derivation on the PE-authored role marker instead of a
+	// hardcoded resourceType name (thunder-app generalization). This mirrors the
+	// runtimeconfig edge below — both features read the same single source of
+	// truth for CRT markers rather than re-deriving the vocabulary.
+	"design": {"artifacts", "dependencies/resources"},
+	// devflow hosts the Temporal dev/task workflows + activities. Its activity
+	// ports are all devflow-local (the funnel/genai/plan/issue adapters live at
+	// the composition root), so it holds NO cross-feature edge — other features
+	// depend on IT (the signaler), never the reverse.
+	"devflow": {},
 	// execution is the platform-owned half of the Task/Execution split: it reads
-	// GitHub Task facts (gitrepo) and re-verifies against the design at HEAD
-	// (artifacts). It NEVER imports feature/task — the §1 split is a package
-	// boundary (enforced by the absence of "task" here and below).
-	"execution":    {"artifacts", "gitrepo"},
+	// GitHub Task facts (gitrepo) and, on PR events, signals a waiting devflow
+	// TaskFlow workflow (devflow, nil-safe). Design at HEAD is read through a
+	// consumer-side port, not a direct artifacts import. It NEVER imports
+	// feature/task — the §1 split is a package boundary.
+	"execution":    {"gitrepo", "devflow"},
 	"files":        {"gitrepo"},
 	"genai":        {"gitrepo"},
 	"gitrepo":      {},
@@ -83,17 +100,21 @@ var featureEdgeAllowlist = map[string][]string{
 	// services. These two edges ARE the feature — it assembles GET /config and runs
 	// the atomic multi-section PATCH across both services — so the concrete edges
 	// are the deliberate design, not incidental coupling.
-	"orgconfig":    {"idp", "orgcreds"},
-	"orgcreds":     {"gitrepo"},
-	"project":      {"artifacts", "gitrepo"},
+	"orgconfig": {"idp", "orgcreds"},
+	"orgcreds":  {"gitrepo"},
+	"project":   {"artifacts", "gitrepo"},
 	// provisioning is the dependency-provisioning coordinator (dependency-management
 	// §3.6): it drives the provisioner cores (dependencies/resources) and GitHub gate
 	// issues (gitrepo). Every other collaborator — the executions store, the funnel
 	// Reevaluate hook, the design reader, the repo locator — is a consumer-side port
 	// wired at the composition root, so it holds only these two feature edges.
-	"provisioning":  {"dependencies/resources", "gitrepo"},
-	"requirements":  {"artifacts"},
-	"runtimeconfig": {"artifacts"},
+	"provisioning": {"dependencies/resources", "gitrepo"},
+	"requirements": {"artifacts"},
+	// runtimeconfig reads the thunder-app dependency's binding outputs (OIDC
+	// config) and patches its redirect URIs declaratively; it reuses the
+	// resources package's single source of truth for the per-env binding name
+	// (ExternalResourceBindingName) rather than re-deriving the convention.
+	"runtimeconfig": {"artifacts", "dependencies/resources"},
 	"skills":        {"artifacts", "gitrepo"},
 	// task is the GitHub-facing half: it never imports feature/execution (the §1
 	// split) — the funnel is reached through the task.Dispatcher consumer port.

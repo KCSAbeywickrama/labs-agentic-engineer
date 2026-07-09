@@ -88,6 +88,11 @@ type IssueOps interface {
 	// GetPullRequest returns a pull request's live state (open/closed + merged +
 	// merge SHA) for the sweep's PR-state reconciliation (§5).
 	GetPullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) (*PullRequestState, error)
+	// MergePullRequest squash-merges an open pull request — the devflow task
+	// workflow's auto merge-pr gate. GitHub's 405 not-mergeable answer (checks
+	// pending, conflicts, already merged) is returned as an error for the
+	// caller to reconcile against GetPullRequest.
+	MergePullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) error
 }
 
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.

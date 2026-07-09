@@ -25,7 +25,8 @@ import {
 } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
-import { githubKeys, projectKeys } from "./keys";
+import { useConfig } from "../../settings/api/queries";
+import { projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 
@@ -186,17 +187,14 @@ export function useDeleteProject() {
 }
 
 // The connected GitHub org, for the repo-URL preview in the create flow.
-// Read from the consolidated org-config projection (GET /config replaced
-// /org/credentials/github when the contract consolidated org config).
+// GitHub connection state now lives on the org config (issue #96 moved it
+// off the old /org/credentials/github onto GET /config's gitProvider
+// section), so this rides the settings feature's shared useConfig query
+// instead of a second, independent fetch of the same endpoint. gitProvider
+// is nullable (not connected yet), hence the optional chaining.
 export function useGithubOrg() {
-  return useQuery({
-    queryKey: githubKeys.status,
-    queryFn: async () => {
-      const { data, error } = await client.GET("/config");
-      if (error || !data) return null;
-      return data.gitProvider.githubLogin ?? null;
-    },
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
+  const { data } = useConfig();
+  return {
+    data: data?.gitProvider?.githubLogin ?? data?.gitProvider?.identityLogin ?? null,
+  };
 }

@@ -66,6 +66,16 @@ var (
 	ErrRequirementsNotApproved = errors.New("design generation requires an approved (tagged) requirements version")
 	ErrConversationNotFound    = errors.New("conversation not found")
 	ErrTurnNotFound            = errors.New("turn not found")
+	// ErrSkillsRepoUnavailable means the org's _skills repo (the turn's
+	// SkillsRef source) could not be resolved — its row is missing or
+	// unprovisionable, or the backing repo is gone/unreachable (live incident:
+	// the GitHub repo was deleted externally while its git_repositories row
+	// lingered). Mapped to a LOGGED 503 with a clear message instead of the
+	// generic 500 that previously swallowed the cause. Wraps the underlying
+	// error for the logs. Recovery is a manual operator action today: delete
+	// the stale `_skills` git_repositories row — the next resolve re-provisions
+	// and re-seeds the repo.
+	ErrSkillsRepoUnavailable = errors.New("org skills repository unavailable")
 )
 
 // TurnInProgressError is the D18 guard rejection: another turn holds the
@@ -209,6 +219,12 @@ type ServiceDeps struct {
 	SkillsRepo SkillsRepoResolver
 	MCPTokens  MCPTokenMinter
 	MCPBaseURL string
+	// TurnFinishHook, when set, is invoked once with the terminal outcome of
+	// every turn (outcome is "completed" | "failed"). The devflow feature uses
+	// it to signal a waiting design-generate workflow. Best-effort — a nil hook
+	// or a slow hook must never delay or fail the turn. Kept as a plain func so
+	// the genai package does not import devflow.
+	TurnFinishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
 }
 
 type service struct {
@@ -222,6 +238,7 @@ type service struct {
 	skillsRepo SkillsRepoResolver
 	mcpTokens  MCPTokenMinter
 	mcpBaseURL string
+	finishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
 }
 
 // NewService wires the genai service.
@@ -237,6 +254,7 @@ func NewService(d ServiceDeps) GenAIService {
 		skillsRepo: d.SkillsRepo,
 		mcpTokens:  d.MCPTokens,
 		mcpBaseURL: d.MCPBaseURL,
+		finishHook: d.TurnFinishHook,
 	}
 }
 
@@ -289,14 +307,18 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	if err != nil {
 		return "", fmt.Errorf("resolve base ref: %w", err)
 	}
+	// Skills resolve failures are typed: both arms mean the org's _skills repo
+	// is unusable right now (row missing/unprovisionable, or the backing repo
+	// gone/unreachable — e.g. deleted externally under a lingering row). The
+	// edge maps this to a logged 503 rather than the old opaque 500.
 	skillsRow, err := s.skillsRepo(ctx, orgID)
 	if err != nil {
-		return "", fmt.Errorf("resolve skills repo: %w", err)
+		return "", fmt.Errorf("%w: resolve repo row: %w", ErrSkillsRepoUnavailable, err)
 	}
 	skillsRepoRef := gitrepo.WorkspaceRefFor(orgID, skillsRow, ref.Cred)
 	skillsRef, err := ws.Head(ctx, skillsRepoRef, "")
 	if err != nil {
-		return "", fmt.Errorf("resolve skills ref: %w", err)
+		return "", fmt.Errorf("%w: resolve head: %w", ErrSkillsRepoUnavailable, err)
 	}
 	if err := s.snapshots.Ensure(ctx, ref, baseRef); err != nil {
 		return "", fmt.Errorf("ensure repo snapshot: %w", err)

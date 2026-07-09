@@ -31,6 +31,7 @@ package codingagent
 
 import (
 	"context"
+	"time"
 
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -85,6 +86,13 @@ type AnthropicProvisioner interface {
 // auth.TaskTokenManager (Issue(id, ocOrgID, projectID)).
 type TokenIssuer interface {
 	Issue(id, ocOrgID, projectID string) (string, error)
+
+	// IssueServiceToken mints a dedicated BFF-signed identity token for a given
+	// audience (e.g. auth.AudienceMCP) — used to mint the coding runner's
+	// AEP_MCP_TOKEN, since the runner bearer above (aud git-service) is
+	// rejected by the MCP verifier. ttl <= 0 falls back to the manager's
+	// configured task TTL. Wired from auth.TaskTokenManager.IssueServiceToken.
+	IssueServiceToken(audience, ocOrgID string, ttl time.Duration) (string, error)
 }
 
 // ProjectRepos resolves a project's git repo row (RepoURL/RepoSlug). Wired from
@@ -116,6 +124,18 @@ type OrgPublisherProvisioner interface {
 // import). Optional — nil skips the pre-flight (public/unit flows).
 type ComponentEnsurer interface {
 	EnsureComponent(ctx context.Context, orgID, projectID, component string) error
+}
+
+// ComponentRuntimeConfigEmitter writes the per-web-app `env-config.js` file onto
+// the component's ReleaseBindings so the SPA's `window._env_` is populated at
+// request time. Called best-effort at OC-component-ensure time (coding dispatch
+// pre-flight), mirroring the legacy dispatch service's ensureOCComponent hook.
+// The web-app gate lives inside the emitter (it self-no-ops for non-web-app
+// components), so this feature holds no design/artifacts import and passes only
+// the component name. Wired at the composition root from
+// runtimeconfig.RuntimeConfigService; nil → skipped.
+type ComponentRuntimeConfigEmitter interface {
+	EmitForComponent(ctx context.Context, orgID, projectID, componentName string) error
 }
 
 // BuildSecretStager pre-stages the org's build git credential on the workflow

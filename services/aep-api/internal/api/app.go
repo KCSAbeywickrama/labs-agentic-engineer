@@ -102,6 +102,10 @@ type AppParams struct {
 	MCPExternalResources dependencies.ExternalResourceReader
 	MCPOrgEndpoints      dependencies.OrgEndpointLister
 	MCPResourceTypes     dependencies.ResourceTypeLister
+	// MCPRemoteGit backs the read-only remote-git MCP tools (endpoint spec
+	// discovery). Nil makes get_remote_git_file_contents/search_remote_git_code
+	// return a tool error; it never affects the other tools.
+	MCPRemoteGit dependencies.RemoteGitReader
 }
 
 // NewHandler assembles the full HTTP handler with middleware and routes.

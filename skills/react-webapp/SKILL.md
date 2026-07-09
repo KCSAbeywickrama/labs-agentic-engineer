@@ -3,6 +3,7 @@ name: react-webapp
 description: How to build a React SPA on the platform — Vite project layout, multi-stage Dockerfile → nginx:alpine runtime, synchronous /env-config.js load before the bundle, the authoritative window._env_ key set, throw-on-missing-key rule, and stock static-only nginx config (no envsubst, no proxy). Apply to every web-app component.
 ---
 
+
 # React Webapp
 
 ## What this skill does
@@ -14,13 +15,13 @@ values flow in at request time via `window._env_` — not at build time.
 
 ## Platform facts
 
-- Web-app components have `componentType: web-app`, `entrypoint:
+- Web-app components have `componentType: web-application`, `entrypoint:
   deployment/web-application`, `buildpack: docker`, default port 9090.
 - They do NOT get an OpenAPI spec — `set_openapi` for a web-app is
   rejected.
 - They do NOT carry `exposesAPI` — that toggle is for backend API
-  enforcement only. Web-apps express auth via `callerIdentity` instead
-  (see `thunder-authentication`).
+  enforcement only. Web-apps express auth via a `thunder-app`
+  platform-resource dependency instead (see `thunder-authentication`).
 - The image is **identical across every environment**. Per-env values
   (API URLs, OIDC config, feature flags) arrive at request time via
   `window._env_`, populated by `/env-config.js`.
@@ -41,7 +42,7 @@ Use these EXACT spellings — do not invent new keys:
 | `API_BASE_URL` | this web-app has a `component`-kind `dependencies` entry on a service sibling | external gateway URL of the primary upstream service in this project |
 | `<UPSTREAM>_URL` | this web-app depends on `<upstream>` (a `component`-kind `dependencies` entry) | external gateway URL of that sibling (`<UPSTREAM>` = upstream component name in `UPPER_SNAKE_CASE`, e.g. `todo-api` → `TODO_API_URL`) |
 | `<NAME>_URL` | this web-app's `dependencies` include an `external`-kind entry `<name>` | external gateway URL of that external upstream API (same UPPER_SNAKE convention, e.g. `employee-api` → `EMPLOYEE_API_URL`) |
-| `THUNDER_*` | this web-app has `callerIdentity.mode: end-user` | OIDC config keys (`THUNDER_URL`, `THUNDER_CLIENT_ID`, `THUNDER_REDIRECT_URI`, `THUNDER_SCOPES`, `THUNDER_AFTER_SIGN_IN_URL`) — owned by the `thunder-authentication` skill; see it for the per-key meanings and wiring |
+| `<DEP>_*` | this web-app declares an auth `platform-resource` dependency named `<dep>` | OIDC config keys (`<DEP>_CLIENT_ID`, `<DEP>_ISSUER`, `<DEP>_JWKS_URL`, `<DEP>_SCOPES`), where `<DEP>` is the UPPER_SNAKE of the dependency name (e.g. `user-auth` → `USER_AUTH_*`) — owned by the `thunder-authentication` skill; see it for the per-key meanings and wiring |
 | `<NAME>` (any) | the agent declared it in `workload.yaml` `configurations.env` | app-config default (per-env override possible) |
 
 ## Recommended practice
@@ -78,7 +79,7 @@ And one Acceptance criteria bullet:
   platform's `env-config.js` is loaded synchronously before the bundle
   so the value is always populated when modules evaluate."
 
-For every web-app task whose component has `callerIdentity.mode: end-user`,
+For every web-app task whose component declares a `thunder-app` dependency,
 also add this Scope bullet (covered fully in `thunder-authentication`):
 
 - "`nginx/default.conf` is a stock static-file config — no proxy block,
@@ -101,7 +102,7 @@ Project layout (Vite + TS):
 │   ├── App.tsx
 │   ├── env.ts        # typed window._env_ shim
 │   ├── api.ts        # fetch helpers
-│   ├── auth.ts       # only if callerIdentity.mode: end-user — see thunder-authentication
+│   ├── auth.ts       # only if the component declares a thunder-app dependency — see thunder-authentication
 │   └── pages/
 ├── nginx/
 │   └── default.conf
@@ -135,8 +136,9 @@ missing (which means a config bug, not a missing key default):
 type Env = {
   API_BASE_URL: string;
   // Plus one <UPSTREAM>_URL per component-kind dependency entry, if any.
-  // If this SPA has callerIdentity.mode: end-user, the THUNDER_* OIDC
-  // keys are also present — extend this type with them per the
+  // If this SPA declares an auth platform-resource dependency, its
+  // <DEP>_* OIDC keys (<DEP> = UPPER_SNAKE of the dependency name) are
+  // also present — extend this type with them per the
   // thunder-authentication skill, which owns the auth wiring.
 };
 
@@ -159,8 +161,8 @@ export const env: Env = window._env_;
 missing. Do NOT write `?? ""` or any other silent default — that
 fallback produces the v0 `405 Method Not Allowed` bug where every
 fetch becomes a relative URL hitting the SPA's own nginx. The example
-below is the unauthenticated client; if this SPA has
-`callerIdentity.mode: end-user`, attach `Authorization: Bearer <token>`
+below is the unauthenticated client; if this SPA declares a `thunder-app`
+dependency, attach `Authorization: Bearer <token>`
 to each fetch instead — see the `thunder-authentication` skill for the
 auth'd client.
 

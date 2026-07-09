@@ -81,11 +81,6 @@ const exposesAPISchema = z.strictObject({
   orgPublished: z.boolean().optional(),
 });
 
-// Caller-identity intent (platform-owned; mirrors Go models.CallerIdentity).
-const callerIdentitySchema = z.strictObject({
-  mode: z.string(),
-});
-
 export const componentDesignSchema = z.strictObject({
   name: z.string().min(1),
   type: z.string().min(1),
@@ -98,7 +93,6 @@ export const componentDesignSchema = z.strictObject({
   dependencies: z.array(dependencySchema),
   description: z.string().min(1),
   exposesAPI: exposesAPISchema.optional(),
-  callerIdentity: callerIdentitySchema.optional(),
   componentAgentInstructions: z.string().optional(),
 });
 

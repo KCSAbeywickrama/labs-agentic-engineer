@@ -33,7 +33,7 @@ import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 
 // Sidebar highlight follows the route; grows one mapping per top-level route.
 function activeItemFor(pathname: string): string {
-  if (pathname === "/" || pathname.startsWith("/projects")) return "projects";
+  if (pathname.startsWith("/settings")) return "settings";
   return "projects";
 }
 
@@ -104,8 +104,9 @@ export function AppLayout() {
           </Sidebar.Nav>
           <Sidebar.Footer>
             <Sidebar.Category>
-              {/* Stub until the Admin feature lands. */}
-              <Sidebar.Item id="settings">
+              {/* Org-level Settings (issue #96) — not the UserMenu's
+                  personal-settings stub above, which is untouched. */}
+              <Sidebar.Item id="settings" link={<Link to="/settings" />}>
                 <Sidebar.ItemIcon>
                   <Settings />
                 </Sidebar.ItemIcon>
