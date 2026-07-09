@@ -29,6 +29,14 @@
 # Idempotent: re-running is safe — helm install is gated by helm_install_if_not_exists,
 # kubectl apply is server-side, and ExternalSecrets / CRs are upserts.
 #
+# Optional: setup.sh runs this stage unless SKIP_OBSERVABILITY=1 is set (e.g.
+# `SKIP_OBSERVABILITY=1 bash scripts/setup.sh`), in which case it's skipped —
+# this is the heaviest install (OpenSearch StatefulSet + Fluent Bit DaemonSet
+# + RCA agent) and not everyone needs Live Progress streaming or the
+# alert→RCA handoff. Run this script by hand later to add it on top of an
+# existing setup; start.sh detects its absence and degrades gracefully
+# (see stage 7c).
+#
 # Wiring summary:
 #   - Helm: openchoreo-observability-plane @ v1.0.1-hotfix.1
 #       Observer + cluster-agent + RCA. Creates HTTPRoute on its OWN
