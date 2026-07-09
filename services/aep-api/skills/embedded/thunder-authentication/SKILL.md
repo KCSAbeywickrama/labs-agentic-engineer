@@ -62,6 +62,12 @@ instead of deriving it from YOUR dependency name) produces a
 - The Thunder OIDC discovery endpoint is `<DEP>_ISSUER/.well-known/openid-configuration`.
 - Token endpoint: `<DEP>_ISSUER/oauth2/token`. The SPA posts to it
   cross-origin — there is NO same-origin `/oidc/` proxy in nginx.
+- The signed-in user's identity claims ride in the ID TOKEN, surfaced by
+  `oidc-client-ts` as `user.profile`: `groups` (their role/group memberships)
+  and `ouId`/`ouName`/`ouHandle` (their organization), beside standard
+  `profile`/`email`. The platform requests the `group`/`ou` scopes by default,
+  so a role-aware SPA reads roles from `user.profile.groups` — it never decodes
+  the access token for them.
 - Default Thunder admin user (dev clusters): `admin` / `admin` in the
   `Administrators` group. Real orgs add their own users via Thunder's
   admin console / SCIM.
@@ -198,6 +204,18 @@ export async function getAccessToken(): Promise<string | null> {
 }
 ```
 
+When the spec calls for role-based UI, read the user's roles from
+`user.profile.groups` — the id_token claim `oidc-client-ts` surfaces (see
+Platform facts); the platform already requests the `group`/`ou` scopes:
+
+```ts
+export async function getRoles(): Promise<string[]> {
+  const user = await userManager.getUser();
+  const groups = user?.profile?.groups;
+  return Array.isArray(groups) ? (groups as string[]) : [];
+}
+```
+
 Add a callback route in your router — mounted under the base via
 `basename={import.meta.env.BASE_URL}` (see react-webapp) — that calls
 `handleCallback()` once on mount, then navigates to `/`. If you instead gate
@@ -250,6 +268,7 @@ export async function listTodos() {
 | Symptom | Cause | Fix |
 |---|---|---|
 | SPA throws `<KEY> not set` / redirects to `undefined/oauth2/authorize` | Agent hardcoded a fixed key prefix instead of deriving keys from YOUR dependency name | Use `env.<DEP>_ISSUER` etc., where `<DEP>` = UPPER_SNAKE of the auth dependency name (dep `user-auth` → `USER_AUTH_ISSUER`). |
+| Every user shows no role / `groups` is empty | Roles read from the wrong place — the access token, or a hand-decoded JWT | Read `user.profile.groups` (the id_token claim `oidc-client-ts` surfaces). The platform already requests the `group`/`ou` scopes, so the claim is present. |
 | After login, "invalid redirect URI" | `redirect_uri` doesn't match the base-prefixed URL the platform registered (e.g. a root `/callback`, or an invented redirect-URI key) | Compute `window.location.origin + import.meta.env.BASE_URL + 'callback'`. |
 | Login loops forever — never reaches the app, no `POST /oauth2/token` | Callback detection compares the router path or `window.location.pathname` against a root `/callback`, which never matches under the base subpath, so the callback handler never mounts | Base-prefix the check: `import.meta.env.BASE_URL + 'callback'`, and set the router `basename={import.meta.env.BASE_URL}` (see react-webapp). |
 | Sign-in loops endlessly even at the right path | `oidc-client-ts` written without `WebStorageStateStore({ store: sessionStorage })` | Use the constructor shown above; without it, state and PKCE verifier don't survive the redirect. |
