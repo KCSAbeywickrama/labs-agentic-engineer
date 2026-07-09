@@ -78,12 +78,6 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
-- Spec view — Generate / Re-generate design: a user-driven CTA in the Designs
-  section fires a design-generation room turn (agent writes `specs/design/…`
-  live); gated on requirements existing; Build stays gated on design files
-  (ADR-0007) — [#159](https://github.com/wso2/labs-agentic-engineer/issues/159)
-  (no contract change; staleness auto-detection deferred to
-  [#160](https://github.com/wso2/labs-agentic-engineer/issues/160))
 - Project overview — "Generate spec" CTA on the Spec card: persists the create
   prompt to localStorage and, when `hasSpec` is false, seeds a live room turn
   to generate requirements (create does not auto-derive) —
@@ -138,7 +132,7 @@ GitHub issue plus any ADRs it produced.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|
-| _none yet_ | — | — | — |
+| Spec view — Generate / Re-generate design | 2026-07-10 | Phase-aware primary CTA in the Spec view header: **Generate design** when requirements exist but no design, **Build** once a design exists; **Re-generate design** in the Designs section. Fires a design-generation room turn (agent writes `specs/design/…` live). Gated on requirements; Build stays gated on design files. Verified live (7 design files generated + committed). | [#159](https://github.com/wso2/labs-agentic-engineer/issues/159), ADR-0007 (staleness → [#160](https://github.com/wso2/labs-agentic-engineer/issues/160)) |
 
 ## Non-goals
 
