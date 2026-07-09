@@ -923,6 +923,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// into provision-Execution terminals + gate-issue closes, releasing gated
 		// consumer tasks (dependency-management §3.6).
 		resourceWatcher,
+		// Runtime-config convergence backstop: re-emits SPA env-config.js once a
+		// web-app's own public URL resolves. The build-success emit runs before
+		// the web-app's ReleaseBinding endpoint is up (so the consumer-url-env-config
+		// gate defers the write), and — since a web-app is dispatched last — no
+		// later build-success re-fires it. This idempotent sweep lands env-config.js
+		// once the URL converges (replaces the dropped periodic reconcile backstop).
+		runtimeconfig.NewWatcher(db, runtimeConfigSvc, asServiceIdentity, 0),
 		// Periodic credential validator — walks every active org_credentials row
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised credentials.
