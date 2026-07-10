@@ -47,28 +47,52 @@ const skillMD = (name: string, kind?: string): string => {
 
 // ---- readSkillsApplied ------------------------------------------------------
 
-test("readSkillsApplied: parses the frontmatter sequence", async () => {
+test("readSkillsApplied: parses the component design.json skillsApplied array", async () => {
   const ws = await tmpTree({
-    "specs/design/design.md": "---\nskillsApplied:\n  - go\n  - react-webapp\n---\n\n# design\n",
+    "specs/design/components/api/design.json": JSON.stringify({
+      skillsApplied: ["go", "react-webapp"],
+    }),
   });
-  assert.deepEqual(await readSkillsApplied(ws), ["go", "react-webapp"]);
+  assert.deepEqual(await readSkillsApplied(ws, "api"), ["go", "react-webapp"]);
 });
 
-test("readSkillsApplied: absent design.md → []", async () => {
+test("readSkillsApplied: absent design.json → []", async () => {
   const ws = await tmpTree({ "README.md": "no design here" });
-  assert.deepEqual(await readSkillsApplied(ws), []);
+  assert.deepEqual(await readSkillsApplied(ws, "api"), []);
 });
 
-test("readSkillsApplied: design with no skillsApplied → []", async () => {
-  const ws = await tmpTree({ "specs/design/design.md": "---\ntitle: x\n---\n\n# design\n" });
-  assert.deepEqual(await readSkillsApplied(ws), []);
+test("readSkillsApplied: design.json with no skillsApplied → []", async () => {
+  const ws = await tmpTree({
+    "specs/design/components/api/design.json": JSON.stringify({ title: "x" }),
+  });
+  assert.deepEqual(await readSkillsApplied(ws, "api"), []);
+});
+
+test("readSkillsApplied: malformed design.json → []", async () => {
+  const ws = await tmpTree({
+    "specs/design/components/api/design.json": "{ not valid json",
+  });
+  assert.deepEqual(await readSkillsApplied(ws, "api"), []);
 });
 
 test("readSkillsApplied: non-string entries are filtered out", async () => {
   const ws = await tmpTree({
-    "specs/design/design.md": "---\nskillsApplied:\n  - go\n  - 42\n  - null\n---\n",
+    "specs/design/components/api/design.json": JSON.stringify({
+      skillsApplied: ["go", 42, null],
+    }),
   });
-  assert.deepEqual(await readSkillsApplied(ws), ["go"]);
+  assert.deepEqual(await readSkillsApplied(ws, "api"), ["go"]);
+});
+
+test("readSkillsApplied: reads only the named component, not others", async () => {
+  const ws = await tmpTree({
+    "specs/design/components/api/design.json": JSON.stringify({ skillsApplied: ["go"] }),
+    "specs/design/components/webapp/design.json": JSON.stringify({
+      skillsApplied: ["react-webapp"],
+    }),
+  });
+  assert.deepEqual(await readSkillsApplied(ws, "api"), ["go"]);
+  assert.deepEqual(await readSkillsApplied(ws, "webapp"), ["react-webapp"]);
 });
 
 // ---- resolveKind ------------------------------------------------------------
@@ -131,7 +155,7 @@ test("resolveSkillsFromClone: path-traversal names are rejected", async () => {
 
 test("resolveTaskSkills: end-to-end with an injected clone", async () => {
   const ws = await tmpTree({
-    "specs/design/design.md": "---\nskillsApplied:\n  - go\n---\n",
+    "specs/design/components/api/design.json": JSON.stringify({ skillsApplied: ["go"] }),
   });
   const cloneSrc = await tmpTree({ "skills/go/SKILL.md": skillMD("go", "org") });
   const scratchDir = path.join(os.tmpdir(), "aep-skills-orch", "task-1");
@@ -140,6 +164,7 @@ test("resolveTaskSkills: end-to-end with an injected clone", async () => {
   let cloneCount = 0;
   const out = await resolveTaskSkills({
     workspace: ws,
+    componentName: "api",
     skillsRepoURL: "https://github.com/acme/org-skills",
     pat: "tok",
     scratchDir,
@@ -158,10 +183,13 @@ test("resolveTaskSkills: end-to-end with an injected clone", async () => {
 });
 
 test("resolveTaskSkills: no applied skills → no clone, empty result", async () => {
-  const ws = await tmpTree({ "specs/design/design.md": "---\ntitle: x\n---\n" });
+  const ws = await tmpTree({
+    "specs/design/components/api/design.json": JSON.stringify({ title: "x" }),
+  });
   let cloned = false;
   const out = await resolveTaskSkills({
     workspace: ws,
+    componentName: "api",
     skillsRepoURL: "https://github.com/acme/org-skills",
     pat: "tok",
     scratchDir: path.join(os.tmpdir(), "aep-skills-noop", "task-2"),
