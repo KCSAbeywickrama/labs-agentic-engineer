@@ -78,6 +78,12 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Tasks page + project-scoped left nav — sidebar swaps to Overview / Spec /
+  Tasks / Deployments / Issues inside a project (ADR-0009); flat task list
+  with status chips (polling) + per-task console-log page (SSE); Issues ships
+  as a placeholder — [#173](https://github.com/wso2/labs-agentic-engineer/issues/173)
+  (no contract change; filtering deferred to
+  [#177](https://github.com/wso2/labs-agentic-engineer/issues/177))
 - Spec view — Build button invokes the build resource: commit-then-build
   (collab flush-on-demand → `POST /build`), lands on the overview; Build
   disabled with a tooltip while an agent turn runs —
