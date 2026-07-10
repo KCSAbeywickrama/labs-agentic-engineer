@@ -25,6 +25,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/feature/design"
+	"github.com/wso2/aep/aep-api/internal/feature/devflow"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -73,4 +75,79 @@ type buildSecretStager struct {
 
 func (s buildSecretStager) StageExternalSecrets(ctx context.Context, _, ocOrgID, projectID, depName string, secretsByEnv map[string]map[string]string) (map[string]string, error) {
 	return s.prov.StageSecrets(ctx, ocOrgID, projectID, &models.ExternalResource{Name: depName}, secretsByEnv)
+}
+
+// buildProvisionStatus adapts provisioning.Service.Status onto the build
+// preflight's ProvisionStatusReader port. It collapses the provisioning
+// tri-state onto the preflight bool: a dependency is "already handled" (Ready ==
+// true, so the drawer does NOT re-ask for it) whenever its status is anything
+// other than "unknown". This is intentionally NOT DependencyStatus.Ready, which
+// is false for BOTH "unknown" (nothing started) AND "provisioning" (in-flight) —
+// returning .Ready would re-ask a dependency that is already being provisioned.
+// A Status error surfaces the item (safe direction: preflight over-asks rather
+// than silently dropping a dependency).
+type buildProvisionStatus struct {
+	svc *provisioning.Service
+}
+
+func (b buildProvisionStatus) Ready(ctx context.Context, orgID, projectID, depName string) (bool, error) {
+	st, err := b.svc.Status(ctx, orgID, projectID, depName, "")
+	if err != nil {
+		return false, err
+	}
+	return st.Status != "unknown", nil
+}
+
+// buildProvisioner adapts the design + provisioning features onto devflow's
+// BuildProvisioner port (issue #164) — the dev workflow's provisioning step.
+// devflow imports neither feature (that would cycle), so the mapping between
+// devflow.ProvisionInput ⇄ provisioning.BuildProvisionInput and their failure
+// twins lives here at the composition root. RegisterExternalResources runs FIRST
+// so the external deps are in the catalog before ProvisionForBuild's
+// EnsureProvisionIssues / catalog.Get read them. orgID doubles as the OC org
+// handle == the SM-API org id (the build path stages secrets under the org
+// handle — Task 2/3 precedent).
+type buildProvisioner struct {
+	design design.DesignService
+	prov   *provisioning.Service
+}
+
+func (b buildProvisioner) ProvisionForBuild(ctx context.Context, orgID, projectID, tag string, inputs []devflow.ProvisionInput) ([]devflow.ProvisionFailure, error) {
+	if err := b.design.RegisterExternalResources(ctx, orgID, projectID); err != nil {
+		return nil, err
+	}
+	mapped := make([]provisioning.BuildProvisionInput, 0, len(inputs))
+	for _, in := range inputs {
+		mapped = append(mapped, provisioning.BuildProvisionInput{
+			Component:      in.Component,
+			Dependency:     in.Dependency,
+			Kind:           in.Kind,
+			Config:         in.Config,
+			SecretRefByEnv: in.SecretRefByEnv,
+			Parameters:     in.Parameters,
+			Approved:       in.Approved,
+		})
+	}
+	fails, err := b.prov.ProvisionForBuild(ctx, orgID, orgID, projectID, tag, mapped)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]devflow.ProvisionFailure, 0, len(fails))
+	for _, f := range fails {
+		out = append(out, devflow.ProvisionFailure{Component: f.Component, Dependency: f.Dependency, Reason: f.Reason})
+	}
+	return out, nil
+}
+
+// providerBuildTrigger adapts build.StartProjectBuild onto provisioning's
+// ProviderBuildTrigger port (issue #164, Task 4): the automated org-service
+// visibility flow kicks a not-yet-published provider project's build so it
+// deploys (and publishes org-wide). StartProjectBuild is idempotent — an
+// already-running provider build is treated as success.
+type providerBuildTrigger struct {
+	build *build.Service
+}
+
+func (t providerBuildTrigger) TriggerBuild(ctx context.Context, orgID, projectID string) error {
+	return t.build.StartProjectBuild(ctx, orgID, projectID)
 }
