@@ -219,8 +219,21 @@ export function SpecView({ projectName }: { projectName: string }) {
       try {
         await collab.flush(); // no-op when offline
         setBuildPhase("checking");
-        const { data } = await preflight.refetch();
-        if (data?.needsInput) {
+        const { data, isError, error } = await preflight.refetch();
+        if (isError || data === undefined) {
+          // TanStack's refetch() resolves rather than throws on error, so a
+          // preflight failure (network blip, expired session, BFF hiccup)
+          // must be handled explicitly here — otherwise it falls through to
+          // building with empty inputs, silently skipping dependency
+          // provisioning (the exact #164 symptom this feature fixes).
+          setBuildError(
+            error instanceof Error
+              ? error.message
+              : "Failed to check build readiness.",
+          );
+          return;
+        }
+        if (data.needsInput) {
           setPreflightItems(data.items ?? []);
           setDependencyDrawerOpen(true);
           return;

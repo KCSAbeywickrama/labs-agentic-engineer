@@ -164,6 +164,22 @@ describe("SpecView onBuild routing (#164)", () => {
     expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument();
   });
 
+  it("preflight refetch errors — surfaces the failure and does not build or navigate", async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: undefined,
+      isError: true,
+      error: new Error("boom"),
+    });
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+
+    await waitFor(() => expect(screen.getByText("boom")).toBeInTheDocument());
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument();
+  });
+
   it("needsInput:true — opens the dependency drawer and does not build", async () => {
     mockPreflightRefetch.mockResolvedValue({
       data: { needsInput: true, items: PREFLIGHT_ITEMS },
