@@ -17,9 +17,12 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { specKeys } from "./keys";
 import { toSpecEntries } from "./mapping";
+
+type FileContent = components["schemas"]["FileContent"];
 
 function toError(error: unknown, fallback: string): Error {
   const e = error as { detail?: string; title?: string } | undefined;
@@ -50,6 +53,33 @@ export function useSpecFiles(projectName: string) {
 }
 
 /**
+ * Fetch one spec file's content. Shared by the lazy selection hook below and
+ * the derived-view hooks (useDerivedCellDiagram, useDerivedWireframe), which
+ * fetch several files at once outside of a single "selected file" context.
+ */
+export async function fetchSpecFileContent(
+  projectName: string,
+  file: { path: string; sha: string },
+): Promise<FileContent> {
+  // openapi-fetch can't substitute Huma's `{path...}` wildcard (its
+  // serializer only knows `{name}`/`{name*}`, and both percent-encode
+  // the slashes the wildcard exists to keep). Build the concrete URL,
+  // cast to the contract path so the response stays typed. `file.path`
+      // is already the full repo path (specs/…) the Files API expects.
+  const repoPath = file.path
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  const { data, error } = await client.GET(
+    `/projects/${encodeURIComponent(projectName)}/files/${repoPath}` as "/projects/{projectName}/files/{path...}",
+    { params: { path: { projectName, path: file.path } } },
+  );
+  if (error || data === undefined)
+    throw toError(error, `Failed to load ${file.path}`);
+  return data;
+}
+
+/**
  * Content of one spec file, fetched lazily for the selection (#113
  * decision 4). Immutable per (path, sha) — see specKeys.file.
  */
@@ -61,24 +91,9 @@ export function useSpecFileContent(
     queryKey: specKeys.file(projectName, file?.path ?? "", file?.sha ?? ""),
     enabled: file !== null,
     staleTime: Infinity,
-    queryFn: async () => {
+    queryFn: () => {
       if (!file) throw new Error("no file selected");
-      // openapi-fetch can't substitute Huma's `{path...}` wildcard (its
-      // serializer only knows `{name}`/`{name*}`, and both percent-encode
-      // the slashes the wildcard exists to keep). Build the concrete URL,
-      // cast to the contract path so the response stays typed. `file.path`
-      // is already the full repo path (specs/…) the Files API expects.
-      const repoPath = file.path
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/");
-      const { data, error } = await client.GET(
-        `/projects/${encodeURIComponent(projectName)}/files/${repoPath}` as "/projects/{projectName}/files/{path...}",
-        { params: { path: { projectName, path: file.path } } },
-      );
-      if (error || data === undefined)
-        throw toError(error, `Failed to load ${file.path}`);
-      return data;
+      return fetchSpecFileContent(projectName, file);
     },
   });
 }

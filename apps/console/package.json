@@ -19,6 +19,11 @@
   "dependencies": {
     "@aep/agent-stream": "workspace:*",
     "@aep/collab-doc": "workspace:*",
+    "@aep/design-projection": "workspace:*",
+    "@aep/excalidraw-dsl": "workspace:*",
+    "@aep/ui-cell-diagram-view": "workspace:*",
+    "@aep/ui-excalidraw-view": "workspace:*",
+    "@aep/ui-openapi-view": "workspace:*",
     "@hocuspocus/provider": "4.3.0",
     "@tanstack/react-query": "5.90.5",
     "@tanstack/react-router": "1.170.17",
