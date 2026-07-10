@@ -65,6 +65,11 @@ type TaskView struct {
 	Hold          bool                     `json:"hold"`
 	Attention     []string                 `json:"attention"`
 	Executions    map[string]ExecutionView `json:"executions"`
+	// BlockedBy lists the dependency display names a not-yet-started coding Task
+	// is waiting on when its DerivedStatus was reconciled to on_hold (issue #164
+	// follow-up). Empty/omitted when the Task is not dependency-gated — the board
+	// reads it to render "On hold — Waiting for X".
+	BlockedBy []string `json:"blockedBy,omitempty"`
 }
 
 // TaskDetail is the Get shape: a TaskView plus the full Execution history.
@@ -79,12 +84,15 @@ type Reads struct {
 	repos    RepoResolver
 	execs    ExecutionReader
 	versions VersionReader // optional (stale-design attention)
+	design   DesignReader  // optional (dependency-gated on_hold reconciliation)
 }
 
 // NewReads wires the read path. versions may be nil (then the stale-design
-// attention flag is not computed).
-func NewReads(issues IssueClient, repos RepoResolver, execs ExecutionReader, versions VersionReader) *Reads {
-	return &Reads{issues: issues, repos: repos, execs: execs, versions: versions}
+// attention flag is not computed). design may be nil (then the dependency-gated
+// on_hold reconciliation degrades to component-dep gating only — provision /
+// org-service dep resolution is skipped).
+func NewReads(issues IssueClient, repos RepoResolver, execs ExecutionReader, versions VersionReader, design DesignReader) *Reads {
+	return &Reads{issues: issues, repos: repos, execs: execs, versions: versions, design: design}
 }
 
 // List returns the project's Tasks filtered by state ("open" | "closed" |
@@ -132,7 +140,155 @@ func (r *Reads) ListByTag(ctx context.Context, orgID, projectID, state, tag stri
 		}
 		out = append(out, view)
 	}
+	// Second pass: reconcile dependency-gated coding Tasks to on_hold + BlockedBy.
+	// This needs every sibling's derived status, so it runs after the per-issue
+	// loop over the whole set (issue #164 follow-up).
+	r.reconcileBlocked(ctx, orgID, projectID, out)
 	return out, nil
+}
+
+// reconcileBlocked is the read path's dependency-gated on_hold pass (issue #164
+// follow-up). A coding Task waiting on unresolved dependencies today derives a
+// misleading status — in_progress (a queued-not-running execution → board
+// "Ongoing") or pending (no execution → "Pending") — and records nothing about
+// WHY. Gating lives at two write-side layers (the funnel's depsGate for
+// provisioning deps, the Temporal task graph for sibling-component deps), neither
+// of which annotates the Task, so the read path — which already derived every
+// Task's status — is the reliable place to compute "is this waiting, and on
+// what". It mirrors funnel.depsGate/depDeployed, but resolves "deployed" from the
+// already-derived sibling views instead of re-loading each dep's executions.
+//
+// It overrides ONLY a not-started coding Task (absent or queued coding
+// execution): a genuinely running Task keeps in_progress. A met dep is one whose
+// resolving view derives deployed; an unmet dep is one whose resolver is missing
+// or not deployed. Provision + org-service deps gate CONDITIONALLY — only when a
+// consumer-side aep:provision gate exists for the dep — so a resolved/ready dep
+// with no gate never becomes a phantom forever-hold (the same conditional rule
+// the funnel applies to org-service deps).
+func (r *Reads) reconcileBlocked(ctx context.Context, orgID, projectID string, views []TaskView) {
+	// Resolution maps over the derived views (mirror the funnel's projectView):
+	// coding/ops Tasks index by component; aep:provision gates index by dependency
+	// name (a provision gate's Component field IS the dep name). Highest issue
+	// number wins, matching the funnel's latest-per-component rule.
+	latestByComponent := map[string]TaskView{}
+	provisionByDep := map[string]TaskView{}
+	for _, v := range views {
+		key := strings.ToLower(v.Component)
+		if key == "" {
+			continue
+		}
+		if v.ExecutorClass == string(taskmeta.ClassProvision) {
+			if cur, ok := provisionByDep[key]; !ok || v.IssueNumber > cur.IssueNumber {
+				provisionByDep[key] = v
+			}
+			continue
+		}
+		if cur, ok := latestByComponent[key]; !ok || v.IssueNumber > cur.IssueNumber {
+			latestByComponent[key] = v
+		}
+	}
+
+	// Per-component provision + org-service deps from the design at HEAD. A nil
+	// design reader or a read error degrades to component-dep gating only (the
+	// block's dependsOn still resolves), never blocks the list.
+	var provisionDeps, orgServiceDeps map[string][]string
+	if r.design != nil {
+		if deps, err := r.design.ProvisionDepNames(ctx, orgID, projectID); err != nil {
+			slog.WarnContext(ctx, "reads: read provision deps failed", "project", projectID, "error", err)
+		} else {
+			provisionDeps = deps
+		}
+		if deps, err := r.design.OrgServiceDepNames(ctx, orgID, projectID); err != nil {
+			slog.WarnContext(ctx, "reads: read org-service deps failed", "project", projectID, "error", err)
+		} else {
+			orgServiceDeps = deps
+		}
+	}
+
+	// depMet mirrors funnel.depDeployed: a dep resolves via its component Task,
+	// falling back to its aep:provision gate; it is met iff that view derives
+	// deployed. An unresolvable name is not met.
+	depMet := func(dep string) bool {
+		key := strings.ToLower(dep)
+		v, ok := latestByComponent[key]
+		if !ok {
+			v, ok = provisionByDep[key]
+		}
+		if !ok {
+			return false
+		}
+		return v.DerivedStatus == string(taskmeta.StatusDeployed)
+	}
+
+	for i := range views {
+		v := &views[i]
+		if v.ExecutorClass != string(taskmeta.ClassCoding) {
+			continue
+		}
+		if !nonTerminalForHold(v.DerivedStatus) || !codingNotStarted(v) {
+			continue
+		}
+		compKey := strings.ToLower(v.Component)
+		seen := map[string]bool{}
+		var unmet []string
+		check := func(dep string) {
+			key := strings.ToLower(dep)
+			if key == "" || seen[key] {
+				return
+			}
+			seen[key] = true
+			if !depMet(dep) {
+				unmet = append(unmet, dep)
+			}
+		}
+		// Sibling-component deps (the block's dependsOn) gate unconditionally.
+		for _, dep := range v.DependsOn {
+			check(dep)
+		}
+		// Provision + org-service deps gate ONLY when an aep:provision gate exists
+		// for the dep (indexed in provisionByDep): a resolved/ready dep with no gate
+		// is not blocking.
+		for _, dep := range provisionDeps[compKey] {
+			if _, gated := provisionByDep[strings.ToLower(dep)]; gated {
+				check(dep)
+			}
+		}
+		for _, dep := range orgServiceDeps[compKey] {
+			if _, gated := provisionByDep[strings.ToLower(dep)]; gated {
+				check(dep)
+			}
+		}
+		if len(unmet) > 0 {
+			v.DerivedStatus = string(taskmeta.StatusOnHold)
+			v.BlockedBy = unmet
+		}
+	}
+}
+
+// nonTerminalForHold reports whether a derived status is one the dependency
+// reconciler may override to on_hold: a Task still waiting to run (pending /
+// in_progress / on_hold). Every terminal or past-dispatch status (deployed,
+// building, merged, ready_for_review, rejected, abandoned, failed) is left
+// untouched.
+func nonTerminalForHold(status string) bool {
+	switch taskmeta.DerivedStatus(status) {
+	case taskmeta.StatusPending, taskmeta.StatusInProgress, taskmeta.StatusOnHold:
+		return true
+	}
+	return false
+}
+
+// codingNotStarted reports whether a coding Task has NOT begun running: its
+// latest coding execution is absent or still queued (a dependency-gated Task
+// queues behind the funnel's gate). A running coding execution means the Task was
+// dispatched — genuinely in_progress — and must not be overridden to on_hold. The
+// view's Executions map carries the latest status per kind.
+func codingNotStarted(v *TaskView) bool {
+	e, ok := v.Executions[string(taskmeta.KindCoding)]
+	if !ok {
+		return true
+	}
+	return e.Status == string(taskmeta.ExecQueued)
 }
 
 // Get returns one Task with its full Execution history.
