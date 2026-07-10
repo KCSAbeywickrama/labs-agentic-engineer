@@ -75,6 +75,11 @@ export function TaskPage({
     log.settledStatus ?? log.task?.derivedStatus ?? detail.data.derivedStatus;
   const title = log.task?.title ?? detail.data.title;
   const issueUrl = log.task?.issueUrl ?? detail.data.issueUrl;
+  // TaskDetail (the get-task response) doesn't carry blockedBy — only the
+  // stream's TaskView does — so this is populated once the SSE stream has
+  // upserted a task frame, and simply absent before that (fine: the caption
+  // is optional decoration, not load-bearing).
+  const blockedBy = log.task?.blockedBy;
 
   const tail =
     log.phase === "reconnecting"
@@ -135,6 +140,11 @@ export function TaskPage({
           </IconButton>
         </Tooltip>
       </Stack>
+      {derivedStatus === "on_hold" && blockedBy?.length ? (
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>
+          Waiting for {blockedBy.join(", ")}
+        </Typography>
+      ) : null}
       <TaskLogView lines={log.lines} {...(tail ? { tail } : {})} />
     </Box>
   );

@@ -1692,6 +1692,13 @@ components:
           type:
             - array
             - "null"
+        blockedBy:
+          description: >-
+            Names of the dependencies this task is waiting on; present when
+            derivedStatus is on_hold.
+          items:
+            type: string
+          type: array
         body:
           type: string
         component:

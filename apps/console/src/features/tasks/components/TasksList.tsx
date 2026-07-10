@@ -121,7 +121,14 @@ export function TasksList({ projectName }: { projectName: string }) {
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
-                <TaskStatusChip derivedStatus={t.derivedStatus} />
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                  <TaskStatusChip derivedStatus={t.derivedStatus} />
+                  {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
+                    <Typography variant="caption" color="text.secondary">
+                      Waiting for {t.blockedBy.join(", ")}
+                    </Typography>
+                  ) : null}
+                </Box>
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 64 }}>
                 <Tooltip title="Open the GitHub issue">
