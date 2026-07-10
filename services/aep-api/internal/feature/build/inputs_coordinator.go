@@ -55,6 +55,11 @@ func NewInputsCoordinator(spec SpecCollector, auth AuthDeriver, stager SecretSta
 // handler returns {failures} and cuts no tag); an auth-derivation error
 // (conflict / catalog-unavailable) propagates as err for the handler to map to
 // 409 / 503.
+//
+// When any spec collection fails the build is already aborting, so we return
+// the failures WITHOUT deriving auth — deriving would commit to HEAD for a
+// build that never cuts a tag, and an auth error would mask the spec failures
+// the user actually needs to see. The next Build re-derives idempotently.
 func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) ([]InputFailure, error) {
 	var failures []InputFailure
 	for _, in := range inputs {
@@ -73,6 +78,9 @@ func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID st
 				Reason:     err.Error(),
 			})
 		}
+	}
+	if len(failures) > 0 {
+		return failures, nil
 	}
 	if err := c.auth.DeriveEndUserAuthAtHead(ctx, orgID, projectID); err != nil {
 		return failures, err

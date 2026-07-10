@@ -18,6 +18,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,7 +66,10 @@ func stripeExternal() []models.DesignComponent {
 	}}
 }
 
-type recordingSpec struct{ calls []specCall }
+type recordingSpec struct {
+	calls []specCall
+	err   error // when set, every CollectSpec call fails with it
+}
 
 type specCall struct {
 	component, dep, url string
@@ -74,6 +78,9 @@ type specCall struct {
 
 func (s *recordingSpec) CollectSpec(_ context.Context, _, _, component, dep string, raw []byte, url string) (string, error) {
 	s.calls = append(s.calls, specCall{component: component, dep: dep, url: url, raw: raw})
+	if s.err != nil {
+		return "", s.err
+	}
 	return "components/" + component + "/dependencies/" + dep + ".openapi.yaml", nil
 }
 
@@ -149,4 +156,20 @@ func TestApplyPreTag_AuthConflictReturnsError(t *testing.T) {
 	c := &InputsCoordinator{spec: &recordingSpec{}, auth: auth}
 	_, err := c.ApplyPreTag(ctx, "acme", "shop", nil)
 	require.ErrorIs(t, err, ErrEndUserAuthConflict)
+}
+
+// When a spec collection fails the build is aborting, so auth derivation must
+// NOT run (it would commit to HEAD for a build that cuts no tag) and the spec
+// failures must be returned intact rather than masked by an auth error.
+func TestApplyPreTag_SpecFailureSkipsAuthDerivation(t *testing.T) {
+	spec := &recordingSpec{err: errors.New("fetch failed")}
+	auth := &recordingAuth{}
+	c := &InputsCoordinator{spec: spec, auth: auth}
+	fails, err := c.ApplyPreTag(ctx, "acme", "shop", []BuildInputItem{
+		{Component: "o", Dependency: "stripe", Kind: "external-spec", SpecURL: "https://x/openapi.yaml"},
+	})
+	require.NoError(t, err)
+	require.Len(t, fails, 1)
+	require.Equal(t, "stripe", fails[0].Dependency)
+	require.Equal(t, 0, auth.calls) // auth derivation skipped on spec failure
 }
