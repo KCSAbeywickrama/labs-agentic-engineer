@@ -83,6 +83,15 @@ func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, want []string) (
 	}
 	return out, nil
 }
+func (f *fakeIssues) GetIssue(_ context.Context, _, _ string, n int) (*gitrepo.IssueInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := f.byNum[n]; i != nil {
+		cp := *i
+		return &cp, nil
+	}
+	return nil, gitrepo.ErrIssueNotFound
+}
 func (f *fakeIssues) CommentIssue(context.Context, string, string, int, string) error { return nil }
 func (f *fakeIssues) EditIssueBody(context.Context, string, string, int, string) error {
 	return nil
@@ -199,7 +208,7 @@ func newRig(t *testing.T, iss *fakeIssues, execs fakeExecs, specVersions []artif
 	t.Helper()
 	disp := &fakeDispatcher{signal: make(chan struct{}, 8)}
 	reads := task.NewReads(iss, fakeRepos{}, execs, nil)
-	commands := task.NewCommands(iss, fakeRepos{}, disp)
+	commands := task.NewCommands(iss, fakeRepos{}, disp, nil)
 	plan := task.NewPlanService(fakeRepos{}, fakeVersions{spec: specVersions}, nil,
 		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, iss, nil, nil)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{

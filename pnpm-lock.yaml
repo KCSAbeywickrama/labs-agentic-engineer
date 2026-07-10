@@ -323,6 +323,31 @@ importers:
         specifier: ^25.5.0
         version: 25.9.4
 
+  services/aep-mcp-server:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.24.0
+        version: 1.29.0(zod@4.4.3)
+      express:
+        specifier: ^5.0.0
+        version: 5.2.1
+      zod:
+        specifier: ^4.3.6
+        version: 4.4.3
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
+      '@types/node':
+        specifier: ^25.6.0
+        version: 25.9.4
+      tsx:
+        specifier: ^4.21.0
+        version: 4.22.4
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   services/agents:
     dependencies:
       '@aep/agent-stream':
