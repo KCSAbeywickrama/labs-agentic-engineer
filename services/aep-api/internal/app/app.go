@@ -213,10 +213,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// case when smClient is nil is fine).
 	smWriter := orgcreds.NewSMAPIWriter(smClient, db)
 
-	// cluster-gateway-proxy client — the local plane's coding-agent dispatch
-	// path (`ca-…` Jobs). When CLUSTER_GATEWAY_PROXY_URL is empty the proxy
-	// executor + JobWatcher are not wired and the coding executor uses the
-	// ClusterWorkflow fallback.
+	// cluster-gateway-proxy client. Used for reading coding-agent pod logs +
+	// job status (streaming feed + JobWatcher) and, when sm-api is also
+	// configured, for the full proxy DISPATCH path. When CLUSTER_GATEWAY_PROXY_URL
+	// is empty none of those are wired and dispatch uses the direct
+	// K8sJobDispatcher with no live streaming. In a local install this points at
+	// the in-cluster cluster-gateway-proxy stub (reads only).
 	var cgwClient *clustergatewayproxy.Client
 	if cfg.ClusterGatewayProxyURL != "" {
 		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
@@ -226,7 +228,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		cgwClient = clustergatewayproxy.New(cgwCfg)
 		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL, "authenticated", tokenProvider != nil)
 	} else {
-		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — coding-agent dispatch uses the ClusterWorkflow fallback")
+		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — coding-agent live streaming + JobWatcher disabled; dispatch uses the direct K8s Job path")
 	}
 
 	// Credentials + git-service services and controllers.
@@ -511,9 +513,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
 	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
 	// Coding-execution activity feed: live-tail the ca-… pod log while running,
-	// serve the captured coding_agent_logs snapshot once terminal. Wired only on
-	// the proxy dispatch path (cgwClient present); otherwise coding executions
-	// report terminal-ness only.
+	// serve the captured coding_agent_logs snapshot once terminal. Keyed on the
+	// proxy client alone (NOT on the dispatch path): a local install dispatches
+	// via the direct K8sJobDispatcher but still reads pod logs through the
+	// proxy stub, so streaming works regardless of which dispatcher ran.
 	if cgwClient != nil {
 		execProgressSvc.WithCodingProgress(codingagent.NewAgentProgressReader(cgwClient, db))
 	}
@@ -630,14 +633,30 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// applied skills locally (the same EnsureProvisioned+GetRepo closure the
 	// genai + task-plan turns use for their SkillsRef).
 	codingExecutor.WithSkillsRepo(skillsRepoForTurns)
-	// The cluster-gateway-proxy dispatch path (the `ca-…` Jobs the local plane
-	// uses): per-org NS + per-run ExternalSecrets + a K8s Job via the proxy.
-	// Publisher-cc is provisioned through idpService (skipped for an http
-	// platform URL). Falls back to ClusterWorkflow when unconfigured.
-	if cgwClient != nil {
+	// The cluster-gateway-proxy DISPATCH path (per-org NS + per-run
+	// ExternalSecrets + a K8s Job via the proxy) requires sm-api: the per-run
+	// ExternalSecrets source their values (Anthropic key, etc.) from it. So this
+	// path is gated on BOTH the proxy AND sm-api being configured — the cloud/prod
+	// posture. In a local install the proxy stub is present for reads (streaming +
+	// JobWatcher, both keyed on cgwClient below) but sm-api is not, so dispatch
+	// falls through to the direct K8sJobDispatcher, which writes the Anthropic
+	// Secret straight into the runner namespace (no OpenBao/ESO/sm-api).
+	if cgwClient != nil && cfg.SecretManagerAPIURL != "" {
 		codingExecutor.WithProxy(codingagent.New(cgwClient), db, idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
-		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled",
+		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled (proxy + sm-api)",
 			"runnerImage", cfg.AgentRunnerImage, "clusterSecretStore", cfg.AgentClusterSecretStore)
+	}
+	// Direct K8s Job fallback: no cluster-gateway-proxy or SM-API needed.
+	// Enabled when the in-cluster client, runner image, and platform URL are all set.
+	if wpClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != "" {
+		k8sJobDispatcher := codingagent.NewK8sJobDispatcher(
+			wpClient,
+			anthropicKeyReaderAdapter{svc: anthropicCredService},
+			cfg.AgentPlatformURL,
+			cfg.AgentRunnerImage,
+		)
+		codingExecutor.WithK8sJobDispatch(k8sJobDispatcher, db)
+		slog.Info("coding executor: direct k8s-job dispatch path enabled", "runnerImage", cfg.AgentRunnerImage)
 	}
 	// Build-secret staging so the post-merge build clones a PRIVATE project repo
 	// (the local plane sets GITHUB_REPO_VISIBILITY=private). Reuses the same
@@ -956,13 +975,22 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// locally-buffered streams get the terminal event.
 		genai.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
 	}
-	// JobWatcher polls the proxy-dispatched `ca-…` coding-agent Jobs and Finishes
-	// the coding execution FAILED on Job failure (success rides the PR webhook),
-	// capturing the pod's final log. Only when the proxy path is configured.
+	// JobWatcher polls the `ca-…` coding-agent Jobs and Finishes the coding
+	// execution FAILED on Job failure (success rides the PR webhook), capturing
+	// the pod's final log. Keyed on the proxy client alone: both dispatch paths
+	// (proxy and direct K8sJobDispatcher) emit `ca-…` run names, so the watcher
+	// reads job status + logs through the proxy stub regardless of dispatcher.
 	if cgwClient != nil {
-		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo).
-			WithWorkflowSignaler(devflowSignaler))
-		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
+		jobWatcher := codingagent.NewJobWatcher(db, cgwClient, executionRepo).
+			WithWorkflowSignaler(devflowSignaler)
+		// Per-run ExternalSecret teardown applies only to the proxy dispatch
+		// path (which stages them); the direct K8s-Job path creates none.
+		if cfg.SecretManagerAPIURL != "" {
+			jobWatcher.WithExternalSecretCleanup()
+		}
+		watchers = append(watchers, jobWatcher)
+		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)",
+			"externalSecretCleanup", cfg.SecretManagerAPIURL != "")
 	}
 	// Temporal devflow worker. Registered only when Temporal is configured
 	// (TEMPORAL_HOSTPORT set). The watcher dials in a retry loop, so a Temporal

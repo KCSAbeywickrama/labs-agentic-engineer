@@ -50,6 +50,23 @@ func Init() {
 	// OpenChoreo platform API defaults — overridable via ~/.aep/config.yaml.
 	viper.SetDefault("oc.api_url", "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080")
 
+	// Coding-agent dispatch + live streaming — overridable via ~/.aep/config.yaml.
+	//
+	// codingagent.local_stubs.enabled: LOCAL DEV ONLY. Deploys the in-cluster
+	// cluster-gateway-proxy stub that aep-api reads coding-agent pod logs + job
+	// status through (the live activity feed + JobWatcher). The stub forwards
+	// arbitrary Kubernetes API calls with NO auth/allowlist, so it must NEVER be
+	// enabled in production. Defaults true here because `aep init` is the local
+	// dev install flow; for a prod install set it false in ~/.aep/config.yaml and
+	// point cluster_gateway_proxy.url / secret_manager_api.url at the real
+	// managed services instead.
+	viper.SetDefault("codingagent.local_stubs.enabled", true)
+	// Real endpoints for prod (ignored locally when the stub is enabled). Leave
+	// secret_manager_api.url empty to keep coding dispatch on the direct K8s Job
+	// path (no OpenBao/ESO/sm-api); set it to enable the full proxy dispatch path.
+	viper.SetDefault("codingagent.cluster_gateway_proxy.url", "")
+	viper.SetDefault("codingagent.secret_manager_api.url", "")
+
 	// Thunder defaults — all overridable via ~/.aep/config.yaml or AEP_THUNDER_* env vars.
 	viper.SetDefault("thunder.namespace", "thunder")
 	viper.SetDefault("thunder.url", "http://thunder-service.thunder.svc.cluster.local:8090")

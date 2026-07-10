@@ -58,6 +58,43 @@ console:
     clientId: "aep-console-client"
     scopes: "openid profile email"
 
+codingAgentRunner:
+  # Docker image for the coding-agent runner Job. Dispatched directly as a
+  # K8s Job in the org's data-plane remote-worker namespace.
+  image: "docker.io/xlight05/aep-coding-agent-runner:v7"
+
+# Coding-agent dispatch + live-streaming wiring.
+#
+# The coding-agent runner writes NDJSON progress to its pod stdout; aep-api
+# surfaces the live activity feed + drives the JobWatcher by READING that pod's
+# logs through the cluster-gateway-proxy. In cloud/prod that proxy is a real
+# managed service; locally we run an in-cluster stub of it (reads only), while
+# dispatch stays on the direct K8s Job path.
+codingAgentDispatch:
+  localStubs:
+    # LOCAL DEV ONLY. Deploys the in-cluster cluster-gateway-proxy stub, which
+    # forwards arbitrary K8s API calls to the cluster with NO auth/allowlist.
+    # NEVER set true in production — prod uses the real managed proxy; enabling
+    # this in a shared cluster exposes the K8s API. aep init sets this true for
+    # local installs; prod leaves it false and supplies the real URLs below.
+    enabled: false
+  clusterGatewayProxy:
+    # Base URL aep-api uses to reach the cluster-gateway-proxy. When
+    # localStubs.enabled and this is empty, the chart wires the in-cluster stub
+    # Service DNS automatically. In prod, set this to the real proxy endpoint.
+    url: ""
+    # Stub image + port — only used when localStubs.enabled.
+    image: "senithkay/ae:cluster-gateway-proxy"
+    port: 8085
+  secretManagerApi:
+    # Base URL of the secret-manager-api. Empty (local) → coding dispatch uses
+    # the direct K8s Job path, which writes the Anthropic Secret straight into
+    # the runner namespace (no OpenBao/ESO/sm-api). In prod, set this to the
+    # real sm-api endpoint to enable the full proxy dispatch path. No local stub
+    # is shipped for sm-api (the hardened install revokes the OpenBao root token
+    # the stub would need).
+    url: ""
+
 taskSigning:
   issuer: "aep-bff"
   audience: "git-service"

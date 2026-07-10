@@ -51,6 +51,13 @@ type JobWatcher struct {
 	pollInterval time.Duration
 	once         sync.Once
 
+	// cleanupExternalSecrets gates the per-run ExternalSecret teardown. Only the
+	// proxy DISPATCH path stages per-run ExternalSecrets (anthropic/github/
+	// publisher); the direct K8sJobDispatcher writes a plain Secret and creates
+	// none, so with it the cleanup would only 403/404 on resources that never
+	// existed. Enabled from the composition root when proxy dispatch is active.
+	cleanupExternalSecrets bool
+
 	// signaler feeds a coding-job failure to a waiting devflow TaskFlow
 	// workflow. Nil-safe (no-op when absent).
 	signaler *devflow.Signaler
@@ -68,6 +75,14 @@ func NewJobWatcher(db *gorm.DB, proxy *clustergatewayproxy.Client, execRows repo
 // reaches a waiting TaskFlow workflow. Optional. Returns the receiver.
 func (w *JobWatcher) WithWorkflowSignaler(s *devflow.Signaler) *JobWatcher {
 	w.signaler = s
+	return w
+}
+
+// WithExternalSecretCleanup enables per-run ExternalSecret teardown on terminal
+// Job state. Wire only when the proxy dispatch path is active (it is what
+// stages them); leave off for direct K8s-Job dispatch. Returns the receiver.
+func (w *JobWatcher) WithExternalSecretCleanup() *JobWatcher {
+	w.cleanupExternalSecrets = true
 	return w
 }
 
@@ -127,7 +142,9 @@ func (w *JobWatcher) checkOne(ctx context.Context, row *models.Execution) {
 		// Agent succeeded — the coding Execution ends via the PR webhook, not
 		// here. Capture the log + clean up the per-run ExternalSecrets.
 		w.captureFinalLog(ctx, row, ns, "Succeeded")
-		w.cleanupPerRunExternalSecrets(ctx, row, ns)
+		if w.cleanupExternalSecrets {
+			w.cleanupPerRunExternalSecrets(ctx, row, ns)
+		}
 	case status.Failed > 0:
 		reason := "job_failed"
 		for _, c := range status.Conditions {
@@ -137,7 +154,9 @@ func (w *JobWatcher) checkOne(ctx context.Context, row *models.Execution) {
 			}
 		}
 		w.captureFinalLog(ctx, row, ns, "Failed")
-		w.cleanupPerRunExternalSecrets(ctx, row, ns)
+		if w.cleanupExternalSecrets {
+			w.cleanupPerRunExternalSecrets(ctx, row, ns)
+		}
 		w.finishFailed(ctx, row, reason)
 	}
 }

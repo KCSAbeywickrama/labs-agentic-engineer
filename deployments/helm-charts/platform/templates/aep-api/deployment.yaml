@@ -50,6 +50,13 @@ spec:
               value: "aep-*"
             - name: SERVICE_AUTH_CLIENT_ID
               value: {{ .Values.aepApi.serviceAuth.clientId | quote }}
+            - name: SERVICE_AUTH_TOKEN_URL
+              value: "{{ .Values.thunder.adminURL }}/oauth2/token"
+            - name: SERVICE_AUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-thunder-secrets
+                  key: AEP_API_CLIENT_SECRET
             - name: SERVICE_AUTH_HOST_HEADER
               value: ""
             - name: BFF_TASK_SIGNING_KEY_PATH
@@ -89,6 +96,28 @@ spec:
               value: "aep-system-client"
             - name: AGENTS_SVC_BASE_URL
               value: "http://aep-agents.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepAgents.port }}"
+            - name: AGENT_PLATFORM_URL
+              value: "http://aep-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepApi.port }}"
+            - name: AGENT_RUNNER_IMAGE
+              value: {{ .Values.codingAgentRunner.image | quote }}
+            # cluster-gateway-proxy: enables coding-agent live streaming +
+            # JobWatcher (reads pod logs/job status). Local → in-cluster stub
+            # Service; prod → the real managed proxy URL. Unset → no streaming,
+            # dispatch via the direct K8s Job path.
+            {{- if .Values.codingAgentDispatch.localStubs.enabled }}
+            - name: CLUSTER_GATEWAY_PROXY_URL
+              value: "http://cluster-gateway-proxy.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.codingAgentDispatch.clusterGatewayProxy.port }}"
+            {{- else if .Values.codingAgentDispatch.clusterGatewayProxy.url }}
+            - name: CLUSTER_GATEWAY_PROXY_URL
+              value: {{ .Values.codingAgentDispatch.clusterGatewayProxy.url | quote }}
+            {{- end }}
+            # secret-manager-api: when set, enables the full proxy DISPATCH path
+            # (per-run ExternalSecrets). Left empty locally so dispatch uses the
+            # direct K8s Job path. Set to the real sm-api endpoint in prod.
+            {{- if .Values.codingAgentDispatch.secretManagerApi.url }}
+            - name: SECRET_MANAGER_API_URL
+              value: {{ .Values.codingAgentDispatch.secretManagerApi.url | quote }}
+            {{- end }}
 
             # secrets — all values sourced from ESO-synced K8s Secrets (written by aep init)
             - name: AGENTS_SVC_JWT_SECRET

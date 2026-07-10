@@ -1,0 +1,24 @@
+# OpenChoreo authorization: OC authorizes API calls against its own
+# ClusterAuthzRoleBinding CRD, matching a token's `sub` claim to a
+# ClusterAuthzRole — it does NOT consult Thunder role assignments. aep-api's
+# outbound service calls (coding-dispatch component pre-flight, etc.) present a
+# client_credentials token with sub={{ .Values.aepApi.serviceAuth.clientId }};
+# without this binding OC returns 403 "You do not have permission". Mirrors the
+# legacy setup-aep.sh `aep-api-client-binding`. The ClusterAuthzRole `admin` is
+# provided by the OpenChoreo control-plane install (the base platform).
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRoleBinding
+metadata:
+  name: aep-api-client-binding
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-aep
+spec:
+  effect: allow
+  entitlement:
+    claim: sub
+    value: {{ .Values.aepApi.serviceAuth.clientId | quote }}
+  roleMappings:
+    - roleRef:
+        kind: ClusterAuthzRole
+        name: admin

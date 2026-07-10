@@ -168,6 +168,18 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if mode := viper.GetString("platform.workspaces.access_mode"); mode != "" {
 		helmArgs = append(helmArgs, "--set", "workspaces.accessMode="+mode)
 	}
+	// Coding-agent dispatch: deploy the local cluster-gateway-proxy stub (reads
+	// pod logs/job status for live streaming + JobWatcher) unless disabled. Prod
+	// installs set codingagent.local_stubs.enabled=false and supply the real
+	// endpoint URLs — see ~/.aep/config.yaml.
+	helmArgs = append(helmArgs, "--set",
+		fmt.Sprintf("codingAgentDispatch.localStubs.enabled=%t", viper.GetBool("codingagent.local_stubs.enabled")))
+	if u := viper.GetString("codingagent.cluster_gateway_proxy.url"); u != "" {
+		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.clusterGatewayProxy.url="+u)
+	}
+	if u := viper.GetString("codingagent.secret_manager_api.url"); u != "" {
+		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.secretManagerApi.url="+u)
+	}
 	var helmOut bytes.Buffer
 	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)
 	helmCmd.Stdout = &helmOut
