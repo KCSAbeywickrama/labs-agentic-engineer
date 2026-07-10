@@ -226,10 +226,11 @@ func (f fakeRepos) ByFullName(context.Context, string) (string, string, error) {
 }
 
 // fakeDesign returns a fixed component-name set and optional per-component
-// provisioning deps.
+// provisioning + org-service deps.
 type fakeDesign struct {
-	names        map[string]bool
-	provisionDep map[string][]string
+	names         map[string]bool
+	provisionDep  map[string][]string
+	orgServiceDep map[string][]string
 }
 
 func (f fakeDesign) ComponentNames(context.Context, string, string) (map[string]bool, error) {
@@ -238,6 +239,10 @@ func (f fakeDesign) ComponentNames(context.Context, string, string) (map[string]
 
 func (f fakeDesign) ProvisionDepNames(context.Context, string, string) (map[string][]string, error) {
 	return f.provisionDep, nil
+}
+
+func (f fakeDesign) OrgServiceDepNames(context.Context, string, string) (map[string][]string, error) {
+	return f.orgServiceDep, nil
 }
 
 // fakeExecutor records the requests it received and can be told to Start the row

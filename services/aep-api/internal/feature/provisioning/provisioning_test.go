@@ -38,6 +38,11 @@ type fakeIssues struct {
 	closed   map[int]string
 	comments map[int][]string
 	nextNum  int
+	// project records the project each CREATED issue belongs to so ListIssues can
+	// filter by project (production lists issues per project repo). Seeded issues
+	// carry no project and match every project — backward compatible with the
+	// single-project tests.
+	project map[int]string
 }
 
 func newFakeIssues(seed []gitrepo.IssueInfo) *fakeIssues {
@@ -47,17 +52,24 @@ func newFakeIssues(seed []gitrepo.IssueInfo) *fakeIssues {
 			max = i.Number
 		}
 	}
-	return &fakeIssues{list: seed, closed: map[int]string{}, comments: map[int][]string{}, nextNum: max + 1}
+	return &fakeIssues{list: seed, closed: map[int]string{}, comments: map[int][]string{}, nextNum: max + 1, project: map[int]string{}}
 }
 
-func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, _ []string) ([]gitrepo.IssueInfo, error) {
-	return f.list, nil
+func (f *fakeIssues) ListIssues(_ context.Context, _, projectID string, _ []string) ([]gitrepo.IssueInfo, error) {
+	var out []gitrepo.IssueInfo
+	for _, i := range f.list {
+		if p := f.project[i.Number]; p == "" || p == projectID {
+			out = append(out, i)
+		}
+	}
+	return out, nil
 }
-func (f *fakeIssues) CreateIssue(_ context.Context, _, _ string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error) {
+func (f *fakeIssues) CreateIssue(_ context.Context, _, projectID string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error) {
 	f.created = append(f.created, req)
 	n := f.nextNum
 	f.nextNum++
 	f.list = append(f.list, gitrepo.IssueInfo{Number: n, Title: req.Title, Body: req.Body, State: "open", Labels: req.Labels})
+	f.project[n] = projectID
 	return &gitrepo.IssueResult{Number: n}, nil
 }
 func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, comment string) error {

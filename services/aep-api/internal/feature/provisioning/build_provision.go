@@ -92,7 +92,16 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 				failures = append(failures, ProvisionFailure{Component: in.Component, Dependency: in.Dependency, Reason: err.Error()})
 			}
 		case buildKindOrgService:
-			// Cross-project org-service access is authored in Task 4 — no-op here.
+			// Cross-project org-service visibility (issue #164, Task 4): for an
+			// APPROVED-but-unresolved org-service dep, record the access request, mint
+			// the consumer-side visibility gate, and kick the provider's build. An
+			// unapproved dep is left alone (the user did not opt in). Per-input batch
+			// semantics: a failure becomes a ProvisionFailure and the batch continues.
+			if in.Approved {
+				if err := s.StartOrgServiceVisibility(ctx, orgID, projectID, in.Dependency); err != nil {
+					failures = append(failures, ProvisionFailure{Component: in.Component, Dependency: in.Dependency, Reason: err.Error()})
+				}
+			}
 		default:
 			slog.WarnContext(ctx, "provisioning: unknown build provision kind", "kind", in.Kind, "dependency", in.Dependency)
 		}

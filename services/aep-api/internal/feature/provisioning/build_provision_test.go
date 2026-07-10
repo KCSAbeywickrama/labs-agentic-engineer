@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -128,9 +129,9 @@ func TestProvisionForBuild_ExternalAuthorFailureContinues(t *testing.T) {
 	}
 }
 
-// TestProvisionForBuild_OrgServiceIsNoop confirms an org-service input is a
-// no-op in this task (Task 4 fills it) and never errors.
-func TestProvisionForBuild_OrgServiceIsNoop(t *testing.T) {
+// TestProvisionForBuild_OrgServiceUnapprovedIsNoop confirms an UNAPPROVED
+// org-service input authors nothing (the user did not opt in) and never errors.
+func TestProvisionForBuild_OrgServiceUnapprovedIsNoop(t *testing.T) {
 	issues := newFakeIssues(nil)
 	ext := &fakeExtProv{}
 	plat := &fakePlatProv{}
@@ -138,13 +139,68 @@ func TestProvisionForBuild_OrgServiceIsNoop(t *testing.T) {
 		fakeDesign{comps: []models.DesignComponent{{Name: "web"}}}, &fakeCatalog{}, ext, plat, &fakeBindings{})
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
-		{Component: "web", Dependency: "inventory", Kind: "org-service", Approved: true},
+		{Component: "web", Dependency: "inventory", Kind: "org-service", Approved: false},
 	})
 	if err != nil || len(fails) != 0 {
-		t.Fatalf("org-service must be a silent no-op, got fails=%+v err=%v", fails, err)
+		t.Fatalf("unapproved org-service must be a silent no-op, got fails=%+v err=%v", fails, err)
 	}
 	if ext.authorRefCalls != 0 || plat.calls != 0 {
 		t.Fatalf("org-service must author nothing")
+	}
+	if len(issues.created) != 0 {
+		t.Fatalf("unapproved org-service must mint no gate, created %d", len(issues.created))
+	}
+}
+
+// TestProvisionForBuild_OrgServiceApprovedStartsVisibility confirms an APPROVED
+// org-service input drives StartOrgServiceVisibility (issue #164, Task 4): the
+// consumer visibility gate + provider org-publish issue are minted and the
+// provider build is triggered, without failing the batch.
+func TestProvisionForBuild_OrgServiceApprovedStartsVisibility(t *testing.T) {
+	issues := newFakeIssues(nil)
+	access := &fakeAccess{}
+	build := &fakeProviderBuild{}
+	consumer := models.DesignComponent{Name: "web", Dependencies: []models.Dependency{
+		{Kind: models.DependencyKindOrgService, Name: "inventory"},
+	}}
+	svc := NewService(Deps{
+		Issues:    issues,
+		Execs:     &fakeExecStore{},
+		Reeval:    &fakeReeval{},
+		Design:    fakeDesign{comps: []models.DesignComponent{consumer}},
+		Repos:     fakeRepos{},
+		Access:    access,
+		Providers: fakeProviders{byName: map[string]openchoreo.WorkloadEndpointInfo{
+			"inventory": {Project: "warehouse", Component: "warehouse-inventory", Name: "http"},
+		}},
+	})
+	svc.SetProviderBuildTrigger(build)
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "storefront", "v3", []BuildProvisionInput{
+		{Component: "web", Dependency: "inventory", Kind: "org-service", Approved: true},
+	})
+	if err != nil || len(fails) != 0 {
+		t.Fatalf("approved org-service must not fail the batch, got fails=%+v err=%v", fails, err)
+	}
+	// One consumer visibility gate + one provider org-publish issue minted.
+	var haveVisibility, haveOrgPublish bool
+	for _, req := range issues.created {
+		block, berr := taskmeta.ParseBlock(req.Body)
+		if berr != nil {
+			continue
+		}
+		switch block.GateKind {
+		case taskmeta.GateOrgServiceVisibility:
+			haveVisibility = true
+		case taskmeta.GateOrgPublish:
+			haveOrgPublish = true
+		}
+	}
+	if !haveVisibility || !haveOrgPublish {
+		t.Fatalf("approved org-service must mint the consumer visibility gate + provider org-publish issue, created %+v", issues.created)
+	}
+	if build.calls != 1 || build.lastPrj != "warehouse" {
+		t.Fatalf("approved org-service must trigger the provider build once for the provider project, got calls=%d prj=%q", build.calls, build.lastPrj)
 	}
 }
 

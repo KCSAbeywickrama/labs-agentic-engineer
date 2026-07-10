@@ -143,6 +143,18 @@ type ProviderResolver interface {
 	FindByComponent(ctx context.Context, orgHandle, name string) (openchoreo.WorkloadEndpointInfo, bool, error)
 }
 
+// ProviderBuildTrigger kicks the provider project's build so a not-yet-published
+// org-service provider actually deploys (and, on deploy, publishes org-wide —
+// resolving the consumer's visibility gate). Declared as a provisioning port so
+// this feature never imports build/devflow (that would cycle); the app-root
+// adapter (Task 5) wires the real build start. The trigger is idempotent: if a
+// provider devflow is already running the adapter treats it as success. Nil is a
+// documented best-effort no-op (logged) — the funnel still holds the consumer and
+// the sweep heals once the provider deploys by any other path.
+type ProviderBuildTrigger interface {
+	TriggerBuild(ctx context.Context, orgID, projectID string) error
+}
+
 // AccessStore is the cross-project access-request tracking table.
 // *repositories.AccessRequestRepository satisfies it.
 type AccessStore interface {
