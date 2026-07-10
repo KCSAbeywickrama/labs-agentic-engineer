@@ -73,8 +73,6 @@ function opLabel(op: string): string {
       return "Created";
     case "remove":
       return "Deleted";
-    case "frontmatter":
-      return "Updated field";
     default:
       return "Modified";
   }

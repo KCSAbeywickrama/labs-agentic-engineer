@@ -14,7 +14,10 @@ self-correction.
 ## Decision
 
 Edit via **anchored literal search/replace** — `addFile` / `editFile` / `removeFile`
-over flat byte strings, plus `setFrontmatterField` for flat frontmatter keys.
+over flat byte strings. (A dedicated `setFrontmatterField` tool existed early on for
+flat frontmatter keys; it was retired once component config moved to `design.json`
+and no spec file carried frontmatter — frontmatter, if ever present, is edited with
+`editFile` like any other text.)
 
 - `editFile(path, oldString, newString)`: `oldString` matched **literally** (CRLF→LF
   only) and must hit **exactly once** — indentation preserved byte-for-byte, no
@@ -42,4 +45,4 @@ truth). This ADR records *why*.
 - `NOT_UNIQUE` candidate echo is **load-bearing** — keeps multi-site edits to one
   corrective round-trip.
 - Accepted residual risk: an edit at a wrong-but-parseable column passes the guard;
-  mitigated by `setFrontmatterField` + copying leading whitespace verbatim.
+  mitigated by the YAML reparse guard + copying leading whitespace verbatim.

@@ -36,7 +36,6 @@ export type {
   AddFileInput,
   EditFileInput,
   RemoveFileInput,
-  SetFrontmatterFieldInput,
   LoadSkillInput,
   LoadSkillResult,
   LoadedSkill,

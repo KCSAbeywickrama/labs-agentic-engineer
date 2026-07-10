@@ -28,13 +28,10 @@ Tools:
   indentation and newlines. oldString must match EXACTLY ONE place.
 - addFile(path, content) — create a NEW file (emits a whole body). Use only for files that do not exist yet.
 - removeFile(path) — delete a file.
-- setFrontmatterField(path, key, value) — set a key in a markdown file's YAML frontmatter (between the ---
-  fences, e.g. language, buildpack). Use this for ANY frontmatter change — never anchor an
-  editFile inside the --- fences; list values are fragile to indent by hand.
 
 Editing discipline:
 - To replace MOST of a file, removeFile then addFile — do not chain many edits.
-- openapi.yaml and frontmatter are indentation-sensitive: include the exact leading whitespace in both
+- openapi.yaml is indentation-sensitive: include the exact leading whitespace in both
   oldString and newString. To keep an anchor unique in a repetitive YAML file, include the parent key line.
 
 Reacting to tool results (each result tells you the next move):

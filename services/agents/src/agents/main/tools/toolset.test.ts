@@ -35,18 +35,18 @@ const SKILLS = testSkillSource([{ name: "task-planning", description: "plan task
 const bundle = () => new FileBundle({});
 const plan = () => new TaskPlan({});
 
-test("files tool set (no skills) is exactly today's four file tools", () => {
-  assert.deepEqual(Object.keys(buildFileTools(bundle())), ["addFile", "editFile", "removeFile", "setFrontmatterField"]);
+test("files tool set (no skills) is exactly today's file tools", () => {
+  assert.deepEqual(Object.keys(buildFileTools(bundle())), ["addFile", "editFile", "removeFile"]);
 });
 
 test("files tool set with skills adds only the skill loader (byte-identical to today)", () => {
-  assert.deepEqual(Object.keys(buildFileTools(bundle(), SKILLS)), ["addFile", "editFile", "removeFile", "setFrontmatterField", "loadSkill"]);
+  assert.deepEqual(Object.keys(buildFileTools(bundle(), SKILLS)), ["addFile", "editFile", "removeFile", "loadSkill"]);
 });
 
 test("task-plan tool set registers planTask+updateTask and NO file tools", () => {
   const keys = Object.keys(buildTaskPlanTools(plan()));
   assert.deepEqual(keys, ["planTask", "updateTask"]);
-  for (const fileTool of ["addFile", "editFile", "removeFile", "setFrontmatterField"]) {
+  for (const fileTool of ["addFile", "editFile", "removeFile"]) {
     assert.equal(keys.includes(fileTool), false, `${fileTool} must not be in the task-plan set`);
   }
 });

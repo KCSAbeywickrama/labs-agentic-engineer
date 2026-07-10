@@ -297,14 +297,10 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 
 	switch {
 	case foldErr != nil:
-		var ufe *agentfold.UnsupportedFrontmatterError
-		if errors.As(foldErr, &ufe) {
-			// The agents-side bundle applied a write the Go fold cannot
-			// byte-reproduce — a parity failure by construction (loud, D14).
-			slog.ErrorContext(ctx, "genai: fold cannot reproduce frontmatter write — turn rejected, main untouched",
-				"turn", job.turnID, "path", ufe.Path, "reason", ufe.Reason)
-			return failedTerminal(turnReasonFoldParity, foldErr.Error(), nil)
-		}
+		// The fold's add/edit/remove ops are pure byte-deterministic string
+		// mutations; the only error they surface is a base-read infrastructure
+		// failure. Byte-parity against the agents-side bundle is enforced
+		// separately by the D14 Verify gate below.
 		slog.WarnContext(ctx, "genai: fold infrastructure failure", "turn", job.turnID, "error", foldErr)
 		return failedTerminal(turnReasonInternal, foldErr.Error(), nil)
 	case readErr != nil:
