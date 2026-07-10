@@ -86,6 +86,14 @@ service + one web-application — that is an outcome of the rule, not a target. 
 components in kebab-case after their responsibility (`expense-api`,
 `expense-webapp`, `report-worker`).
 
+**Component `type` is a fixed vocabulary — use the EXACT string.** A backend is
+`"service"`; a browser app is `"web-application"` (OpenChoreo's own term). Write
+`"web-application"` verbatim — NOT `"webapp"`, `"web-app"`, or `"webApplication"`
+(those are rejected, and a wrong value silently breaks the app's deployment and
+runtime config). The `-webapp` in a component NAME is fine; the `type` is still
+`"web-application"`. Other kinds the requirements imply (`"scheduled-task"`,
+`"worker"`, …) are captured verbatim.
+
 ## Per-component design.json
 
 Each component's structured facts live in ONE JSON document (no markdown, no
@@ -95,7 +103,7 @@ violations:
 ```json
 {
   "name": "expense-api",              // MUST equal the directory name
-  "type": "service",                  // "service" | "web-application" | any kind the requirements imply ("scheduled-task", "worker", ...)
+  "type": "service",                  // EXACT kind: "service" or "web-application" (NEVER "webapp"/"web-app"), or another the requirements imply ("scheduled-task", "worker", ...)
   "version": "0.1.0",                 // semantic version; 0.1.0 for a new component
   "language": "Go",                   // implementation language, e.g. "Go", "TypeScript"
   "buildpack": "docker",              // always "docker"

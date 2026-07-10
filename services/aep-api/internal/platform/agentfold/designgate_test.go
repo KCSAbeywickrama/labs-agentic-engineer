@@ -63,6 +63,40 @@ func TestDesignGate_Endpoint(t *testing.T) {
 	}
 }
 
+// TestDesignGate_TypeAliasRejected locks the canonical-kind rule in parity with
+// the zod gate: the wrong web-application spellings reject; the canonical value
+// and other kinds accept.
+func TestDesignGate_TypeAliasRejected(t *testing.T) {
+	tmpl := func(typ string) string {
+		return fmt.Sprintf(`{"name":"svc","type":%q,"version":"0.1.0","language":"Go",`+
+			`"buildpack":"docker","appPath":"svc","entrypoint":"deployment/service",`+
+			`"exposure":"internet","description":"x","dependencies":[]}`, typ)
+	}
+	cases := []struct {
+		typ    string
+		wantOK bool
+	}{
+		{"service", true},
+		{"web-application", true},
+		{"worker", true},
+		{"webapp", false},
+		{"web-app", false},
+		{"WebApp", false},
+		{"webApplication", false},
+	}
+	for _, c := range cases {
+		t.Run(c.typ, func(t *testing.T) {
+			p := validateComponentDesign(tmpl(c.typ), "svc")
+			if c.wantOK && p != nil {
+				t.Fatalf("type %q: want accepted, got %s", c.typ, p.message)
+			}
+			if !c.wantOK && p == nil {
+				t.Fatalf("type %q: want rejected (canonical is web-application), got accepted", c.typ)
+			}
+		})
+	}
+}
+
 // designWithParams renders a schema-valid component design.json whose single
 // platform-resource dependency carries the given raw `parameters` JSON literal.
 func designWithParams(paramsJSON string) string {

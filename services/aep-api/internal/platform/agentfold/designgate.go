@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // componentDesignRe is COMPONENT_DESIGN_JSON_RE.
@@ -43,8 +44,13 @@ type designProblem struct {
 }
 
 var (
-	designStringFields  = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
-	exposureValues      = map[string]bool{"internet": true, "intranet": true}
+	designStringFields = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
+	exposureValues     = map[string]bool{"internet": true, "intranet": true}
+	// webAppTypeAliases are the wrong spellings of the canonical "web-application"
+	// component kind that the zod gate rejects (component-design-schema.ts); the
+	// fold gate mirrors that rejection so a design carrying "webapp"/"web-app"
+	// (which silently breaks deploy + runtime-config) never folds.
+	webAppTypeAliases   = map[string]bool{"webapp": true, "web-app": true, "webapplication": true, "web application": true}
 	dependencyKinds     = map[string]bool{"component": true, "org-service": true, "external": true, "platform-resource": true}
 	dependencyKnownKeys = map[string]bool{
 		"kind": true, "name": true, "description": true, "needsSpec": true,
@@ -90,6 +96,9 @@ func validateComponentDesign(content, dirName string) *designProblem {
 		if s == "" {
 			return &designProblem{code: ErrSchemaViolation, message: field + ": must be at least 1 characters"}
 		}
+	}
+	if t, _ := obj["type"].(string); webAppTypeAliases[strings.ToLower(strings.TrimSpace(t))] {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("type %q is not a canonical kind — use \"web-application\" for a browser app", t)}
 	}
 	exposure, ok := obj["exposure"].(string)
 	if !ok || !exposureValues[exposure] {

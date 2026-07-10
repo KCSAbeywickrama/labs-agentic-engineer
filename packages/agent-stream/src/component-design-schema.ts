@@ -81,6 +81,19 @@ const endpointSchema = z.strictObject({
   name: z.string().min(1),
 });
 
+// `type` is an OPEN vocabulary (future kinds: worker, scheduled-task, …) but the
+// browser-app kind has ONE canonical spelling: "web-application" (OpenChoreo's
+// term). The agent habitually writes "webapp"/"web-app", which silently breaks
+// deployment + runtime-config (both key on the exact string). Reject the known
+// wrong aliases with a self-correct message — this normalizes NOTHING, it forces
+// the agent to emit the canonical value. Mirrored in the Go fold gate
+// (agentfold/designgate.go) and the high-level-architecture skill.
+const WEB_APPLICATION_ALIASES = new Set(["webapp", "web-app", "webapplication", "web application"]);
+const componentTypeSchema = z.string().min(1).refine(
+  (t) => !WEB_APPLICATION_ALIASES.has(t.trim().toLowerCase()),
+  { message: 'use "web-application" (the canonical kind), not "webapp"/"web-app", for a browser app component type' },
+);
+
 // Managed-API exposure policy (platform-owned; mirrors Go models.ExposesAPI).
 const exposesAPISchema = z.strictObject({
   managed: z.boolean().optional(),
@@ -91,7 +104,7 @@ const exposesAPISchema = z.strictObject({
 
 export const componentDesignSchema = z.strictObject({
   name: z.string().min(1),
-  type: z.string().min(1),
+  type: componentTypeSchema,
   version: z.string().min(1),
   language: z.string().min(1),
   buildpack: z.string().min(1),
