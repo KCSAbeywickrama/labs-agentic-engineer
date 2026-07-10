@@ -27,33 +27,28 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
   Tab,
   Tabs,
-  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import {
   CircleCheck,
   ExternalLink,
   GitPullRequest,
-  Globe,
-  Link2,
   Upload,
 } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import {
-  useCreateSkill,
-  useImportSkill,
-  useImportSkillUrl,
-} from "../api/queries";
+import { useCreateSkill, useImportSkill } from "../api/queries";
 
 type ImportResult = components["schemas"]["ImportResult"];
 
-// The community path is guidance + link-out only (issue #96 re-grill): no
-// proxying of the unofficial skills.sh registry API.
+// The community ecosystem is a link-out only: skills.sh has no official API,
+// and importing from a URL would need a server-side fetch the BE doesn't
+// implement (issue #143 — the From-URL path was dropped for exactly that).
 const SKILLS_SH_URL = "https://skills.sh";
 
-type ImportMethod = "upload" | "url" | "community" | "pr";
+type ImportMethod = "upload" | "pr";
 
 function slugFromFileName(fileName: string): string {
   return fileName
@@ -70,9 +65,9 @@ function skillNameFromMd(fileName: string, skillMd: string): string {
   return fromFrontmatter || slugFromFileName(fileName);
 }
 
-// Every path lands the skill in the org skills repo — the BE commits on the
-// action paths; the guidance paths (community → paste URL, PR → GitHub) end
-// there too because the repo is the catalogue's source of truth.
+// Two ways in, both landing in the org skills repo: upload a file (the BE
+// commits it), or author it as a pull request against the repo directly —
+// the catalogue reads the repo, so a merged PR simply shows up here.
 export function ImportSkillDialog({
   open,
   onClose,
@@ -84,28 +79,22 @@ export function ImportSkillDialog({
 }) {
   const [method, setMethod] = useState<ImportMethod>("upload");
   const [file, setFile] = useState<File | null>(null);
-  const [url, setUrl] = useState("");
   const [result, setResult] = useState<ImportResult | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
   const importTarball = useImportSkill();
-  const importUrl = useImportSkillUrl();
   const createSkill = useCreateSkill();
 
-  const pending =
-    importTarball.isPending || importUrl.isPending || createSkill.isPending;
+  const pending = importTarball.isPending || createSkill.isPending;
   const submitError =
     fileError ??
     (importTarball.isError ? importTarball.error.message : null) ??
-    (importUrl.isError ? importUrl.error.message : null) ??
     (createSkill.isError ? createSkill.error.message : null);
 
   const resetSubmission = () => {
     importTarball.reset();
-    importUrl.reset();
     createSkill.reset();
     setFile(null);
-    setUrl("");
     setFileError(null);
     setResult(null);
   };
@@ -123,8 +112,8 @@ export function ImportSkillDialog({
       importTarball.mutate(file, { onSuccess: setResult });
       return;
     }
-    // Single SKILL.md — rides the create endpoint; there is no separate
-    // authoring surface (issue #96 re-grill: import is the only ingestion).
+    // Single SKILL.md — rides the create endpoint; there is no from-scratch
+    // authoring surface (issue #143: import is the only ingestion).
     file
       .text()
       .then((skillMd) => {
@@ -145,11 +134,6 @@ export function ImportSkillDialog({
         );
       })
       .catch(() => setFileError("Could not read the selected file"));
-  };
-
-  const submitUrl = () => {
-    if (!url.trim()) return;
-    importUrl.mutate(url.trim(), { onSuccess: setResult });
   };
 
   const warnings = result?.warnings ?? [];
@@ -216,26 +200,12 @@ export function ImportSkillDialog({
                 resetSubmission();
                 setMethod(v as ImportMethod);
               }}
-              variant="scrollable"
-              allowScrollButtonsMobile
             >
               <Tab
                 value="upload"
                 icon={<Upload size={16} />}
                 iconPosition="start"
                 label="Upload file"
-              />
-              <Tab
-                value="url"
-                icon={<Link2 size={16} />}
-                iconPosition="start"
-                label="From URL"
-              />
-              <Tab
-                value="community"
-                icon={<Globe size={16} />}
-                iconPosition="start"
-                label="Community"
               />
               <Tab
                 value="pr"
@@ -249,8 +219,9 @@ export function ImportSkillDialog({
               <>
                 <DialogContentText>
                   Upload a single <code>SKILL.md</code>, or a gzip-compressed
-                  AgentSkills tarball for a multi-file skill (SKILL.md +
-                  references).
+                  AgentSkills tarball (<code>.tar.gz</code>) for a multi-file
+                  skill (SKILL.md + references). The platform validates it and
+                  commits it to the org skills repo.
                 </DialogContentText>
                 <Box>
                   <Button
@@ -282,112 +253,123 @@ export function ImportSkillDialog({
               </>
             )}
 
-            {method === "url" && (
-              <>
+            {method === "pr" && (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <DialogContentText>
-                  Paste a direct file URL — a raw <code>SKILL.md</code> or a{" "}
-                  <code>.tar.gz</code> AgentSkills tarball. The platform
-                  fetches and validates it, then commits it to the org skills
-                  repo.
+                  Skills are plain files in your organization&apos;s skills
+                  repo. The catalogue reads that repo directly, so a merged pull
+                  request shows up here — nothing to upload.
                 </DialogContentText>
-                <TextField
-                  label="Skill URL"
-                  placeholder="https://raw.githubusercontent.com/…/SKILL.md"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  fullWidth
-                />
-              </>
-            )}
 
-            {method === "community" && (
-              <>
-                <DialogContentText>
-                  Community skills are shared through the AgentSkills
-                  ecosystem (the <code>npx skills</code> registry). Browse the
-                  catalogue, open a skill&apos;s source, and copy the URL of
-                  its raw <code>SKILL.md</code> or tarball — then import it
-                  here.
-                </DialogContentText>
-                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                {repoUrl ? (
                   <Button
-                    variant="outlined"
+                    variant="contained"
                     endIcon={<ExternalLink size={16} />}
-                    href={SKILLS_SH_URL}
+                    href={repoUrl}
                     target="_blank"
                     rel="noreferrer"
+                    sx={{ alignSelf: "flex-start" }}
                   >
-                    Browse skills.sh
+                    Open the org skills repo
                   </Button>
-                  <Button variant="text" onClick={() => setMethod("url")}>
-                    I have the URL
-                  </Button>
-                </Box>
-              </>
-            )}
+                ) : (
+                  <Alert severity="info">
+                    The org skills repo isn&apos;t available yet — connect
+                    GitHub and the platform will provision it.
+                  </Alert>
+                )}
 
-            {method === "pr" && (
-              <>
-                <DialogContentText>
-                  Skills are files in the org skills repo — author one as a
-                  pull request:
-                </DialogContentText>
-                <Box component="ol" sx={{ m: 0, pl: 3 }}>
+                <Box component="ol" sx={{ m: 0, pl: 3, "& li": { mb: 1.5 } }}>
                   <li>
                     <Typography variant="body2">
-                      Branch the org skills repo and add{" "}
-                      <code>skills/&lt;name&gt;/SKILL.md</code> (plus any
-                      reference files).
+                      Create a branch off the repo&apos;s default branch.
                     </Typography>
                   </li>
                   <li>
                     <Typography variant="body2">
-                      Open a pull request and get it reviewed and merged.
+                      Add a folder <code>skills/&lt;skill-name&gt;/</code> — a
+                      lowercase, hyphenated name.
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      Inside it, write <code>SKILL.md</code>: YAML frontmatter
+                      naming the skill and saying when an agent should apply it,
+                      then the instructions as markdown.
+                    </Typography>
+                    <Box
+                      component="pre"
+                      sx={{
+                        m: 0,
+                        p: 1.5,
+                        borderRadius: 1,
+                        bgcolor: "action.hover",
+                        fontFamily: "monospace",
+                        fontSize: 12,
+                        overflowX: "auto",
+                      }}
+                    >
+                      {`---
+name: my-skill
+description: What it does, and when to apply it.
+---
+
+# My skill
+
+Instructions the agent should follow…`}
+                    </Box>
+                  </li>
+                  <li>
+                    <Typography variant="body2">
+                      Put any supporting files alongside it in{" "}
+                      <code>references/</code>.
                     </Typography>
                   </li>
                   <li>
                     <Typography variant="body2">
-                      Done — the catalogue reads the repo directly, so the
-                      skill appears here on merge.
+                      Commit, open a pull request, and get it reviewed. On merge
+                      the skill appears in this catalogue.
                     </Typography>
                   </li>
                 </Box>
-                {repoUrl && (
+
+                <Divider />
+
+                {/* Secondary: where to find something to adapt, not a step. */}
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Looking for a skill to adapt? Community skills are shared
+                    through the AgentSkills ecosystem (the{" "}
+                    <code>npx skills</code> registry).
+                  </Typography>
                   <Box>
                     <Button
-                      variant="outlined"
-                      endIcon={<ExternalLink size={16} />}
-                      href={repoUrl}
+                      variant="text"
+                      size="small"
+                      endIcon={<ExternalLink size={14} />}
+                      href={SKILLS_SH_URL}
                       target="_blank"
                       rel="noreferrer"
+                      sx={{ mt: 0.5, ml: -1 }}
                     >
-                      Open the org skills repo
+                      Browse skills.sh
                     </Button>
                   </Box>
-                )}
-              </>
+                </Box>
+              </Box>
             )}
 
             {submitError && <Alert severity="error">{submitError}</Alert>}
           </DialogContent>
           <DialogActions>
             <Button onClick={close}>
-              {method === "upload" || method === "url" ? "Cancel" : "Close"}
+              {method === "upload" ? "Cancel" : "Close"}
             </Button>
             {method === "upload" && (
               <Button
                 variant="contained"
                 onClick={submitUpload}
                 disabled={!file || pending}
-              >
-                {pending ? "Importing…" : "Import"}
-              </Button>
-            )}
-            {method === "url" && (
-              <Button
-                variant="contained"
-                onClick={submitUrl}
-                disabled={!url.trim() || pending}
               >
                 {pending ? "Importing…" : "Import"}
               </Button>

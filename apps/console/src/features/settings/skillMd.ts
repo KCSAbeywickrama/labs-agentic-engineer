@@ -16,9 +16,17 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { SettingsLayout } from "../features/settings/components/SettingsLayout";
-
-export const Route = createFileRoute("/settings")({
-  component: SettingsLayout,
-});
+// A SKILL.md is YAML frontmatter followed by a markdown body. Markdown has no
+// notion of frontmatter: rendering the raw file would turn the opening `---`
+// into a thematic break and the closing `---` into a setext heading over the
+// last frontmatter line. Split it off before rendering, and show it verbatim.
+export function splitFrontmatter(skillMd: string): {
+  frontmatter: string | null;
+  body: string;
+} {
+  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(
+    skillMd,
+  );
+  if (!match) return { frontmatter: null, body: skillMd };
+  return { frontmatter: match[1] ?? "", body: skillMd.slice(match[0].length) };
+}

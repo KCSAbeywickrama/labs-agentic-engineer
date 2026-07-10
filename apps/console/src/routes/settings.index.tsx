@@ -16,9 +16,11 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { SettingsLayout } from "../features/settings/components/SettingsLayout";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/settings")({
-  component: SettingsLayout,
+// Bare /settings has no content of its own — land on the first section.
+export const Route = createFileRoute("/settings/")({
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/credentials" });
+  },
 });
