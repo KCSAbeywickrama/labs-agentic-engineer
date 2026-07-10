@@ -315,7 +315,7 @@ export function StatusCards({
           ),
         },
         {
-          // "Tasks" per the IA rename (#173, ADR-0009) — matches the nav.
+          // "Tasks" per the IA rename (#173, ADR-0010) — matches the nav.
           title: "Tasks",
           node: (
             <StatusCard

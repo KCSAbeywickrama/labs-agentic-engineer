@@ -58,7 +58,7 @@ import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 
 // Sidebar highlight follows the route; grows one mapping per top-level route
-// (global nav) or per project section (project nav, ADR-0009).
+// (global nav) or per project section (project nav, ADR-0010).
 function activeItemFor(pathname: string, inProject: boolean): string {
   if (pathname.startsWith("/settings")) return "settings";
   if (!inProject) return "projects";
@@ -74,7 +74,7 @@ function activeItemFor(pathname: string, inProject: boolean): string {
   }
 }
 
-// Full-screen surfaces keep the sidebar but collapse it on entry (ADR-0009);
+// Full-screen surfaces keep the sidebar but collapse it on entry (ADR-0010);
 // leaving re-expands it. Rendered inside <AppShell>, which provides the
 // shell context this consumes.
 function SidebarAutoCollapse({ collapsed }: { collapsed: boolean }) {
@@ -188,7 +188,7 @@ export function AppLayout() {
         <SidebarAutoCollapse collapsed={isSpecRoute} />
         <Sidebar activeItem={activeItem}>
           <Sidebar.Nav>
-            {/* Project-scoped nav (ADR-0009): inside a project the nav fully
+            {/* Project-scoped nav (ADR-0010): inside a project the nav fully
                 swaps to its sections — no back-item; home is the header brand
                 or the project switcher. */}
             {projectName ? (

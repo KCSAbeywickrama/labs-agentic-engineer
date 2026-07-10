@@ -65,7 +65,7 @@ Approved at section level; per-section detail is defined feature-by-feature.
 - **Home — projects list.** Empty state prompts the user to start an app
   development (give a requirement → project is born).
 - **Project view** — inside a project the sidebar nav swaps to its sections
-  (ADR-0009; no back-item, home is the header brand / project switcher):
+  (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — component map + status, deployment state, recent activity.
   - **Specs & Design** — the requirement, derived design + validation files;
     the blocking design review lives here.
@@ -161,7 +161,7 @@ GitHub issue plus any ADRs it produced.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|
-| Tasks page + project-scoped left nav | 2026-07-10 | Sidebar swaps to Overview / Spec / Tasks / Deployments / Issues inside a project (full swap, no back-item; spec workspace auto-collapses it). Tasks: flat list with Pending/Ongoing/Done/Failed chips, 5s polling while active, per-task console-log page streaming `stream-task-log` (SSE) with per-attempt dividers. Issues ships as a placeholder (future SRE-agent issues surface); overview Build card renamed Tasks. No contract changes. Filtering deferred to [#177](https://github.com/wso2/labs-agentic-engineer/issues/177). | [#173](https://github.com/wso2/labs-agentic-engineer/issues/173), ADR-0009 |
+| Tasks page + project-scoped left nav | 2026-07-10 | Sidebar swaps to Overview / Spec / Tasks / Deployments / Issues inside a project (full swap, no back-item; spec workspace auto-collapses it). Tasks: flat list with Pending/Ongoing/Done/Failed chips, 5s polling while active, per-task console-log page streaming `stream-task-log` (SSE) with per-attempt dividers. Issues ships as a placeholder (future SRE-agent issues surface); overview Build card renamed Tasks. No contract changes. Filtering deferred to [#177](https://github.com/wso2/labs-agentic-engineer/issues/177). | [#173](https://github.com/wso2/labs-agentic-engineer/issues/173), ADR-0010 |
 | Spec view — Generate / Re-generate design | 2026-07-10 | Phase-aware primary CTA in the Spec view header: **Generate design** when requirements exist but no design, **Build** once a design exists; **Re-generate design** in the Designs section. Fires a design-generation room turn (agent writes `specs/design/…` live). Gated on requirements; Build stays gated on design files. Verified live (7 design files generated + committed). | [#159](https://github.com/wso2/labs-agentic-engineer/issues/159), ADR-0007 (staleness → [#160](https://github.com/wso2/labs-agentic-engineer/issues/160)) |
 
 ## Non-goals

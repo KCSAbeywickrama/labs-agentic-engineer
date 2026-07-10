@@ -1,4 +1,4 @@
-# ADR-0009: Project-scoped sidebar navigation (full swap)
+# ADR-0010: Project-scoped sidebar navigation (full swap)
 
 - **Status:** Accepted
 - **Date:** 2026-07-10 (grilling of the tasks-page feature,
