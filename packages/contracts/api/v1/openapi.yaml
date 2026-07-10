@@ -188,6 +188,48 @@ components:
         - status
         - workflow_status
       type: object
+    BuildStage:
+      additionalProperties: false
+      description: Build-stage aggregate on ProjectStatus (#184) — the tag being/last built and its task counts, so the overview needs no list-tasks read.
+      properties:
+        status:
+          description: idle (never built), running, failed, succeeded
+          enum:
+            - idle
+            - running
+            - failed
+            - succeeded
+          type: string
+        tasks:
+          additionalProperties: false
+          description: Task counts bucketed from derivedStatus.
+          properties:
+            active:
+              format: int64
+              type: integer
+            done:
+              format: int64
+              type: integer
+            failed:
+              format: int64
+              type: integer
+            total:
+              format: int64
+              type: integer
+          required:
+            - total
+            - done
+            - failed
+            - active
+          type: object
+        version:
+          description: Spec tag the current/last build built; "" if never built.
+          type: string
+      required:
+        - version
+        - status
+        - tasks
+      type: object
     BuildStatusTask:
       additionalProperties: false
       properties:
@@ -662,6 +704,39 @@ components:
             - "null"
       required:
         - items
+      type: object
+    DeployStage:
+      additionalProperties: false
+      description: Deploy-stage aggregate on ProjectStatus (#184) — what's live in dev and rollout progress.
+      properties:
+        components:
+          additionalProperties: false
+          description: Component rollout progress for the current deploy.
+          properties:
+            ready:
+              format: int64
+              type: integer
+            total:
+              format: int64
+              type: integer
+          required:
+            - total
+            - ready
+          type: object
+        status:
+          enum:
+            - none
+            - deploying
+            - deployed
+            - failed
+          type: string
+        version:
+          description: Spec tag live in dev; "" if nothing deployed.
+          type: string
+      required:
+        - version
+        - status
+        - components
       type: object
     DisconnectOutputBody:
       additionalProperties: false
@@ -1143,6 +1218,10 @@ components:
           format: uri
           readOnly: true
           type: string
+        build:
+          $ref: "#/components/schemas/BuildStage"
+        deploy:
+          $ref: "#/components/schemas/DeployStage"
         designStatus:
           description: '"", draft, approved'
           type: string
@@ -1163,6 +1242,8 @@ components:
           type: string
         repoUrl:
           type: string
+        spec:
+          $ref: "#/components/schemas/SpecStage"
         specStatus:
           description: '"", draft, approved'
           type: string
@@ -1175,6 +1256,9 @@ components:
         - hasTasks
         - specStatus
         - designStatus
+        - spec
+        - build
+        - deploy
       type: object
     ProvisionBody:
       additionalProperties: false
@@ -1374,6 +1458,28 @@ components:
       required:
         - updates
         - count
+      type: object
+    SpecStage:
+      additionalProperties: false
+      description: Spec-stage aggregate on ProjectStatus (#184). Approved/draft is derived, not stored — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished draft; exists false = no spec yet.
+      properties:
+        design:
+          description: Design files exist for the spec (gates the Spec view's design button).
+          type: boolean
+        dirty:
+          description: specs/ moved on GitHub past the latest tag.
+          type: boolean
+        exists:
+          description: Any spec file created; false renders the Generate-spec CTA.
+          type: boolean
+        version:
+          description: Latest v<N> spec tag; "" if never published.
+          type: string
+      required:
+        - exists
+        - version
+        - dirty
+        - design
       type: object
     StartConnectInputBody:
       additionalProperties: false

@@ -73,14 +73,31 @@ export function useProject(projectName: string) {
   });
 }
 
-// The overview watches the pipeline move, so its reads poll (issue #77
-// decision: 10s while visible; SSE deferred).
+// Spec-view reads still poll at a flat interval (tags below).
 const OVERVIEW_POLL_MS = 10_000;
+
+// Status polling is adaptive (#183): fast while any stage is moving, slow
+// when settled — idle polling stays on because spec pushes happen on GitHub
+// and must flip the v1+ chip without a reload.
+const STATUS_ACTIVE_POLL_MS = 5_000;
+const STATUS_IDLE_POLL_MS = 30_000;
+
+type ProjectStatus = components["schemas"]["ProjectStatus"];
+
+function statusIsMoving(status: ProjectStatus): boolean {
+  return (
+    status.build.status === "running" ||
+    status.deploy.status === "deploying" ||
+    status.repoStatus === "pending" ||
+    status.repoStatus === "cloning"
+  );
+}
 
 function useProjectResource<T>(
   queryKey: readonly unknown[],
   fetcher: () => Promise<{ data?: T; error?: unknown }>,
   what: string,
+  refetchInterval?: number | ((data: T | undefined) => number | false),
 ) {
   return useQuery({
     queryKey,
@@ -92,10 +109,18 @@ function useProjectResource<T>(
       }
       return data;
     },
-    refetchInterval: OVERVIEW_POLL_MS,
+    ...(refetchInterval !== undefined && {
+      refetchInterval:
+        typeof refetchInterval === "function"
+          ? (query: { state: { data: T | undefined } }) =>
+              refetchInterval(query.state.data)
+          : refetchInterval,
+    }),
   });
 }
 
+// The page's only poller (#183): the whole pipeline renders from this one
+// aggregate (ADR-0006), so nothing else on the overview needs an interval.
 export function useProjectStatus(projectName: string) {
   return useProjectResource(
     projectKeys.status(projectName),
@@ -104,9 +129,15 @@ export function useProjectStatus(projectName: string) {
         params: { path: { projectName } },
       }),
     "project status",
+    (status) =>
+      !status || statusIsMoving(status)
+        ? STATUS_ACTIVE_POLL_MS
+        : STATUS_IDLE_POLL_MS,
   );
 }
 
+// No standing interval (#183): the overview refetches this when the status
+// poll shows a build/deploy transition (components only change then).
 export function useProjectComponents(projectName: string) {
   return useProjectResource(
     projectKeys.components(projectName),
@@ -115,17 +146,6 @@ export function useProjectComponents(projectName: string) {
         params: { path: { projectName } },
       }),
     "components",
-  );
-}
-
-export function useProjectTasks(projectName: string) {
-  return useProjectResource(
-    projectKeys.tasks(projectName),
-    () =>
-      client.GET("/projects/{projectName}/tasks", {
-        params: { path: { projectName } },
-      }),
-    "tasks",
   );
 }
 

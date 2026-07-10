@@ -82,6 +82,12 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Project overview — versioned pipeline (Spec → Build → Deploy) on a single
+  adaptive status poll: per-stage version chips (v1, v1+), task/component
+  counts from nested ProjectStatus stage aggregates; list-tasks + /tags leave
+  the page — [#183](https://github.com/wso2/labs-agentic-engineer/issues/183)
+  (BE handshake: [#184](https://github.com/wso2/labs-agentic-engineer/issues/184);
+  build-history follow-up: [#185](https://github.com/wso2/labs-agentic-engineer/issues/185))
 - Settings → Skills — flat paginated catalogue: alphabetical list with inline
   kind chips (blurb tooltips) replacing the four group sections; numbered
   client-side pagination (10/page) + retained search —
