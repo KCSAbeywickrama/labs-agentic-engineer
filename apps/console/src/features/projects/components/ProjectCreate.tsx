@@ -40,6 +40,8 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { useCreateProject, useGithubOrg } from "../api/queries";
 import { isValidProjectName, suggestProjectName } from "../lib/projectName";
+import { saveCreatePrompt } from "../lib/promptStore";
+import { useSession } from "../../../auth/SessionContext";
 
 // Issue #71 decision: clicking an example acts as prompt + Start in one
 // click — it jumps straight to the name/repo confirmation step.
@@ -89,6 +91,7 @@ function ExampleCard({
 
 export function ProjectCreate() {
   const navigate = useNavigate();
+  const { orgHandle } = useSession();
   const [step, setStep] = useState<"prompt" | "confirm">("prompt");
   const [prompt, setPrompt] = useState("");
   const [name, setName] = useState("");
@@ -125,11 +128,15 @@ export function ProjectCreate() {
     createProject.mutate(
       { name, prompt, ...(repoName !== name && { repoName }) },
       {
-        onSuccess: (project) =>
+        onSuccess: (project) => {
+          // Keep the prompt so the Spec card's "Generate spec" CTA can seed the
+          // first requirements turn (#150) — the BE doesn't return it on read.
+          saveCreatePrompt(orgHandle ?? "default", project.name, prompt);
           void navigate({
             to: "/projects/$projectName",
             params: { projectName: project.name },
-          }),
+          });
+        },
       },
     );
   };

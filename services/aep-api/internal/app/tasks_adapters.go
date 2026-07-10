@@ -18,6 +18,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -29,6 +31,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
+	"github.com/wso2/aep/aep-api/internal/feature/task"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -45,28 +48,46 @@ func (r repoLocator) ByFullName(_ context.Context, fullName string) (string, str
 	return repositories.LookupOrgProjectByRepoURL(r.db, fullName)
 }
 
-// latestExecutionByIssue resolves a Task's newest execution row (repo full
-// name via the repo row, then the org-fenced by-issue history) — the task-log
-// endpoint's default when no executionId is pinned. Satisfies
-// execution.LatestExecutionResolver.
-type latestExecutionByIssue struct {
+// taskSnapshotAdapter reads a Task's current snapshot for the task-log stream's
+// `task` frame: the full TaskDetail JSON (forwarded verbatim — the stream never
+// unmarshals it) plus the derived status the stream uses to detect settle. The
+// projection lives here at the composition root because execution never imports
+// feature/task (§1 split). Satisfies execution.TaskSnapshotReader.
+type taskSnapshotAdapter struct{ reads *task.Reads }
+
+func (a taskSnapshotAdapter) TaskSnapshot(ctx context.Context, orgID, projectID string, issueNumber int) (*execution.TaskSnapshot, error) {
+	detail, err := a.reads.Get(ctx, orgID, projectID, issueNumber)
+	if err != nil {
+		if errors.Is(err, task.ErrTaskNotFound) {
+			return nil, nil // not a Task → the stream answers 404 before opening
+		}
+		return nil, err
+	}
+	// The `task` frame carries the TaskView (header/status/lineage) only — the
+	// stream's `execution` frames own the live execution list, so the redundant
+	// executionHistory stays off the wire.
+	raw, err := json.Marshal(detail.TaskView)
+	if err != nil {
+		return nil, err
+	}
+	return &execution.TaskSnapshot{JSON: raw, DerivedStatus: detail.DerivedStatus}, nil
+}
+
+// executionsByIssueAdapter lists a Task's execution rows (oldest first) for the
+// task-log stream to walk into one chronological timeline — repo full name via
+// the repo row, then the org-fenced by-issue history. Satisfies
+// execution.ExecutionHistory.
+type executionsByIssueAdapter struct {
 	repos repositories.RepoRepository
 	execs repositories.ExecutionRepository
 }
 
-func (l latestExecutionByIssue) LatestByIssue(ctx context.Context, orgID, projectID string, issueNumber int) (*models.Execution, error) {
-	full, err := repoFullNameLookup{repos: l.repos}.RepoFullName(ctx, orgID, projectID)
+func (a executionsByIssueAdapter) ByIssue(ctx context.Context, orgID, projectID string, issueNumber int) ([]models.Execution, error) {
+	full, err := repoFullNameLookup{repos: a.repos}.RepoFullName(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := l.execs.ListByIssueScoped(ctx, orgID, full, issueNumber)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return &rows[len(rows)-1], nil // created_at ASC — the last row is newest
+	return a.execs.ListByIssueScoped(ctx, orgID, full, issueNumber)
 }
 
 // designComponents exposes the design's component names at HEAD for the funnel's

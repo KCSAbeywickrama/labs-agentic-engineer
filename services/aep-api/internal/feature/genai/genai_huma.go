@@ -18,7 +18,7 @@ package genai
 
 // genai_huma.go — the committed-truth turn HTTP edge (design §6 API delta):
 //
-//	POST …/agents/{id}/messages {useCase,instruction,target?}    → 202 {turnId}
+//	POST …/agents/{id}/messages {useCase?,instruction,target?}   → 202 {turnId}
 //	GET  …/turns/{turnId}                                         → status
 //	GET  …/turns/active                                           → status | 204
 //	GET  …/turns/{turnId}/stream?from=N (SSE, Last-Event-ID)      → replay + tail
@@ -63,9 +63,13 @@ type turnInput struct {
 	ProjectName    string `path:"projectName" doc:"Project name (DNS-label slug)"`
 	ConversationID string `path:"conversationId" doc:"FE-chosen conversation uuid"`
 	Body           struct {
-		UseCase     string `json:"useCase" enum:"requirements-generate,requirements-chat,design-generate" doc:"Which generation/chat flow"`
-		Instruction string `json:"instruction" doc:"User message / generation directive"`
-		Target      string `json:"target,omitempty" doc:"Optional target (e.g. a doc type)"`
+		// UseCase is optional (a pointer so an omitted field is nil rather than
+		// the enum-invalid ""): absent runs the generic turn, present must match
+		// the enum. The service normalizes nil→"" → useCaseGeneral.
+		UseCase     *string `json:"useCase,omitempty" enum:"requirements-generate,requirements-chat,design-generate" doc:"Which generation/chat flow. Omit to run a generic spec turn."`
+		Instruction string  `json:"instruction" doc:"User message / generation directive"`
+		Target      string  `json:"target,omitempty" doc:"Optional target (e.g. a doc type)"`
+		Collab      bool    `json:"collab,omitempty" doc:"Room-scoped turn (#86 phase 4): the agent joins the project's spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git."`
 	}
 }
 
@@ -129,11 +133,16 @@ func RegisterGenAI(api huma.API, svc GenAIService) {
 		DefaultStatus: http.StatusAccepted,
 		MaxBodyBytes:  startTurnMaxBodyBytes,
 	}, func(ctx context.Context, in *turnInput) (*turnOutput, error) {
+		useCase := ""
+		if in.Body.UseCase != nil {
+			useCase = *in.Body.UseCase
+		}
 		turnID, err := svc.StartTurn(ctx, in.OrgHandle, in.ProjectName, TurnInput{
-			UseCase:        in.Body.UseCase,
+			UseCase:        useCase,
 			ConversationID: in.ConversationID,
 			Instruction:    in.Body.Instruction,
 			Target:         in.Body.Target,
+			Collab:         in.Body.Collab,
 		})
 		if err != nil {
 			return nil, mapTurnError(ctx, err)
@@ -304,6 +313,8 @@ func mapTurnError(ctx context.Context, err error) error {
 		return huma.Error400BadRequest("invalid conversation id")
 	case errors.Is(err, ErrEmptyInstruction):
 		return huma.Error400BadRequest(ErrEmptyInstruction.Error())
+	case errors.Is(err, ErrCollabNoToken):
+		return huma.Error400BadRequest(ErrCollabNoToken.Error())
 	case errors.Is(err, ErrNoAnthropicKey):
 		return huma.Error400BadRequest(ErrNoAnthropicKey.Error())
 	case errors.Is(err, ErrRequirementsMissing):

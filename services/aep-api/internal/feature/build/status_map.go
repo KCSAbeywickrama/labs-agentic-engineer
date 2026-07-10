@@ -17,6 +17,7 @@
 package build
 
 import (
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -53,6 +54,24 @@ func statusFromRow(rowStatus string) string {
 	case models.WorkflowStatusFailed, models.WorkflowStatusCanceled:
 		return statusFailed
 	default: // running
+		return statusInProgress
+	}
+}
+
+// statusFromDerived maps a Task's live derived status (taskmeta.Derive: GitHub
+// facts ⋈ executions) onto the contract's build enum. This is the DURABLE task
+// status — the source for a build's task list when the Temporal run is archived
+// (no live refs) or the query is unavailable. The workflow's DevTaskRef refines
+// it for tasks still in flight (taskStatus above).
+func statusFromDerived(derived string) string {
+	switch taskmeta.DerivedStatus(derived) {
+	case taskmeta.StatusDeployed:
+		return statusCompleted
+	case taskmeta.StatusFailed, taskmeta.StatusRejected, taskmeta.StatusAbandoned:
+		return statusFailed
+	case taskmeta.StatusPending, taskmeta.StatusOnHold:
+		return statusStarted
+	default: // in_progress / ready_for_review / merged / building
 		return statusInProgress
 	}
 }

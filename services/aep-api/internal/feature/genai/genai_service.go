@@ -48,6 +48,12 @@ const (
 	useCaseRequirementsGenerate = "requirements-generate"
 	useCaseRequirementsChat     = "requirements-chat"
 	useCaseDesignGenerate       = "design-generate"
+	// useCaseGeneral is the INTERNAL use case a turn runs under when the client
+	// omits "useCase" — a generic spec turn with generic steering, a generic
+	// commit message, and no requirements/design gating. It is not a client
+	// value (absent from validUseCases): the edge reaches it only by normalizing
+	// an absent field, so the wire enum stays the three real flows.
+	useCaseGeneral = "general"
 )
 
 var validUseCases = map[string]bool{
@@ -62,7 +68,10 @@ var (
 	ErrInvalidUseCase        = errors.New("invalid use case")
 	ErrInvalidConversationID = errors.New("invalid conversation id")
 	ErrEmptyInstruction      = errors.New("instruction must not be empty")
-	ErrNoAnthropicKey        = errors.New("organization has no Anthropic API key configured")
+	// ErrCollabNoToken rejects a room-scoped turn whose request carried no
+	// bearer — the agent joins the room with the caller's token (#86 d7).
+	ErrCollabNoToken  = errors.New("collab turn requires a bearer token")
+	ErrNoAnthropicKey = errors.New("organization has no Anthropic API key configured")
 	// ErrRequirementsMissing gates design generation on requirements CONTENT
 	// at HEAD (single-tag build flow: the version tag is cut by the build
 	// endpoint AFTER the design exists, so a tag can never be a precondition
@@ -143,6 +152,10 @@ type TurnInput struct {
 	ConversationID string
 	Instruction    string
 	Target         string
+	// Collab makes this a room-scoped turn (#86 phase 4): the agents service
+	// joins the project's spec room as a live Yjs peer with the prompting
+	// user's bearer, edits the shared doc, and nothing is committed to git.
+	Collab bool
 }
 
 // TurnStatus is the read view of one turn (the status GET body).
@@ -263,8 +276,16 @@ func NewService(d ServiceDeps) GenAIService {
 }
 
 func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in TurnInput) (string, error) {
-	if !validUseCases[in.UseCase] {
+	// useCase is optional. An ABSENT value runs the generic turn (useCaseGeneral):
+	// generic steering + commit message, no requirements/design gate. A PRESENT
+	// value must be one of the three real flows (the wire enum already fences
+	// HTTP callers; this guards direct service/test callers too).
+	if in.UseCase != "" && !validUseCases[in.UseCase] {
 		return "", ErrInvalidUseCase
+	}
+	useCase := in.UseCase
+	if useCase == "" {
+		useCase = useCaseGeneral
 	}
 	if !validConversationID(in.ConversationID) {
 		return "", ErrInvalidConversationID
@@ -297,6 +318,19 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// = the org credential's save identity (the AEP bot fallback).
 	author, committer := s.captureIdentities(ctx, ref)
 
+	// Room-scoped turn (#86 phase 4): capture the room + the prompting user's
+	// bearer NOW (D20 — the runner has no request context). Access is
+	// request-scoped: the collab server's oracle validates this token exactly
+	// like a browser join; no token → the turn cannot join, fail pre-202.
+	collabRoomID, collabToken := "", ""
+	if in.Collab {
+		collabToken = auth.GetAuthToken(ctx)
+		if collabToken == "" {
+			return "", ErrCollabNoToken
+		}
+		collabRoomID = "spec-" + orgID + "-" + projectID
+	}
+
 	ws := s.git.Workspace()
 	baseRef, err := ws.Head(ctx, ref, "")
 	if err != nil {
@@ -309,7 +343,7 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// build endpoint cuts the tag AFTER the design exists, so requiring one
 	// here deadlocked every new project. The latest v<N>, when one exists,
 	// still stamps the turn's lineage specTag ("" on a first build).
-	if in.UseCase == useCaseDesignGenerate {
+	if useCase == useCaseDesignGenerate {
 		if err := s.requireRequirementsContent(ctx, ref, baseRef); err != nil {
 			return "", err
 		}
@@ -343,7 +377,7 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		OrgID:          orgID,
 		ProjectID:      projectID,
 		ConversationID: in.ConversationID,
-		UseCase:        in.UseCase,
+		UseCase:        useCase,
 		BaseRef:        baseRef,
 		SkillsRef:      skillsRef,
 		Status:         turnStatusRunning,
@@ -361,10 +395,10 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		turnID:           row.ID,
 		orgID:            orgID,
 		projectID:        projectID,
-		useCase:          in.UseCase,
+		useCase:          useCase,
 		conversationID:   in.ConversationID,
-		nsConversationID: namespacedID(repo, in.UseCase, in.ConversationID),
-		instruction:      in.Instruction + steeringByUseCase[in.UseCase] + targetSuffix(in.Target),
+		nsConversationID: namespacedID(repo, useCase, in.ConversationID),
+		instruction:      in.Instruction + steeringByUseCase[useCase] + targetSuffix(in.Target),
 		summary:          in.Instruction,
 		repoRef:          ref,
 		baseRef:          baseRef,
@@ -372,6 +406,8 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		anthropicKey:     key,
 		author:           author,
 		committer:        committer,
+		collabRoomID:     collabRoomID,
+		collabToken:      collabToken,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic

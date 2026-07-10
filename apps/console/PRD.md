@@ -78,6 +78,17 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Spec view — Build button invokes the build resource: commit-then-build
+  (collab flush-on-demand → `POST /build`), lands on the overview; Build
+  disabled with a tooltip while an agent turn runs —
+  [#162](https://github.com/wso2/labs-agentic-engineer/issues/162)
+  (no aep-api change; collab-service flush handler; ADR-0007 amended on ship)
+- Project overview — "Generate spec" CTA on the Spec card: persists the create
+  prompt to localStorage and, when `hasSpec` is false, seeds a live room turn
+  to generate requirements (create does not auto-derive) —
+  [#150](https://github.com/wso2/labs-agentic-engineer/issues/150)
+  (no contract change; duplicate-generation guard deferred to
+  [#151](https://github.com/wso2/labs-agentic-engineer/issues/151))
 - Settings — org GitHub PAT + Anthropic key credentials, and skills catalogue
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
@@ -87,6 +98,11 @@ that's a stalled feature — investigate, don't ignore.
   [#80](https://github.com/wso2/labs-agentic-engineer/issues/80) (BE
   handshake: [#81](https://github.com/wso2/labs-agentic-engineer/issues/81),
   ADR-0007)
+- Project AI panel — right-hand agent chat on every project route; messages
+  run room-scoped collab turns (#86 phase 4): the agent joins the spec room
+  as a live peer and edits the shared doc while narrating in the panel —
+  [#130](https://github.com/wso2/labs-agentic-engineer/issues/130) (on
+  `feature-collab-with-agents`, not aep-rewrite, until the flow completes)
 - Console on the proposed contract (#111) — spec view reads via `list-files` +
   lazy `read-file` (supersedes #99); overview Build card from `list-tasks`
   (`/board` is gone); version chips from `/tags` `latest`/`specDirty` —
@@ -121,7 +137,7 @@ GitHub issue plus any ADRs it produced.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|
-| _none yet_ | — | — | — |
+| Spec view — Generate / Re-generate design | 2026-07-10 | Phase-aware primary CTA in the Spec view header: **Generate design** when requirements exist but no design, **Build** once a design exists; **Re-generate design** in the Designs section. Fires a design-generation room turn (agent writes `specs/design/…` live). Gated on requirements; Build stays gated on design files. Verified live (7 design files generated + committed). | [#159](https://github.com/wso2/labs-agentic-engineer/issues/159), ADR-0007 (staleness → [#160](https://github.com/wso2/labs-agentic-engineer/issues/160)) |
 
 ## Non-goals
 

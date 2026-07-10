@@ -82,12 +82,12 @@ test("validate: rooms outside the caller's org are denied", async () => {
   );
 });
 
-test("spec files: list + per-file reads through the real client, keys stripped of specs/", async () => {
+test("spec files: list + per-file reads through the real client, full specs/ paths verbatim", async () => {
   const bff = createBffClient(base);
   const files = await bff.fetchSpecFiles("opaque-token", "demo-shop");
   assert.equal(files.length, devSpecFiles.length);
-  const prd = files.find((f) => f.path === "requirements/prd.md");
-  assert.ok(prd, "room key is the repo path without specs/");
+  const prd = files.find((f) => f.path === "specs/requirements/prd.md");
+  assert.ok(prd, "doc key is the full repo path, verbatim");
   assert.match(prd.content, /Demo Shop — PRD/);
 });
 

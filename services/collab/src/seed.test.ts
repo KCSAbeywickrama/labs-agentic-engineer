@@ -20,11 +20,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as Y from "yjs";
 import { seedDocument, filesMap } from "./seed.js";
-import { fragmentToMarkdown } from "./markdown.js";
+import { fragmentToMarkdown } from "@aep/collab-doc";
 
 const bundle = [
-  { path: "requirements/prd.md", content: "# PRD\n" },
-  { path: "design/arch.excalidraw", content: '{"type":"excalidraw-dsl"}' },
+  { path: "requirements/prd.md", content: "# PRD\n", sha: "t1" },
+  { path: "design/arch.excalidraw", content: '{"type":"excalidraw-dsl"}', sha: "t2" },
 ];
 
 test("seeds md files as Y.XmlFragments, others as Y.Text entries", () => {

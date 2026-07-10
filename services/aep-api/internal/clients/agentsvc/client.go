@@ -86,6 +86,20 @@ type TurnRequest struct {
 	// without it). The wire shape is pinned by @aep/agent-stream's McpConfig
 	// (packages/agent-stream/src/contracts/sse-events.ts): `mcp: {url, token}`.
 	MCP *MCPBlock `json:"mcp,omitempty"`
+	// Collab, when set, makes this a room-scoped turn (#86 phase 4): the agents
+	// service joins the collab room as a live Yjs peer, reads its file bundle
+	// FROM the doc, and applies ops to the doc — nothing is committed to git.
+	// Wire shape pinned by @aep/agent-stream's CollabConfig.
+	Collab *CollabBlock `json:"collab,omitempty"`
+}
+
+// CollabBlock names the room and carries the prompting user's bearer,
+// forwarded request-scoped (#86 decision 7) — the collab server's oracle
+// validates it exactly like a browser join. JSON field names match
+// @aep/agent-stream's CollabConfig exactly.
+type CollabBlock struct {
+	RoomID string `json:"roomId"`
+	Token  string `json:"token"`
 }
 
 // MCPBlock is the caller-supplied MCP discovery config for a turn. URL is the

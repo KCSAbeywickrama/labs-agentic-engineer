@@ -59,9 +59,11 @@ type ProgressEvent struct {
 	Message     string `json:"message,omitempty"`
 }
 
-// ProgressResponse is the envelope the progress endpoint returns.
+// ProgressResponse is the envelope the progress reader returns per execution.
 // Schema-versioned so the console can branch on future envelope changes
-// without flag-flipping.
+// without flag-flipping. It is an INTERNAL DTO — the task-log HTTP surface is
+// the SSE stream (TimelineEvent frames); this envelope is how the per-kind
+// line sources report their slice to the stream assembler.
 type ProgressResponse struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	Lines         []ProgressEvent `json:"lines"`
@@ -69,4 +71,16 @@ type ProgressResponse struct {
 	Phase         string          `json:"phase,omitempty"`
 	Truncated     bool            `json:"truncated,omitempty"`
 	Final         bool            `json:"final"`
+}
+
+// TimelineEvent is one entry on the unified task-log stream: a ProgressEvent
+// (its fields flatten into the JSON — the struct is embedded, not nested) plus
+// attribution for WHICH execution attempt produced it. The console renders one
+// row per TimelineEvent and groups rows by executionId/executionKind — no
+// server-side per-execution filter, so history browsing is a client-side
+// group-by over one feed.
+type TimelineEvent struct {
+	ProgressEvent
+	ExecutionID   string `json:"executionId"`
+	ExecutionKind string `json:"executionKind"`
 }
