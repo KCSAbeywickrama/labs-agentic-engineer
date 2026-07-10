@@ -45,6 +45,7 @@ export function SpecFileList({
   onSelect,
   onAddArtifact,
   onRegenerateDesign,
+  regenerateDisabled,
   deriving,
   failed,
 }: {
@@ -55,6 +56,8 @@ export function SpecFileList({
   /** Re-generate the design (#159) — shown in the Designs header once a design
    *  exists; fires the same design-generation room turn as the header CTA. */
   onRegenerateDesign: () => void;
+  /** Disabled while an agent turn runs — a re-generate would be dropped mid-turn. */
+  regenerateDisabled?: boolean;
   /** Agents are still shaping the spec — empty groups say so. */
   deriving: boolean;
   /** Derivation failed — empty groups say that instead. */
@@ -90,14 +93,24 @@ export function SpecFileList({
                 </Tooltip>
               )}
               {group.id === "designs" && groupFiles.length > 0 && (
-                <Tooltip title="Re-generate design from the current requirements">
-                  <IconButton
-                    size="small"
-                    aria-label="Re-generate design"
-                    onClick={onRegenerateDesign}
-                  >
-                    <RefreshCw size={16} />
-                  </IconButton>
+                <Tooltip
+                  title={
+                    regenerateDisabled
+                      ? "An agent is still working — re-generate is available once it finishes"
+                      : "Re-generate design from the current requirements"
+                  }
+                >
+                  {/* span so the tooltip works while the button is disabled */}
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label="Re-generate design"
+                      onClick={onRegenerateDesign}
+                      disabled={regenerateDisabled ?? false}
+                    >
+                      <RefreshCw size={16} />
+                    </IconButton>
+                  </span>
                 </Tooltip>
               )}
             </Box>
