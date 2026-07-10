@@ -21,10 +21,9 @@ specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidr
 
 ## The top-level design.md
 
-YAML frontmatter first, then these sections. Depth rule: **every requirement
-must have a home** in a capability, entity, role, or screen below — a
-requirement you can't point to in this document is a defect, not an editing
-choice.
+These sections, in order. Depth rule: **every requirement must have a home** in
+a capability, entity, role, or screen below — a requirement you can't point to
+in this document is a defect, not an editing choice.
 
 1. **Overview** — what the system is, in one paragraph.
 2. **Components** — a bullet per component: name, `type`, one-line
