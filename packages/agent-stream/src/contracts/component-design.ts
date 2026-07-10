@@ -81,6 +81,9 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
+  /** Skill names applied to THIS component (per-component; the coding runner
+   *  materializes exactly these for a build of this component). */
+  skillsApplied?: string[];
 }
 
 /**
