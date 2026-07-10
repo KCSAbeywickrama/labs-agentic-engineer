@@ -231,6 +231,9 @@ func (f *fakeIssueSvc) CreateIssue(context.Context, string, string, gitrepo.Crea
 func (f *fakeIssueSvc) ListIssues(context.Context, string, string, []string) ([]gitrepo.IssueInfo, error) {
 	panic("fakeIssueSvc: ListIssues not expected")
 }
+func (f *fakeIssueSvc) GetIssue(context.Context, string, string, int) (*gitrepo.IssueInfo, error) {
+	panic("fakeIssueSvc: GetIssue not expected")
+}
 func (f *fakeIssueSvc) CloseIssue(context.Context, string, string, int, string) error {
 	panic("fakeIssueSvc: CloseIssue not expected")
 }

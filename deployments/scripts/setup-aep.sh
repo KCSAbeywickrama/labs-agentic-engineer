@@ -103,6 +103,29 @@ else
     echo "✅ ClusterWorkflow 'aep-coding-agent' installed (DEV — /app/plugin overlay live from host)"
 fi
 
+# Pre-pull + import the coding-agent runner image into the k3d node. It's a
+# ~560MB image on a personal Docker Hub repo; on a fresh cluster the FIRST
+# coding-agent Job pulls it cold, which has taken ~17 min — long enough to blow
+# past the Job's activeDeadlineSeconds, so the pod is killed the moment it
+# starts and the task fails with DeadlineExceeded (and any dependent task then
+# sits On Hold forever). Pre-importing makes the first dispatch start instantly.
+# The tag is read from the manifest so it can't drift from what the Job uses.
+RUNNER_IMAGE="$(grep -oE 'image:[[:space:]]*[^[:space:]]*aep-coding-agent-runner:[^[:space:]]+' "$CODING_AGENT_MANIFEST" | head -1 | awk '{print $2}')"
+if [ -n "$RUNNER_IMAGE" ]; then
+    echo ""
+    echo "🐳 Pre-importing coding-agent runner image ($RUNNER_IMAGE)..."
+    if docker image inspect "$RUNNER_IMAGE" &>/dev/null || docker pull "$RUNNER_IMAGE"; then
+        k3d image import "$RUNNER_IMAGE" -c "$CLUSTER_NAME" \
+            && echo "✅ runner image cached on node — first coding-agent dispatch won't cold-pull" \
+            || echo "⚠️  k3d image import failed; first dispatch may cold-pull (see DeadlineExceeded risk above)"
+    else
+        echo "⚠️  Could not pull $RUNNER_IMAGE — first coding-agent Job may exceed its deadline"
+        echo "    on the cold pull. Pre-pull it manually, or raise the Job activeDeadlineSeconds."
+    fi
+else
+    echo "⚠️  Could not determine runner image from $CODING_AGENT_MANIFEST — skipping pre-import."
+fi
+
 # ============================================================================
 # OpenChoreo infrastructure resources
 # ============================================================================
@@ -695,8 +718,48 @@ spec:
   - roleRef:
       kind: ClusterAuthzRole
       name: workload-publisher
+---
+# The SRE/RCA agent's handoff stage auto-dispatches a coding-agent run for a
+# code-level incident (AE_AUTO_DISPATCH): ae_dispatch_coding_agent → aep-api's
+# PromoteAndExecute, whose SYNCHRONOUS EnsureComponent pre-check forwards the
+# agent's own service-account token (sub=openchoreo-rca-agent) to the OC API's
+# CreateComponent. The control-plane chart's `rca-agent` role is read-only
+# (*:view + incidents:update), so that one call 403s and dispatch never fires.
+# Grant the agent's identity `component:create` via this ADDITIVE role/binding
+# (Casbin unions it with the chart's rca-agent role — we don't edit the
+# Helm-managed role, so a control-plane `helm upgrade` can't revert it) so the
+# whole alert→RCA→issue→dispatch loop completes for every org/project under the
+# one shared service identity — no per-user provisioning. Everything downstream
+# of the pre-check (the funnel's own EnsureComponent, workflowrun:create, the
+# Anthropic secret write) runs in aep-api's detached goroutine as
+# sub=aep-api-client (admin *), so `component:create` is the ONLY action this
+# identity needs. A normal user hitting the same promote-from-issue route still
+# forwards THEIR token and is still gated by their own OC permissions — this
+# grant is scoped to the SRE agent's dedicated credential, which no human holds.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRole
+metadata:
+  name: rca-agent-dispatch
+spec:
+  description: "SRE/RCA agent handoff: create the Component CR when auto-dispatching a coding-agent run"
+  actions:
+  - component:create
+---
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterAuthzRoleBinding
+metadata:
+  name: rca-agent-dispatch-binding
+spec:
+  effect: allow
+  entitlement:
+    claim: sub
+    value: openchoreo-rca-agent
+  roleMappings:
+  - roleRef:
+      kind: ClusterAuthzRole
+      name: rca-agent-dispatch
 OCEOF
-echo "✅ AEP API service account + Administrators group + workload publisher authorized"
+echo "✅ AEP API service account + Administrators group + workload publisher + RCA-agent dispatch authorized"
 
 # ============================================================================
 # Generate .env file

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/repositories"
@@ -30,6 +31,10 @@ import (
 type IssueService interface {
 	CreateIssue(ctx context.Context, orgID, projectID string, req CreateIssueRequest) (*IssueResult, error)
 	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]IssueInfo, error)
+	// GetIssue fetches a single issue by number — O(1) in repo size, unlike
+	// ListIssues (which pages the repo). Returns ErrIssueNotFound when no issue
+	// with that number exists on the project's repo.
+	GetIssue(ctx context.Context, orgID, projectID string, number int) (*IssueInfo, error)
 	// CloseIssue closes the issue, optionally posting a closing comment first.
 	CloseIssue(ctx context.Context, orgID, projectID string, number int, comment string) error
 	// CommentIssue posts a comment on the issue.
@@ -63,6 +68,64 @@ type issueService struct {
 	repo     repositories.RepoRepository
 	github   IssueOps
 	resolver credentials.Resolver
+	// createLocks serializes dedupe-checked creation per "owner/repo" so two
+	// concurrent CreateIssue calls with the same DedupeKey can't both pass the
+	// existing-issue check before either creates — the exact race that produced
+	// duplicate SRE/RCA issues when multiple alert rules fired for one incident.
+	// In-process: correct within this aep-api instance (the deployment runs
+	// one). Across replicas the check-then-create window shrinks from the
+	// caller's whole run to a single list+create roundtrip, not zero — a DB
+	// unique constraint would be needed for cross-replica atomicity.
+	//
+	// keyedMutex evicts a repo's lock once no create is in flight for it, so the
+	// map stays bounded by concurrent dedup creates rather than growing once per
+	// distinct repo this long-lived process has ever served.
+	createLocks keyedMutex
+}
+
+// keyedMutex is a per-key mutex pool that deletes a key's entry once no
+// goroutine holds or is waiting on it, keeping the map bounded by the number
+// of concurrently-locked keys (not by every distinct key ever seen — the
+// unbounded-growth risk of a naive sync.Map of mutexes in a long-lived,
+// many-repo process). The zero value is ready to use.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*refCountedLock
+}
+
+type refCountedLock struct {
+	mu   sync.Mutex
+	refs int // holders + waiters, guarded by keyedMutex.mu
+}
+
+// lock acquires the mutex for key and returns its release func. refs is bumped
+// under keyedMutex.mu at acquire time — before waiting on the inner mutex — so
+// a waiter is always counted before the current holder can release and try to
+// evict, keeping the count consistent. The entry is deleted when the last
+// holder/waiter releases.
+func (k *keyedMutex) lock(key string) func() {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = make(map[string]*refCountedLock)
+	}
+	rc, ok := k.locks[key]
+	if !ok {
+		rc = &refCountedLock{}
+		k.locks[key] = rc
+	}
+	rc.refs++
+	k.mu.Unlock()
+
+	rc.mu.Lock()
+	return func() {
+		rc.mu.Unlock()
+		k.mu.Lock()
+		rc.refs--
+		if rc.refs == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
+	}
 }
 
 func NewIssueService(repo repositories.RepoRepository, github IssueOps, resolver credentials.Resolver) IssueService {
@@ -83,6 +146,31 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 		return nil, err
 	}
 
+	if key := strings.TrimSpace(req.DedupeKey); key != "" {
+		req.DedupeKey = "" // aep-api-only field; must not reach GitHub
+		label := dedupeLabelFor(key)
+
+		unlock := s.lockRepoCreates(owner, repoName)
+		defer unlock()
+
+		existing, listErr := s.github.ListIssues(ctx, owner, repoName, cred, []string{label})
+		if listErr != nil {
+			// Best-effort: a failed lookup must not block filing the issue; at
+			// worst we regress to a possible duplicate.
+			slog.WarnContext(ctx, "dedupe lookup failed, creating without dedup check",
+				"project", projectID, "label", label, "error", listErr)
+		} else {
+			for _, iss := range existing {
+				if strings.EqualFold(iss.State, "open") {
+					slog.InfoContext(ctx, "issue create deduped to existing open issue",
+						"project", projectID, "label", label, "issue", iss.Number)
+					return &IssueResult{Number: iss.Number, URL: iss.URL, Deduped: true}, nil
+				}
+			}
+		}
+		req.Labels = append(req.Labels, label)
+	}
+
 	// Ensure all requested labels exist in the repo before creating the issue.
 	// GitHub silently drops labels that don't exist, so we create them up-front.
 	for _, label := range req.Labels {
@@ -98,12 +186,38 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 	return s.github.CreateIssue(ctx, owner, repoName, cred, req)
 }
 
+// lockRepoCreates acquires the per-repo creation lock and returns its release
+// func. See the createLocks field doc for why this exists.
+func (s *issueService) lockRepoCreates(owner, repo string) func() {
+	return s.createLocks.lock(owner + "/" + repo)
+}
+
+// dedupeLabelFor turns a caller-supplied dedupe key into the GitHub label that
+// marks issues created with that key. Whitespace collapses to "-" and the
+// result is capped at GitHub's 50-char label limit — the cap is deterministic
+// (same key → same label), so we truncate rather than hash.
+func dedupeLabelFor(key string) string {
+	label := "dedupe:" + strings.ToLower(strings.Join(strings.Fields(key), "-"))
+	if len(label) > 50 {
+		label = label[:50]
+	}
+	return label
+}
+
 func (s *issueService) ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]IssueInfo, error) {
 	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
 	return s.github.ListIssues(ctx, owner, repoName, cred, labels)
+}
+
+func (s *issueService) GetIssue(ctx context.Context, orgID, projectID string, number int) (*IssueInfo, error) {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.github.GetIssue(ctx, owner, repoName, cred, number)
 }
 
 func (s *issueService) CloseIssue(ctx context.Context, orgID, projectID string, number int, comment string) error {

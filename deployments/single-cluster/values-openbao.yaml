@@ -24,9 +24,20 @@ server:
     - /bin/sh
     - -c
     - |
-      sleep 5
       export BAO_ADDR=http://127.0.0.1:8200
       export BAO_TOKEN=root
+
+      # Wait until the dev server actually answers before seeding. A fixed
+      # `sleep 5` lost this race on a cold node: every
+      # command below failed silently, leaving no auth/kubernetes mount —
+      # ESO then got 403 on every login and all component builds ran
+      # credential-less. `set -e` makes any residual failure kill the hook,
+      # which fails the pod and retries the whole seeding — loud, not silent.
+      for i in $(seq 1 60); do
+        bao status >/dev/null 2>&1 && break
+        sleep 2
+      done
+      set -e
 
       bao auth enable kubernetes 2>/dev/null || true
       bao write auth/kubernetes/config \
