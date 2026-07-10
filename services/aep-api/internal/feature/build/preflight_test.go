@@ -53,7 +53,7 @@ func (f fakeStatus) Ready(context.Context, string, string, string) (bool, error)
 func kindsByDep(items []PreflightItem) map[string][]string {
 	out := make(map[string][]string, len(items))
 	for _, it := range items {
-		out[it.DepName] = append(out[it.DepName], it.Kind)
+		out[it.Dependency] = append(out[it.Dependency], it.Kind)
 	}
 	return out
 }
@@ -111,7 +111,7 @@ func TestPreflight_PlatformResourceItem_CarriesResourceTypeAndParameters(t *test
 	require.NoError(t, err)
 	require.Len(t, pf.Items, 1)
 	item := pf.Items[0]
-	require.Equal(t, "orders-db", item.DepName)
+	require.Equal(t, "orders-db", item.Dependency)
 	require.Equal(t, "postgres-cnpg", item.ResourceType)
 	require.Equal(t, map[string]any{"instances": 1}, item.Parameters)
 }

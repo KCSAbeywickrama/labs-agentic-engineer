@@ -33,9 +33,15 @@ type PreflightDesignReader interface {
 // ProvisionStatusReader reports whether a dependency no longer needs the
 // drawer: it is a TRI-STATE collapsed to a bool — true when the dependency is
 // already provisioned OR provisioning is in-flight, false only when nothing
-// has been started yet. Wraps provisioning.Service.Status
-// (internal/feature/provisioning/status_service.go), whose DependencyStatus.Ready
-// already carries this same collapsed semantics.
+// has been started yet. This is a DIFFERENT semantics than
+// provisioning.Service.Status's DependencyStatus.Ready: that field is
+// `b.IsReady()` (internal/feature/provisioning/status_service.go:53), which is
+// false for BOTH Status:"unknown" (nothing started) and Status:"provisioning"
+// (in-flight) — it does not collapse the tri-state on its own. The real
+// adapter implementing this interface must therefore NOT simply return
+// DependencyStatus.Ready; it must treat any non-"unknown" Status (e.g.
+// "provisioning") as "already handled" so preflight does not re-ask for a
+// dependency that is already in flight.
 type ProvisionStatusReader interface {
 	Ready(ctx context.Context, orgID, projectID, depName string) (bool, error)
 }
@@ -55,19 +61,16 @@ type ConfigKeyView struct {
 // dependency — external deps can raise both a spec and a config item) that
 // still needs user input/approval before a build can safely dispatch it.
 type PreflightItem struct {
-	Kind          string          `json:"kind" enum:"external-spec,external-config,platform-resource,org-service"`
-	ComponentName string          `json:"componentName" doc:"Owning component name"`
-	DepName       string          `json:"depName" doc:"Dependency name"`
-	Description   string          `json:"description,omitempty"`
+	Component   string `json:"component" doc:"Owning component name"`
+	Dependency  string `json:"dependency" doc:"Dependency name"`
+	Kind        string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
+	Description string `json:"description"`
 	// external-config only: key/secret views the drawer collects values for.
 	Config []ConfigKeyView `json:"config,omitempty"`
 	// platform-resource only: the registered (Cluster)ResourceType + the
 	// design-authored provisioning defaults.
 	ResourceType string         `json:"resourceType,omitempty"`
 	Parameters   map[string]any `json:"parameters,omitempty"`
-	// org-service only: the 3 non-resolved resolution states (unresolved |
-	// blocked | ambiguous) that gate the drawer.
-	Status string `json:"status,omitempty"`
 }
 
 // BuildPreflight is the get-build-preflight response: whether the console
@@ -157,10 +160,10 @@ func (s *PreflightService) externalItems(ctx context.Context, orgID, projectID, 
 	var out []PreflightItem
 	if d.NeedsSpec && d.SpecPath == "" && d.SpecUrl == "" {
 		out = append(out, PreflightItem{
-			Kind:          "external-spec",
-			ComponentName: componentName,
-			DepName:       d.Name,
-			Description:   d.Description,
+			Kind:        "external-spec",
+			Component:   componentName,
+			Dependency:  d.Name,
+			Description: d.Description,
 		})
 	}
 	ready, err := s.status.Ready(ctx, orgID, projectID, d.Name)
@@ -169,11 +172,11 @@ func (s *PreflightService) externalItems(ctx context.Context, orgID, projectID, 
 	}
 	if !ready {
 		out = append(out, PreflightItem{
-			Kind:          "external-config",
-			ComponentName: componentName,
-			DepName:       d.Name,
-			Description:   d.Description,
-			Config:        toConfigKeyViews(d.Config),
+			Kind:        "external-config",
+			Component:   componentName,
+			Dependency:  d.Name,
+			Description: d.Description,
+			Config:      toConfigKeyViews(d.Config),
 		})
 	}
 	return out, nil
@@ -188,12 +191,12 @@ func (s *PreflightService) platformResourceItems(ctx context.Context, orgID, pro
 		return nil, nil
 	}
 	return []PreflightItem{{
-		Kind:          "platform-resource",
-		ComponentName: componentName,
-		DepName:       d.Name,
-		Description:   d.Description,
-		ResourceType:  d.ResourceType,
-		Parameters:    d.Parameters,
+		Kind:         "platform-resource",
+		Component:    componentName,
+		Dependency:   d.Name,
+		Description:  d.Description,
+		ResourceType: d.ResourceType,
+		Parameters:   d.Parameters,
 	}}, nil
 }
 
@@ -201,11 +204,10 @@ func orgServiceItems(componentName string, d models.Dependency) []PreflightItem 
 	switch d.Status {
 	case models.DependencyStatusUnresolved, models.DependencyStatusBlocked, models.DependencyStatusAmbiguous:
 		return []PreflightItem{{
-			Kind:          "org-service",
-			ComponentName: componentName,
-			DepName:       d.Name,
-			Description:   d.Description,
-			Status:        d.Status,
+			Kind:        "org-service",
+			Component:   componentName,
+			Dependency:  d.Name,
+			Description: d.Description,
 		}}
 	default:
 		return nil
