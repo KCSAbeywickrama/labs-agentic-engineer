@@ -48,6 +48,7 @@ type listInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
 	State       string `query:"state" enum:"open,closed,all" doc:"Which Tasks to return (default open)"`
+	Tag         string `query:"tag" doc:"Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions."`
 }
 
 type listOutput struct {
@@ -98,14 +99,14 @@ func RegisterTask(api huma.API, reads *Reads, commands *Commands, plan *PlanServ
 		OperationID: "list-tasks",
 		Method:      http.MethodGet,
 		Path:        "/projects/{projectName}/tasks",
-		Summary:     "List a project's Tasks (live GitHub ⋈ executions → derived status)",
+		Summary:     "List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to one spec/build version tag",
 		Tags:        []string{"Tasks"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *listInput) (*listOutput, error) {
 		if reads == nil {
 			return nil, huma.Error503ServiceUnavailable("tasks not configured")
 		}
-		views, err := reads.List(ctx, in.OrgHandle, in.ProjectName, in.State)
+		views, err := reads.ListByTag(ctx, in.OrgHandle, in.ProjectName, in.State, in.Tag)
 		if err != nil {
 			return nil, mapReadError(err)
 		}
