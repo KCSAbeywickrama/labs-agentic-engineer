@@ -16,38 +16,24 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import {
-  alpha,
   Box,
   Button,
   Card,
   CardContent,
   CircularProgress,
-  Divider,
   PageContent,
   Stack,
   Typography,
 } from '@wso2/oxygen-ui';
 import { ChevronLeft, Github } from '@wso2/oxygen-ui-icons-react';
-import { api } from '../services/api';
-import type { ExecutionView, TaskDetail, TaskStatus } from '../services/api';
-import { useExecutionProgress } from '../hooks/useExecutionProgress';
-import { TaskActivityFeed } from '../components/tasks/TaskActivityFeed';
+import { useTaskStream } from '../hooks/useTaskStream';
+import { TaskTimeline } from '../components/tasks/TaskTimeline';
 import { TaskPipelineStrip } from '../components/tasks/TaskPipelineStrip';
 import { FlagChip, TaskStatusPill } from '../components/tasks/TaskStatusPill';
 import { IN_FLIGHT_TASK_STATUSES } from '../components/tasks/types';
 import { projectTasksPath } from '../lib/paths';
-import { formatElapsedSince } from '../lib/relativeTime';
-
-// Terminal for polling. failed/rejected are NOT terminal — a retry can drive
-// them to deployed — so the detail keeps polling through them; otherwise the
-// header freezes on the failed attempt's stale attention flag after the task
-// recovers (the list, which refetches, shows it correctly). Only deployed/
-// abandoned truly settle.
-const SETTLED_STATUSES = new Set<TaskStatus>(['deployed', 'abandoned']);
-const POLL_MS = 5000;
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -62,63 +48,18 @@ export default function TaskDetailPage() {
   const { orgId, projectId, issueNumber } = useParams<{ orgId: string; projectId: string; issueNumber: string }>();
   const issueNum = Number(issueNumber);
 
-  const [task, setTask] = useState<TaskDetail | undefined>();
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedExecId, setSelectedExecId] = useState<string | undefined>();
+  // One SSE connection carries the Task's whole live state — header, executions,
+  // and the unified timeline — replacing the task re-poll + per-execution cursor
+  // poll + execution-selection the page used to run.
+  const { task, executions, lines, settled, error } = useTaskStream(projectId, issueNum);
 
-  const load = useCallback(async () => {
-    if (!projectId || !Number.isFinite(issueNum)) return;
-    try {
-      const data = await api.getTask(projectId, issueNum);
-      setTask(data);
-      setError(null);
-      // Default the progress feed to the most-recent execution.
-      setSelectedExecId((prev) => prev ?? data.executionHistory[0]?.id);
-    } catch (e) {
-      setError((e as Error)?.message ?? 'Task not found.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [projectId, issueNum]);
+  const anyLive = !settled && executions.some((e) => e.status === 'running' || e.status === 'queued');
 
-  useEffect(() => {
-    setIsLoading(true);
-    void load();
-  }, [load]);
-
-  // Poll until the task settles — including through failed/rejected, which a
-  // retry can still carry to deployed, so the header (status + attention) stays
-  // consistent with the freshly-refetched list instead of freezing on a stale
-  // attention flag from a since-recovered attempt.
-  useEffect(() => {
-    if (!task || SETTLED_STATUSES.has(task.derivedStatus)) return undefined;
-    const t = setInterval(() => void load(), POLL_MS);
-    return () => clearInterval(t);
-  }, [task, load]);
-
-  const selectedExec = useMemo(
-    () => task?.executionHistory.find((e) => e.id === selectedExecId),
-    [task, selectedExecId],
-  );
-  const progress = useExecutionProgress(projectId, selectedExecId, selectedExec?.status === 'running');
-
-  if (isLoading) {
-    return (
-      <PageContent>
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 16, gap: 1.5 }}>
-          <CircularProgress size={28} thickness={3} />
-          <Typography variant="body2" color="text.disabled">Loading task…</Typography>
-        </Box>
-      </PageContent>
-    );
-  }
-
-  if (error || !task) {
+  if (error) {
     return (
       <PageContent>
         <Box sx={{ pt: 8, textAlign: 'center' }}>
-          <Typography variant="body2" color="error.main">{error ?? 'Task not found.'}</Typography>
+          <Typography variant="body2" color="error.main">{error}</Typography>
           <Button
             component={RouterLink}
             to={projectTasksPath(orgId ?? '', projectId ?? '')}
@@ -128,6 +69,17 @@ export default function TaskDetailPage() {
           >
             Back to tasks
           </Button>
+        </Box>
+      </PageContent>
+    );
+  }
+
+  if (!task) {
+    return (
+      <PageContent>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 16, gap: 1.5 }}>
+          <CircularProgress size={28} thickness={3} />
+          <Typography variant="body2" color="text.disabled">Loading task…</Typography>
         </Box>
       </PageContent>
     );
@@ -193,107 +145,17 @@ export default function TaskDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Executions + progress */}
+        {/* Executions + unified timeline (grouped by attempt) */}
         <Card variant="outlined">
           <CardContent>
-            <Typography variant="overline" sx={{ color: 'text.disabled' }}>Executions</Typography>
-            {task.executionHistory.length === 0 ? (
-              <Typography variant="body2" color="text.disabled" sx={{ mt: 1 }}>
-                No executions yet — Execute this task (or stamp <code>aep:execute</code> on the issue) to dispatch it.
-              </Typography>
-            ) : (
-              <Stack spacing={0.5} sx={{ mt: 1 }}>
-                {task.executionHistory.map((exec) => (
-                  <ExecutionRow
-                    key={exec.id}
-                    exec={exec}
-                    selected={exec.id === selectedExecId}
-                    onSelect={() => setSelectedExecId(exec.id)}
-                  />
-                ))}
-              </Stack>
-            )}
-
-            {selectedExec && (
-              <>
-                <Divider sx={{ my: 1.5 }} />
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                  <Typography variant="overline" sx={{ color: 'text.disabled' }}>
-                    {selectedExec.kind} progress
-                  </Typography>
-                  {selectedExec.status === 'running' && progress.lines.length > 0 && !progress.final && (
-                    <Typography variant="caption" color="text.disabled">· live</Typography>
-                  )}
-                </Stack>
-                <TaskActivityFeed
-                  lines={progress.lines}
-                  final={progress.final}
-                  emptyMessage={
-                    selectedExec.status === 'queued'
-                      ? `Queued${selectedExec.reason ? ` — ${selectedExec.reason}` : ''}. Waiting to start…`
-                      : selectedExec.status === 'running'
-                        ? 'Execution running — streaming activity will appear here…'
-                        : 'No activity recorded for this execution.'
-                  }
-                />
-                {progress.error && (
-                  <Typography variant="caption" color="warning.main" sx={{ mt: 1, display: 'block' }}>
-                    Live progress unavailable — the execution status above remains accurate.
-                  </Typography>
-                )}
-              </>
-            )}
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="overline" sx={{ color: 'text.disabled' }}>Executions</Typography>
+              {anyLive && <Typography variant="caption" color="text.disabled">· live</Typography>}
+            </Stack>
+            <TaskTimeline executions={executions} lines={lines} />
           </CardContent>
         </Card>
       </Stack>
     </PageContent>
-  );
-}
-
-function ExecutionRow({ exec, selected, onSelect }: { exec: ExecutionView; selected: boolean; onSelect: () => void }) {
-  const tone =
-    exec.status === 'succeeded' ? 'success.main'
-    : exec.status === 'failed' ? 'error.main'
-    : exec.status === 'running' ? 'primary.main'
-    : exec.status === 'canceled' ? 'text.disabled'
-    : 'warning.main'; // queued
-  const started = formatElapsedSince(exec.startedAt ?? exec.createdAt);
-
-  return (
-    <Box
-      onClick={onSelect}
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 1.25,
-        px: 1.25,
-        py: 0.875,
-        borderRadius: 1,
-        cursor: 'pointer',
-        border: '1px solid',
-        borderColor: selected ? 'primary.main' : 'divider',
-        bgcolor: (t) => (selected ? alpha(t.palette.primary.main, 0.05) : 'transparent'),
-        '&:hover': { bgcolor: (t) => alpha(t.palette.text.primary, 0.03) },
-      }}
-    >
-      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tone, flexShrink: 0 }} />
-      <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 52 }}>{exec.kind}</Typography>
-      <Typography variant="caption" sx={{ color: tone, fontWeight: 600, textTransform: 'uppercase', minWidth: 72 }}>
-        {exec.status}
-      </Typography>
-      {exec.runName && (
-        <Typography variant="caption" sx={{ color: 'text.disabled', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {exec.runName}
-        </Typography>
-      )}
-      {exec.reason && !exec.runName && (
-        <Typography variant="caption" sx={{ color: 'text.disabled', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {exec.reason}
-        </Typography>
-      )}
-      {started && (
-        <Typography variant="caption" sx={{ color: 'text.disabled', flexShrink: 0 }}>{started} ago</Typography>
-      )}
-    </Box>
   );
 }

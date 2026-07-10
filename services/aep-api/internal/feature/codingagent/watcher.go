@@ -29,6 +29,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
+	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -54,6 +55,8 @@ type JobWatcher struct {
 	// signaler feeds a coding-job failure to a waiting devflow TaskFlow
 	// workflow. Nil-safe (no-op when absent).
 	signaler *devflow.Signaler
+	// notifier wakes any attached task-log stream on the failure. Nil-safe.
+	notifier *execution.TaskStreamHub
 }
 
 // NewJobWatcher constructs a watcher. db + proxy + execRows required.
@@ -68,6 +71,13 @@ func NewJobWatcher(db *gorm.DB, proxy *clustergatewayproxy.Client, execRows repo
 // reaches a waiting TaskFlow workflow. Optional. Returns the receiver.
 func (w *JobWatcher) WithWorkflowSignaler(s *devflow.Signaler) *JobWatcher {
 	w.signaler = s
+	return w
+}
+
+// WithTaskNotifier wires the task-log stream hub so a coding-job failure wakes
+// attached console streams instantly. Optional — nil-safe.
+func (w *JobWatcher) WithTaskNotifier(h *execution.TaskStreamHub) *JobWatcher {
+	w.notifier = h
 	return w
 }
 
@@ -152,6 +162,7 @@ func (w *JobWatcher) finishFailed(ctx context.Context, row *models.Execution, re
 	w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, devflow.SigJobStatus, devflow.RunStatusSignal{
 		ExecutionID: row.ID, Phase: devflow.PhaseFailed, Message: reason,
 	})
+	w.notifier.Notify(row.Repo, row.IssueNumber)
 }
 
 // cleanupPerRunExternalSecrets deletes the per-run ExternalSecrets the

@@ -253,10 +253,16 @@ else
     echo "📦 Installing Workflow Plane..."
     create_plane_cert_resources openchoreo-workflow-plane
 
+    # Pre-fetched via fetch_gh_raw (PAT-aware, retried) — a direct helm
+    # --values URL read hits the anonymous raw.githubusercontent.com throttle
+    # with no retry (a 429 here aborted a bring-up once).
+    REGISTRY_VALUES_FILE="$(mktemp)"
+    fetch_gh_raw "https://raw.githubusercontent.com/openchoreo/openchoreo/v${OPENCHOREO_VERSION}/install/k3d/single-cluster/values-registry.yaml" "$REGISTRY_VALUES_FILE"
     helm upgrade --install registry docker-registry \
         --repo https://twuni.github.io/docker-registry.helm \
         --namespace openchoreo-workflow-plane --create-namespace \
-        --values "https://raw.githubusercontent.com/openchoreo/openchoreo/v${OPENCHOREO_VERSION}/install/k3d/single-cluster/values-registry.yaml"
+        --values "$REGISTRY_VALUES_FILE"
+    rm -f "$REGISTRY_VALUES_FILE"
 
     helm upgrade --install openchoreo-workflow-plane \
         oci://ghcr.io/openchoreo/helm-charts/openchoreo-workflow-plane \

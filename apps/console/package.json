@@ -17,6 +17,8 @@
     "gen": "openapi-typescript ../../packages/contracts/api/v1/openapi.yaml -o src/generated/aep-api.d.ts && tsr generate"
   },
   "dependencies": {
+    "@aep/agent-stream": "workspace:*",
+    "@aep/collab-doc": "workspace:*",
     "@hocuspocus/provider": "4.3.0",
     "@tanstack/react-query": "5.90.5",
     "@tanstack/react-router": "1.170.17",

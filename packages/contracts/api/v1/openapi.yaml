@@ -135,6 +135,14 @@ components:
       type: object
     BuildRequest:
       additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/BuildRequest.json
+          format: uri
+          readOnly: true
+          type: string
       type: object
     BuildResponse:
       additionalProperties: false
@@ -183,6 +191,10 @@ components:
     BuildStatusTask:
       additionalProperties: false
       properties:
+        issueNumber:
+          description: GitHub issue number of the Task — links a build-status row to its issue (and to the task-log stream); replaces the old title-join.
+          format: int64
+          type: integer
         status:
           enum:
             - started
@@ -1066,40 +1078,6 @@ components:
         - seq
         - kind
       type: object
-    ProgressResponse:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ProgressResponse.json
-          format: uri
-          readOnly: true
-          type: string
-        cursorMillis:
-          format: int64
-          type: integer
-        final:
-          type: boolean
-        lines:
-          items:
-            $ref: "#/components/schemas/ProgressEvent"
-          type:
-            - array
-            - "null"
-        phase:
-          type: string
-        schemaVersion:
-          format: int64
-          type: integer
-        truncated:
-          type: boolean
-      required:
-        - schemaVersion
-        - lines
-        - cursorMillis
-        - final
-      type: object
     Project:
       additionalProperties: false
       properties:
@@ -1453,12 +1431,13 @@ components:
           readOnly: true
           type: string
         latest:
-          description: Newest user-tagged spec version (e.g. v3); absent when nothing is tagged. Proposed frontend-first (#117).
+          description: Newest spec version tag (e.g. v3); absent when nothing is tagged.
           type: string
         specDirty:
-          description: True when specs/ changed on GitHub after `latest` was tagged. Proposed frontend-first (#117).
+          description: True when specs/ changed after latest was tagged.
           type: boolean
         tags:
+          description: Spec version tags (v<N>), newest first.
           items:
             type: string
           type:
@@ -1536,6 +1515,34 @@ components:
         - attention
         - executions
       type: object
+    TaskStreamEvent:
+      additionalProperties: false
+      description: >-
+        One SSE frame on the task-log stream. `type` discriminates the payload:
+        `task` carries the full TaskView (client upserts by issue), `execution`
+        one ExecutionView (client upserts by id), `line` one TimelineEvent
+        (client appends, deduped by executionId+seq), and `done` the settled
+        derivedStatus (the server then closes the stream).
+      properties:
+        derivedStatus:
+          description: Settled derived status — present only on the `done` frame.
+          type: string
+        execution:
+          $ref: "#/components/schemas/ExecutionView"
+        line:
+          $ref: "#/components/schemas/TimelineEvent"
+        task:
+          $ref: "#/components/schemas/TaskView"
+        type:
+          enum:
+            - task
+            - execution
+            - line
+            - done
+          type: string
+      required:
+        - type
+      type: object
     TaskView:
       additionalProperties: false
       properties:
@@ -1591,6 +1598,67 @@ components:
         - attention
         - executions
       type: object
+    TimelineEvent:
+      additionalProperties: false
+      description: >-
+        A unified-timeline entry: today's ProgressEvent (phase | tool_use |
+        git_commit | git_push | gh_action | build_step | log | result) plus its
+        attribution — which execution attempt it came from. This is the per-row
+        shape the console renders; the FE groups rows by executionId/kind.
+      properties:
+        branch:
+          type: string
+        command:
+          type: string
+        completedAt:
+          type: string
+        error:
+          type: string
+        executionId:
+          description: Id of the execution attempt this line belongs to.
+          type: string
+        executionKind:
+          description: Kind of that attempt (coding | build | ops) — client-side grouping/section labels.
+          type: string
+        files:
+          format: int64
+          type: integer
+        kind:
+          type: string
+        level:
+          type: string
+        message:
+          type: string
+        phase:
+          type: string
+        schemaVersion:
+          format: int64
+          type: integer
+        seq:
+          format: int64
+          type: integer
+        sha:
+          type: string
+        startedAt:
+          type: string
+        status:
+          type: string
+        step:
+          type: string
+        summary:
+          type: string
+        tool:
+          type: string
+        ts:
+          type: string
+      required:
+        - schemaVersion
+        - ts
+        - seq
+        - kind
+        - executionId
+        - executionKind
+      type: object
     TurnInputBody:
       additionalProperties: false
       properties:
@@ -1601,6 +1669,9 @@ components:
           format: uri
           readOnly: true
           type: string
+        collab:
+          description: 'Room-scoped turn (#86 phase 4): the agent joins the project''s spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git.'
+          type: boolean
         instruction:
           description: User message / generation directive
           type: string
@@ -1608,14 +1679,13 @@ components:
           description: Optional target (e.g. a doc type)
           type: string
         useCase:
-          description: Which generation/chat flow
+          description: Which generation/chat flow. Omit to run a generic spec turn.
           enum:
             - requirements-generate
             - requirements-chat
             - design-generate
           type: string
       required:
-        - useCase
         - instruction
       type: object
     TurnOutputBody:
@@ -1633,6 +1703,54 @@ components:
           type: string
       required:
         - turnId
+      type: object
+    TurnStatus:
+      additionalProperties: false
+      description: One turn's lifecycle view (create-turn 202 → poll/attach).
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/TurnStatus.json
+          format: uri
+          readOnly: true
+          type: string
+        commitSha:
+          type: string
+        conversationId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        message:
+          type: string
+        noChanges:
+          type: boolean
+        paths:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        reason:
+          type: string
+        status:
+          description: running, completed, failed
+          type: string
+        turnId:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        useCase:
+          type: string
+      required:
+        - turnId
+        - conversationId
+        - useCase
+        - status
+        - createdAt
+        - updatedAt
       type: object
     UpdateConfigBody:
       additionalProperties: false
@@ -2744,7 +2862,7 @@ paths:
       summary: Get a component's OpenAPI spec
       tags:
         - Components
-  /projects/{projectName}/agents/{conversationId}/messages: #rename from convo
+  /projects/{projectName}/agents/{conversationId}/messages: 
     get:
       operationId: get-conversation
       parameters:
@@ -3180,9 +3298,9 @@ paths:
       summary: Get one Task with its full Execution history
       tags:
         - Tasks
-  /projects/{projectName}/tasks/{issueNumber}/log: #old /projects/{projectName}/executions/{executionId}/progress
+  /projects/{projectName}/tasks/{issueNumber}/log:
     get:
-      operationId: get-execution-progress
+      operationId: stream-task-log
       parameters:
         - description: Project name (DNS-label slug)
           in: path
@@ -3191,26 +3309,97 @@ paths:
           schema:
             description: Project name (DNS-label slug)
             type: string
-        - description: Execution id
+        - description: GitHub issue number of the Task
           in: path
-          name: executionId
+          name: issueNumber
           required: true
           schema:
-            description: Execution id
-            type: string
-        - description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
-          explode: false
-          in: query
-          name: sinceMillis
+            description: GitHub issue number of the Task
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/TaskStreamEvent"
+          description: >-
+            SSE stream of the Task's entire live state — status, executions, and
+            a unified timeline across all attempts. One `data:` JSON frame per
+            event (a TaskStreamEvent discriminated by `type`: task | execution |
+            line | done), each stamped `id: <seq>`; `: keep-alive` comments pace
+            idle waits. A settled Task streams its full history then ends with
+            `data: [DONE]` and the server closes the connection. Reconnects are
+            idempotent: the client upserts task/execution by id and dedups lines,
+            so state re-emitted on reconnect is safe. There are deliberately no
+            server-side filters (executionId/kind) — every line carries its own
+            attribution and the console groups by attempt client-side.
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Stream a Task's live state (status + executions + unified timeline) as SSE
+      tags:
+        - Tasks
+  /projects/{projectName}/turns/active:
+    get:
+      operationId: get-active-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
           schema:
-            description: "Cursor: only lines after this epoch-millis (0 ⇒ initial load)"
+            description: Project name (DNS-label slug)
             type: string
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProgressResponse"
+                $ref: "#/components/schemas/TurnStatus"
+          description: OK
+        "204":
+          description: No running turn
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get the project's running turn (204 when none)
+      tags:
+        - GenAI
+  /projects/{projectName}/turns/{turnId}:
+    get:
+      operationId: get-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Turn id from the 202 create response
+          in: path
+          name: turnId
+          required: true
+          schema:
+            description: Turn id from the 202 create response
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnStatus"
           description: OK
         default:
           content:
@@ -3220,9 +3409,52 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Poll an Execution's progress (build steps / coding status)
+      summary: Get one turn's status
       tags:
-        - Tasks
+        - GenAI
+  /projects/{projectName}/turns/{turnId}/stream:
+    get:
+      operationId: stream-turn
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+        - description: Turn id from the 202 create response
+          in: path
+          name: turnId
+          required: true
+          schema:
+            description: Turn id from the 202 create response
+            type: string
+        - description: Replay from this absolute event index (wins over Last-Event-ID)
+          in: query
+          name: from
+          schema:
+            description: Replay from this absolute event index (wins over Last-Event-ID)
+            type: integer
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                description: Raw agent StreamPart frames + one terminal event, id-stamped; ends with [DONE]
+                type: string
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Attach to a turn's event stream (SSE replay + live tail)
+      tags:
+        - GenAI
   /skills:
     get:
       operationId: list-skills

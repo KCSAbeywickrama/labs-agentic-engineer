@@ -35,16 +35,33 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 
 	wantOps := []string{
 		"list-projects", "list-organizations", "list-components", "get-component-config",
-		"get-requirements", "get-collab-session", "get-design-bundle",
+		"get-requirements", "get-spec-collab-session", "get-design-bundle",
 		// Tasks-github-native surface (§9.1): the board/dispatch/retry ops are gone.
 		"list-tasks", "get-task", "plan-tasks", "execute-task", "hold-task", "unhold-task",
-		"get-execution-progress",
+		// The task-log endpoint is now one SSE stream (status + executions +
+		// unified timeline), not the cursor-poll it replaced.
+		"stream-task-log",
 		// Consolidated org-config surface (replaces the Anthropic/GitHub/IDP tag groups).
 		"get-config", "update-config", "list-skills",
+		// Single-tag build surface (the contract's build-project/get-project-build).
+		"build-project", "get-project-build", "list-project-tags",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {
 			t.Errorf("spec missing operation %q", op)
+		}
+	}
+
+	// De-exposed surfaces must stay gone: devflows left the public edge with
+	// the build endpoint, and the per-artifact save ops would cut tags that
+	// bypass the whole-spec build gate.
+	wantAbsent := []string{
+		"start-devflow", "list-devflows", "get-devflow", "decide-devflow-gate",
+		"save-requirements", "save-design",
+	}
+	for _, op := range wantAbsent {
+		if strings.Contains(s, op) {
+			t.Errorf("spec still serves de-exposed operation %q", op)
 		}
 	}
 	for _, scheme := range []string{"userJWT", "bearerFormat"} {

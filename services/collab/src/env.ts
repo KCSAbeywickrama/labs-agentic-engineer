@@ -26,6 +26,10 @@ export interface CollabConfig {
    *  (stand-in for #81 / #86 phase 2). Never in cluster. */
   mockBff: boolean;
   mockBffPort: number;
+  /** Committer (#133): quiet period before a flush commits. */
+  commitDebounceMs: number;
+  /** Committer (#133): max wait during continuous editing (the ~5min cap). */
+  commitMaxDebounceMs: number;
 }
 
 function flag(value: string | undefined): boolean {
@@ -50,5 +54,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollabConfig {
     devMode,
     mockBff,
     mockBffPort,
+    commitDebounceMs: Number(env.COLLAB_COMMIT_DEBOUNCE_MS ?? 60_000),
+    commitMaxDebounceMs: Number(env.COLLAB_COMMIT_MAX_DEBOUNCE_MS ?? 300_000),
   };
 }
