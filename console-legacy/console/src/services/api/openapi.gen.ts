@@ -1761,10 +1761,10 @@ export interface components {
             /** @description Optional target (e.g. a doc type) */
             target?: string;
             /**
-             * @description Which generation/chat flow
+             * @description Which generation/chat flow. Omit to run a generic spec turn.
              * @enum {string}
              */
-            useCase: "requirements-generate" | "requirements-chat" | "design-generate";
+            useCase?: "requirements-generate" | "requirements-chat" | "design-generate";
         };
         TurnOutputBody: {
             /**

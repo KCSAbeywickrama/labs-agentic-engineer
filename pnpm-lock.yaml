@@ -32,6 +32,12 @@ importers:
 
   apps/console:
     dependencies:
+      '@aep/agent-stream':
+        specifier: workspace:*
+        version: link:../../packages/agent-stream
+      '@aep/collab-doc':
+        specifier: workspace:*
+        version: link:../../packages/collab-doc
       '@aep/design-projection':
         specifier: workspace:*
         version: link:../../packages/design-projection
@@ -147,6 +153,34 @@ importers:
       zod:
         specifier: ^4.3.6
         version: 4.4.3
+    devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.22.4
+
+  packages/collab-doc:
+    dependencies:
+      '@tiptap/core':
+        specifier: ^3.27.2
+        version: 3.27.2(@tiptap/pm@3.27.2)
+      '@tiptap/markdown':
+        specifier: ^3.27.2
+        version: 3.27.2(@tiptap/core@3.27.2(@tiptap/pm@3.27.2))(@tiptap/pm@3.27.2)
+      '@tiptap/starter-kit':
+        specifier: ^3.27.2
+        version: 3.27.2
+      fast-diff:
+        specifier: ^1.3.0
+        version: 1.3.0
+      prosemirror-model:
+        specifier: ^1.25.10
+        version: 1.25.10
+      y-prosemirror:
+        specifier: ^1.3.7
+        version: 1.3.7(prosemirror-model@1.25.10)(prosemirror-state@1.4.4)(prosemirror-view@1.42.0)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
+      yjs:
+        specifier: ^13.6.31
+        version: 13.6.31
     devDependencies:
       tsx:
         specifier: ^4.21.0
@@ -291,9 +325,15 @@ importers:
       '@aep/agent-stream':
         specifier: workspace:*
         version: link:../../packages/agent-stream
+      '@aep/collab-doc':
+        specifier: workspace:*
+        version: link:../../packages/collab-doc
       '@ai-sdk/anthropic':
         specifier: ^4.0.0
         version: 4.0.0(zod@4.4.3)
+      '@hocuspocus/provider':
+        specifier: ^4.3.0
+        version: 4.3.0(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -306,9 +346,15 @@ importers:
       pg:
         specifier: ^8.13.0
         version: 8.22.0
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
       yaml:
         specifier: ^2.8.4
         version: 2.9.0
+      yjs:
+        specifier: ^13.6.31
+        version: 13.6.31
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -322,6 +368,9 @@ importers:
       '@clack/prompts':
         specifier: ^1.6.0
         version: 1.6.0
+      '@hocuspocus/server':
+        specifier: ^4.3.0
+        version: 4.3.0(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6
@@ -331,27 +380,21 @@ importers:
       '@types/pg':
         specifier: ^8.11.0
         version: 8.20.0
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
       tsx:
         specifier: ^4.21.0
         version: 4.22.4
 
   services/collab:
     dependencies:
+      '@aep/collab-doc':
+        specifier: workspace:*
+        version: link:../../packages/collab-doc
       '@hocuspocus/server':
         specifier: ^4.3.0
         version: 4.3.0(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
-      '@tiptap/core':
-        specifier: ^3.27.2
-        version: 3.27.2(@tiptap/pm@3.27.2)
-      '@tiptap/markdown':
-        specifier: ^3.27.2
-        version: 3.27.2(@tiptap/core@3.27.2(@tiptap/pm@3.27.2))(@tiptap/pm@3.27.2)
-      '@tiptap/starter-kit':
-        specifier: ^3.27.2
-        version: 3.27.2
-      y-prosemirror:
-        specifier: ^1.3.7
-        version: 1.3.7(prosemirror-model@1.25.10)(prosemirror-state@1.4.4)(prosemirror-view@1.42.0)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
       yjs:
         specifier: ^13.6.31
         version: 13.6.31
@@ -3096,6 +3139,9 @@ packages:
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
+
+  fast-diff@1.3.0:
+    resolution: {integrity: sha512-VxPP4NqbUjj6MaAOafWeUn2cXWLcCtljklUtZf0Ind4XQ+QPtmA0b18zZy0jIQx+ExRVCR/ZQpBmik5lXshNsw==}
 
   fast-equals@5.4.0:
     resolution: {integrity: sha512-jt2DW/aNFNwke7AUd+Z+e6pz39KO5rzdbbFCg2sGafS4mk13MI7Z8O5z9cADNn5lhGODIgLwug6TZO2ctf7kcw==}
@@ -7611,6 +7657,8 @@ snapshots:
       - supports-color
 
   fast-deep-equal@3.1.3: {}
+
+  fast-diff@1.3.0: {}
 
   fast-equals@5.4.0: {}
 

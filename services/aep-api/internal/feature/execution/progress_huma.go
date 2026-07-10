@@ -19,14 +19,9 @@ package execution
 import (
 	"context"
 	"errors"
-	"net/http"
-	"strconv"
-
-	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
-	"github.com/wso2/aep/aep-api/internal/platform/humakit"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -58,12 +53,14 @@ type CodingProgress interface {
 	AgentProgress(ctx context.Context, row *models.Execution, sinceMillis int64) (*contracts.ProgressResponse, error)
 }
 
-// ProgressService serves the unified progress endpoint keyed by execution id
-// (§9.1): the kind selects the source — build reads the WorkflowRun's step
-// deltas; coding surfaces the runner's activity via the CodingProgress source
-// (live pod-log tail while running, captured coding_agent_logs snapshot once
+// ProgressService derives one execution's progress lines keyed by execution id:
+// the kind selects the source — build reads the WorkflowRun's step deltas;
+// coding surfaces the runner's activity via the CodingProgress source (live
+// pod-log tail while running, captured coding_agent_logs snapshot once
 // terminal). A nil codingProgress degrades the coding branch to terminal-ness
-// only.
+// only. It is the per-execution line source the task-log SSE stream
+// (task_stream.go) walks across every attempt — no longer an HTTP handler of
+// its own (the cursor-poll endpoint it once backed is retired).
 type ProgressService struct {
 	execs          ExecutionLookup
 	oc             OCProgress
@@ -136,38 +133,4 @@ func buildStepEvents(run *models.WorkflowRun) []contracts.ProgressEvent {
 		})
 	}
 	return out
-}
-
-type progressInput struct {
-	humakit.OrgScopedInput
-	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
-	ExecutionID string `path:"executionId" doc:"Execution id"`
-	SinceMillis string `query:"sinceMillis" doc:"Cursor: only lines after this epoch-millis (0 ⇒ initial load)"`
-}
-
-type progressOutput struct{ Body *contracts.ProgressResponse }
-
-// RegisterProgress registers the unified progress endpoint on the public Huma API.
-func RegisterProgress(api huma.API, svc *ProgressService) {
-	huma.Register(api, huma.Operation{
-		OperationID: "get-execution-progress",
-		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/executions/{executionId}/progress",
-		Summary:     "Poll an Execution's progress (build steps / coding status)",
-		Tags:        []string{"Tasks"},
-		Security:    humakit.SecurityUserJWT,
-	}, func(ctx context.Context, in *progressInput) (*progressOutput, error) {
-		if svc == nil {
-			return nil, huma.Error503ServiceUnavailable("progress not configured")
-		}
-		sinceMillis, _ := strconv.ParseInt(in.SinceMillis, 10, 64)
-		resp, err := svc.GetProgress(ctx, in.OrgHandle, in.ExecutionID, sinceMillis)
-		if err != nil {
-			if errors.Is(err, ErrExecutionNotFound) {
-				return nil, huma.Error404NotFound("execution not found")
-			}
-			return nil, huma.Error500InternalServerError("progress failed")
-		}
-		return &progressOutput{Body: resp}, nil
-	})
 }

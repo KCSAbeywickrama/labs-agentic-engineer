@@ -74,7 +74,10 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 }
 
 const FILES_LIST_PATH = /^\/api\/v1\/projects\/([^/]+)\/files$/;
+const FILES_APPLY_PATH = /^\/api\/v1\/projects\/([^/]+)\/files\/apply$/;
 const FILE_READ_PATH = /^\/api\/v1\/projects\/([^/]+)\/files\/(.+)$/;
+
+let applyCount = 0;
 
 // Deterministic stand-in for the git blob sha (unused by the seeder, present
 // for shape fidelity with the real FileMeta/FileContent).
@@ -140,6 +143,42 @@ export function createMockBff(options: MockBffOptions = {}): http.Server {
         content: file.content,
         sha: mockSha(file.path + file.content),
       });
+    }
+
+    // Committer seam (#133): atomic apply → one mock commit. A write whose
+    // baseSha is literally "stale" trips the 409 conflict arm (test hook).
+    const applyMatch =
+      req.method === "POST" && url.pathname.match(FILES_APPLY_PATH);
+    if (applyMatch) {
+      if (!token) return json(res, 401, { title: "Unauthorized" });
+      let raw = "";
+      req.on("data", (chunk: Buffer) => (raw += chunk.toString()));
+      req.on("end", () => {
+        const body = JSON.parse(raw || "{}") as {
+          writes?: { path: string; content: string; baseSha: string }[];
+          deletes?: { path: string; baseSha: string }[];
+        };
+        const writes = body.writes ?? [];
+        const stale = writes.filter((w) => w.baseSha === "stale");
+        if (stale.length > 0) {
+          return json(res, 409, {
+            conflicts: stale.map((w) => ({
+              path: w.path,
+              baseSha: w.baseSha,
+              currentSha: "current",
+            })),
+          });
+        }
+        applyCount += 1;
+        return json(res, 200, {
+          commitSha: `mockcommit${applyCount}`,
+          files: writes.map((w) => ({
+            path: w.path,
+            sha: mockSha(w.path + w.content),
+          })),
+        });
+      });
+      return;
     }
 
     return json(res, 404, { title: "not found" });

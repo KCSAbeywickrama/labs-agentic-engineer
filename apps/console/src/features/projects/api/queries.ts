@@ -186,6 +186,33 @@ export function useDeleteProject() {
   });
 }
 
+// Trigger a project build (#162): the single-tag flow — the BFF validates,
+// tags v<N>, and runs the dev workflow, returning the tag. The Spec view
+// commits the room first (collab flush-on-demand) so this tags the current
+// HEAD. Invalidates the project's reads since status/tasks/tags shift once the
+// build starts.
+export function useBuildProject(projectName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await client.POST("/projects/{projectName}/build", {
+        params: { path: { projectName } },
+        body: {},
+      });
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(e?.detail ?? e?.title ?? "Failed to start the build");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: projectKeys.detail(projectName),
+      });
+    },
+  });
+}
+
 // The connected GitHub org, for the repo-URL preview in the create flow.
 // GitHub connection state now lives on the org config (issue #96 moved it
 // off the old /org/credentials/github onto GET /config's gitProvider

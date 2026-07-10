@@ -41,12 +41,9 @@ import type {
   Organization,
   TaskView,
   TaskDetail,
-  TaskProgressResponse,
-  DevflowStartRequest,
-  DevflowStartResponse,
-  DevflowRun,
-  DevflowStatus,
-  DevflowGateRequest,
+  ProjectBuildResponse,
+  ProjectBuildStatus,
+  TagList,
 } from './types';
 
 import { env } from '../../config/env';
@@ -271,21 +268,8 @@ export const restApi = {
     }
   },
 
-  /**
-   * Cut the requirements version tag. The `commitSha` pin is OPTIONAL and
-   * vestigial now: the backend resolves HEAD from its own git mirror (the
-   * shared-volume workspace), so the GitHub ref-read lag that once made the
-   * pin load-bearing is gone. Pass it when a just-landed apply naturally
-   * provides a fresh sha; call unpinned otherwise. Let ApiError bubble —
-   * Publish must stop (show the message) when the tag fails, not navigate on
-   * as if it succeeded.
-   */
-  async saveRequirements(projectId: string, commitSha?: string): Promise<RequirementsBundle> {
-    return fetchJSON<RequirementsBundle>(`${projectPrefix(projectId)}/requirements/save`, {
-      method: 'POST',
-      body: JSON.stringify(commitSha ? { commitSha } : {}),
-    });
-  },
+  // saveRequirements is GONE: the Save button only commits (files/apply);
+  // version tags are cut by buildProject (single-tag build flow).
 
   async discardRequirements(projectId: string): Promise<RequirementsBundle | undefined> {
     try {
@@ -321,11 +305,11 @@ export const restApi = {
     }
   },
 
-  // -- Collaboration (still scoped to the requirements editor session) ------
+  // -- Collaboration (the unified spec editor session) -----------------------
   async getCollabSession(projectId: string): Promise<CollabSession | undefined> {
     try {
       return await fetchJSON<CollabSession>(
-        `${projectPrefix(projectId)}/requirements/collab-session`,
+        `${projectPrefix(projectId)}/spec/collab-session`,
       );
     } catch {
       return undefined;
@@ -334,16 +318,8 @@ export const restApi = {
 
   // -- Designs (real backend) ------------------------------------------------
 
-  /** `commitSha` pin: optional-and-vestigial, see saveRequirements. */
-  async saveAndProceedDesign(projectId: string, commitSha?: string): Promise<Design> {
-    // Let ApiError bubble — Publish needs to surface the server's error
-    // message (e.g. missing requirements baseline, save-via-API failures)
-    // rather than collapsing every failure into a generic toast.
-    return fetchJSON<Design>(`${projectPrefix(projectId)}/design/save`, {
-      method: 'POST',
-      body: JSON.stringify(commitSha ? { commitSha } : {}),
-    });
-  },
+  // saveAndProceedDesign is GONE: the Build button commits (files/apply) and
+  // calls buildProject, which validates the whole spec and cuts the one tag.
 
   async discardDesignChanges(projectId: string): Promise<Design | undefined> {
     try {
@@ -506,17 +482,8 @@ export const restApi = {
     });
   },
 
-  // Unified execution progress feed keyed by execution id (kind selects the
-  // source server-side). Same cursor/NDJSON contract as the legacy per-task
-  // progress endpoints, so `useCursorPolling` drives it unchanged.
-  async getExecutionProgress(
-    projectId: string, executionId: string, sinceMillis: number,
-  ): Promise<TaskProgressResponse> {
-    const q = new URLSearchParams({ sinceMillis: String(sinceMillis) });
-    return fetchJSON<TaskProgressResponse>(
-      `${projectPrefix(projectId)}/executions/${executionId}/progress?${q.toString()}`,
-    );
-  },
+  // The Task log is now an SSE stream (status + executions + unified timeline);
+  // it is consumed by useTaskStream (raw fetch + parseSseStream), not fetchJSON.
 
   // -- Component Configs (Environment Variables) --------------------------------
 
@@ -549,41 +516,33 @@ export const restApi = {
     }
   },
 
-  // -- Devflow (Temporal-backed development workflow) ---------------------------
+  // -- Project build (single-tag spec version + dev workflow) -------------------
 
-  // Start the development workflow for a project. `gates` is optional per-gate
-  // auto/manual config (default: everything auto). 200 → {workflowId, runId}.
-  async startDevflow(
-    projectId: string, body?: DevflowStartRequest,
-  ): Promise<DevflowStartResponse> {
-    return fetchJSON<DevflowStartResponse>(`${projectPrefix(projectId)}/devflows`, {
+  // Trigger a build: the backend validates the whole spec (requirements +
+  // design), cuts the next v<N> tag, starts the dev workflow asynchronously,
+  // and returns the tag. 422 (ApiError with per-file detail) when the spec is
+  // not buildable — let it bubble so the Build button can surface it.
+  async buildProject(projectId: string): Promise<ProjectBuildResponse> {
+    return fetchJSON<ProjectBuildResponse>(`${projectPrefix(projectId)}/build`, {
       method: 'POST',
-      body: JSON.stringify(body ?? {}),
+      body: JSON.stringify({}),
     });
   },
 
-  // List a project's dev workflow runs (newest first).
-  async listDevflows(projectId: string): Promise<DevflowRun[]> {
-    const data = await fetchJSON<DevflowRun[] | null>(`${projectPrefix(projectId)}/devflows`);
-    return data ?? [];
-  },
-
-  // Live status of one dev workflow (queried from Temporal).
-  async getDevflow(projectId: string, workflowId: string): Promise<DevflowStatus> {
-    return fetchJSON<DevflowStatus>(
-      `${projectPrefix(projectId)}/devflows/${encodeURIComponent(workflowId)}`,
+  // Live status of the build for a spec version tag. 404 → no build for it.
+  async getProjectBuild(projectId: string, tag: string): Promise<ProjectBuildStatus> {
+    return fetchJSON<ProjectBuildStatus>(
+      `${projectPrefix(projectId)}/build/${encodeURIComponent(tag)}`,
     );
   },
 
-  // Approve/reject a human-in-the-loop gate. Set `taskIssue` to target a task
-  // child workflow instead of the dev workflow. 204 on success.
-  async decideDevflowGate(
-    projectId: string, workflowId: string, gate: string, body: DevflowGateRequest,
-  ): Promise<void> {
-    await fetchJSON<void>(
-      `${projectPrefix(projectId)}/devflows/${encodeURIComponent(workflowId)}/gates/${encodeURIComponent(gate)}`,
-      { method: 'POST', body: JSON.stringify(body) },
-    );
+  // The spec version tags (v<N>, newest first) + latest + dirty flag.
+  async listProjectTags(projectId: string): Promise<TagList | undefined> {
+    try {
+      return await fetchJSON<TagList>(`${projectPrefix(projectId)}/tags`);
+    } catch {
+      return undefined;
+    }
   },
 
 };

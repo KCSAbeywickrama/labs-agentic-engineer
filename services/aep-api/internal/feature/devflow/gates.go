@@ -25,9 +25,12 @@ import (
 // Gate names — every human-in-the-loop pause point in the two workflows.
 // Each gate runs in auto mode by default (no pause); a run started with
 // GateConfig.Auto[name] = false pauses there until a SigGateDecision.
+// NOTE: the build endpoint always starts runs with the zero GateConfig (all
+// auto) and the gate-decide endpoint left the public surface with the devflow
+// routes, so only auto mode is reachable today; the gatekeeper machinery stays
+// for a future HITL surface.
 const (
 	// DevFlowWorkflow gates.
-	GateDesign   = "design"   // before design generation
 	GatePlan     = "plan"     // before task planning
 	GateValidate = "validate" // before the validation step
 	GateComplete = "complete" // before the workflow completes

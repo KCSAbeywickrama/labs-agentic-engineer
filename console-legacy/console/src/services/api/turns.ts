@@ -87,8 +87,8 @@ export function turnErrorMessage(result: {
       return 'A generation is already running for this project. Please wait for it to finish.';
     case 'missing_org_key':
       return 'No Anthropic API key is configured for this organization. Add one in Organization → Settings → Anthropic.';
-    case 'requirements_not_approved':
-      return 'Approve (publish) a requirements version before generating the design.';
+    case 'requirements_missing':
+      return 'Write or generate requirements before generating the design.';
     case 'upstream':
       return 'The generation service is unavailable. Please try again shortly.';
     case 'turn_failed':

@@ -35,6 +35,7 @@ import {
   seedSkills,
   skillsLoadError,
   skillsRepoUrl,
+  type MockSkill,
   type SettingsScenario,
 } from "../fixtures/settings";
 
@@ -44,7 +45,6 @@ type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
 type CreateSkillInput = components["schemas"]["CreateSkillInput"];
 type UpdateSkillInput = components["schemas"]["UpdateSkillInput"];
-type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type SkillSummary = components["schemas"]["SkillSummary"];
 
@@ -66,7 +66,7 @@ function problem(body: object, status: number) {
 // handlers/projects.ts's createdProjects pattern.
 let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
-let skills: SkillDetailBody[] = [];
+let skills: MockSkill[] = [];
 let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
 
@@ -81,7 +81,7 @@ function ensureInitialized() {
   skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
 }
 
-function toSummary(s: SkillDetailBody): SkillSummary {
+function toSummary(s: MockSkill): SkillSummary {
   return {
     name: s.name,
     kind: s.kind,
@@ -317,14 +317,14 @@ export const settingsHandlers = [
         409,
       );
     }
-    const created: SkillDetailBody = {
+    const created: MockSkill = {
       orgId: "org-1",
       name: body.name,
       kind: "custom",
       editable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
-      references: body.references,
+      references: body.references ?? {},
       version: 1,
       contentSha: `sha-${body.name}-1`,
       updatedAt: new Date().toISOString(),
@@ -366,7 +366,7 @@ export const settingsHandlers = [
     }
     const body = (await request.json()) as UpdateSkillInput;
     skill.skillMd = body.skillMd;
-    skill.references = body.references;
+    skill.references = body.references ?? {};
     skill.description = extractDescription(body.skillMd);
     skill.version += 1;
     skill.updatedAt = new Date().toISOString();

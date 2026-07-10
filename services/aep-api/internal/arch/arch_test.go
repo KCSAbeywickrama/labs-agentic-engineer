@@ -54,6 +54,15 @@ const mod = "github.com/wso2/aep/aep-api"
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
 	"artifacts": {"gitrepo"},
+	// build is the public single-tag build surface (build-project /
+	// get-project-build). It deliberately composes the machinery it fronts:
+	// artifacts (SpecSaveResult + SpecValidationError — the 422 detail must
+	// survive errors.As across the port boundary), devflow (workflow name/id/
+	// status vocabulary + the Temporal runtime the runner wraps), task
+	// (TaskView for the status title join), gitrepo (typed repo errors).
+	// Heavy collaborators (SaveSpec, workflow_runs, repo lookup) stay behind
+	// consumer-side ports wired at the composition root.
+	"build": {"artifacts", "devflow", "gitrepo", "task"},
 	// codingagent is the funnel's one registered executor: it implements the
 	// execution.Executor port (hence the execution edge) and reaches every other
 	// service — identities, anthropic, repos, OC — through consumer ports wired

@@ -79,10 +79,10 @@ type collabValidateOutput struct {
 // recovered from the verified token, not the {orgHandle} path.
 func RegisterCollab(api huma.API, repos repoOracle) {
 	huma.Register(api, huma.Operation{
-		OperationID: "get-collab-session",
+		OperationID: "get-spec-collab-session",
 		Method:      http.MethodGet,
-		Path:        "/projects/{projectName}/requirements/collab-session",
-		Summary:     "Get the collaboration session descriptor",
+		Path:        "/projects/{projectName}/spec/collab-session",
+		Summary:     "Get the collaboration session descriptor for the spec workspace",
 		Tags:        []string{"Collaboration"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *collabSessionInput) (*collabSessionOutput, error) {

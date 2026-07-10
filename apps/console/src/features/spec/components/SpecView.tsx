@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Avatar,
@@ -33,15 +33,17 @@ import {
   Typography,
   useAppShell,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Hammer } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
+  useBuildProject,
   useProject,
   useProjectStatus,
   useProjectTags,
 } from "../../projects/api/queries";
 import { useSpecFileContent, useSpecFiles } from "../api/queries";
+import { toSpecEntry } from "../api/mapping";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
@@ -91,6 +93,13 @@ export function SpecView({ projectName }: { projectName: string }) {
   const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
   const [selection, setSelection] = useState<SpecSelection | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
+  // Build (#162): commit-then-build. buildPhase drives the button label /
+  // loading; an agent peer in the room means a turn is writing → block Build.
+  const build = useBuildProject(projectName);
+  const [buildPhase, setBuildPhase] = useState<"committing" | "building" | null>(
+    null,
+  );
+  const [buildError, setBuildError] = useState<string | null>(null);
 
   // Collapse the sidebar while focused on the spec, expand when leaving.
   useEffect(() => {
@@ -100,7 +109,22 @@ export function SpecView({ projectName }: { projectName: string }) {
     };
   }, [actions]);
 
-  const files = spec.data ?? [];
+  // The spec list is git (one-shot, committed truth + offline fallback)
+  // UNIONed with the live collab doc (agent-created files and edits arrive
+  // here in real time, before they commit). Deduped by path; the git entry
+  // wins when both have it (it carries the real blob sha). Sorted by path so
+  // the order is stable as live files appear.
+  const files = useMemo(() => {
+    const byPath = new Map<string, ReturnType<typeof toSpecEntry>>();
+    for (const path of collab.docPaths) {
+      const entry = toSpecEntry({ path, sha: "" });
+      if (entry) byPath.set(entry.path, entry);
+    }
+    for (const entry of spec.data ?? []) byPath.set(entry.path, entry);
+    return [...byPath.values()]
+      .filter((e): e is NonNullable<typeof e> => e !== null)
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }, [spec.data, collab.docPaths]);
   // Default selection: the first requirements file (the seeded PRD).
   const firstRequirements = files.find((f) => f.group === "requirements");
   const effectiveSelection: SpecSelection =
@@ -156,6 +180,46 @@ export function SpecView({ projectName }: { projectName: string }) {
   const chip = status.data ? specChip(status.data) : null;
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
+  // #159: design is derived FROM requirements, so its CTA needs them first.
+  const hasRequirementsFiles = files.some((f) => f.group === "requirements");
+
+  // Generate/Re-generate design (#159): open the agent panel and auto-send the
+  // design turn via the shared ?generate=design signal (AppLayout + the panel).
+  const generateDesign = () =>
+    void navigate({
+      to: "/projects/$projectName/spec",
+      params: { projectName },
+      search: { generate: "design" },
+    });
+
+  // An agent turn is in flight iff an agent peer is present in the room (#86 d7
+  // renders them with kind:"agent"). Building a half-written design is wrong,
+  // so Build is disabled — with a tooltip — while one is working (#162).
+  const agentBusy = collab.peers.some((p) => p.kind === "agent");
+
+  // Build (#162): commit the room's live edits FIRST (POST /build tags HEAD),
+  // then trigger the build, then go watch progress on the overview.
+  const onBuild = () => {
+    setBuildError(null);
+    setBuildPhase("committing");
+    void (async () => {
+      try {
+        await collab.flush(); // no-op when offline
+        setBuildPhase("building");
+        await build.mutateAsync();
+        void navigate({
+          to: "/projects/$projectName",
+          params: { projectName },
+        });
+      } catch (e) {
+        setBuildError(
+          e instanceof Error ? e.message : "Failed to start the build.",
+        );
+      } finally {
+        setBuildPhase(null);
+      }
+    })();
+  };
 
   const displayName = project.data?.displayName ?? projectName;
 
@@ -258,36 +322,74 @@ export function SpecView({ projectName }: { projectName: string }) {
 
           <Divider orientation="vertical" flexItem />
 
-          <Tooltip
-            title={
-              hasDesignFiles
-                ? "Start building from this spec"
-                : "Available once design files are generated"
-            }
-          >
-            {/* span so the tooltip works while the button is disabled */}
-            <span>
-              <Button
-                variant="contained"
-                startIcon={<Hammer size={18} />}
-                disabled={!hasDesignFiles}
-                onClick={() =>
-                  void navigate({
-                    to: "/projects/$projectName",
-                    params: { projectName },
-                  })
-                }
-              >
-                Build
-              </Button>
-            </span>
-          </Tooltip>
+          {/* Phase-aware primary CTA (#159): the prominent action is always the
+              next pipeline step — Generate design until a design exists, then
+              Build. A dead disabled Build hid what to do next. */}
+          {hasDesignFiles ? (
+            <Tooltip
+              title={
+                agentBusy
+                  ? "An agent is still working — Build is available once it finishes"
+                  : "Commit your latest changes and start building"
+              }
+            >
+              {/* span so the tooltip works while the button is disabled */}
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Hammer size={18} />}
+                  disabled={agentBusy || buildPhase !== null}
+                  loading={buildPhase !== null}
+                  onClick={onBuild}
+                >
+                  {buildPhase === "committing"
+                    ? "Committing…"
+                    : buildPhase === "building"
+                      ? "Building…"
+                      : "Build"}
+                </Button>
+              </span>
+            </Tooltip>
+          ) : (
+            <Tooltip
+              title={
+                agentBusy
+                  ? "An agent is still working — Generate design is available once it finishes"
+                  : hasRequirementsFiles
+                    ? "Derive the component design from your requirements"
+                    : "Generate requirements first"
+              }
+            >
+              {/* span so the tooltip works while the button is disabled */}
+              <span>
+                <Button
+                  variant="contained"
+                  startIcon={<Sparkles size={18} />}
+                  disabled={!hasRequirementsFiles || agentBusy}
+                  onClick={generateDesign}
+                >
+                  Generate design
+                </Button>
+              </span>
+            </Tooltip>
+          )}
         </Box>
 
         {failed && (
           <Alert severity="error" sx={{ borderRadius: 0 }}>
             Spec derivation hit a problem. Existing files remain browsable;
             the agents' error details will surface here in a follow-up.
+          </Alert>
+        )}
+
+        {/* Build failed to start (#162): commit or POST /build errored. */}
+        {buildError && (
+          <Alert
+            severity="error"
+            sx={{ borderRadius: 0 }}
+            onClose={() => setBuildError(null)}
+          >
+            {buildError}
           </Alert>
         )}
 
@@ -331,6 +433,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                 selection={effectiveSelection}
                 onSelect={setSelection}
                 onAddArtifact={() => setAddArtifactOpen(true)}
+                onRegenerateDesign={generateDesign}
+                regenerateDisabled={agentBusy}
                 deriving={deriving}
                 failed={failed}
               />

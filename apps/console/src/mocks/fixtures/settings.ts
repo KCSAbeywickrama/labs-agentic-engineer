@@ -21,6 +21,11 @@ import type { components } from "../../generated/aep-api";
 type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
 type SkillDetailBody = components["schemas"]["SkillDetailBody"];
+
+// The contract's detail body dropped `version` (the BE detail read no longer
+// serves it) but the list's SkillSummary keeps it — the mock catalogue tracks
+// it per skill so list projections and update-sync bookkeeping still work.
+export type MockSkill = SkillDetailBody & { version: number };
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
@@ -127,7 +132,7 @@ export const skillsLoadError: ErrorModel = {
 
 // Two built-ins, one flow skill, one custom (editable) — enough spread to
 // exercise editable/read-only rendering and the updates-available list.
-export const seedSkills: SkillDetailBody[] = [
+export const seedSkills: MockSkill[] = [
   {
     orgId: "org-1",
     name: "high-level-architecture",

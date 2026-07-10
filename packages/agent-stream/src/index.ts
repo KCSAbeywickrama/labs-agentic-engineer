@@ -46,11 +46,18 @@ export type {
   TurnRequest,
   WorkspaceRef,
   McpConfig,
+  CollabConfig,
   ManifestPart,
   Toolset,
   AgentSseEventType,
 } from "./contracts/sse-events.js";
-export { AGENT_SSE_EVENT_TYPES, SSE_DONE, TOOLSETS, isToolset } from "./contracts/sse-events.js";
+export {
+  AGENT_SSE_EVENT_TYPES,
+  SSE_DONE,
+  TOOLSETS,
+  isToolset,
+  isCollabConfig,
+} from "./contracts/sse-events.js";
 export type {
   ComponentDesign,
   Dependency,

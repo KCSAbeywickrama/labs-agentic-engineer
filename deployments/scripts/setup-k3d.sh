@@ -91,8 +91,12 @@ EOF
 fi
 
 echo "🔧 Applying CoreDNS custom configuration..."
-kubectl apply --context "${CLUSTER_CONTEXT}" \
-    -f "https://raw.githubusercontent.com/openchoreo/openchoreo/v${OPENCHOREO_VERSION}/install/k3d/common/coredns-custom.yaml"
+# Pre-fetched via fetch_gh_raw (PAT-aware, retried) — a direct kubectl -f URL
+# read hits the anonymous raw.githubusercontent.com throttle with no retry.
+COREDNS_CUSTOM_FILE="$(mktemp)"
+fetch_gh_raw "https://raw.githubusercontent.com/openchoreo/openchoreo/v${OPENCHOREO_VERSION}/install/k3d/common/coredns-custom.yaml" "$COREDNS_CUSTOM_FILE"
+kubectl apply --context "${CLUSTER_CONTEXT}" -f "$COREDNS_CUSTOM_FILE"
+rm -f "$COREDNS_CUSTOM_FILE"
 echo "✅ CoreDNS configured"
 
 # Fix node-level DNS (8.8.8.8 fallback for external image pulls).
