@@ -44,6 +44,9 @@ jobs:
           - name: console
             dockerfile: apps/console/Dockerfile
             context: .
+          - name: cluster-gateway-proxy
+            dockerfile: deployments/local-cluster-gateway-proxy/Dockerfile
+            context: deployments/local-cluster-gateway-proxy
 
     steps:
       - uses: actions/checkout@v4
@@ -122,6 +125,7 @@ jobs:
           yq -i '.console.image.repository = "${{ env.IMAGE_PREFIX }}/console"' /tmp/platform/values.yaml
           yq -i '.console.image.tag = "${{ inputs.version }}"' /tmp/platform/values.yaml
           yq -i '.console.image.pullPolicy = "IfNotPresent"' /tmp/platform/values.yaml
+          yq -i '.codingAgentDispatch.clusterGatewayProxy.image = "${{ env.IMAGE_PREFIX }}/cluster-gateway-proxy:${{ inputs.version }}"' /tmp/platform/values.yaml
 
           helm package /tmp/platform --destination /tmp/charts
 
@@ -166,7 +170,8 @@ jobs:
           - \`ghcr.io/wso2/aep/aep-api:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/agents:${{ inputs.version }}\`
           - \`ghcr.io/wso2/aep/remote-worker:${{ inputs.version }}\`
-          - \`ghcr.io/wso2/aep/console:${{ inputs.version }}\`"
+          - \`ghcr.io/wso2/aep/console:${{ inputs.version }}\`
+          - \`ghcr.io/wso2/aep/cluster-gateway-proxy:${{ inputs.version }}\`"
 
   # ─── CTL: build CLI binaries ─────────────────────────────────────────────────
   build-ctl-binaries:
