@@ -17,12 +17,29 @@
  */
 
 // Standalone config (instead of vite.config.ts) so tests skip the app's
-// router-codegen and react plugins: the suite covers pure logic only.
+// router-codegen and react plugins.
+//
+// `environment` stays "node": most of the suite is pure logic and node is
+// the fastest/least-disruptive default. Component tests opt into jsdom
+// per-file via a `// @vitest-environment jsdom` pragma at the top of the file.
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
     environment: "node",
+    globals: true,
+    setupFiles: ["src/test-setup.ts"],
+    server: {
+      deps: {
+        inline: [
+          "@wso2/oxygen-ui",
+          "prismjs",
+          "@mui/x-data-grid",
+          "@mui/x-date-pickers",
+          "@mui/x-tree-view",
+        ],
+      },
+    },
   },
 });
