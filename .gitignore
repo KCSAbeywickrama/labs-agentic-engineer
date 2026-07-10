@@ -35,3 +35,6 @@ new_spec.yml
 
 # Personal learning notes (not part of the project)
 learning/
+
+# Git worktrees for isolated agent/dev work
+.worktrees/
