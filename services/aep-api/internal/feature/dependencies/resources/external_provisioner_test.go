@@ -220,6 +220,47 @@ func TestProvision_Validation(t *testing.T) {
 	}
 }
 
+// TestStageSecrets_WritesPerEnvReturnsRefs proves the extracted SM-API-only
+// write loop: each env's secrets land under the per-env "extres-" entity and
+// the returned refByEnv carries ONLY the secretStorePath (a reference), while
+// an env with no secrets produces no write and no ref.
+func TestStageSecrets_WritesPerEnvReturnsRefs(t *testing.T) {
+	t.Parallel()
+	sw := &fakeSecretWriter{}
+	p := newTestProvisioner(nil, newFakeRC("rel-1"), sw)
+	er := &models.ExternalResource{
+		Name: "stripe", ResourceTypeName: "stripe",
+		ConfigKeys: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true}},
+	}
+	refByEnv, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er, map[string]map[string]string{
+		"development": {"STRIPE_KEY": "sk_live"},
+		"production":  {}, // empty → no write, no ref
+	})
+	if err != nil {
+		t.Fatalf("stage secrets: %v", err)
+	}
+	if refByEnv["development"] == "" {
+		t.Fatalf("want a development ref, got %v", refByEnv)
+	}
+	if _, ok := refByEnv["production"]; ok {
+		t.Fatalf("an env with no secrets must not produce a ref: %v", refByEnv)
+	}
+	if got := sw.wrote["extres-stripe-development"]; got["STRIPE_KEY"] != "sk_live" {
+		t.Fatalf("secret not written under the per-env entity: %v", sw.wrote)
+	}
+}
+
+// Secrets present but SM-API disabled fails closed (mirrors Provision's guard).
+func TestStageSecrets_SecretsWithoutSMAPIFails(t *testing.T) {
+	t.Parallel()
+	p := newTestProvisioner(nil, newFakeRC("rel-1"), &fakeSecretWriter{disabled: true})
+	er := &models.ExternalResource{Name: "stripe"}
+	if _, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er,
+		map[string]map[string]string{"development": {"STRIPE_KEY": "k"}}); err == nil {
+		t.Fatal("want error when SM-API disabled but secrets present")
+	}
+}
+
 func TestDeprovision_DeletesBindingsThenResource(t *testing.T) {
 	t.Parallel()
 

@@ -126,6 +126,14 @@ type DesignService interface {
 	// specPath edit that clears the external-needs-spec proceed-gate. Returns the
 	// component-relative stored path.
 	CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error)
+	// DeriveEndUserAuthAtHead runs the end-user-auth derivation against the
+	// design at HEAD and commits any stamped exposesAPI.auth — the SAME pre-tag
+	// step SaveAndProceed performs, extracted so the thin POST /build path can
+	// run it before its own tag-cut (issue #164). Surfaces ErrEndUserAuthConflict
+	// (409) on an explicit conflicting service-required and
+	// ErrResourceCatalogUnavailable (503) when a platform-resource dependency
+	// exists but the CRT catalog is unreachable (fail-closed).
+	DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error
 }
 
 type designService struct {

@@ -140,6 +140,38 @@ func exposesAPIEqual(a, b *models.ExposesAPI) bool {
 	return *a == *b
 }
 
+// DeriveEndUserAuthAtHead reads the design at HEAD, evaluates the end-user-auth
+// derivation, and commits any stamped exposesAPI.auth — the SAME pre-tag work
+// SaveAndProceed does (the auth-derivation block at design_service.go), factored
+// out so the thin POST /build path can run it BEFORE its own tag-cut so the
+// derived value is captured in the version tag (issue #164). Returns
+// ErrEndUserAuthConflict on an explicit conflicting service-required and
+// ErrResourceCatalogUnavailable when a platform-resource dependency exists but
+// the CRT catalog is unreachable (fail-closed). A design with nothing to derive
+// (missing/empty design, or no platform-resource dependency) is a no-op
+// returning nil. The caller re-reads HEAD after (its TagSpec re-resolves HEAD),
+// so this does not return the mutated design.
+func (s *designService) DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error {
+	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		if artifacts.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("read design: %w", err)
+	}
+	if designFile == nil {
+		return nil
+	}
+	markers, err := s.resourceMarkersForAuthDerivation(ctx, designFile)
+	if err != nil {
+		return err
+	}
+	if _, err := s.persistEndUserAuthDerivation(ctx, orgID, projectID, designFile, markers); err != nil {
+		return err
+	}
+	return nil
+}
+
 // persistEndUserAuthDerivation runs deriveEndUserAuth over designFile's
 // components and, for every component it stamps, commits the updated
 // design.json to main via the committed-truth write surface (the same

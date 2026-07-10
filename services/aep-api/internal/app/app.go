@@ -796,13 +796,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		FilesSvc:         filesSvc,
 		ArtifactSvc:      artifactSvcGit,
 		GenAISvc:         genaiSvc,
-		BuildSvc: build.NewService(build.Deps{
-			Runner: build.NewTemporalRunner(devflowRuntime),
-			Store:  workflowRunRepo,
-			Repos:  repoFullNameLookup{repos: repoRepo},
-			Tagger: buildSpecTagger{art: artifactSvcGit},
-			Tasks:  taskReads,
-		}),
+		// BuildSvc is assigned below (params.HumaDeps.BuildSvc), after the
+		// external-resource provisioner exists — its InputsCoordinator stages the
+		// drawer's external-config secrets through that provisioner's SM-API write.
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
 		GitHubAppClientID: cfg.GitHubAppClientID,
@@ -861,6 +857,23 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// reference; the readiness watcher observes platform-resource bindings'
 	// native Ready condition out-of-band and releases gated consumer tasks.
 	externalProvisioner := resources.NewExternalResourceProvisioner(externalResourceRepo, resourceClient, smWriter)
+	// The public build surface: its InputsCoordinator runs the drawer inputs'
+	// pre-tag work (collect external specs, derive end-user auth) and stages
+	// external-config secrets to SM-API through externalProvisioner before the
+	// tag-cut, carrying the resulting provision payload into the dev workflow.
+	params.HumaDeps.BuildSvc = build.NewService(build.Deps{
+		Runner: build.NewTemporalRunner(devflowRuntime),
+		Store:  workflowRunRepo,
+		Repos:  repoFullNameLookup{repos: repoRepo},
+		Tagger: buildSpecTagger{art: artifactSvcGit},
+		Tasks:  taskReads,
+		Coord: build.NewInputsCoordinator(
+			designService,                        // SpecCollector (CollectSpec)
+			buildAuthDeriver{svc: designService}, // AuthDeriver (sentinel translation)
+			buildSecretStager{prov: externalProvisioner},
+			designComponents{store: artifactStore},
+		),
+	})
 	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
 		Issues:    issueService,

@@ -40,6 +40,32 @@ type DevFlowInput struct {
 	Repo  string     `json:"repo"`
 	Tag   string     `json:"tag"`
 	Gates GateConfig `json:"gates"`
+	// Provision carries the user's build-drawer inputs (issue #164): the
+	// non-secret config, staged secret references, platform-resource params, and
+	// approvals the workflow's provisioning step (Task 3) authors OC bindings +
+	// gate issues from. Empty when the build needs no provisioning. Secret VALUES
+	// are never carried here — only SM-API references (SecretRefByEnv).
+	Provision []ProvisionInput `json:"provision,omitempty"`
+}
+
+// ProvisionInput is one dependency's resolved provisioning payload, produced by
+// the build endpoint from the drawer inputs and carried into the dev workflow.
+// It is the shared wire contract between POST /build (which stages secrets to
+// SM-API and derives references) and the workflow's provisioning step (which
+// authors the OC Resource model + aep:provision gates). A raw secret value is
+// NEVER placed here — SecretRefByEnv holds the SM-API reference per env instead.
+type ProvisionInput struct {
+	Component  string `json:"component"`
+	Dependency string `json:"dependency"`
+	Kind       string `json:"kind"`
+	// external non-secret config by key.
+	Config map[string]string `json:"config,omitempty"`
+	// external: the SM-API secret reference per env (NOT the secret value).
+	SecretRefByEnv map[string]string `json:"secretRefByEnv,omitempty"`
+	// platform-resource: provisioning params (mixed scalar types).
+	Parameters map[string]any `json:"parameters,omitempty"`
+	// platform-resource / org-service: the user's approval.
+	Approved bool `json:"approved,omitempty"`
 }
 
 // DevFlowStatus is the QueryStatus result for a dev workflow.

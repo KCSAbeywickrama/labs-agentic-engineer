@@ -46,6 +46,7 @@ type Service struct {
 	repos  RepoLookup
 	tagger SpecTagger
 	tasks  TaskReader
+	coord  *InputsCoordinator
 }
 
 // Deps carries the service's ports.
@@ -55,22 +56,68 @@ type Deps struct {
 	Repos  RepoLookup
 	Tagger SpecTagger
 	Tasks  TaskReader
+	// Coord runs the drawer inputs' pre-tag work + provision-payload assembly.
+	// Nil-safe: a build with no coordinator (and no inputs) behaves exactly as
+	// before this feature.
+	Coord *InputsCoordinator
 }
 
 // NewService wires the build service.
 func NewService(d Deps) *Service {
-	return &Service{runner: d.Runner, store: d.Store, repos: d.Repos, tagger: d.Tagger, tasks: d.Tasks}
+	return &Service{runner: d.Runner, store: d.Store, repos: d.Repos, tagger: d.Tagger, tasks: d.Tasks, coord: d.Coord}
 }
 
 // --- wire shapes (names drive the generated schema names — keep them exactly
 // --- BuildRequest / BuildResponse / BuildStatus / BuildStatusTask) ----------
 
-// BuildRequest is the (empty) build-project body.
-type BuildRequest struct{}
+// BuildRequest is the build-project body: the drawer inputs the user supplied
+// for the dependencies this build must provision (empty for a build with no
+// outstanding dependency inputs).
+type BuildRequest struct {
+	Inputs []BuildInputItem `json:"inputs,omitempty"`
+}
 
-// BuildResponse returns the spec version tag the build runs for.
+// BuildInputItem is one drawer entry's resolved input — the POST /build mirror
+// of the GET-preflight PreflightItem. Exactly the fields relevant to its Kind
+// are set.
+type BuildInputItem struct {
+	Component  string `json:"component" doc:"Owning component name"`
+	Dependency string `json:"dependency" doc:"Dependency name"`
+	Kind       string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
+	// external-config: the collected key/value pairs (secret-vs-nonsecret is
+	// decided server-side from the design's ConfigKey.Secret flags — never sent
+	// by the client, never logged).
+	Values []ConfigValue `json:"values,omitempty"`
+	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
+	SpecContent string `json:"specContent,omitempty"`
+	SpecURL     string `json:"specUrl,omitempty"`
+	// platform-resource: the provisioning params (mixed scalar types).
+	Parameters map[string]any `json:"parameters,omitempty"`
+	// platform-resource / org-service: the user's approval.
+	Approved bool `json:"approved,omitempty"`
+}
+
+// ConfigValue is one external-config key/value pair the drawer collected.
+type ConfigValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// InputFailure reports one drawer input the build could not apply (e.g. an
+// invalid/unfetchable spec) — a fail-fast pre-tag result: the build cuts no tag
+// and starts no workflow.
+type InputFailure struct {
+	Component  string `json:"component,omitempty"`
+	Dependency string `json:"dependency"`
+	Kind       string `json:"kind,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+// BuildResponse returns the spec version tag the build runs for, OR the
+// per-input failures that blocked it (never both — failures mean no tag).
 type BuildResponse struct {
-	Tag string `json:"tag"`
+	Tag      string         `json:"tag,omitempty"`
+	Failures []InputFailure `json:"failures,omitempty"`
 }
 
 // BuildStatusTask is one task's progress inside a build. IssueNumber links the
@@ -149,6 +196,30 @@ func (s *Service) build(ctx context.Context, in *buildInput) (*buildOutput, erro
 		return nil, huma.Error404NotFound("project repository not found")
 	}
 
+	// Apply the drawer inputs BEFORE the tag-cut: collect external specs +
+	// derive end-user auth (their commits must land on HEAD so the tag captures
+	// them), then stage external-config secrets to SM-API and assemble the
+	// provision payload. A fail-fast pre-tag failure returns {failures} and cuts
+	// NO tag. NOTE: in.Body carries raw secret values — it must never be logged.
+	var provInputs []devflow.ProvisionInput
+	if s.coord != nil {
+		fails, aerr := s.coord.ApplyPreTag(ctx, in.OrgHandle, in.ProjectName, in.Body.Inputs)
+		if aerr != nil {
+			return nil, mapPreTagError(aerr)
+		}
+		if len(fails) > 0 {
+			return &buildOutput{Body: BuildResponse{Failures: fails}}, nil
+		}
+		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, in.OrgHandle, in.OrgHandle, in.ProjectName, in.Body.Inputs)
+		if perr != nil {
+			return nil, huma.Error502BadGateway("stage inputs: " + perr.Error())
+		}
+		if len(pfails) > 0 {
+			return &buildOutput{Body: BuildResponse{Failures: pfails}}, nil
+		}
+		provInputs = prov
+	}
+
 	// The whole-spec hard gate runs INSIDE TagSpec, before the tag is cut —
 	// the returned tag always names a validated requirements+design pair. An
 	// unchanged spec returns the existing tag; the workflow still (re)runs.
@@ -164,6 +235,7 @@ func (s *Service) build(ctx context.Context, in *buildInput) (*buildOutput, erro
 		Repo:      repo,
 		Tag:       res.Tag,
 		Gates:     devflow.GateConfig{}, // all gates auto
+		Provision: provInputs,
 	})
 	if err != nil {
 		if errors.Is(err, ErrTemporalUnavailable) {
@@ -287,6 +359,20 @@ func (s *Service) taskStatuses(ctx context.Context, orgID, projectID, tag string
 		out = append(out, *byIssue[n])
 	}
 	return out
+}
+
+// mapPreTagError maps the coordinator's pre-tag failures onto the edge
+// vocabulary: an end-user-auth conflict is a 409 (the design self-contradicts),
+// an unreachable CRT catalog is a retryable 503, anything else a 500.
+func mapPreTagError(err error) error {
+	switch {
+	case errors.Is(err, ErrEndUserAuthConflict):
+		return huma.Error409Conflict(err.Error())
+	case errors.Is(err, ErrResourceCatalogUnavailable):
+		return huma.Error503ServiceUnavailable(err.Error())
+	default:
+		return huma.Error500InternalServerError("apply build inputs: " + err.Error())
+	}
 }
 
 // mapTagError maps SaveSpec failures onto the edge vocabulary: the spec gate
