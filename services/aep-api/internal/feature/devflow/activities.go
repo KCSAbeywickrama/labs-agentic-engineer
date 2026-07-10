@@ -202,16 +202,21 @@ type ProvisionDepsInput struct {
 }
 
 // ProvisionDependencies authors the project's dependencies by kind from the
-// build drawer inputs (mint gates → external sync, platform-resource async). A
-// build with no provision inputs is a no-op (so an unprovisioned build never
-// depends on the provisioner being wired). Per-dependency failures come back as
+// build drawer inputs (mint gates → external sync, platform-resource async) AND
+// reconciles any provision gate whose dependency is already Ready but was left
+// un-completed by a prior build (self-heal — issue #164). It always runs when a
+// provisioner is wired, even with no drawer inputs, so a project stranded on an
+// orphaned gate recovers on its next build. Per-dependency failures come back as
 // data; an infra error surfaces as the activity error (retry / fail the run).
 func (a *Activities) ProvisionDependencies(ctx context.Context, in ProvisionDepsInput) ([]ProvisionFailure, error) {
-	if len(in.Inputs) == 0 {
-		return nil, nil
-	}
 	if a.provisioner == nil {
-		return nil, errNotConfigured
+		// No provisioner wired (degraded boot / tests): a build that needs to
+		// author inputs cannot proceed; a build with nothing to author (and so
+		// nothing to reconcile through the provisioner) is a safe no-op.
+		if len(in.Inputs) > 0 {
+			return nil, errNotConfigured
+		}
+		return nil, nil
 	}
 	return a.provisioner.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.Inputs)
 }

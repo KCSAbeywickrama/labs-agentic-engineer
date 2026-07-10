@@ -308,6 +308,35 @@ func TestSettleReadyGate_NoOpenGate(t *testing.T) {
 	}
 }
 
+// TestProvisionForBuild_EmptyInputsDoesNotMint pins that a build with no drawer
+// inputs (a pure re-build) mints NO new gates — EnsureProvisionIssues is skipped
+// so already-ready deps don't churn a fresh gate every build. The settle pass
+// still runs (reconciling any existing open gate), but with no seeded gate here
+// it is a no-op.
+func TestProvisionForBuild_EmptyInputsDoesNotMint(t *testing.T) {
+	issues := newFakeIssues(nil)
+	execs := &fakeExecStore{}
+	// orders-db is Ready in OC, but there is no existing gate to settle.
+	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
+		resources.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
+	}}
+	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", nil)
+	if err != nil {
+		t.Fatalf("ProvisionForBuild (empty inputs): %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	if len(issues.list) != 0 {
+		t.Fatalf("empty-input build must not mint any gate, got %d", len(issues.list))
+	}
+	if len(issues.closed) != 0 {
+		t.Fatalf("no existing gate → nothing to settle, got %d closed", len(issues.closed))
+	}
+}
+
 // provisionRowFor returns the first provision Execution row for a dep name.
 func provisionRowFor(execs *fakeExecStore, depName string) *models.Execution {
 	for _, r := range execs.rows {

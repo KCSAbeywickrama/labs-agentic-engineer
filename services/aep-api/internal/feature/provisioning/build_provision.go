@@ -77,8 +77,15 @@ type ProvisionFailure struct {
 // already be registered in the catalog (the app-root adapter calls
 // design.RegisterExternalResources before this — Task 5).
 func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, projectID, tag string, inputs []BuildProvisionInput) ([]ProvisionFailure, error) {
-	if err := s.EnsureProvisionIssues(ctx, orgID, projectID, tag); err != nil {
-		return nil, err
+	// Mint gates only when the drawer carried inputs. A not-ready dependency is
+	// always surfaced in the build drawer, so a build with no inputs needs no new
+	// gate — and a pure re-build must not churn a fresh gate for every already-ready
+	// dep. Existing gates are still reconciled by settleReadyGates below, so an
+	// orphaned gate self-heals on ANY later build, drawer or not (issue #164).
+	if len(inputs) > 0 {
+		if err := s.EnsureProvisionIssues(ctx, orgID, projectID, tag); err != nil {
+			return nil, err
+		}
 	}
 
 	var failures []ProvisionFailure

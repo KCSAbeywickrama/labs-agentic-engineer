@@ -75,6 +75,21 @@ func TestProvisionDependencies_NoInputsNoProvisionerSkips(t *testing.T) {
 	}
 }
 
+// TestProvisionDependencies_NoInputsWiredReconciles: with a provisioner wired,
+// the activity runs even with NO drawer inputs — ProvisionForBuild reconciles
+// any provision gate whose dep is already Ready but was left un-completed by a
+// prior build (self-heal — issue #164). The old short-circuit skipped this.
+func TestProvisionDependencies_NoInputsWiredReconciles(t *testing.T) {
+	fp := &fakeBuildProvisioner{}
+	acts := NewActivities(Deps{Provisioner: fp})
+	if _, err := acts.ProvisionDependencies(context.Background(), ProvisionDepsInput{OrgID: "a", ProjectID: "p", Tag: "v1"}); err != nil {
+		t.Fatalf("no-inputs reconcile must not error, got %v", err)
+	}
+	if fp.calls != 1 {
+		t.Fatalf("provisioner must be called once for reconciliation even with no inputs, got %d", fp.calls)
+	}
+}
+
 // TestProvisionDependencies_PropagatesError: an infra error from the port
 // surfaces as the activity error (the workflow retries / fails the run).
 func TestProvisionDependencies_PropagatesError(t *testing.T) {
