@@ -28,7 +28,7 @@ import {
 } from "./chatStore.js";
 import { getTurn, openTurnStream } from "./api/turns.js";
 
-const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile", "setFrontmatterField"]);
+const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
 
 /**
  * Attach to a running turn's stream and fold it to its terminal. Resolves

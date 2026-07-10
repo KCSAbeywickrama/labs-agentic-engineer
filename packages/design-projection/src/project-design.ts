@@ -17,7 +17,7 @@
  */
 
 /**
- * design.json projection — the frontmatter-authored design bundle, folded
+ * design.json projection — the per-component design.json bundle, folded
  * into the derived machine view (`ProjectDesign` in types.ts) that the
  * cell diagram, coding-agent dispatch, and task generation consume. Pure:
  * files in, JSON out; nobody authors this artifact and the agent never sees
@@ -73,19 +73,19 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
   const dir = `specs/design/components/${id}`;
   // The authored file is schema-validated at write time (FileBundle); parse
   // defensively anyway so a hand-edited bundle degrades to defaults, not a throw.
-  let fm: Record<string, unknown> = {};
+  let dj: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(files[`${dir}/design.json`] ?? "");
-    if (parsed && typeof parsed === "object") fm = parsed as Record<string, unknown>;
+    if (parsed && typeof parsed === "object") dj = parsed as Record<string, unknown>;
   } catch {
     /* defaults below */
   }
   // The design phase accepts ANY component kind the requirements imply; the
   // authored type passes through untouched (support-gating is a later phase).
-  const type = str(fm.type) ?? "service";
-  const exposure = str(fm.exposure) ?? "intranet";
-  const skillsApplied = Array.isArray(fm.skillsApplied)
-    ? fm.skillsApplied.filter((s): s is string => typeof s === "string")
+  const type = str(dj.type) ?? "service";
+  const exposure = str(dj.exposure) ?? "intranet";
+  const skillsApplied = Array.isArray(dj.skillsApplied)
+    ? dj.skillsApplied.filter((s): s is string => typeof s === "string")
     : [];
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };
@@ -95,14 +95,14 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
   // exactOptionalPropertyTypes: omit absent keys instead of `key: undefined`.
   const build: ProjectDesignComponent["build"] = {};
   for (const key of ["language", "buildpack", "appPath", "entrypoint"] as const) {
-    const v = str(fm[key]);
+    const v = str(dj[key]);
     if (v !== undefined) build[key] = v;
   }
 
   return {
     id,
     type,
-    version: str(fm.version) ?? "0.1.0",
+    version: str(dj.version) ?? "0.1.0",
     skillsApplied,
     build,
     ...(type === "service"
@@ -122,7 +122,7 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
           },
         }
       : {}),
-    connections: dependencyEdges(fm.dependencies),
+    connections: dependencyEdges(dj.dependencies),
     artifacts,
   };
 }

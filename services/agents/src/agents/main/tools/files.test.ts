@@ -47,8 +47,8 @@ const loadSkillExec = (skills: SkillSourceArg): LoadSkillExec =>
 test("buildFileTools omits loadSkill when no skills are supplied (skill-free = today)", () => {
   const tools = buildFileTools(new FileBundle({}));
   assert.equal(LOAD_SKILL in tools, false);
-  // The four file-mutation tools are always present, in declaration order.
-  assert.deepEqual(Object.keys(tools), ["addFile", "editFile", "removeFile", "setFrontmatterField"]);
+  // The file-mutation tools are always present, in declaration order.
+  assert.deepEqual(Object.keys(tools), ["addFile", "editFile", "removeFile"]);
 });
 
 test("buildFileTools registers loadSkill when skills are supplied", () => {

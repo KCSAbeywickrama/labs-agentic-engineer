@@ -41,7 +41,6 @@ import {
   type EditFileInput,
   type Equal,
   type RemoveFileInput,
-  type SetFrontmatterFieldInput,
 } from "@aep/agent-stream";
 import { buildSkillTools } from "./skill-tools.js";
 import type { SkillSource } from "../skill-source.js";
@@ -49,7 +48,6 @@ import type { SkillSource } from "../skill-source.js";
 export const ADD_FILE = "addFile" as const;
 export const EDIT_FILE = "editFile" as const;
 export const REMOVE_FILE = "removeFile" as const;
-export const SET_FRONTMATTER_FIELD = "setFrontmatterField" as const;
 /** A tool for human-in-the-loop questions — implemented, but disabled. */
 export const ASK_QUESTION = "ask_question" as const;
 
@@ -78,14 +76,6 @@ export const removeFileInputSchema = z.object({
   path: z.string().describe("Existing bundle path to delete."),
 });
 
-export const setFrontmatterFieldInputSchema = z.object({
-  path: z.string().describe("Markdown file with leading --- frontmatter."),
-  key: z.string().describe("Frontmatter key to set or add, e.g. 'language' or 'buildpack'."),
-  value: z
-    .union([z.string(), z.number(), z.boolean(), z.array(z.string())])
-    .describe("New value. Arrays render as a YAML block list."),
-});
-
 // --- Drift guard: Zod schema ⇄ sse-events wire type -------------------------
 // Compile-time only. If a schema's inferred input diverges from its wire type,
 // the corresponding `true` is no longer assignable and this fails to compile,
@@ -94,8 +84,7 @@ const _drift: [
   Equal<z.infer<typeof addFileInputSchema>, AddFileInput>,
   Equal<z.infer<typeof editFileInputSchema>, EditFileInput>,
   Equal<z.infer<typeof removeFileInputSchema>, RemoveFileInput>,
-  Equal<z.infer<typeof setFrontmatterFieldInputSchema>, SetFrontmatterFieldInput>,
-] = [true, true, true, true];
+] = [true, true, true];
 void _drift;
 
 // --- ask_question (HITL, Option B) — implemented but NOT registered ----------
@@ -138,7 +127,7 @@ export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record
         "Change part of an existing file by replacing oldString with newString. oldString must be copied VERBATIM " +
         "from the file (including leading indentation and newlines) and must match EXACTLY ONE location. On NOT_UNIQUE, " +
         "broaden the anchor with surrounding lines; on NOT_FOUND, re-copy the snippet exactly. Use this for prose AND " +
-        "openapi.yaml; for frontmatter keys prefer setFrontmatterField.",
+        "openapi.yaml.",
       inputSchema: editFileInputSchema,
       execute: async ({ path, oldString, newString }) => bundle.editFile(path, oldString, newString),
     }),
@@ -149,15 +138,6 @@ export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record
         "(requirements.md, design.md) with PROTECTED_PATH.",
       inputSchema: removeFileInputSchema,
       execute: async ({ path }) => bundle.removeFile(path),
-    }),
-
-    [SET_FRONTMATTER_FIELD]: tool({
-      description:
-        "Set a single YAML frontmatter field on a markdown file (the keys between the leading --- fences, e.g. " +
-        "language, buildpack). Owns the rendering so list/array values never need fragile multi-line " +
-        "anchoring. Requires existing frontmatter (NO_FRONTMATTER otherwise).",
-      inputSchema: setFrontmatterFieldInputSchema,
-      execute: async ({ path, key, value }) => bundle.setFrontmatterField(path, key, value),
     }),
 
     // ask_question — human-in-the-loop follow-up. Implemented (Phase 5) but NOT
