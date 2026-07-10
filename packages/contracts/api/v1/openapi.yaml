@@ -954,23 +954,6 @@ components:
         - kind
         - warnings
       type: object
-    ImportSkillUrlInput:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/ImportSkillUrlInput.json
-          format: uri
-          readOnly: true
-          type: string
-        url:
-          description: Direct file URL — a raw SKILL.md or a gzip-compressed AgentSkills tarball. Fetched server-side.
-          format: uri
-          type: string
-      required:
-        - url
-      type: object
     LLMProjection:
       additionalProperties: false
       properties:
@@ -1302,13 +1285,9 @@ components:
           type: string
         name:
           type: string
-        version:
-          format: int64
-          type: integer
       required:
         - name
         - kind
-        - version
         - description
         - contentSha
         - editable
@@ -1357,6 +1336,9 @@ components:
       type: object
     SkillUpdate:
       additionalProperties: false
+      description: >
+        One built-in whose embedded (platform) content differs from the org's
+        repo copy. Reconcile compares ContentSHA, not a hand-maintained version.
       properties:
         $schema:
           description: A URL to the JSON Schema for this object.
@@ -1365,19 +1347,10 @@ components:
           format: uri
           readOnly: true
           type: string
-        embeddedVersion:
-          format: int64
-          type: integer
         name:
           type: string
-        repoVersion:
-          description: -1 when the skill has no repo row yet
-          format: int64
-          type: integer
       required:
         - name
-        - repoVersion
-        - embeddedVersion
       type: object
     SkillUpdateList:
       additionalProperties: false
@@ -1446,24 +1419,6 @@ components:
           type: string
       required:
         - status
-      type: object
-    SyncSkillsInput:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/SyncSkillsInput.json
-          format: uri
-          readOnly: true
-          type: string
-        names:
-          description: Skill names to sync. Omitted or empty syncs every embedded built-in/flow skill (default behavior).
-          items:
-            type: string
-          type:
-            - array
-            - "null"
       type: object
     TagList:
       additionalProperties: false
@@ -3585,41 +3540,9 @@ paths:
       summary: Import an AgentSkills tarball
       tags:
         - Skills
-  /skills/import-url:
-    post:
-      operationId: import-skill-url
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ImportSkillUrlInput"
-        required: true
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ImportResult"
-          description: Created
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Import a skill from a URL
-      tags:
-        - Skills
   /skills/sync:
     post:
       operationId: sync-skills
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SyncSkillsInput"
       responses:
         "200":
           content:
@@ -3635,7 +3558,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Sync built-in skills
+      summary: Sync built-in skills (creates the org's skills repo if missing)
       tags:
         - Skills
   /skills/updates:

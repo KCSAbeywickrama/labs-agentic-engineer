@@ -26,7 +26,6 @@ import {
   IMPORT_INVALID_SENTINEL,
   IMPORT_WARN_SENTINEL,
   importFileInvalidError,
-  importUrlInvalidError,
   importWarningsFixture,
   INVALID_CREDENTIAL_VALUE,
   llmConnectedFixture,
@@ -34,9 +33,9 @@ import {
   seedSkillUpdates,
   seedSkills,
   skillsLoadError,
+  skillsSyncError,
   skillsRepoUrl,
   type SettingsScenario,
-  type SkillRecord,
 } from "../fixtures/settings";
 
 type ConfigPatch = components["schemas"]["ConfigPatch"];
@@ -45,9 +44,9 @@ type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
 type CreateSkillInput = components["schemas"]["CreateSkillInput"];
 type UpdateSkillInput = components["schemas"]["UpdateSkillInput"];
-type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type SkillSummary = components["schemas"]["SkillSummary"];
+type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 
 function scenario(): SettingsScenario {
   return (
@@ -67,7 +66,7 @@ function problem(body: object, status: number) {
 // handlers/projects.ts's createdProjects pattern.
 let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
-let skills: SkillRecord[] = [];
+let skills: SkillDetailBody[] = [];
 let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
 
@@ -77,27 +76,27 @@ function ensureInitialized() {
   if (scenario() === "connected") {
     gitProvider = { ...githubConnectedFixture };
     llm = { ...llmConnectedFixture };
+  } else if (scenario() === "partial") {
+    // Onboarding resume-after-abandon (#102): GitHub landed, Anthropic
+    // didn't — the wizard must open at its first incomplete step.
+    gitProvider = { ...githubConnectedFixture };
   }
   skills = seedSkills.map((s) => ({ ...s }));
   skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
 }
 
-function toSummary(s: SkillRecord): SkillSummary {
+function toSummary(s: SkillDetailBody): SkillSummary {
   return {
     name: s.name,
     kind: s.kind,
-    version: s.version,
     description: s.description,
     contentSha: s.contentSha,
     editable: s.editable,
   };
 }
 
-// The contract's SkillDetailBody has no `version` field, so strip the
-// mock-only tracking field before returning it over the wire.
-function toDetail(s: SkillRecord): SkillDetailBody {
-  const { version: _version, ...detail } = s;
-  return detail;
+function nextContentSha(name: string): string {
+  return `sha-${name}-${Date.now()}`;
 }
 
 function extractDescription(skillMd: string): string {
@@ -122,8 +121,7 @@ function importSkill(name: string, source: string): ImportResult {
   const withWarnings = name.includes(IMPORT_WARN_SENTINEL);
   const existing = skills.find((s) => s.name === name);
   if (existing) {
-    existing.version += 1;
-    existing.contentSha = `sha-${name}-${existing.version}`;
+    existing.contentSha = nextContentSha(name);
     existing.updatedAt = new Date().toISOString();
   } else {
     skills.push({
@@ -134,8 +132,7 @@ function importSkill(name: string, source: string): ImportResult {
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
-      version: 1,
-      contentSha: `sha-${name}-1`,
+      contentSha: nextContentSha(name),
       updatedAt: new Date().toISOString(),
     });
   }
@@ -243,57 +240,39 @@ export const settingsHandlers = [
     });
   }),
 
-  http.post("*/api/v1/skills/import-url", async ({ request }) => {
+  // All-or-nothing, mirroring the BE: no request body, reconcile everything.
+  // Per #102 the BE creates the org's skills repo first when it's missing;
+  // the mock treats that as part of the same opaque call.
+  http.post("*/api/v1/skills/sync", () => {
     ensureInitialized();
-    const body = (await request.json()) as { url?: string } | null;
-    const url = body?.url ?? "";
-    if (!url || url.includes(IMPORT_INVALID_SENTINEL)) {
-      return problem(importUrlInvalidError, 422);
-    }
-    const basename = url.split("/").pop() ?? "";
-    const name =
-      slugFromFileName(basename) || `imported-skill-${skills.length + 1}`;
-    return HttpResponse.json(importSkill(name, url), { status: 201 });
-  }),
-
-  http.post("*/api/v1/skills/sync", async ({ request }) => {
-    ensureInitialized();
-    let names: string[] | undefined;
-    try {
-      const body = (await request.json()) as { names?: string[] } | null;
-      names = body?.names ?? undefined;
-    } catch {
-      names = undefined;
-    }
-    const targets =
-      names && names.length > 0
-        ? skillUpdates.filter((u) => names.includes(u.name))
-        : skillUpdates;
+    if (scenario() === "sync-error") return problem(skillsSyncError, 502);
+    const targets = skillUpdates;
 
     for (const t of targets) {
       const existing = skills.find((s) => s.name === t.name);
       if (existing) {
-        existing.version = t.embeddedVersion;
+        existing.contentSha = nextContentSha(t.name);
         existing.updatedAt = new Date().toISOString();
       } else {
+        // A synced-in skill the repo didn't have yet. Unmarked frontmatter is
+        // an `org` skill, matching the BE's frontmatterKind default.
         skills.push({
           orgId: "org-1",
           name: t.name,
-          kind: "builtin",
+          kind: "org",
           editable: false,
-          description: `${t.name} (built-in)`,
-          skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (built-in)\n---\n\nBuilt-in skill body.`,
+          description: `${t.name} (platform-shipped)`,
+          skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
-          version: t.embeddedVersion,
-          contentSha: `sha-${t.name}-${t.embeddedVersion}`,
+          contentSha: nextContentSha(t.name),
           updatedAt: new Date().toISOString(),
         });
       }
     }
-    const targetNames = new Set(targets.map((t) => t.name));
-    skillUpdates = skillUpdates.filter((u) => !targetNames.has(u.name));
+    const updated = targets.length;
+    skillUpdates = [];
 
-    return HttpResponse.json({ status: "synced", updated: targets.length });
+    return HttpResponse.json({ status: "synced", updated });
   }),
 
   http.get("*/api/v1/skills/updates", () => {
@@ -325,7 +304,7 @@ export const settingsHandlers = [
         409,
       );
     }
-    const created: SkillRecord = {
+    const created: SkillDetailBody = {
       orgId: "org-1",
       name: body.name,
       kind: "custom",
@@ -333,12 +312,11 @@ export const settingsHandlers = [
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
       references: body.references ?? {},
-      version: 1,
-      contentSha: `sha-${body.name}-1`,
+      contentSha: nextContentSha(body.name),
       updatedAt: new Date().toISOString(),
     };
     skills.push(created);
-    return HttpResponse.json(toDetail(created), { status: 201 });
+    return HttpResponse.json(created, { status: 201 });
   }),
 
   http.get("*/api/v1/skills/:name", ({ params }) => {
@@ -355,7 +333,7 @@ export const settingsHandlers = [
         404,
       );
     }
-    return HttpResponse.json(toDetail(skill));
+    return HttpResponse.json(skill);
   }),
 
   http.put("*/api/v1/skills/:name", async ({ params, request }) => {
@@ -376,9 +354,9 @@ export const settingsHandlers = [
     skill.skillMd = body.skillMd;
     skill.references = body.references ?? {};
     skill.description = extractDescription(body.skillMd);
-    skill.version += 1;
+    skill.contentSha = nextContentSha(skill.name);
     skill.updatedAt = new Date().toISOString();
-    return HttpResponse.json(toDetail(skill));
+    return HttpResponse.json(skill);
   }),
 
   http.delete("*/api/v1/skills/:name", ({ params }) => {

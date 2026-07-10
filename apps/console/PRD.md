@@ -89,6 +89,12 @@ that's a stalled feature — investigate, don't ignore.
   [#150](https://github.com/wso2/labs-agentic-engineer/issues/150)
   (no contract change; duplicate-generation guard deferred to
   [#151](https://github.com/wso2/labs-agentic-engineer/issues/151))
+- Onboarding — first-time credentials wizard for the default org (hard gate on
+  incomplete `GET /config`): GitHub PAT + Anthropic key, then auto skills-repo
+  bootstrap via extended `/skills/sync` —
+  [#102](https://github.com/wso2/labs-agentic-engineer/issues/102)
+  (BE handshake [#171](https://github.com/wso2/labs-agentic-engineer/issues/171);
+  ADR-0009)
 - Spec view — rich design rendering: component-grouped file list, whole-architecture
   cell diagram, per-component wireframes, and Swagger-style API Spec view
   (client-derived, read-only; no committed artifacts) —
@@ -96,6 +102,11 @@ that's a stalled feature — investigate, don't ignore.
 - Settings — org GitHub PAT + Anthropic key credentials, and skills catalogue
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
+  handshake: [#100](https://github.com/wso2/labs-agentic-engineer/issues/100))
+- Settings → Skills legacy parity — per-tab routes, categorised catalogue
+  (org/platform/custom/imported), MD viewer + monospace editor with preview,
+  upload-only import with pull-request guidance —
+  [#143](https://github.com/wso2/labs-agentic-engineer/issues/143) (BE
   handshake: [#100](https://github.com/wso2/labs-agentic-engineer/issues/100))
 - Spec view — full-screen spec workspace (grouped requirement/design/validation
   file listing, placeholder textarea content, UI-only build trigger) —

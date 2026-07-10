@@ -192,7 +192,7 @@ func TestSyncProjectAPITraits_ReEmitsEnabledServicesOnly(t *testing.T) {
 // component via UpdateComponentTraitEnvironmentConfigs.
 func traitCORSFor(t *testing.T, oc *mocks.ComponentClientMock, component string) map[string]interface{} {
 	t.Helper()
-	inst := APIConfigurationInstanceName(component)
+	inst := APIConfigurationInstanceName(component, "")
 	for _, c := range oc.UpdateComponentTraitEnvironmentConfigsCalls() {
 		if c.ComponentName != component {
 			continue

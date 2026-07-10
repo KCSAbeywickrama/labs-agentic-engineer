@@ -16,20 +16,11 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
-import { OnboardingGate } from "../features/onboarding/components/OnboardingGate";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session. Behind it, the onboarding gate (issue #102,
-// ADR-0009) holds every route until the org's config is complete.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <OnboardingGate>
-        <AppLayout />
-      </OnboardingGate>
-    </AuthGuard>
-  ),
+// Bare /settings has no content of its own — land on the first section.
+export const Route = createFileRoute("/settings/")({
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/credentials" });
+  },
 });

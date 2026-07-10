@@ -257,33 +257,13 @@ export function useImportSkill() {
   });
 }
 
-// Server-side fetch of a direct file URL (raw SKILL.md or tarball) — the
-// BE fetches so the browser never hits CORS (issue #96 re-grill decision).
-export function useImportSkillUrl() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (url: string) => {
-      const { data, error } = await client.POST("/skills/import-url", {
-        body: { url },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to import from the URL"));
-      }
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-    },
-  });
-}
-
+// All-or-nothing: the BE's sync-skills takes no body and reconciles every
+// embedded skill in one commit (`Reconcile`). There is no per-skill selection.
 export function useSyncSkills() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (names: string[]) => {
-      const { data, error } = await client.POST("/skills/sync", {
-        body: names.length > 0 ? { names } : undefined,
-      });
+    mutationFn: async () => {
+      const { data, error } = await client.POST("/skills/sync", {});
       if (error) {
         throw new Error(errorMessage(error, "Failed to sync skills"));
       }

@@ -16,20 +16,17 @@
  * under the License.
  */
 
-import { createRootRoute } from "@tanstack/react-router";
-import { AppLayout } from "../layouts/AppLayout";
-import { AuthGuard } from "../auth/AuthGuard";
-import { OnboardingGate } from "../features/onboarding/components/OnboardingGate";
-
-// Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session. Behind it, the onboarding gate (issue #102,
-// ADR-0009) holds every route until the org's config is complete.
-export const Route = createRootRoute({
-  component: () => (
-    <AuthGuard>
-      <OnboardingGate>
-        <AppLayout />
-      </OnboardingGate>
-    </AuthGuard>
-  ),
-});
+// A SKILL.md is YAML frontmatter followed by a markdown body. Markdown has no
+// notion of frontmatter: rendering the raw file would turn the opening `---`
+// into a thematic break and the closing `---` into a setext heading over the
+// last frontmatter line. Split it off before rendering, and show it verbatim.
+export function splitFrontmatter(skillMd: string): {
+  frontmatter: string | null;
+  body: string;
+} {
+  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(
+    skillMd,
+  );
+  if (!match) return { frontmatter: null, body: skillMd };
+  return { frontmatter: match[1] ?? "", body: skillMd.slice(match[0].length) };
+}

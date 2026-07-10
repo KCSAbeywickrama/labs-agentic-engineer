@@ -45,10 +45,42 @@ type DesignComponent struct {
 	// Description is the single-responsibility prose (what the component does /
 	// does NOT do) — the design.json `description` key. This is the successor to
 	// the per-component design.md markdown body.
-	Description                string      `json:"description,omitempty"`
-	OpenAPISpec                string      `json:"openAPISpec"`
-	ComponentAgentInstructions string      `json:"componentAgentInstructions"`
-	ExposesAPI                 *ExposesAPI `json:"exposesAPI,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Endpoint is the component's single network endpoint, sourced from the
+	// design.json `endpoint` key. Only its Name is declared — the shared key
+	// the coding agent's workload.yaml and the platform's api-configuration
+	// trait both reference. Nil when the design declares no endpoint; callers
+	// use EndpointName() to get the effective name (defaulting to "http").
+	Endpoint                   *ComponentEndpoint `json:"endpoint,omitempty"`
+	OpenAPISpec                string             `json:"openAPISpec"`
+	ComponentAgentInstructions string             `json:"componentAgentInstructions"`
+	ExposesAPI                 *ExposesAPI        `json:"exposesAPI,omitempty"`
+}
+
+// DefaultEndpointName is the conventional workload endpoint name the platform's
+// managed-API (api-configuration) trait binds to when a component's design.json
+// declares no explicit endpoint.
+const DefaultEndpointName = "http"
+
+// ComponentEndpoint is the component's single network endpoint as declared in
+// design.json. Only Name is carried: it is the SINGLE SOURCE OF TRUTH for the
+// endpoint name shared between the coding agent's workload.yaml
+// (spec.endpoints[].name) and the api-configuration trait's endpointName. The
+// port is deliberately NOT declared here — it stays in workload.yaml, chosen to
+// match the app's actual listen port. Mirrors the agent-stream TS `Endpoint`.
+type ComponentEndpoint struct {
+	Name string `json:"name"`
+}
+
+// EndpointName returns the effective workload endpoint name for the component:
+// the design.json `endpoint.name` when declared, otherwise the conventional
+// DefaultEndpointName ("http"). This is the one place the default lives, so
+// every consumer (trait emit, instance naming) agrees.
+func (c DesignComponent) EndpointName() string {
+	if c.Endpoint != nil && c.Endpoint.Name != "" {
+		return c.Endpoint.Name
+	}
+	return DefaultEndpointName
 }
 
 // DependencyKind discriminates the unified Dependency entry.
