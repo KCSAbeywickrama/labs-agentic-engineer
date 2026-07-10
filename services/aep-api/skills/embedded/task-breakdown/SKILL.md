@@ -57,7 +57,7 @@ handling").
 
 ## Worked example
 
-Design: `orders-web` (webapp) → `orders-api` (service) → `payments-api`
+Design: `orders-web` (web-application) → `orders-api` (service) → `payments-api`
 (service). `payments-api` also depends on external `stripe` and
 platform-resource `payments-db`; `orders-api` also depends on org-service
 `identity`.

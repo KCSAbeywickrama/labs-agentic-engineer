@@ -81,9 +81,13 @@ spec:
           default: ""
         scopes:
           type: string
-          # Space-separated OAuth scopes (the operator forwards them verbatim to
-          # Thunder). Defaults to the standard OIDC set.
-          default: "openid profile email"
+          # Space-separated OAuth scopes the SPA requests. `group` and `ou` are
+          # required for role-aware apps: verified on Thunder 0.34 that `groups`
+          # (and `ou*`) reach the ID TOKEN only when these scopes are granted —
+          # the app's scopeClaims map them (set by the thunder-app operator). The
+          # SPA reads roles from `user.profile.groups`; drop `group` and it sees
+          # no role. See the thunder-authentication skill.
+          default: "openid profile email group ou"
   environmentConfigs:
     openAPIV3Schema:
       type: object
