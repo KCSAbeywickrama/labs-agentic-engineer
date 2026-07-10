@@ -129,12 +129,9 @@ bootstrap:
       )
 
       PUBLIC_APPS=(
-        # /callback is the new console's dedicated OAuth route (issue #91);
-        # root redirects serve the legacy console (login + post-logout).
-        # During the #98 transition legacy stays at :8090 and the new
-        # console lives at :8091, so that origin needs /callback (login)
-        # and root (post-logout) entries too.
-        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,http://localhost:8091,http://localhost:8091/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
+        # /callback is the console's dedicated OAuth route (issue #91);
+        # root redirects handle post-logout.
+        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
       )
 
       # OpenChoreo's control-plane chart ships Backstage enabled (values-cp.yaml
