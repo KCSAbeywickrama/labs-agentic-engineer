@@ -318,9 +318,11 @@ export function SpecView({ projectName }: { projectName: string }) {
           ) : (
             <Tooltip
               title={
-                hasRequirementsFiles
-                  ? "Derive the component design from your requirements"
-                  : "Generate requirements first"
+                agentBusy
+                  ? "An agent is still working — Generate design is available once it finishes"
+                  : hasRequirementsFiles
+                    ? "Derive the component design from your requirements"
+                    : "Generate requirements first"
               }
             >
               {/* span so the tooltip works while the button is disabled */}
@@ -328,7 +330,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 <Button
                   variant="contained"
                   startIcon={<Sparkles size={18} />}
-                  disabled={!hasRequirementsFiles}
+                  disabled={!hasRequirementsFiles || agentBusy}
                   onClick={generateDesign}
                 >
                   Generate design
@@ -397,6 +399,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 onSelect={setSelectedPath}
                 onAddArtifact={() => setAddArtifactOpen(true)}
                 onRegenerateDesign={generateDesign}
+                regenerateDisabled={agentBusy}
                 deriving={deriving}
                 failed={failed}
               />
