@@ -634,6 +634,7 @@ export function SpecView({ projectName }: { projectName: string }) {
       <BuildDependencyDrawer
         open={dependencyDrawerOpen}
         items={preflightItems}
+        submitting={dependencyDrawerOpen && buildPhase === "building"}
         onClose={() => setDependencyDrawerOpen(false)}
         onContinue={(inputs) => void onContinueBuild(inputs)}
       />

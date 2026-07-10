@@ -58,13 +58,14 @@ const ITEMS: PreflightItem[] = [
   },
 ];
 
-function setup(items: PreflightItem[] = ITEMS) {
+function setup(items: PreflightItem[] = ITEMS, submitting = false) {
   const onClose = vi.fn();
   const onContinue = vi.fn();
   render(
     <BuildDependencyDrawer
       open
       items={items}
+      submitting={submitting}
       onClose={onClose}
       onContinue={onContinue}
     />,
@@ -94,6 +95,40 @@ describe("BuildDependencyDrawer", () => {
 
     expect(postgresCheckbox).toBeChecked();
     expect(billingCheckbox).toBeChecked();
+  });
+
+  // A single prechecked platform-resource approval leaves Continue enabled on
+  // its own — the ideal fixture to prove that `submitting` is what disables it.
+  const PLATFORM_ONLY: PreflightItem[] = [
+    {
+      component: "api",
+      dependency: "notes-db",
+      kind: "platform-resource",
+      description: "Provision this postgres-cnpg for you",
+      resourceType: "postgres-cnpg",
+    },
+  ];
+
+  it("keeps Continue enabled for a prechecked approval when not submitting", () => {
+    setup(PLATFORM_ONLY, false);
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+  });
+
+  it("shows a spinner on Continue and disables both buttons while submitting", () => {
+    const { onContinue } = setup(PLATFORM_ONLY, true);
+
+    const continueButton = screen.getByRole("button", { name: /continue/i });
+    // Disabled despite the prechecked approval — the in-flight build is what
+    // blocks it, so the request can't be double-submitted.
+    expect(continueButton).toBeDisabled();
+    // The Continue button (not the Build button behind the drawer) carries the
+    // spinner while POST /build is in flight.
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    // Cancel is locked so the drawer can't be dismissed mid-call.
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
+
+    fireEvent.click(continueButton);
+    expect(onContinue).not.toHaveBeenCalled();
   });
 
   it("disables Continue until external-config values and external-spec url/content are filled", () => {

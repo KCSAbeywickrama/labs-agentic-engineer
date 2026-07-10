@@ -238,11 +238,17 @@ export function BuildDependencyDrawer({
   items,
   onClose,
   onContinue,
+  submitting = false,
 }: {
   open: boolean;
   items: PreflightItem[];
   onClose: () => void;
   onContinue: (inputs: BuildInputItem[]) => void;
+  // True while the parent's build call (POST /build) triggered by Continue is
+  // in flight: the Continue button shows a spinner and both buttons disable so
+  // the request can't be double-submitted or the drawer dismissed mid-call.
+  // The parent closes the drawer on success.
+  submitting?: boolean;
 }) {
   const [state, setState] = useState<Record<string, ItemState>>(() =>
     initialState(items),
@@ -371,10 +377,13 @@ export function BuildDependencyDrawer({
         ) : null}
 
         <Stack direction="row" spacing={2} justifyContent="flex-end">
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
           <Button
             variant="contained"
-            disabled={!canContinue}
+            loading={submitting}
+            disabled={!canContinue || submitting}
             onClick={handleContinue}
           >
             Continue
