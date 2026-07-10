@@ -37,9 +37,10 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ExternalLink, Eye, EyeOff, GitHub, Lightbulb } from "@wso2/oxygen-ui-icons-react";
+import { Eye, EyeOff, GitHub, Lightbulb } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import { useConnectGitHubPat, useDisconnectGitProvider } from "../api/queries";
+import { GitHubPatScopeGuide } from "./GitHubPatScopeGuide";
 
 type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 
@@ -123,9 +124,7 @@ export function GitHubCredentialCard({
               Connect a GitHub personal access token with{" "}
               <strong>organization-level access</strong> so the platform can
               read and write this org's spec and code repos and host its skills
-              catalogue. Use a fine-grained token with the organization set as
-              the resource owner, or a classic token with the{" "}
-              <code>repo</code> scope owned by a member of the org.
+              catalogue. The token must be owned by a member of the org.
             </Typography>
             <Alert severity="info" icon={<Lightbulb size={18} />}>
               Pro tip: create a dedicated GitHub organization for this platform
@@ -136,6 +135,7 @@ export function GitHubCredentialCard({
         )}
 
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <GitHubPatScopeGuide />
           <TextField
             label={
               connected
@@ -172,17 +172,6 @@ export function GitHubCredentialCard({
             helperText="The GitHub organization the platform reads and writes repos in."
             fullWidth
           />
-          <Button
-            variant="text"
-            size="small"
-            href="https://github.com/settings/personal-access-tokens/new"
-            target="_blank"
-            rel="noreferrer"
-            endIcon={<ExternalLink size={14} />}
-            sx={{ alignSelf: "flex-start" }}
-          >
-            Create a token on GitHub
-          </Button>
           {connect.isError && (
             <Alert severity="error">{connect.error.message}</Alert>
           )}

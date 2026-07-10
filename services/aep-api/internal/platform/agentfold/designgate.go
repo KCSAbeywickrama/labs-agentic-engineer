@@ -62,6 +62,7 @@ var (
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
 		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
+		"skillsApplied": true,
 	}
 )
 
@@ -118,6 +119,11 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
+	if sa, present := obj["skillsApplied"]; present {
+		if p := validateSkillsApplied(sa); p != nil {
+			return p
+		}
+	}
 	if name := obj["name"].(string); name != dirName {
 		return &designProblem{
 			code:    ErrSchemaViolation,
@@ -146,6 +152,23 @@ func validateEndpoint(v any) *designProblem {
 	name, ok := ep["name"].(string)
 	if !ok || name == "" {
 		return &designProblem{code: ErrSchemaViolation, message: "endpoint.name: must be at least 1 characters"}
+	}
+	return nil
+}
+
+// validateSkillsApplied mirrors the zod `skillsApplied: z.array(z.string())`:
+// when present it must be an array whose every element is a string. Parity with
+// the agent's zod gate — without it the Go fold would accept a shape the agent
+// rejected (or vice versa), diverging the fold. (JSON arrays unmarshal to []any.)
+func validateSkillsApplied(raw any) *designProblem {
+	arr, ok := raw.([]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "skillsApplied: must be an array"}
+	}
+	for i, v := range arr {
+		if _, ok := v.(string); !ok {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsApplied[%d]: must be a string", i)}
+		}
 	}
 	return nil
 }

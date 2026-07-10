@@ -140,9 +140,13 @@ func (s *Service) Get(ctx context.Context, org string) (*ConfigProjection, error
 	if s.credentialSvc != nil {
 		proj, err := s.credentialSvc.Status(ctx, org)
 		switch {
-		case err == nil:
+		// A disconnected row is retained by the disconnect cascade (audit trail,
+		// app re-adoption) but the config contract says null = not connected —
+		// projecting it would keep the console's onboarding gate (ADR-0009) and
+		// settings card treating the org as connected.
+		case err == nil && proj.Status != "disconnected":
 			out.GitProvider = gitProviderProjectionFrom(proj)
-		case isNotFound(err):
+		case err == nil || isNotFound(err):
 			out.GitProvider = nil
 		default:
 			return nil, fmt.Errorf("orgconfig get gitProvider: %w", err)

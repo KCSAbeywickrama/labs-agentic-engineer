@@ -26,28 +26,9 @@
  * `design.gen.json` post-turn so the shape is inspectable while testing.
  */
 
-import { parse as parseYaml } from "yaml";
 import type { ProjectDesign, ProjectDesignComponent, ProjectDesignConnection } from "./types.js";
 
-// Same frontmatter grammar as the agents service (bundle.ts) — a local copy
-// keeps this package dependency-light; the shape is trivial and stable
-// (leading --- fences, LF-normalized).
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
-const lf = (s: string): string => s.replace(/\r\n/g, "\n");
-
 const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\/design\.json$/;
-
-/** Parse a markdown file's YAML frontmatter into a record ({} when absent/invalid). */
-function frontmatter(raw: string): Record<string, unknown> {
-  const m = FRONTMATTER_RE.exec(lf(raw));
-  if (!m || !m[1]) return {};
-  try {
-    const parsed = parseYaml(m[1]) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
@@ -103,6 +84,9 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
   // authored type passes through untouched (support-gating is a later phase).
   const type = str(fm.type) ?? "service";
   const exposure = str(fm.exposure) ?? "intranet";
+  const skillsApplied = Array.isArray(fm.skillsApplied)
+    ? fm.skillsApplied.filter((s): s is string => typeof s === "string")
+    : [];
 
   const artifacts: Record<string, string> = { design: `${dir}/design.json` };
   if (files[`${dir}/openapi.yaml`] !== undefined) artifacts.openapi = `${dir}/openapi.yaml`;
@@ -119,6 +103,7 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
     id,
     type,
     version: str(fm.version) ?? "0.1.0",
+    skillsApplied,
     build,
     ...(type === "service"
       ? {
@@ -143,22 +128,17 @@ export function projectComponent(id: string, files: Record<string, string>): Pro
 }
 
 /**
- * STAGE 2 — aggregation: every component projection + the top-level
- * design.md frontmatter (skillsApplied) folded into the project-wide
- * ProjectDesign. Downstream views (cell diagram, task planning) build on THIS,
- * because their subject is the relationships BETWEEN components.
+ * STAGE 2 — aggregation: every component projection folded into the
+ * project-wide ProjectDesign. Downstream views (cell diagram, task planning)
+ * build on THIS, because their subject is the relationships BETWEEN
+ * components.
  */
 export function buildProjectDesign(projectName: string, files: Record<string, string>): ProjectDesign {
-  const topFm = frontmatter(files["specs/design/design.md"] ?? "");
-  const skillsApplied = Array.isArray(topFm.skillsApplied)
-    ? topFm.skillsApplied.filter((s): s is string => typeof s === "string")
-    : [];
-
   const ids = Object.keys(files)
     .map((p) => COMPONENT_RE.exec(p)?.[1])
     .filter((id): id is string => id !== undefined)
     .sort();
   const components = ids.map((id) => projectComponent(id, files));
 
-  return { modelVersion: "0.4.0", id: projectName, name: projectName, skillsApplied, components };
+  return { modelVersion: "0.4.0", id: projectName, name: projectName, components };
 }

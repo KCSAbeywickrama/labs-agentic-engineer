@@ -178,6 +178,12 @@
     },
     "componentAgentInstructions": {
       "type": "string"
+    },
+    "skillsApplied": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

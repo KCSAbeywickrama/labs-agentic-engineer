@@ -25,12 +25,12 @@ const DESIGN: ProjectDesign = {
   modelVersion: "0.4.0",
   id: "expense-claim",
   name: "expense-claim",
-  skillsApplied: ["high-level-architecture"],
   components: [
     {
       id: "expense-api",
       type: "service",
       version: "0.2.0",
+      skillsApplied: ["high-level-architecture"],
       build: { language: "Go" },
       services: {
         "expense-api": {
@@ -50,6 +50,7 @@ const DESIGN: ProjectDesign = {
       id: "expense-webapp",
       type: "webapp",
       version: "0.1.0",
+      skillsApplied: [],
       build: { language: "TypeScript" },
       connections: [{ id: "http://expense-api", type: "http", onPlatform: true }],
       artifacts: {},

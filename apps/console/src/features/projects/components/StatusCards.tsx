@@ -29,7 +29,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FileText, Hammer, Rocket, Sparkles } from "@wso2/oxygen-ui-icons-react";
+import { FileText, ListChecks, Rocket, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { bucketTasks } from "../api/taskBuckets";
@@ -315,13 +315,14 @@ export function StatusCards({
           ),
         },
         {
-          title: "Build",
+          // "Tasks" per the IA rename (#173, ADR-0010) — matches the nav.
+          title: "Tasks",
           node: (
             <StatusCard
-              icon={<Hammer size={18} />}
-              title="Build"
+              icon={<ListChecks size={18} />}
+              title="Tasks"
               state={buildCardState(status, tasks)}
-              to="builds"
+              to="tasks"
               projectName={projectName}
             />
           ),
@@ -339,7 +340,7 @@ export function StatusCards({
           ),
         },
       ]
-    : (["Spec", "Build", "Deployment"] as const).map((title) => ({
+    : (["Spec", "Tasks", "Deployment"] as const).map((title) => ({
         title,
         node: <LoadingCard title={title} />,
       }));

@@ -21,15 +21,36 @@
 # logs. Without this, the BFF's /progress/agent endpoint returns 503 and the
 # UI falls back to "Live progress unavailable — falling back to status polling".
 #
+# Also wires the SRE (RCA) agent alert→RCA→AEP-handoff pipeline (see
+# docs/developer-guide/sre-handoff-runbook.md): logs-adapter (alert-rule
+# evaluation), observer auto-trigger config, and the RCA agent's AE_HANDOFF
+# env so code-level RCA findings become GitHub issues + coding-agent runs.
+#
 # Idempotent: re-running is safe — helm install is gated by helm_install_if_not_exists,
 # kubectl apply is server-side, and ExternalSecrets / CRs are upserts.
+#
+# Optional: setup.sh skips this stage unless ENABLE_OBSERVABILITY=1 is set (e.g.
+# `ENABLE_OBSERVABILITY=1 bash scripts/setup.sh`), in which case it runs —
+# this is the heaviest install (OpenSearch StatefulSet + Fluent Bit DaemonSet
+# + RCA agent) and not everyone needs Live Progress streaming or the
+# alert→RCA handoff. Run this script by hand later to add it on top of an
+# existing setup; start.sh detects its absence and degrades gracefully
+# (see stage 7c).
 #
 # Wiring summary:
 #   - Helm: openchoreo-observability-plane @ v1.0.1-hotfix.1
 #       Observer + cluster-agent + RCA. Creates HTTPRoute on its OWN
 #       gateway (openchoreo-observability-plane/gateway-default, port 11080).
-#   - Helm: observability-logs-opensearch @ v0.3.11
-#       OpenSearch (storage) + Fluent Bit (DaemonSet, log shipper).
+#   - Helm: observability-logs-opensearch @ v0.5.1
+#       OpenSearch (storage) + Fluent Bit (DaemonSet, log shipper) +
+#       logs-adapter (materialises ObservabilityAlertRules as OpenSearch
+#       alerting monitors — 0.3.x had NO adapter, so log alert rules synced
+#       but were never evaluated).
+#   - ConfigMap patches (post-helm): observer-config auto-trigger keys
+#       (LOGS_ADAPTER_ENABLED / RCA_SERVICE_URL / ALERT_SUPPRESSION_WINDOW)
+#       and rca-agent-config AEP-handoff keys (AE_HANDOFF / AE_AUTO_DISPATCH /
+#       AE_API_URL). Patched after helm so chart upgrades can't silently
+#       drop them on re-runs.
 #   - Cross-namespace HTTPRoute on the MAIN kgateway
 #       (openchoreo-control-plane/gateway-default) for observer.openchoreo.localhost
 #       so the BFF in docker-compose can reach the Observer via the same
@@ -39,10 +60,35 @@
 #       Pull username/password/OAuth-client-secret from OpenBao
 #       (seeded by single-cluster/values-openbao.yaml postStart hook).
 #   - CR: ClusterObservabilityPlane/default registers this plane with the CP.
-#   - Job: opensearch-bootstrap-templates fixes the upstream chart's
-#       index-template race where Fluent Bit's first write lands before the
-#       container-logs template, leaving kubernetes.pod_name as text instead
-#       of keyword (Observer's wildcard query then matches zero docs).
+#   - Job: opensearch-bootstrap-templates — detection + self-heal ONLY. The
+#       0.5.x chart's own setup hook owns the container-logs index template
+#       (log: wildcard, pod_name + openchoreo_dev/* labels: keyword — the
+#       exact mappings the Observer's queries and the logs-adapter's alert
+#       monitors depend on). This job verifies the template and deletes any
+#       index created under a wrong/older mapping (e.g. the Fluent Bit
+#       first-write race) so it's recreated correctly. It must NOT put its
+#       own template: a same-name template REPLACES the chart's, and a
+#       log:text mapping silently breaks every log-based alert (wildcard
+#       patterns then match analysed lowercase tokens — "ERROR" never matches).
+#
+# Knobs (env):
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v12).
+#                   handoff-v12 makes every SRE-created issue a well-formed,
+#                   dispatchable AE Task at creation (src/agent/handoff_logic.py):
+#                   it stamps the aep:task/aep:coding/aep:origin/incident labels
+#                   plus the taskmeta block, and normalises the component to AE's
+#                   design (unprefixed) name via design_component_name()
+#                   (testyello-service1 → service1) on BOTH the block and the
+#                   ae_dispatch_coding_agent call — so the funnel gate no longer
+#                   cancels with "component not in design at HEAD" and a
+#                   partially-labelled issue is never left inert (missing the
+#                   aep:task marker → the funnel ignores it). Requires the
+#                   rca-agent component:create grant in setup-aep.sh (without it
+#                   the synchronous EnsureComponent pre-check 403s).
+#                   Falls back to anthropic-patched if not built or pullable.
+#   AE_HANDOFF      enable the RCA→AEP coding-agent handoff (default: true)
+#   AE_AUTO_DISPATCH auto-dispatch the coding agent after issue creation
+#                   (default: true; false = issue-only, human dispatches)
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -50,8 +96,17 @@ source "$SCRIPT_DIR/env.sh"
 source "$SCRIPT_DIR/utils.sh"
 
 OBS_PLANE_VERSION="1.0.1-hotfix.1"
-OBS_LOGS_VERSION="0.3.11"
+# >= 0.5.1 REQUIRED for the logs-adapter (alert-rule evaluation engine).
+# 0.3.x ships no adapter: ObservabilityAlertRules sync as Ready but are
+# never evaluated — no alert ever fires, silently.
+OBS_LOGS_VERSION="0.5.1"
 NS="openchoreo-observability-plane"
+
+# SRE-agent handoff knobs (see header). AE_API_URL is how the in-cluster RCA
+# agent reaches the docker-compose-hosted aep-mcp-server on the host.
+AE_HANDOFF="${AE_HANDOFF:-true}"
+AE_AUTO_DISPATCH="${AE_AUTO_DISPATCH:-true}"
+AE_API_URL="${AE_API_URL:-http://host.k3d.internal:3401}"
 
 echo "=== Installing OpenChoreo Observability Plane ==="
 
@@ -112,6 +167,98 @@ spec:
 EOF
 echo "✅ ExternalSecrets applied"
 
+# ── 1b. RCA (SRE) agent image + secret ───────────────────────────────────
+# The RCA agent runs the patched image (Anthropic ToolStrategy fix). It's a
+# locally-built image, so import it into the k3d cluster (a cluster rebuild
+# loses imported images — this makes the import part of setup). Build once with
+# (repo:tag must match RCA_IMAGE_REPO:RCA_IMAGE_TAG below so this local build is
+# picked up instead of a registry pull):
+#   docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 <openchoreo-repo>/agents/sre-agent
+# The agent reads its LLM key + OAuth client secret from the rca-agent-secret
+# Secret (envFrom). RCA_LLM_API_KEY comes from ANTHROPIC_API_KEY in deployments/.env;
+# OAUTH_CLIENT_SECRET must equal the openchoreo-rca-agent client secret registered
+# by the Thunder bootstrap (values-thunder.yaml CONFIDENTIAL_APPS).
+echo ""
+echo "1️⃣b RCA agent image + secret"
+# Preferred tag `handoff-v12` (= RCA_IMAGE_TAG default below) carries the
+# Anthropic structured-output fix AND the AEP coding-agent handoff stage
+# (AE_HANDOFF). Resolution order:
+#   1. local build            docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 \
+#                               <openchoreo-repo>/agents/sre-agent
+#      (preferred — developers iterating on the agent aren't surprised by a
+#       stale registry copy)
+#   2. registry pull          ${RCA_IMAGE_PULL} (Docker Hub mirror)
+#   3. local anthropic-patched (older tag: RCA works, handoff stage ABSENT)
+#
+# RCA_IMAGE_REPO is the FULLY QUALIFIED name (tharindulak/openchoreo-sre-agent),
+# not a short local alias — deliberately. An earlier version used a short repo
+# name here and retagged the pulled image to it before `k3d image import`; the
+# Deployment then referenced that short, unqualified name. That worked right
+# after import, but k3d/containerd's image GC can evict it later — and because
+# the reference had no registry/namespace, kubelet's re-pull attempt resolved
+# to docker.io/library/<name> (Docker Hub's default namespace for official
+# images) instead of our actual image, and failed outright
+# (ImagePullBackOff: "pull access denied, repository does not exist"). Using
+# the fully-qualified name everywhere means a cache-evicted image can always
+# be re-pulled from the real registry — no more silent long-term fragility.
+RCA_IMAGE_REPO="tharindulak/openchoreo-sre-agent"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v12}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v12}"
+if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
+    echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
+    if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then
+        docker tag "$RCA_IMAGE_PULL" "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}"
+        echo "✅ pulled ${RCA_IMAGE_PULL} → retagged as ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}"
+    elif docker image inspect "${RCA_IMAGE_REPO}:anthropic-patched" >/dev/null 2>&1; then
+        echo "⚠️  registry pull failed — falling back to ${RCA_IMAGE_REPO}:anthropic-patched"
+        echo "    (RCA works, AEP handoff stage ABSENT)."
+        RCA_IMAGE_TAG="anthropic-patched"
+    fi
+fi
+RCA_IMAGE="${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}"
+# k3d image import is known to flake transiently ("short read ... unexpected
+# EOF" while ingesting a layer blob — truncated docker→node tar stream), and
+# some k3d versions exit 0 anyway. So: import, VERIFY the image is really in
+# the node's containerd, retry once, and if it still isn't there fall back to
+# registry-direct (helm values point at $RCA_IMAGE_PULL and the node pulls
+# from Docker Hub itself — possible since the image is published multi-arch).
+_rca_image_in_node() {
+    # imported local images land as docker.io/library/<repo>:<tag> — substring
+    # match on repo:tag covers both that and registry-form names
+    docker exec "k3d-${CLUSTER_NAME}-server-0" \
+        ctr -n k8s.io images ls -q 2>/dev/null | grep -q "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}"
+}
+if docker image inspect "$RCA_IMAGE" >/dev/null 2>&1; then
+    IMPORTED=""
+    for attempt in 1 2; do
+        k3d image import "$RCA_IMAGE" -c "$CLUSTER_NAME" || true
+        if _rca_image_in_node; then IMPORTED=yes; break; fi
+        echo "⚠️  import attempt ${attempt} did not land in the node (transient k3d flake) — retrying..."
+    done
+    if [ -n "$IMPORTED" ]; then
+        echo "✅ imported $RCA_IMAGE into k3d-$CLUSTER_NAME (verified in node containerd)"
+    else
+        echo "⚠️  k3d import failed twice — switching to registry-direct: the cluster"
+        echo "    will pull ${RCA_IMAGE_PULL} from Docker Hub instead."
+        RCA_IMAGE_REPO="${RCA_IMAGE_PULL%%:*}"
+        RCA_IMAGE_TAG="${RCA_IMAGE_PULL##*:}"
+    fi
+else
+    echo "⚠️  $RCA_IMAGE not found locally and registry pull failed — build it"
+    echo "    (docker build -t $RCA_IMAGE <openchoreo>/agents/sre-agent) or the RCA pod"
+    echo "    will stay ImagePullBackOff. Continuing; other obs-plane components are unaffected."
+fi
+ANTHROPIC_API_KEY="$(grep -E '^ANTHROPIC_API_KEY=' "$SCRIPT_DIR/../.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "⚠️  ANTHROPIC_API_KEY not set in deployments/.env — RCA agent will fail its"
+    echo "    LLM connection test. Set it (or switch rca.llm.modelName to an OpenAI model)."
+fi
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" create secret generic rca-agent-secret \
+    --from-literal=RCA_LLM_API_KEY="$ANTHROPIC_API_KEY" \
+    --from-literal=OAUTH_CLIENT_SECRET="openchoreo-rca-agent-secret" \
+    --dry-run=client -o yaml | kubectl --context "$CLUSTER_CONTEXT" apply -f - >/dev/null
+echo "✅ rca-agent-secret applied"
+
 # ── 2. Observability plane chart (Observer + cluster-agent + RCA) ────────
 echo ""
 echo "2️⃣  openchoreo-observability-plane chart (v${OBS_PLANE_VERSION})"
@@ -133,6 +280,34 @@ security:
     tokenUrl: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token"
     authServerBaseUrl: "http://thunder.openchoreo.localhost:8080"
 rca:
+  # SRE / RCA agent. Uses a locally-built image that carries the Anthropic
+  # structured-output fix (ToolStrategy instead of ProviderStrategy — the stock
+  # ghcr.io/openchoreo/sre-agent image rejects Anthropic with many tools:
+  # "grammar too large") and, with the 'handoff' tag, the AEP coding-agent
+  # handoff stage. Built + imported in step 1b above. If you switch to an
+  # OpenAI model without the handoff, the stock image works and you can drop
+  # the image override.
+  enabled: true
+  image:
+    repository: ${RCA_IMAGE_REPO}
+    tag: ${RCA_IMAGE_TAG}
+    pullPolicy: IfNotPresent          # locally-imported image, not a registry pull
+  llm:
+    modelName: anthropic:claude-sonnet-4-6
+  secretName: rca-agent-secret        # created in step 1b (RCA_LLM_API_KEY + OAUTH_CLIENT_SECRET)
+  oauth:
+    clientId: openchoreo-rca-agent    # registered by the Thunder bootstrap (values-thunder.yaml)
+  openchoreoApiUrl: "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080"
+  # Stock limit is cpu:250m — too low for trace-heavy analyses. The agent can
+  # trip its liveness probe (exit 137) mid-run, which orphans the report in
+  # "pending". Bump CPU/mem so analyses complete.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
   http:
     hostnames:
       - rca-agent.openchoreo.localhost
@@ -147,11 +322,23 @@ EOF
 # so re-runs pick up value changes from /tmp/obs-plane-values.yaml. The
 # helper skips already-installed releases, which would silently bypass any
 # future tuning here.
+#
+# --force-conflicts: this Helm (v4+) defaults --server-side to "auto", which
+# uses SSA once a release's prior revision did. Step 3b below kubectl-patches
+# observer-config/rca-agent-config/the ai-rca-agent deployment AFTER every
+# helm run (deliberately — see that step's comment), which stamps those
+# fields with fieldManager "kubectl-patch". Without --force-conflicts, the
+# NEXT re-run of this same `helm upgrade` fails outright ("Apply failed with
+# 1 conflict: conflict with \"kubectl-patch\"") because SSA sees a foreign
+# owner on a field the chart also sets. Safe to force here: step 3b
+# unconditionally re-asserts the authoritative values right after this
+# command anyway, so which side wins THIS apply doesn't matter.
 helm upgrade --install observability-plane \
     "oci://ghcr.io/openchoreo/helm-charts/openchoreo-observability-plane" \
     --namespace "$NS" --create-namespace --kube-context "${CLUSTER_CONTEXT}" \
     --version "$OBS_PLANE_VERSION" \
     --values /tmp/obs-plane-values.yaml \
+    --force-conflicts \
     --timeout 10m
 echo "⏳ Waiting for Observer + controller-manager..."
 kubectl --context "$CLUSTER_CONTEXT" -n "$NS" wait --for=condition=Available deployment/observer --timeout=300s
@@ -183,6 +370,23 @@ openSearch:
 # (avoids a second helm-upgrade pass).
 fluent-bit:
   enabled: true
+# logs-adapter (0.5.x): the alert-rule evaluation engine. The observer forwards
+# ObservabilityAlertRule CRUD here; the adapter materialises each rule as an
+# OpenSearch alerting monitor and webhooks fired alerts back to the observer.
+# adapter.enabled defaults true in >=0.5.1; it only needs the credentials ref.
+adapter:
+  openSearchSecretName: opensearch-admin-credentials
+  # Patched build of upstream 0.5.1: alert-rule log matching is
+  # case-insensitive (stock 0.5.1 compiles rules into a case-sensitive
+  # wildcard, so a rule watching "ERROR" silently stops firing when a code
+  # change rewords the log line to "error" — when a
+  # coding-agent PR detached the alert from the failure it watched).
+  # Stopgap pending the upstream PR to openchoreo/community-modules
+  # (fix/alert-rule-case-insensitive-match) — drop this pin when the fix
+  # ships in a released adapter (>0.5.1).
+  image:
+    repository: docker.io/tharindulak/observability-logs-opensearch-adapter
+    tag: 0.5.1-case-insensitive
 EOF
 helm upgrade --install observability-logs-opensearch \
     "oci://ghcr.io/openchoreo/helm-charts/observability-logs-opensearch" \
@@ -192,7 +396,113 @@ helm upgrade --install observability-logs-opensearch \
     --timeout 15m
 echo "⏳ Waiting for OpenSearch StatefulSet (large image — first install ~5-10 min)..."
 kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout status statefulset/opensearch-master --timeout=900s
-echo "✅ logs-opensearch ready"
+echo "⏳ Waiting for logs-adapter..."
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout status deploy/logs-adapter-opensearch --timeout=300s
+echo "✅ logs-opensearch ready (incl. logs-adapter)"
+
+# ── 3b. Alert→RCA auto-trigger + AEP handoff wiring ──────────────────────
+# Post-helm ConfigMap patches + restarts. Patched here (not via chart values)
+# because the chart doesn't expose all these keys and observer.extraEnvs
+# REPLACES chart defaults — a patch after every helm run is deterministic.
+#
+#   observer-config:
+#     LOGS_ADAPTER_ENABLED     without it, log alert rules are never evaluated
+#     RCA_SERVICE_URL          where the observer POSTs /analyze on alert fire
+#     ALERT_SUPPRESSION_WINDOW per-rule+component de-dup. UNSET ⇒ NO de-dup:
+#                              concurrent RCA runs race the handoff's
+#                              search-then-create dedup ⇒ duplicate GitHub
+#                              issues + duplicate coding-agent dispatches.
+#   rca-agent-config:
+#     AE_HANDOFF               enables the RCA→AEP handoff stage (issue+dispatch)
+#     AE_AUTO_DISPATCH         false ⇒ issue-only; a human dispatches from AEP
+#     AE_API_URL               aep-mcp-server base URL (host.k3d.internal:3401)
+echo ""
+echo "3️⃣b Alert→RCA auto-trigger + AEP handoff wiring"
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch cm observer-config --type=merge -p \
+    '{"data":{"LOGS_ADAPTER_ENABLED":"true","RCA_SERVICE_URL":"http://ai-rca-agent:8080","ALERT_SUPPRESSION_WINDOW":"1h"}}'
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout restart deploy/observer
+if [ "$AE_HANDOFF" = "true" ]; then
+    kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch cm rca-agent-config --type=merge -p \
+        "{\"data\":{\"AE_HANDOFF\":\"true\",\"AE_AUTO_DISPATCH\":\"${AE_AUTO_DISPATCH}\",\"AE_API_URL\":\"${AE_API_URL}\"}}"
+    kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout restart deploy/ai-rca-agent
+    echo "   AE handoff: enabled (auto-dispatch=${AE_AUTO_DISPATCH}, mcp=${AE_API_URL})"
+else
+    echo "   AE handoff: disabled (AE_HANDOFF=false)"
+fi
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout status deploy/observer --timeout=300s
+if [ "$AE_HANDOFF" = "true" ]; then
+    # With AE_HANDOFF=true the agent's boot-time MCP test is FATAL: it must
+    # reach aep-mcp-server (docker-compose, started later by start.sh). Only
+    # wait for readiness if that server is already up (i.e. setup is being
+    # re-run on a live stack); on a fresh setup the crash-loop is expected
+    # and start.sh auto-recovers the agent once compose is up.
+    if curl -s --max-time 2 http://localhost:3401/healthz 2>/dev/null | grep -q '"ok"'; then
+        kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout status deploy/ai-rca-agent --timeout=300s || \
+            echo "⚠️  ai-rca-agent not ready — check the RCA image import in step 1b"
+    else
+        echo "ℹ️  aep-mcp-server not running yet — ai-rca-agent will crash-loop until"
+        echo "    'bash scripts/start.sh' brings the compose stack up (start.sh then"
+        echo "    auto-restarts the agent). This is expected on a fresh setup."
+    fi
+fi
+echo "✅ auto-trigger + handoff wiring applied"
+
+# ── 3c. Dynamic Anthropic key — reuse the org's key as set via the AE console ──
+# AnthropicCredentialService.Connect() (aep-api) stores the console-connected
+# key in Postgres (org_secrets, AES-256-GCM), best-effort mirrors it into
+# OpenBao via the SM-API stub, and — when RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE/
+# _SECRET_NAME are set on aep-api (docker-compose.yml) — PUSHES a matching
+# ExternalSecret into THIS namespace itself, synchronously with every
+# Connect() call (AnthropicCredentialService.pushExternalSecret, via the
+# same cluster-gateway-proxy ApplyExternalSecret the coding-agent dispatcher
+# uses for its own per-run secrets). That push is what keeps the
+# ExternalSecret's remoteRef pointed at the CURRENT OpenBao path: the SM-API
+# stub regenerates a brand-new random-suffixed path on every single
+# Connect() call (deployments/local-secret-manager-api/main.go
+# generateSecretRefName → randomHex12(), never an in-place update), so a
+# path fixed at setup time would go stale the moment anyone
+# reconnects/rotates the key. Pushing on every Connect() closes that gap for
+# both the first-ever connect and every later rotation — no re-run needed.
+#
+# So THIS script no longer creates or discovers that ExternalSecret at all —
+# it only ensures the one-time STRUCTURAL piece exists: the volume + mount +
+# env var wiring below, which the ExternalSecret (whenever aep-api pushes
+# one) feeds into. If the org has never connected a key via the console,
+# `optional: true` on the volume's secret source means the mount is just an
+# empty dir rather than blocking the pod in ContainerCreating —
+# resolve_api_key() falls back to the static RCA_LLM_API_KEY exactly as
+# before, and main.py's boot-time LLM test skips (warns, doesn't crash) when
+# neither source has a key.
+echo ""
+echo "3️⃣c Dynamic Anthropic key (volume wiring; ExternalSecret is pushed by aep-api on Connect)"
+# Patched onto the Deployment (not chart values) for the same "survives a
+# helm re-run" reason as step 3b's ConfigMap patches. A podSpec change here
+# triggers K8s's normal rolling update on its own — no explicit restart needed.
+kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch deployment ai-rca-agent --type=strategic -p '
+spec:
+  template:
+    spec:
+      volumes:
+        - name: anthropic-key
+          secret:
+            secretName: rca-agent-anthropic-secret
+            optional: true
+            defaultMode: 0400
+      containers:
+        - name: ai-rca-agent
+          volumeMounts:
+            - name: anthropic-key
+              mountPath: /etc/rca-agent/anthropic
+              readOnly: true
+          env:
+            - name: RCA_LLM_API_KEY_FILE
+              value: /etc/rca-agent/anthropic/RCA_LLM_API_KEY
+'
+echo "✅ ai-rca-agent volume/env wired for the dynamic Anthropic key"
+echo "   Once an org connects a key via the AE console, aep-api pushes an ExternalSecret here"
+echo "   automatically (refreshed every 5m) — no re-run of this script needed, then or on later"
+echo "   rotations. Until then, or if push isn't configured on aep-api, it falls back to the"
+echo "   static RCA_LLM_API_KEY from step 1b."
 
 # ── 4. Cross-namespace HTTPRoute on the MAIN kgateway ────────────────────
 # The chart's own HTTPRoute attaches to a separate Gateway on port 11080.
@@ -283,6 +593,8 @@ spec:
         name: cluster-agent-tls
         namespace: $NS
   observerURL: http://observer.openchoreo.localhost:11080
+  # Lets the portal fetch RCA reports from the SRE agent (rca.enabled above).
+  rcaAgentURL: http://rca-agent.openchoreo.localhost:11080
 EOF
 echo "✅ ClusterObservabilityPlane registered"
 
@@ -328,17 +640,33 @@ spec:
                 if $CURL "${OS}/_cluster/health?wait_for_status=yellow&timeout=5s" >/dev/null 2>&1; then break; fi
                 sleep 5
               done
-              echo "Applying composable index template container-logs..."
-              $CURL -X PUT "${OS}/_index_template/container-logs" -d @- <<'JSON'
-              {"index_patterns":["container-logs-*"],"priority":500,"template":{"settings":{"index":{"number_of_shards":1,"number_of_replicas":1}},"mappings":{"dynamic":"true","properties":{"@timestamp":{"type":"date"},"stream":{"type":"keyword"},"log":{"type":"text"},"kubernetes":{"properties":{"pod_name":{"type":"keyword"},"namespace_name":{"type":"keyword"},"container_name":{"type":"keyword"},"pod_id":{"type":"keyword"},"host":{"type":"keyword"},"labels":{"type":"object","dynamic":true},"annotations":{"properties":{"workflows_argoproj_io/node-name":{"type":"keyword"}}}}}}}}}
-              JSON
-              echo
-              echo "Scanning indices for wrong pod_name mapping..."
+              # Do NOT PUT a template here. The 0.5.x module chart's own setup job
+              # (post-install/upgrade hook) applies the authoritative container-logs
+              # template: log as `wildcard` (the alert monitors' *phrase* queries
+              # need it — on `text`, wildcard patterns match analysed lowercase
+              # tokens and "ERROR" silently matches nothing), pod_name/labels as
+              # keyword (the monitors' UID `term` filters need keyword). A custom
+              # same-name template REPLACES the chart's and broke both — this job
+              # is now detection + self-heal only.
+              echo "Verifying chart template is in place (log must be wildcard-typed)..."
+              tpl_log=$($CURL "${OS}/_index_template/container-logs" 2>/dev/null \
+                | grep -o '"log":{"type":"[a-z_]*"}' | head -1 | cut -d'"' -f6)
+              if [ "$tpl_log" != "wildcard" ]; then
+                echo "WARNING: container-logs template maps log as '${tpl_log:-absent}' (expected 'wildcard')."
+                echo "         The module chart's opensearch-setup-logs hook job should own this template."
+              fi
+              echo "Scanning indices for wrong mappings (pod_name/labels != keyword, log != wildcard)..."
               for idx in $($CURL "${OS}/_cat/indices/container-logs-*?h=index" 2>/dev/null); do
                 t=$($CURL "${OS}/${idx}/_mapping/field/kubernetes.pod_name" 2>/dev/null \
                   | grep -o '"type":"[a-z]*"' | head -1 | cut -d'"' -f4)
-                if [ "$t" = "text" ]; then echo "  - ${idx}: '$t', recreating"; $CURL -X DELETE "${OS}/${idx}" >/dev/null
-                else echo "  - ${idx}: '$t', ok"; fi
+                lt=$($CURL "${OS}/${idx}/_mapping/field/kubernetes.labels.openchoreo_dev%2Fcomponent-uid" 2>/dev/null \
+                  | grep -o '"type":"[a-z]*"' | head -1 | cut -d'"' -f4)
+                lg=$($CURL "${OS}/${idx}/_mapping/field/log" 2>/dev/null \
+                  | grep -o '"type":"[a-z_]*"' | head -1 | cut -d'"' -f4)
+                if [ "$t" = "text" ] || [ "$lt" = "text" ] || { [ -n "$lg" ] && [ "$lg" != "wildcard" ]; }; then
+                  echo "  - ${idx}: pod_name='$t' component-uid='$lt' log='$lg', recreating"
+                  $CURL -X DELETE "${OS}/${idx}" >/dev/null
+                else echo "  - ${idx}: pod_name='$t' component-uid='${lt:-unset}' log='${lg:-unset}', ok"; fi
               done
               echo "Bootstrap complete."
 EOF
@@ -348,3 +676,9 @@ echo "✅ OpenSearch index-template bootstrap complete"
 
 echo ""
 echo "✅ Observability Plane installation complete!"
+echo ""
+echo "   Alert→RCA→coding-agent handoff is wired (AE_HANDOFF=${AE_HANDOFF})."
+echo "   One step can't be automated: create an ObservabilityAlertRule per"
+echo "   component you want auto-RCA on (needs the component's UID + name"
+echo "   labels, incident.enabled + triggerAiRca: true)."
+echo "   Guide: docs/developer-guide/sre-handoff-runbook.md"

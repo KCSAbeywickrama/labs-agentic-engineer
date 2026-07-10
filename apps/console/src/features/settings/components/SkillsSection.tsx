@@ -32,11 +32,12 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
+  Pagination,
   SearchBar,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Eye, FolderGit2, Pencil, Trash2, Upload } from "@wso2/oxygen-ui-icons-react";
-import type { components } from "../../../generated/aep-api";
 import {
   useConfig,
   useDeleteSkill,
@@ -44,13 +45,14 @@ import {
   useSkills,
   useSyncSkills,
 } from "../api/queries";
-import { SKILL_GROUPS, kindLabel, normalizeKind } from "../skillKind";
+import { kindBlurb, kindChipColor, kindLabel, normalizeKind } from "../skillKind";
+import { paginateSkills } from "../skillsList";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
 import { SkillViewerDialog } from "./SkillViewerDialog";
 import { SyncUpdatesControl } from "./SyncUpdatesControl";
 
-type SkillSummary = components["schemas"]["SkillSummary"];
+const PAGE_SIZE = 10;
 
 export function SkillsSection() {
   const {
@@ -65,6 +67,7 @@ export function SkillsSection() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [requestedPage, setRequestedPage] = useState(1);
   const [viewTarget, setViewTarget] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -134,24 +137,16 @@ export function SkillsSection() {
   const updatable = new Set((updates ?? []).map((u) => u.name));
   const syncedCount = syncSkills.data?.updated ?? 0;
 
-  // Client-side filter (issue #96 re-grill): the catalogue is fully loaded and
-  // tens of skills at most. Match the displayed kind label as well as the raw
-  // value — the chip reads "Organization", so that is what people will type.
-  const query = search.trim().toLowerCase();
-  const matches = (skill: SkillSummary) =>
-    !query ||
-    [
-      skill.name,
-      skill.description,
-      skill.kind,
-      kindLabel(normalizeKind(skill.kind)),
-    ].some((field) => (field ?? "").toLowerCase().includes(query));
-
-  const visible = skills.filter(matches);
-  const grouped = SKILL_GROUPS.map((group) => ({
-    ...group,
-    rows: visible.filter((s) => normalizeKind(s.kind) === group.kind),
-  }));
+  // Filter → sort → clamp → slice as one pure derivation: a list that shrinks
+  // underneath the current page (delete, sync) lands on the nearest still-
+  // valid page without any effect re-syncing state.
+  const query = search.trim();
+  const { rows, page, pageCount, total } = paginateSkills(
+    skills,
+    query,
+    requestedPage,
+    PAGE_SIZE,
+  );
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
@@ -182,7 +177,12 @@ export function SkillsSection() {
         <Box sx={{ width: { xs: "100%", sm: 320 } }}>
           <SearchBar
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              // A new query re-filters from scratch — page 1 is the only
+              // page that is meaningful for it.
+              setRequestedPage(1);
+            }}
             placeholder="Search skills..."
           />
         </Box>
@@ -221,127 +221,121 @@ export function SkillsSection() {
         </Alert>
       )}
 
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {grouped.map(({ kind, heading, blurb, rows }) => (
-          <Box key={kind}>
-            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
-              {heading}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {blurb}
-            </Typography>
-
-            {rows.length === 0 ? (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ mt: 1, fontStyle: "italic" }}
-              >
-                {query ? "No matches." : "None yet."}
-              </Typography>
-            ) : (
-              <Card variant="outlined" sx={{ mt: 1 }}>
-                <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
-                  {rows.map((skill, idx) => {
-                    return (
-                      <Box key={skill.name}>
-                        {idx > 0 && <Divider />}
+      {total === 0 ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ fontStyle: "italic" }}
+        >
+          {query ? "No matches." : "None yet."}
+        </Typography>
+      ) : (
+        <>
+          <Card variant="outlined">
+            <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
+              {rows.map((skill, idx) => {
+                const kind = normalizeKind(skill.kind);
+                return (
+                  <Box key={skill.name}>
+                    {idx > 0 && <Divider />}
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1.5,
+                        px: 2,
+                        py: 1.5,
+                        "&:hover": { bgcolor: "action.hover" },
+                      }}
+                    >
+                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                         <Box
                           sx={{
                             display: "flex",
                             alignItems: "center",
-                            gap: 1.5,
-                            px: 2,
-                            py: 1.5,
-                            "&:hover": { bgcolor: "action.hover" },
+                            gap: 1,
+                            flexWrap: "wrap",
                           }}
                         >
-                          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                            <Box
-                              sx={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 1,
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              <Typography variant="body1" fontWeight={600}>
-                                {skill.name}
-                              </Typography>
-                              {/* No kind chip: the group heading above already
-                                  names the kind. Only state that the grouping
-                                  can't convey gets a chip. */}
-                              {updatable.has(skill.name) && (
-                                <Chip
-                                  size="small"
-                                  color="warning"
-                                  label="update available"
-                                />
-                              )}
-                              {/* Org and platform groups are read-only by
-                                  definition (the blurb says so), so only flag
-                                  it where the grouping doesn't imply it. */}
-                              {!skill.editable &&
-                                kind !== "org" &&
-                                kind !== "platform" && (
-                                  <Chip
-                                    size="small"
-                                    variant="outlined"
-                                    label="read-only"
-                                  />
-                                )}
-                            </Box>
-                            <Typography
-                              variant="body2"
-                              color="text.secondary"
-                              sx={{ mt: 0.5 }}
-                            >
-                              {skill.description}
-                            </Typography>
-                          </Box>
-                          <Box
-                            sx={{ display: "flex", gap: 0.5, flexShrink: 0 }}
-                          >
-                            {/* View is available for every kind — inspecting a
-                                read-only org/platform skill's body is the whole
-                                point of the viewer. */}
+                          <Typography variant="body1" fontWeight={600}>
+                            {skill.name}
+                          </Typography>
+                          {/* The kind chip is the flat list's only kind
+                              signal; its tooltip carries the kind's blurb,
+                              including read-only-ness — there is no separate
+                              read-only chip. */}
+                          <Tooltip title={kindBlurb(kind)}>
+                            <Chip
+                              size="small"
+                              color={kindChipColor(kind)}
+                              label={kindLabel(kind)}
+                            />
+                          </Tooltip>
+                          {updatable.has(skill.name) && (
+                            <Chip
+                              size="small"
+                              color="warning"
+                              label="update available"
+                            />
+                          )}
+                        </Box>
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ mt: 0.5 }}
+                        >
+                          {skill.description}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", gap: 0.5, flexShrink: 0 }}>
+                        {/* View is available for every kind — inspecting a
+                            read-only org/platform skill's body is the whole
+                            point of the viewer. */}
+                        <Button
+                          size="small"
+                          startIcon={<Eye size={16} />}
+                          onClick={() => setViewTarget(skill.name)}
+                        >
+                          View
+                        </Button>
+                        {skill.editable && (
+                          <>
                             <Button
                               size="small"
-                              startIcon={<Eye size={16} />}
-                              onClick={() => setViewTarget(skill.name)}
+                              startIcon={<Pencil size={16} />}
+                              onClick={() => setEditTarget(skill.name)}
                             >
-                              View
+                              Edit
                             </Button>
-                            {skill.editable && (
-                              <>
-                                <Button
-                                  size="small"
-                                  startIcon={<Pencil size={16} />}
-                                  onClick={() => setEditTarget(skill.name)}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="small"
-                                  color="error"
-                                  startIcon={<Trash2 size={16} />}
-                                  onClick={() => setDeleteTarget(skill.name)}
-                                >
-                                  Delete
-                                </Button>
-                              </>
-                            )}
-                          </Box>
-                        </Box>
+                            <Button
+                              size="small"
+                              color="error"
+                              startIcon={<Trash2 size={16} />}
+                              onClick={() => setDeleteTarget(skill.name)}
+                            >
+                              Delete
+                            </Button>
+                          </>
+                        )}
                       </Box>
-                    );
-                  })}
-                </CardContent>
-              </Card>
-            )}
-          </Box>
-        ))}
-      </Box>
+                    </Box>
+                  </Box>
+                );
+              })}
+            </CardContent>
+          </Card>
+          {/* Hidden on a single page — it would be dead UI. */}
+          {pageCount > 1 && (
+            <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
+              <Pagination
+                count={pageCount}
+                page={page}
+                onChange={(_, next) => setRequestedPage(next)}
+              />
+            </Box>
+          )}
+        </>
+      )}
 
       <ImportSkillDialog
         open={importOpen}

@@ -101,10 +101,10 @@ type WorkflowRunner interface {
 }
 
 // TaskReader is the DURABLE task source behind a build's task list: the live
-// GitHub ⋈ executions read (the same one behind GET /tasks), which the build
-// scopes to its own lineage tag. It survives an archived Temporal run — the
-// workflow query only refines in-flight status on top of it. Satisfied by
-// *task.Reads.
+// GitHub ⋈ executions read (the same one behind GET /tasks), scoped by the build
+// to its own lineage tag via the aep:spec/<tag> label. It survives an archived
+// Temporal run — the workflow query only refines in-flight status on top of it.
+// Satisfied by *task.Reads.
 type TaskReader interface {
-	List(ctx context.Context, orgID, projectID, state string) ([]task.TaskView, error)
+	ListByTag(ctx context.Context, orgID, projectID, state, tag string) ([]task.TaskView, error)
 }

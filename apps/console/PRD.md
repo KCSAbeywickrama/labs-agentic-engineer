@@ -64,12 +64,16 @@ Approved at section level; per-section detail is defined feature-by-feature.
 
 - **Home — projects list.** Empty state prompts the user to start an app
   development (give a requirement → project is born).
-- **Project view**, sections:
+- **Project view** — inside a project the sidebar nav swaps to its sections
+  (ADR-0010; no back-item, home is the header brand / project switcher):
   - **Overview** — component map + status, deployment state, recent activity.
   - **Specs & Design** — the requirement, derived design + validation files;
     the blocking design review lives here.
-  - **Build** — coding-agent task board; PRs link out to GitHub.
+  - **Tasks** — coding-agent task list + per-task console log; PRs and issues
+    link out to GitHub.
   - **Deployments** — dev environment state and URLs.
+  - **Issues** — issues the SRE agent raises against the running project
+    (placeholder until its feature lands).
 - **Admin** — agent customization (instructions, skills). Architect/SRE only.
 
 ## In flight
@@ -78,6 +82,11 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Settings → Skills — flat paginated catalogue: alphabetical list with inline
+  kind chips (blurb tooltips) replacing the four group sections; numbered
+  client-side pagination (10/page) + retained search —
+  [#172](https://github.com/wso2/labs-agentic-engineer/issues/172)
+  (no contract change)
 - Spec view — Build button invokes the build resource: commit-then-build
   (collab flush-on-demand → `POST /build`), lands on the overview; Build
   disabled with a tooltip while an agent turn runs —
@@ -89,6 +98,12 @@ that's a stalled feature — investigate, don't ignore.
   [#150](https://github.com/wso2/labs-agentic-engineer/issues/150)
   (no contract change; duplicate-generation guard deferred to
   [#151](https://github.com/wso2/labs-agentic-engineer/issues/151))
+- Onboarding — first-time credentials wizard for the default org (hard gate on
+  incomplete `GET /config`): GitHub PAT + Anthropic key, then auto skills-repo
+  bootstrap via extended `/skills/sync` —
+  [#102](https://github.com/wso2/labs-agentic-engineer/issues/102)
+  (BE handshake [#171](https://github.com/wso2/labs-agentic-engineer/issues/171);
+  ADR-0009)
 - Spec view — rich design rendering: component-grouped file list, whole-architecture
   cell diagram, per-component wireframes, and Swagger-style API Spec view
   (client-derived, read-only; no committed artifacts) —
@@ -146,6 +161,7 @@ GitHub issue plus any ADRs it produced.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|
+| Tasks page + project-scoped left nav | 2026-07-10 | Sidebar swaps to Overview / Spec / Tasks / Deployments / Issues inside a project (full swap, no back-item; spec workspace auto-collapses it). Tasks: flat list with Pending/Ongoing/Done/Failed chips, 5s polling while active, per-task console-log page streaming `stream-task-log` (SSE) with per-attempt dividers. Issues ships as a placeholder (future SRE-agent issues surface); overview Build card renamed Tasks. No contract changes. Filtering deferred to [#177](https://github.com/wso2/labs-agentic-engineer/issues/177). | [#173](https://github.com/wso2/labs-agentic-engineer/issues/173), ADR-0010 |
 | Spec view — Generate / Re-generate design | 2026-07-10 | Phase-aware primary CTA in the Spec view header: **Generate design** when requirements exist but no design, **Build** once a design exists; **Re-generate design** in the Designs section. Fires a design-generation room turn (agent writes `specs/design/…` live). Gated on requirements; Build stays gated on design files. Verified live (7 design files generated + committed). | [#159](https://github.com/wso2/labs-agentic-engineer/issues/159), ADR-0007 (staleness → [#160](https://github.com/wso2/labs-agentic-engineer/issues/160)) |
 
 ## Non-goals
