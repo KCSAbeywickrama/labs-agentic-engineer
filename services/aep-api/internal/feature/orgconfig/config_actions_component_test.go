@@ -104,6 +104,13 @@ func TestConfigComponent_Disconnect_ConnectedThenGone(t *testing.T) {
 	if m := decodeCfg(t, resp.Body.Bytes()); m["status"] != "disconnected" {
 		t.Fatalf("disconnect body drifted: %v", m)
 	}
+	// The credential row is retained (status flip, not delete — audit trail and
+	// app re-adoption need it), but the config contract says null = not
+	// connected (types.go, ADR-0009): a disconnected org must project
+	// gitProvider as null so the console re-gates onboarding at the GitHub step.
+	if m := decodeCfg(t, c.h.AsOrg("acme").Get(configPath).Body.Bytes()); m["gitProvider"] != nil {
+		t.Fatalf("disconnected gitProvider must project as null: %v", m["gitProvider"])
+	}
 }
 
 func TestConfigComponent_Disconnect_NeverConnected(t *testing.T) {

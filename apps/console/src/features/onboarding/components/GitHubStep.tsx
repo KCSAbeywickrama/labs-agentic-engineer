@@ -26,20 +26,9 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import {
-  ExternalLink,
-  Eye,
-  EyeOff,
-  GitHub,
-  Lightbulb,
-} from "@wso2/oxygen-ui-icons-react";
+import { Eye, EyeOff, GitHub, Lightbulb } from "@wso2/oxygen-ui-icons-react";
 import { useConnectGitHubPat } from "../../settings/api/queries";
-
-// Classic-PAT URL preselecting the scopes the platform needs (#102 decision:
-// classic PAT, repo + read:org; exact set confirmed via the BE handshake
-// issue #171 — a correction here is copy-only).
-const TOKEN_URL =
-  "https://github.com/settings/tokens/new?scopes=repo,read:org&description=Agentic%20Engineer%20Platform";
+import { GitHubPatScopeGuide } from "../../settings/components/GitHubPatScopeGuide";
 
 // Validation is the PATCH itself: the BFF probes the PAT against GitHub
 // before persisting (#96 pattern), so errors surface from the mutation.
@@ -63,9 +52,8 @@ export function GitHubStep() {
       </Box>
       <Typography variant="body2" color="text.secondary">
         The platform hosts your organization's skills catalogue and project
-        repos on GitHub. Create a <strong>classic personal access token</strong>{" "}
-        with the <code>repo</code> and <code>read:org</code> scopes, owned by a
-        member of the GitHub organization the platform should use.
+        repos on GitHub. The token must be owned by a member of the GitHub
+        organization the platform should use.
       </Typography>
       <Alert severity="info" icon={<Lightbulb size={18} />}>
         Pro tip: create a dedicated GitHub organization for this platform so
@@ -73,17 +61,7 @@ export function GitHubStep() {
         your team's main org.
       </Alert>
 
-      <Button
-        variant="text"
-        size="small"
-        href={TOKEN_URL}
-        target="_blank"
-        rel="noreferrer"
-        endIcon={<ExternalLink size={14} />}
-        sx={{ alignSelf: "flex-start" }}
-      >
-        Create a token on GitHub (scopes preselected)
-      </Button>
+      <GitHubPatScopeGuide />
 
       <TextField
         required
