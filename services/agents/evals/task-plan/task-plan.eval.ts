@@ -55,8 +55,7 @@ function designJson(name: string, type: string, connections: { to: string; type:
 }
 
 const DESIGN_MD = `---
-skillsApplied:
-  - high-level-architecture
+sourceSpec: v1
 ---
 
 # Overview

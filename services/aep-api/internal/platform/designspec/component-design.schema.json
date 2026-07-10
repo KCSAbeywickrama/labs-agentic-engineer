@@ -80,7 +80,11 @@
                   "type": "boolean"
                 },
                 "credentialClass": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "secret",
+                    "publishable"
+                  ]
                 }
               },
               "required": [
@@ -145,6 +149,19 @@
       "type": "string",
       "minLength": 1
     },
+    "endpoint": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
     "exposesAPI": {
       "type": "object",
       "properties": {
@@ -165,6 +182,12 @@
     },
     "componentAgentInstructions": {
       "type": "string"
+    },
+    "skillsApplied": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

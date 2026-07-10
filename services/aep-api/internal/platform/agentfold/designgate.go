@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // componentDesignRe is COMPONENT_DESIGN_JSON_RE.
@@ -43,8 +44,13 @@ type designProblem struct {
 }
 
 var (
-	designStringFields  = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
-	exposureValues      = map[string]bool{"internet": true, "intranet": true}
+	designStringFields = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
+	exposureValues     = map[string]bool{"internet": true, "intranet": true}
+	// webAppTypeAliases are the wrong spellings of the canonical "web-application"
+	// component kind that the zod gate rejects (component-design-schema.ts); the
+	// fold gate mirrors that rejection so a design carrying "webapp"/"web-app"
+	// (which silently breaks deploy + runtime-config) never folds.
+	webAppTypeAliases   = map[string]bool{"webapp": true, "web-app": true, "webapplication": true, "web application": true}
 	dependencyKinds     = map[string]bool{"component": true, "org-service": true, "external": true, "platform-resource": true}
 	dependencyKnownKeys = map[string]bool{
 		"kind": true, "name": true, "description": true, "needsSpec": true,
@@ -55,7 +61,8 @@ var (
 		"name": true, "type": true, "version": true, "language": true,
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
-		"exposesAPI": true, "componentAgentInstructions": true,
+		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
+		"skillsApplied": true,
 	}
 )
 
@@ -91,6 +98,9 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return &designProblem{code: ErrSchemaViolation, message: field + ": must be at least 1 characters"}
 		}
 	}
+	if t, _ := obj["type"].(string); webAppTypeAliases[strings.ToLower(strings.TrimSpace(t))] {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("type %q is not a canonical kind — use \"web-application\" for a browser app", t)}
+	}
 	exposure, ok := obj["exposure"].(string)
 	if !ok || !exposureValues[exposure] {
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("exposure: %q is not an allowed value", obj["exposure"])}
@@ -104,10 +114,60 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
+	if ep, present := obj["endpoint"]; present {
+		if p := validateEndpoint(ep); p != nil {
+			return p
+		}
+	}
+	if sa, present := obj["skillsApplied"]; present {
+		if p := validateSkillsApplied(sa); p != nil {
+			return p
+		}
+	}
 	if name := obj["name"].(string); name != dirName {
 		return &designProblem{
 			code:    ErrSchemaViolation,
 			message: fmt.Sprintf("name %q must equal the component directory name %q", name, dirName),
+		}
+	}
+	return nil
+}
+
+// validateEndpoint mirrors the zod endpointSchema.strictObject: an optional
+// block whose only key is `name` (a non-empty string). The port must accept
+// exactly what the zod gate accepts — a design.json with an `endpoint` block
+// passes the FileBundle's write-gate, so it MUST fold here too or the manifest
+// check fails a healthy turn (the endpoint field was added by the endpoint-name
+// single-source change; component-design-schema.ts is the source of truth).
+func validateEndpoint(v any) *designProblem {
+	ep, ok := v.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "endpoint: must be an object"}
+	}
+	for k := range ep {
+		if k != "name" {
+			return &designProblem{code: ErrSchemaViolation, message: "endpoint: unknown property " + k}
+		}
+	}
+	name, ok := ep["name"].(string)
+	if !ok || name == "" {
+		return &designProblem{code: ErrSchemaViolation, message: "endpoint.name: must be at least 1 characters"}
+	}
+	return nil
+}
+
+// validateSkillsApplied mirrors the zod `skillsApplied: z.array(z.string())`:
+// when present it must be an array whose every element is a string. Parity with
+// the agent's zod gate — without it the Go fold would accept a shape the agent
+// rejected (or vice versa), diverging the fold. (JSON arrays unmarshal to []any.)
+func validateSkillsApplied(raw any) *designProblem {
+	arr, ok := raw.([]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "skillsApplied: must be an array"}
+	}
+	for i, v := range arr {
+		if _, ok := v.(string); !ok {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("skillsApplied[%d]: must be a string", i)}
 		}
 	}
 	return nil

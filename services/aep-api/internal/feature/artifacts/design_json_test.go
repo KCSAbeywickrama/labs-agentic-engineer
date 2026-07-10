@@ -17,6 +17,7 @@
 package artifacts
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -37,6 +38,9 @@ const fullComponentDesignJSON = `{
   "entrypoint": "deployment/service",
   "exposure": "intranet",
   "description": "Owns order checkout. Does NOT handle payments capture.",
+  "endpoint": {
+    "name": "http"
+  },
   "dependencies": [
     {
       "kind": "component",
@@ -100,6 +104,9 @@ func TestParseComponentDesignJSON_AllKinds(t *testing.T) {
 	if comp.ExposesAPI == nil || comp.ExposesAPI.Auth != "service-required" || !comp.ExposesAPI.OrgPublished {
 		t.Fatalf("exposesAPI drifted: %+v", comp.ExposesAPI)
 	}
+	if comp.Endpoint == nil || comp.Endpoint.Name != "http" || comp.EndpointName() != "http" {
+		t.Fatalf("endpoint drifted: %+v (EndpointName=%q)", comp.Endpoint, comp.EndpointName())
+	}
 
 	if len(comp.Dependencies) != 4 {
 		t.Fatalf("want 4 dependencies, got %d: %+v", len(comp.Dependencies), comp.Dependencies)
@@ -145,6 +152,84 @@ func TestMarshalComponentDesignJSON_RoundTripByteIdentical(t *testing.T) {
 	if !strings.HasSuffix(string(out), "\n") {
 		t.Fatalf("output must end with a trailing newline")
 	}
+}
+
+// TestComponentDesignJSON_Endpoint covers the design.json `endpoint` block:
+// a declared non-default name round-trips verbatim and drives EndpointName(),
+// while an omitted block leaves Endpoint nil and EndpointName() falls back to
+// the platform default "http" (never emitting an `endpoint` key on write).
+func TestComponentDesignJSON_Endpoint(t *testing.T) {
+	t.Run("custom name round-trips and drives EndpointName", func(t *testing.T) {
+		raw := `{
+  "name": "gateway",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "gateway",
+  "entrypoint": "deployment/service",
+  "exposure": "internet",
+  "description": "Edge gateway exposing a non-default endpoint name.",
+  "endpoint": {
+    "name": "api"
+  },
+  "dependencies": []
+}
+`
+		comp, err := parseComponentDesignJSON("gateway", raw)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if comp.Endpoint == nil || comp.Endpoint.Name != "api" {
+			t.Fatalf("endpoint drifted: %+v", comp.Endpoint)
+		}
+		if comp.EndpointName() != "api" {
+			t.Fatalf("EndpointName() = %q, want %q", comp.EndpointName(), "api")
+		}
+		out, err := marshalComponentDesignJSON("gateway", comp)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if string(out) != raw {
+			t.Fatalf("round-trip not byte-identical:\n--- got ---\n%s\n--- want ---\n%s", out, raw)
+		}
+	})
+
+	t.Run("omitted endpoint defaults to http and emits no key", func(t *testing.T) {
+		raw := `{
+  "name": "worker",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "worker",
+  "entrypoint": "deployment/service",
+  "exposure": "intranet",
+  "description": "The component declares no explicit network name; the default applies.",
+  "dependencies": []
+}
+`
+		comp, err := parseComponentDesignJSON("worker", raw)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if comp.Endpoint != nil {
+			t.Fatalf("endpoint should be nil when omitted, got %+v", comp.Endpoint)
+		}
+		if comp.EndpointName() != models.DefaultEndpointName {
+			t.Fatalf("EndpointName() = %q, want default %q", comp.EndpointName(), models.DefaultEndpointName)
+		}
+		out, err := marshalComponentDesignJSON("worker", comp)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(out), `"endpoint"`) {
+			t.Fatalf("omitted endpoint key must not be written back:\n%s", out)
+		}
+		if string(out) != raw {
+			t.Fatalf("round-trip not byte-identical:\n--- got ---\n%s\n--- want ---\n%s", out, raw)
+		}
+	})
 }
 
 func TestMarshalComponentDesignJSON_NeverEmitsStatusReason(t *testing.T) {
@@ -407,6 +492,36 @@ func TestSplitAssembleDesign_ComponentRoundTrip(t *testing.T) {
 	}
 	if len(got.Dependencies) != 1 || got.Dependencies[0].Name != "cart" {
 		t.Fatalf("dependency round-trip drifted: %+v", got.Dependencies)
+	}
+}
+
+func TestComponentDesignJSON_SkillsAppliedRoundTrip(t *testing.T) {
+	src := `{
+  "name": "orders-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "orders-api",
+  "entrypoint": "cmd/main",
+  "exposure": "internet",
+  "description": "orders",
+  "dependencies": [],
+  "skillsApplied": ["go", "openapi-conventions"]
+}`
+	comp, err := parseComponentDesignJSON("orders-api", src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if want := []string{"go", "openapi-conventions"}; !reflect.DeepEqual(comp.SkillsApplied, want) {
+		t.Fatalf("parsed skillsApplied = %v, want %v", comp.SkillsApplied, want)
+	}
+	out, err := marshalComponentDesignJSON("orders-api", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"skillsApplied"`) {
+		t.Fatalf("marshalled design.json missing skillsApplied: %s", out)
 	}
 }
 

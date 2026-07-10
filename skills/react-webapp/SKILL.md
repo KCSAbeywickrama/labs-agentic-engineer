@@ -109,7 +109,42 @@ Project layout (Vite + TS):
 └── Dockerfile
 ```
 
-`index.html` — `<script src="/env-config.js">` is **synchronous**,
+#### Subpath-aware build — REQUIRED
+
+The platform serves every web-app under a gateway **subpath**, not a host
+root: `https://<gateway>/<project>-<component>-<endpointName>/`, where
+`<endpointName>` is the component's design.json `endpoint.name` (default
+`http`, so the path is typically `/<project>-<component>-http/`). The gateway
+strips that prefix back to `/` for nginx, but the browser reads the asset URLs
+out of your `index.html` and requests them at the gateway root, so **any
+absolute `/asset` reference 404s and the page renders blank.** Build the SPA
+base-aware — `import.meta.env.BASE_URL` (Vite's build-time base constant,
+e.g. `/<project>-<component>-http/` with a trailing slash) is the one handle
+for every base-prefixed URL:
+
+- **`vite.config.ts`** — set `base` to the deploy subpath so Vite emits
+  base-prefixed asset URLs:
+  `base: "/<project>-<component>-http/"` (leading + trailing slash).
+- **`index.html`** — load env-config **relative**: `<script src="./env-config.js">`
+  (NOT `/env-config.js`), so it resolves under the base.
+- **react-router** — set the router `basename` to the base:
+  `<BrowserRouter basename={import.meta.env.BASE_URL}>` so every route
+  (including any auth `callback`) matches under the subpath.
+- **Any `window.location.pathname` check** — e.g. a manual "is this the
+  callback?" guard — compares against the base-prefixed path
+  `import.meta.env.BASE_URL + "callback"`, never a literal root `/callback`.
+  A root check never matches under the subpath, so the branch is silently
+  skipped — the classic cause of a callback handler that never runs and a
+  sign-in that loops.
+- **OAuth `redirect_uri`** (thunder-app dep) — derive it from the base,
+  `window.location.origin + import.meta.env.BASE_URL + "callback"`; see
+  `thunder-authentication` for the full auth wiring.
+- **`src/vite-env.d.ts`** — must exist with `/// <reference types="vite/client" />`
+  (it does in a stock `npm create vite` project). Without it, `import.meta.env`
+  is untyped and `tsc` fails the build with `TS2339: Property 'env' does not
+  exist on type 'ImportMeta'`.
+
+`index.html` — `<script src="./env-config.js">` is **synchronous**,
 BEFORE the bundle. No `async`, no `defer`, no `type="module"` on this
 tag. This guarantees `window._env_` is populated before any ES module
 evaluates.
@@ -120,7 +155,7 @@ evaluates.
   <head>
     <meta charset="utf-8" />
     <title>App</title>
-    <script src="/env-config.js"></script>
+    <script src="./env-config.js"></script>
   </head>
   <body>
     <div id="root"></div>

@@ -140,6 +140,11 @@ export function runClaudeQuery(
   const plugins: Array<{ type: "local"; path: string }> = [
     { type: "local", path: PLUGIN_PATH },
   ];
+  // Related-issue discovery/cross-linking moved to the SRE agent's handoff
+  // stage (a "## Related issues" section in the issue body; GitHub #N
+  // mentions back-link automatically) — issues arrive pre-linked, so the
+  // former aep:related-issues preload is gone. See AE-HANDOFF-DESIGN.md in
+  // openchoreo/agents/sre-agent.
   const skillPreload: string[] = ["aep:aep"];
   if (perTaskSkills?.skillsPluginDir) {
     plugins.push({ type: "local", path: perTaskSkills.skillsPluginDir });

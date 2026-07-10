@@ -43,11 +43,7 @@ A simple API that responds with "Hello, World!" when called.
 `,
 
   "specs/design/design.md": `---
-skillsApplied:
-  - api-management
-  - go
-  - react-webapp
-  - thunder-authentication
+sourceSpec: v1
 ---
 
 A simple public API service that responds with "Hello, World!" in JSON format. Built as a single Go service exposing one endpoint, requiring no authentication.

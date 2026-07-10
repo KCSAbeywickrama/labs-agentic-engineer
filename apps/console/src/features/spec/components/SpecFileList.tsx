@@ -16,8 +16,11 @@
  * under the License.
  */
 
+import type React from "react";
+import { useState } from "react";
 import {
   Box,
+  Collapse,
   IconButton,
   List,
   ListItemButton,
@@ -26,101 +29,264 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FileText, Plus } from "@wso2/oxygen-ui-icons-react";
-import type { SpecFileEntry, SpecGroup } from "../api/mapping";
-
-const GROUPS: { id: SpecGroup; title: string }[] = [
-  { id: "requirements", title: "Requirements" },
-  { id: "designs", title: "Designs" },
-  { id: "validation", title: "Validation" },
-];
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Plus, RefreshCw,
+  Network,
+  LayoutDashboard,
+} from "@wso2/oxygen-ui-icons-react";
+import type { SpecFileEntry } from "../api/mapping";
+import {
+  buildDesignSection,
+  selectionKey,
+  type SpecSelection,
+} from "../api/designTree";
 
 function basename(path: string): string {
   return path.split("/").at(-1) ?? path;
 }
 
+const OPENAPI_RE = /\/openapi\.ya?ml$/;
+function fileLabel(path: string): string {
+  return OPENAPI_RE.test(path) ? "API Spec" : basename(path);
+}
+
+function fileSel(path: string): SpecSelection {
+  return { kind: "file", path };
+}
+
 export function SpecFileList({
   files,
-  selectedPath,
+  selection,
   onSelect,
   onAddArtifact,
+  onRegenerateDesign,
+  regenerateDisabled,
   deriving,
   failed,
 }: {
   files: SpecFileEntry[];
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
+  selection: SpecSelection | null;
+  onSelect: (sel: SpecSelection) => void;
   onAddArtifact: () => void;
+  /** Re-generate the design (#159) — shown in the Designs header once a design
+   *  exists; fires the same design-generation room turn as the header CTA. */
+  onRegenerateDesign: () => void;
+  /** Disabled while an agent turn runs — a re-generate would be dropped mid-turn. */
+  regenerateDisabled?: boolean;
   /** Agents are still shaping the spec — empty groups say so. */
   deriving: boolean;
   /** Derivation failed — empty groups say that instead. */
   failed: boolean;
 }) {
+  const selKey = selection ? selectionKey(selection) : null;
+  const isSel = (sel: SpecSelection) => selKey === selectionKey(sel);
+
+  const requirements = files.filter((f) => f.group === "requirements");
+  const validation = files.filter((f) => f.group === "validation");
+  const design = buildDesignSection(files);
+
+  // Per-component expand/collapse — default expanded, remembered by name so
+  // toggling one component survives unrelated re-derivations of the list.
+  const [collapsedComponents, setCollapsedComponents] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleComponent = (name: string) => {
+    setCollapsedComponents((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const emptyNote = failed
+    ? "Derivation failed"
+    : deriving
+      ? "Being derived…"
+      : "No files yet";
+
+  // `indent` bumps a row one level deeper than the top-level tree (matching
+  // the old console's depth-based pl: files inside an expanded component sit
+  // right of both the top-level entries and the component's own header row).
+  const row = (
+    sel: SpecSelection,
+    label: string,
+    icon: React.ReactNode,
+    indent?: boolean,
+  ) => (
+    <ListItemButton
+      key={selectionKey(sel)}
+      selected={isSel(sel)}
+      onClick={() => onSelect(sel)}
+      sx={{ pl: indent ? 4 : 2, pr: 2 }}
+    >
+      <ListItemIcon sx={{ minWidth: 32 }}>{icon}</ListItemIcon>
+      <ListItemText primary={label} slotProps={{ primary: { noWrap: true } }} />
+    </ListItemButton>
+  );
+
+  const flatGroup = (
+    title: string,
+    groupFiles: SpecFileEntry[],
+    addBtn?: boolean,
+  ) => (
+    <Box sx={{ mb: 1 }}>
+      <Box
+        sx={{
+          px: 2,
+          py: 0.5,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <Typography variant="overline" color="text.secondary">
+          {title}
+        </Typography>
+        {addBtn && (
+          <Tooltip title="Add requirement artifact">
+            <IconButton
+              size="small"
+              aria-label="Add requirement artifact"
+              onClick={onAddArtifact}
+            >
+              <Plus size={16} />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+      {groupFiles.length > 0 ? (
+        <List dense disablePadding>
+          {groupFiles.map((f) =>
+            row(fileSel(f.path), basename(f.path), <FileText size={16} />),
+          )}
+        </List>
+      ) : (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ px: 2, py: 0.5, fontStyle: "italic" }}
+        >
+          {emptyNote}
+        </Typography>
+      )}
+    </Box>
+  );
+
   return (
     <Box component="nav" aria-label="Spec files" sx={{ py: 1 }}>
-      {GROUPS.map((group) => {
-        const groupFiles = files.filter((f) => f.group === group.id);
-        return (
-          <Box key={group.id} sx={{ mb: 1 }}>
-            <Box
-              sx={{
-                px: 2,
-                py: 0.5,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
+      {flatGroup("Requirements", requirements, true)}
+
+      {/* Designs — grouped by component, with synthetic diagram entries. */}
+      <Box sx={{ mb: 1 }}>
+        <Box
+          sx={{
+            px: 2,
+            py: 0.5,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Typography variant="overline" color="text.secondary">
+            Designs
+          </Typography>
+          {(design.hasComponents || design.overview.length > 0) && (
+            <Tooltip
+              title={
+                regenerateDisabled
+                  ? "An agent is still working — re-generate is available once it finishes"
+                  : "Re-generate design from the current requirements"
+              }
             >
-              <Typography variant="overline" color="text.secondary">
-                {group.title}
-              </Typography>
-              {group.id === "requirements" && (
-                <Tooltip title="Add requirement artifact">
-                  <IconButton
-                    size="small"
-                    aria-label="Add requirement artifact"
-                    onClick={onAddArtifact}
-                  >
-                    <Plus size={16} />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
-            {groupFiles.length > 0 ? (
-              <List dense disablePadding>
-                {groupFiles.map((file) => (
+              {/* span so the tooltip works while the button is disabled */}
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label="Re-generate design"
+                  onClick={onRegenerateDesign}
+                  disabled={regenerateDisabled ?? false}
+                >
+                  <RefreshCw size={16} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          )}
+        </Box>
+        {design.hasComponents || design.overview.length > 0 ? (
+          <List dense disablePadding>
+            {design.hasComponents &&
+              row({ kind: "cell-diagram" }, "Architecture", <Network size={16} />)}
+            {design.overview.map((f) =>
+              row(
+                fileSel(f.path),
+                basename(f.path),
+                <LayoutDashboard size={16} />,
+              ),
+            )}
+            {design.components.map((c) => {
+              const collapsed = collapsedComponents.has(c.name);
+              return (
+                <Box key={c.name} sx={{ mt: 0.5 }}>
                   <ListItemButton
-                    key={file.path}
-                    selected={file.path === selectedPath}
-                    onClick={() => onSelect(file.path)}
-                    sx={{ px: 2 }}
+                    onClick={() => toggleComponent(c.name)}
+                    sx={{ px: 2, py: 0.25, minHeight: 0 }}
+                    aria-expanded={!collapsed}
+                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${c.name}`}
                   >
-                    <ListItemIcon sx={{ minWidth: 32 }}>
-                      <FileText size={16} />
+                    <ListItemIcon sx={{ minWidth: 20 }}>
+                      {collapsed ? (
+                        <ChevronRight size={14} />
+                      ) : (
+                        <ChevronDown size={14} />
+                      )}
                     </ListItemIcon>
                     <ListItemText
-                      primary={basename(file.path)}
-                      slotProps={{ primary: { noWrap: true } }}
+                      primary={c.name}
+                      slotProps={{
+                        primary: {
+                          variant: "body2",
+                          fontWeight: 600,
+                          color: "text.secondary",
+                        },
+                      }}
                     />
                   </ListItemButton>
-                ))}
-              </List>
-            ) : (
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ px: 2, py: 0.5, fontStyle: "italic" }}
-              >
-                {failed
-                  ? "Derivation failed"
-                  : deriving
-                    ? "Being derived…"
-                    : "No files yet"}
-              </Typography>
-            )}
-          </Box>
-        );
-      })}
+                  <Collapse in={!collapsed} unmountOnExit>
+                    {c.files.map((f) =>
+                      row(fileSel(f.path), fileLabel(f.path), <FileText size={16} />, true),
+                    )}
+                    {c.wireframeDslPath &&
+                      row(
+                        {
+                          kind: "wireframe",
+                          component: c.name,
+                          dslPath: c.wireframeDslPath,
+                        },
+                        "Wireframe",
+                        <LayoutDashboard size={16} />,
+                        true,
+                      )}
+                  </Collapse>
+                </Box>
+              );
+            })}
+          </List>
+        ) : (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ px: 2, py: 0.5, fontStyle: "italic" }}
+          >
+            {emptyNote}
+          </Typography>
+        )}
+      </Box>
+
+      {flatGroup("Validation", validation)}
     </Box>
   );
 }

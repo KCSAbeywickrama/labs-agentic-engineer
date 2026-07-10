@@ -25,7 +25,8 @@
 // See docs/design/coding-runner-skills-clone.md.
 //
 // Flow (per task):
-//   1. Read specs/design/design.md → skillsApplied[] from the PROJECT clone.
+//   1. Read specs/design/components/<component>/design.json → skillsApplied[]
+//      for the BUILDING component from the PROJECT clone.
 //   2. git clone --depth 1 the org-skills repo into a scratch dir OUTSIDE the
 //      work tree (so its nested .git never enters the agent's git status).
 //   3. For each bare name resolve skills/<name>/SKILL.md (+ references/*.md) and
@@ -44,9 +45,6 @@ import type { SkillKind, SkillResolution } from "./skills_materializer.js";
 
 const execAsync = promisify(exec);
 
-// The single root design file whose frontmatter carries skillsApplied — pinned
-// by the BFF artifact store (specs/design/design.md, key `skillsApplied`).
-const DESIGN_REL = "specs/design/design.md";
 const SKILLS_ROOT = "skills";
 const KNOWN_KINDS: readonly SkillKind[] = ["platform", "org", "custom", "imported"];
 
@@ -55,8 +53,10 @@ const KNOWN_KINDS: readonly SkillKind[] = ["platform", "org", "custom", "importe
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
 
 export interface ResolveTaskSkillsArgs {
-  /** The project work tree (holds specs/design/design.md). */
+  /** The project work tree (holds specs/design/components/<name>/design.json). */
   workspace: string;
+  /** The building component's name — selects which component's design.json to read. */
+  componentName: string;
   /** AEP_SKILLS_REPO_URL — the org's `org-skills` clone URL. */
   skillsRepoURL: string;
   /** Org-wide GitHub PAT (x-access-token) for the clone. */
@@ -70,15 +70,15 @@ export interface ResolveTaskSkillsArgs {
 }
 
 /**
- * Resolve the design's applied skills from a fresh org-skills clone. Returns an
- * empty list (NOT an error) when the design applies no skills or design.md is
- * absent. Throws only on a clone failure — the caller degrades to the base
- * plugin.
+ * Resolve the building component's applied skills from a fresh org-skills
+ * clone. Returns an empty list (NOT an error) when the component's design.json
+ * applies no skills or is absent. Throws only on a clone failure — the caller
+ * degrades to the base plugin.
  */
 export async function resolveTaskSkills(args: ResolveTaskSkillsArgs): Promise<SkillResolution[]> {
   const log = args.log ?? ((l: string) => console.log(l));
 
-  const names = await readSkillsApplied(args.workspace, log);
+  const names = await readSkillsApplied(args.workspace, args.componentName, log);
   if (names.length === 0) {
     log("[skills-resolve] design applies no skills — nothing to materialise");
     return [];
@@ -90,31 +90,35 @@ export async function resolveTaskSkills(args: ResolveTaskSkillsArgs): Promise<Sk
   return resolveSkillsFromClone(args.scratchDir, names, log);
 }
 
-// readSkillsApplied reads specs/design/design.md from the project clone and
-// returns its frontmatter `skillsApplied` (a sequence of bare skill names).
-// Absent file → loud warn + []; present-but-no-skills → quiet [].
+// The component's authored design file; its `skillsApplied` key lists the
+// skills THIS component's build needs (per-component — the project design.md
+// no longer carries skills).
+const componentDesignRel = (component: string) =>
+  `specs/design/components/${component}/design.json`;
+
+// Reads the building component's design.json and returns its `skillsApplied`
+// (bare skill names). Absent file / absent field → []. Malformed JSON → [].
 export async function readSkillsApplied(
   workspace: string,
+  componentName: string,
   log: (line: string) => void = () => {},
 ): Promise<string[]> {
-  const designPath = path.join(workspace, DESIGN_REL);
+  const rel = componentDesignRel(componentName);
   let raw: string;
   try {
-    raw = await fs.promises.readFile(designPath, "utf-8");
+    raw = await fs.promises.readFile(path.join(workspace, rel), "utf-8");
   } catch {
-    log(`[skills-resolve] ⚠️  ${DESIGN_REL} not found — proceeding with no applied skills`);
+    log(`[skills-resolve] ⚠️  ${rel} not found — proceeding with no applied skills`);
     return [];
   }
-  const block = frontmatterBlock(raw);
-  if (!block) return [];
   try {
-    const fm = parseYaml(block) as unknown;
-    const applied = (fm as { skillsApplied?: unknown } | null)?.skillsApplied;
+    const parsed = JSON.parse(raw) as { skillsApplied?: unknown } | null;
+    const applied = parsed?.skillsApplied;
     if (Array.isArray(applied)) {
       return applied.filter((s): s is string => typeof s === "string");
     }
   } catch {
-    /* malformed frontmatter → no skills */
+    /* malformed design.json → no skills */
   }
   return [];
 }

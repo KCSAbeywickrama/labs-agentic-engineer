@@ -24,13 +24,24 @@ type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
-// Scenario switch for the Settings feature (#96). Toggle in devtools:
-//   localStorage.setItem('aep:mock:settings', 'empty' | 'connected' | 'error')
-// "empty": nothing connected yet (the default — exercises the not-connected
-// and GitHub-not-connected-blocks-Skills states).
-// "connected": GitHub + Anthropic already connected.
+// Scenario switch for the Settings (#96) and Onboarding (#102) features.
+// Toggle in devtools:
+//   localStorage.setItem('aep:mock:settings',
+//     'empty' | 'partial' | 'connected' | 'error' | 'sync-error')
+// "empty": nothing connected yet (the default — triggers the onboarding
+// gate; also exercises Settings' not-connected states).
+// "partial": GitHub connected, Anthropic not — the onboarding wizard opens
+// at its first incomplete step (resume-after-abandon, #102).
+// "connected": GitHub + Anthropic already connected (no onboarding).
 // "error": GET /config and GET /skills fail (load-error state).
-export type SettingsScenario = "empty" | "connected" | "error";
+// "sync-error": config empty and POST /skills/sync fails — exercises the
+// wizard's bootstrap-failure step (Retry / Continue anyway, #102).
+export type SettingsScenario =
+  | "empty"
+  | "partial"
+  | "connected"
+  | "error"
+  | "sync-error";
 
 // Typing this exact value into a PAT/API-key field simulates the BFF's
 // synchronous probe-before-persist validation failing against the real
@@ -52,14 +63,6 @@ export const importWarningsFixture = [
 // HTML URL of the org skills repo backing the catalogue (GET /skills
 // envelope repoUrl — powers the Import dialog's via-pull-request guidance).
 export const skillsRepoUrl = "https://github.com/acme-dev/org-skills";
-
-export const importUrlInvalidError: ErrorModel = {
-  type: "about:blank",
-  status: 422,
-  title: "Unprocessable Entity",
-  detail:
-    "body.url: the URL did not yield a valid skill (expected a raw SKILL.md or a gzip AgentSkills tarball)",
-};
 
 export const importFileInvalidError: ErrorModel = {
   type: "about:blank",
@@ -125,47 +128,99 @@ export const skillsLoadError: ErrorModel = {
   detail: "Failed to load skills",
 };
 
-// Two built-ins, one flow skill, one custom (editable) — enough spread to
-// exercise editable/read-only rendering and the updates-available list.
+// Bootstrap failure for the onboarding wizard (#102): repo creation or the
+// built-ins push failed. Sync is idempotent, so the remedy is retry.
+export const skillsSyncError: ErrorModel = {
+  type: "about:blank",
+  status: 502,
+  title: "Bad Gateway",
+  detail: "Failed to create the skills repository on GitHub",
+};
+
+// Covers all four kinds (org | platform | custom | imported — the BE's real
+// vocabulary; builtin/flow are retired) so the catalogue's kind chips,
+// read-only vs editable actions, and the updates-available list all exercise.
+// More than one page of skills (10/page, issue #172) so the flat list's
+// pagination is exercisable in mock mode.
 export const seedSkills: SkillDetailBody[] = [
   {
     orgId: "org-1",
+    name: "go",
+    kind: "org",
+    editable: false,
+    description:
+      "How to build a Go service on the platform — layout, port 9090, multi-stage Dockerfile.",
+    skillMd: `---
+name: go
+description: How to build a Go service on the platform.
+---
+
+# Go services
+
+Pin \`golang:1.25-alpine\` as the builder; the build pod runs with
+\`GOTOOLCHAIN=local\`.
+
+## Layout
+
+- \`cmd/\` — entrypoints
+- \`internal/\` — everything else
+
+Expose \`GET /health\` for liveness on port **9090**.`,
+    references: {},
+    contentSha: "sha-go-1",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "react-webapp",
+    kind: "org",
+    editable: false,
+    description:
+      "How to build a React SPA on the platform — Vite layout, nginx runtime, window._env_ config.",
+    skillMd: `---
+name: react-webapp
+description: How to build a React SPA on the platform.
+---
+
+# React web apps
+
+Load \`/env-config.js\` synchronously **before** the bundle, then read runtime
+config from \`window._env_\`. Throw on a missing key rather than defaulting.`,
+    references: {},
+    contentSha: "sha-rw-1",
+    updatedAt: "2026-05-02T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
     name: "high-level-architecture",
-    kind: "builtin",
+    kind: "platform",
     editable: false,
     description: "Derives component architecture from requirements.",
-    skillMd:
-      "---\nname: high-level-architecture\ndescription: Derives component architecture from requirements.\n---\n\nDerive the component architecture from the approved requirements.",
+    skillMd: `---
+name: high-level-architecture
+description: Derives component architecture from requirements.
+---
+
+Derive the component architecture from the approved requirements.`,
     references: {},
-    version: 1,
     contentSha: "sha-hla-1",
     updatedAt: "2026-05-01T00:00:00Z",
   },
   {
     orgId: "org-1",
     name: "task-breakdown",
-    kind: "builtin",
+    kind: "platform",
     editable: false,
     description: "Breaks a design into buildable tasks.",
-    skillMd:
-      "---\nname: task-breakdown\ndescription: Breaks a design into buildable tasks.\n---\n\nBreak the approved design into a sequence of buildable tasks.",
+    skillMd: `---
+name: task-breakdown
+description: Breaks a design into buildable tasks.
+---
+
+Break the approved design into a sequence of buildable tasks.`,
     references: {},
-    version: 1,
     contentSha: "sha-tb-1",
     updatedAt: "2026-05-01T00:00:00Z",
-  },
-  {
-    orgId: "org-1",
-    name: "flow-orchestration",
-    kind: "flow",
-    editable: false,
-    description: "Coordinates the multi-agent generation flow.",
-    skillMd:
-      "---\nname: flow-orchestration\ndescription: Coordinates the multi-agent generation flow.\n---\n\nCoordinate hand-off between the generation-flow agents.",
-    references: {},
-    version: 2,
-    contentSha: "sha-fo-2",
-    updatedAt: "2026-05-15T00:00:00Z",
   },
   {
     orgId: "org-1",
@@ -173,18 +228,156 @@ export const seedSkills: SkillDetailBody[] = [
     kind: "custom",
     editable: true,
     description: "Acme's internal pre-deploy checklist.",
-    skillMd:
-      "---\nname: acme-deploy-checklist\ndescription: Acme's internal pre-deploy checklist.\n---\n\nRun through Acme's pre-deploy checklist before shipping.",
-    references: {},
-    version: 1,
+    skillMd: `---
+name: acme-deploy-checklist
+description: Acme's internal pre-deploy checklist.
+---
+
+# Pre-deploy checklist
+
+1. Migrations applied
+2. Feature flags reviewed
+3. Rollback plan written`,
+    references: {
+      "references/rollback.md": "# Rollback\n\nRevert the release tag.",
+    },
     contentSha: "sha-adc-1",
     updatedAt: "2026-06-20T00:00:00Z",
   },
+  {
+    orgId: "org-1",
+    name: "find-skills",
+    kind: "imported",
+    editable: true,
+    description: "Discover and evaluate community AgentSkills before adopting.",
+    skillMd: `---
+name: find-skills
+description: Discover and evaluate community AgentSkills before adopting.
+---
+
+Search the registry, read the SKILL.md, and check the declared license.`,
+    references: {},
+    contentSha: "sha-fs-1",
+    updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "node-service",
+    kind: "org",
+    editable: false,
+    description: "How to build a Node.js service on the platform.",
+    skillMd: `---
+name: node-service
+description: How to build a Node.js service on the platform.
+---
+
+Pin the LTS base image; expose \`GET /health\` on port **9090**.`,
+    references: {},
+    contentSha: "sha-ns-1",
+    updatedAt: "2026-05-03T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "python-service",
+    kind: "org",
+    editable: false,
+    description: "How to build a Python service on the platform.",
+    skillMd: `---
+name: python-service
+description: How to build a Python service on the platform.
+---
+
+Use \`uv\` for dependency management; expose \`GET /health\` on port **9090**.`,
+    references: {},
+    contentSha: "sha-ps-1",
+    updatedAt: "2026-05-03T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "postgres-schema",
+    kind: "org",
+    editable: false,
+    description: "Schema and migration conventions for platform databases.",
+    skillMd: `---
+name: postgres-schema
+description: Schema and migration conventions for platform databases.
+---
+
+One migration per change; never edit an applied migration.`,
+    references: {},
+    contentSha: "sha-pg-1",
+    updatedAt: "2026-05-04T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "wireframes",
+    kind: "platform",
+    editable: false,
+    description: "Derives per-component wireframes from the design file.",
+    skillMd: `---
+name: wireframes
+description: Derives per-component wireframes from the design file.
+---
+
+Derive one wireframe per user-facing component in the approved design.`,
+    references: {},
+    contentSha: "sha-wf-1",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "validation-files",
+    kind: "platform",
+    editable: false,
+    description: "Derives validation files from approved requirements.",
+    skillMd: `---
+name: validation-files
+description: Derives validation files from approved requirements.
+---
+
+Every requirement gets at least one validation criterion.`,
+    references: {},
+    contentSha: "sha-vf-1",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "acme-api-style",
+    kind: "custom",
+    editable: true,
+    description: "Acme's REST API naming and versioning conventions.",
+    skillMd: `---
+name: acme-api-style
+description: Acme's REST API naming and versioning conventions.
+---
+
+Plural nouns, kebab-case paths, \`/v1\` prefix, RFC 9457 errors.`,
+    references: {},
+    contentSha: "sha-aas-1",
+    updatedAt: "2026-06-22T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "commit-conventions",
+    kind: "imported",
+    editable: true,
+    description: "Conventional-commit message rules for agent-authored PRs.",
+    skillMd: `---
+name: commit-conventions
+description: Conventional-commit message rules for agent-authored PRs.
+---
+
+\`type(scope): summary\` — imperative, no trailing period.`,
+    references: {},
+    contentSha: "sha-cc-1",
+    updatedAt: "2026-07-02T00:00:00Z",
+  },
 ];
 
-// Behind the platform's embedded version — surfaces in GET /skills/updates
-// until synced. "code-review" has no repo row yet (repoVersion -1).
+// Embedded content differs from the org repo copy — surfaces in GET
+// /skills/updates until synced. "code-review" is absent from the repo.
 export const seedSkillUpdates: SkillUpdate[] = [
-  { name: "task-breakdown", repoVersion: 1, embeddedVersion: 2 },
-  { name: "code-review", repoVersion: -1, embeddedVersion: 1 },
+  { name: "task-breakdown" },
+  { name: "go" },
+  { name: "code-review" },
 ];

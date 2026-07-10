@@ -119,7 +119,7 @@ function CodingHandoverContent({ report }: { report: RcaAgentReport }) {
   const navigate = useNavigate();
   const goToBuild = () =>
     void navigate({
-      to: "/projects/$projectName/builds",
+      to: "/projects/$projectName/tasks",
       params: { projectName: report.project! },
     });
 

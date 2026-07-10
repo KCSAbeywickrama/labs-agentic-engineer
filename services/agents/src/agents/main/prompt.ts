@@ -28,13 +28,10 @@ Tools:
   indentation and newlines. oldString must match EXACTLY ONE place.
 - addFile(path, content) — create a NEW file (emits a whole body). Use only for files that do not exist yet.
 - removeFile(path) — delete a file.
-- setFrontmatterField(path, key, value) — set a key in a markdown file's YAML frontmatter (between the ---
-  fences, e.g. language, buildpack, skillsApplied). Use this for ANY frontmatter change — never anchor an
-  editFile inside the --- fences; list values are fragile to indent by hand.
 
 Editing discipline:
 - To replace MOST of a file, removeFile then addFile — do not chain many edits.
-- openapi.yaml and frontmatter are indentation-sensitive: include the exact leading whitespace in both
+- openapi.yaml is indentation-sensitive: include the exact leading whitespace in both
   oldString and newString. To keep an anchor unique in a repetitive YAML file, include the parent key line.
 
 Reacting to tool results (each result tells you the next move):
@@ -45,6 +42,8 @@ Reacting to tool results (each result tells you the next move):
 - INVALID_YAML — your edit would break the YAML and was rejected; fix the indentation of newString and retry.
 - INVALID_JSON / SCHEMA_VIOLATION — a components/<name>/design.json write was rejected (broken JSON or a
   schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
+  skillsApplied (the skills that component's build needs) is a per-component key inside its design.json,
+  not project-level frontmatter.
 
 Keep prose outside tool calls to a single short sentence. When the instruction is fully applied, stop.`;
 
@@ -142,15 +141,7 @@ A simple API that responds with "Hello, World!" when called.
 - Requests work without requiring any parameters or authentication.
 `,
 
-  "specs/design/design.md": `---
-skillsApplied:
-  - api-management
-  - go
-  - react-webapp
-  - thunder-authentication
----
-
-A simple public API service that responds with "Hello, World!" in JSON format. Built as a single Go service exposing one endpoint, requiring no authentication.
+  "specs/design/design.md": `A simple public API service that responds with "Hello, World!" in JSON format. Built as a single Go service exposing one endpoint, requiring no authentication.
 `,
 
   "specs/design/components/hello-api/design.json": `{
@@ -163,6 +154,7 @@ A simple public API service that responds with "Hello, World!" in JSON format. B
   "entrypoint": "deployment/service",
   "exposure": "internet",
   "dependencies": [],
+  "skillsApplied": ["go", "api-management"],
   "description": "A simple public Go HTTP service (port 9090, net/http) that returns a hello-world JSON message. No authentication. Endpoints are specified in openapi.yaml."
 }
 `,

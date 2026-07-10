@@ -46,9 +46,19 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { LanguageModel } from "ai";
-import { SSE_DONE, TOOLSETS, isToolset, type McpConfig, type StreamPart, type Toolset } from "@aep/agent-stream";
+import {
+  SSE_DONE,
+  TOOLSETS,
+  isToolset,
+  isCollabConfig,
+  type CollabConfig,
+  type McpConfig,
+  type StreamPart,
+  type Toolset,
+} from "@aep/agent-stream";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
+import { joinRoom, type RoomPeer } from "./collab/room-peer.js";
 import type { SkillSource } from "./agents/main/skill-source.js";
 import { readSnapshot, loadSkillsFromSnapshot } from "./conversation/load-workspace.js";
 import { resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
@@ -123,6 +133,7 @@ export function createApp(deps: CreateAppDeps): Express {
       skills?: unknown;
       toolset?: unknown;
       mcp?: unknown;
+      collab?: unknown;
     };
 
     // Pre-stream validation → HTTP status (no SSE headers sent yet).
@@ -193,6 +204,28 @@ export function createApp(deps: CreateAppDeps): Express {
       mcp = body.mcp;
     }
 
+    // collab (optional, #86 phase 4): a room-scoped turn. The room replaces
+    // the snapshot as the FILE source (skills + the org fence still come from
+    // the workspace); ops apply live to the doc; nothing commits. Reject a
+    // malformed block, an unsupported toolset combination, or a deployment
+    // with no collab server, pre-stream.
+    let collab: CollabConfig | undefined;
+    if (body.collab !== undefined) {
+      if (!isCollabConfig(body.collab)) {
+        res.status(400).json({ error: "collab must be { roomId: string, token: string }" });
+        return;
+      }
+      if (toolset !== undefined && toolset !== "files") {
+        res.status(400).json({ error: "collab turns support only the files toolset" });
+        return;
+      }
+      if (!config.collabWsUrl) {
+        res.status(503).json({ error: "collab is not configured on this deployment (AGENT_COLLAB_WS_URL)" });
+        return;
+      }
+      collab = body.collab;
+    }
+
     // Build the per-turn model from the request key (fail as a pre-stream 500).
     let model: LanguageModel;
     try {
@@ -234,6 +267,26 @@ export function createApp(deps: CreateAppDeps): Express {
       res.write(`data: ${JSON.stringify(part)}\n\n`);
     };
 
+    // Room-scoped turn (#86 phase 4): join as a live peer BEFORE streaming —
+    // an oracle denial or sync timeout is a clean pre-stream status. The
+    // synced doc replaces the snapshot as the turn's file source.
+    let roomPeer: RoomPeer | undefined;
+    if (collab) {
+      try {
+        roomPeer = await joinRoom({
+          url: config.collabWsUrl!,
+          roomId: collab.roomId,
+          token: collab.token,
+        });
+        files = roomPeer.files();
+      } catch (err) {
+        res.status(502).json({
+          error: err instanceof Error ? err.message : "collab room join failed",
+        });
+        return;
+      }
+    }
+
     try {
       await runConversationTurn({
         id,
@@ -243,6 +296,7 @@ export function createApp(deps: CreateAppDeps): Express {
         skillSource,
         ...(toolset ? { toolset } : {}),
         ...(mcp ? { mcp } : {}),
+        ...(roomPeer ? { collabPeer: roomPeer } : {}),
         model,
         store: deps.store,
         guard,
@@ -271,6 +325,10 @@ export function createApp(deps: CreateAppDeps): Express {
         res.write(`data: ${SSE_DONE}\n\n`);
         res.end();
       }
+    } finally {
+      // The agent peer never lingers in the room past its turn (presence
+      // honesty); runs on every exit path, including client-gone returns.
+      roomPeer?.leave();
     }
   });
 

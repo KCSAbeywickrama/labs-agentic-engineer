@@ -22,8 +22,9 @@
  * component-level design.md: the spec agent writes it (whole-file rewrites,
  * schema-validated by the FileBundle on every write), downstream consumers
  * (design projection, coding-agent dispatch, task generation) read it
- * directly. The TOP-LEVEL design.md (prose + skillsApplied frontmatter) is
- * unchanged. The Zod validator (`componentDesignSchema` in
+ * directly. `skillsApplied` is a key HERE (per-component), NOT in design.md
+ * frontmatter; the top-level design.md is prose + an optional `sourceSpec`
+ * frontmatter only. The Zod validator (`componentDesignSchema` in
  * `../component-design-schema.ts`) is drift-guarded against this type.
  */
 
@@ -43,7 +44,12 @@ export interface ComponentDesign {
   version: string;
   /** Implementation language, e.g. "Go", "TypeScript". */
   language: string;
-  /** Always "docker" today. */
+  /**
+   * The build buildpack — always "docker" (the platform's single build path).
+   * The agent write-gate (checkComponentDesign) pins this to "docker" as a
+   * post-parse check, so the type stays `string` and the shared JSON Schema /
+   * BFF save-gate stay permissive.
+   */
   buildpack: string;
   /** Repo-relative source dir — the component name. */
   appPath: string;
@@ -61,6 +67,16 @@ export interface ComponentDesign {
   /** The single-responsibility paragraph (what it does / does NOT do). */
   description: string;
   /**
+   * Optional. The single network endpoint the component exposes. Its `name`
+   * is the SINGLE SOURCE OF TRUTH for the endpoint name: the coding agent
+   * writes the same name into `workload.yaml` (`spec.endpoints[].name`) and
+   * the platform's managed-API (`api-configuration`) trait binds to it. When
+   * omitted, both sides default to the conventional name `"http"`. The port
+   * is NOT declared here — it stays in `workload.yaml`, chosen to match the
+   * app's actual listen port. Mirrors Go `models.ComponentEndpoint`.
+   */
+  endpoint?: Endpoint;
+  /**
    * PLATFORM-OWNED (optional). Managed-API exposure policy for a service, set
    * by the platform — the agent must NOT invent it. Round-trips through the
    * file untouched. Mirrors Go `models.ExposesAPI`.
@@ -71,6 +87,20 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
+  /** Skill names applied to THIS component (per-component; the coding runner
+   *  materializes exactly these for a build of this component). */
+  skillsApplied?: string[];
+}
+
+/**
+ * The single network endpoint a component exposes. Only the `name` is
+ * declared — it is the shared key the coding agent's `workload.yaml` and the
+ * platform's `api-configuration` trait both reference. Mirrors Go
+ * `models.ComponentEndpoint`.
+ */
+export interface Endpoint {
+  /** Workload endpoint name (the `spec.endpoints[].name` key). Defaults to "http" when the component declares no endpoint. */
+  name: string;
 }
 
 /** The closed set of dependency kinds (mirrors Go `models.DependencyKind`). */
@@ -115,8 +145,8 @@ export interface ConfigKey {
   key: string;
   /** Secret keys route through the secret path. Default: false. */
   secret?: boolean;
-  /** publishable | secret. */
-  credentialClass?: string;
+  /** How the value is supplied/stored: "secret" (user-supplied private) or "publishable" (non-sensitive config). */
+  credentialClass?: "secret" | "publishable";
 }
 
 /** One option attached to an ambiguous dependency. Mirrors Go `models.DependencyCandidate`. */

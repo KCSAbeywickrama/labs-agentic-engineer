@@ -16,42 +16,117 @@
  * under the License.
  */
 
+import { useCallback, useEffect, useState } from "react";
 import {
   AppShell,
+  Box,
+  Collapse,
   ColorSchemeToggle,
   Divider,
   Footer,
   Header,
+  IconButton,
   Sidebar,
+  Tooltip,
   UserMenu,
+  useAppShell,
   version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
 import {
+  CircleAlert,
+  FileText,
   FolderOpen,
+  LayoutDashboard,
+  ListChecks,
   LogOut,
+  Rocket,
   Settings,
   Siren,
+  Sparkles,
   User as UserIcon,
   WSO2,
 } from "@wso2/oxygen-ui-icons-react";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  useNavigate,
+  useParams,
+  useRouterState,
+  useSearch,
+} from "@tanstack/react-router";
 import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 import { AlertsNotificationPanel, NotificationButton } from "./NotificationBell";
+import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 
-// Sidebar highlight follows the route; grows one mapping per top-level route.
-function activeItemFor(pathname: string): string {
+// Sidebar highlight follows the route; grows one mapping per top-level route
+// (global nav) or per project section (project nav, ADR-0010).
+function activeItemFor(pathname: string, inProject: boolean): string {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/alerts")) return "alerts";
-  return "projects";
+  if (!inProject) return "projects";
+  const section = pathname.split("/")[3];
+  switch (section) {
+    case "spec":
+    case "tasks":
+    case "deployments":
+    case "issues":
+      return section;
+    default:
+      return "overview";
+  }
+}
+
+// Full-screen surfaces keep the sidebar but collapse it on entry (ADR-0010);
+// leaving re-expands it. Rendered inside <AppShell>, which provides the
+// shell context this consumes.
+function SidebarAutoCollapse({ collapsed }: { collapsed: boolean }) {
+  const { actions } = useAppShell();
+  const setSidebarCollapsed = actions.setSidebarCollapsed;
+  useEffect(() => {
+    setSidebarCollapsed(collapsed);
+  }, [collapsed, setSidebarCollapsed]);
+  return null;
 }
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
 // Main(Outlet) + Footer + NotificationPanel (Alerts, #154/#155).
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeItem = activeItemFor(pathname);
-  const { user, signOut } = useSession();
+  const { user, signOut, orgHandle } = useSession();
+
+  // Project AI panel (#130): available on every project route — mounted here
+  // because the full-screen spec route bypasses ProjectLayout. Same
+  // strict:false param read as the header's project switcher.
+  const params = useParams({ strict: false }) as { projectName?: string };
+  const projectName = params.projectName;
+  const [chatOpen, setChatOpen] = useState(false);
+
+  const activeItem = activeItemFor(pathname, Boolean(projectName));
+  // The spec workspace is the console's full-screen surface (#80).
+  const isSpecRoute = Boolean(projectName) && activeItem === "spec";
+
+  // "Generate spec" CTA (#150): the Spec card navigates here with ?generate=1.
+  // Open the panel and hand the one-shot signal to AgentChatPanel, which sends
+  // the first requirements turn; then strip the param so a refresh/back doesn't
+  // re-fire it.
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as {
+    generate?: "requirements" | "design";
+  };
+  const generate = search.generate;
+  useEffect(() => {
+    if (generate && projectName) setChatOpen(true);
+  }, [generate, projectName]);
+  const clearGenerate = useCallback(() => {
+    if (!projectName) return;
+    void navigate({
+      to: "/projects/$projectName/spec",
+      params: { projectName },
+      search: {},
+      replace: true,
+    });
+  }, [navigate, projectName]);
 
   return (
     <AppShell initialCollapsed={false} collapseOnSelectOnMobile>
@@ -81,6 +156,17 @@ export function AppLayout() {
           </Header.Switchers>
           <Header.Spacer />
           <Header.Actions>
+            {projectName && (
+              <Tooltip title={chatOpen ? "Close agent chat" : "Agent chat"}>
+                <IconButton
+                  aria-label="Toggle agent chat"
+                  color={chatOpen ? "primary" : "default"}
+                  onClick={() => setChatOpen((v) => !v)}
+                >
+                  <Sparkles size={20} />
+                </IconButton>
+              </Tooltip>
+            )}
             <ColorSchemeToggle />
             <NotificationButton />
             <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
@@ -100,24 +186,102 @@ export function AppLayout() {
         </Header>
       </AppShell.Navbar>
 
+      {/* Must live inside a named AppShell slot: unrecognized direct children
+          of AppShell are dropped by its slot extraction. */}
       <AppShell.Sidebar>
+        <SidebarAutoCollapse collapsed={isSpecRoute} />
         <Sidebar activeItem={activeItem}>
           <Sidebar.Nav>
-            <Sidebar.Category>
-              <Sidebar.Item id="projects" link={<Link to="/" />}>
-                <Sidebar.ItemIcon>
-                  <FolderOpen />
-                </Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
-              </Sidebar.Item>
-              {/* Global Alerts section (#155) — RCA-agent reports across every project. */}
-              <Sidebar.Item id="alerts" link={<Link to="/alerts" />}>
-                <Sidebar.ItemIcon>
-                  <Siren />
-                </Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>Alerts</Sidebar.ItemLabel>
-              </Sidebar.Item>
-            </Sidebar.Category>
+            {/* Project-scoped nav (ADR-0010): inside a project the nav fully
+                swaps to its sections — no back-item; home is the header brand
+                or the project switcher. */}
+            {projectName ? (
+              <Sidebar.Category>
+                <Sidebar.Item
+                  id="overview"
+                  link={
+                    <Link to="/projects/$projectName" params={{ projectName }} />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <LayoutDashboard />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Overview</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="spec"
+                  link={
+                    <Link
+                      to="/projects/$projectName/spec"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <FileText />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Spec</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="tasks"
+                  link={
+                    <Link
+                      to="/projects/$projectName/tasks"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <ListChecks />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Tasks</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="deployments"
+                  link={
+                    <Link
+                      to="/projects/$projectName/deployments"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <Rocket />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Deployments</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="issues"
+                  link={
+                    <Link
+                      to="/projects/$projectName/issues"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <CircleAlert />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Issues</Sidebar.ItemLabel>
+                </Sidebar.Item>
+              </Sidebar.Category>
+            ) : (
+              <Sidebar.Category>
+                <Sidebar.Item id="projects" link={<Link to="/" />}>
+                  <Sidebar.ItemIcon>
+                    <FolderOpen />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                {/* Global Alerts section (#155) — RCA-agent reports across every project. */}
+                <Sidebar.Item id="alerts" link={<Link to="/alerts" />}>
+                  <Sidebar.ItemIcon>
+                    <Siren />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Alerts</Sidebar.ItemLabel>
+                </Sidebar.Item>
+              </Sidebar.Category>
+            )}
           </Sidebar.Nav>
           <Sidebar.Footer>
             <Sidebar.Category>
@@ -135,7 +299,42 @@ export function AppLayout() {
       </AppShell.Sidebar>
 
       <AppShell.Main>
-        <Outlet />
+        {/* Content + the project AI panel side by side: the page shrinks
+            rather than being overlaid; the panel mounts only while open.
+            AppShell.Main is itself a flex container, so this wrapper must
+            grow (it's a flex ITEM) or it collapses to content width. */}
+        <Box
+          sx={{
+            display: "flex",
+            flexGrow: 1,
+            width: "100%",
+            minWidth: 0,
+            height: "100%",
+            minHeight: 0,
+          }}
+        >
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Outlet />
+          </Box>
+          {/* Horizontal Collapse gives the sidebar-style slide; unmountOnExit
+              keeps the closed panel out of the tree (no idle polling). */}
+          {projectName && (
+            <Collapse
+              in={chatOpen}
+              orientation="horizontal"
+              unmountOnExit
+              sx={{ height: "100%", flexShrink: 0 }}
+            >
+              <AgentChatPanel
+                org={orgHandle ?? "default"}
+                projectName={projectName}
+                onClose={() => setChatOpen(false)}
+                {...(generate ? { autoGenerate: generate } : {})}
+                onAutoGenerated={clearGenerate}
+              />
+            </Collapse>
+          )}
+        </Box>
       </AppShell.Main>
 
       <AppShell.Footer>

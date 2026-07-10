@@ -264,17 +264,63 @@ Three components behind the project cell:
 The storefront talks to both services; services share nothing.
 `;
 
-const architectureDiagram = `{
-  "type": "excalidraw-dsl",
-  "components": [
-    { "id": "storefront", "kind": "web-application" },
-    { "id": "catalog-api", "kind": "service" },
-    { "id": "orders-api", "kind": "service" }
-  ],
-  "edges": [
-    { "from": "storefront", "to": "catalog-api" },
-    { "from": "storefront", "to": "orders-api" }
+// Per-component design files (#80 rich design view): design.json for each of
+// the three components named in architectureMd, plus one wireframes.dsl for
+// the customer-facing component — enough to exercise the Designs sidebar's
+// component grouping and the derived Architecture / Wireframe views.
+const storefrontDesignJson = `{
+  "name": "storefront",
+  "type": "web-application",
+  "version": "0.1.0",
+  "language": "TypeScript",
+  "buildpack": "nodejs",
+  "appPath": "storefront",
+  "entrypoint": "src/main.tsx",
+  "exposure": "internet",
+  "description": "Customer-facing storefront UI.",
+  "dependencies": [
+    { "kind": "component", "name": "catalog-api" },
+    { "kind": "component", "name": "orders-api" }
   ]
+}`;
+
+const storefrontWireframesDsl = `screen Catalog
+  navbar "Demo Shop | Catalog | Cart | Orders" 0,0
+  heading "Browse products" 40,60
+  input "Search products" 40,110 400x36
+  card "Product grid" 40,160 760x420
+
+screen Cart
+  navbar "Demo Shop | Catalog | Cart | Orders" 0,0
+  heading "Your cart" 40,60
+  table "Product | Qty | Price" 40,110 760x300
+  button "Checkout" 40,430 160x40
+`;
+
+const catalogApiDesignJson = `{
+  "name": "catalog-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "catalog-api",
+  "entrypoint": "cmd/main",
+  "exposure": "intranet",
+  "description": "Product catalog CRUD + search.",
+  "dependencies": []
+}`;
+
+const ordersApiDesignJson = `{
+  "name": "orders-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "orders-api",
+  "entrypoint": "cmd/main",
+  "exposure": "intranet",
+  "description": "Cart, checkout, and order history.",
+  "dependencies": []
 }`;
 
 const validationPlan = `# Demo Shop — Validation plan
@@ -304,7 +350,22 @@ const collaborationFiles: MockSpecFile[] = [
 
 const fullFiles: MockSpecFile[] = [
   ...collaborationFiles,
-  { path: "specs/design/architecture.excalidraw", content: architectureDiagram },
+  {
+    path: "specs/design/components/storefront/design.json",
+    content: storefrontDesignJson,
+  },
+  {
+    path: "specs/design/components/storefront/wireframes.dsl",
+    content: storefrontWireframesDsl,
+  },
+  {
+    path: "specs/design/components/catalog-api/design.json",
+    content: catalogApiDesignJson,
+  },
+  {
+    path: "specs/design/components/orders-api/design.json",
+    content: ordersApiDesignJson,
+  },
   { path: "specs/validation/validation-plan.md", content: validationPlan },
 ];
 

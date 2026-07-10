@@ -59,6 +59,10 @@ type RepoAdmin interface {
 type IssueOps interface {
 	CreateIssue(ctx context.Context, owner, repo string, cred credentials.Credential, req CreateIssueRequest) (*IssueResult, error)
 	ListIssues(ctx context.Context, owner, repo string, cred credentials.Credential, labels []string) ([]IssueInfo, error)
+	// GetIssue fetches a single issue by number via GET /issues/{number} — an
+	// O(1) lookup, unlike ListIssues which pages the whole repo. Returns
+	// ErrIssueNotFound when the host answers 404.
+	GetIssue(ctx context.Context, owner, repo string, cred credentials.Credential, number int) (*IssueInfo, error)
 	// EnsureLabel creates a label in the repository if it does not already exist.
 	// It is idempotent — a 422 Unprocessable Entity response (already exists) is treated as success.
 	EnsureLabel(ctx context.Context, owner, repo string, cred credentials.Credential, name, color string) error

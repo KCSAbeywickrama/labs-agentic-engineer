@@ -19,6 +19,7 @@
 import type { ReactNode } from "react";
 import {
   Box,
+  Button,
   Card,
   CardActionArea,
   CardContent,
@@ -28,7 +29,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { FileText, Hammer, Rocket } from "@wso2/oxygen-ui-icons-react";
+import { FileText, ListChecks, Rocket, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { bucketTasks } from "../api/taskBuckets";
@@ -221,6 +222,55 @@ function StatusCard({
   );
 }
 
+// Spec card in the not-generated state (#150): no spec exists yet
+// (`hasSpec === false`), so the card is a plain (non-clickable) call-to-action
+// rather than whole-card navigation — its single action is the Generate spec
+// button, which opens the Spec view and auto-sends the first requirements turn
+// seeded from the stored create prompt. (No re-trigger guard yet — #151.)
+function GenerateSpecCard({ projectName }: { projectName: string }) {
+  const navigate = useNavigate();
+  return (
+    <Card
+      variant="outlined"
+      sx={{ height: "100%", borderColor: "primary.main", borderWidth: 2 }}
+    >
+      <CardContent
+        sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+      >
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1.5 }}>
+          <FileText size={18} />
+          <Typography variant="subtitle2" color="text.secondary">
+            Spec
+          </Typography>
+        </Stack>
+        <Typography variant="h6" gutterBottom>
+          Start here
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Turn your idea into a requirements spec — the agent drafts it live and
+          you refine it together.
+        </Typography>
+        <Box sx={{ flexGrow: 1 }} />
+        <Box>
+          <Button
+            variant="contained"
+            startIcon={<Sparkles size={16} />}
+            onClick={() =>
+              void navigate({
+                to: "/projects/$projectName/spec",
+                params: { projectName },
+                search: { generate: "requirements" },
+              })
+            }
+          >
+            Generate spec
+          </Button>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+}
+
 function LoadingCard({ title }: { title: string }) {
   return (
     <Card variant="outlined" sx={{ height: "100%" }}>
@@ -250,7 +300,9 @@ export function StatusCards({
     ? [
         {
           title: "Spec",
-          node: (
+          // No spec yet → the Generate spec CTA (#150); otherwise the normal
+          // whole-card spec status.
+          node: status.hasSpec ? (
             <StatusCard
               icon={<FileText size={18} />}
               title="Spec"
@@ -258,16 +310,19 @@ export function StatusCards({
               to="spec"
               projectName={projectName}
             />
+          ) : (
+            <GenerateSpecCard projectName={projectName} />
           ),
         },
         {
-          title: "Build",
+          // "Tasks" per the IA rename (#173, ADR-0010) — matches the nav.
+          title: "Tasks",
           node: (
             <StatusCard
-              icon={<Hammer size={18} />}
-              title="Build"
+              icon={<ListChecks size={18} />}
+              title="Tasks"
               state={buildCardState(status, tasks)}
-              to="builds"
+              to="tasks"
               projectName={projectName}
             />
           ),
@@ -285,7 +340,7 @@ export function StatusCards({
           ),
         },
       ]
-    : (["Spec", "Build", "Deployment"] as const).map((title) => ({
+    : (["Spec", "Tasks", "Deployment"] as const).map((title) => ({
         title,
         node: <LoadingCard title={title} />,
       }));

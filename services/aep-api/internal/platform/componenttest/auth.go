@@ -29,6 +29,11 @@ import (
 // request, so table tests with t.Parallel() don't race.
 const hdrClaims = "X-Componenttest-Claims"
 
+// TestBearer is the stand-in bearer fakeInboundAuth stores alongside the
+// claims (production: ExtractAuthToken). Tests asserting a forwarded caller
+// token compare against this.
+const TestBearer = "componenttest-bearer"
+
 // fakeInboundAuth is the component tier's stand-in for the production
 // JWKS-backed auth.Middleware (bff-component-testing.md §3). It does NOT verify a
 // token — it projects the harness-supplied claims into the request context at
@@ -41,7 +46,12 @@ func fakeInboundAuth(next http.Handler) http.Handler {
 		if raw := r.Header.Get(hdrClaims); raw != "" {
 			var c auth.Claims
 			if err := json.Unmarshal([]byte(raw), &c); err == nil {
-				r = r.WithContext(auth.WithClaims(r.Context(), &c))
+				ctx := auth.WithClaims(r.Context(), &c)
+				// Production's ExtractAuthToken stores the request bearer next
+				// to the verified claims; mirror it with a fixed stand-in so
+				// features that forward the caller's token (collab turns,
+				// OC user-JWT path) see one. TestBearer is the assertable value.
+				r = r.WithContext(auth.WithAuthToken(ctx, TestBearer))
 			}
 			r.Header.Del(hdrClaims)
 		}

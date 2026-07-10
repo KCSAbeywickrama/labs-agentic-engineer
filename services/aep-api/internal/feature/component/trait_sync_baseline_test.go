@@ -48,7 +48,7 @@ func TestBaseline_NoExposesAPI_ProducesNoTrait(t *testing.T) {
 			if enabled {
 				t.Fatalf("ResolveAPISecurityEnabled = true for %s (exposesAPI=%+v); want false", c.name, c.exposes)
 			}
-			traits, configs := DesiredAPIConfigurationTrait("svc", enabled)
+			traits, configs := DesiredAPIConfigurationTrait("svc", "", enabled)
 			if len(traits) != 0 {
 				t.Errorf("want zero traits for %s, got %d", c.name, len(traits))
 			}
@@ -83,7 +83,7 @@ func TestProtected_ProducesCanonicalTrait(t *testing.T) {
 	if !models.ResolveAPISecurityEnabled(comp) {
 		t.Fatal("ResolveAPISecurityEnabled should be true for auth=end-user-required")
 	}
-	traits, configs := DesiredAPIConfigurationTrait("todo-api", true)
+	traits, configs := DesiredAPIConfigurationTrait("todo-api", "", true)
 	if len(traits) != 1 {
 		t.Fatalf("want exactly 1 trait, got %d", len(traits))
 	}

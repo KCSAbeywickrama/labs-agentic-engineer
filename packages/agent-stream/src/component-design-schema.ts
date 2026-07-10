@@ -38,10 +38,15 @@ import type { Equal } from "./type-equal.js";
 // in-turn instead of committing a design.json the tag-time save gate 422s.
 
 // One env-var key the component reads at runtime (mirrors Go models.ConfigKey).
+// credentialClass is a CLOSED vocabulary (the skill fixes it to secret |
+// publishable): "secret" routes the value through the private secret path,
+// "publishable" is non-sensitive config. An off-vocabulary value must reject
+// HERE so the agent self-corrects in-turn instead of committing config the
+// value-collection gate can't route.
 const configKeySchema = z.strictObject({
   key: z.string().min(1),
   secret: z.boolean().optional(),
-  credentialClass: z.string().optional(),
+  credentialClass: z.enum(["secret", "publishable"]).optional(),
 });
 
 // One option attached to an ambiguous dependency (mirrors Go models.DependencyCandidate).
@@ -73,6 +78,30 @@ const dependencySchema = z.strictObject({
   candidates: z.array(dependencyCandidateSchema).optional(),
 });
 
+// The component's single network endpoint (mirrors Go models.ComponentEndpoint).
+// Only `name` is declared — the shared key the coding agent's workload.yaml and
+// the platform's api-configuration trait both reference. Defaults to "http"
+// downstream when the whole block is omitted.
+const endpointSchema = z.strictObject({
+  name: z.string().min(1),
+});
+
+// `type` is an OPEN vocabulary (future kinds: worker, scheduled-task, …) but the
+// browser-app kind has ONE canonical spelling: "web-application" (OpenChoreo's
+// term). The agent habitually writes "webapp"/"web-app", which silently breaks
+// deployment + runtime-config (both key on the exact string). Reject the known
+// wrong aliases with a self-correct message — this normalizes NOTHING, it forces
+// the agent to emit the canonical value. Mirrored in the Go fold gate
+// (agentfold/designgate.go) and the high-level-architecture skill. NB: a zod
+// `.refine` does not serialize to JSON Schema, so the generated
+// component-design.schema.json is intentionally more permissive on `type` (a
+// bare non-empty string); the alias rule is enforced by this gate + the Go fold.
+const WEB_APPLICATION_ALIASES = new Set(["webapp", "web-app", "webapplication", "web application"]);
+const componentTypeSchema = z.string().min(1).refine(
+  (t) => !WEB_APPLICATION_ALIASES.has(t.trim().toLowerCase()),
+  { message: 'use "web-application" (the canonical kind), not "webapp"/"web-app", for a browser app component type' },
+);
+
 // Managed-API exposure policy (platform-owned; mirrors Go models.ExposesAPI).
 const exposesAPISchema = z.strictObject({
   managed: z.boolean().optional(),
@@ -83,17 +112,23 @@ const exposesAPISchema = z.strictObject({
 
 export const componentDesignSchema = z.strictObject({
   name: z.string().min(1),
-  type: z.string().min(1),
+  type: componentTypeSchema,
   version: z.string().min(1),
   language: z.string().min(1),
+  // buildpack stays a bare string in the schema; the "docker"-only rule is a
+  // post-parse check in checkComponentDesign (like name==dir) so it does NOT
+  // serialize to the shared JSON Schema — the BFF save-gate + Go fold stay
+  // permissive/untouched while the agent write-gate still self-corrects in-turn.
   buildpack: z.string().min(1),
   appPath: z.string().min(1),
   entrypoint: z.string().min(1),
   exposure: z.enum(["internet", "intranet"]),
   dependencies: z.array(dependencySchema),
   description: z.string().min(1),
+  endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
+  skillsApplied: z.array(z.string()).optional(),
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).
@@ -140,6 +175,17 @@ export function checkComponentDesign(path: string, content: string): ComponentDe
     return {
       code: "SCHEMA_VIOLATION",
       message: `${path}: "name" must equal the component directory ("${dir}"), got "${res.data.name}".`,
+    };
+  }
+  // buildpack is effectively closed: the platform builds every component with the
+  // "docker" buildpack. Enforced here (post-parse, like name==dir) rather than in
+  // the zod schema so it does NOT serialize to the shared JSON Schema — the BFF
+  // save-gate + Go fold stay permissive/untouched; the agent (the sole writer)
+  // self-corrects in-turn. Mirrored in the high-level-architecture skill.
+  if (res.data.buildpack !== "docker") {
+    return {
+      code: "SCHEMA_VIOLATION",
+      message: `${path}: "buildpack" must be "docker" (the platform's single build path), got ${JSON.stringify(res.data.buildpack)}.`,
     };
   }
   return null;

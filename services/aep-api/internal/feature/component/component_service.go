@@ -166,7 +166,7 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	// api-configuration trait derived from design.md's exposesAPI.auth (none →
 	// no trait). Set at create time; per-env reconcile is the trait_sync path's job.
 	apiSecurityEnabled := models.ResolveAPISecurityEnabled(*comp)
-	traits, _ := DesiredAPIConfigurationTrait(k8sName, apiSecurityEnabled)
+	traits, _ := DesiredAPIConfigurationTrait(k8sName, comp.EndpointName(), apiSecurityEnabled)
 
 	// repository.secretRef stays empty: build credentials are pre-staged per
 	// WorkflowRun (build-credential-injection.md), so the Component's workflow

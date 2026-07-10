@@ -16,15 +16,14 @@ Derive the design tree from `requirements.md`. The design lives under
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
 specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
-specs/design/components/<name>/wireframes.dsl  # webapps only (excalidraw-wireframes skill)
+specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
 ```
 
 ## The top-level design.md
 
-YAML frontmatter first, then these sections. Depth rule: **every requirement
-must have a home** in a capability, entity, role, or screen below — a
-requirement you can't point to in this document is a defect, not an editing
-choice.
+These sections, in order. Depth rule: **every requirement must have a home** in
+a capability, entity, role, or screen below — a requirement you can't point to
+in this document is a defect, not an editing choice.
 
 1. **Overview** — what the system is, in one paragraph.
 2. **Components** — a bullet per component: name, `type`, one-line
@@ -47,10 +46,14 @@ Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
 sections, no generic performance targets, no "future enhancements" — unless
 the requirements state them.
 
-After emitting or changing the design, record the skills you actually applied:
-use `setFrontmatterField` on `specs/design/design.md` with key `skillsApplied`
-and the list of skill names (e.g. `["high-level-architecture",
-"openapi-conventions"]`). Never hand-edit frontmatter with editFile.
+After emitting or changing a component's design, record the skills that
+component's build actually needs as a `skillsApplied` array **inside that
+component's `specs/design/components/<name>/design.json`** — e.g. a Go API
+service → `["openapi-conventions", "go"]`; a web-application →
+`["excalidraw", "react"]`. It is a JSON key on the component's design object,
+so include it when you write that `design.json` (addFile/editFile) — do NOT
+put `skillsApplied` in `design.md` frontmatter. Each component carries only the
+skills its own build needs.
 
 ## Deriving components — deployment units the requirements justify
 
@@ -63,7 +66,7 @@ requirements state>". Write that justification into the component's
 A requirement justifies a SEPARATE component when it shows:
 
 - a distinct user-facing surface — e.g. an internal admin portal AND a
-  customer-facing app with different users and lifecycles → two webapps;
+  customer-facing app with different users and lifecycles → two web-applications;
 - a genuinely different runtime or scaling profile — e.g. an async
   worker/batch processor beside an interactive API, or a long-running
   AI/inference service;
@@ -82,9 +85,17 @@ Do NOT split by:
   components; the platform provides them.
 
 When nothing above forces a split, a small system naturally lands at one
-service + one webapp — that is an outcome of the rule, not a target. Name
+service + one web-application — that is an outcome of the rule, not a target. Name
 components in kebab-case after their responsibility (`expense-api`,
 `expense-webapp`, `report-worker`).
+
+**Component `type` is a fixed vocabulary — use the EXACT string.** A backend is
+`"service"`; a browser app is `"web-application"` (OpenChoreo's own term). Write
+`"web-application"` verbatim — NOT `"webapp"`, `"web-app"`, or `"webApplication"`
+(those are rejected, and a wrong value silently breaks the app's deployment and
+runtime config). The `-webapp` in a component NAME is fine; the `type` is still
+`"web-application"`. Other kinds the requirements imply (`"scheduled-task"`,
+`"worker"`, …) are captured verbatim.
 
 ## Per-component design.json
 
@@ -95,7 +106,7 @@ violations:
 ```json
 {
   "name": "expense-api",              // MUST equal the directory name
-  "type": "service",                  // "service" | "web-application" | any kind the requirements imply ("scheduled-task", "worker", ...)
+  "type": "service",                  // EXACT kind: "service" or "web-application" (NEVER "webapp"/"web-app"), or another the requirements imply ("scheduled-task", "worker", ...)
   "version": "0.1.0",                 // semantic version; 0.1.0 for a new component
   "language": "Go",                   // implementation language, e.g. "Go", "TypeScript"
   "buildpack": "docker",              // always "docker"
@@ -103,7 +114,8 @@ violations:
   "entrypoint": "deployment/service", // deploy entry
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
-  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do."
+  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
+  "endpoint": { "name": "http" } // optional; see below
 }
 ```
 
@@ -112,6 +124,12 @@ violations:
 design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
+
+`endpoint` is optional: omit it and a service's endpoint takes the default name
+`"http"`. Declare `{ "name": "<endpoint-name>" }` only when the endpoint must be
+named otherwise — `name` is the single source of truth the coding agent copies
+into `workload.yaml` and the managed-API gateway binds to. The port lives in
+`workload.yaml`, not here.
 
 Do NOT author `exposesAPI`, `componentAgentInstructions`, or any dependency
 `status`/`reason` — those are PLATFORM-owned. If the platform has already

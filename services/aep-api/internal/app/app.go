@@ -382,6 +382,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// the Enabled() check.
 	credService.WithSMAPIWriter(smWriter)
 	anthropicCredService.WithSMAPIWriter(smWriter)
+	// Push the org's Anthropic key to a consumer's ExternalSecret on every
+	// successful Connect (both first-time connect and later rotation) — see
+	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
+	// unless both env vars are set (no consumer assumed by default).
+	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
 	validatorProbes := orgcreds.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := credentials.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
@@ -660,7 +665,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Command surface calls into the funnel; webhook handling splits across the
 	// two package halves: issues.* (task birth / block repair / command labels)
 	// in feature/task, pull_request.* (end coding / spawn build) in feature/execution.
-	taskCommands := task.NewCommands(issueService, repoService, funnel)
+	taskCommands := task.NewCommands(issueService, repoService, funnel, componentService)
 	platformSender := githubBotLogin(cfg.GitHubAppSlug)
 	registerWebhook := func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
 		webhookRouter.Register(event, action, webhook.EventHandlerFunc(h))
@@ -777,6 +782,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		ConfigSvc:        configService,
 		RequirementsSvc:  requirementsService,
 		CollabRepo:       repoService,
+		IssueSvc:         issueService,
 		DesignSvc:        designService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
@@ -960,6 +966,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// into provision-Execution terminals + gate-issue closes, releasing gated
 		// consumer tasks (dependency-management §3.6).
 		resourceWatcher,
+		// Runtime-config convergence backstop: re-emits SPA env-config.js once a
+		// web-app's own public URL resolves. The build-success emit runs before
+		// the web-app's ReleaseBinding endpoint is up (so the consumer-url-env-config
+		// gate defers the write), and — since a web-app is dispatched last — no
+		// later build-success re-fires it. This idempotent sweep lands env-config.js
+		// once the URL converges (replaces the dropped periodic reconcile backstop).
+		runtimeconfig.NewWatcher(db, runtimeConfigSvc, asServiceIdentity, 0),
 		// Periodic credential validator — walks every active org_credentials row
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised credentials.

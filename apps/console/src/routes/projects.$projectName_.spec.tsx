@@ -22,7 +22,17 @@ import { SpecView } from "../features/spec/components/SpecView";
 // `$projectName_` (trailing underscore) un-nests this route from the
 // /projects/$projectName layout: the spec view is a full-screen workspace
 // without the shared project header (#80).
+//
+// `?generate=requirements|design` (#150/#159): arriving from a "Generate spec"
+// or "Generate/Re-generate design" CTA — AppLayout opens the agent panel and
+// auto-sends the matching generation turn.
 export const Route = createFileRoute("/projects/$projectName_/spec")({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { generate?: "requirements" | "design" } =>
+    search.generate === "requirements" || search.generate === "design"
+      ? { generate: search.generate }
+      : {},
   component: SpecRoute,
 });
 

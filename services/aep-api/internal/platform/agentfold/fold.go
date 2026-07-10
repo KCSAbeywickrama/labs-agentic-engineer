@@ -39,7 +39,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -59,14 +58,13 @@ import (
 // map — the exact (FE-filtered) snapshot the TS fold was seeded with.
 type BaseReader func(ctx context.Context, path string) (content []byte, exists bool, err error)
 
-// Op names the four canonical file mutations (the TS `Op` union).
+// Op names the canonical file mutations (the TS `Op` union).
 type Op string
 
 const (
-	OpAdd         Op = "add"
-	OpEdit        Op = "edit"
-	OpRemove      Op = "remove"
-	OpFrontmatter Op = "frontmatter"
+	OpAdd    Op = "add"
+	OpEdit   Op = "edit"
+	OpRemove Op = "remove"
 )
 
 // OpStatus is the success detail: applied = state changed;
@@ -92,7 +90,6 @@ const (
 	ErrInvalidYAML     ErrCode = "INVALID_YAML"
 	ErrInvalidJSON     ErrCode = "INVALID_JSON"
 	ErrSchemaViolation ErrCode = "SCHEMA_VIOLATION"
-	ErrNoFrontmatter   ErrCode = "NO_FRONTMATTER"
 	ErrProtectedPath   ErrCode = "PROTECTED_PATH"
 )
 
@@ -282,31 +279,6 @@ func (f *Fold) RemoveFile(ctx context.Context, path string) (OpResult, error) {
 	return opOk(path, op, StatusApplied), nil
 }
 
-// SetFrontmatterField is FileBundle.setFrontmatterField. value must be a
-// string, bool, float64 (or int), or []string — the wire contract. A non-nil
-// error is either a base-read failure or an *UnsupportedFrontmatterError
-// (frontmatter outside the byte-parity emitter subset → the turn must fail).
-func (f *Fold) SetFrontmatterField(ctx context.Context, path, key string, value any) (OpResult, error) {
-	const op = OpFrontmatter
-	content, exists, err := f.read(ctx, path)
-	if err != nil {
-		return OpResult{}, err
-	}
-	if !exists {
-		return opErr(path, op, ErrNoSuchFile, path+" is not in the bundle."), nil
-	}
-	next, problem, ferr := setFrontmatterField(path, content, key, value)
-	if ferr != nil {
-		return OpResult{}, ferr
-	}
-	if problem != nil {
-		return opErr(path, op, problem.code, problem.message), nil
-	}
-	return f.commit(path, op, next, func(e string) string {
-		return "frontmatter would not be valid YAML: " + e
-	}), nil
-}
-
 // commit applies content to path gated by the YAML reparse guard and the
 // component design.json schema gate; a rejection leaves the fold
 // byte-for-byte unchanged.
@@ -355,13 +327,12 @@ func (f *Fold) FullState(seed map[string]string) map[string]string {
 
 // opByTool mirrors OP_BY_TOOL (change.ts).
 var opByTool = map[string]Op{
-	"addFile":             OpAdd,
-	"editFile":            OpEdit,
-	"removeFile":          OpRemove,
-	"setFrontmatterField": OpFrontmatter,
+	"addFile":    OpAdd,
+	"editFile":   OpEdit,
+	"removeFile": OpRemove,
 }
 
-// IsFileMutationTool reports whether toolName is one of the four canonical
+// IsFileMutationTool reports whether toolName is one of the canonical
 // file-mutation tools (change.ts isFileMutationTool).
 func IsFileMutationTool(toolName string) bool {
 	_, ok := opByTool[toolName]
@@ -370,7 +341,7 @@ func IsFileMutationTool(toolName string) bool {
 
 // ApplyToolCall folds ONE parsed StreamPart into the fold, mirroring how the
 // TS fold consumes the stream (turnStream.ts): only `tool-call` frames for the
-// four mutation tools apply; everything else — other frame types, unknown
+// mutation tools apply; everything else — other frame types, unknown
 // tools, malformed inputs — is silently ignored (nil, nil). The result is
 // returned for logging; state parity does not depend on it.
 func (f *Fold) ApplyToolCall(ctx context.Context, part StreamPart) (*OpResult, error) {
@@ -407,14 +378,6 @@ func (f *Fold) ApplyToolCall(ctx context.Context, part StreamPart) (*OpResult, e
 			return nil, nil
 		}
 		res, err = f.RemoveFile(ctx, path)
-	case "setFrontmatterField":
-		path, okP := asString(in["path"])
-		key, okK := asString(in["key"])
-		value, okV := asFrontmatterValue(in["value"])
-		if !okP || !okK || !okV {
-			return nil, nil
-		}
-		res, err = f.SetFrontmatterField(ctx, path, key, value)
 	}
 	if err != nil {
 		return nil, err
@@ -444,41 +407,37 @@ func asString(v any) (string, bool) {
 	return s, ok
 }
 
-// asFrontmatterValue is isFrontmatterValue: string | number | boolean |
-// string[] (an empty array qualifies).
-func asFrontmatterValue(v any) (any, bool) {
-	switch t := v.(type) {
-	case string, bool:
-		return t, true
-	case json.Number:
-		f, err := strconv.ParseFloat(t.String(), 64)
-		if err != nil {
-			if strings.Contains(err.Error(), "value out of range") {
-				return f, true // ±Inf / 0, the JS Number overflow behavior
-			}
-			return nil, false
-		}
-		return f, true
-	case []any:
-		out := make([]string, len(t))
-		for i, e := range t {
-			s, ok := e.(string)
-			if !ok {
-				return nil, false
-			}
-			out[i] = s
-		}
-		return out, true
-	default:
-		return nil, false
-	}
-}
-
 // ---- helpers (bundle.ts ports) ------------------------------------------------
 
 // lf is the canonical newline form — all fold content is stored LF.
 func lf(s string) string {
 	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
+// u16Len is the UTF-16 code-unit length (JS String.prototype.length).
+func u16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if r > 0xFFFF {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+// jsTrim is String.prototype.trim: ECMA WhiteSpace (TAB VT FF SP NBSP ZWNBSP
+// + Unicode Zs) plus LineTerminator (LF CR LS PS). Notably NEL (U+0085) is
+// NOT trimmed, unlike Go's unicode.IsSpace.
+func jsTrim(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		switch r {
+		case '\t', '\v', '\f', ' ', 0x00a0, 0xfeff, '\n', '\r', 0x2028, 0x2029:
+			return true
+		}
+		return r == 0x1680 || (r >= 0x2000 && r <= 0x200a) || r == 0x202f || r == 0x205f || r == 0x3000
+	})
 }
 
 func opOk(path string, op Op, status OpStatus) OpResult {

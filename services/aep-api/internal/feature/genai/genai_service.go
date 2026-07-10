@@ -68,7 +68,10 @@ var (
 	ErrInvalidUseCase        = errors.New("invalid use case")
 	ErrInvalidConversationID = errors.New("invalid conversation id")
 	ErrEmptyInstruction      = errors.New("instruction must not be empty")
-	ErrNoAnthropicKey        = errors.New("organization has no Anthropic API key configured")
+	// ErrCollabNoToken rejects a room-scoped turn whose request carried no
+	// bearer — the agent joins the room with the caller's token (#86 d7).
+	ErrCollabNoToken  = errors.New("collab turn requires a bearer token")
+	ErrNoAnthropicKey = errors.New("organization has no Anthropic API key configured")
 	// ErrRequirementsMissing gates design generation on requirements CONTENT
 	// at HEAD (single-tag build flow: the version tag is cut by the build
 	// endpoint AFTER the design exists, so a tag can never be a precondition
@@ -149,6 +152,10 @@ type TurnInput struct {
 	ConversationID string
 	Instruction    string
 	Target         string
+	// Collab makes this a room-scoped turn (#86 phase 4): the agents service
+	// joins the project's spec room as a live Yjs peer with the prompting
+	// user's bearer, edits the shared doc, and nothing is committed to git.
+	Collab bool
 }
 
 // TurnStatus is the read view of one turn (the status GET body).
@@ -311,6 +318,19 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	// = the org credential's save identity (the AEP bot fallback).
 	author, committer := s.captureIdentities(ctx, ref)
 
+	// Room-scoped turn (#86 phase 4): capture the room + the prompting user's
+	// bearer NOW (D20 — the runner has no request context). Access is
+	// request-scoped: the collab server's oracle validates this token exactly
+	// like a browser join; no token → the turn cannot join, fail pre-202.
+	collabRoomID, collabToken := "", ""
+	if in.Collab {
+		collabToken = auth.GetAuthToken(ctx)
+		if collabToken == "" {
+			return "", ErrCollabNoToken
+		}
+		collabRoomID = "spec-" + orgID + "-" + projectID
+	}
+
 	ws := s.git.Workspace()
 	baseRef, err := ws.Head(ctx, ref, "")
 	if err != nil {
@@ -386,6 +406,8 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		anthropicKey:     key,
 		author:           author,
 		committer:        committer,
+		collabRoomID:     collabRoomID,
+		collabToken:      collabToken,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic
