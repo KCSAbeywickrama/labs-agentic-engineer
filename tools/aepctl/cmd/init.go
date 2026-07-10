@@ -180,6 +180,14 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if u := viper.GetString("codingagent.secret_manager_api.url"); u != "" {
 		helmArgs = append(helmArgs, "--set", "codingAgentDispatch.secretManagerApi.url="+u)
 	}
+	// GitHub webhook delivery: register deliveryURL on repos and, locally, deploy
+	// the smee-client that forwards the smee.io channel into the cluster. Prod
+	// sets webhook.local_smee.enabled=false and delivery_url to a real ingress.
+	helmArgs = append(helmArgs, "--set",
+		fmt.Sprintf("webhook.localSmee.enabled=%t", viper.GetBool("webhook.local_smee.enabled")))
+	if u := viper.GetString("webhook.delivery_url"); u != "" {
+		helmArgs = append(helmArgs, "--set", "webhook.deliveryURL="+u)
+	}
 	var helmOut bytes.Buffer
 	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)
 	helmCmd.Stdout = &helmOut

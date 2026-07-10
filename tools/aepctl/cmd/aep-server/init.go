@@ -163,12 +163,21 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 		return fatal(fmt.Sprintf("generate agents JWT secret: %v", err))
 	}
 
+	// GitHub webhook HMAC secret. aep-api registers it on each repo's webhook
+	// and validates inbound X-Hub-Signature-256 with it (fail-closed). Generated
+	// here so it's identical in local + prod and never a plaintext chart value.
+	webhookSecret, err := bootstrap.GeneratePassword(32)
+	if err != nil {
+		return fatal(fmt.Sprintf("generate webhook secret: %v", err))
+	}
+
 	secrets := []struct{ path, value string }{
 		{"aep/anthropic-api-key", req.AnthropicApiKey},
 		{"aep/postgres-password", postgresPassword},
 		{"aep/task-signing-key", signingKey},
 		{"aep/oauth-state-key", oauthStateKey},
 		{"aep/agents-jwt-secret", agentsJWTSecret},
+		{"aep/webhook-secret", webhookSecret},
 	}
 	for _, name := range thunderClientNames {
 		secrets = append(secrets, struct{ path, value string }{
