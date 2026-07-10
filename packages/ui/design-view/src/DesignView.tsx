@@ -148,6 +148,10 @@ function DependencyCard({ dep }: { dep: Dependency }) {
         </Typography>
         {dep.resourceType && <Tag label={dep.resourceType} />}
         {dep.needsSpec && <Tag label="needsSpec" />}
+        {dep.parameters &&
+          Object.entries(dep.parameters).map(([k, v]) => (
+            <Tag key={k} label={`${k}=${String(v)}`} />
+          ))}
       </Box>
       {dep.description && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -175,17 +179,22 @@ function DependencyCard({ dep }: { dep: Dependency }) {
       )}
       {dep.config && dep.config.length > 0 && (
         <Box sx={{ mt: 0.5, display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-          {dep.config.map((c) => (
-            <Tag key={c.key} label={c.secret ? `${c.key} (secret)` : c.key} />
-          ))}
+          {dep.config.map((c, i) => {
+            const notes = [c.secret ? "secret" : null, c.credentialClass ?? null]
+              .filter(Boolean)
+              .join(" · ");
+            return (
+              <Tag key={`${c.key}:${i}`} label={notes ? `${c.key} (${notes})` : c.key} />
+            );
+          })}
         </Box>
       )}
       {dep.candidates && dep.candidates.length > 0 && (
         <Box sx={{ mt: 0.5 }}>
-          {dep.candidates.map((cand) => {
+          {dep.candidates.map((cand, i) => {
             const candHref = safeHref(cand.url);
             return (
-              <Typography key={cand.label} variant="caption" sx={{ display: "block" }}>
+              <Typography key={`${cand.label}:${i}`} variant="caption" sx={{ display: "block" }}>
                 {candHref ? (
                   <Link href={candHref} target="_blank" rel="noreferrer">
                     {cand.label}
@@ -247,8 +256,8 @@ function DesignBody({ design }: { design: ComponentDesign }) {
           <>
             <SectionHeading>Skills applied</SectionHeading>
             <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-              {design.skillsApplied.map((s) => (
-                <Chip key={s} label={s} size="small" />
+              {design.skillsApplied.map((s, i) => (
+                <Chip key={`${s}:${i}`} label={s} size="small" />
               ))}
             </Box>
           </>
@@ -261,8 +270,8 @@ function DesignBody({ design }: { design: ComponentDesign }) {
             No dependencies.
           </Typography>
         ) : (
-          design.dependencies.map((dep) => (
-            <DependencyCard key={`${dep.kind}:${dep.name}`} dep={dep} />
+          design.dependencies.map((dep, i) => (
+            <DependencyCard key={`${dep.kind}:${dep.name}:${i}`} dep={dep} />
           ))
         )}
       </Box>
