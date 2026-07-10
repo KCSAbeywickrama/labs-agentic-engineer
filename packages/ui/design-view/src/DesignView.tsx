@@ -23,6 +23,7 @@ import {
   type ComponentDesign,
   type Dependency,
 } from "./parse.js";
+import { safeHref } from "./url.js";
 
 // Solid background per component type / dependency kind. Text color is
 // computed for contrast (getContrastText), so labels stay readable in both
@@ -129,6 +130,7 @@ function Tag({ label }: { label: string }) {
 function DependencyCard({ dep }: { dep: Dependency }) {
   const color = KIND_COLOR[dep.kind] ?? FALLBACK;
   const kindLabel = KIND_LABEL[dep.kind] ?? dep.kind;
+  const specHref = safeHref(dep.specUrl);
   return (
     <Box
       sx={{
@@ -160,9 +162,15 @@ function DependencyCard({ dep }: { dep: Dependency }) {
       {dep.specUrl && (
         <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
           spec:{" "}
-          <Link href={dep.specUrl} target="_blank" rel="noreferrer" sx={mono}>
-            {dep.specUrl}
-          </Link>
+          {specHref ? (
+            <Link href={specHref} target="_blank" rel="noreferrer" sx={mono}>
+              {dep.specUrl}
+            </Link>
+          ) : (
+            <Box component="span" sx={mono}>
+              {dep.specUrl}
+            </Box>
+          )}
         </Typography>
       )}
       {dep.config && dep.config.length > 0 && (
@@ -174,18 +182,21 @@ function DependencyCard({ dep }: { dep: Dependency }) {
       )}
       {dep.candidates && dep.candidates.length > 0 && (
         <Box sx={{ mt: 0.5 }}>
-          {dep.candidates.map((cand) => (
-            <Typography key={cand.label} variant="caption" sx={{ display: "block" }}>
-              {cand.url ? (
-                <Link href={cand.url} target="_blank" rel="noreferrer">
-                  {cand.label}
-                </Link>
-              ) : (
-                cand.label
-              )}
-              {cand.description ? ` — ${cand.description}` : ""}
-            </Typography>
-          ))}
+          {dep.candidates.map((cand) => {
+            const candHref = safeHref(cand.url);
+            return (
+              <Typography key={cand.label} variant="caption" sx={{ display: "block" }}>
+                {candHref ? (
+                  <Link href={candHref} target="_blank" rel="noreferrer">
+                    {cand.label}
+                  </Link>
+                ) : (
+                  cand.label
+                )}
+                {cand.description ? ` — ${cand.description}` : ""}
+              </Typography>
+            );
+          })}
         </Box>
       )}
     </Box>
