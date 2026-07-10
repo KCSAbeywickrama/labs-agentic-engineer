@@ -118,8 +118,10 @@ export const skillsLoadError: ErrorModel = {
 };
 
 // Covers all four kinds (org | platform | custom | imported — the BE's real
-// vocabulary; builtin/flow are retired) so the catalogue's grouped rendering,
+// vocabulary; builtin/flow are retired) so the catalogue's kind chips,
 // read-only vs editable actions, and the updates-available list all exercise.
+// More than one page of skills (10/page, issue #172) so the flat list's
+// pagination is exercisable in mock mode.
 export const seedSkills: SkillDetailBody[] = [
   {
     orgId: "org-1",
@@ -237,6 +239,118 @@ Search the registry, read the SKILL.md, and check the declared license.`,
     references: {},
     contentSha: "sha-fs-1",
     updatedAt: "2026-07-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "node-service",
+    kind: "org",
+    editable: false,
+    description: "How to build a Node.js service on the platform.",
+    skillMd: `---
+name: node-service
+description: How to build a Node.js service on the platform.
+---
+
+Pin the LTS base image; expose \`GET /health\` on port **9090**.`,
+    references: {},
+    contentSha: "sha-ns-1",
+    updatedAt: "2026-05-03T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "python-service",
+    kind: "org",
+    editable: false,
+    description: "How to build a Python service on the platform.",
+    skillMd: `---
+name: python-service
+description: How to build a Python service on the platform.
+---
+
+Use \`uv\` for dependency management; expose \`GET /health\` on port **9090**.`,
+    references: {},
+    contentSha: "sha-ps-1",
+    updatedAt: "2026-05-03T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "postgres-schema",
+    kind: "org",
+    editable: false,
+    description: "Schema and migration conventions for platform databases.",
+    skillMd: `---
+name: postgres-schema
+description: Schema and migration conventions for platform databases.
+---
+
+One migration per change; never edit an applied migration.`,
+    references: {},
+    contentSha: "sha-pg-1",
+    updatedAt: "2026-05-04T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "wireframes",
+    kind: "platform",
+    editable: false,
+    description: "Derives per-component wireframes from the design file.",
+    skillMd: `---
+name: wireframes
+description: Derives per-component wireframes from the design file.
+---
+
+Derive one wireframe per user-facing component in the approved design.`,
+    references: {},
+    contentSha: "sha-wf-1",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "validation-files",
+    kind: "platform",
+    editable: false,
+    description: "Derives validation files from approved requirements.",
+    skillMd: `---
+name: validation-files
+description: Derives validation files from approved requirements.
+---
+
+Every requirement gets at least one validation criterion.`,
+    references: {},
+    contentSha: "sha-vf-1",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "acme-api-style",
+    kind: "custom",
+    editable: true,
+    description: "Acme's REST API naming and versioning conventions.",
+    skillMd: `---
+name: acme-api-style
+description: Acme's REST API naming and versioning conventions.
+---
+
+Plural nouns, kebab-case paths, \`/v1\` prefix, RFC 9457 errors.`,
+    references: {},
+    contentSha: "sha-aas-1",
+    updatedAt: "2026-06-22T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "commit-conventions",
+    kind: "imported",
+    editable: true,
+    description: "Conventional-commit message rules for agent-authored PRs.",
+    skillMd: `---
+name: commit-conventions
+description: Conventional-commit message rules for agent-authored PRs.
+---
+
+\`type(scope): summary\` — imperative, no trailing period.`,
+    references: {},
+    contentSha: "sha-cc-1",
+    updatedAt: "2026-07-02T00:00:00Z",
   },
 ];
 
