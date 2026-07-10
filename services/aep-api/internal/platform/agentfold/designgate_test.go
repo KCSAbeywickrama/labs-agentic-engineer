@@ -167,3 +167,41 @@ func TestValidateComponentDesign_Parameters(t *testing.T) {
 		})
 	}
 }
+
+// designWithSkills builds a minimal valid component design.json for dir "svc",
+// optionally injecting a `skillsApplied` value verbatim from fragment.
+func designWithSkills(fragment string) string {
+	sa := ""
+	if fragment != "" {
+		sa = `,"skillsApplied":` + fragment
+	}
+	return fmt.Sprintf(`{"name":"svc","type":"service","version":"0.1.0",`+
+		`"language":"Go","buildpack":"docker","appPath":"svc",`+
+		`"entrypoint":"deployment/service","exposure":"internet",`+
+		`"description":"x","dependencies":[]%s}`, sa)
+}
+
+func TestDesignGate_SkillsApplied(t *testing.T) {
+	cases := []struct {
+		name     string
+		fragment string
+		wantOK   bool
+	}{
+		{"absent — valid", "", true},
+		{"empty array — valid", `[]`, true},
+		{"string array — valid", `["go","openapi-conventions"]`, true},
+		{"not an array — rejected", `"go"`, false},
+		{"non-string element — rejected", `["go",3]`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := validateComponentDesign(designWithSkills(c.fragment), "svc")
+			if c.wantOK && p != nil {
+				t.Fatalf("want accepted, got: %s", p.message)
+			}
+			if !c.wantOK && p == nil {
+				t.Fatalf("want rejected, got accepted")
+			}
+		})
+	}
+}

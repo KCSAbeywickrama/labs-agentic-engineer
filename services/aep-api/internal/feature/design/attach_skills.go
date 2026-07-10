@@ -31,15 +31,17 @@ import (
 // dependency whose ClusterResourceType carries the PE-authored
 // `aep.wso2.com/skill` annotation (resources.TypeMarkers.Skill) means the
 // design needs that skill's agent instructions to work with the dependency —
-// so design save ensures the skill name is present in the design's
-// skillsApplied. Membership keys ONLY on the CRT annotation, never on a
-// resourceType name or component type: any dependency kind carrying the
-// marker qualifies, exactly like deriveEndUserAuth keys on the role label
-// rather than a hardcoded name.
+// so design save ensures the skill name is present in the OWNING component's
+// skillsApplied (per-component design.json — see
+// models.DesignComponent.SkillsApplied). Membership keys ONLY on the CRT
+// annotation, never on a resourceType name or component type: any dependency
+// kind carrying the marker qualifies, exactly like deriveEndUserAuth keys on
+// the role label rather than a hardcoded name.
 //
-// This is append-only by design: skillsApplied may carry entries from other
-// sources (generation-time skill selection, manual edits), and this pass must
-// never remove or reorder them — it only ever adds a missing name, once.
+// This is append-only by design: a component's skillsApplied may carry
+// entries from other sources (generation-time skill selection, manual
+// edits), and this pass must never remove or reorder them — it only ever
+// adds a missing name, once, to the component that declared the dependency.
 // An unresolvable/unknown skill name is deliberately NOT validated here: it is
 // attached as-authored on the CRT, and the downstream resolve layer
 // (skills.SkillService.ResolveMany, read at execution time via
@@ -48,20 +50,22 @@ import (
 // skills/repo_store.go's ResolveMany. A PE typo in the annotation must not
 // brick every save of every design that happens to depend on that type.
 
-// attachAnnotatedSkills ensures every skill named by a platform-resource
-// dependency's CRT skill annotation is present in designFile.SkillsApplied.
-// Mutates designFile.SkillsApplied in place (append-only, de-duplicated) and
-// reports whether it appended at least one new entry. A nil/empty markers map
+// attachAnnotatedSkills ensures every skill named by a component's
+// platform-resource dependency CRT annotation is present in THAT component's
+// SkillsApplied (append-only, de-duplicated within the component). Returns the
+// names of components that gained at least one skill. A nil/empty markers map
 // (no platform-resource dependency in the design, or none of its types carry
-// the annotation) appends nothing.
-func attachAnnotatedSkills(designFile *artifacts.DesignFile, markers map[string]resources.TypeMarkers) bool {
-	present := make(map[string]struct{}, len(designFile.SkillsApplied))
-	for _, name := range designFile.SkillsApplied {
-		present[name] = struct{}{}
-	}
-	changed := false
+// the annotation) changes nothing.
+func attachAnnotatedSkills(designFile *artifacts.DesignFile, markers map[string]resources.TypeMarkers) []string {
+	var changed []string
 	for i := range designFile.Components {
-		for _, dep := range designFile.Components[i].Dependencies {
+		comp := &designFile.Components[i]
+		present := make(map[string]struct{}, len(comp.SkillsApplied))
+		for _, name := range comp.SkillsApplied {
+			present[name] = struct{}{}
+		}
+		added := false
+		for _, dep := range comp.Dependencies {
 			if dep.Kind != models.DependencyKindPlatformResource {
 				continue
 			}
@@ -73,64 +77,70 @@ func attachAnnotatedSkills(designFile *artifacts.DesignFile, markers map[string]
 				continue
 			}
 			present[skill] = struct{}{}
-			designFile.SkillsApplied = append(designFile.SkillsApplied, skill)
-			changed = true
+			comp.SkillsApplied = append(comp.SkillsApplied, skill)
+			added = true
+		}
+		if added {
+			changed = append(changed, comp.Name)
 		}
 	}
 	return changed
 }
 
 // persistSkillsApplied runs attachAnnotatedSkills over designFile and, when it
-// appended at least one skill, commits the updated root design.md (the
-// skillsApplied frontmatter lives there — see artifacts.SplitDesign/
-// AssembleDesign, not per-component design.json) to main via the
-// committed-truth write surface, mirroring persistEndUserAuthDerivation's
-// render-CAS-commit shape for the derive_auth seam. It runs from
-// SaveAndProceed in the SAME pass and over the SAME marker map
-// resourceMarkersForAuthDerivation already fetched — no second catalog call.
+// added at least one skill to at least one component, commits the changed
+// components' design.json files (re-rendered via artifacts.SplitDesign) to
+// main via the committed-truth write surface, mirroring
+// persistEndUserAuthDerivation's render-CAS-commit shape for the derive_auth
+// seam — a single atomic multi-file commit when more than one component
+// changed. It runs from SaveAndProceed in the SAME pass and over the SAME
+// marker map resourceMarkersForAuthDerivation already fetched — no second
+// catalog call.
 //
 // Returns (true, nil) when a commit landed — the caller must re-resolve HEAD
 // (its designFile + any pinned commitSHA are now stale), the same convention
 // the auto-fetch-on-save and auth-derivation steps already follow. A nil
 // fileCommitter (degraded boot) is a best-effort no-op after a successful
-// in-memory attach: designFile.SkillsApplied still reflects the addition for
-// THIS response, but nothing is persisted.
+// in-memory attach: the changed components' SkillsApplied still reflect the
+// addition for THIS response, but nothing is persisted.
 func (s *designService) persistSkillsApplied(ctx context.Context, orgID, projectID string, designFile *artifacts.DesignFile, markers map[string]resources.TypeMarkers) (bool, error) {
-	if !attachAnnotatedSkills(designFile, markers) {
+	changed := attachAnnotatedSkills(designFile, markers)
+	if len(changed) == 0 {
 		return false, nil
 	}
 	if s.fileCommitter == nil {
-		return false, nil
+		return false, nil // degraded boot — in-memory attach still reflects for this response
 	}
 
-	rendered, rerr := artifacts.SplitDesign(&artifacts.DesignFile{
-		Overview:      designFile.Overview,
-		SourceSpec:    designFile.SourceSpec,
-		SkillsApplied: designFile.SkillsApplied,
-	})
+	// Render the whole design; pick out the changed components' design.json files.
+	rendered, rerr := artifacts.SplitDesign(designFile)
 	if rerr != nil {
-		return false, fmt.Errorf("render design.md: %w", rerr)
-	}
-	content, ok := rendered[artifacts.DesignRootFile]
-	if !ok {
-		return false, fmt.Errorf("render design.md: %q missing from split", artifacts.DesignRootFile)
+		return false, fmt.Errorf("render design: %w", rerr)
 	}
 
-	designFull := artifacts.DesignDir + "/" + artifacts.DesignRootFile
-	_, sha, exists, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, designFull)
-	if rerr != nil {
-		return false, fmt.Errorf("read %q for CAS: %w", designFull, rerr)
-	}
-	if !exists {
-		return false, fmt.Errorf("%q missing on disk", designFull)
+	writes := make([]DesignFileWrite, 0, len(changed))
+	for _, name := range changed {
+		rel := "components/" + name + "/design.json"
+		content, ok := rendered[rel]
+		if !ok {
+			return false, fmt.Errorf("render design: %q missing from split", rel)
+		}
+		full := artifacts.DesignDir + "/" + rel
+		_, sha, exists, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, full)
+		if rerr != nil {
+			return false, fmt.Errorf("read %q for CAS: %w", full, rerr)
+		}
+		if !exists {
+			return false, fmt.Errorf("%q missing on disk", full)
+		}
+		writes = append(writes, DesignFileWrite{Path: full, Content: content, BaseSHA: sha})
 	}
 
-	if err := s.fileCommitter.Commit(ctx, orgID, projectID,
-		[]DesignFileWrite{{Path: designFull, Content: content, BaseSHA: sha}},
-		"Attach CRT-annotated skills to the design"); err != nil {
+	if err := s.fileCommitter.Commit(ctx, orgID, projectID, writes,
+		"Attach CRT-annotated skills to component designs"); err != nil {
 		return false, err
 	}
-	slog.InfoContext(ctx, "design save: skill auto-attach persisted",
-		"org", orgID, "project", projectID, "skillsApplied", designFile.SkillsApplied)
+	slog.InfoContext(ctx, "design save: per-component skill auto-attach persisted",
+		"org", orgID, "project", projectID, "components", changed)
 	return true, nil
 }

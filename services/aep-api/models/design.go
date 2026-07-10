@@ -55,6 +55,10 @@ type DesignComponent struct {
 	OpenAPISpec                string             `json:"openAPISpec"`
 	ComponentAgentInstructions string             `json:"componentAgentInstructions"`
 	ExposesAPI                 *ExposesAPI        `json:"exposesAPI,omitempty"`
+	// SkillsApplied are the skill names applied to THIS component (per-component
+	// — the coding runner materializes exactly these when building it). Sourced
+	// from the component design.json `skillsApplied` key.
+	SkillsApplied []string `json:"skillsApplied,omitempty"`
 }
 
 // DefaultEndpointName is the conventional workload endpoint name the platform's

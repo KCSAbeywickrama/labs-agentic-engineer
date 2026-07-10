@@ -18,6 +18,7 @@ package design
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -39,8 +40,8 @@ func skillMarker(resourceType, skill string) map[string]resources.TypeMarkers {
 	return map[string]resources.TypeMarkers{resourceType: {Skill: skill}}
 }
 
-// (a) dep with Skill marker → skillsApplied gains it.
-func TestAttachAnnotatedSkills_AttachesWhenAnnotated(t *testing.T) {
+// (a) dep with Skill marker → the owning component's SkillsApplied gains it.
+func TestAttachAnnotatedSkills_AttachesToOwningComponent(t *testing.T) {
 	t.Parallel()
 	d := &artifacts.DesignFile{
 		Components: []models.DesignComponent{{
@@ -49,30 +50,30 @@ func TestAttachAnnotatedSkills_AttachesWhenAnnotated(t *testing.T) {
 		}},
 	}
 	changed := attachAnnotatedSkills(d, skillMarker("thunder-app", "thunder-authentication"))
-	if !changed {
-		t.Fatal("want changed=true")
+	if !reflect.DeepEqual(changed, []string{"storefront-web"}) {
+		t.Fatalf("changed = %v, want [storefront-web]", changed)
 	}
-	if want := []string{"thunder-authentication"}; !equalStrings(d.SkillsApplied, want) {
-		t.Fatalf("SkillsApplied = %v, want %v", d.SkillsApplied, want)
+	if want := []string{"thunder-authentication"}; !equalStrings(d.Components[0].SkillsApplied, want) {
+		t.Fatalf("SkillsApplied = %v, want %v", d.Components[0].SkillsApplied, want)
 	}
 }
 
-// (b) already present → no duplicate, changed=false.
+// (b) already present on the component → no duplicate, not reported changed.
 func TestAttachAnnotatedSkills_NoDuplicateWhenAlreadyPresent(t *testing.T) {
 	t.Parallel()
 	d := &artifacts.DesignFile{
-		SkillsApplied: []string{"thunder-authentication"},
 		Components: []models.DesignComponent{{
-			Name:         "storefront-web",
-			Dependencies: []models.Dependency{resourceDep("user-auth", "thunder-app")},
+			Name:          "storefront-web",
+			SkillsApplied: []string{"thunder-authentication"},
+			Dependencies:  []models.Dependency{resourceDep("user-auth", "thunder-app")},
 		}},
 	}
 	changed := attachAnnotatedSkills(d, skillMarker("thunder-app", "thunder-authentication"))
-	if changed {
-		t.Fatal("want changed=false — skill already present")
+	if changed != nil {
+		t.Fatalf("want changed=nil — skill already present, got %v", changed)
 	}
-	if want := []string{"thunder-authentication"}; !equalStrings(d.SkillsApplied, want) {
-		t.Fatalf("SkillsApplied = %v, want %v (no duplicate)", d.SkillsApplied, want)
+	if want := []string{"thunder-authentication"}; !equalStrings(d.Components[0].SkillsApplied, want) {
+		t.Fatalf("SkillsApplied = %v, want %v (no duplicate)", d.Components[0].SkillsApplied, want)
 	}
 }
 
@@ -87,55 +88,52 @@ func TestAttachAnnotatedSkills_UnannotatedTypeUntouched(t *testing.T) {
 	}
 	// postgres-cnpg carries no skill annotation.
 	changed := attachAnnotatedSkills(d, map[string]resources.TypeMarkers{"postgres-cnpg": {}})
-	if changed {
-		t.Fatal("want changed=false — type carries no skill annotation")
+	if changed != nil {
+		t.Fatalf("want changed=nil — type carries no skill annotation, got %v", changed)
 	}
-	if len(d.SkillsApplied) != 0 {
-		t.Fatalf("SkillsApplied = %v, want empty", d.SkillsApplied)
+	if len(d.Components[0].SkillsApplied) != 0 {
+		t.Fatalf("SkillsApplied = %v, want empty", d.Components[0].SkillsApplied)
 	}
 }
 
-// (d) multiple deps with the same skill → one entry.
+// (d) multiple deps on the SAME component with the same skill → one entry.
 func TestAttachAnnotatedSkills_MultipleDepsSameSkillOneEntry(t *testing.T) {
 	t.Parallel()
 	d := &artifacts.DesignFile{
-		Components: []models.DesignComponent{
-			{
-				Name:         "storefront-web",
-				Dependencies: []models.Dependency{resourceDep("user-auth", "thunder-app")},
-			},
-			{
-				Name:         "orders-api",
-				Dependencies: []models.Dependency{resourceDep("service-auth", "thunder-app")},
-			},
-		},
-	}
-	changed := attachAnnotatedSkills(d, skillMarker("thunder-app", "thunder-authentication"))
-	if !changed {
-		t.Fatal("want changed=true")
-	}
-	if want := []string{"thunder-authentication"}; !equalStrings(d.SkillsApplied, want) {
-		t.Fatalf("SkillsApplied = %v, want exactly one entry %v", d.SkillsApplied, want)
-	}
-}
-
-// (e) existing skillsApplied entries preserved verbatim, append-only ordering.
-func TestAttachAnnotatedSkills_PreservesExistingEntriesVerbatim(t *testing.T) {
-	t.Parallel()
-	d := &artifacts.DesignFile{
-		SkillsApplied: []string{"z-first-manual-skill", "a-second-manual-skill"},
 		Components: []models.DesignComponent{{
-			Name:         "storefront-web",
-			Dependencies: []models.Dependency{resourceDep("user-auth", "thunder-app")},
+			Name: "orders-api",
+			Dependencies: []models.Dependency{
+				resourceDep("user-auth", "thunder-app"),
+				resourceDep("service-auth", "thunder-app"),
+			},
 		}},
 	}
 	changed := attachAnnotatedSkills(d, skillMarker("thunder-app", "thunder-authentication"))
-	if !changed {
-		t.Fatal("want changed=true")
+	if !reflect.DeepEqual(changed, []string{"orders-api"}) {
+		t.Fatalf("changed = %v, want [orders-api]", changed)
+	}
+	if want := []string{"thunder-authentication"}; !equalStrings(d.Components[0].SkillsApplied, want) {
+		t.Fatalf("SkillsApplied = %v, want exactly one entry %v", d.Components[0].SkillsApplied, want)
+	}
+}
+
+// (e) existing per-component entries preserved verbatim, append-only ordering.
+func TestAttachAnnotatedSkills_PreservesExistingEntriesVerbatim(t *testing.T) {
+	t.Parallel()
+	d := &artifacts.DesignFile{
+		Components: []models.DesignComponent{{
+			Name:          "storefront-web",
+			SkillsApplied: []string{"z-first-manual-skill", "a-second-manual-skill"},
+			Dependencies:  []models.Dependency{resourceDep("user-auth", "thunder-app")},
+		}},
+	}
+	changed := attachAnnotatedSkills(d, skillMarker("thunder-app", "thunder-authentication"))
+	if !reflect.DeepEqual(changed, []string{"storefront-web"}) {
+		t.Fatalf("changed = %v, want [storefront-web]", changed)
 	}
 	want := []string{"z-first-manual-skill", "a-second-manual-skill", "thunder-authentication"}
-	if !equalStrings(d.SkillsApplied, want) {
-		t.Fatalf("SkillsApplied = %v, want %v (existing entries first, untouched order)", d.SkillsApplied, want)
+	if !equalStrings(d.Components[0].SkillsApplied, want) {
+		t.Fatalf("SkillsApplied = %v, want %v (existing entries first, untouched order)", d.Components[0].SkillsApplied, want)
 	}
 }
 
@@ -152,11 +150,11 @@ func TestAttachAnnotatedSkills_NonPlatformResourceDepIgnored(t *testing.T) {
 		}},
 	}
 	changed := attachAnnotatedSkills(d, skillMarker("thunder-app", "thunder-authentication"))
-	if changed {
-		t.Fatal("want changed=false — org-service dependency must never qualify")
+	if changed != nil {
+		t.Fatalf("want changed=nil — org-service dependency must never qualify, got %v", changed)
 	}
-	if len(d.SkillsApplied) != 0 {
-		t.Fatalf("SkillsApplied = %v, want empty", d.SkillsApplied)
+	if len(d.Components[0].SkillsApplied) != 0 {
+		t.Fatalf("SkillsApplied = %v, want empty", d.Components[0].SkillsApplied)
 	}
 }
 
@@ -170,11 +168,39 @@ func TestAttachAnnotatedSkills_NilMarkersNoop(t *testing.T) {
 			Dependencies: []models.Dependency{resourceDep("user-auth", "thunder-app")},
 		}},
 	}
-	if changed := attachAnnotatedSkills(d, nil); changed {
-		t.Fatal("want changed=false with a nil marker map")
+	if changed := attachAnnotatedSkills(d, nil); changed != nil {
+		t.Fatalf("want changed=nil with a nil marker map, got %v", changed)
 	}
-	if len(d.SkillsApplied) != 0 {
-		t.Fatalf("SkillsApplied = %v, want empty", d.SkillsApplied)
+	if len(d.Components[0].SkillsApplied) != 0 {
+		t.Fatalf("SkillsApplied = %v, want empty", d.Components[0].SkillsApplied)
+	}
+}
+
+// Per-component isolation: a dependency owned by one component must never
+// spill a skill into a sibling component, even a sibling that depends ON the
+// owning component (component-kind dependency, not platform-resource).
+func TestAttachAnnotatedSkills_PerComponentIsolation(t *testing.T) {
+	t.Parallel()
+	df := &artifacts.DesignFile{Components: []models.DesignComponent{
+		{Name: "api", Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindPlatformResource, Name: "db", ResourceType: "postgres-cnpg"},
+		}},
+		{Name: "web", Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindComponent, Name: "api"},
+		}},
+	}}
+	markers := map[string]resources.TypeMarkers{"postgres-cnpg": {Skill: "postgres"}}
+
+	changed := attachAnnotatedSkills(df, markers)
+
+	if !reflect.DeepEqual(changed, []string{"api"}) {
+		t.Fatalf("changed = %v, want [api]", changed)
+	}
+	if !reflect.DeepEqual(df.Components[0].SkillsApplied, []string{"postgres"}) {
+		t.Fatalf("api skillsApplied = %v, want [postgres]", df.Components[0].SkillsApplied)
+	}
+	if len(df.Components[1].SkillsApplied) != 0 {
+		t.Fatalf("web should gain no skills, got %v", df.Components[1].SkillsApplied)
 	}
 }
 
@@ -190,28 +216,38 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// --- wiring: SaveAndProceed persists the skill attach before the tag-cut ----
+// --- wiring: SaveAndProceed persists the per-component skill attach before
+// the tag-cut --------------------------------------------------------------
 
 // designFilesWithDepsAndSkills is designFilesWithDeps (proceed_gate_test.go)
-// with the root design.md frontmatter carrying pre-existing skillsApplied
-// entries — used to assert append-only behavior against on-disk state.
+// with the `consumer` component's design.json carrying pre-existing
+// skillsApplied entries — used to assert append-only behavior against
+// on-disk state.
 func designFilesWithDepsAndSkills(depsJSON string, existingSkills []string) map[string]string {
 	files := designFilesWithDeps(depsJSON)
-	var fm strings.Builder
-	fm.WriteString("---\nsourceSpec: v1\n")
-	if len(existingSkills) > 0 {
-		fm.WriteString("skillsApplied:\n")
-		for _, s := range existingSkills {
-			fm.WriteString("  - " + s + "\n")
+	var skillsJSON strings.Builder
+	skillsJSON.WriteString("[")
+	for i, s := range existingSkills {
+		if i > 0 {
+			skillsJSON.WriteString(",")
 		}
+		skillsJSON.WriteString(`"` + s + `"`)
 	}
-	fm.WriteString("---\n\nOverview.\n")
-	files[artifacts.DesignRootFile] = fm.String()
+	skillsJSON.WriteString("]")
+	files["components/consumer/design.json"] = `{
+  "name": "consumer",
+  "type": "service",
+  "language": "Go",
+  "description": "Consumes deps.",
+  "dependencies": ` + depsJSON + `,
+  "skillsApplied": ` + skillsJSON.String() + `
+}
+`
 	return files
 }
 
-// (a) dep with Skill marker → skillsApplied gains it, persisted to root
-// design.md BEFORE the tag-cut (mirrors
+// (a) dep with Skill marker → skillsApplied gains it, persisted to the
+// component's design.json BEFORE the tag-cut (mirrors
 // TestSaveAndProceed_DerivesEndUserAuthAndPersistsBeforeTag).
 func TestSaveAndProceed_AttachesAnnotatedSkillAndPersists(t *testing.T) {
 	t.Parallel()
@@ -235,17 +271,17 @@ func TestSaveAndProceed_AttachesAnnotatedSkillAndPersists(t *testing.T) {
 		t.Fatalf("want exactly one skill-attach commit, got %d", fc.commits)
 	}
 	if len(fc.writes) != 1 {
-		t.Fatalf("want a single-file commit (root design.md), got %d writes", len(fc.writes))
+		t.Fatalf("want a single-file commit (the owning component's design.json), got %d writes", len(fc.writes))
 	}
 	w := fc.writes[0]
-	if !strings.HasSuffix(w.Path, "design.md") || strings.Contains(w.Path, "components/") {
-		t.Fatalf("commit path = %q, want the root design.md", w.Path)
+	if !strings.HasSuffix(w.Path, "components/consumer/design.json") {
+		t.Fatalf("commit path = %q, want the consumer component's design.json", w.Path)
 	}
 	if w.BaseSHA != "sha-design" {
 		t.Fatalf("commit must CAS on the read sha, got %q", w.BaseSHA)
 	}
 	if !strings.Contains(w.Content, "thunder-authentication") {
-		t.Fatalf("committed design.md missing the attached skill:\n%s", w.Content)
+		t.Fatalf("committed design.json missing the attached skill:\n%s", w.Content)
 	}
 }
 
@@ -308,20 +344,22 @@ func TestSaveAndProceed_MultipleDepsSameSkillPersistsOneEntry(t *testing.T) {
 	}
 	w := fc.writes[0]
 	if got := strings.Count(w.Content, "thunder-authentication"); got != 1 {
-		t.Fatalf("committed design.md must list the skill exactly once, got %d occurrences in:\n%s", got, w.Content)
+		t.Fatalf("committed design.json must list the skill exactly once, got %d occurrences in:\n%s", got, w.Content)
 	}
 }
 
 // Composition pin: a SINGLE resource type whose markers carry BOTH the
 // end-user-auth role AND a skill annotation (the real thunder-app CRT shape
-// once G5 lands), declared by a service component, on a design that already
-// has a skillsApplied entry. The save must land exactly TWO commits in order
-// — first the auth-derivation design.json commit, then the skillsApplied
-// design.md commit — with disjoint paths, fetch the marker map exactly once,
-// and only THEN cut the tag at HEAD (CommitSHA "" — the re-read-after-commit
+// once G5 lands), declared by a service component, on a design whose
+// component already has a skillsApplied entry. The save must land exactly TWO
+// commits in order — first the auth-derivation design.json commit, then the
+// skillsApplied design.json commit, both against the SAME component's
+// design.json (auth derivation and skill attach are independent passes over
+// the same owning component) — fetch the marker map exactly once, and only
+// THEN cut the tag at HEAD (CommitSHA "" — the re-read-after-commit
 // convention guarantees the tagged tree includes both changes). This pins the
-// two-commit composition so a future coalescing refactor can't silently
-// break it.
+// two-commit composition so a future coalescing refactor can't silently break
+// it.
 func TestSaveAndProceed_AuthRoleAndSkillMarkerComposeTwoCommitsThenTag(t *testing.T) {
 	t.Parallel()
 	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
@@ -367,7 +405,7 @@ func TestSaveAndProceed_AuthRoleAndSkillMarkerComposeTwoCommitsThenTag(t *testin
 	}
 
 	// (1) exactly two commits, auth derivation first, skill attach second,
-	// disjoint paths.
+	// both against the consumer component's design.json.
 	if fc.commits != 2 || len(fc.commitLog) != 2 {
 		t.Fatalf("want exactly two commits (auth derivation + skill attach), got %d (%d logged)", fc.commits, len(fc.commitLog))
 	}
@@ -378,12 +416,8 @@ func TestSaveAndProceed_AuthRoleAndSkillMarkerComposeTwoCommitsThenTag(t *testin
 	if !strings.Contains(authWrites[0].Content, `"auth": "end-user-required"`) {
 		t.Fatalf("first commit missing the derived auth:\n%s", authWrites[0].Content)
 	}
-	if len(skillWrites) != 1 || strings.Contains(skillWrites[0].Path, "components/") ||
-		!strings.HasSuffix(skillWrites[0].Path, "design.md") {
-		t.Fatalf("second commit must be the root design.md skill attach, got %+v", skillWrites)
-	}
-	if authWrites[0].Path == skillWrites[0].Path {
-		t.Fatalf("the two commits must touch disjoint paths, both hit %q", authWrites[0].Path)
+	if len(skillWrites) != 1 || !strings.HasSuffix(skillWrites[0].Path, "components/consumer/design.json") {
+		t.Fatalf("second commit must be the consumer design.json skill attach, got %+v", skillWrites)
 	}
 
 	// (2) the skill commit carries the pre-existing entry AND the attached one.
@@ -425,9 +459,9 @@ func TestSaveAndProceed_ExistingSkillsAppliedPreservedOnAttach(t *testing.T) {
 	}
 	w := fc.writes[0]
 	if !strings.Contains(w.Content, "manually-added-skill") {
-		t.Fatalf("committed design.md lost the pre-existing skill entry:\n%s", w.Content)
+		t.Fatalf("committed design.json lost the pre-existing skill entry:\n%s", w.Content)
 	}
 	if !strings.Contains(w.Content, "thunder-authentication") {
-		t.Fatalf("committed design.md missing the newly attached skill:\n%s", w.Content)
+		t.Fatalf("committed design.json missing the newly attached skill:\n%s", w.Content)
 	}
 }

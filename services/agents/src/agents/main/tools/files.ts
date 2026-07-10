@@ -80,7 +80,7 @@ export const removeFileInputSchema = z.object({
 
 export const setFrontmatterFieldInputSchema = z.object({
   path: z.string().describe("Markdown file with leading --- frontmatter."),
-  key: z.string().describe("Frontmatter key to set or add, e.g. 'buildpack' or 'skillsApplied'."),
+  key: z.string().describe("Frontmatter key to set or add, e.g. 'language' or 'buildpack'."),
   value: z
     .union([z.string(), z.number(), z.boolean(), z.array(z.string())])
     .describe("New value. Arrays render as a YAML block list."),
@@ -154,7 +154,7 @@ export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record
     [SET_FRONTMATTER_FIELD]: tool({
       description:
         "Set a single YAML frontmatter field on a markdown file (the keys between the leading --- fences, e.g. " +
-        "language, buildpack, skillsApplied). Owns the rendering so list/array values never need fragile multi-line " +
+        "language, buildpack). Owns the rendering so list/array values never need fragile multi-line " +
         "anchoring. Requires existing frontmatter (NO_FRONTMATTER otherwise).",
       inputSchema: setFrontmatterFieldInputSchema,
       execute: async ({ path, key, value }) => bundle.setFrontmatterField(path, key, value),
