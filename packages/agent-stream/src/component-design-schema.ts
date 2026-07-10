@@ -87,7 +87,10 @@ const endpointSchema = z.strictObject({
 // deployment + runtime-config (both key on the exact string). Reject the known
 // wrong aliases with a self-correct message — this normalizes NOTHING, it forces
 // the agent to emit the canonical value. Mirrored in the Go fold gate
-// (agentfold/designgate.go) and the high-level-architecture skill.
+// (agentfold/designgate.go) and the high-level-architecture skill. NB: a zod
+// `.refine` does not serialize to JSON Schema, so the generated
+// component-design.schema.json is intentionally more permissive on `type` (a
+// bare non-empty string); the alias rule is enforced by this gate + the Go fold.
 const WEB_APPLICATION_ALIASES = new Set(["webapp", "web-app", "webapplication", "web application"]);
 const componentTypeSchema = z.string().min(1).refine(
   (t) => !WEB_APPLICATION_ALIASES.has(t.trim().toLowerCase()),

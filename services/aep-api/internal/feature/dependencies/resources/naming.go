@@ -41,11 +41,13 @@ const (
 
 // boundName returns natural unchanged when it already fits max; otherwise it
 // replaces the overflowing tail with a deterministic 8-hex FNV-1a hash of the
-// FULL natural name, so distinct inputs never collide while the result stays a
-// valid DNS-1035 label (lowercase, starts with a letter, no trailing '-') within
-// max. Short names are returned byte-for-byte, so existing bindings keep their
-// readable names and only overflowing names change — no migration of already
-// provisioned resources is needed.
+// FULL natural name. The hash makes collisions between distinct long names
+// negligible (a 32-bit space against per-org resource cardinality) rather than
+// the near-certain prefix collision a plain truncation would cause, while the
+// result stays a valid DNS-1035 label (lowercase, starts with a letter, no
+// trailing '-') within max. Short names are returned byte-for-byte, so existing
+// bindings keep their readable names and only overflowing names change — no
+// migration of already provisioned resources is needed.
 func boundName(natural string, max int) string {
 	if len(natural) <= max {
 		return natural
