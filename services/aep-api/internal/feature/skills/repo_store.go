@@ -171,6 +171,24 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 	return out, nil
 }
 
+// RepoWebURL returns the HTML URL of the org's skills repo — the stored clone
+// URL with any ".git" suffix trimmed (the contract SkillSummaryList.repoUrl;
+// it powers the console Import dialog's via-pull-request link). Provisions the
+// repo on first touch like every read, and degrades to "" on any failure —
+// same posture as the catalog (§12); the console shows its connect-GitHub
+// guidance for an empty URL.
+func (s *SkillService) RepoWebURL(ctx context.Context, orgID string) string {
+	if s == nil || s.git == nil || s.repos == nil || orgID == "" {
+		return ""
+	}
+	repo, err := s.ensureSkillsRepo(ctx, orgID)
+	if err != nil {
+		slog.WarnContext(ctx, "skills: resolve repo url failed — serving empty", "org", orgID, "error", err)
+		return ""
+	}
+	return strings.TrimSuffix(repo.RepoURL, ".git")
+}
+
 // ---- catalog loading ---------------------------------------------------------
 
 // catalog returns the org's skills at the branch tip, degrading to empty on
