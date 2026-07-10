@@ -311,39 +311,6 @@ components:
         - email
         - projectName
       type: object
-    CollectSpecInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/CollectSpecInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        rawSpec:
-          description: Raw OpenAPI 3.x YAML/JSON (paste path)
-          type: string
-        specUrl:
-          description: HTTPS URL to fetch the OpenAPI spec from
-          type: string
-      type: object
-    CollectSpecOutputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/CollectSpecOutputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        specPath:
-          description: Component-relative path where the spec was stored
-          type: string
-      required:
-        - specPath
-      type: object
     Component:
       additionalProperties: false
       properties:
@@ -2797,55 +2764,6 @@ paths:
       summary: Provision a platform-resource dependency (async)
       tags:
         - Dependencies
-  /projects/{projectName}/components/{componentName}/dependencies/{depName}/spec:
-    post:
-      operationId: collect-dependency-spec
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Consumer component name
-          in: path
-          name: componentName
-          required: true
-          schema:
-            description: Consumer component name
-            type: string
-        - description: External dependency name
-          in: path
-          name: depName
-          required: true
-          schema:
-            description: External dependency name
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CollectSpecInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CollectSpecOutputBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Store a consumed OpenAPI spec for an external dependency
-      tags:
-        - Design(Deprecated)
   /projects/{projectName}/components/{componentName}/dependencies/{depName}/status:
     get:
       operationId: get-dependency-status

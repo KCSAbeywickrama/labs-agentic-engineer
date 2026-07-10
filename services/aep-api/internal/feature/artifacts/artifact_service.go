@@ -56,10 +56,8 @@ var (
 	// ErrInvalidVersionTag is returned when a tag string in a path/query does
 	// not parse as `v<N>` or `v<N>-<M>`. Maps to 400.
 	ErrInvalidVersionTag = errors.New("invalid version tag")
-	// ErrSpecNotFound / ErrDesignNotFound are the spec/design members of the
-	// artifact-not-found family — raised when the requirements or design corpus
-	// is absent at HEAD / a tag.
-	ErrSpecNotFound   = errors.New("spec not found")
+	// ErrDesignNotFound is the design member of the artifact-not-found family —
+	// raised when the design corpus is absent at HEAD / a tag.
 	ErrDesignNotFound = errors.New("design not found")
 )
 
@@ -142,8 +140,12 @@ type DesignSaveResult struct {
 // tag.
 type ArtifactService interface {
 	// Requirements bundle at HEAD (flat directory of markdown/dsl/excalidraw).
+	// Only consumer: ArtifactStore.ListRequirements (project_service.go's spec
+	// summary read).
 	ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	// Design bundle at HEAD (recursive; keys relative to specs/design/).
+	// Design bundle at HEAD (recursive; keys relative to specs/design/). Only
+	// consumer: ArtifactStore.ReadDesign, the shared design-read path used
+	// throughout (component, project, provisioning, runtimeconfig, task, …).
 	ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
 
 	// Save / Discard.
@@ -159,8 +161,6 @@ type ArtifactService interface {
 	LatestSpecTag(ctx context.Context, orgID, projectID string) string
 	SaveRequirements(ctx context.Context, orgID, projectID string, req SaveRequest) (*RequirementsSaveResult, error)
 	SaveDesign(ctx context.Context, orgID, projectID string, req SaveRequest) (*DesignSaveResult, error)
-	DiscardRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	DiscardDesign(ctx context.Context, orgID, projectID string) (map[string]string, error)
 
 	// Versions.
 	ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]RequirementsVersionInfo, error)
@@ -462,50 +462,6 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 		DesignRevision:      nextRev,
 		CommitHash:          head,
 	}, nil
-}
-
-// ----- Discard (revert-commit to last tag) -----
-
-// DiscardRequirements reverts the `specs/requirements/` subtree on `main` back
-// to its content at the latest `v<N>` tag via a revert-commit (there is no
-// working tree to reset). With no tag yet the subtree is reverted to empty
-// (nothing has ever been approved). Returns the reverted bundle.
-func (s *artifactService) DiscardRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	_, ref, err := s.readyRef(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	tags, err := s.listVersionTags(ctx, ref)
-	if err != nil {
-		return nil, fmt.Errorf("list tags: %w", err)
-	}
-	tag := latestRequirementsTag(tags)
-	return s.revertSubtreeToTag(ctx, ref, requirementsPrefix, requirementsBundleFilter, tag,
-		discardMessage("requirements", tag))
-}
-
-// DiscardDesign reverts the `specs/design/` subtree on `main` back to its
-// content at the latest `v<N>-<M>` tag via a revert-commit. With no tag yet the
-// subtree is reverted to empty. Returns the reverted bundle.
-func (s *artifactService) DiscardDesign(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	_, ref, err := s.readyRef(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	tags, err := s.listVersionTags(ctx, ref)
-	if err != nil {
-		return nil, fmt.Errorf("list tags: %w", err)
-	}
-	tag := latestDesignTag(tags)
-	return s.revertSubtreeToTag(ctx, ref, designPrefix, designBundleFilter, tag,
-		discardMessage("design", tag))
-}
-
-func discardMessage(kind, tag string) string {
-	if tag == "" {
-		return "Discard " + kind + " changes — revert to empty (no approved version)"
-	}
-	return "Discard " + kind + " changes — revert to " + tag
 }
 
 // ----- Internal helpers -----

@@ -238,24 +238,6 @@ func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d 
 // from a real error.
 func IsNotFound(err error) bool { return errors.Is(err, ErrArtifactNotFound) }
 
-// DesignFilesEqual compares two design file maps after trimming whitespace from
-// each value. Used by the has-unsaved-changes check.
-func DesignFilesEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, va := range a {
-		vb, ok := b[k]
-		if !ok {
-			return false
-		}
-		if strings.TrimSpace(va) != strings.TrimSpace(vb) {
-			return false
-		}
-	}
-	return true
-}
-
 // rootFrontmatter is the YAML frontmatter we accept on the root `design.md`.
 type rootFrontmatter struct {
 	SourceSpec string `yaml:"sourceSpec,omitempty"`

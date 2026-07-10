@@ -63,7 +63,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
-	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -480,7 +479,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	}
 	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
 	configService := component.NewConfigService(configRepo, componentService)
-	requirementsService := requirements.NewRequirementsService(artifactStore, artifactSvcGit)
 	designService := design.NewDesignService(artifactStore, artifactSvcGit)
 
 	// Tasks are GitHub issues (the Task/Execution split, tasks-github-native):
@@ -775,9 +773,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		OrgSvc:           organizationService,
 		ComponentSvc:     componentService,
 		ConfigSvc:        configService,
-		RequirementsSvc:  requirementsService,
 		CollabRepo:       repoService,
-		DesignSvc:        designService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskPlan:         taskPlan,

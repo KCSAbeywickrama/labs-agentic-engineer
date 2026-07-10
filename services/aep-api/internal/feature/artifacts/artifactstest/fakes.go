@@ -42,8 +42,6 @@ type FakeArtifactService struct {
 	LatestSpecTagFunc            func(ctx context.Context, orgID, projectID string) string
 	SaveRequirementsFunc         func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error)
 	SaveDesignFunc               func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error)
-	DiscardRequirementsFunc      func(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	DiscardDesignFunc            func(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	ListRequirementsVersionsFunc func(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
 	ListDesignVersionsFunc       func(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
 	ListSpecVersionTagsFunc      func(ctx context.Context, orgID, projectID string) (*artifacts.TagList, error)
@@ -102,20 +100,6 @@ func (f *FakeArtifactService) SaveDesign(ctx context.Context, orgID, projectID s
 		panic("artifactstest: SaveDesign called but SaveDesignFunc is not set")
 	}
 	return f.SaveDesignFunc(ctx, orgID, projectID, req)
-}
-
-func (f *FakeArtifactService) DiscardRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	if f.DiscardRequirementsFunc == nil {
-		panic("artifactstest: DiscardRequirements called but DiscardRequirementsFunc is not set")
-	}
-	return f.DiscardRequirementsFunc(ctx, orgID, projectID)
-}
-
-func (f *FakeArtifactService) DiscardDesign(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	if f.DiscardDesignFunc == nil {
-		panic("artifactstest: DiscardDesign called but DiscardDesignFunc is not set")
-	}
-	return f.DiscardDesignFunc(ctx, orgID, projectID)
 }
 
 func (f *FakeArtifactService) ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error) {
