@@ -23,7 +23,7 @@ import { deriveCellDiagramProject } from "../derive/deriveCellDiagram";
 import { deriveWireframeScene } from "../derive/deriveWireframe";
 import { fetchSpecFileContent } from "./queries";
 import { specKeys } from "./keys";
-import { toRepoPath, type SpecFileEntry } from "./mapping";
+import type { SpecFileEntry } from "./mapping";
 
 /** The component design.json entries (drives both the fetch set and the memo key). */
 function designJsonEntries(files: SpecFileEntry[]): SpecFileEntry[] {
@@ -52,10 +52,13 @@ export function useDerivedCellDiagram(
 
   const project = useMemo(() => {
     if (isPending || isError) return null;
+    // f.path is already the full repo path (specs/design/components/<c>/design.json)
+    // deriveCellDiagramProject expects — mapping.ts's SpecFileEntry.path scheme,
+    // no conversion needed (the old unprefixed room-key scheme is retired).
     const byRepoPath: Record<string, string> = {};
     entries.forEach((f, i) => {
       const content = results[i]?.data?.content;
-      if (typeof content === "string") byRepoPath[toRepoPath(f.path)] = content;
+      if (typeof content === "string") byRepoPath[f.path] = content;
     });
     return deriveCellDiagramProject(byRepoPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps

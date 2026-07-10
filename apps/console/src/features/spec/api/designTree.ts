@@ -39,9 +39,12 @@ export interface DesignSection {
   components: DesignComponentNode[];
 }
 
-const COMPONENT_RE = /^design\/components\/([^/]+)\//;
+// SpecFileEntry.path is the full repo-relative path (mapping.ts's current
+// scheme — the unprefixed room-key scheme it retired), so this must match
+// the `specs/` prefix too.
+const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\//;
 
-/** Component name for a `design/components/<name>/…` path, else null. */
+/** Component name for a `specs/design/components/<name>/…` path, else null. */
 export function componentOf(path: string): string | null {
   return COMPONENT_RE.exec(path)?.[1] ?? null;
 }

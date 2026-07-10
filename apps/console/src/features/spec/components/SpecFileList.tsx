@@ -157,27 +157,6 @@ export function SpecFileList({
             </IconButton>
           </Tooltip>
         )}
-              {group.id === "designs" && groupFiles.length > 0 && (
-                <Tooltip
-                  title={
-                    regenerateDisabled
-                      ? "An agent is still working — re-generate is available once it finishes"
-                      : "Re-generate design from the current requirements"
-                  }
-                >
-                  {/* span so the tooltip works while the button is disabled */}
-                  <span>
-                    <IconButton
-                      size="small"
-                      aria-label="Re-generate design"
-                      onClick={onRegenerateDesign}
-                      disabled={regenerateDisabled ?? false}
-                    >
-                      <RefreshCw size={16} />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              )}
       </Box>
       {groupFiles.length > 0 ? (
         <List dense disablePadding>
@@ -203,10 +182,39 @@ export function SpecFileList({
 
       {/* Designs — grouped by component, with synthetic diagram entries. */}
       <Box sx={{ mb: 1 }}>
-        <Box sx={{ px: 2, py: 0.5 }}>
+        <Box
+          sx={{
+            px: 2,
+            py: 0.5,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <Typography variant="overline" color="text.secondary">
             Designs
           </Typography>
+          {(design.hasComponents || design.overview.length > 0) && (
+            <Tooltip
+              title={
+                regenerateDisabled
+                  ? "An agent is still working — re-generate is available once it finishes"
+                  : "Re-generate design from the current requirements"
+              }
+            >
+              {/* span so the tooltip works while the button is disabled */}
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label="Re-generate design"
+                  onClick={onRegenerateDesign}
+                  disabled={regenerateDisabled ?? false}
+                >
+                  <RefreshCw size={16} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          )}
         </Box>
         {design.hasComponents || design.overview.length > 0 ? (
           <List dense disablePadding>

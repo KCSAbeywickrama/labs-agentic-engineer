@@ -24,10 +24,11 @@ import {
 
 /**
  * Whole-architecture cell-diagram projection. `designJsonByRepoPath` maps
- * repo-relative `specs/design/components/<c>/design.json` paths to their content
- * (the projection's COMPONENT_DESIGN_JSON_RE requires the `specs/` prefix — use
- * `toRepoPath()`). Returns null when there are no components or a source is
- * malformed — a bad source never throws into the render tree.
+ * repo-relative `specs/design/components/<c>/design.json` paths to their
+ * content (the projection's COMPONENT_DESIGN_JSON_RE requires the `specs/`
+ * prefix — mapping.ts's SpecFileEntry.path already carries it). Returns null
+ * when there are no components or a source is malformed — a bad source
+ * never throws into the render tree.
  */
 export function deriveCellDiagramProject(
   designJsonByRepoPath: Record<string, string>,
