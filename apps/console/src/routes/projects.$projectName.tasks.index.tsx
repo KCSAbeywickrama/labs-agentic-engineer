@@ -17,21 +17,21 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { Hammer } from "@wso2/oxygen-ui-icons-react";
-import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
+import { Typography } from "@wso2/oxygen-ui";
+import { TasksList } from "../features/tasks/components/TasksList";
 
-export const Route = createFileRoute("/projects/$projectName/builds")({
-  component: BuildsPlaceholderRoute,
+export const Route = createFileRoute("/projects/$projectName/tasks/")({
+  component: TasksRoute,
 });
 
-function BuildsPlaceholderRoute() {
+function TasksRoute() {
   const { projectName } = Route.useParams();
   return (
-    <SectionPlaceholder
-      icon={<Hammer size={48} />}
-      title="Builds is on its way"
-      description="The coding-agent task board — watch tasks move, dig into failures, and follow PRs out to GitHub. Its own feature issue will land it."
-      projectName={projectName}
-    />
+    <>
+      <Typography variant="h6" sx={{ mb: 2 }}>
+        Tasks
+      </Typography>
+      <TasksList projectName={projectName} />
+    </>
   );
 }
