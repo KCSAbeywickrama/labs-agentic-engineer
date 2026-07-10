@@ -21,6 +21,82 @@ import (
 	"testing"
 )
 
+// designWithEndpoint builds a minimal valid component design.json for dir "svc",
+// splicing in the given `endpoint` fragment (or none when empty).
+func designWithEndpoint(endpointFragment string) string {
+	ep := ""
+	if endpointFragment != "" {
+		ep = `,"endpoint":` + endpointFragment
+	}
+	return fmt.Sprintf(`{"name":"svc","type":"service","version":"0.1.0",`+
+		`"language":"Go","buildpack":"docker","appPath":"svc",`+
+		`"entrypoint":"deployment/service","exposure":"internet",`+
+		`"description":"x","dependencies":[]%s}`, ep)
+}
+
+// TestDesignGate_Endpoint locks fold-parity for the design.json `endpoint`
+// block against the zod endpointSchema (component-design-schema.ts): a
+// zod-accepted write must fold here, and a zod-rejected shape must reject here.
+func TestDesignGate_Endpoint(t *testing.T) {
+	cases := []struct {
+		name     string
+		fragment string
+		wantOK   bool
+	}{
+		{"absent — still valid", "", true},
+		{"valid name", `{"name":"http"}`, true},
+		{"valid non-default name", `{"name":"api"}`, true},
+		{"empty name rejected", `{"name":""}`, false},
+		{"unknown key rejected", `{"name":"http","port":8080}`, false},
+		{"not an object rejected", `"http"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := validateComponentDesign(designWithEndpoint(c.fragment), "svc")
+			if c.wantOK && p != nil {
+				t.Fatalf("want accepted, got rejected: %s", p.message)
+			}
+			if !c.wantOK && p == nil {
+				t.Fatalf("want rejected, got accepted")
+			}
+		})
+	}
+}
+
+// TestDesignGate_TypeAliasRejected locks the canonical-kind rule in parity with
+// the zod gate: the wrong web-application spellings reject; the canonical value
+// and other kinds accept.
+func TestDesignGate_TypeAliasRejected(t *testing.T) {
+	tmpl := func(typ string) string {
+		return fmt.Sprintf(`{"name":"svc","type":%q,"version":"0.1.0","language":"Go",`+
+			`"buildpack":"docker","appPath":"svc","entrypoint":"deployment/service",`+
+			`"exposure":"internet","description":"x","dependencies":[]}`, typ)
+	}
+	cases := []struct {
+		typ    string
+		wantOK bool
+	}{
+		{"service", true},
+		{"web-application", true},
+		{"worker", true},
+		{"webapp", false},
+		{"web-app", false},
+		{"WebApp", false},
+		{"webApplication", false},
+	}
+	for _, c := range cases {
+		t.Run(c.typ, func(t *testing.T) {
+			p := validateComponentDesign(tmpl(c.typ), "svc")
+			if c.wantOK && p != nil {
+				t.Fatalf("type %q: want accepted, got %s", c.typ, p.message)
+			}
+			if !c.wantOK && p == nil {
+				t.Fatalf("type %q: want rejected (canonical is web-application), got accepted", c.typ)
+			}
+		})
+	}
+}
+
 // designWithParams renders a schema-valid component design.json whose single
 // platform-resource dependency carries the given raw `parameters` JSON literal.
 func designWithParams(paramsJSON string) string {

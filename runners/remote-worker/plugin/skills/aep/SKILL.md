@@ -241,7 +241,10 @@ metadata:
   name: <component-name>        # logical name — no project prefix
 
 endpoints:
-  - name: <endpoint-name>
+  - name: http                  # MUST equal design.json `endpoint.name` (default
+                                # `http` when it declares none). The managed-API
+                                # gateway binds to THIS name; a mismatch fails deploy
+                                # rendering (`workload.endpoints["<name>"]: no such key`).
     type: HTTP                  # HTTP | GraphQL | Websocket | TCP | UDP | gRPC
     port: <port>
     basePath: /                 # optional; root path for API services

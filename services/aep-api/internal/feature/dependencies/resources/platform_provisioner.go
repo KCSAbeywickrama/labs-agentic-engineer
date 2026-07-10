@@ -169,14 +169,20 @@ func (p *OCNativeProvisioner) Deprovision(ctx context.Context, orgHandle, projec
 // ---- naming + pure builders (unit-tested) ------------------------------------
 
 // platformResourceName is the per-project Resource name (metadata.name is
-// namespace-unique; owner.projectName does NOT scope it). Mirrors
-// ExternalResourceName for the external half.
-func platformResourceName(project, depName string) string { return project + "-" + depName }
+// namespace-unique; owner.projectName does NOT scope it). It delegates to
+// ExternalResourceName so the platform and external halves are provably the
+// same name — the status read (status_service.go) recomputes a platform binding
+// name via ExternalResourceBindingName and relies on that identity.
+func platformResourceName(project, depName string) string {
+	return ExternalResourceName(project, depName)
+}
 
 // platformBindingName is the per-env ResourceReleaseBinding name — the single
-// source of truth shared by Provision, Deprovision and the status read.
+// source of truth shared by Provision, Deprovision and the status read. It
+// delegates to ExternalResourceBindingName, inheriting the maxOCBindingName
+// bound that keeps the OC-rendered CloudNativePG Cluster within its 50-char cap.
 func platformBindingName(project, depName, env string) string {
-	return platformResourceName(project, depName) + "-" + env
+	return ExternalResourceBindingName(project, depName, env)
 }
 
 // BuildPlatformResource references a DISCOVERED ClusterResourceType (Type.Kind

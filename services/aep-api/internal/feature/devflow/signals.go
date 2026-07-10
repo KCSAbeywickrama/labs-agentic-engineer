@@ -20,8 +20,6 @@ package devflow
 // events into these signals (via Signaler); the workflows block on them
 // instead of polling. Payload structs are versioned by care: only add fields.
 const (
-	// SigDesignTurnDone — genai finishTurn/TurnSweeper → DevFlowWorkflow.
-	SigDesignTurnDone = "design-turn-done"
 	// SigPROpened — pull_request.opened webhook → TaskFlowWorkflow (coding done).
 	SigPROpened = "pr-opened"
 	// SigPRMerged — pull_request.closed(merged) webhook → TaskFlowWorkflow.
@@ -45,14 +43,6 @@ const (
 	PhaseSucceeded = "succeeded"
 	PhaseFailed    = "failed"
 )
-
-// DesignTurnDoneSignal reports a genai turn reaching a terminal state.
-type DesignTurnDoneSignal struct {
-	TurnID  string `json:"turnId"`
-	UseCase string `json:"useCase"`
-	Outcome string `json:"outcome"` // completed | failed
-	Error   string `json:"error,omitempty"`
-}
 
 // PRSignal reports a pull-request event for the Task the PR closes.
 type PRSignal struct {

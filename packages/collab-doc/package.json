@@ -1,0 +1,37 @@
+{
+  "name": "@aep/collab-doc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared collab-document plumbing (#86): the spec-room Y.Doc model (Y.Map path→Y.Text + Y.XmlFragment per md file), headless markdown ↔ ProseMirror conversion, and safe edit application (Y.Text diff-and-patch, fragment reparse). Used by services/collab (seeding/committer) and services/agents (agents as live peers).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "tsx --test \"test/**/*.test.ts\"",
+    "dev": "echo \"@aep/collab-doc: no dev server\""
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.27.2",
+    "@tiptap/markdown": "^3.27.2",
+    "@tiptap/starter-kit": "^3.27.2",
+    "fast-diff": "^1.3.0",
+    "prosemirror-model": "^1.25.10",
+    "y-prosemirror": "^1.3.7",
+    "yjs": "^13.6.31"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

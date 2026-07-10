@@ -35,21 +35,15 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-type planVersions struct{ designTag string }
+type planVersions struct{ specTag string }
 
 func (p planVersions) ListRequirementsVersions(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-	return []artifacts.RequirementsVersionInfo{{Tag: "requirements-v1"}}, nil
+	return []artifacts.RequirementsVersionInfo{{Tag: p.specTag}}, nil
 }
-func (p planVersions) ListDesignVersions(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-	return []artifacts.DesignVersionInfo{{Tag: p.designTag}}, nil
-}
-func (p planVersions) LatestDesignTag(context.Context, string, string) string {
-	return p.designTag
+func (p planVersions) LatestSpecTag(context.Context, string, string) string {
+	return p.specTag
 }
 func (planVersions) GetRequirementsAtTag(context.Context, string, string, string) (map[string]string, error) {
-	return map[string]string{}, nil
-}
-func (planVersions) GetDesignAtTag(context.Context, string, string, string) (map[string]string, error) {
 	return map[string]string{}, nil
 }
 
@@ -77,7 +71,7 @@ type planRig struct {
 	svc          *PlanService
 }
 
-func newPlanRig(t *testing.T, seed map[string]string, designTag string) *planRig {
+func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 	t.Helper()
 	fx := workspacetest.New(t, seed)
 	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
@@ -92,7 +86,7 @@ func newPlanRig(t *testing.T, seed map[string]string, designTag string) *planRig
 	issues := newFakeIssues()
 	svc := NewPlanService(
 		fakeRepos{repo: repoRow},
-		planVersions{designTag: designTag},
+		planVersions{specTag: specTag},
 		gitrepo.NewGitOpsService(nilResolver{}, fx.Engine),
 		func(context.Context, string) (string, error) { return "sk-test", nil },
 		turn,
@@ -124,7 +118,7 @@ func TestStartPlan_DispatchesWorkspaceShape(t *testing.T) {
 		"specs/design/design.md":                              "# design",
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
 		"specs/requirements/requirements.md":                  "# reqs",
-	}, "design-v1")
+	}, "v1")
 	req := r.start(t)
 
 	if req.Toolset != "task-plan" {
@@ -181,14 +175,14 @@ func TestStartPlan_DispatchesWorkspaceShape(t *testing.T) {
 func TestStartPlan_InstructionCarriesExistingTasksAndLineageDiff(t *testing.T) {
 	r := newPlanRig(t, map[string]string{
 		"specs/design/design.md": "# design v0\n",
-	}, "design-v1")
-	r.fx.Origin.Tag(t, "design-v0", "Design v0")
+	}, "v1")
+	r.fx.Origin.Tag(t, "v0", "Spec v0")
 	r.fx.Origin.Seed(t, map[string]string{"specs/design/design.md": "# design v1 CHANGED\n"}, "design change")
-	r.fx.Origin.Tag(t, "design-v1", "Design v1")
+	r.fx.Origin.Tag(t, "v1", "Spec v1")
 
 	block := taskmeta.Block{Component: "hello-world-api", Origin: taskmeta.OriginSpecPlan,
-		SpecTag: "requirements-v1", DesignTag: "design-v0"}
-	block.Key = taskmeta.Key("proj1", "design-v0", block.Target(), "Implement hello-world-api")
+		SpecTag: "v0", DesignTag: "v0"}
+	block.Key = taskmeta.Key("proj1", "v0", block.Target(), "Implement hello-world-api")
 	r.issues.seed(gitrepo.IssueInfo{
 		Number: 104,
 		Title:  "Implement hello-world-api",
@@ -205,7 +199,7 @@ func TestStartPlan_InstructionCarriesExistingTasksAndLineageDiff(t *testing.T) {
 	if !strings.Contains(instr, "--- tasks/104.md ---") || !strings.Contains(instr, "hello-world-api") {
 		t.Errorf("existing task render missing: %q", instr)
 	}
-	if !strings.Contains(instr, "# Lineage diff: design-v0 → design-v1") {
+	if !strings.Contains(instr, "# Lineage diff: v0 → v1") {
 		t.Errorf("lineage diff section missing: %q", instr)
 	}
 	// The diff carries real hunks (the gitfs Diff Patch extension).
@@ -232,7 +226,7 @@ func TestStartPlan_SkillsRepoGone_TypedError(t *testing.T) {
 	turn := &capturingTurn{}
 	svc := NewPlanService(
 		fakeRepos{repo: repoRow},
-		planVersions{designTag: "design-v1"},
+		planVersions{specTag: "v1"},
 		gitrepo.NewGitOpsService(nilResolver{}, fx.Engine),
 		func(context.Context, string) (string, error) { return "sk-test", nil },
 		turn,

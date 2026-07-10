@@ -45,6 +45,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/credentials"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
+	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
@@ -452,19 +453,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
-		// Signal a waiting devflow workflow when a design-generate turn ends.
-		// Best-effort + nil-safe; other use cases are ignored (the workflow also
-		// filters by turn id).
-		TurnFinishHook: func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string) {
-			if useCase != designGenerateUseCase {
-				return
-			}
-			devflowSignaler.SignalDev(ctx, orgID, projectID, devflow.SigDesignTurnDone, devflow.DesignTurnDoneSignal{
-				TurnID:  turnID,
-				UseCase: useCase,
-				Outcome: outcome,
-			})
-		},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
@@ -508,8 +496,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
 
-	// The unified per-execution progress endpoint. (The runner skills-pull S2S
-	// endpoint is retired — the runner now clones `org-skills` and resolves
+	// The Task-keyed log endpoint (issue number → newest execution by default,
+	// executionId query pins one for history browsing). (The runner skills-pull
+	// S2S endpoint is retired — the runner now clones `org-skills` and resolves
 	// applied skills locally, stamped via AEP_SKILLS_REPO_URL above.)
 	execProgressSvc := execution.NewProgressService(executionRepo, componentClient)
 	// Coding-execution activity feed: live-tail the ca-… pod log while running,
@@ -519,6 +508,19 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	if cgwClient != nil {
 		execProgressSvc.WithCodingProgress(codingagent.NewAgentProgressReader(cgwClient, db))
 	}
+	// The task-log SSE stream: one connection per open task-detail page carries
+	// the Task's whole live state (status + executions + unified timeline across
+	// attempts). The hub is the in-proc change bus the PR webhook + job/exec
+	// watchers ping so an attached stream re-derives instantly; a slow re-derive
+	// tick on each connection is the safety net (no durable event table).
+	taskStreamHub := execution.NewTaskStreamHub()
+	taskStreamSvc := execution.NewTaskStreamService(
+		execProgressSvc,
+		taskSnapshotAdapter{reads: taskReads},
+		executionsByIssueAdapter{repos: repoRepo, execs: executionRepo},
+		repoFullNameLookup{repos: repoRepo},
+		taskStreamHub,
+	)
 
 	// trait_sync is the single shared emitter that reconciles the
 	// `api-configuration` ClusterTrait on a Component CR + per-environment
@@ -673,7 +675,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// pull_request.* handlers apply NO echo suppression (the platform authors no
 	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
 	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService).
-		WithWorkflowSignaler(devflowSignaler)
+		WithWorkflowSignaler(devflowSignaler).
+		WithTaskNotifier(taskStreamHub)
 	execEvents.RegisterHandlers(registerWebhook)
 	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
@@ -683,7 +686,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// outcomes; build success re-evaluates the funnel).
 	sweep := execution.NewSweep(funnel, execEvents, executionRepo, repoLister{repos: repoRepo}, issueService, 0)
 	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, funnel, asServiceIdentity, 0).
-		WithWorkflowSignaler(devflowSignaler)
+		WithWorkflowSignaler(devflowSignaler).
+		WithTaskNotifier(taskStreamHub)
 	// A build that fails at git-clone-auth within budget is re-minted + re-tried
 	// (§7). Only meaningful when a credential can be staged; otherwise a git-auth
 	// failure is terminal like any other.
@@ -791,7 +795,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskPlan:         taskPlan,
-		ExecProgress:     execProgressSvc,
+		TaskStream:       taskStreamSvc,
 		ComponentClient:  componentClient,
 		IDPSvc:           idpService,
 		CredentialSvc:    credService,
@@ -806,12 +810,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		FilesSvc:         filesSvc,
 		ArtifactSvc:      artifactSvcGit,
 		GenAISvc:         genaiSvc,
-		DevflowSvc: devflow.NewHumaService(
-			devflowRuntime,
-			workflowRunRepo,
-			repoFullNameLookup{repos: repoRepo},
-			devflowTagger{art: artifactSvcGit},
-		),
+		BuildSvc: build.NewService(build.Deps{
+			Runner: build.NewTemporalRunner(devflowRuntime),
+			Store:  workflowRunRepo,
+			Repos:  repoFullNameLookup{repos: repoRepo},
+			Tagger: buildSpecTagger{art: artifactSvcGit},
+			Tasks:  taskReads,
+		}),
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
 		GitHubAppClientID: cfg.GitHubAppClientID,
@@ -978,6 +983,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// into provision-Execution terminals + gate-issue closes, releasing gated
 		// consumer tasks (dependency-management §3.6).
 		resourceWatcher,
+		// Runtime-config convergence backstop: re-emits SPA env-config.js once a
+		// web-app's own public URL resolves. The build-success emit runs before
+		// the web-app's ReleaseBinding endpoint is up (so the consumer-url-env-config
+		// gate defers the write), and — since a web-app is dispatched last — no
+		// later build-success re-fires it. This idempotent sweep lands env-config.js
+		// once the URL converges (replaces the dropped periodic reconcile backstop).
+		runtimeconfig.NewWatcher(db, runtimeConfigSvc, asServiceIdentity, 0),
 		// Periodic credential validator — walks every active org_credentials row
 		// once per cfg.CredentialValidatorInterval (default 24h), probes GitHub,
 		// flags identity drift on confirmed unauthorised credentials.
@@ -997,7 +1009,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// capturing the pod's final log. Only when the proxy path is configured.
 	if cgwClient != nil {
 		watchers = append(watchers, codingagent.NewJobWatcher(db, cgwClient, executionRepo).
-			WithWorkflowSignaler(devflowSignaler))
+			WithWorkflowSignaler(devflowSignaler).
+			WithTaskNotifier(taskStreamHub))
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)")
 	}
 	// Temporal devflow worker. Registered only when Temporal is configured
@@ -1010,8 +1023,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			Runs:               workflowRunRepo,
 			Dispatcher:         codingDispatcher{funnel: funnel, execs: executionRepo},
 			Merger:             prMerger{issues: issueService},
-			Tagger:             devflowTagger{art: artifactSvcGit},
-			Design:             devflowDesign{art: artifactSvcGit, genai: genaiSvc, design: designService},
+			Spec:               devflowSpecValidator{art: artifactSvcGit},
 			Planner:            devflowPlanner{plan: taskPlan, reads: taskReads},
 			Validator:          devflowValidator{store: artifactStore, comp: componentService},
 			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},

@@ -53,14 +53,6 @@ export const importWarningsFixture = [
 // envelope repoUrl — powers the Import dialog's via-pull-request guidance).
 export const skillsRepoUrl = "https://github.com/acme-dev/org-skills";
 
-export const importUrlInvalidError: ErrorModel = {
-  type: "about:blank",
-  status: 422,
-  title: "Unprocessable Entity",
-  detail:
-    "body.url: the URL did not yield a valid skill (expected a raw SKILL.md or a gzip AgentSkills tarball)",
-};
-
 export const importFileInvalidError: ErrorModel = {
   type: "about:blank",
   status: 422,
@@ -125,47 +117,88 @@ export const skillsLoadError: ErrorModel = {
   detail: "Failed to load skills",
 };
 
-// Two built-ins, one flow skill, one custom (editable) — enough spread to
-// exercise editable/read-only rendering and the updates-available list.
+// Covers all four kinds (org | platform | custom | imported — the BE's real
+// vocabulary; builtin/flow are retired) so the catalogue's grouped rendering,
+// read-only vs editable actions, and the updates-available list all exercise.
 export const seedSkills: SkillDetailBody[] = [
   {
     orgId: "org-1",
+    name: "go",
+    kind: "org",
+    editable: false,
+    description:
+      "How to build a Go service on the platform — layout, port 9090, multi-stage Dockerfile.",
+    skillMd: `---
+name: go
+description: How to build a Go service on the platform.
+---
+
+# Go services
+
+Pin \`golang:1.25-alpine\` as the builder; the build pod runs with
+\`GOTOOLCHAIN=local\`.
+
+## Layout
+
+- \`cmd/\` — entrypoints
+- \`internal/\` — everything else
+
+Expose \`GET /health\` for liveness on port **9090**.`,
+    references: {},
+    contentSha: "sha-go-1",
+    updatedAt: "2026-05-01T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
+    name: "react-webapp",
+    kind: "org",
+    editable: false,
+    description:
+      "How to build a React SPA on the platform — Vite layout, nginx runtime, window._env_ config.",
+    skillMd: `---
+name: react-webapp
+description: How to build a React SPA on the platform.
+---
+
+# React web apps
+
+Load \`/env-config.js\` synchronously **before** the bundle, then read runtime
+config from \`window._env_\`. Throw on a missing key rather than defaulting.`,
+    references: {},
+    contentSha: "sha-rw-1",
+    updatedAt: "2026-05-02T00:00:00Z",
+  },
+  {
+    orgId: "org-1",
     name: "high-level-architecture",
-    kind: "builtin",
+    kind: "platform",
     editable: false,
     description: "Derives component architecture from requirements.",
-    skillMd:
-      "---\nname: high-level-architecture\ndescription: Derives component architecture from requirements.\n---\n\nDerive the component architecture from the approved requirements.",
+    skillMd: `---
+name: high-level-architecture
+description: Derives component architecture from requirements.
+---
+
+Derive the component architecture from the approved requirements.`,
     references: {},
-    version: 1,
     contentSha: "sha-hla-1",
     updatedAt: "2026-05-01T00:00:00Z",
   },
   {
     orgId: "org-1",
     name: "task-breakdown",
-    kind: "builtin",
+    kind: "platform",
     editable: false,
     description: "Breaks a design into buildable tasks.",
-    skillMd:
-      "---\nname: task-breakdown\ndescription: Breaks a design into buildable tasks.\n---\n\nBreak the approved design into a sequence of buildable tasks.",
+    skillMd: `---
+name: task-breakdown
+description: Breaks a design into buildable tasks.
+---
+
+Break the approved design into a sequence of buildable tasks.`,
     references: {},
-    version: 1,
     contentSha: "sha-tb-1",
     updatedAt: "2026-05-01T00:00:00Z",
-  },
-  {
-    orgId: "org-1",
-    name: "flow-orchestration",
-    kind: "flow",
-    editable: false,
-    description: "Coordinates the multi-agent generation flow.",
-    skillMd:
-      "---\nname: flow-orchestration\ndescription: Coordinates the multi-agent generation flow.\n---\n\nCoordinate hand-off between the generation-flow agents.",
-    references: {},
-    version: 2,
-    contentSha: "sha-fo-2",
-    updatedAt: "2026-05-15T00:00:00Z",
   },
   {
     orgId: "org-1",
@@ -173,18 +206,44 @@ export const seedSkills: SkillDetailBody[] = [
     kind: "custom",
     editable: true,
     description: "Acme's internal pre-deploy checklist.",
-    skillMd:
-      "---\nname: acme-deploy-checklist\ndescription: Acme's internal pre-deploy checklist.\n---\n\nRun through Acme's pre-deploy checklist before shipping.",
-    references: {},
-    version: 1,
+    skillMd: `---
+name: acme-deploy-checklist
+description: Acme's internal pre-deploy checklist.
+---
+
+# Pre-deploy checklist
+
+1. Migrations applied
+2. Feature flags reviewed
+3. Rollback plan written`,
+    references: {
+      "references/rollback.md": "# Rollback\n\nRevert the release tag.",
+    },
     contentSha: "sha-adc-1",
     updatedAt: "2026-06-20T00:00:00Z",
   },
+  {
+    orgId: "org-1",
+    name: "find-skills",
+    kind: "imported",
+    editable: true,
+    description: "Discover and evaluate community AgentSkills before adopting.",
+    skillMd: `---
+name: find-skills
+description: Discover and evaluate community AgentSkills before adopting.
+---
+
+Search the registry, read the SKILL.md, and check the declared license.`,
+    references: {},
+    contentSha: "sha-fs-1",
+    updatedAt: "2026-07-01T00:00:00Z",
+  },
 ];
 
-// Behind the platform's embedded version — surfaces in GET /skills/updates
-// until synced. "code-review" has no repo row yet (repoVersion -1).
+// Embedded content differs from the org repo copy — surfaces in GET
+// /skills/updates until synced. "code-review" is absent from the repo.
 export const seedSkillUpdates: SkillUpdate[] = [
-  { name: "task-breakdown", repoVersion: 1, embeddedVersion: 2 },
-  { name: "code-review", repoVersion: -1, embeddedVersion: 1 },
+  { name: "task-breakdown" },
+  { name: "go" },
+  { name: "code-review" },
 ];

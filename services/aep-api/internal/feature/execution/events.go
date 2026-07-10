@@ -55,6 +55,10 @@ type Events struct {
 	// a nil signaler (old-console flow, or Temporal disabled) is a no-op, so the
 	// webhook handlers behave exactly as before when no workflow is driving.
 	signaler *devflow.Signaler
+	// notifier wakes any attached task-log SSE stream so the console sees a PR
+	// transition (coding done / merged / rejected) instantly instead of on the
+	// stream's slow re-derive tick. Nil-safe.
+	notifier *TaskStreamHub
 }
 
 // NewEvents wires the pull_request handlers. prs may be nil (then the sweep
@@ -67,6 +71,13 @@ func NewEvents(store ExecutionStore, funnel *Funnel, registry *Registry, prs PRR
 // TaskFlow workflow. Optional — unset leaves the old behavior unchanged.
 func (e *Events) WithWorkflowSignaler(s *devflow.Signaler) *Events {
 	e.signaler = s
+	return e
+}
+
+// WithTaskNotifier wires the task-log stream hub so PR transitions wake attached
+// console streams instantly. Optional — nil-safe.
+func (e *Events) WithTaskNotifier(h *TaskStreamHub) *Events {
+	e.notifier = h
 	return e
 }
 
@@ -151,6 +162,7 @@ func (e *Events) PullRequestOpened(ctx context.Context, _, _ string, payload []b
 		PRNumber: p.PullRequest.Number,
 		HeadSHA:  p.PullRequest.MergeCommitSHA,
 	})
+	e.notifier.Notify(p.Repository.FullName, issueNumber)
 	return nil
 }
 
@@ -176,6 +188,7 @@ func (e *Events) PullRequestClosed(ctx context.Context, _, _ string, payload []b
 			Issue:    issueNumber,
 			PRNumber: p.PullRequest.Number,
 		})
+		e.notifier.Notify(p.Repository.FullName, issueNumber)
 		return e.recordRejection(ctx, p.Repository.FullName, issueNumber)
 	}
 
@@ -188,6 +201,7 @@ func (e *Events) PullRequestClosed(ctx context.Context, _, _ string, payload []b
 		PRNumber: p.PullRequest.Number,
 		MergeSHA: p.PullRequest.MergeCommitSHA,
 	})
+	e.notifier.Notify(p.Repository.FullName, issueNumber)
 	return e.spawnBuild(ctx, p.Repository.FullName, issueNumber, p.PullRequest.MergeCommitSHA)
 }
 

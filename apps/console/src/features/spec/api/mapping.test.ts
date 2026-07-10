@@ -17,26 +17,26 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { toRepoPath, toSpecEntries, toSpecEntry } from "./mapping";
+import { toSpecEntries, toSpecEntry } from "./mapping";
 
 describe("toSpecEntry", () => {
-  it("strips the specs/ prefix and derives the group from the folder", () => {
+  it("keeps the full specs/ path and derives the group from the folder", () => {
     expect(
       toSpecEntry({ path: "specs/requirements/prd.md", sha: "a1" }),
-    ).toEqual({ path: "requirements/prd.md", sha: "a1", group: "requirements" });
+    ).toEqual({ path: "specs/requirements/prd.md", sha: "a1", group: "requirements" });
     expect(
       toSpecEntry({ path: "specs/design/architecture.md", sha: "b2" }),
-    ).toEqual({ path: "design/architecture.md", sha: "b2", group: "designs" });
+    ).toEqual({ path: "specs/design/architecture.md", sha: "b2", group: "designs" });
     expect(
       toSpecEntry({ path: "specs/validation/plan.md", sha: "c3" }),
-    ).toEqual({ path: "validation/plan.md", sha: "c3", group: "validation" });
+    ).toEqual({ path: "specs/validation/plan.md", sha: "c3", group: "validation" });
   });
 
   it("keeps nested paths intact", () => {
     expect(
       toSpecEntry({ path: "specs/design/components/orders/design.json", sha: "d4" }),
     ).toEqual({
-      path: "design/components/orders/design.json",
+      path: "specs/design/components/orders/design.json",
       sha: "d4",
       group: "designs",
     });
@@ -59,12 +59,6 @@ describe("toSpecEntries", () => {
         { path: "specs/notes.md", sha: "x" },
         { path: "specs/validation/plan.md", sha: "c3" },
       ]).map((e) => e.path),
-    ).toEqual(["requirements/prd.md", "validation/plan.md"]);
-  });
-});
-
-describe("toRepoPath", () => {
-  it("round-trips with toSpecEntry", () => {
-    expect(toRepoPath("requirements/prd.md")).toBe("specs/requirements/prd.md");
+    ).toEqual(["specs/requirements/prd.md", "specs/validation/plan.md"]);
   });
 });

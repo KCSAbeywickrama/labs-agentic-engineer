@@ -392,6 +392,51 @@ func (c *client) EnsureApplication(ctx context.Context, app DesiredApp) (string,
 }
 
 // createApp registers a new public OAuth2 client: PKCE required, no client
+// -- identity-claim contract -------------------------------------------------
+//
+// Every provisioned OAuth app carries the SAME platform identity claims so
+// end-user tokens are role-aware. This mirrors the seeded Console app
+// (deployments/dev-thunder-setup/bootstrap/60-aep-console.yaml) and is a
+// platform-wide contract, not per-app config — hence a constant here rather
+// than a ThunderApplication CR field.
+//
+//   - identityUserAttributes lands in BOTH tokens' userAttributes. `groups`
+//     drives role-based UI; `ou*` identifies the org; the rest are profile.
+//   - scopeClaimConfig gates which claims Thunder releases per requested scope.
+//     `group → [groups]` is load-bearing: verified on Thunder 0.34 that
+//     `groups` reaches the ID TOKEN only when the `group` scope is granted
+//     (the thunder-app resource type's `scopes` default requests it). Without
+//     it, groups appears only in the access token and the SPA (reading the
+//     id_token) sees no role.
+//   - allowedUserTypes lets org (Person) users authenticate.
+var (
+	identityUserAttributes = []string{
+		"given_name", "family_name", "username", "groups",
+		"email", "name", "ouId", "ouName", "ouHandle",
+	}
+	allowedUserTypes = []string{"Person"}
+)
+
+// tokenClaimConfig returns the oauth2 `token` block (per-token userAttributes).
+// A fresh map per call so each app payload owns its copy.
+func tokenClaimConfig() map[string]any {
+	return map[string]any{
+		"accessToken": map[string]any{"userAttributes": identityUserAttributes},
+		"idToken":     map[string]any{"userAttributes": identityUserAttributes},
+	}
+}
+
+// scopeClaimConfig maps OIDC scopes to the claims Thunder releases when that
+// scope is granted. A fresh map per call.
+func scopeClaimConfig() map[string]any {
+	return map[string]any{
+		"profile": []string{"name", "given_name", "family_name", "picture"},
+		"email":   []string{"email", "email_verified"},
+		"group":   []string{"groups"},
+		"ou":      []string{"ouId", "ouName", "ouHandle"},
+	}
+}
+
 // secret, authorization_code + refresh_token grants. The payload's KEY NAMES
 // mirror createSPAApp in services/aep-api/internal/clients/thundersvc/client.go
 // exactly (values differ where documented: clientId is set to
@@ -400,8 +445,9 @@ func (c *client) EnsureApplication(ctx context.Context, app DesiredApp) (string,
 func (c *client) createApp(ctx context.Context, token string, app DesiredApp, ouID string) (string, error) {
 	uris := wireRedirectURIs(app.RedirectURIs)
 	payload := map[string]any{
-		"name": app.Name,
-		"ouId": ouID,
+		"name":             app.Name,
+		"ouId":             ouID,
+		"allowedUserTypes": allowedUserTypes,
 		"inboundAuthConfig": []map[string]any{
 			{
 				"type": "oauth2",
@@ -413,6 +459,8 @@ func (c *client) createApp(ctx context.Context, token string, app DesiredApp, ou
 					"tokenEndpointAuthMethod": "none",
 					"pkceRequired":            true,
 					"publicClient":            true,
+					"token":                   tokenClaimConfig(),
+					"scopeClaims":             scopeClaimConfig(),
 				},
 			},
 		},
@@ -454,7 +502,13 @@ func (c *client) createApp(ctx context.Context, token string, app DesiredApp, ou
 // updateApp implements desired-state semantics: read the full app, replace
 // its redirect URIs with EXACTLY the desired set (not a merge — the CR is
 // the single source of truth; the placeholder stands in when the set is
-// empty, see placeholderRedirectURI), then write the full object back.
+// empty, see placeholderRedirectURI), re-assert the platform identity-claim
+// contract, then write the full object back.
+//
+// The claim contract (token userAttributes + scopeClaims + allowedUserTypes)
+// is re-applied here — not only on create — so apps provisioned before this
+// contract existed self-heal on their next reconcile, rather than staying bare
+// (which yields end-user tokens with no `groups` claim → no role in the SPA).
 func (c *client) updateApp(ctx context.Context, token, internalID string, app DesiredApp) error {
 	full, err := c.getAppByID(ctx, token, internalID)
 	if err != nil {
@@ -465,6 +519,9 @@ func (c *client) updateApp(ctx context.Context, token, internalID string, app De
 		return fmt.Errorf("app %q: %w", app.Name, err)
 	}
 	cfg["redirectUris"] = wireRedirectURIs(app.RedirectURIs)
+	cfg["token"] = tokenClaimConfig()
+	cfg["scopeClaims"] = scopeClaimConfig()
+	full["allowedUserTypes"] = allowedUserTypes
 	return c.putAppByID(ctx, token, internalID, full)
 }
 

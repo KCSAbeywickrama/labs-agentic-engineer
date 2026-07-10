@@ -61,6 +61,16 @@ export interface ComponentDesign {
   /** The single-responsibility paragraph (what it does / does NOT do). */
   description: string;
   /**
+   * Optional. The single network endpoint the component exposes. Its `name`
+   * is the SINGLE SOURCE OF TRUTH for the endpoint name: the coding agent
+   * writes the same name into `workload.yaml` (`spec.endpoints[].name`) and
+   * the platform's managed-API (`api-configuration`) trait binds to it. When
+   * omitted, both sides default to the conventional name `"http"`. The port
+   * is NOT declared here — it stays in `workload.yaml`, chosen to match the
+   * app's actual listen port. Mirrors Go `models.ComponentEndpoint`.
+   */
+  endpoint?: Endpoint;
+  /**
    * PLATFORM-OWNED (optional). Managed-API exposure policy for a service, set
    * by the platform — the agent must NOT invent it. Round-trips through the
    * file untouched. Mirrors Go `models.ExposesAPI`.
@@ -71,6 +81,17 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
+}
+
+/**
+ * The single network endpoint a component exposes. Only the `name` is
+ * declared — it is the shared key the coding agent's `workload.yaml` and the
+ * platform's `api-configuration` trait both reference. Mirrors Go
+ * `models.ComponentEndpoint`.
+ */
+export interface Endpoint {
+  /** Workload endpoint name (the `spec.endpoints[].name` key). Defaults to "http" when the component declares no endpoint. */
+  name: string;
 }
 
 /** The closed set of dependency kinds (mirrors Go `models.DependencyKind`). */

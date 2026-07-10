@@ -47,30 +47,12 @@ type PRMerger interface {
 	MergePR(ctx context.Context, orgID, projectID string, prNumber int) error
 }
 
-// Tagger cuts (idempotently) the requirements version tag the build is based
-// on, returning the tag name (e.g. "v3"). Satisfied by an app-root adapter
-// over the artifacts service; a no-change save returns the existing tag.
-type Tagger interface {
-	CreateVersionTag(ctx context.Context, orgID, projectID string) (tag string, err error)
-}
-
-// DesignPort adapts design generation for the dev workflow. Satisfied by an
-// app-root adapter over the artifacts + genai services.
-type DesignPort interface {
-	// DesignExists reports whether an approved design already exists for the
-	// requirements version reqTag (so the workflow skips regeneration).
-	DesignExists(ctx context.Context, orgID, projectID, reqTag string) (bool, error)
-	// StartDesignTurn starts the design-generate genai turn and returns its id
-	// (reusing an already-active turn's id when one is running).
-	StartDesignTurn(ctx context.Context, orgID, projectID string) (turnID string, err error)
-	// DesignTurnOutcome reads a turn's terminal state — the workflow's fallback
-	// when the design-turn-done signal is missed. done=false while running.
-	DesignTurnOutcome(ctx context.Context, orgID, projectID, turnID string) (done bool, outcome string, err error)
-	// ApproveDesign cuts the next design version tag (v<N>-<M>) from the
-	// generated design at HEAD — the "design gate = build trigger" step
-	// (ADR-0007). Planning requires an approved (tagged) design, so a
-	// freshly-generated design must be approved before the plan step.
-	ApproveDesign(ctx context.Context, orgID, projectID string) error
+// SpecValidator re-runs the whole-spec hard gate at a `v<N>` tag — the dev
+// workflow's defensive pre-plan check (the build endpoint validated the same
+// spec before cutting the tag). Satisfied by an app-root adapter over the
+// artifacts service.
+type SpecValidator interface {
+	ValidateSpecAtTag(ctx context.Context, orgID, projectID, tag string) error
 }
 
 // Planner runs task planning and returns the planned tasks (issue number +

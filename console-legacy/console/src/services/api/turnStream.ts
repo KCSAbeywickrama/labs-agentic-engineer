@@ -115,7 +115,7 @@ export interface FoldOptions {
 
 export type StartTurnErrorCode =
   | 'turn_in_progress' // 409 — another turn is active for the project (D18)
-  | 'requirements_not_approved' // 409 — design-generate with no tagged requirements (D19)
+  | 'requirements_missing' // 409 — design-generate with no requirements content
   | 'missing_org_key' // 400 — no org Anthropic key configured
   | 'not_found' // 404 — unknown project / cross-tenant conversation
   | 'upstream' // 502/503/504 — agents-service unavailable
@@ -168,8 +168,8 @@ export function classifyStartTurnError(
     if (typeof b.activeTurnId === 'string' && b.activeTurnId) err.activeTurnId = b.activeTurnId;
     return err;
   }
-  if (code === 'requirements_not_approved') {
-    return { ok: false, code: 'requirements_not_approved', message };
+  if (code === 'requirements_missing') {
+    return { ok: false, code: 'requirements_missing', message };
   }
   switch (status) {
     case 400:
@@ -182,8 +182,8 @@ export function classifyStartTurnError(
     case 404:
       return { ok: false, code: 'not_found', message };
     case 409:
-      // 409 with no machine code ⇒ the design-generate spec-approval gate.
-      return { ok: false, code: 'requirements_not_approved', message };
+      // 409 with no machine code ⇒ the design-generate requirements gate.
+      return { ok: false, code: 'requirements_missing', message };
     case 502:
     case 503:
     case 504:

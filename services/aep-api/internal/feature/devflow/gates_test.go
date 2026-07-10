@@ -27,26 +27,26 @@ import (
 
 func TestGateConfig_IsAuto(t *testing.T) {
 	// Nil config → everything auto (the default).
-	require.True(t, GateConfig{}.IsAuto(GateDesign))
+	require.True(t, GateConfig{}.IsAuto(GatePlan))
 	// A gate absent from the map is auto; present=false is manual.
-	c := GateConfig{Auto: map[string]bool{GateDesign: false, GatePlan: true}}
-	require.False(t, c.IsAuto(GateDesign))
+	c := GateConfig{Auto: map[string]bool{GateValidate: false, GatePlan: true}}
+	require.False(t, c.IsAuto(GateValidate))
 	require.True(t, c.IsAuto(GatePlan))
 	require.True(t, c.IsAuto(GateComplete))
 }
 
-func TestDevFlowWorkflow_ManualDesignGate_Reject(t *testing.T) {
+func TestDevFlowWorkflow_ManualPlanGate_Reject(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	registerDevActivities(env, false, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
 
 	env.RegisterDelayedCallback(func() {
-		env.SignalWorkflow(SigGateDecision, GateDecisionSignal{Gate: GateDesign, Approve: false, Note: "not yet"})
+		env.SignalWorkflow(SigGateDecision, GateDecisionSignal{Gate: GatePlan, Approve: false, Note: "not yet"})
 	}, time.Second)
 
 	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{
 		OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1",
-		Gates: GateConfig{Auto: map[string]bool{GateDesign: false}},
+		Gates: GateConfig{Auto: map[string]bool{GatePlan: false}},
 	})
 
 	require.True(t, env.IsWorkflowCompleted())
@@ -54,13 +54,13 @@ func TestDevFlowWorkflow_ManualDesignGate_Reject(t *testing.T) {
 	var res DevFlowStatus
 	require.NoError(t, env.GetWorkflowResult(&res))
 	require.Equal(t, DevPhaseFailed, res.Phase)
-	require.Contains(t, res.Error, "design gate rejected")
+	require.Contains(t, res.Error, "plan gate rejected")
 }
 
 func TestDevFlowWorkflow_ManualGate_ApprovalTimeout(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	registerDevActivities(env, true, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
 
 	// plan gate is manual with a 60s approval timeout; send no decision so the
 	// timeout fires (the test env auto-advances time while idle) → rejection.
@@ -80,7 +80,7 @@ func TestDevFlowWorkflow_ManualGate_ApprovalTimeout(t *testing.T) {
 func TestDevFlowWorkflow_PendingGate_VisibleInQuery(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	registerDevActivities(env, true, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
 	env.RegisterWorkflow(TaskFlowWorkflow)
 	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
 

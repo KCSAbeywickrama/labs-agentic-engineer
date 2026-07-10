@@ -33,6 +33,8 @@ const prodConfig: CollabConfig = {
   devMode: false,
   mockBff: false,
   mockBffPort: 0,
+  commitDebounceMs: 1000,
+  commitMaxDebounceMs: 5000,
 };
 const devConfig: CollabConfig = {
   port: 0,
@@ -40,6 +42,8 @@ const devConfig: CollabConfig = {
   devMode: true,
   mockBff: false,
   mockBffPort: 0,
+  commitDebounceMs: 1000,
+  commitMaxDebounceMs: 5000,
 };
 
 function fakeBff(overrides: Partial<BffClient> = {}): BffClient {
@@ -50,8 +54,9 @@ function fakeBff(overrides: Partial<BffClient> = {}): BffClient {
       projectName: "shop",
     }),
     fetchSpecFiles: async () => [
-      { path: "requirements/prd.md", content: "# P\n" },
+      { path: "requirements/prd.md", content: "# P\n", sha: "s1" },
     ],
+    applyFiles: async () => ({ commitSha: "c", files: [] }),
     ...overrides,
   };
 }
@@ -153,7 +158,7 @@ test("load seeds from the BFF's Files API with the joiner's token", async () => 
     bff: fakeBff({
       fetchSpecFiles: async (token, project) => {
         calls.push(token, project);
-        return [{ path: "requirements/prd.md", content: "hi" }];
+        return [{ path: "requirements/prd.md", content: "hi", sha: "s2" }];
       },
     }),
   });

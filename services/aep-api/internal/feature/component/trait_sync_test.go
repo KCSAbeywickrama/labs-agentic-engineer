@@ -23,16 +23,20 @@ import (
 
 func TestAPIConfigurationInstanceName(t *testing.T) {
 	cases := []struct {
-		in, want string
+		in, ep, want string
 	}{
-		{"poc-public", "poc-public-http"},
-		{"user-api", "user-api-http"},
-		{"  trimmed  ", "trimmed-http"},
-		{"", "component-http"},
+		// Empty endpoint name ⇒ the default "http" (prior behavior preserved).
+		{"poc-public", "", "poc-public-http"},
+		{"user-api", "", "user-api-http"},
+		{"  trimmed  ", "", "trimmed-http"},
+		{"", "", "component-http"},
+		// A design-declared endpoint name is honored verbatim.
+		{"user-api", "api", "user-api-api"},
+		{"gateway", "  grpc  ", "gateway-grpc"},
 	}
 	for _, c := range cases {
-		if got := APIConfigurationInstanceName(c.in); got != c.want {
-			t.Errorf("APIConfigurationInstanceName(%q) = %q, want %q", c.in, got, c.want)
+		if got := APIConfigurationInstanceName(c.in, c.ep); got != c.want {
+			t.Errorf("APIConfigurationInstanceName(%q, %q) = %q, want %q", c.in, c.ep, got, c.want)
 		}
 	}
 }
@@ -42,7 +46,7 @@ func TestAPIConfigurationInstanceName(t *testing.T) {
 // This is the schema the AP gateway-runtime expects (see
 // deployments/manifests/api-platform/api-configuration-trait.yaml).
 func TestDesiredAPIConfigurationTrait_Enabled(t *testing.T) {
-	traits, configs := DesiredAPIConfigurationTrait("svc", true)
+	traits, configs := DesiredAPIConfigurationTrait("svc", "", true)
 	if len(traits) != 1 {
 		t.Fatalf("want 1 trait, got %d", len(traits))
 	}
@@ -86,11 +90,32 @@ func TestDesiredAPIConfigurationTrait_Enabled(t *testing.T) {
 	}
 }
 
+// TestDesiredAPIConfigurationTrait_CustomEndpointName — a design-declared
+// endpoint name (other than the default "http") must flow into BOTH the trait
+// `endpointName` parameter and the trait instance name / config key, so the
+// gateway binds to the workload's actual endpoint (no more hardcoded "http").
+func TestDesiredAPIConfigurationTrait_CustomEndpointName(t *testing.T) {
+	traits, configs := DesiredAPIConfigurationTrait("svc", "api", true)
+	if len(traits) != 1 {
+		t.Fatalf("want 1 trait, got %d", len(traits))
+	}
+	tr := traits[0]
+	if tr.InstanceName != "svc-api" {
+		t.Errorf("InstanceName = %q, want %q", tr.InstanceName, "svc-api")
+	}
+	if got, want := tr.Parameters["endpointName"], "api"; got != want {
+		t.Errorf("endpointName = %v, want %v", got, want)
+	}
+	if _, ok := configs["svc-api"]; !ok {
+		t.Fatalf("missing config for svc-api; got keys %v", keysOfAny(configs))
+	}
+}
+
 // TestDesiredAPIConfigurationTrait_Disabled — public component shape.
 // No trait + a tombstone entry in configs so the OC client's merge logic
 // removes any previously-set trait instance from each RB.
 func TestDesiredAPIConfigurationTrait_Disabled(t *testing.T) {
-	traits, configs := DesiredAPIConfigurationTrait("svc", false)
+	traits, configs := DesiredAPIConfigurationTrait("svc", "", false)
 	if traits != nil {
 		t.Fatalf("want nil traits when disabled, got %+v", traits)
 	}
