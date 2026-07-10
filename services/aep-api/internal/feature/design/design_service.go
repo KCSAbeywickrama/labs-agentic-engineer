@@ -134,6 +134,12 @@ type DesignService interface {
 	// ErrResourceCatalogUnavailable (503) when a platform-resource dependency
 	// exists but the CRT catalog is unreachable (fail-closed).
 	DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error
+	// RegisterExternalResources upserts the project's `external` dependencies at
+	// HEAD into the org's external-resource catalog — the SAME registration
+	// SaveAndProceed performs, exposed so the thin POST /build provisioning path
+	// (issue #164) can ensure the catalog is populated before authoring bindings.
+	// A nil design (no committed design yet) is a no-op.
+	RegisterExternalResources(ctx context.Context, orgID, projectID string) error
 }
 
 type designService struct {
@@ -277,6 +283,19 @@ func (s *designService) registerExternalResources(ctx context.Context, orgID str
 			}
 		}
 	}
+}
+
+// RegisterExternalResources reads the design at HEAD and best-effort upserts
+// every distinct `external` dependency into the org catalog (the public entry
+// the build path's provisioning adapter calls before authoring bindings, so the
+// catalog resolves each external resource). A nil design is a no-op.
+func (s *designService) RegisterExternalResources(ctx context.Context, orgID, projectID string) error {
+	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("design: read design: %w", err)
+	}
+	s.registerExternalResources(ctx, orgID, designFile)
+	return nil
 }
 
 // CollectSpec resolves the {component, depName} external dependency in the

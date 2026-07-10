@@ -35,35 +35,38 @@ var errNotConfigured = errors.New("devflow: activity dependency not configured")
 // are added as later phases wire each adapter; the workflow-run index
 // activities land first because both workflows record themselves on entry.
 type Activities struct {
-	runs       WorkflowRunStore
-	dispatcher CodingDispatcher
-	merger     PRMerger
-	spec       SpecValidator
-	planner    Planner
-	validator  Validator
+	runs        WorkflowRunStore
+	dispatcher  CodingDispatcher
+	merger      PRMerger
+	spec        SpecValidator
+	planner     Planner
+	validator   Validator
+	provisioner BuildProvisioner
 }
 
 // Deps carries the activity adapters. Any field may be nil in narrow contexts
 // (the corresponding activity then returns a not-configured error); the app
 // root wires all of them.
 type Deps struct {
-	Runs       WorkflowRunStore
-	Dispatcher CodingDispatcher
-	Merger     PRMerger
-	Spec       SpecValidator
-	Planner    Planner
-	Validator  Validator
+	Runs        WorkflowRunStore
+	Dispatcher  CodingDispatcher
+	Merger      PRMerger
+	Spec        SpecValidator
+	Planner     Planner
+	Validator   Validator
+	Provisioner BuildProvisioner
 }
 
 // NewActivities wires the activity adapters.
 func NewActivities(d Deps) *Activities {
 	return &Activities{
-		runs:       d.Runs,
-		dispatcher: d.Dispatcher,
-		merger:     d.Merger,
-		spec:       d.Spec,
-		planner:    d.Planner,
-		validator:  d.Validator,
+		runs:        d.Runs,
+		dispatcher:  d.Dispatcher,
+		merger:      d.Merger,
+		spec:        d.Spec,
+		planner:     d.Planner,
+		validator:   d.Validator,
+		provisioner: d.Provisioner,
 	}
 }
 
@@ -187,4 +190,28 @@ func (a *Activities) Validate(ctx context.Context, in ValidateInput) error {
 		return errNotConfigured
 	}
 	return a.validator.Validate(ctx, in.OrgID, in.ProjectID, in.Tag)
+}
+
+// ProvisionDepsInput carries the project + tag + resolved provisioning payload
+// the dev workflow authors the dependencies from (issue #164).
+type ProvisionDepsInput struct {
+	OrgID     string           `json:"orgId"`
+	ProjectID string           `json:"projectId"`
+	Tag       string           `json:"tag"`
+	Inputs    []ProvisionInput `json:"inputs,omitempty"`
+}
+
+// ProvisionDependencies authors the project's dependencies by kind from the
+// build drawer inputs (mint gates → external sync, platform-resource async). A
+// build with no provision inputs is a no-op (so an unprovisioned build never
+// depends on the provisioner being wired). Per-dependency failures come back as
+// data; an infra error surfaces as the activity error (retry / fail the run).
+func (a *Activities) ProvisionDependencies(ctx context.Context, in ProvisionDepsInput) ([]ProvisionFailure, error) {
+	if len(in.Inputs) == 0 {
+		return nil, nil
+	}
+	if a.provisioner == nil {
+		return nil, errNotConfigured
+	}
+	return a.provisioner.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.Inputs)
 }

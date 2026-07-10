@@ -1,0 +1,163 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package provisioning
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/models"
+)
+
+// TestProvisionForBuild_ByKind is the Task-3 contract: the workflow's provision
+// step mints the gate issues once, then authors each dependency BY KIND —
+// external via AuthorWithSecretRef (the no-SM-write author half, gate closed
+// synchronously) and platform-resource via the async Provision (gate left open
+// for the readiness watcher). It must NOT route external through Provision (that
+// would re-write secrets).
+func TestProvisionForBuild_ByKind(t *testing.T) {
+	issues := newFakeIssues(nil) // no gates yet — EnsureProvisionIssues mints them
+	execs := &fakeExecStore{}
+	reeval := &fakeReeval{}
+	ext := &fakeExtProv{}
+	plat := &fakePlatProv{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	}}
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config",
+			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"development": "sm://x"}},
+		{Component: "orders", Dependency: "orders-db", Kind: "platform-resource",
+			Parameters: map[string]any{"instances": 1}, Approved: true},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+
+	// EnsureProvisionIssues minted a gate per distinct external + platform dep.
+	if len(issues.created) != 2 {
+		t.Fatalf("want 2 minted gate issues (stripe + orders-db), got %d", len(issues.created))
+	}
+
+	// External authored via AuthorWithSecretRef — NOT via Provision (no SM write).
+	if ext.authorRefCalls != 1 {
+		t.Fatalf("external dep must be authored via AuthorWithSecretRef once, got %d", ext.authorRefCalls)
+	}
+	if ext.calls != 0 {
+		t.Fatalf("external dep must NOT go through Provision (that re-writes secrets), got %d Provision calls", ext.calls)
+	}
+	// The staged reference + plain config reach the author call verbatim.
+	if got := ext.authorByEnv["development"]; got.SecretStorePath != "sm://x" || got.Plain["region"] != "us" {
+		t.Fatalf("author byEnv wrong: %+v", got)
+	}
+
+	// Platform-resource authored via the async Provision path.
+	if plat.calls != 1 {
+		t.Fatalf("platform-resource dep must be authored via Provision once, got %d", plat.calls)
+	}
+	if plat.params["instances"] != 1 {
+		t.Fatalf("platform-resource params must flow through, got %+v", plat.params)
+	}
+
+	// The external gate closed synchronously; the platform gate stays open (async).
+	extGate := gateNumber(issues, "stripe")
+	if _, closed := issues.closed[extGate]; !closed {
+		t.Fatalf("external gate #%d must be closed synchronously", extGate)
+	}
+	platGate := gateNumber(issues, "orders-db")
+	if _, closed := issues.closed[platGate]; closed {
+		t.Fatalf("platform gate #%d must stay open for the readiness watcher", platGate)
+	}
+}
+
+// TestProvisionForBuild_ExternalAuthorFailureContinues pins the batch semantics:
+// a per-input author error becomes a ProvisionFailure (data, not an activity
+// error) and the batch continues to the remaining inputs.
+func TestProvisionForBuild_ExternalAuthorFailureContinues(t *testing.T) {
+	issues := newFakeIssues(nil)
+	execs := &fakeExecStore{}
+	ext := &fakeExtProv{authorErr: fmt.Errorf("author boom")}
+	plat := &fakePlatProv{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}}},
+	}}
+	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config",
+			SecretRefByEnv: map[string]string{"development": "sm://x"}},
+		{Component: "orders", Dependency: "orders-db", Kind: "platform-resource",
+			Parameters: map[string]any{"instances": 1}},
+	})
+	if err != nil {
+		t.Fatalf("a per-input author failure must not be an activity error, got %v", err)
+	}
+	if len(fails) != 1 {
+		t.Fatalf("want exactly one ProvisionFailure, got %+v", fails)
+	}
+	if fails[0].Dependency != "stripe" || fails[0].Component != "orders" {
+		t.Fatalf("failure identity wrong: %+v", fails[0])
+	}
+	if fails[0].Reason == "" {
+		t.Fatalf("failure must carry a reason")
+	}
+	// The batch continued past the failure: the platform-resource still provisioned.
+	if plat.calls != 1 {
+		t.Fatalf("batch must continue after an external failure, got %d platform calls", plat.calls)
+	}
+}
+
+// TestProvisionForBuild_OrgServiceIsNoop confirms an org-service input is a
+// no-op in this task (Task 4 fills it) and never errors.
+func TestProvisionForBuild_OrgServiceIsNoop(t *testing.T) {
+	issues := newFakeIssues(nil)
+	ext := &fakeExtProv{}
+	plat := &fakePlatProv{}
+	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{},
+		fakeDesign{comps: []models.DesignComponent{{Name: "web"}}}, &fakeCatalog{}, ext, plat, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
+		{Component: "web", Dependency: "inventory", Kind: "org-service", Approved: true},
+	})
+	if err != nil || len(fails) != 0 {
+		t.Fatalf("org-service must be a silent no-op, got fails=%+v err=%v", fails, err)
+	}
+	if ext.authorRefCalls != 0 || plat.calls != 0 {
+		t.Fatalf("org-service must author nothing")
+	}
+}
+
+// gateNumber finds the minted aep:provision gate issue number for a dep name.
+func gateNumber(issues *fakeIssues, depName string) int {
+	for _, i := range issues.list {
+		block, err := taskmeta.ParseBlock(i.Body)
+		if err != nil {
+			continue
+		}
+		if block.Component == depName {
+			return i.Number
+		}
+	}
+	return 0
+}

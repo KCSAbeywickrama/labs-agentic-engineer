@@ -204,6 +204,65 @@ func TestProvision_SecretValuesWithoutSMAPI_Fails(t *testing.T) {
 	}
 }
 
+// TestAuthorWithSecretRef_UsesStagedRefNoSMWrite pins the build path's author
+// half (issue #164): it authors the per-env binding pinned to the PASSED
+// SecretStorePath (staged pre-tag by POST /build) and NEVER writes to SM-API.
+func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
+	t.Parallel()
+
+	rc := newFakeRC("openweather-proj-abc123")
+	sw := &fakeSecretWriter{}
+	p := newTestProvisioner(nil, rc, sw)
+
+	er := &models.ExternalResource{
+		Name: "openweather", ResourceTypeName: "openweather",
+		ConfigKeys: []models.ConfigKey{
+			{Key: "OPENWEATHER_BASE_URL", Secret: false},
+			{Key: "OPENWEATHER_API_KEY", Secret: true},
+		},
+	}
+	byEnv := map[string]PreparedEnvValues{
+		"development": {
+			Plain:           map[string]string{"OPENWEATHER_BASE_URL": "https://api.openweathermap.org"},
+			SecretStorePath: "user-app-secrets/wc-org/staged-ref",
+		},
+	}
+
+	res, err := p.AuthorWithSecretRef(context.Background(), "default", "weatherproj", er, byEnv)
+	if err != nil {
+		t.Fatalf("AuthorWithSecretRef: %v", err)
+	}
+	// The SM-API writer is NEVER touched — the secret was staged pre-tag.
+	if len(sw.wrote) != 0 {
+		t.Fatalf("AuthorWithSecretRef must not write to SM-API, wrote: %v", sw.wrote)
+	}
+	// One binding, pinned to the release, carrying the PASSED secretStorePath.
+	bindings := rc.EnsureBindingCalls()
+	if len(bindings) != 1 {
+		t.Fatalf("want 1 binding, got %d", len(bindings))
+	}
+	b := bindings[0].B
+	if b.Metadata.Name != "weatherproj-openweather-development" {
+		t.Errorf("binding name = %q", b.Metadata.Name)
+	}
+	if b.Spec.ResourceRelease != "openweather-proj-abc123" {
+		t.Errorf("binding not pinned: %q", b.Spec.ResourceRelease)
+	}
+	var cfg map[string]string
+	if err := json.Unmarshal(b.Spec.ResourceTypeEnvironmentConfigs, &cfg); err != nil {
+		t.Fatalf("env configs not json: %v", err)
+	}
+	if cfg["OPENWEATHER_BASE_URL"] != "https://api.openweathermap.org" {
+		t.Errorf("plain value missing from env configs: %v", cfg)
+	}
+	if cfg[openchoreo.SecretStorePathField] != "user-app-secrets/wc-org/staged-ref" {
+		t.Errorf("staged secretStorePath must be pinned verbatim, got %q", cfg[openchoreo.SecretStorePathField])
+	}
+	if res.BindingByEnv["development"] != "weatherproj-openweather-development" {
+		t.Errorf("BindingByEnv wrong: %+v", res.BindingByEnv)
+	}
+}
+
 func TestProvision_Validation(t *testing.T) {
 	t.Parallel()
 

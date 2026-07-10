@@ -112,6 +112,11 @@ type ProjectLister interface {
 // *resources.ExternalResourceProvisioner satisfies it.
 type ExternalProvisioner interface {
 	Provision(ctx context.Context, orgHandle, ocOrgID, projectName string, er *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error)
+	// AuthorWithSecretRef authors the OC external Resource model from
+	// already-staged secret references (the build path, issue #164) — no SM-API
+	// write. Mirrors Provision's resource/binding authoring using the passed
+	// per-env secretStorePath.
+	AuthorWithSecretRef(ctx context.Context, orgHandle, projectName string, er *models.ExternalResource, byEnv map[string]resources.PreparedEnvValues) (*resources.ProvisionResult, error)
 	Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error
 	// ResolveRunnerSecrets returns the SM-API vault path + secret-key list for
 	// each named external resource, read back off its per-env binding — the

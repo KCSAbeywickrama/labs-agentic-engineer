@@ -166,6 +166,12 @@ type fakeExtProv struct {
 	result        *resources.ProvisionResult
 	err           error
 	deprovisioned []string
+
+	// AuthorWithSecretRef spies (the build path's no-SM-write author half).
+	authorRefCalls int
+	authorByEnv    map[string]resources.PreparedEnvValues
+	authorResult   *resources.ProvisionResult
+	authorErr      error
 }
 
 func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error) {
@@ -176,6 +182,17 @@ func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.Ext
 	}
 	if f.result != nil {
 		return f.result, nil
+	}
+	return &resources.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
+}
+func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.PreparedEnvValues) (*resources.ProvisionResult, error) {
+	f.authorRefCalls++
+	f.authorByEnv = byEnv
+	if f.authorErr != nil {
+		return nil, f.authorErr
+	}
+	if f.authorResult != nil {
+		return f.authorResult, nil
 	}
 	return &resources.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
 }
