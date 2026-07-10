@@ -18,14 +18,25 @@
 
 import { Server } from "@hocuspocus/server";
 import type {
+  afterUnloadDocumentPayload,
+  beforeUnloadDocumentPayload,
   onAuthenticatePayload,
   onLoadDocumentPayload,
+  onStatelessPayload,
+  onStoreDocumentPayload,
 } from "@hocuspocus/server";
 import type { CollabConfig } from "./env.js";
 import type { BffClient } from "./bff.js";
 import { isSpecRoom } from "./room.js";
 import { seedDocument } from "./seed.js";
 import { devSeedFiles } from "./fixtures.js";
+import { flushRoom } from "./committer.js";
+import {
+  addParticipant,
+  dropRoomState,
+  ensureRoomState,
+  roomState,
+} from "./rooms.js";
 
 // Connection context established by onAuthenticate and consumed by later
 // hooks. The token is retained for the seed read (performed as the first
@@ -67,6 +78,15 @@ export function buildAuthenticateHook(config: CollabConfig, deps: CollabDeps) {
     // itself (#86: identity stays the BFF's problem). It also resolves the
     // room into a project name for the seed read.
     const identity = await deps.bff.validateAccess(token, documentName);
+    // Committer bookkeeping (#133): the session's participants become the
+    // commit's Co-authored-by trailers; the latest token backs the forced
+    // unload flush (no connection context exists by then).
+    const state = ensureRoomState(documentName, identity.projectName);
+    state.lastToken = token;
+    addParticipant(documentName, {
+      name: identity.name,
+      email: identity.email,
+    });
     return {
       user: { name: identity.name, email: identity.email, kind: "user" },
       token,
@@ -106,6 +126,12 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
         context.projectName,
       );
       seedDocument(document, files);
+      // Committer baseline (#133): the flush diffs the live doc against what
+      // was seeded (content) and preconditions on the shas we read.
+      const state = ensureRoomState(documentName, context.projectName);
+      for (const f of files) {
+        state.baseline.set(f.path, { content: f.content, sha: f.sha });
+      }
       deps.log?.(`seeded ${documentName} (${files.length} files) from BFF`);
     } catch (err) {
       deps.log?.(
@@ -116,19 +142,152 @@ export function buildLoadDocumentHook(config: CollabConfig, deps: CollabDeps) {
   };
 }
 
+// buildStoreDocumentHook is the #133 committer trigger: Hocuspocus debounces
+// it per document (Server debounce/maxDebounce) and runs it one final time
+// before unload, so "quiet period", "max age", and "last leave" all funnel
+// here. Dev mode has no BFF-backed rooms to commit.
+export function buildStoreDocumentHook(config: CollabConfig, deps: CollabDeps) {
+  return async (
+    data: Pick<onStoreDocumentPayload, "document" | "documentName"> & {
+      lastContext: CollabContext | null;
+    },
+  ) => {
+    if (config.devMode || !deps.bff) return;
+    if (!roomState(data.documentName)) return;
+    try {
+      await flushRoom(
+        { bff: deps.bff, log: deps.log },
+        data.documentName,
+        data.document,
+        data.lastContext ?? undefined,
+      );
+    } catch (err) {
+      // A failed flush must not kill connections; the doc stays live and the
+      // next store attempt (or session end) retries from the same baseline.
+      deps.log?.(
+        `committer: flush failed for ${data.documentName} (${String(err)})`,
+      );
+    }
+  };
+}
+
+// The forced session-end flush (#86 ph6 review gate): interim stores HOLD
+// files with pending agent marks, so the last leave must commit everything
+// (accept-by-default) BEFORE the doc unloads. beforeUnloadDocument has no
+// connection context — the room state's lastToken authenticates the apply.
+export function buildBeforeUnloadHook(config: CollabConfig, deps: CollabDeps) {
+  return async (
+    data: Pick<beforeUnloadDocumentPayload, "document" | "documentName">,
+  ) => {
+    if (config.devMode || !deps.bff) return;
+    if (!roomState(data.documentName)) return;
+    try {
+      await flushRoom(
+        { bff: deps.bff, log: deps.log },
+        data.documentName,
+        data.document,
+        undefined,
+        true,
+      );
+    } catch (err) {
+      deps.log?.(
+        `committer: final flush failed for ${data.documentName} (${String(err)})`,
+      );
+    }
+  };
+}
+
+export function buildAfterUnloadHook(deps: CollabDeps) {
+  return (data: Pick<afterUnloadDocumentPayload, "documentName">) => {
+    dropRoomState(data.documentName);
+    deps.log?.(`room ${data.documentName} unloaded — committer state dropped`);
+    return Promise.resolve();
+  };
+}
+
+// Flush-on-demand (#162): the console requests a commit BEFORE triggering a
+// build. `POST /build` tags git HEAD, so the room's live doc edits (which
+// otherwise reach git only on the debounce / last-peer-leave) must land first.
+// A stateless `{type:"flush",id}` message force-flushes the room through the
+// committer (accept-by-default for held agent suggestions) and acks the
+// requesting connection; the console awaits the ack, then builds. Unknown
+// payloads are ignored; a clean/dev/no-BFF room acks immediately (nothing to
+// commit → HEAD is already the truth).
+export function buildStatelessHook(config: CollabConfig, deps: CollabDeps) {
+  return async (
+    data: Pick<
+      onStatelessPayload,
+      "connection" | "documentName" | "document" | "payload"
+    >,
+  ) => {
+    let msg: { type?: string; id?: string };
+    try {
+      msg = JSON.parse(data.payload) as { type?: string; id?: string };
+    } catch {
+      return; // not our protocol
+    }
+    if (msg.type !== "flush") return;
+
+    const ack = (extra: Record<string, unknown> = {}) =>
+      data.connection.sendStateless(
+        JSON.stringify({ type: "flushed", id: msg.id, ...extra }),
+      );
+
+    if (config.devMode || !deps.bff || !roomState(data.documentName)) {
+      ack(); // nothing to commit — proceed to build against current HEAD
+      return;
+    }
+    try {
+      await flushRoom(
+        { bff: deps.bff, log: deps.log },
+        data.documentName,
+        data.document,
+        undefined,
+        true,
+      );
+      ack();
+    } catch (err) {
+      deps.log?.(
+        `committer: on-demand flush failed for ${data.documentName} (${String(err)})`,
+      );
+      data.connection.sendStateless(
+        JSON.stringify({
+          type: "flush-error",
+          id: msg.id,
+          message: err instanceof Error ? err.message : "flush failed",
+        }),
+      );
+    }
+  };
+}
+
 export function createCollabServer(
   config: CollabConfig,
   deps: CollabDeps,
 ): Server<CollabContext> {
   return new Server<CollabContext>({
     name: "aep-collab",
-    // No persistence extension yet: the committer worker is #86 phase 3.
-    // Until then a doc's life is its room's life; the seed is the recovery
-    // story. Keep docs loaded only while connections exist.
+    // The committer (#86 phase 3 / #133): onStoreDocument is Hocuspocus's
+    // debounced persistence seam — a quiet period commits, maxDebounce caps
+    // the wait during continuous editing, and unload runs one final store.
+    // A doc's life is still its room's life; git is the durable truth and
+    // rejoin reseeds from HEAD.
     unloadImmediately: true,
+    debounce: config.commitDebounceMs,
+    maxDebounce: config.commitMaxDebounceMs,
     onAuthenticate: buildAuthenticateHook(config, deps),
     onLoadDocument: buildLoadDocumentHook(config, deps) as (
       data: onLoadDocumentPayload<CollabContext>,
+    ) => Promise<unknown>,
+    onStoreDocument: buildStoreDocumentHook(config, deps) as (
+      data: onStoreDocumentPayload<CollabContext>,
+    ) => Promise<unknown>,
+    beforeUnloadDocument: buildBeforeUnloadHook(config, deps) as (
+      data: beforeUnloadDocumentPayload,
+    ) => Promise<unknown>,
+    afterUnloadDocument: buildAfterUnloadHook(deps),
+    onStateless: buildStatelessHook(config, deps) as (
+      data: onStatelessPayload,
     ) => Promise<unknown>,
   });
 }

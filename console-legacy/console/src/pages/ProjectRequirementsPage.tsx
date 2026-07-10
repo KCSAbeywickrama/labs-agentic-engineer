@@ -42,7 +42,7 @@ import {
   Tooltip,
   Typography,
 } from '@wso2/oxygen-ui';
-import { GitCompare, GitHub, Rocket, Sparkles } from '@wso2/oxygen-ui-icons-react';
+import { GitCompare, GitHub, Save, Sparkles } from '@wso2/oxygen-ui-icons-react';
 import type { CollabConfig } from '@aep/md-editor';
 import { Explorer, type ExplorerRef, type AddFileMenuItem } from '@aep/explorer';
 import { api, ApiError } from '../services/api';
@@ -57,7 +57,6 @@ import {
   turnErrorMessage,
 } from '../services/api/turns';
 import { computeDerivedArtifacts, derivedPathsFor } from '../lib/derivedArtifacts';
-import { projectArchitecturePath } from '../lib/paths';
 import { useCollabEditor } from '../hooks/useCollabEditor';
 import CollabAwarenessBar from '../components/CollabAwarenessBar';
 import { env } from '../config/env';
@@ -663,8 +662,8 @@ export default function ProjectRequirementsPage() {
     [projectId, activePath, updateBuffers, refreshServer, reportApplyError],
   );
 
-  // -- Publish (flush buffers → apply → save-tag → architecture) --------------
-  const handlePublish = async () => {
+  // -- Save (flush buffers → apply commit; NO tag — versions are cut by Build) --
+  const handleSave = async () => {
     if (!projectId) return;
     // Flush the active editor buffer first.
     if (activePath) {
@@ -699,10 +698,6 @@ export default function ProjectRequirementsPage() {
         deletes.push({ path: p, baseSha: shas[p] });
       }
 
-      // The {commitSha} pin on save is optional now (the backend reads its own
-      // mirror — no GitHub read-lag): pass it when the apply just minted one,
-      // save unpinned otherwise (tags HEAD).
-      let commitSha: string | undefined;
       if (writes.length > 0 || deletes.length > 0) {
         const res = await applyFiles(projectId, { writes, deletes, message: 'Update requirements' });
         if (!res.ok) {
@@ -710,13 +705,12 @@ export default function ProjectRequirementsPage() {
           setPublishing(false);
           return;
         }
-        commitSha = res.commitSha;
       }
-      await api.saveRequirements(projectId, commitSha);
       updateBuffers(() => ({}));
-      navigate(projectArchitecturePath(routeOrgId, projectId));
+      await refreshServer();
+      setPublishing(false);
     } catch (err) {
-      setPublishError(err instanceof ApiError ? err.message : 'Failed to publish. Please try again.');
+      setPublishError(err instanceof ApiError ? err.message : 'Failed to save. Please try again.');
       setPublishing(false);
     }
   };
@@ -992,16 +986,16 @@ export default function ProjectRequirementsPage() {
         {!viewingHistorical && !streamingMain && (
           <>
             <Divider orientation="vertical" flexItem />
-            <Tooltip title={reqTurnActive ? 'A generation is writing the requirements — publishing is disabled until it finishes.' : ''}>
+            <Tooltip title={reqTurnActive ? 'A generation is writing the requirements — saving is disabled until it finishes.' : ''}>
               <span>
                 <Button
                   variant="contained"
                   size="small"
-                  startIcon={publishing ? <CircularProgress size={14} color="inherit" /> : <Rocket size={16} />}
+                  startIcon={publishing ? <CircularProgress size={14} color="inherit" /> : <Save size={16} />}
                   disabled={publishing || Object.keys(explorerFiles).length === 0 || reqTurnActive}
-                  onClick={handlePublish}
+                  onClick={handleSave}
                 >
-                  {publishing ? 'Publishing...' : 'Publish'}
+                  {publishing ? 'Saving...' : 'Save'}
                 </Button>
               </span>
             </Tooltip>

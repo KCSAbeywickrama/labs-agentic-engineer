@@ -64,9 +64,38 @@ const dependencySchema = z.strictObject({
   specUrl: z.string().optional(),
   config: z.array(configKeySchema).optional(),
   resourceType: z.string().optional(),
-  parameters: z.record(z.string(), z.string()).optional(),
+  // Values are typed per the target (Cluster)ResourceType's OpenAPI v3 schema —
+  // e.g. postgres-cnpg declares `instances` as integer and `storage`/`version`
+  // as string, so parameters are mixed scalar types, not string-only. The map
+  // is marshalled verbatim into the OpenChoreo Resource spec.parameters, so a
+  // number must survive as a JSON number for CRD validation to pass.
+  parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   candidates: z.array(dependencyCandidateSchema).optional(),
 });
+
+// The component's single network endpoint (mirrors Go models.ComponentEndpoint).
+// Only `name` is declared — the shared key the coding agent's workload.yaml and
+// the platform's api-configuration trait both reference. Defaults to "http"
+// downstream when the whole block is omitted.
+const endpointSchema = z.strictObject({
+  name: z.string().min(1),
+});
+
+// `type` is an OPEN vocabulary (future kinds: worker, scheduled-task, …) but the
+// browser-app kind has ONE canonical spelling: "web-application" (OpenChoreo's
+// term). The agent habitually writes "webapp"/"web-app", which silently breaks
+// deployment + runtime-config (both key on the exact string). Reject the known
+// wrong aliases with a self-correct message — this normalizes NOTHING, it forces
+// the agent to emit the canonical value. Mirrored in the Go fold gate
+// (agentfold/designgate.go) and the high-level-architecture skill. NB: a zod
+// `.refine` does not serialize to JSON Schema, so the generated
+// component-design.schema.json is intentionally more permissive on `type` (a
+// bare non-empty string); the alias rule is enforced by this gate + the Go fold.
+const WEB_APPLICATION_ALIASES = new Set(["webapp", "web-app", "webapplication", "web application"]);
+const componentTypeSchema = z.string().min(1).refine(
+  (t) => !WEB_APPLICATION_ALIASES.has(t.trim().toLowerCase()),
+  { message: 'use "web-application" (the canonical kind), not "webapp"/"web-app", for a browser app component type' },
+);
 
 // Managed-API exposure policy (platform-owned; mirrors Go models.ExposesAPI).
 const exposesAPISchema = z.strictObject({
@@ -78,7 +107,7 @@ const exposesAPISchema = z.strictObject({
 
 export const componentDesignSchema = z.strictObject({
   name: z.string().min(1),
-  type: z.string().min(1),
+  type: componentTypeSchema,
   version: z.string().min(1),
   language: z.string().min(1),
   buildpack: z.string().min(1),
@@ -87,6 +116,7 @@ export const componentDesignSchema = z.strictObject({
   exposure: z.enum(["internet", "intranet"]),
   dependencies: z.array(dependencySchema),
   description: z.string().min(1),
+  endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
 });

@@ -132,6 +132,12 @@ type WorkloadEndpointInfo struct {
 	Port       int32    // endpoint port
 	BasePath   string   // optional root path
 	Visibility []string // explicit extra visibilities: namespace | internal | external
+
+	// Schema is the endpoint's inline API definition, if the Workload declares one
+	// (OpenChoreo populates spec.endpoints[].schema from workload.yaml `schemaFile:`,
+	// or a directly-authored Workload CR). Empty for app-factory BYO-image workloads.
+	SchemaType    string // e.g. "openapi", "proto", "graphql" (endpoint.Schema.Type)
+	SchemaContent string // the inlined spec document (endpoint.Schema.Content)
 }
 
 // NamespaceVisible reports whether this endpoint is consumable cross-project
@@ -651,6 +657,10 @@ type workloadItem struct {
 			Port       int32    `json:"port"`
 			BasePath   string   `json:"basePath"`
 			Visibility []string `json:"visibility"`
+			Schema     struct {
+				Type    string `json:"type"`
+				Content string `json:"content"`
+			} `json:"schema"`
 		} `json:"endpoints"`
 	} `json:"spec"`
 }
@@ -664,14 +674,16 @@ func (c *resourceClient) ListWorkloadEndpoints(ctx context.Context, orgHandle st
 	for _, w := range out.Items {
 		for name, ep := range w.Spec.Endpoints {
 			infos = append(infos, WorkloadEndpointInfo{
-				Project:    w.Spec.Owner.ProjectName,
-				Component:  w.Spec.Owner.ComponentName,
-				Workload:   w.Metadata.Name,
-				Name:       name,
-				Type:       ep.Type,
-				Port:       ep.Port,
-				BasePath:   ep.BasePath,
-				Visibility: ep.Visibility,
+				Project:       w.Spec.Owner.ProjectName,
+				Component:     w.Spec.Owner.ComponentName,
+				Workload:      w.Metadata.Name,
+				Name:          name,
+				Type:          ep.Type,
+				Port:          ep.Port,
+				BasePath:      ep.BasePath,
+				Visibility:    ep.Visibility,
+				SchemaType:    ep.Schema.Type,
+				SchemaContent: ep.Schema.Content,
 			})
 		}
 	}

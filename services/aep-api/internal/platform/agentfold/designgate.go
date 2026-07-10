@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // componentDesignRe is COMPONENT_DESIGN_JSON_RE.
@@ -43,8 +44,13 @@ type designProblem struct {
 }
 
 var (
-	designStringFields  = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
-	exposureValues      = map[string]bool{"internet": true, "intranet": true}
+	designStringFields = []string{"name", "type", "version", "language", "buildpack", "appPath", "entrypoint", "description"}
+	exposureValues     = map[string]bool{"internet": true, "intranet": true}
+	// webAppTypeAliases are the wrong spellings of the canonical "web-application"
+	// component kind that the zod gate rejects (component-design-schema.ts); the
+	// fold gate mirrors that rejection so a design carrying "webapp"/"web-app"
+	// (which silently breaks deploy + runtime-config) never folds.
+	webAppTypeAliases   = map[string]bool{"webapp": true, "web-app": true, "webapplication": true, "web application": true}
 	dependencyKinds     = map[string]bool{"component": true, "org-service": true, "external": true, "platform-resource": true}
 	dependencyKnownKeys = map[string]bool{
 		"kind": true, "name": true, "description": true, "needsSpec": true,
@@ -55,7 +61,7 @@ var (
 		"name": true, "type": true, "version": true, "language": true,
 		"buildpack": true, "appPath": true, "entrypoint": true,
 		"exposure": true, "dependencies": true, "description": true,
-		"exposesAPI": true, "componentAgentInstructions": true,
+		"endpoint": true, "exposesAPI": true, "componentAgentInstructions": true,
 	}
 )
 
@@ -91,6 +97,9 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return &designProblem{code: ErrSchemaViolation, message: field + ": must be at least 1 characters"}
 		}
 	}
+	if t, _ := obj["type"].(string); webAppTypeAliases[strings.ToLower(strings.TrimSpace(t))] {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("type %q is not a canonical kind — use \"web-application\" for a browser app", t)}
+	}
 	exposure, ok := obj["exposure"].(string)
 	if !ok || !exposureValues[exposure] {
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("exposure: %q is not an allowed value", obj["exposure"])}
@@ -104,11 +113,39 @@ func validateComponentDesign(content, dirName string) *designProblem {
 			return p
 		}
 	}
+	if ep, present := obj["endpoint"]; present {
+		if p := validateEndpoint(ep); p != nil {
+			return p
+		}
+	}
 	if name := obj["name"].(string); name != dirName {
 		return &designProblem{
 			code:    ErrSchemaViolation,
 			message: fmt.Sprintf("name %q must equal the component directory name %q", name, dirName),
 		}
+	}
+	return nil
+}
+
+// validateEndpoint mirrors the zod endpointSchema.strictObject: an optional
+// block whose only key is `name` (a non-empty string). The port must accept
+// exactly what the zod gate accepts — a design.json with an `endpoint` block
+// passes the FileBundle's write-gate, so it MUST fold here too or the manifest
+// check fails a healthy turn (the endpoint field was added by the endpoint-name
+// single-source change; component-design-schema.ts is the source of truth).
+func validateEndpoint(v any) *designProblem {
+	ep, ok := v.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "endpoint: must be an object"}
+	}
+	for k := range ep {
+		if k != "name" {
+			return &designProblem{code: ErrSchemaViolation, message: "endpoint: unknown property " + k}
+		}
+	}
+	name, ok := ep["name"].(string)
+	if !ok || name == "" {
+		return &designProblem{code: ErrSchemaViolation, message: "endpoint.name: must be at least 1 characters"}
 	}
 	return nil
 }
@@ -134,6 +171,35 @@ func validateDependency(i int, d any) *designProblem {
 	name, ok := dep["name"].(string)
 	if !ok || name == "" {
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].name: must be a non-empty string", i)}
+	}
+	if p := validateDependencyParameters(i, dep["parameters"]); p != nil {
+		return p
+	}
+	return nil
+}
+
+// validateDependencyParameters mirrors the zod
+// `parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))`:
+// when present, parameters must be an object whose values are scalar (string,
+// number, or boolean). Objects/arrays/null values reject. Enforcing this keeps
+// the write-gate in parity with the agent's zod gate — WITHOUT it the Go fold
+// would accept a parameter shape the agent rejected (or vice versa), diverging
+// the fold. (JSON numbers unmarshal to float64 through encoding/json.)
+func validateDependencyParameters(i int, raw any) *designProblem {
+	if raw == nil {
+		return nil // absent (optional)
+	}
+	params, ok := raw.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].parameters: must be an object", i)}
+	}
+	for k, v := range params {
+		switch v.(type) {
+		case string, float64, bool:
+			// scalar — allowed
+		default:
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].parameters.%s: must be a string, number, or boolean", i, k)}
+		}
 	}
 	return nil
 }

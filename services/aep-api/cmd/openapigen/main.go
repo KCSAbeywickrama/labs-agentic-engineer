@@ -29,7 +29,10 @@ func main() {
 		path string
 		gen  func() ([]byte, error)
 	}{
-		{filepath.Join("..", "..", "packages", "contracts", "api", "v1", "openapi.yaml"), api.GenerateOpenAPIYAML},
+		// The curated contract (packages/contracts/api/v1/openapi.yaml) is the
+		// hand-maintained source of truth and is NEVER written by this tool;
+		// both exports below are comparison aids under the gitignored build/.
+		{filepath.Join("build", "public-openapi.yaml"), api.GenerateOpenAPIYAML},
 		{filepath.Join("build", "internal-openapi.yaml"), api.GenerateInternalOpenAPIYAML},
 	}
 	for _, s := range specs {

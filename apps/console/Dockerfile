@@ -34,6 +34,16 @@ COPY apps/console ./apps/console
 
 RUN pnpm install --frozen-lockfile --filter @aep/console...
 
+# Workspace deps whose exports resolve to ./dist must be compiled first
+# (@aep/agent-stream — the agent-chat panel's SSE contracts, #130;
+# @aep/collab-doc — the AgentInsertion mark shared with the editor, #86 ph6;
+# @aep/design-projection + @aep/excalidraw-dsl — the rich design view's
+# projection + wireframe DSL, #149). The @aep/ui-* view packages resolve to
+# their src/ (types: src/index.ts) so tsc reads them directly — no pre-build.
+RUN pnpm --filter @aep/agent-stream build
+RUN pnpm --filter @aep/collab-doc build
+RUN pnpm --filter @aep/design-projection build
+RUN pnpm --filter @aep/excalidraw-dsl build
 RUN pnpm --filter @aep/console gen
 RUN pnpm --filter @aep/console build
 

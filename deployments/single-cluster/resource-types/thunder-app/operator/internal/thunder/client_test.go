@@ -271,6 +271,46 @@ func asString(v any) string {
 	return s
 }
 
+// anySliceHas reports whether a JSON-decoded array ([]any) contains want.
+func anySliceHas(v any, want string) bool {
+	arr, _ := v.([]any)
+	for _, e := range arr {
+		if s, _ := e.(string); s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// assertIdentityClaimContract verifies the platform identity-claim contract a
+// provisioned OAuth app must carry: `groups` in BOTH tokens' userAttributes,
+// the `group → [groups]` scopeClaim (what releases groups into the id_token),
+// and allowedUserTypes=[Person]. Shared by the create + update (backfill) tests.
+func assertIdentityClaimContract(t *testing.T, body map[string]any) {
+	t.Helper()
+	if !anySliceHas(body["allowedUserTypes"], "Person") {
+		t.Errorf("allowedUserTypes = %v, want to include %q", body["allowedUserTypes"], "Person")
+	}
+	cfg, ok := firstOAuthConfig(body)
+	if !ok {
+		t.Fatalf("body missing inboundAuthConfig[0].config: %#v", body)
+	}
+	tok, _ := cfg["token"].(map[string]any)
+	if tok == nil {
+		t.Fatalf("config.token missing — end-user tokens would carry no userAttributes: %#v", cfg)
+	}
+	for _, kind := range []string{"idToken", "accessToken"} {
+		sub, _ := tok[kind].(map[string]any)
+		if !anySliceHas(sub["userAttributes"], "groups") {
+			t.Errorf("token.%s.userAttributes = %v, want to include %q (drives role-based UI)", kind, sub["userAttributes"], "groups")
+		}
+	}
+	sc, _ := cfg["scopeClaims"].(map[string]any)
+	if !anySliceHas(sc["group"], "groups") {
+		t.Errorf("scopeClaims.group = %v, want [groups] — without it, the group scope releases no groups claim into the id_token", sc["group"])
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -392,6 +432,10 @@ func TestEnsureApplication_CreatesWhenAbsent(t *testing.T) {
 	// application inboundAuthConfig has no per-app scope allowlist field
 	// (see DesiredApp.Scopes doc comment in client.go). Asserting one would
 	// mean inventing a field Thunder doesn't accept.
+
+	// The identity-claim contract must ride on every created app so end-user
+	// tokens carry `groups` (role) + `ou*` (org).
+	assertIdentityClaimContract(t, f.lastCreateBody)
 }
 
 // (b) EnsureApplication against an already-existing app with stale
@@ -441,6 +485,9 @@ func TestEnsureApplication_UpdatesExistingReplacesRedirectURIs(t *testing.T) {
 	if _, present := cfg["redirect_uris"]; present {
 		t.Errorf("PUT body carries snake_case key %q — want redirectUris", "redirect_uris")
 	}
+	// Backfill: an app created before the identity-claim contract existed must
+	// self-heal on update — the PUT re-asserts the full contract, not just URIs.
+	assertIdentityClaimContract(t, f.lastPutBody)
 }
 
 // Create with NO desired redirect URIs must still succeed: Thunder rejects

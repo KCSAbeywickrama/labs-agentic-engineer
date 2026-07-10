@@ -26,7 +26,6 @@ import {
   IMPORT_INVALID_SENTINEL,
   IMPORT_WARN_SENTINEL,
   importFileInvalidError,
-  importUrlInvalidError,
   importWarningsFixture,
   INVALID_CREDENTIAL_VALUE,
   llmConnectedFixture,
@@ -44,9 +43,9 @@ type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
 type CreateSkillInput = components["schemas"]["CreateSkillInput"];
 type UpdateSkillInput = components["schemas"]["UpdateSkillInput"];
-type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type SkillSummary = components["schemas"]["SkillSummary"];
+type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 
 function scenario(): SettingsScenario {
   return (
@@ -68,16 +67,7 @@ let gitProvider: GitProviderProjection | null = null;
 let llm: LLMProjection | null = null;
 let skills: SkillDetailBody[] = [];
 let skillUpdates: SkillUpdate[] = [];
-// version is not stored in SkillDetailBody (removed from schema); tracked here.
-let skillVersions = new Map<string, number>();
 let initialized = false;
-
-const SEED_VERSIONS: Record<string, number> = {
-  "high-level-architecture": 1,
-  "task-breakdown": 1,
-  "flow-orchestration": 2,
-  "acme-deploy-checklist": 1,
-};
 
 function ensureInitialized() {
   if (initialized) return;
@@ -88,18 +78,20 @@ function ensureInitialized() {
   }
   skills = seedSkills.map((s) => ({ ...s }));
   skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
-  skillVersions = new Map(Object.entries(SEED_VERSIONS));
 }
 
 function toSummary(s: SkillDetailBody): SkillSummary {
   return {
     name: s.name,
     kind: s.kind,
-    version: skillVersions.get(s.name) ?? 1,
     description: s.description,
     contentSha: s.contentSha,
     editable: s.editable,
   };
+}
+
+function nextContentSha(name: string): string {
+  return `sha-${name}-${Date.now()}`;
 }
 
 function extractDescription(skillMd: string): string {
@@ -124,12 +116,9 @@ function importSkill(name: string, source: string): ImportResult {
   const withWarnings = name.includes(IMPORT_WARN_SENTINEL);
   const existing = skills.find((s) => s.name === name);
   if (existing) {
-    const nextVer = (skillVersions.get(name) ?? 1) + 1;
-    skillVersions.set(name, nextVer);
-    existing.contentSha = `sha-${name}-${nextVer}`;
+    existing.contentSha = nextContentSha(name);
     existing.updatedAt = new Date().toISOString();
   } else {
-    skillVersions.set(name, 1);
     skills.push({
       orgId: "org-1",
       name,
@@ -138,7 +127,7 @@ function importSkill(name: string, source: string): ImportResult {
       description: `Imported from ${source}.`,
       skillMd: `---\nname: ${name}\ndescription: Imported from ${source}.\n---\n\nImported skill body.`,
       references: {},
-      contentSha: `sha-${name}-1`,
+      contentSha: nextContentSha(name),
       updatedAt: new Date().toISOString(),
     });
   }
@@ -246,58 +235,36 @@ export const settingsHandlers = [
     });
   }),
 
-  http.post("*/api/v1/skills/import-url", async ({ request }) => {
+  // All-or-nothing, mirroring the BE: no request body, reconcile everything.
+  http.post("*/api/v1/skills/sync", () => {
     ensureInitialized();
-    const body = (await request.json()) as { url?: string } | null;
-    const url = body?.url ?? "";
-    if (!url || url.includes(IMPORT_INVALID_SENTINEL)) {
-      return problem(importUrlInvalidError, 422);
-    }
-    const basename = url.split("/").pop() ?? "";
-    const name =
-      slugFromFileName(basename) || `imported-skill-${skills.length + 1}`;
-    return HttpResponse.json(importSkill(name, url), { status: 201 });
-  }),
-
-  http.post("*/api/v1/skills/sync", async ({ request }) => {
-    ensureInitialized();
-    let names: string[] | undefined;
-    try {
-      const body = (await request.json()) as { names?: string[] } | null;
-      names = body?.names ?? undefined;
-    } catch {
-      names = undefined;
-    }
-    const targets =
-      names && names.length > 0
-        ? skillUpdates.filter((u) => names.includes(u.name))
-        : skillUpdates;
+    const targets = skillUpdates;
 
     for (const t of targets) {
-      const ver = t.embeddedVersion ?? 1;
       const existing = skills.find((s) => s.name === t.name);
       if (existing) {
-        skillVersions.set(t.name, ver);
+        existing.contentSha = nextContentSha(t.name);
         existing.updatedAt = new Date().toISOString();
       } else {
-        skillVersions.set(t.name, ver);
+        // A synced-in skill the repo didn't have yet. Unmarked frontmatter is
+        // an `org` skill, matching the BE's frontmatterKind default.
         skills.push({
           orgId: "org-1",
           name: t.name,
-          kind: "builtin",
+          kind: "org",
           editable: false,
-          description: `${t.name} (built-in)`,
-          skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (built-in)\n---\n\nBuilt-in skill body.`,
+          description: `${t.name} (platform-shipped)`,
+          skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
-          contentSha: `sha-${t.name}-${ver}`,
+          contentSha: nextContentSha(t.name),
           updatedAt: new Date().toISOString(),
         });
       }
     }
-    const targetNames = new Set(targets.map((t) => t.name));
-    skillUpdates = skillUpdates.filter((u) => !targetNames.has(u.name));
+    const updated = targets.length;
+    skillUpdates = [];
 
-    return HttpResponse.json({ status: "synced", updated: targets.length });
+    return HttpResponse.json({ status: "synced", updated });
   }),
 
   http.get("*/api/v1/skills/updates", () => {
@@ -329,7 +296,6 @@ export const settingsHandlers = [
         409,
       );
     }
-    skillVersions.set(body.name, 1);
     const created: SkillDetailBody = {
       orgId: "org-1",
       name: body.name,
@@ -338,7 +304,7 @@ export const settingsHandlers = [
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
       references: body.references ?? {},
-      contentSha: `sha-${body.name}-1`,
+      contentSha: nextContentSha(body.name),
       updatedAt: new Date().toISOString(),
     };
     skills.push(created);
@@ -380,7 +346,7 @@ export const settingsHandlers = [
     skill.skillMd = body.skillMd;
     skill.references = body.references ?? {};
     skill.description = extractDescription(body.skillMd);
-    skillVersions.set(skill.name, (skillVersions.get(skill.name) ?? 1) + 1);
+    skill.contentSha = nextContentSha(skill.name);
     skill.updatedAt = new Date().toISOString();
     return HttpResponse.json(skill);
   }),
@@ -388,7 +354,6 @@ export const settingsHandlers = [
   http.delete("*/api/v1/skills/:name", ({ params }) => {
     ensureInitialized();
     skills = skills.filter((s) => s.name !== params.name);
-    skillVersions.delete(String(params.name));
     return HttpResponse.json({ status: "deleted" });
   }),
 ];

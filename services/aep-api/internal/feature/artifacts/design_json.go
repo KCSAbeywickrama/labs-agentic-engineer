@@ -51,6 +51,7 @@ import (
 //	entrypoint                 ↔ Entrypoint
 //	exposure                   ↔ Exposure      ("internet" | "intranet")
 //	description                ↔ Description    (the single-responsibility prose / former design.md body)
+//	endpoint                   ↔ Endpoint       (optional; {name} — the workload endpoint name the api-configuration trait binds to)
 //	dependencies               ↔ Dependencies  (unified kind-discriminated union; replaces connections[])
 //	exposesAPI                 ↔ ExposesAPI     (platform-owned; {managed, auth, userContext, orgPublished})
 //	componentAgentInstructions ↔ ComponentAgentInstructions (platform-owned; optional)
@@ -81,10 +82,18 @@ type componentDesignJSON struct {
 	Entrypoint   string           `json:"entrypoint,omitempty"`
 	Exposure     string           `json:"exposure,omitempty"`
 	Description  string           `json:"description,omitempty"`
+	Endpoint     *endpointJSON    `json:"endpoint,omitempty"`
 	Dependencies []dependencyJSON `json:"dependencies"`
 	// Platform-owned blocks (absent = zero value).
 	ExposesAPI                 *exposesAPIJSON `json:"exposesAPI,omitempty"`
 	ComponentAgentInstructions string          `json:"componentAgentInstructions,omitempty"`
+}
+
+// endpointJSON is the on-disk shape of the optional `endpoint` block. Only the
+// name is carried (mirrors models.ComponentEndpoint); the port stays in
+// workload.yaml.
+type endpointJSON struct {
+	Name string `json:"name"`
 }
 
 // dependencyJSON is the on-disk shape for one unified dependency entry. It
@@ -100,7 +109,7 @@ type dependencyJSON struct {
 	SpecUrl      string                    `json:"specUrl,omitempty"`
 	Config       []configKeyJSON           `json:"config,omitempty"`
 	ResourceType string                    `json:"resourceType,omitempty"`
-	Parameters   map[string]string         `json:"parameters,omitempty"`
+	Parameters   map[string]any            `json:"parameters,omitempty"`
 	Candidates   []dependencyCandidateJSON `json:"candidates,omitempty"`
 }
 
@@ -169,6 +178,7 @@ func parseComponentDesignJSON(dir, raw string) (models.DesignComponent, error) {
 		AppPath:                    dj.AppPath,
 		Exposure:                   dj.Exposure,
 		Description:                dj.Description,
+		Endpoint:                   toModelEndpoint(dj.Endpoint),
 		ComponentAgentInstructions: dj.ComponentAgentInstructions,
 		ExposesAPI:                 toModelExposesAPI(dj.ExposesAPI),
 	}, nil
@@ -274,6 +284,7 @@ func marshalComponentDesignJSON(dir string, comp models.DesignComponent) ([]byte
 		Entrypoint:                 comp.Entrypoint,
 		Exposure:                   comp.Exposure,
 		Description:                comp.Description,
+		Endpoint:                   toJSONEndpoint(comp.Endpoint),
 		Dependencies:               toJSONDeps(comp.Dependencies),
 		ExposesAPI:                 toJSONExposesAPI(comp.ExposesAPI),
 		ComponentAgentInstructions: comp.ComponentAgentInstructions,
@@ -360,6 +371,25 @@ func toJSONCandidates(in []models.DependencyCandidate) []dependencyCandidateJSON
 		out = append(out, dependencyCandidateJSON{Label: c.Label, Description: c.Description, URL: c.URL})
 	}
 	return out
+}
+
+// toModelEndpoint builds *models.ComponentEndpoint from the on-disk block,
+// returning nil when the block is absent or carries an empty name (so callers
+// fall back to the default endpoint name via DesignComponent.EndpointName).
+func toModelEndpoint(in *endpointJSON) *models.ComponentEndpoint {
+	if in == nil || in.Name == "" {
+		return nil
+	}
+	return &models.ComponentEndpoint{Name: in.Name}
+}
+
+// toJSONEndpoint mirrors toModelEndpoint for the write path: nil or empty name
+// omits the `endpoint` key entirely (the default is implicit).
+func toJSONEndpoint(in *models.ComponentEndpoint) *endpointJSON {
+	if in == nil || in.Name == "" {
+		return nil
+	}
+	return &endpointJSON{Name: in.Name}
 }
 
 // toModelExposesAPI builds *models.ExposesAPI, returning nil when the block is

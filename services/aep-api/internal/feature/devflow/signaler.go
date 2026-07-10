@@ -33,17 +33,15 @@ const signalTimeout = 5 * time.Second
 // Satisfied by repositories.WorkflowRunRepository.
 type SignalLookup interface {
 	RunningTaskByIssue(ctx context.Context, repo string, issueNumber int) (*models.DevflowRun, error)
-	RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error)
-	GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error)
 }
 
-// Signaler is the bridge existing webhook handlers, watchers, and the genai
-// turn runner use to feed events into the devflow workflows. Every method is
-// BEST-EFFORT: no matching workflow (the old-console flow drives a Task with
-// no workflow_runs row) is a debug-log no-op, and a signal-send failure is
-// logged, never propagated — a webhook handler must not fail because a
-// workflow could not be signaled. A nil *Signaler is safe to call (feature
-// disabled), so callers hold an optional dependency without nil checks.
+// Signaler is the bridge existing webhook handlers and watchers use to feed
+// events into the devflow task workflows. Every method is BEST-EFFORT: no
+// matching workflow (the old-console flow drives a Task with no workflow_runs
+// row) is a debug-log no-op, and a signal-send failure is logged, never
+// propagated — a webhook handler must not fail because a workflow could not
+// be signaled. A nil *Signaler is safe to call (feature disabled), so callers
+// hold an optional dependency without nil checks.
 type Signaler struct {
 	rt     *Runtime
 	lookup SignalLookup
@@ -67,24 +65,6 @@ func (s *Signaler) SignalTask(ctx context.Context, repo string, issue int, name 
 	}
 	if row == nil {
 		slog.DebugContext(ctx, "devflow signaler: no running task workflow", "repo", repo, "issue", issue, "signal", name)
-		return
-	}
-	s.send(ctx, row.WorkflowID, name, payload)
-}
-
-// SignalDev resolves the running dev workflow for (org, project) and sends it
-// a signal. No running workflow ⇒ no-op.
-func (s *Signaler) SignalDev(ctx context.Context, orgID, projectID, name string, payload any) {
-	if s == nil || s.rt == nil || !s.rt.Available() {
-		return
-	}
-	row, err := s.lookup.RunningDevByProject(ctx, orgID, projectID)
-	if err != nil {
-		slog.WarnContext(ctx, "devflow signaler: dev lookup failed", "org", orgID, "project", projectID, "error", err)
-		return
-	}
-	if row == nil {
-		slog.DebugContext(ctx, "devflow signaler: no running dev workflow", "org", orgID, "project", projectID, "signal", name)
 		return
 	}
 	s.send(ctx, row.WorkflowID, name, payload)

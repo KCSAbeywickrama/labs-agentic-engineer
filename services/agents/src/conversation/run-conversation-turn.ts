@@ -31,6 +31,8 @@
 
 import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import { FileBundle, type McpConfig, type StreamPart, type Toolset } from "@aep/agent-stream";
+import { DocFileBundle } from "../collab/doc-bundle.js";
+import type { RoomPeer } from "../collab/room-peer.js";
 import { runTurn } from "../agents/main/run-turn.js";
 import { buildFileTools, ASK_QUESTION } from "../agents/main/tools/files.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
@@ -119,6 +121,14 @@ export interface RunConversationTurnInput {
    * merge (byte-identical to today).
    */
   mcp?: McpConfig;
+  /**
+   * Live collab-room peer for a room-scoped turn (#86 phase 4). Present (and
+   * toolset `files`) → the bundle mirrors every applied op onto the room's
+   * Y.Doc as it happens; `input.files` is the doc snapshot the SERVER read
+   * from the synced replica. The server owns the peer's lifecycle (join
+   * before, leave after); this function only writes through it.
+   */
+  collabPeer?: RoomPeer;
   /** Injected at the composition root (createModel is called ONCE there, not per turn). */
   model: LanguageModel;
   store: ConversationStore;
@@ -152,7 +162,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       tools = buildTaskPlanTools(new TaskPlan(input.files), skills);
       instructions = buildTaskPlanInstructions(skills);
     } else {
-      bundle = new FileBundle(input.files);
+      bundle = input.collabPeer
+        ? new DocFileBundle(input.collabPeer, input.files)
+        : new FileBundle(input.files);
       tools = buildFileTools(bundle, skills);
       instructions = buildInstructions(skills);
     }

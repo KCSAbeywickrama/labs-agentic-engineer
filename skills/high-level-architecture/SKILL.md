@@ -16,7 +16,7 @@ Derive the design tree from `requirements.md`. The design lives under
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
 specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
-specs/design/components/<name>/wireframes.dsl  # webapps only (excalidraw-wireframes skill)
+specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
 ```
 
 ## The top-level design.md
@@ -63,7 +63,7 @@ requirements state>". Write that justification into the component's
 A requirement justifies a SEPARATE component when it shows:
 
 - a distinct user-facing surface — e.g. an internal admin portal AND a
-  customer-facing app with different users and lifecycles → two webapps;
+  customer-facing app with different users and lifecycles → two web-applications;
 - a genuinely different runtime or scaling profile — e.g. an async
   worker/batch processor beside an interactive API, or a long-running
   AI/inference service;
@@ -82,9 +82,17 @@ Do NOT split by:
   components; the platform provides them.
 
 When nothing above forces a split, a small system naturally lands at one
-service + one webapp — that is an outcome of the rule, not a target. Name
+service + one web-application — that is an outcome of the rule, not a target. Name
 components in kebab-case after their responsibility (`expense-api`,
 `expense-webapp`, `report-worker`).
+
+**Component `type` is a fixed vocabulary — use the EXACT string.** A backend is
+`"service"`; a browser app is `"web-application"` (OpenChoreo's own term). Write
+`"web-application"` verbatim — NOT `"webapp"`, `"web-app"`, or `"webApplication"`
+(those are rejected, and a wrong value silently breaks the app's deployment and
+runtime config). The `-webapp` in a component NAME is fine; the `type` is still
+`"web-application"`. Other kinds the requirements imply (`"scheduled-task"`,
+`"worker"`, …) are captured verbatim.
 
 ## Per-component design.json
 
@@ -95,7 +103,7 @@ violations:
 ```json
 {
   "name": "expense-api",              // MUST equal the directory name
-  "type": "service",                  // "service" | "web-application" | any kind the requirements imply ("scheduled-task", "worker", ...)
+  "type": "service",                  // EXACT kind: "service" or "web-application" (NEVER "webapp"/"web-app"), or another the requirements imply ("scheduled-task", "worker", ...)
   "version": "0.1.0",                 // semantic version; 0.1.0 for a new component
   "language": "Go",                   // implementation language, e.g. "Go", "TypeScript"
   "buildpack": "docker",              // always "docker"
@@ -103,7 +111,8 @@ violations:
   "entrypoint": "deployment/service", // deploy entry
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
-  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do."
+  "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
+  "endpoint": { "name": "http" } // optional; see below
 }
 ```
 
@@ -112,6 +121,12 @@ violations:
 design.json, re-emit the whole corrected file (removeFile + addFile) — never
 patch JSON with anchored edits. On INVALID_JSON or SCHEMA_VIOLATION, fix what
 the message lists and re-emit.
+
+`endpoint` is optional: omit it and a service's endpoint takes the default name
+`"http"`. Declare `{ "name": "<endpoint-name>" }` only when the endpoint must be
+named otherwise — `name` is the single source of truth the coding agent copies
+into `workload.yaml` and the managed-API gateway binds to. The port lives in
+`workload.yaml`, not here.
 
 Do NOT author `exposesAPI`, `componentAgentInstructions`, or any dependency
 `status`/`reason` — those are PLATFORM-owned. If the platform has already
@@ -170,6 +185,17 @@ tools, USE them before authoring an `external`, `org-service`, or
   rather than inventing a parallel one.
 - `list_org_endpoints` — find the real provider component name for an
   `org-service` before referencing it.
+- `list_org_component_endpoints` — once you have the provider's name, call this
+  to read its REAL contract before writing the dependency's `description`:
+  each row resolves to a `spec.availability` of `inline` (read
+  `spec.inlineContent` directly — it IS the OpenAPI document), `repo` (no
+  inline spec, but the row's `owner`/`repo`/`subdir`/`branch` locate the
+  provider's source — use `search_remote_git_code` under that `subdir` to find
+  the spec file if you don't know its exact path, then
+  `get_remote_git_file_contents` to read it), or `none` (no contract is
+  resolvable). Base the dependency's `description` on the ACTUAL
+  operations/paths/schemas the contract exposes; on `none`, say so plainly in
+  the `description` instead of inventing a shape.
 - `list_platform_resource_types` — get a valid `resourceType` (and its
   parameters) before declaring a `platform-resource`. Read each type's
   `description` and pick the type whose description matches the need; when
@@ -192,7 +218,9 @@ least one `config` key — the value-collection gate needs something to collect.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;
-for a `platform-resource`, what it stores). The console shows it in the
+for an `org-service`, the specific operations/paths it calls from the
+provider's discovered contract — or that no contract was resolvable, never a
+guess; for a `platform-resource`, what it stores). The console shows it in the
 dependency drawer and the coding agent relies on it to integrate correctly.
 
 One component per directory. Every `service` gets an `openapi.yaml`

@@ -48,6 +48,8 @@ LICENSE_FILES = $(shell git ls-files | \
 install:
 	$(PNPM) install
 	go work sync
+	@echo ">> console-legacy deps (own pnpm workspace — not in the root turbo graph)"
+	@cd console-legacy && $(PNPM) install
 
 gen:
 	$(TURBO) run gen

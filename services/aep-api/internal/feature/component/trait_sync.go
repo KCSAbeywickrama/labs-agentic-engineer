@@ -197,7 +197,7 @@ func (s *TraitSyncService) SyncComponentTraits(ctx context.Context, orgID, proje
 		allowedOrigins = origins
 	}
 
-	traits, configs := DesiredAPIConfigurationTraitWithIssuers(componentName, desiredEnabled, issuers, allowedOrigins)
+	traits, configs := DesiredAPIConfigurationTraitWithIssuers(componentName, match.EndpointName(), desiredEnabled, issuers, allowedOrigins)
 
 	// Patch the Component CR's spec.traits. Skip when there's nothing to
 	// change — but the OC client's GET-then-PUT is harmless so we always
@@ -401,24 +401,33 @@ func (s *TraitSyncService) lockFor(orgID, projectID, componentName string) *sync
 
 // -- Pure helpers ------------------------------------------------------------
 
-// APIConfigurationInstanceName returns the canonical trait instance name
-// for the component's HTTP endpoint. Mirrors the POC manifests' naming
-// (`<componentName>-http`) so on-cluster resources are predictable. The
-// trait template uses this as the prefix for the generated Backend and
+// APIConfigurationInstanceName returns the canonical trait instance name for
+// the component's managed endpoint. Mirrors the POC manifests' naming
+// (`<componentName>-<endpointName>`) so on-cluster resources are predictable.
+// The trait template uses this as the prefix for the generated Backend and
 // RestApi resources (`<instanceName>-api-gw-backend`, `<instanceName>`).
-func APIConfigurationInstanceName(componentName string) string {
+//
+// `endpointName` is the design.json-declared workload endpoint name; an empty
+// value defaults to models.DefaultEndpointName ("http"), preserving the prior
+// `<componentName>-http` naming for components that declare no endpoint.
+func APIConfigurationInstanceName(componentName, endpointName string) string {
 	componentName = strings.TrimSpace(componentName)
 	if componentName == "" {
 		componentName = "component"
 	}
-	return componentName + "-http"
+	endpointName = strings.TrimSpace(endpointName)
+	if endpointName == "" {
+		endpointName = models.DefaultEndpointName
+	}
+	return componentName + "-" + endpointName
 }
 
 // DesiredAPIConfigurationTrait — convenience shim that calls
 // DesiredAPIConfigurationTraitWithIssuers with no issuer pinning and
-// no sibling origins (wildcard CORS).
-func DesiredAPIConfigurationTrait(componentName string, enabled bool) (traits []models.ComponentTrait, configs map[string]map[string]interface{}) {
-	return DesiredAPIConfigurationTraitWithIssuers(componentName, enabled, nil, nil)
+// no sibling origins (wildcard CORS). `endpointName` is the design.json
+// workload endpoint name (empty ⇒ the default "http").
+func DesiredAPIConfigurationTrait(componentName, endpointName string, enabled bool) (traits []models.ComponentTrait, configs map[string]map[string]interface{}) {
+	return DesiredAPIConfigurationTraitWithIssuers(componentName, endpointName, enabled, nil, nil)
 }
 
 // DesiredAPIConfigurationTraitWithIssuers returns the BFF-internal
@@ -439,8 +448,20 @@ func DesiredAPIConfigurationTrait(componentName string, enabled bool) (traits []
 // `configs` is keyed by trait instance name; the value is the parameters
 // block that lands at `ReleaseBinding.spec.traitEnvironmentConfigs[<inst>]`.
 // The shape (cors / jwtAuth) matches the trait's environmentConfigSchema.
-func DesiredAPIConfigurationTraitWithIssuers(componentName string, enabled bool, issuers []string, allowedOrigins []string) (traits []models.ComponentTrait, configs map[string]map[string]interface{}) {
-	inst := APIConfigurationInstanceName(componentName)
+//
+// `endpointName` is the design.json-declared workload endpoint name the trait
+// binds to (it must match a key in the component's workload.yaml
+// `spec.endpoints`). An empty value defaults to models.DefaultEndpointName
+// ("http"). This is the SINGLE point that decides the bound endpoint name — it
+// is no longer hardcoded, so a component whose workload names its endpoint
+// something other than "http" still renders (previously deploy rendering failed
+// with `workload.endpoints["http"]: no such key`).
+func DesiredAPIConfigurationTraitWithIssuers(componentName, endpointName string, enabled bool, issuers []string, allowedOrigins []string) (traits []models.ComponentTrait, configs map[string]map[string]interface{}) {
+	endpointName = strings.TrimSpace(endpointName)
+	if endpointName == "" {
+		endpointName = models.DefaultEndpointName
+	}
+	inst := APIConfigurationInstanceName(componentName, endpointName)
 	if !enabled {
 		// Clear both: empty traits + empty config marks the instance for
 		// removal in the OC client's merge logic.
@@ -453,7 +474,7 @@ func DesiredAPIConfigurationTraitWithIssuers(componentName string, enabled bool,
 		Kind:         "ClusterTrait",
 		Name:         "api-configuration",
 		Parameters: map[string]interface{}{
-			"endpointName": "http",
+			"endpointName": endpointName,
 		},
 	}}
 	issuersIface := make([]interface{}, 0, len(issuers))
