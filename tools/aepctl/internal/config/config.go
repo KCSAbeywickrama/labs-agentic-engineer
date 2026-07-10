@@ -50,6 +50,18 @@ func Init() {
 	// OpenChoreo platform API defaults — overridable via ~/.aep/config.yaml.
 	viper.SetDefault("oc.api_url", "http://openchoreo-api.openchoreo-control-plane.svc.cluster.local:8080")
 
+	// Local OpenChoreo org-unit provisioning — overridable via ~/.aep/config.yaml.
+	//
+	// oc.local_org_provisioning.enabled: LOCAL DEV ONLY. Creates the per-org
+	// namespaced ComponentTypes (service/web-application) + api-configuration
+	// ClusterTrait that aep-api references — the local stand-in for cloud
+	// platform-api ProvisionOrgUnit. NEVER enable in production: there
+	// ProvisionOrgUnit creates these per org, and the chart must not.
+	// oc.org_namespace: the org's OpenChoreo control-plane namespace where the
+	// namespaced ComponentTypes are created (local single-org install → "default").
+	viper.SetDefault("oc.local_org_provisioning.enabled", true)
+	viper.SetDefault("oc.org_namespace", "default")
+
 	// Coding-agent dispatch + live streaming — overridable via ~/.aep/config.yaml.
 	//
 	// codingagent.local_stubs.enabled: LOCAL DEV ONLY. Deploys the in-cluster

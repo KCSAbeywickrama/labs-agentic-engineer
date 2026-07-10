@@ -188,6 +188,14 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if u := viper.GetString("webhook.delivery_url"); u != "" {
 		helmArgs = append(helmArgs, "--set", "webhook.deliveryURL="+u)
 	}
+	// Local OpenChoreo org-unit provisioning: create the per-org namespaced
+	// ComponentTypes + api-configuration trait aep-api references (cloud does this
+	// via platform-api ProvisionOrgUnit). Prod sets enabled=false.
+	helmArgs = append(helmArgs, "--set",
+		fmt.Sprintf("localOrgProvisioning.enabled=%t", viper.GetBool("oc.local_org_provisioning.enabled")))
+	if ns := viper.GetString("oc.org_namespace"); ns != "" {
+		helmArgs = append(helmArgs, "--set", "localOrgProvisioning.orgNamespace="+ns)
+	}
 	var helmOut bytes.Buffer
 	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)
 	helmCmd.Stdout = &helmOut

@@ -115,6 +115,22 @@ webhook:
     enabled: false
     image: "docker.io/deltaprojects/smee-client:latest"
 
+# Local stand-in for cloud platform-api ProvisionOrgUnit. aep-api references a
+# per-org NAMESPACED ComponentType (kind=ComponentType) for each component; the
+# base OpenChoreo ClusterComponentType lacks the registry-pull-secret and the
+# api-configuration trait, so builds fail "component type not found" without the
+# per-org types. In cloud, ProvisionOrgUnit creates them per org; locally nothing
+# does. This provisions the api-configuration ClusterTrait + the namespaced
+# service/web-application ComponentTypes in the org's control-plane namespace.
+localOrgProvisioning:
+  # LOCAL DEV ONLY (single-org). PROD: false — platform-api ProvisionOrgUnit
+  # creates these per-org, so the chart must not.
+  enabled: false
+  # The org's OpenChoreo control-plane namespace where the namespaced
+  # ComponentTypes are created. For the local single-org install this is the OC
+  # control-plane namespace ("default"), NOT the platform release namespace.
+  orgNamespace: "default"
+
 taskSigning:
   issuer: "aep-bff"
   audience: "git-service"
