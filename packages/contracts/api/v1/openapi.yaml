@@ -3558,7 +3558,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Sync built-in skills
+      summary: Sync built-in skills (creates the org's skills repo if missing)
       tags:
         - Skills
   /skills/updates:

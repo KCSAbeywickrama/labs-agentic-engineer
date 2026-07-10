@@ -24,13 +24,24 @@ type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
-// Scenario switch for the Settings feature (#96). Toggle in devtools:
-//   localStorage.setItem('aep:mock:settings', 'empty' | 'connected' | 'error')
-// "empty": nothing connected yet (the default — exercises the not-connected
-// and GitHub-not-connected-blocks-Skills states).
-// "connected": GitHub + Anthropic already connected.
+// Scenario switch for the Settings (#96) and Onboarding (#102) features.
+// Toggle in devtools:
+//   localStorage.setItem('aep:mock:settings',
+//     'empty' | 'partial' | 'connected' | 'error' | 'sync-error')
+// "empty": nothing connected yet (the default — triggers the onboarding
+// gate; also exercises Settings' not-connected states).
+// "partial": GitHub connected, Anthropic not — the onboarding wizard opens
+// at its first incomplete step (resume-after-abandon, #102).
+// "connected": GitHub + Anthropic already connected (no onboarding).
 // "error": GET /config and GET /skills fail (load-error state).
-export type SettingsScenario = "empty" | "connected" | "error";
+// "sync-error": config empty and POST /skills/sync fails — exercises the
+// wizard's bootstrap-failure step (Retry / Continue anyway, #102).
+export type SettingsScenario =
+  | "empty"
+  | "partial"
+  | "connected"
+  | "error"
+  | "sync-error";
 
 // Typing this exact value into a PAT/API-key field simulates the BFF's
 // synchronous probe-before-persist validation failing against the real
@@ -115,6 +126,15 @@ export const skillsLoadError: ErrorModel = {
   status: 500,
   title: "Internal Server Error",
   detail: "Failed to load skills",
+};
+
+// Bootstrap failure for the onboarding wizard (#102): repo creation or the
+// built-ins push failed. Sync is idempotent, so the remedy is retry.
+export const skillsSyncError: ErrorModel = {
+  type: "about:blank",
+  status: 502,
+  title: "Bad Gateway",
+  detail: "Failed to create the skills repository on GitHub",
 };
 
 // Covers all four kinds (org | platform | custom | imported — the BE's real
