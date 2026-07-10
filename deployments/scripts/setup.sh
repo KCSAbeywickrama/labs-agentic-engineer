@@ -31,10 +31,10 @@ echo "  4. Observability Plane (Observer + OpenSearch + Fluent Bit +"
 echo "     logs-adapter + AI RCA agent — in-UI Live Progress streaming,"
 echo "     plus the alert → AI-RCA → coding-agent handoff pipeline:"
 echo "     docs/developer-guide/sre-handoff-runbook.md)"
-echo "     SKIP_OBSERVABILITY=1 skips this stage (heaviest install: OpenSearch"
-echo "     StatefulSet + Fluent Bit DaemonSet + RCA agent) — Live Progress"
-echo "     streaming and the alert→RCA pipeline are then unavailable until"
-echo "     scripts/setup-observability.sh is run manually."
+echo "     Skipped by default (heaviest install: OpenSearch StatefulSet +"
+echo "     Fluent Bit DaemonSet + RCA agent) — set ENABLE_OBSERVABILITY=1 to"
+echo "     install it. Live Progress streaming and the alert→RCA pipeline are"
+echo "     unavailable until scripts/setup-observability.sh is run."
 echo "  5. Temporal workflow engine (drives the devflow workflows; aep-api"
 echo "     runs the worker in-process)"
 echo "  6. AEP-specific config (ClusterWorkflows, ComponentTypes,"
@@ -50,10 +50,10 @@ echo ""
 bash "$SCRIPT_DIR/setup-openchoreo.sh"
 echo ""
 
-if [ "${SKIP_OBSERVABILITY:-0}" = "1" ]; then
-    echo "⏭️  SKIP_OBSERVABILITY=1 — skipping Observability Plane (run scripts/setup-observability.sh manually when needed)"
-else
+if [ "${ENABLE_OBSERVABILITY:-0}" = "1" ]; then
     bash "$SCRIPT_DIR/setup-observability.sh"
+else
+    echo "⏭️  Observability Plane skipped (set ENABLE_OBSERVABILITY=1 to install it, or run scripts/setup-observability.sh manually when needed)"
 fi
 echo ""
 
