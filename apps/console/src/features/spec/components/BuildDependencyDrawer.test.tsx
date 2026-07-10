@@ -214,6 +214,39 @@ describe("BuildDependencyDrawer", () => {
     expect(resourceInput).toMatchObject({ approved: false });
   });
 
+  it("accepts a pasted spec via the content field and emits specContent (not specUrl)", () => {
+    const specItem: PreflightItem = {
+      component: "checkout-api",
+      dependency: "partner-openapi-spec",
+      kind: "external-spec",
+      description: "Partner API spec",
+    };
+    const { onContinue } = setup([specItem]);
+
+    const continueButton = screen.getByRole("button", { name: /continue/i });
+    expect(continueButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/spec content/i), {
+      target: { value: "openapi: 3.0.0\ninfo:\n  title: Partner API" },
+    });
+
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    const inputs = onContinue.mock.calls[0]?.[0] as BuildInputItem[];
+    const specInput = inputs.find(
+      (i) => i.dependency === "partner-openapi-spec",
+    );
+    expect(specInput).toMatchObject({
+      component: "checkout-api",
+      dependency: "partner-openapi-spec",
+      kind: "external-spec",
+      specContent: "openapi: 3.0.0\ninfo:\n  title: Partner API",
+    });
+    expect(specInput).not.toHaveProperty("specUrl");
+  });
+
   it("calls onClose when Cancel is clicked", () => {
     const { onClose } = setup();
 

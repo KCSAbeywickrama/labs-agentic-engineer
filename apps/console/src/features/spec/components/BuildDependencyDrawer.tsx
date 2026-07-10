@@ -49,16 +49,21 @@ function itemKey(item: PreflightItem): string {
   return `${item.component}::${item.dependency}`;
 }
 
+/** Fresh per-item state as if the drawer just opened with this item. */
+function seedForItem(item: PreflightItem): ItemState {
+  return {
+    values: {},
+    specUrl: "",
+    specContent: "",
+    approved:
+      item.kind === "platform-resource" || item.kind === "org-service",
+  };
+}
+
 function initialState(items: PreflightItem[]): Record<string, ItemState> {
   const state: Record<string, ItemState> = {};
   for (const item of items) {
-    state[itemKey(item)] = {
-      values: {},
-      specUrl: "",
-      specContent: "",
-      approved:
-        item.kind === "platform-resource" || item.kind === "org-service",
-    };
+    state[itemKey(item)] = seedForItem(item);
   }
   return state;
 }
@@ -260,13 +265,16 @@ export function BuildDependencyDrawer({
   function updateState(item: PreflightItem, patch: Partial<ItemState>) {
     setState((prev) => ({
       ...prev,
-      [itemKey(item)]: { ...prev[itemKey(item)]!, ...patch },
+      [itemKey(item)]: {
+        ...(prev[itemKey(item)] ?? seedForItem(item)),
+        ...patch,
+      },
     }));
   }
 
   function handleContinue() {
     const inputs = items.map((item) =>
-      toBuildInputItem(item, state[itemKey(item)]!),
+      toBuildInputItem(item, state[itemKey(item)] ?? seedForItem(item)),
     );
     onContinue(inputs);
   }
@@ -294,11 +302,11 @@ export function BuildDependencyDrawer({
                 <ExternalConfigPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)]!}
+                  state={state[itemKey(item)] ?? seedForItem(item)}
                   onChange={(key, value) =>
                     updateState(item, {
                       values: {
-                        ...state[itemKey(item)]!.values,
+                        ...(state[itemKey(item)] ?? seedForItem(item)).values,
                         [key]: value,
                       },
                     })
@@ -317,7 +325,7 @@ export function BuildDependencyDrawer({
                 <ExternalSpecPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)]!}
+                  state={state[itemKey(item)] ?? seedForItem(item)}
                   onUrlChange={(value) => updateState(item, { specUrl: value })}
                   onContentChange={(value) =>
                     updateState(item, { specContent: value })
@@ -336,7 +344,7 @@ export function BuildDependencyDrawer({
                 <ApprovalPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)]!}
+                  state={state[itemKey(item)] ?? seedForItem(item)}
                   description={`Provision this ${item.resourceType ?? "resource"} for you`}
                   onToggle={(checked) =>
                     updateState(item, { approved: checked })
@@ -354,7 +362,7 @@ export function BuildDependencyDrawer({
               <ApprovalPanel
                 key={itemKey(item)}
                 item={item}
-                state={state[itemKey(item)]!}
+                state={state[itemKey(item)] ?? seedForItem(item)}
                 description="Make this cross-project endpoint visible — this updates and rebuilds the owning project; your build continues and the consuming task waits until it's published"
                 onToggle={(checked) => updateState(item, { approved: checked })}
               />
