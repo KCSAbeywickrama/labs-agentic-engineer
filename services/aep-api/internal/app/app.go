@@ -894,15 +894,17 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Mint aep:provision gate issues on design approval (before planning gates any
 	// consumer coding task on them).
 	designService.SetProvisionIssueMinter(provisioningSvc)
-	// Mint the project's single aep:validation Task on design approval. It
-	// dependsOn every component, so the funnel holds it until they all deploy,
-	// then dispatches the validation runner (validation-phase).
+	// Mint the project's single aep:validation Task in the PLANNING pass: the
+	// plan session mints it right after the plan tap creates the implementation
+	// issues, so it is born in the same phase as them (and never pollutes the
+	// plan turn's existing-task context). It dependsOn every component, so the
+	// funnel holds it until they all deploy (validation-phase).
 	validationSvc := validation.NewService(validation.Deps{
 		Issues:   issueService,
 		Design:   designComponents{store: artifactStore},
 		Criteria: validationCriteria{files: filesSvc},
 	})
-	designService.SetValidationIssueMinter(validationSvc)
+	taskPlan.SetValidationIssueMinter(validationSvc)
 	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
 	// external dependency's OpenAPI contract and atomically commits the spec file
 	// + the design.json specPath edit (clearing the external-needs-spec gate) via

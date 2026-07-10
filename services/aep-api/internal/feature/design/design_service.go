@@ -134,7 +134,6 @@ type designService struct {
 	taskSvc             taskReconciler            // for SaveAndProceed reconciliation; may be nil in tests
 	externalResourceReg externalResourceRegistrar // for SaveAndProceed external-resource registration; may be nil
 	provisionMinter     provisionIssueMinter      // for SaveAndProceed aep:provision gate minting; may be nil
-	validationMinter    validationIssueMinter     // for SaveAndProceed aep:validation task minting; may be nil
 	fileCommitter       designFileCommitter       // for CollectSpec's committed-truth spec write; may be nil
 	resourceCatalog     resourceMarkerCatalog     // for SaveAndProceed end-user-auth derivation; may be nil (fails closed when platform-resource deps exist)
 }
@@ -184,15 +183,6 @@ type provisionIssueMinter interface {
 	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) error
 }
 
-// validationIssueMinter is design_service's narrow consumer port for the
-// validation feature: on a design tag-cut it ensures the project's single
-// aep:validation Task exists (validation-phase). *validation.Service satisfies
-// it. Wired via SetValidationIssueMinter at the composition root; nil is a
-// no-op.
-type validationIssueMinter interface {
-	EnsureValidationIssue(ctx context.Context, orgID, projectID, designTag string) error
-}
-
 // externalResourceRegistrar is design_service's narrow consumer port for the
 // dependency-management external-resource catalog. *repositories.ExternalResourceRepository
 // satisfies it; defined here (consumer side) so design needn't import the
@@ -237,13 +227,6 @@ func (s *designService) SetExternalResourceRegistry(reg externalResourceRegistra
 // design is tagged. A nil minter is a documented no-op.
 func (s *designService) SetProvisionIssueMinter(m provisionIssueMinter) {
 	s.provisionMinter = m
-}
-
-// SetValidationIssueMinter wires the validation feature so the project's
-// aep:validation Task is minted (best-effort) whenever a design is tagged. A nil
-// minter is a documented no-op.
-func (s *designService) SetValidationIssueMinter(m validationIssueMinter) {
-	s.validationMinter = m
 }
 
 // SetFileCommitter wires the committed-truth Files commit surface CollectSpec
@@ -804,14 +787,10 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		}
 	}
 
-	// Mint the project's single aep:validation Task so it holds (dependsOn every
-	// component) until they all deploy, then dispatches the validation runner
-	// (validation-phase; best-effort, never fails the save).
-	if s.validationMinter != nil {
-		if merr := s.validationMinter.EnsureValidationIssue(ctx, orgID, projectID, res.Tag); merr != nil {
-			slog.WarnContext(ctx, "validation issue minting after design save failed", "error", merr)
-		}
-	}
+	// The project's aep:validation Task is NOT minted here: it is born in the
+	// planning pass (task.PlanSession mints it right after the plan tap creates
+	// the implementation issues), so it lands in the same phase as them and
+	// never appears in the plan turn's existing-task context.
 
 	if s.taskSvc != nil {
 		if rerr := s.taskSvc.ReconcilePendingForDesignChange(ctx, orgID, projectID); rerr != nil {

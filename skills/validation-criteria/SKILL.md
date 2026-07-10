@@ -14,6 +14,9 @@ scenario checks, the human sign-off checklist) is derived from this file, so **f
 requirement matters more than volume** — a wrong or invented criterion silently corrupts every
 downstream check.
 
+This skill runs standalone (a turn asking only for criteria) or as the **final step of a
+design-generation turn** — in both cases the requirement-only input rule below stands unchanged.
+
 ## Input — the requirement ONLY
 
 Read the requirement prose from `specs/requirements/requirements.md` (or whichever requirements file the
@@ -26,6 +29,12 @@ requirement says or necessarily implies.
 Create `specs/validation/validation-criteria.json` (use `addFile`; if it already exists, replace its
 contents). The file MUST be valid JSON conforming **exactly** to the schema below — no comments, no
 trailing prose, no Markdown fences. Keep field order stable.
+
+**Regeneration — preserve `covered`.** When the file already exists in your workspace, the validation
+run may have written `covered: true` on e2e criteria whose tests passed. For every criterion whose `id`
+AND `must` text are unchanged from the existing file, copy its existing `covered` value; a new or
+reworded criterion gets `covered: false`. Never invent `covered: true` yourself — only carry forward
+what the existing file already has.
 
 ```json
 {
@@ -54,7 +63,7 @@ trailing prose, no Markdown fences. Keep field order stable.
 | `criteria[].id` | `AC-<req-number>-<letter>`, e.g. `AC-001-a`, `AC-001-b`. |
 | `criteria[].must` | A single, **atomic**, verifiable assertion. No conjunctions — split "X and Y" into two criteria. |
 | `criteria[].method` | Exactly one of `e2e` \| `scenario` \| `manual` (see below). |
-| `criteria[].covered` | Set `false` for every `e2e` criterion; **omit** it entirely for `scenario`/`manual`. Never set `true` — the validation run writes that later. |
+| `criteria[].covered` | `false` for every NEW/changed `e2e` criterion; **omit** it entirely for `scenario`/`manual`. On regeneration, carry forward the existing value for unchanged criteria (see above) — never invent `true` (the validation run writes that). |
 
 ## Assigning `method`
 
@@ -83,6 +92,8 @@ When unsure between `e2e` and `scenario`, choose `e2e` if you can phrase a concr
 
 - Do not add fields beyond the schema, comments, or any prose inside the JSON.
 - Do not read `design.md`, `openapi.yaml`, or source code to derive criteria (requirement-only input).
-- Do not set `covered: true` on any criterion.
-- Do not generate e2e test files, a validation workflow, or anything else — producing the single
-  `specs/validation/validation-criteria.json` file is the entire task.
+- Do not set `covered: true` on any criterion yourself — only carry an existing `true` forward for an
+  unchanged criterion when regenerating.
+- Do not generate e2e test files, a validation workflow, or anything else — this skill produces the
+  single `specs/validation/validation-criteria.json` file, whether it runs standalone or as the final
+  step of a design turn.

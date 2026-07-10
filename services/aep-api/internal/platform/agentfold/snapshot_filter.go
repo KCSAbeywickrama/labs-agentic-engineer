@@ -29,7 +29,10 @@ import (
 )
 
 // KeepInTurnSnapshot mirrors keepInTurnSnapshot: keep agent-authored sources
-// (*.md, *.dsl, a design.json basename) and drop everything else.
+// (*.md, *.dsl, a design.json or validation-criteria.json basename) and drop
+// everything else. validation-criteria.json is kept so a design regeneration
+// can see the existing acceptance oracle and preserve its covered flags (the
+// validation run's write-back) instead of silently resetting them.
 func KeepInTurnSnapshot(path string) bool {
 	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".dsl") {
 		return true
@@ -38,7 +41,7 @@ func KeepInTurnSnapshot(path string) bool {
 	if i := strings.LastIndexByte(path, '/'); i >= 0 {
 		base = path[i+1:]
 	}
-	return base == "design.json"
+	return base == "design.json" || base == "validation-criteria.json"
 }
 
 // InTurnSnapshot is the complete per-file predicate the agents-side snapshot
