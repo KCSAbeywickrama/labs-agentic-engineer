@@ -83,21 +83,17 @@ describe("BuildDependencyDrawer", () => {
     expect(screen.getByText(/billing-service/i)).toBeInTheDocument();
   });
 
-  it("checks platform-resource and org-service approvals by default", () => {
+  it("shows platform-resource and org-service as informational (no approval checkbox)", () => {
     setup();
 
-    const postgresCheckbox = screen.getByRole("checkbox", {
-      name: /postgres/i,
-    });
-    const billingCheckbox = screen.getByRole("checkbox", {
-      name: /billing-service/i,
-    });
-
-    expect(postgresCheckbox).toBeChecked();
-    expect(billingCheckbox).toBeChecked();
+    // Continue is the approval, so these kinds render as title + description
+    // only — there is no per-item checkbox to toggle.
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/postgres/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/billing-service/i)).toBeInTheDocument();
   });
 
-  // A single prechecked platform-resource approval leaves Continue enabled on
+  // A single informational platform-resource requires no input, so Continue is enabled on
   // its own — the ideal fixture to prove that `submitting` is what disables it.
   const PLATFORM_ONLY: PreflightItem[] = [
     {
@@ -109,7 +105,7 @@ describe("BuildDependencyDrawer", () => {
     },
   ];
 
-  it("keeps Continue enabled for a prechecked approval when not submitting", () => {
+  it("keeps Continue enabled for an informational platform-resource when not submitting", () => {
     setup(PLATFORM_ONLY, false);
     expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
   });
@@ -118,7 +114,7 @@ describe("BuildDependencyDrawer", () => {
     const { onContinue } = setup(PLATFORM_ONLY, true);
 
     const continueButton = screen.getByRole("button", { name: /continue/i });
-    // Disabled despite the prechecked approval — the in-flight build is what
+    // Disabled despite no input being required — the in-flight build is what
     // blocks it, so the request can't be double-submitted.
     expect(continueButton).toBeDisabled();
     // The Continue button (not the Build button behind the drawer) carries the
@@ -225,7 +221,7 @@ describe("BuildDependencyDrawer", () => {
     });
   });
 
-  it("emits approved:false for an unchecked approval without blocking Continue", () => {
+  it("always emits approved:true for platform-resource/org-service (Continue is the approval)", () => {
     const { onContinue } = setup();
 
     fireEvent.change(screen.getByLabelText(/STRIPE_API_KEY/i), {
@@ -238,15 +234,17 @@ describe("BuildDependencyDrawer", () => {
       target: { value: "https://example.com/openapi.json" },
     });
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /postgres/i }));
-
     const continueButton = screen.getByRole("button", { name: /continue/i });
     expect(continueButton).toBeEnabled();
     fireEvent.click(continueButton);
 
     const inputs = onContinue.mock.calls[0]?.[0] as BuildInputItem[];
-    const resourceInput = inputs.find((i) => i.dependency === "postgres");
-    expect(resourceInput).toMatchObject({ approved: false });
+    expect(
+      inputs.find((i) => i.dependency === "postgres"),
+    ).toMatchObject({ approved: true });
+    expect(
+      inputs.find((i) => i.dependency === "billing-service"),
+    ).toMatchObject({ approved: true });
   });
 
   it("accepts a pasted spec via the content field and emits specContent (not specUrl)", () => {
@@ -305,7 +303,6 @@ describe("BuildDependencyDrawer", () => {
     fireEvent.change(screen.getByLabelText(/STRIPE_API_KEY/i), {
       target: { value: "sk_test_123" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: /postgres/i }));
 
     rerender(
       <BuildDependencyDrawer
@@ -324,9 +321,7 @@ describe("BuildDependencyDrawer", () => {
       />,
     );
 
+    // The typed external-config value is cleared on reopen.
     expect(screen.getByLabelText(/STRIPE_API_KEY/i)).toHaveValue("");
-    expect(
-      screen.getByRole("checkbox", { name: /postgres/i }),
-    ).toBeChecked();
   });
 });

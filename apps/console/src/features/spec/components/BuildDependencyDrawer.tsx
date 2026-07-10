@@ -20,10 +20,8 @@ import { useEffect, useState } from "react";
 import {
   Box,
   Button,
-  Checkbox,
   Divider,
   Drawer,
-  FormControlLabel,
   Stack,
   TextField,
   Typography,
@@ -33,7 +31,12 @@ import type { components } from "../../../generated/aep-api";
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
 
-/** Per-item working state, keyed by `${component}::${dependency}`. */
+/**
+ * Per-item working state, keyed by `${component}::${dependency}`. Only the
+ * input kinds (external-config / external-spec) carry state — platform-resource
+ * and org-service are informational: clicking Continue is the user's approval
+ * of every change listed, so there is no per-item toggle.
+ */
 type ItemState = {
   /** external-config: value typed per config key, keyed by key name. */
   values: Record<string, string>;
@@ -41,29 +44,25 @@ type ItemState = {
   specUrl: string;
   /** external-spec: pasted-content field. */
   specContent: string;
-  /** platform-resource / org-service: approval checkbox. */
-  approved: boolean;
 };
 
 function itemKey(item: PreflightItem): string {
   return `${item.component}::${item.dependency}`;
 }
 
-/** Fresh per-item state as if the drawer just opened with this item. */
-function seedForItem(item: PreflightItem): ItemState {
+/** Fresh per-item state as if the drawer just opened. */
+function seedForItem(): ItemState {
   return {
     values: {},
     specUrl: "",
     specContent: "",
-    approved:
-      item.kind === "platform-resource" || item.kind === "org-service",
   };
 }
 
 function initialState(items: PreflightItem[]): Record<string, ItemState> {
   const state: Record<string, ItemState> = {};
   for (const item of items) {
-    state[itemKey(item)] = seedForItem(item);
+    state[itemKey(item)] = seedForItem();
   }
   return state;
 }
@@ -107,16 +106,18 @@ function toBuildInputItem(
       : { ...base, specContent: state.specContent };
   }
 
+  // platform-resource / org-service are informational — clicking Continue is
+  // the approval, so they are always emitted approved.
   if (item.kind === "platform-resource") {
     return {
       ...base,
-      approved: state.approved,
+      approved: true,
       ...(item.parameters ? { parameters: item.parameters } : {}),
     };
   }
 
   // org-service
-  return { ...base, approved: state.approved };
+  return { ...base, approved: true };
 }
 
 function ExternalConfigPanel({
@@ -189,28 +190,16 @@ function ExternalSpecPanel({
   );
 }
 
-function ApprovalPanel({
+function InfoPanel({
   item,
-  state,
   description,
-  onToggle,
 }: {
   item: PreflightItem;
-  state: ItemState;
   description: string;
-  onToggle: (checked: boolean) => void;
 }) {
   return (
     <Stack spacing={1}>
-      <FormControlLabel
-        control={
-          <Checkbox
-            checked={state.approved}
-            onChange={(e) => onToggle(e.target.checked)}
-          />
-        }
-        label={item.dependency}
-      />
+      <Typography variant="subtitle1">{item.dependency}</Typography>
       <Typography variant="body2" color="text.secondary">
         {description}
       </Typography>
@@ -272,7 +261,7 @@ export function BuildDependencyDrawer({
     setState((prev) => ({
       ...prev,
       [itemKey(item)]: {
-        ...(prev[itemKey(item)] ?? seedForItem(item)),
+        ...(prev[itemKey(item)] ?? seedForItem()),
         ...patch,
       },
     }));
@@ -280,7 +269,7 @@ export function BuildDependencyDrawer({
 
   function handleContinue() {
     const inputs = items.map((item) =>
-      toBuildInputItem(item, state[itemKey(item)] ?? seedForItem(item)),
+      toBuildInputItem(item, state[itemKey(item)] ?? seedForItem()),
     );
     onContinue(inputs);
   }
@@ -308,11 +297,11 @@ export function BuildDependencyDrawer({
                 <ExternalConfigPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)] ?? seedForItem(item)}
+                  state={state[itemKey(item)] ?? seedForItem()}
                   onChange={(key, value) =>
                     updateState(item, {
                       values: {
-                        ...(state[itemKey(item)] ?? seedForItem(item)).values,
+                        ...(state[itemKey(item)] ?? seedForItem()).values,
                         [key]: value,
                       },
                     })
@@ -331,7 +320,7 @@ export function BuildDependencyDrawer({
                 <ExternalSpecPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)] ?? seedForItem(item)}
+                  state={state[itemKey(item)] ?? seedForItem()}
                   onUrlChange={(value) => updateState(item, { specUrl: value })}
                   onContentChange={(value) =>
                     updateState(item, { specContent: value })
@@ -347,14 +336,10 @@ export function BuildDependencyDrawer({
           <>
             <Stack spacing={2} sx={{ mb: 3 }}>
               {platformResourceItems.map((item) => (
-                <ApprovalPanel
+                <InfoPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)] ?? seedForItem(item)}
-                  description={`Provision this ${item.resourceType ?? "resource"} for you`}
-                  onToggle={(checked) =>
-                    updateState(item, { approved: checked })
-                  }
+                  description={`We'll provision this ${item.resourceType ?? "resource"} for you.`}
                 />
               ))}
             </Stack>
@@ -365,12 +350,10 @@ export function BuildDependencyDrawer({
         {orgServiceItems.length > 0 ? (
           <Stack spacing={2} sx={{ mb: 3 }}>
             {orgServiceItems.map((item) => (
-              <ApprovalPanel
+              <InfoPanel
                 key={itemKey(item)}
                 item={item}
-                state={state[itemKey(item)] ?? seedForItem(item)}
-                description="Make this cross-project endpoint visible — this updates and rebuilds the owning project; your build continues and the consuming task waits until it's published"
-                onToggle={(checked) => updateState(item, { approved: checked })}
+                description="We'll make this cross-project endpoint visible — this updates and rebuilds the owning project; your build continues and the consuming task waits until it's published."
               />
             ))}
           </Stack>
