@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/models"
@@ -81,6 +82,10 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	}
 
 	var failures []ProvisionFailure
+	provisioned := make(map[string]bool, len(inputs))
+	for _, in := range inputs {
+		provisioned[strings.ToLower(in.Dependency)] = true
+	}
 	for _, in := range inputs {
 		switch in.Kind {
 		case buildKindExternalConfig:
@@ -106,7 +111,93 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 			slog.WarnContext(ctx, "provisioning: unknown build provision kind", "kind", in.Kind, "dependency", in.Dependency)
 		}
 	}
+
+	// Reconcile every provision gate whose dep is NOT in inputs. EnsureProvisionIssues
+	// re-mints an OPEN gate for each external + platform-resource dep in the design,
+	// but the inputs loop only admits a run for the drawer subset. A dep whose OC
+	// binding is already Ready is deliberately skipped by build preflight, so it
+	// lands here with a fresh gate and no run — deriving `pending` forever and
+	// stranding every consumer coding task (issue #164). Settle it: admit+complete a
+	// provision run so its gate derives `deployed`, without re-authoring the resource.
+	failures = append(failures, s.settleReadyGates(ctx, orgID, projectID, provisioned)...)
 	return failures, nil
+}
+
+// settleReadyGates reconciles provision gates for deps that are already Ready in
+// OpenChoreo but are NOT in the build drawer inputs (issue #164). For each such
+// dep it admits+completes a provision run so the freshly-minted gate derives
+// `deployed` instead of stranding consumers on a run-less `pending` gate. It
+// re-authors NOTHING — the resource is already Ready. Best-effort: a design read
+// hiccup must not fail the build (log + return nil); a per-dep settle error
+// becomes a ProvisionFailure the workflow can inspect.
+func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string, provisioned map[string]bool) []ProvisionFailure {
+	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
+	if err != nil {
+		slog.WarnContext(ctx, "provisioning: settle read design failed", "error", err)
+		return nil
+	}
+	var failures []ProvisionFailure
+	seen := map[string]bool{}
+	for _, comp := range comps {
+		for _, dep := range comp.Dependencies {
+			// Only external + platform-resource deps mint a provision gate.
+			if dep.Kind != models.DependencyKindExternal && dep.Kind != models.DependencyKindPlatformResource {
+				continue
+			}
+			name := strings.ToLower(dep.Name)
+			// A dep in inputs is provisioned by the inputs loop; dedupe multi-consumer deps.
+			if provisioned[name] || seen[name] {
+				continue
+			}
+			seen[name] = true
+			// Only an already-Ready dep is settled here. A not-Ready dep is driven by
+			// its own drawer input (or is genuinely un-actionable) — leave it alone.
+			st, serr := s.Status(ctx, orgID, projectID, dep.Name, "")
+			if serr != nil || st == nil || !st.Ready {
+				continue
+			}
+			if cerr := s.completeReadyGate(ctx, orgID, projectID, dep.Name, comp.Name); cerr != nil {
+				failures = append(failures, ProvisionFailure{Component: comp.Name, Dependency: dep.Name, Reason: cerr.Error()})
+			}
+		}
+	}
+	return failures
+}
+
+// completeReadyGate admits and completes a provision run for an already-Ready
+// dep's open gate so it derives `deployed` (issue #164). It mirrors the
+// admit→StartWithRun→completeProvisionRow TAIL of authorExternalWithRef but
+// authors NOTHING — the OC binding is already Ready, so re-authoring would only
+// re-write state. No open gate (issueNumber == 0) or an already-active run
+// (!admitted) is an idempotent no-op.
+func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depName, component string) error {
+	slog.DebugContext(ctx, "provisioning: settling already-ready gate", "dependency", depName, "component", component)
+	issueNumber, _, err := s.findProvisionIssue(ctx, orgID, projectID, depName)
+	if err != nil {
+		return err
+	}
+	if issueNumber == 0 {
+		return nil
+	}
+	repo, err := s.repos.RepoFullName(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("provisioning: resolve repo: %w", err)
+	}
+	row, admitted, err := s.admitProvisionRow(ctx, orgID, projectID, repo, depName, issueNumber)
+	if err != nil {
+		return fmt.Errorf("provisioning: admit provision run: %w", err)
+	}
+	if !admitted {
+		// A provision run is already active for this gate (e.g. a concurrent settle).
+		return nil
+	}
+	ref := resources.ExternalResourceBindingName(projectID, depName, defaultEnv)
+	if _, serr := s.execs.StartWithRun(ctx, row.ID, ref); serr != nil {
+		slog.WarnContext(ctx, "provisioning: start settle provision run failed", "execution", row.ID, "error", serr)
+	}
+	s.completeProvisionRow(ctx, orgID, projectID, issueNumber, row.ID,
+		fmt.Sprintf("Dependency `%s` already provisioned (OC binding Ready) — gate settled.", depName))
+	return nil
 }
 
 // authorExternalWithRef runs the synchronous external-config provisioning flow

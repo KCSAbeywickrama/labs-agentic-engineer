@@ -23,6 +23,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -202,6 +203,130 @@ func TestProvisionForBuild_OrgServiceApprovedStartsVisibility(t *testing.T) {
 	if build.calls != 1 || build.lastPrj != "warehouse" {
 		t.Fatalf("approved org-service must trigger the provider build once for the provider project, got calls=%d prj=%q", build.calls, build.lastPrj)
 	}
+}
+
+// TestProvisionForBuild_SettlesReadyGateNotInInputs is the #164 regression: a
+// dep whose OC binding is already Ready but which is NOT in the build drawer
+// inputs still gets a freshly-minted provision gate (via EnsureProvisionIssues).
+// Without a settle step that gate has no succeeded provision run → derives
+// pending forever → the funnel strands every consumer coding task. The fix
+// admits+completes a provision run for it so the gate derives deployed —
+// WITHOUT re-authoring the already-Ready resource.
+func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
+	issues := newFakeIssues(nil)
+	execs := &fakeExecStore{}
+	reeval := &fakeReeval{}
+	ext := &fakeExtProv{}
+	plat := &fakePlatProv{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	}}
+	// orders-db (platform-resource) is already Ready in OC but NOT in the drawer inputs.
+	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
+		resources.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding("host", "port"),
+	}}
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, bindings)
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config",
+			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"development": "sm://x"}},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+
+	// orders-db was Ready but not in inputs → its gate must be settled (closed).
+	dbGate := gateNumber(issues, "orders-db")
+	if _, closed := issues.closed[dbGate]; !closed {
+		t.Fatalf("already-ready dep gate #%d must be settled (closed) or consumers strand", dbGate)
+	}
+	// A succeeded provision run was admitted+completed so the gate derives deployed.
+	if r := provisionRowFor(execs, "orders-db"); r == nil || r.Status != string(taskmeta.ExecSucceeded) {
+		t.Fatalf("settle must admit+complete a provision run for orders-db, got %+v", r)
+	}
+	// The resource is already Ready — settle must NOT re-author it.
+	if plat.calls != 0 {
+		t.Fatalf("settle must NOT re-author the already-ready resource, got %d Provision calls", plat.calls)
+	}
+	// The provisioned dep (stripe, in inputs) is driven by the inputs loop, not double-settled.
+	if n := countProvisionRows(execs, "stripe"); n != 1 {
+		t.Fatalf("stripe (in inputs) must have exactly one provision run, got %d", n)
+	}
+}
+
+// TestProvisionForBuild_SkipsNotReadyGateNotInInputs pins that settle only acts
+// on already-Ready deps: a dep not in inputs whose binding is NOT ready is left
+// alone (its own drawer input drives it), so no run is admitted and its gate
+// stays open.
+func TestProvisionForBuild_SkipsNotReadyGateNotInInputs(t *testing.T) {
+	issues := newFakeIssues(nil)
+	execs := &fakeExecStore{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}}},
+	}}
+	// orders-db has NO binding (never provisioned) → Status reports not-ready.
+	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, catalog, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config",
+			SecretRefByEnv: map[string]string{"development": "sm://x"}},
+	})
+	if err != nil || len(fails) != 0 {
+		t.Fatalf("want clean run, got fails=%+v err=%v", fails, err)
+	}
+	// A not-ready dep not in inputs must NOT be settled.
+	dbGate := gateNumber(issues, "orders-db")
+	if _, closed := issues.closed[dbGate]; closed {
+		t.Fatalf("a not-ready dep gate #%d must NOT be settled", dbGate)
+	}
+	if r := provisionRowFor(execs, "orders-db"); r != nil {
+		t.Fatalf("a not-ready dep must have no provision run, got %+v", r)
+	}
+}
+
+// TestSettleReadyGate_NoOpenGate pins the no-op path: a Ready dep with no open
+// provision gate (findProvisionIssue → 0) admits nothing and closes nothing.
+func TestSettleReadyGate_NoOpenGate(t *testing.T) {
+	issues := newFakeIssues(nil) // no open gates
+	execs := &fakeExecStore{}
+	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
+		resources.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
+	}}
+	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
+
+	if err := svc.completeReadyGate(context.Background(), "acme", "proj", "orders-db", "orders"); err != nil {
+		t.Fatalf("no open gate must be a no-op, got %v", err)
+	}
+	if len(execs.rows) != 0 {
+		t.Fatalf("no open gate → no provision run admitted, got %d rows", len(execs.rows))
+	}
+	if len(issues.closed) != 0 {
+		t.Fatalf("no open gate → nothing closed, got %d", len(issues.closed))
+	}
+}
+
+// provisionRowFor returns the first provision Execution row for a dep name.
+func provisionRowFor(execs *fakeExecStore, depName string) *models.Execution {
+	for _, r := range execs.rows {
+		if r.Kind == string(taskmeta.KindProvision) && r.Component == depName {
+			return r
+		}
+	}
+	return nil
+}
+
+// countProvisionRows counts provision Execution rows admitted for a dep name.
+func countProvisionRows(execs *fakeExecStore, depName string) int {
+	n := 0
+	for _, r := range execs.rows {
+		if r.Kind == string(taskmeta.KindProvision) && r.Component == depName {
+			n++
+		}
+	}
+	return n
 }
 
 // gateNumber finds the minted aep:provision gate issue number for a dep name.
