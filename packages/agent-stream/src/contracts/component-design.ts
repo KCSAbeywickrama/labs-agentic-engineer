@@ -44,7 +44,12 @@ export interface ComponentDesign {
   version: string;
   /** Implementation language, e.g. "Go", "TypeScript". */
   language: string;
-  /** Always "docker" today. */
+  /**
+   * The build buildpack — always "docker" (the platform's single build path).
+   * The agent write-gate (checkComponentDesign) pins this to "docker" as a
+   * post-parse check, so the type stays `string` and the shared JSON Schema /
+   * BFF save-gate stay permissive.
+   */
   buildpack: string;
   /** Repo-relative source dir — the component name. */
   appPath: string;
@@ -140,8 +145,8 @@ export interface ConfigKey {
   key: string;
   /** Secret keys route through the secret path. Default: false. */
   secret?: boolean;
-  /** publishable | secret. */
-  credentialClass?: string;
+  /** How the value is supplied/stored: "secret" (user-supplied private) or "publishable" (non-sensitive config). */
+  credentialClass?: "secret" | "publishable";
 }
 
 /** One option attached to an ambiguous dependency. Mirrors Go `models.DependencyCandidate`. */

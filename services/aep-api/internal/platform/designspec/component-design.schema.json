@@ -80,7 +80,11 @@
                   "type": "boolean"
                 },
                 "credentialClass": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "secret",
+                    "publishable"
+                  ]
                 }
               },
               "required": [
