@@ -3239,6 +3239,13 @@ paths:
               - closed
               - all
             type: string
+        - description: Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions.
+          explode: false
+          in: query
+          name: tag
+          schema:
+            description: Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions.
+            type: string
       responses:
         "200":
           content:
@@ -3258,7 +3265,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List a project's Tasks (live GitHub ⋈ executions → derived status)
+      summary: List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to one spec/build version tag
       tags:
         - Tasks
   /projects/{projectName}/tasks/{issueNumber}:
