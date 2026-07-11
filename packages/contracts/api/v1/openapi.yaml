@@ -99,6 +99,62 @@ components:
         - commitSha
         - files
       type: object
+    BuildInputItem:
+      additionalProperties: false
+      properties:
+        approved:
+          type: boolean
+        component:
+          description: Owning component name
+          type: string
+        dependency:
+          description: Dependency name
+          type: string
+        kind:
+          enum:
+            - external-config
+            - external-spec
+            - platform-resource
+            - org-service
+          type: string
+        parameters:
+          additionalProperties: {}
+          type: object
+        specContent:
+          type: string
+        specUrl:
+          type: string
+        values:
+          items:
+            $ref: "#/components/schemas/ConfigValue"
+          type:
+            - array
+            - "null"
+      required:
+        - component
+        - dependency
+        - kind
+      type: object
+    BuildList:
+      additionalProperties: false
+      description: list-project-builds response — one entry per built spec version tag, newest first.
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/BuildList.json
+          format: uri
+          readOnly: true
+          type: string
+        builds:
+          items:
+            $ref: "#/components/schemas/BuildSummary"
+          type:
+            - array
+            - "null"
+      required:
+        - builds
+      type: object
     BuildLogEntry:
       additionalProperties: false
       properties:
@@ -133,6 +189,28 @@ components:
       required:
         - logs
       type: object
+    BuildPreflight:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/BuildPreflight.json
+          format: uri
+          readOnly: true
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/PreflightItem"
+          type:
+            - array
+            - "null"
+        needsInput:
+          type: boolean
+      required:
+        - needsInput
+        - items
+      type: object
     BuildRequest:
       additionalProperties: false
       properties:
@@ -143,6 +221,12 @@ components:
           format: uri
           readOnly: true
           type: string
+        inputs:
+          items:
+            $ref: "#/components/schemas/BuildInputItem"
+          type:
+            - array
+            - "null"
       type: object
     BuildResponse:
       additionalProperties: false
@@ -154,10 +238,14 @@ components:
           format: uri
           readOnly: true
           type: string
+        failures:
+          items:
+            $ref: "#/components/schemas/InputFailure"
+          type:
+            - array
+            - "null"
         tag:
           type: string
-      required:
-        - tag
       type: object
     BuildStatus:
       additionalProperties: false
@@ -249,6 +337,55 @@ components:
       required:
         - title
         - status
+      type: object
+    BuildSummary:
+      additionalProperties: false
+      description: One entry of list-project-builds — a spec version tag's newest run. A list read has no live workflow query, so "started" never occurs here.
+      properties:
+        completedAt:
+          format: date-time
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - started
+            - in_progress
+            - completed
+            - failed
+          type: string
+        tag:
+          type: string
+        tasks:
+          $ref: "#/components/schemas/BuildTally"
+          description: The run's own frozen task tally, written by the workflow — not a live task recount.
+      required:
+        - tag
+        - status
+        - tasks
+        - startedAt
+      type: object
+    BuildTally:
+      additionalProperties: false
+      properties:
+        active:
+          format: int64
+          type: integer
+        done:
+          format: int64
+          type: integer
+        failed:
+          format: int64
+          type: integer
+        total:
+          format: int64
+          type: integer
+      required:
+        - total
+        - done
+        - failed
+        - active
       type: object
     ClientSecretOutputBody:
       additionalProperties: false
@@ -433,7 +570,9 @@ components:
     ConfigKeyDTO:
       additionalProperties: false
       properties:
-        credentialClass:
+        defaultValue:
+          type: string
+        description:
           type: string
         key:
           type: string
@@ -441,7 +580,20 @@ components:
           type: boolean
       required:
         - key
-        - secret
+      type: object
+    ConfigKeyView:
+      additionalProperties: false
+      properties:
+        defaultValue:
+          type: string
+        description:
+          type: string
+        key:
+          type: string
+        secret:
+          type: boolean
+      required:
+        - key
       type: object
     ConfigPatch:
       additionalProperties: false
@@ -533,6 +685,17 @@ components:
         - llm
         - gitProvider
         - idp
+      type: object
+    ConfigValue:
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+      required:
+        - key
+        - value
       type: object
     ConsumerDTO:
       additionalProperties: false
@@ -996,6 +1159,21 @@ components:
         - kind
         - warnings
       type: object
+    InputFailure:
+      additionalProperties: false
+      properties:
+        component:
+          type: string
+        dependency:
+          type: string
+        kind:
+          type: string
+        reason:
+          type: string
+      required:
+        - dependency
+        - reason
+      type: object
     LLMProjection:
       additionalProperties: false
       properties:
@@ -1071,6 +1249,41 @@ components:
         - uuid
         - name
         - createdAt
+      type: object
+    PreflightItem:
+      additionalProperties: false
+      properties:
+        component:
+          description: Owning component name
+          type: string
+        config:
+          items:
+            $ref: "#/components/schemas/ConfigKeyView"
+          type:
+            - array
+            - "null"
+        dependency:
+          description: Dependency name
+          type: string
+        description:
+          type: string
+        kind:
+          enum:
+            - external-config
+            - external-spec
+            - platform-resource
+            - org-service
+          type: string
+        parameters:
+          additionalProperties: {}
+          type: object
+        resourceType:
+          type: string
+      required:
+        - component
+        - dependency
+        - kind
+        - description
       type: object
     ProgressEvent:
       additionalProperties: false
@@ -1625,6 +1838,13 @@ components:
           type:
             - array
             - "null"
+        blockedBy:
+          description: >-
+            Names of the dependencies this task is waiting on; present when
+            derivedStatus is on_hold.
+          items:
+            type: string
+          type: array
         body:
           type: string
         component:
@@ -2381,6 +2601,35 @@ paths:
       summary: Trigger a project build
       tags:
         - Projects
+  /projects/{projectName}/build/preflight:
+    get:
+      operationId: get-build-preflight
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildPreflight"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Compute the build dependency-drawer preflight
+      tags:
+        - Projects
   /projects/{projectName}/build/{tag}:
     get:
       operationId: get-project-build
@@ -2415,6 +2664,36 @@ paths:
       security:
         - userJWT: []
       summary: Get project build status
+      tags:
+        - Projects
+  /projects/{projectName}/builds:
+    get:
+      description: One entry per built spec version tag, newest first — each the tag's newest run with its frozen task tally.
+      operationId: list-project-builds
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List project builds
       tags:
         - Projects
   /projects/{projectName}/components:

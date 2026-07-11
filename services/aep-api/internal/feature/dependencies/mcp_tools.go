@@ -43,7 +43,7 @@ type externalResourceView struct {
 
 type configKeyDTO struct {
 	Key    string `json:"key"`
-	Secret bool   `json:"secret"`
+	Secret bool   `json:"secret,omitempty"`
 }
 
 // orgEndpointView is the JSON shape returned to the agent for one published org

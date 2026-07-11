@@ -154,12 +154,18 @@ func TestSkillsComponent_List_MatchesGolden(t *testing.T) {
 		t.Fatalf("skills[] element field set drifted:\n got %v\nwant %v", gotElem, wantElem)
 	}
 
-	// Semantics: the seeded built-ins are present, read-only.
+	// Semantics: the seeded built-ins are present, read-only — and the envelope
+	// carries the org skills repo's HTML URL (contract SkillSummaryList.repoUrl;
+	// the console Import dialog's via-pull-request link depends on it).
 	var obj struct {
-		Skills []map[string]any `json:"skills"`
+		Skills  []map[string]any `json:"skills"`
+		RepoURL string           `json:"repoUrl"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &obj); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	if obj.RepoURL == "" {
+		t.Fatalf("list envelope must carry repoUrl (org skills repo HTML URL): %s", resp.Body.String())
 	}
 	var sawGo bool
 	for _, s := range obj.Skills {

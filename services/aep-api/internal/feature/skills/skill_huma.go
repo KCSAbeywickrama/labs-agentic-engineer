@@ -122,7 +122,14 @@ func RegisterSkill(
 		if err != nil {
 			return nil, mapSkillError(err)
 		}
-		return &skillListOutput{Body: map[string]any{"skills": summaries}}, nil
+		// repoUrl is the org skills repo's HTML URL (contract
+		// SkillSummaryList.repoUrl) — "" while the repo can't be provisioned
+		// (e.g. GitHub not connected yet); the console keys its Import
+		// dialog's via-pull-request guidance off it.
+		return &skillListOutput{Body: map[string]any{
+			"skills":  summaries,
+			"repoUrl": skillSvc.RepoWebURL(ctx, in.OrgHandle),
+		}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

@@ -37,6 +37,7 @@ import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
+  useBuildPreflight,
   useBuildProject,
   useProject,
   useProjectStatus,
@@ -48,14 +49,18 @@ import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { AddArtifactDialog } from "./AddArtifactDialog";
+import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
 import { WireframePanel } from "./WireframePanel";
 import { OpenApiView } from "@aep/ui-openapi-view";
+import { DesignView } from "@aep/ui-design-view";
 import type { SpecSelection } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
+type PreflightItem = components["schemas"]["PreflightItem"];
+type BuildInputItem = components["schemas"]["BuildInputItem"];
 
 // specStatus → header chip, same language as the overview's spec card.
 function specChip(status: ProjectStatus): {
@@ -96,10 +101,16 @@ export function SpecView({ projectName }: { projectName: string }) {
   // Build (#162): commit-then-build. buildPhase drives the button label /
   // loading; an agent peer in the room means a turn is writing → block Build.
   const build = useBuildProject(projectName);
-  const [buildPhase, setBuildPhase] = useState<"committing" | "building" | null>(
-    null,
-  );
+  // Preflight (#164): checked between commit and build — a project with
+  // unresolved dependencies (external config/spec, platform resources, org
+  // services) routes through the drawer instead of building blind.
+  const preflight = useBuildPreflight(projectName);
+  const [buildPhase, setBuildPhase] = useState<
+    "committing" | "checking" | "building" | null
+  >(null);
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [dependencyDrawerOpen, setDependencyDrawerOpen] = useState(false);
+  const [preflightItems, setPreflightItems] = useState<PreflightItem[]>([]);
 
   // Collapse the sidebar while focused on the spec, expand when leaving.
   useEffect(() => {
@@ -148,6 +159,12 @@ export function SpecView({ projectName }: { projectName: string }) {
   // read-only API Spec view — like the wireframe .dsl, it never goes through
   // the collab text editor, so it's excluded from both branches below.
   const isOpenApiFile = selectedFile?.path.endsWith("/openapi.yaml") ?? false;
+  // A component's design.json renders as a read-only structured Overview —
+  // like openapi.yaml, it never goes through the collab text editor.
+  const isComponentDesignFile =
+    /^specs\/design\/components\/[^/]+\/design\.json$/.test(
+      selectedFile?.path ?? "",
+    );
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
   // measured height to stretch into — a plain overflow:auto block (used for
@@ -162,13 +179,15 @@ export function SpecView({ projectName }: { projectName: string }) {
       ? collab.getFileFragment(selectedFile.path)
       : null;
   const ytext =
-    selectedFile && !selectedIsMd && !isOpenApiFile
+    selectedFile && !selectedIsMd && !isOpenApiFile && !isComponentDesignFile
       ? collab.getFileText(selectedFile.path)
       : null;
   const usesCollab = Boolean((fragment && collab.provider) || ytext);
   const content = useSpecFileContent(
     projectName,
-    selectedFile && (!usesCollab || isOpenApiFile) ? selectedFile : null,
+    selectedFile && (!usesCollab || isOpenApiFile || isComponentDesignFile)
+      ? selectedFile
+      : null,
   );
 
   const specStatus = status.data?.specStatus;
@@ -197,16 +216,39 @@ export function SpecView({ projectName }: { projectName: string }) {
   // so Build is disabled — with a tooltip — while one is working (#162).
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
 
-  // Build (#162): commit the room's live edits FIRST (POST /build tags HEAD),
-  // then trigger the build, then go watch progress on the overview.
+  // Build (#162, #164): commit the room's live edits FIRST (POST /build tags
+  // HEAD), then check preflight — a project with unresolved dependencies
+  // routes to the drawer instead of building blind; only once preflight says
+  // the project is ready does this trigger the build and go watch progress
+  // on the overview.
   const onBuild = () => {
     setBuildError(null);
     setBuildPhase("committing");
     void (async () => {
       try {
         await collab.flush(); // no-op when offline
+        setBuildPhase("checking");
+        const { data, isError, error } = await preflight.refetch();
+        if (isError || data === undefined) {
+          // TanStack's refetch() resolves rather than throws on error, so a
+          // preflight failure (network blip, expired session, BFF hiccup)
+          // must be handled explicitly here — otherwise it falls through to
+          // building with empty inputs, silently skipping dependency
+          // provisioning (the exact #164 symptom this feature fixes).
+          setBuildError(
+            error instanceof Error
+              ? error.message
+              : "Failed to check build readiness.",
+          );
+          return;
+        }
+        if (data.needsInput) {
+          setPreflightItems(data.items ?? []);
+          setDependencyDrawerOpen(true);
+          return;
+        }
         setBuildPhase("building");
-        await build.mutateAsync();
+        await build.mutateAsync({ inputs: [] });
         void navigate({
           to: "/projects/$projectName",
           params: { projectName },
@@ -219,6 +261,35 @@ export function SpecView({ projectName }: { projectName: string }) {
         setBuildPhase(null);
       }
     })();
+  };
+
+  // Drawer Continue (#164): resubmit the build with the resolved dependency
+  // inputs. A clean response closes the drawer and moves on to the overview;
+  // any inputs the BFF/devflow rejects come back as `failures` — surface the
+  // reasons and leave the drawer open so the user can fix them and retry.
+  const onContinueBuild = async (inputs: BuildInputItem[]) => {
+    setBuildError(null);
+    setBuildPhase("building");
+    try {
+      const res = await build.mutateAsync({ inputs });
+      if (res.failures?.length) {
+        setBuildError(
+          res.failures.map((f) => `${f.dependency}: ${f.reason}`).join("; "),
+        );
+        return;
+      }
+      setDependencyDrawerOpen(false);
+      void navigate({
+        to: "/projects/$projectName",
+        params: { projectName },
+      });
+    } catch (e) {
+      setBuildError(
+        e instanceof Error ? e.message : "Failed to start the build.",
+      );
+    } finally {
+      setBuildPhase(null);
+    }
   };
 
   const displayName = project.data?.displayName ?? projectName;
@@ -344,9 +415,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                 >
                   {buildPhase === "committing"
                     ? "Committing…"
-                    : buildPhase === "building"
-                      ? "Building…"
-                      : "Build"}
+                    : buildPhase === "checking"
+                      ? "Checking…"
+                      : buildPhase === "building"
+                        ? "Building…"
+                        : "Build"}
                 </Button>
               </span>
             </Tooltip>
@@ -466,9 +539,19 @@ export function SpecView({ projectName }: { projectName: string }) {
                 // for structured files). Collaborative when the collab service
                 // is reachable (#86 phase 5); solo-and-unsaved otherwise
                 // (#86 decision 10).
-                isOpenApiFile ? (
+                isOpenApiFile || isComponentDesignFile ? (
                   content.data ? (
-                    <OpenApiView key={content.data.sha} spec={content.data.content} />
+                    isOpenApiFile ? (
+                      <OpenApiView
+                        key={content.data.sha}
+                        spec={content.data.content}
+                      />
+                    ) : (
+                      <DesignView
+                        key={content.data.sha}
+                        design={content.data.content}
+                      />
+                    )
                   ) : content.isError ? (
                     <Alert
                       severity="error"
@@ -565,6 +648,14 @@ export function SpecView({ projectName }: { projectName: string }) {
       <AddArtifactDialog
         open={addArtifactOpen}
         onClose={() => setAddArtifactOpen(false)}
+      />
+
+      <BuildDependencyDrawer
+        open={dependencyDrawerOpen}
+        items={preflightItems}
+        submitting={dependencyDrawerOpen && buildPhase === "building"}
+        onClose={() => setDependencyDrawerOpen(false)}
+        onContinue={(inputs) => void onContinueBuild(inputs)}
       />
     </PageContent>
   );

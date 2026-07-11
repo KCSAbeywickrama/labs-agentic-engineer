@@ -20,6 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ProjectDesign } from "../src/types.js";
 import { toCellDiagramProject } from "../src/cell-diagram.js";
+import { buildProjectDesign } from "../src/project-design.js";
 
 const DESIGN: ProjectDesign = {
   modelVersion: "0.4.0",
@@ -78,8 +79,129 @@ test("maps ProjectDesign to the cell-diagram Project shape (legacy buildProjectM
   assert.equal(api.type, "service");
   assert.equal(api.services["expense-api:api"]!.deploymentMetadata.gateways.internet.isExposed, true);
   // Non-component targets (datastore, external connector) group under external-apis.
+  // The edge's type and on/off-platform signal must survive into the diagram model
+  // (dropping them collapses every external kind into a generic East API — #164).
   assert.deepEqual(api.connections, [
-    { id: "default:external-apis:postgres", label: "postgres", tooltip: "datastore" },
-    { id: "default:external-apis:email-gateway", label: "email-gateway", tooltip: "connector (off-platform)" },
+    {
+      id: "default:external-apis:postgres",
+      label: "postgres",
+      type: "datastore",
+      onPlatform: true,
+      tooltip: "datastore",
+    },
+    {
+      id: "default:external-apis:email-gateway",
+      label: "email-gateway",
+      type: "connector",
+      onPlatform: false,
+      tooltip: "connector (off-platform)",
+    },
+  ]);
+});
+
+test("a platform-resource dependency carries type:datastore + onPlatform:true, not a plain external API", () => {
+  const design: ProjectDesign = {
+    modelVersion: "0.4.0",
+    id: "p",
+    name: "p",
+    components: [
+      {
+        id: "orders-api",
+        type: "service",
+        version: "0.1.0",
+        skillsApplied: [],
+        build: {},
+        services: {
+          "orders-api": {
+            id: "orders-api",
+            label: "orders-api",
+            type: "http",
+            deploymentMetadata: { gateways: { internet: { isExposed: false }, intranet: { isExposed: true } } },
+          },
+        },
+        // Stage 1's DEP_KIND_EDGE mapping for kind "platform-resource".
+        connections: [{ id: "datastore://postgres", type: "datastore", onPlatform: true }],
+        artifacts: {},
+      },
+    ],
+  };
+
+  const p = toCellDiagramProject(design);
+  const api = p.components.find((c) => c.id === "orders-api")!;
+  assert.deepEqual(api.connections, [
+    {
+      id: "default:external-apis:postgres",
+      label: "postgres",
+      type: "datastore",
+      onPlatform: true,
+      tooltip: "datastore",
+    },
+  ]);
+  // The lib's isConnectorConnection fires on type "datastore"/"connector" — this is
+  // what routes the node to the South bound instead of the generic East external API.
+  assert.equal(api.connections[0]!.type, "datastore");
+});
+
+test("off-platform `external` deps are distinguished from on-platform `org-service` deps", () => {
+  const design: ProjectDesign = {
+    modelVersion: "0.4.0",
+    id: "p",
+    name: "p",
+    components: [
+      {
+        id: "billing-api",
+        type: "service",
+        version: "0.1.0",
+        skillsApplied: [],
+        build: {},
+        connections: [
+          // org-service: another on-platform project's service.
+          { id: "http://payments-service", type: "http", onPlatform: true },
+          // external: an off-platform SaaS.
+          { id: "http://stripe", type: "http", onPlatform: false },
+        ],
+        artifacts: {},
+      },
+    ],
+  };
+
+  const p = toCellDiagramProject(design);
+  const api = p.components.find((c) => c.id === "billing-api")!;
+  const orgService = api.connections.find((c) => c.label === "payments-service")!;
+  const external = api.connections.find((c) => c.label === "stripe")!;
+  assert.equal(orgService.onPlatform, true);
+  assert.equal(external.onPlatform, false);
+  // Both are HTTP edges — onPlatform, not type, is what distinguishes them.
+  assert.equal(orgService.type, "http");
+  assert.equal(external.type, "http");
+});
+
+test("end-to-end: an authored platform-resource dependency survives both projection stages as a datastore edge", () => {
+  const bundle: Record<string, string> = {
+    "specs/design/components/orders-api/design.json": JSON.stringify({
+      name: "orders-api",
+      type: "service",
+      version: "0.1.0",
+      language: "Go",
+      buildpack: "docker",
+      appPath: "orders-api",
+      entrypoint: "deployment/service",
+      exposure: "intranet",
+      dependencies: [{ kind: "platform-resource", name: "postgres", resourceType: "postgres" }],
+      description: "The orders API.",
+    }),
+  };
+
+  const design = buildProjectDesign("orders", bundle);
+  const p = toCellDiagramProject(design);
+  const api = p.components.find((c) => c.id === "orders-api")!;
+  assert.deepEqual(api.connections, [
+    {
+      id: "default:external-apis:postgres",
+      label: "postgres",
+      type: "datastore",
+      onPlatform: true,
+      tooltip: "datastore",
+    },
   ]);
 });

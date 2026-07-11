@@ -16,22 +16,15 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { Typography } from "@wso2/oxygen-ui";
-import { TasksList } from "../features/tasks/components/TasksList";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+// The Tasks section became the Builds page (#185); old links keep working.
 export const Route = createFileRoute("/projects/$projectName/tasks/")({
-  component: TasksRoute,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/projects/$projectName/builds",
+      params,
+      replace: true,
+    });
+  },
 });
-
-function TasksRoute() {
-  const { projectName } = Route.useParams();
-  return (
-    <>
-      <Typography variant="h6" sx={{ mb: 2 }}>
-        Tasks
-      </Typography>
-      <TasksList projectName={projectName} />
-    </>
-  );
-}

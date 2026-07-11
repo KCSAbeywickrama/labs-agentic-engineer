@@ -142,8 +142,13 @@ every arrow there appears here and vice versa — a mismatch is a defect. Each
 entry has a `kind` (which selects the meaningful fields) and a `name`; pick the
 kind by WHAT the target is:
 
-- **`component`** — a SIBLING component in this same design (a `<name>/` under
-  `components/`). Just `{ "kind": "component", "name": "expense-webapp" }`.
+- **`component`** — a SIBLING component in this same design that THIS component
+  CALLS: a directed caller→callee edge (one Interactions arrow). Declare it ONLY
+  on the caller, naming the callee it invokes:
+  `{ "kind": "component", "name": "expense-api" }`. Never add the reverse edge —
+  a web-app depends on the API it calls; the API does NOT depend on the web-app
+  that calls it. If a component isn't actually called by this one, it is not a
+  dependency of it (do not list it "for reference").
 - **`org-service`** — a service owned by ANOTHER project in the org that
   publishes its endpoint for cross-project use. `name` is the provider's
   component name. `{ "kind": "org-service", "name": "identity-api" }`.
@@ -170,10 +175,10 @@ kind by WHAT the target is:
 
 ```json
 "dependencies": [
-  { "kind": "component", "name": "expense-webapp" },
+  { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
   { "kind": "external", "name": "stripe",
-    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "credentialClass": "secret" } ] },
+    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
   { "kind": "external", "name": "legacy-billing", "needsSpec": true,
     "specUrl": "https://billing.example.com/openapi.yaml" }
 ]
@@ -205,19 +210,28 @@ tools, USE them before authoring an `external`, `org-service`, or
   none matches, leave the dependency unresolved rather than forcing a fit.
 
 **Config-key conventions.** `config` is the env-var schema the consuming
-component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials
-`"secret": true` (they route through the secret path); set `credentialClass`
-to `"secret"` for values the user supplies privately or `"publishable"` for
-non-sensitive config. Keep the keys minimal — only what the component reads.
+component codes against. Use `SCREAMING_SNAKE_CASE` keys. `secret` is opt-in:
+set `"secret": true` ONLY for credentials (they route through the secret path);
+OMIT it entirely for plain config — a key with no `secret` field is non-secret.
+Give each key an optional `description` — a short note on what the value is and
+where the user finds it (e.g. `{ "key": "STRIPE_API_KEY", "secret": true,
+"description": "Your Stripe secret API key" }`); the Build dependency drawer
+shows it under the field. For a NON-secret key whose sensible default you can
+infer (a region, a base URL), add an optional `defaultValue` — the drawer
+pre-fills the field with it (e.g. `{ "key": "AWS_REGION", "defaultValue":
+"us-east-1" }`). NEVER set `defaultValue` for a secret (`"secret": true`) — a
+credential like an API key has no default to invent. Keep the keys minimal —
+only what the component reads.
+
+**`needsSpec` is opt-in.** Omit `needsSpec` entirely unless the dependency needs
+a collected OpenAPI spec, in which case set it `true` (never write `false`).
 
 **Resolution status is platform-computed.** A dependency's `status` (resolved /
 ambiguous / unresolved / blocked) and its `reason` are computed by the platform
-at read time against the live catalog — you never author those. `candidates`, by
-contrast, ARE authorable: emit them with the URLs you find during discovery or
-web research (the API homepage, a docs page, a spec URL) so the user can verify
-the sources. Declare the intent (kind + name + fields above) and let the
-platform resolve it. An `external` dependency should almost always carry at
-least one `config` key — the value-collection gate needs something to collect.
+at read time against the live catalog — you never author those. Declare the
+intent (kind + name + fields above) and let the platform resolve it. An
+`external` dependency should almost always carry at least one `config` key — the
+value-collection gate needs something to collect.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;

@@ -183,6 +183,75 @@ func TestFunnel_ProvisionDep_ReleasedOnReevaluate(t *testing.T) {
 	}
 }
 
+// newTestFunnelOrg wires a funnel with per-component org-service deps (the
+// conditional org-service gate, issue #164 Task 4).
+func newTestFunnelOrg(store *fakeStore, issues *fakeIssues, names map[string]bool, orgServiceDep map[string][]string, exec Executor) *Funnel {
+	reg := NewRegistry()
+	if exec != nil {
+		reg.Register(taskmeta.ClassCoding, exec)
+	}
+	return NewFunnel(store, issues, fakeRepos{orgID: "org1", projectID: "proj1"},
+		fakeDesign{names: names, orgServiceDep: orgServiceDep}, reg)
+}
+
+// TestFunnel_OrgServiceGate_HoldsUntilDeployed pins the conditional org-service
+// gate: a consumer coding task with an org-service dep that HAS a consumer
+// visibility gate holds until that gate derives deployed, then Reevaluate
+// dispatches it.
+func TestFunnel_OrgServiceGate_HoldsUntilDeployed(t *testing.T) {
+	store := newFakeStore()
+	// The consumer visibility gate exists but is NOT yet deployed (provider has not
+	// published).
+	issues := newFakeIssues([]gitrepo.IssueInfo{
+		provisionIssue(1, "billing", taskmeta.GateOrgServiceVisibility, "open"),
+		taskIssue(2, "cart", nil, []string{taskmeta.LabelExecute}, "open"),
+	})
+	exec := &fakeExecutor{store: store, startOK: true}
+	f := newTestFunnelOrg(store, issues,
+		map[string]bool{"cart": true},
+		map[string][]string{"cart": {"billing"}}, exec)
+
+	if err := f.OnExecuteIntent(context.Background(), "o/r", 2); err != nil {
+		t.Fatalf("OnExecuteIntent: %v", err)
+	}
+	if len(exec.got) != 0 {
+		t.Fatalf("consumer must hold until the org-service provider publishes, got %d", len(exec.got))
+	}
+	// The provider publishes → grant cascade completes a provision run on the
+	// consumer gate → Reevaluate releases the held consumer.
+	markProvisionDeployed(store, 1, "billing")
+	if err := f.Reevaluate(context.Background()); err != nil {
+		t.Fatalf("Reevaluate: %v", err)
+	}
+	if len(exec.got) != 1 {
+		t.Fatalf("Reevaluate must dispatch the consumer once the visibility gate deploys, got %d", len(exec.got))
+	}
+}
+
+// TestFunnel_OrgServiceGate_NoGateDoesNotBlock pins the correctness guard: an
+// org-service dep with NO consumer visibility gate (a resolved / proceed-gated
+// org-service) does NOT block dispatch — the gate is conditional on gate presence,
+// never a forever-block on a missing gate.
+func TestFunnel_OrgServiceGate_NoGateDoesNotBlock(t *testing.T) {
+	store := newFakeStore()
+	// No aep:provision visibility gate for "billing" exists — the org-service is
+	// resolved (or proceed-gated), so it must not hold the consumer.
+	issues := newFakeIssues([]gitrepo.IssueInfo{
+		taskIssue(2, "cart", nil, []string{taskmeta.LabelExecute}, "open"),
+	})
+	exec := &fakeExecutor{store: store, startOK: true}
+	f := newTestFunnelOrg(store, issues,
+		map[string]bool{"cart": true},
+		map[string][]string{"cart": {"billing"}}, exec)
+
+	if err := f.OnExecuteIntent(context.Background(), "o/r", 2); err != nil {
+		t.Fatalf("OnExecuteIntent: %v", err)
+	}
+	if len(exec.got) != 1 {
+		t.Fatalf("an org-service dep with no visibility gate must not block dispatch, got %d", len(exec.got))
+	}
+}
+
 func TestFunnel_ExecuteOnProvisionIssue_NoOp(t *testing.T) {
 	store := newFakeStore()
 	issues := newFakeIssues([]gitrepo.IssueInfo{

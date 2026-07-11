@@ -77,8 +77,8 @@ test("dependencies: kind=external with spec + config is accepted", () => {
       specPath: "dependencies/stripe.openapi.yaml",
       specUrl: "https://example.com/stripe.yaml",
       config: [
-        { key: "STRIPE_API_KEY", secret: true, credentialClass: "secret" },
-        { key: "STRIPE_ACCOUNT", secret: false },
+        { key: "STRIPE_API_KEY", secret: true, description: "Your Stripe secret API key" },
+        { key: "STRIPE_ACCOUNT", secret: false, defaultValue: "acct_default" },
       ],
     },
   ];
@@ -98,19 +98,16 @@ test("dependencies: kind=platform-resource with resourceType + parameters is acc
   assert.equal(check(doc), null);
 });
 
-test("dependencies: candidates array is accepted", () => {
+test("dependencies: the retired candidates array is now an unknown key -> SCHEMA_VIOLATION", () => {
   const doc = baseDoc();
   doc.dependencies = [
     {
       kind: "org-service",
       name: "identity",
-      candidates: [
-        { label: "identity-api (team-a)", description: "prod", url: "https://a" },
-        { label: "identity-api (team-b)" },
-      ],
+      candidates: [{ label: "identity-api (team-a)" }],
     },
   ];
-  assert.equal(check(doc), null);
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
 });
 
 test("dependencies: all four kinds together validate", () => {

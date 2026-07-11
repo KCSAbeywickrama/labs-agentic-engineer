@@ -335,6 +335,15 @@ func (f *Funnel) depsGate(ctx context.Context, facts TaskFacts, view *projectVie
 			check(dep)
 		}
 	}
+	// Org-service deps gate CONDITIONALLY (issue #164, Task 4): only when a
+	// consumer-side aep:provision visibility gate was minted for the dep (indexed
+	// in provisionByDep). A resolved org-service has no gate — so it is NOT gated
+	// here (proceed-gated as before), never a forever-block on a missing gate.
+	for _, dep := range view.orgServiceDepsByComponent[strings.ToLower(facts.Component)] {
+		if _, gated := view.provisionByDep[strings.ToLower(dep)]; gated {
+			check(dep)
+		}
+	}
 	return unmet, nil
 }
 
@@ -425,6 +434,12 @@ type projectView struct {
 	latestByComponent        map[string]TaskFacts
 	provisionByDep           map[string]TaskFacts
 	provisionDepsByComponent map[string][]string
+	// orgServiceDepsByComponent maps each component to its cross-project
+	// org-service dependency names (issue #164, Task 4). Unlike provisionDeps,
+	// these gate a consumer coding task ONLY when a consumer-side aep:provision
+	// visibility gate exists for the dep (a resolved org-service has no gate and
+	// does not block) — depsGate consults provisionByDep before gating on them.
+	orgServiceDepsByComponent map[string][]string
 	// provisionNoted marks issues already carrying aep:provision-noted — the
 	// one-time-comment guard for a stray aep:execute on a provision gate.
 	provisionNoted map[int]bool
@@ -493,6 +508,13 @@ func (f *Funnel) loadProject(ctx context.Context, orgID, projectID, repoFullName
 		slog.WarnContext(ctx, "funnel loadProject: read provision deps failed", "project", projectID, "error", derr)
 	} else {
 		v.provisionDepsByComponent = deps
+	}
+	// Per-component org-service deps (issue #164, Task 4). Best-effort like the
+	// provision deps above: a read error degrades to no org-service gating.
+	if orgDeps, derr := f.design.OrgServiceDepNames(ctx, orgID, projectID); derr != nil {
+		slog.WarnContext(ctx, "funnel loadProject: read org-service deps failed", "project", projectID, "error", derr)
+	} else {
+		v.orgServiceDepsByComponent = orgDeps
 	}
 	return v, nil
 }

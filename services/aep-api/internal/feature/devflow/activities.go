@@ -42,6 +42,7 @@ type Activities struct {
 	planner            Planner
 	validator          Validator
 	validationResolver ValidationResolver
+	provisioner        BuildProvisioner
 }
 
 // Deps carries the activity adapters. Any field may be nil in narrow contexts
@@ -55,6 +56,7 @@ type Deps struct {
 	Planner            Planner
 	Validator          Validator
 	ValidationResolver ValidationResolver
+	Provisioner        BuildProvisioner
 }
 
 // NewActivities wires the activity adapters.
@@ -67,6 +69,7 @@ func NewActivities(d Deps) *Activities {
 		planner:            d.Planner,
 		validator:          d.Validator,
 		validationResolver: d.ValidationResolver,
+		provisioner:        d.Provisioner,
 	}
 }
 
@@ -220,4 +223,33 @@ func (a *Activities) ResolveValidationTask(ctx context.Context, in ProjectRef) (
 		return 0, errNotConfigured
 	}
 	return a.validationResolver.ResolveValidationTask(ctx, in.OrgID, in.ProjectID)
+}
+
+// ProvisionDepsInput carries the project + tag + resolved provisioning payload
+// the dev workflow authors the dependencies from (issue #164).
+type ProvisionDepsInput struct {
+	OrgID     string           `json:"orgId"`
+	ProjectID string           `json:"projectId"`
+	Tag       string           `json:"tag"`
+	Inputs    []ProvisionInput `json:"inputs,omitempty"`
+}
+
+// ProvisionDependencies authors the project's dependencies by kind from the
+// build drawer inputs (mint gates → external sync, platform-resource async) AND
+// reconciles any provision gate whose dependency is already Ready but was left
+// un-completed by a prior build (self-heal — issue #164). It always runs when a
+// provisioner is wired, even with no drawer inputs, so a project stranded on an
+// orphaned gate recovers on its next build. Per-dependency failures come back as
+// data; an infra error surfaces as the activity error (retry / fail the run).
+func (a *Activities) ProvisionDependencies(ctx context.Context, in ProvisionDepsInput) ([]ProvisionFailure, error) {
+	if a.provisioner == nil {
+		// No provisioner wired (degraded boot / tests): a build that needs to
+		// author inputs cannot proceed; a build with nothing to author (and so
+		// nothing to reconcile through the provisioner) is a safe no-op.
+		if len(in.Inputs) > 0 {
+			return nil, errNotConfigured
+		}
+		return nil, nil
+	}
+	return a.provisioner.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.Inputs)
 }

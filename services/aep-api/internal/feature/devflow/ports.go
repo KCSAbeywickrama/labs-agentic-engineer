@@ -81,3 +81,24 @@ type Validator interface {
 type ValidationResolver interface {
 	ResolveValidationTask(ctx context.Context, orgID, projectID string) (issue int, err error)
 }
+
+// BuildProvisioner authors the project's dependencies from the build drawer
+// inputs the dev workflow carries (issue #164): it mints the aep:provision gate
+// issues and authors each dependency by kind (external synchronously,
+// platform-resource async). Satisfied by an app-root adapter over the design +
+// provisioning features — devflow imports neither. A returned error retries the
+// activity; per-dependency failures are returned as data (ProvisionFailure).
+type BuildProvisioner interface {
+	ProvisionForBuild(ctx context.Context, orgID, projectID, tag string, inputs []ProvisionInput) ([]ProvisionFailure, error)
+}
+
+// ProvisionFailure is one dependency's provisioning failure surfaced to the
+// workflow (data, not an activity error). It carries no secret values. This is
+// devflow's own type — the provisioning package defines a field-identical twin;
+// the app-root adapter maps between them (a feature must not import the workflow
+// orchestrator).
+type ProvisionFailure struct {
+	Component  string
+	Dependency string
+	Reason     string
+}

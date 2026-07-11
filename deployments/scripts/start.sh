@@ -214,6 +214,13 @@ fi
 cd "$DEPLOY_DIR"
 echo ""
 echo "🐳 Starting Docker services..."
+# `.env` is the single source of truth for the smee webhook channel. Docker
+# Compose lets an EXPORTED shell var override the `.env` file, so an inherited
+# GITHUB_WEBHOOK_PROXY_URL (e.g. left over from a prior setup run) would bake a
+# stale channel into the smee-client and silently drop every GitHub webhook —
+# GitHub delivers to the .env channel, but the client listens on the exported
+# one. Unset it here so the smee-client always subscribes to the .env channel.
+unset GITHUB_WEBHOOK_PROXY_URL
 docker compose up --build -d
 echo "✅ Docker services started"
 

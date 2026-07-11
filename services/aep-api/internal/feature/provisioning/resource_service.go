@@ -36,6 +36,23 @@ import (
 // request-supplied overrides (request wins). params carry no secrets — a
 // platform resource's credentials are surfaced as binding outputs, never inputs.
 func (s *Service) Provision(ctx context.Context, orgID, projectID, depName string, params map[string]any, envs []string) error {
+	// HTTP-path callers (resources_huma.go) have no known gate number — resolve it
+	// via the label list (these gates are from prior plans, listable, no race).
+	issueNumber, _, err := s.findProvisionIssue(ctx, orgID, projectID, depName)
+	if err != nil {
+		return err
+	}
+	return s.provisionResource(ctx, orgID, projectID, depName, issueNumber, params, envs)
+}
+
+// provisionResource is the platform-resource provisioning core: it authors the OC
+// Resource + binding and, when gateNumber > 0, admits a running provision
+// Execution pinned to the development binding (the readiness watcher finishes it
+// out-of-band). It takes the gate number DIRECTLY so the build path can thread the
+// just-minted number past GitHub's eventually-consistent issue list (issue #164);
+// the public Provision resolves it via findProvisionIssue for its HTTP callers. A
+// gateNumber of 0 authors the resource with no run admitted (a safe no-op gate).
+func (s *Service) provisionResource(ctx context.Context, orgID, projectID, depName string, gateNumber int, params map[string]any, envs []string) error {
 	dep, err := s.findDepInProject(ctx, orgID, projectID, depName, models.DependencyKindPlatformResource)
 	if err != nil {
 		return err
@@ -52,17 +69,13 @@ func (s *Service) Provision(ctx context.Context, orgID, projectID, depName strin
 	}
 	envs = envList(envs)
 
-	issueNumber, _, err := s.findProvisionIssue(ctx, orgID, projectID, depName)
-	if err != nil {
-		return err
-	}
 	var execID string
-	if issueNumber > 0 {
+	if gateNumber > 0 {
 		repo, rerr := s.repos.RepoFullName(ctx, orgID, projectID)
 		if rerr != nil {
 			return fmt.Errorf("provisioning: resolve repo: %w", rerr)
 		}
-		row, admitted, aerr := s.admitProvisionRow(ctx, orgID, projectID, repo, depName, issueNumber)
+		row, admitted, aerr := s.admitProvisionRow(ctx, orgID, projectID, repo, depName, gateNumber)
 		if aerr != nil {
 			return fmt.Errorf("provisioning: admit provision run: %w", aerr)
 		}
@@ -76,7 +89,7 @@ func (s *Service) Provision(ctx context.Context, orgID, projectID, depName strin
 	result, perr := s.platProv.Provision(ctx, orgID, projectID, depName, dep.ResourceType, merged, envs)
 	if perr != nil {
 		if execID != "" {
-			s.failProvisionRow(ctx, orgID, projectID, issueNumber, execID, perr.Error())
+			s.failProvisionRow(ctx, orgID, projectID, gateNumber, execID, perr.Error())
 		}
 		return fmt.Errorf("%w: %v", resources.ErrProvisionFailed, perr)
 	}

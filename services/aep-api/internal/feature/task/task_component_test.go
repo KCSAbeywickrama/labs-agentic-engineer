@@ -207,7 +207,7 @@ type rig struct {
 func newRig(t *testing.T, iss *fakeIssues, execs fakeExecs, specVersions []artifacts.RequirementsVersionInfo) *rig {
 	t.Helper()
 	disp := &fakeDispatcher{signal: make(chan struct{}, 8)}
-	reads := task.NewReads(iss, fakeRepos{}, execs, nil)
+	reads := task.NewReads(iss, fakeRepos{}, execs, nil, nil)
 	commands := task.NewCommands(iss, fakeRepos{}, disp, nil)
 	plan := task.NewPlanService(fakeRepos{}, fakeVersions{spec: specVersions}, nil,
 		func(context.Context, string) (string, error) { return "sk-key", nil }, nil, iss, nil, nil)

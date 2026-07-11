@@ -38,6 +38,17 @@ type fakeIssues struct {
 	closed   map[int]string
 	comments map[int][]string
 	nextNum  int
+	// project records the project each CREATED issue belongs to so ListIssues can
+	// filter by project (production lists issues per project repo). Seeded issues
+	// carry no project and match every project — backward compatible with the
+	// single-project tests.
+	project map[int]string
+	// raceNewIssues simulates GitHub's eventually-consistent label-filtered issue
+	// LIST: when true, an issue just returned by CreateIssue is hidden from
+	// ListIssues (as if the list index has not caught up yet). CreateIssue still
+	// returns the real number — this is exactly the read-after-write race #164 hits.
+	raceNewIssues bool
+	hiddenFromList map[int]bool
 }
 
 func newFakeIssues(seed []gitrepo.IssueInfo) *fakeIssues {
@@ -47,17 +58,30 @@ func newFakeIssues(seed []gitrepo.IssueInfo) *fakeIssues {
 			max = i.Number
 		}
 	}
-	return &fakeIssues{list: seed, closed: map[int]string{}, comments: map[int][]string{}, nextNum: max + 1}
+	return &fakeIssues{list: seed, closed: map[int]string{}, comments: map[int][]string{}, nextNum: max + 1, project: map[int]string{}, hiddenFromList: map[int]bool{}}
 }
 
-func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, _ []string) ([]gitrepo.IssueInfo, error) {
-	return f.list, nil
+func (f *fakeIssues) ListIssues(_ context.Context, _, projectID string, _ []string) ([]gitrepo.IssueInfo, error) {
+	var out []gitrepo.IssueInfo
+	for _, i := range f.list {
+		if f.hiddenFromList[i.Number] {
+			continue // eventually-consistent list has not caught up to this create yet
+		}
+		if p := f.project[i.Number]; p == "" || p == projectID {
+			out = append(out, i)
+		}
+	}
+	return out, nil
 }
-func (f *fakeIssues) CreateIssue(_ context.Context, _, _ string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error) {
+func (f *fakeIssues) CreateIssue(_ context.Context, _, projectID string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error) {
 	f.created = append(f.created, req)
 	n := f.nextNum
 	f.nextNum++
 	f.list = append(f.list, gitrepo.IssueInfo{Number: n, Title: req.Title, Body: req.Body, State: "open", Labels: req.Labels})
+	f.project[n] = projectID
+	if f.raceNewIssues {
+		f.hiddenFromList[n] = true
+	}
 	return &gitrepo.IssueResult{Number: n}, nil
 }
 func (f *fakeIssues) CloseIssue(_ context.Context, _, _ string, number int, comment string) error {
@@ -166,6 +190,12 @@ type fakeExtProv struct {
 	result        *resources.ProvisionResult
 	err           error
 	deprovisioned []string
+
+	// AuthorWithSecretRef spies (the build path's no-SM-write author half).
+	authorRefCalls int
+	authorByEnv    map[string]resources.PreparedEnvValues
+	authorResult   *resources.ProvisionResult
+	authorErr      error
 }
 
 func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error) {
@@ -176,6 +206,17 @@ func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.Ext
 	}
 	if f.result != nil {
 		return f.result, nil
+	}
+	return &resources.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
+}
+func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.PreparedEnvValues) (*resources.ProvisionResult, error) {
+	f.authorRefCalls++
+	f.authorByEnv = byEnv
+	if f.authorErr != nil {
+		return nil, f.authorErr
+	}
+	if f.authorResult != nil {
+		return f.authorResult, nil
 	}
 	return &resources.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
 }
@@ -369,11 +410,17 @@ func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 	issues := newFakeIssues(nil)
 	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
-	if err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1"); err != nil {
+	gateByDep, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1")
+	if err != nil {
 		t.Fatalf("EnsureProvisionIssues: %v", err)
 	}
 	if len(issues.created) != 2 {
 		t.Fatalf("want 2 gate issues (stripe + orders-db), got %d", len(issues.created))
+	}
+	// The returned map carries the minted gate number for each distinct dep — the
+	// read-your-write the build path threads past the racy list.
+	if gateByDep["stripe"] == 0 || gateByDep["orders-db"] == 0 {
+		t.Fatalf("EnsureProvisionIssues must return the minted gate number per dep, got %+v", gateByDep)
 	}
 	// Every gate issue carries the provision class label + a GateKind block field.
 	var haveConfig, haveResource bool
@@ -400,11 +447,16 @@ func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 
 	// Idempotent: a second call mints nothing new (the deps already have open issues).
 	issues.created = nil
-	if err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1"); err != nil {
+	gateByDep2, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1")
+	if err != nil {
 		t.Fatalf("EnsureProvisionIssues #2: %v", err)
 	}
 	if len(issues.created) != 0 {
 		t.Fatalf("second mint must be a no-op, created %d", len(issues.created))
+	}
+	// The map still resolves the pre-existing open gates (from openProvisionDeps).
+	if gateByDep2["stripe"] == 0 || gateByDep2["orders-db"] == 0 {
+		t.Fatalf("second call must still return the existing gate numbers, got %+v", gateByDep2)
 	}
 }
 

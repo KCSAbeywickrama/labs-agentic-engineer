@@ -403,6 +403,82 @@ func TestSaveAndProceed_NilCatalogWithPlatformResourceDepFailsClosed(t *testing.
 
 // Auth-free save (no platform-resource dependency) must NEVER touch the catalog
 // — even a catalog wired to error is not consulted, and the save succeeds.
+// --- DeriveEndUserAuthAtHead (the thin POST /build pre-tag step, #164) -------
+
+// The build path derives + persists exactly like SaveAndProceed does, but
+// standalone (no tag-cut): a commit lands with the stamped auth.
+func TestDeriveEndUserAuthAtHead_PersistsBeforeReturn(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
+	fake := happySave(designFilesWithDeps(deps))
+	svc := newService(fake)
+	fc := &fakeCommitter{}
+	svc.fileCommitter = fc
+	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
+
+	if err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("DeriveEndUserAuthAtHead: %v", err)
+	}
+	if fc.commits != 1 || len(fc.writes) != 1 {
+		t.Fatalf("want one derive-persist commit, got commits=%d writes=%d", fc.commits, len(fc.writes))
+	}
+	if !strings.Contains(fc.writes[0].Content, `"auth": "end-user-required"`) {
+		t.Fatalf("committed design.json missing derived auth: %s", fc.writes[0].Content)
+	}
+}
+
+// A conflicting explicit service-required surfaces the 409 sentinel and commits
+// nothing.
+func TestDeriveEndUserAuthAtHead_ConflictReturnsSentinel(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
+	files := designFilesWithDepsAndAuth(deps, `{"auth": "service-required"}`)
+	svc := newService(happySave(files))
+	fc := &fakeCommitter{}
+	svc.fileCommitter = fc
+	svc.resourceCatalog = &fakeMarkerCatalog{markers: authRole("thunder-app")}
+
+	err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web")
+	if !errors.Is(err, ErrEndUserAuthConflict) {
+		t.Fatalf("want ErrEndUserAuthConflict, got %v", err)
+	}
+	if fc.commits != 0 {
+		t.Fatalf("conflict must commit nothing, got %d", fc.commits)
+	}
+}
+
+// Fail-closed: a platform-resource dep with an unreachable catalog surfaces the
+// 503 sentinel.
+func TestDeriveEndUserAuthAtHead_CatalogDownFailsClosed(t *testing.T) {
+	t.Parallel()
+	deps := `[{"kind":"platform-resource","name":"user-auth","resourceType":"thunder-app"}]`
+	svc := newService(happySave(designFilesWithDeps(deps)))
+	svc.fileCommitter = &fakeCommitter{}
+	svc.resourceCatalog = &fakeMarkerCatalog{err: errors.New("OC unreachable")}
+
+	if err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web"); !errors.Is(err, ErrResourceCatalogUnavailable) {
+		t.Fatalf("want ErrResourceCatalogUnavailable, got %v", err)
+	}
+}
+
+// No platform-resource dependency → a no-op that touches neither catalog nor
+// committer.
+func TestDeriveEndUserAuthAtHead_NoPlatformResourceDepNoOp(t *testing.T) {
+	t.Parallel()
+	svc := newService(happySave(validDesignFiles()))
+	fc := &fakeCommitter{}
+	svc.fileCommitter = fc
+	cat := &fakeMarkerCatalog{err: errors.New("must not be called")}
+	svc.resourceCatalog = cat
+
+	if err := svc.DeriveEndUserAuthAtHead(context.Background(), "acme", "web"); err != nil {
+		t.Fatalf("auth-free derive: unexpected error: %v", err)
+	}
+	if cat.calls != 0 || fc.commits != 0 {
+		t.Fatalf("auth-free derive must not touch catalog/committer: calls=%d commits=%d", cat.calls, fc.commits)
+	}
+}
+
 func TestSaveAndProceed_NoPlatformResourceDepSkipsCatalog(t *testing.T) {
 	t.Parallel()
 	fake := happySave(validDesignFiles())

@@ -45,6 +45,8 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 		"get-config", "update-config", "list-skills",
 		// Single-tag build surface (the contract's build-project/get-project-build).
 		"build-project", "get-project-build", "list-project-tags",
+		// Build dependency-drawer preflight (issue #164).
+		"get-build-preflight",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {

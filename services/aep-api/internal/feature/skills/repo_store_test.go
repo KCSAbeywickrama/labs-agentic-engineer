@@ -188,6 +188,41 @@ func TestList_SeedsBuiltinsOnFirstRead(t *testing.T) {
 	}
 }
 
+// RepoWebURL powers the console Import dialog's "open the org skills repo"
+// link (the GET /skills envelope's repoUrl — contract SkillSummaryList). It is
+// the stored clone URL projected to the HTML URL (".git" trimmed), provisioning
+// the repo on first touch like every other read.
+func TestRepoWebURL_ProjectsCloneURLToHTMLURL(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+
+	got := svc.RepoWebURL(ctx, "org1")
+	if got == "" {
+		t.Fatalf("RepoWebURL: want the provisioned repo's HTML URL, got empty")
+	}
+	row, err := host.GetRepo(ctx, "org1", SkillsRepoProject)
+	if err != nil {
+		t.Fatalf("repo row must be provisioned by RepoWebURL: %v", err)
+	}
+	if want := strings.TrimSuffix(row.RepoURL, ".git"); got != want {
+		t.Fatalf("RepoWebURL = %q, want %q", got, want)
+	}
+	if strings.HasSuffix(got, ".git") {
+		t.Fatalf("RepoWebURL must be the HTML URL, not the clone URL: %q", got)
+	}
+}
+
+// A degraded boot (no git plumbing wired) serves "" — same posture as the
+// catalog's degrade-to-empty; the console shows its connect-GitHub guidance.
+func TestRepoWebURL_DegradesToEmpty(t *testing.T) {
+	t.Parallel()
+	svc := NewSkillService(nil, nil)
+	if got := svc.RepoWebURL(context.Background(), "org1"); got != "" {
+		t.Fatalf("RepoWebURL on degraded service = %q, want empty", got)
+	}
+}
+
 func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStore(t)
