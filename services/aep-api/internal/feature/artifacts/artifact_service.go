@@ -211,8 +211,10 @@ var allowedRequirementExts = []string{".md", ".excalidraw", ".dsl"}
 // allowedDesignExts is the set of file extensions recognised inside
 // `specs/design/`. Markdown holds prose + frontmatter; YAML is OpenAPI specs;
 // JSON is the post-#70 component `design.json` (structured facts, save-gated
-// against the published schema) plus the FE-derived `*.gen.json` projections.
-var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json"}
+// against the published schema) plus the FE-derived `*.gen.json` projections;
+// `.cell` is the project-level cell-diagram DSL (design.cell) that drives the
+// live architecture diagram.
+var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell"}
 
 func hasAllowedDesignExt(name string) bool {
 	lower := strings.ToLower(name)

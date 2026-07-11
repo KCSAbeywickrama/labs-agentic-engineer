@@ -1,0 +1,38 @@
+{
+  "name": "@aep/ui-cell-diagram-react",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Cell architecture diagram renderer (React + xyflow) over the cell DSL. Vendored in-house from @kanushka/cell-diagram-react.",
+  "main": "src/index.ts",
+  "types": "dist/index.d.ts",
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.5",
+    "@xyflow/react": "^12.8.4",
+    "html-to-image": "^1.11.13"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.6.0",
+    "@types/react": "19.1.6",
+    "@types/react-dom": "19.0.2",
+    "@vitejs/plugin-react-swc": "4.2.0",
+    "jsdom": "^25.0.1",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -31,6 +31,7 @@ type BuildResponse = components["schemas"]["BuildResponse"];
 const mockNavigate = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mockNavigate,
+  useSearch: () => ({}),
 }));
 
 // --- oxygen-ui: only useAppShell needs a stub (it throws outside an

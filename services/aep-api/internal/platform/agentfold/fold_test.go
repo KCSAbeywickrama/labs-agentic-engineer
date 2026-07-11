@@ -366,6 +366,7 @@ func TestManifestOfAndIsEmpty(t *testing.T) {
 func TestSnapshotFilter(t *testing.T) {
 	if !KeepInTurnSnapshot("specs/requirements/requirements.md") ||
 		!KeepInTurnSnapshot("a.dsl") ||
+		!KeepInTurnSnapshot("specs/design/design.cell") ||
 		!KeepInTurnSnapshot("specs/design/components/x/design.json") {
 		t.Fatal("keep-filter rejects agent-authored sources")
 	}
