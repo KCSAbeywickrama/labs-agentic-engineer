@@ -18,8 +18,11 @@ package repositories
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -83,9 +86,14 @@ func (r *RcaAgentReportRepository) Get(ctx context.Context, orgID, id string) (*
 }
 
 // List returns up to limit reports for orgID, newest first, optionally
-// continuing after cursor (an opaque RFC3339Nano CreatedAt watermark from a
-// previous page's NextCursor). Returns the page plus the cursor for the next
-// page, or "" on the last page.
+// continuing after cursor (an opaque watermark from a previous page's
+// NextCursor). Returns the page plus the cursor for the next page, or "" on
+// the last page.
+//
+// The sort key is (created_at DESC, id DESC): id is a stable tie-breaker so
+// rows sharing the same created_at (possible with now() defaults / bulk
+// inserts) are never skipped or duplicated across page boundaries. The cursor
+// encodes both fields.
 func (r *RcaAgentReportRepository) List(ctx context.Context, orgID string, cursor string, limit int) ([]models.RcaAgentReport, string, error) {
 	if orgID == "" {
 		return nil, "", fmt.Errorf("rca_agent_reports: orgID is required")
@@ -95,20 +103,47 @@ func (r *RcaAgentReportRepository) List(ctx context.Context, orgID string, curso
 	}
 	q := r.db.WithContext(ctx).Where("org_id = ?", orgID)
 	if cursor != "" {
-		q = q.Where("created_at < ?", cursor)
+		// A malformed cursor is treated as no cursor (serve the first page)
+		// rather than erroring the whole request.
+		if ts, id, ok := decodeReportCursor(cursor); ok {
+			// Keyset pagination: everything strictly after (ts, id) in the
+			// (created_at DESC, id DESC) order.
+			q = q.Where("created_at < ? OR (created_at = ? AND id < ?)", ts, ts, id)
+		}
 	}
 	var reports []models.RcaAgentReport
 	// Fetch one extra row to detect whether a next page exists without a
 	// separate COUNT query.
-	if err := q.Order("created_at DESC").Limit(limit + 1).Find(&reports).Error; err != nil {
+	if err := q.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&reports).Error; err != nil {
 		return nil, "", fmt.Errorf("rca_agent_reports: list org %q: %w", orgID, err)
 	}
 	nextCursor := ""
 	if len(reports) > limit {
-		nextCursor = reports[limit-1].CreatedAt.Format(rfc3339NanoLayout)
+		last := reports[limit-1]
+		nextCursor = encodeReportCursor(last.CreatedAt, last.ID)
 		reports = reports[:limit]
 	}
 	return reports, nextCursor, nil
 }
 
 const rfc3339NanoLayout = "2006-01-02T15:04:05.999999999Z07:00"
+
+// encodeReportCursor packs the (created_at, id) keyset watermark into one
+// opaque base64 token.
+func encodeReportCursor(createdAt time.Time, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(createdAt.Format(rfc3339NanoLayout) + "|" + id))
+}
+
+// decodeReportCursor reverses encodeReportCursor. ok is false for a malformed
+// token (caller then serves the first page).
+func decodeReportCursor(cursor string) (createdAt string, id string, ok bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", "", false
+	}
+	ts, id, found := strings.Cut(string(raw), "|")
+	if !found || ts == "" || id == "" {
+		return "", "", false
+	}
+	return ts, id, true
+}

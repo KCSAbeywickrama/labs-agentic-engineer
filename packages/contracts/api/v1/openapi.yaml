@@ -761,6 +761,7 @@ components:
           type: boolean
         deployedAt:
           type: string
+          format: date-time
         diagnosis:
           description: Full RCA diagnosis + remediation content (markdown)
           type: string
@@ -1528,11 +1529,13 @@ components:
           type: string
         createdAt:
           type: string
+          format: date-time
         deployed:
           description: Whether the resulting fix has been deployed (Verify Fix threshold, not merely PR-merged)
           type: boolean
         deployedAt:
           type: string
+          format: date-time
         diagnosis:
           description: Full RCA diagnosis + remediation content (markdown)
           type: string

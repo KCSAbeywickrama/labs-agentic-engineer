@@ -117,10 +117,15 @@ function IssueCreatedContent({ report }: { report: RcaAgentReport }) {
 
 function CodingHandoverContent({ report }: { report: RcaAgentReport }) {
   const navigate = useNavigate();
+  // Land on the specific Task/build for this alert's issue, not the tasks
+  // list. Guarded below: the buttons only render when issueNumber is set.
   const goToBuild = () =>
     void navigate({
-      to: "/projects/$projectName/tasks",
-      params: { projectName: report.project! },
+      to: "/projects/$projectName/tasks/$issueNumber",
+      params: {
+        projectName: report.project!,
+        issueNumber: String(report.issueNumber),
+      },
     });
 
   if (!report.issueNumber) {

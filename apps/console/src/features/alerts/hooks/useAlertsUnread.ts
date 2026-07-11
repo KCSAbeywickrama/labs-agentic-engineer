@@ -34,18 +34,40 @@ function readSeenUntil(): string {
   }
 }
 
+// Compare timestamps by parsed epoch millis, not lexicographically: RFC3339
+// strings with differing offsets ("Z" vs "+00:00") or fractional precision
+// don't sort correctly as plain strings. NaN (absent/unparseable createdAt)
+// is treated as "no timestamp" — never unread, never advances the watermark.
+function toMillis(ts: string | undefined | null): number {
+  if (!ts) return NaN;
+  return Date.parse(ts);
+}
+
 // Pure logic, exported for unit testing (see useAlertsUnread.test.ts) —
 // reports without a createdAt are treated as already-seen (never counted
 // unread, never advance the watermark), since there's no timestamp to
 // compare against seenUntil.
 
 export function countUnread(reports: RcaAgentReport[], seenUntil: string): number {
-  if (!seenUntil) return reports.filter((r) => Boolean(r.createdAt)).length;
-  return reports.filter((r) => (r.createdAt ?? "") > seenUntil).length;
+  const seen = toMillis(seenUntil);
+  return reports.filter((r) => {
+    const t = toMillis(r.createdAt);
+    if (Number.isNaN(t)) return false;
+    return Number.isNaN(seen) ? true : t > seen;
+  }).length;
 }
 
 export function nextSeenUntil(reports: RcaAgentReport[], seenUntil: string): string {
-  return reports.reduce((max, r) => ((r.createdAt ?? "") > max ? (r.createdAt ?? "") : max), seenUntil);
+  let maxStr = seenUntil;
+  let maxMs = toMillis(seenUntil);
+  for (const r of reports) {
+    const t = toMillis(r.createdAt);
+    if (!Number.isNaN(t) && (Number.isNaN(maxMs) || t > maxMs)) {
+      maxMs = t;
+      maxStr = r.createdAt ?? maxStr;
+    }
+  }
+  return maxStr;
 }
 
 export function useAlertsUnread(reports: RcaAgentReport[]) {
