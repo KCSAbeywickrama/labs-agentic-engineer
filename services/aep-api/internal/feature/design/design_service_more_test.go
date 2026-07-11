@@ -21,23 +21,20 @@
 // No HTTP, no DB — design has no SQL-shaped behavior (persistence delegates to
 // artifacts/git), so there is no dbtest tier for this feature.
 //
-// Per the GitHub-direct rework (docs/design/agents-generation-migration.md
-// §12.2) the per-file PUT/DELETE, component delete, and the architect generate
-// stream are gone; what remains is the read + save + version surface. This file
-// proves the service's surviving logic branches: the design assembly + status
-// projection, the versioning map, the ErrSpecNotApproved save gate, and that
-// the task-reconcile port is invoked on save (and a nil port never panics). The
-// HTTP contract (status codes, error mapping, the gate 401) lives in
-// design_component_test.go.
+// The read + version HTTP surface (get-design-bundle, get-design-bundle-at-tag,
+// discard-design-changes, list-design-versions, and their backing GetDesign/
+// GetDesignAtTag/GetDesignBundle/GetDesignBundleAtTag/DiscardChanges/
+// ListDesignVersions/decodeDesignTag/AssembleDesignFromFiles helpers) was
+// removed outright — superseded by the Files API (list-files/read-file). This
+// file proves what remains: the ErrSpecNotApproved save gate, that the
+// task-reconcile port is invoked on save (and a nil port never panics), and
+// the versioning map SaveAndProceed's projection uses.
 package design
 
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
-
-	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
@@ -86,194 +83,6 @@ func newService(fake *artifactstest.FakeArtifactService) *designService {
 	return &designService{
 		store:       artifacts.NewArtifactStore(fake),
 		artifactSvc: fake,
-	}
-}
-
-// --- GetDesign ---------------------------------------------------------------
-
-func TestGetDesign_NoDesignYet(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return map[string]string{}, nil // empty tree → ReadDesign returns nil,nil
-		},
-	}
-	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
-	if err != nil || d != nil {
-		t.Fatalf("no design: want (nil,nil), got (%v,%v)", d, err)
-	}
-}
-
-func TestGetDesign_NotFoundIsEmptyNotError(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return nil, artifacts.ErrArtifactNotFound
-		},
-	}
-	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
-	if err != nil || d != nil {
-		t.Fatalf("NotFound must degrade to (nil,nil), got (%v,%v)", d, err)
-	}
-}
-
-func TestGetDesign_ApprovedWithVersions(t *testing.T) {
-	t.Parallel()
-	files := validDesignFiles()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return files, nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return []artifacts.DesignVersionInfo{{Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1, CommitHash: "abc"}}, nil
-		},
-		// unsaved-changes compares the working tree against the tagged files;
-		// identical → not unsaved.
-		GetDesignAtTagFunc: func(context.Context, string, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-	}
-	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
-	if err != nil {
-		t.Fatalf("GetDesign: %v", err)
-	}
-	if d.Status != "approved" || d.Version != 1 || len(d.Versions) != 1 {
-		t.Fatalf("status projection: status=%q version=%d versions=%d", d.Status, d.Version, len(d.Versions))
-	}
-	if d.SourceSpec != "v1" {
-		t.Fatalf("sourceSpec: got %q, want v1 (from the design.md frontmatter)", d.SourceSpec)
-	}
-	if d.HasUnsavedChanges {
-		t.Fatal("working tree equals the tag → HasUnsavedChanges must be false")
-	}
-	if len(d.Components) != 1 || d.Components[0].Name != "hello-api" {
-		t.Fatalf("components not assembled: %+v", d.Components)
-	}
-}
-
-func TestGetDesign_UnsavedWhenTreeDiffersFromTag(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return []artifacts.DesignVersionInfo{{Tag: "v1-1", RequirementsVersion: 1, DesignRevision: 1}}, nil
-		},
-		GetDesignAtTagFunc: func(context.Context, string, string, string) (map[string]string, error) {
-			return map[string]string{artifacts.DesignRootFile: "different\n"}, nil
-		},
-	}
-	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
-	if err != nil {
-		t.Fatalf("GetDesign: %v", err)
-	}
-	if !d.HasUnsavedChanges {
-		t.Fatal("working tree differs from the tag → HasUnsavedChanges must be true")
-	}
-}
-
-func TestGetDesign_NoVersionsIsDraftAndUnsaved(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil // never tagged
-		},
-	}
-	d, err := newService(fake).GetDesign(context.Background(), "acme", "web")
-	if err != nil {
-		t.Fatalf("GetDesign: %v", err)
-	}
-	// No tag → draft, and any working-tree content is by definition unsaved.
-	if d.Status != "draft" || d.Version != 0 || !d.HasUnsavedChanges {
-		t.Fatalf("untagged design: status=%q version=%d unsaved=%v", d.Status, d.Version, d.HasUnsavedChanges)
-	}
-}
-
-// --- GetDesignAtTag ----------------------------------------------------------
-
-func TestGetDesignAtTag_NilClientErrors(t *testing.T) {
-	t.Parallel()
-	s := &designService{artifactSvc: nil}
-	if _, err := s.GetDesignAtTag(context.Background(), "acme", "web", "v1-1"); err == nil {
-		t.Fatal("nil artifact client must error")
-	}
-}
-
-func TestGetDesignAtTag_NotFoundMapsToDesignNotFound(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		GetDesignAtTagFunc: func(context.Context, string, string, string) (map[string]string, error) {
-			return nil, artifacts.ErrArtifactNotFound
-		},
-	}
-	_, err := newService(fake).GetDesignAtTag(context.Background(), "acme", "web", "v1-1")
-	if !errors.Is(err, artifacts.ErrDesignNotFound) {
-		t.Fatalf("want ErrDesignNotFound, got %v", err)
-	}
-}
-
-func TestGetDesignAtTag_HappyDecodesParentFromTag(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		GetDesignAtTagFunc: func(context.Context, string, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-	}
-	d, err := newService(fake).GetDesignAtTag(context.Background(), "acme", "web", "v3-2")
-	if err != nil {
-		t.Fatalf("GetDesignAtTag: %v", err)
-	}
-	if d.Status != "approved" || d.SourceSpec != "v3" {
-		t.Fatalf("tag decode: status=%q sourceSpec=%q (want approved / v3)", d.Status, d.SourceSpec)
-	}
-}
-
-// --- GetDesignBundle / AtTag -------------------------------------------------
-
-func TestGetDesignBundle_PairsFilesAndDesign(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	b, err := newService(fake).GetDesignBundle(context.Background(), "acme", "web")
-	if err != nil {
-		t.Fatalf("GetDesignBundle: %v", err)
-	}
-	if len(b.Files) == 0 || b.Design == nil || len(b.Design.Components) != 1 {
-		t.Fatalf("bundle must pair the raw file map with the assembled design: %+v", b)
-	}
-}
-
-func TestGetDesignBundleAtTag_NilClientErrors(t *testing.T) {
-	t.Parallel()
-	s := &designService{artifactSvc: nil}
-	if _, err := s.GetDesignBundleAtTag(context.Background(), "acme", "web", "v1-1"); err == nil {
-		t.Fatal("nil artifact client must error")
-	}
-}
-
-func TestGetDesignBundleAtTag_Happy(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		GetDesignAtTagFunc: func(context.Context, string, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-	}
-	b, err := newService(fake).GetDesignBundleAtTag(context.Background(), "acme", "web", "v1-1")
-	if err != nil {
-		t.Fatalf("GetDesignBundleAtTag: %v", err)
-	}
-	if len(b.Files) == 0 || b.Design == nil {
-		t.Fatalf("bundle-at-tag must carry files + design: %+v", b)
 	}
 }
 
@@ -388,75 +197,6 @@ func TestSaveAndProceed_ReconcileFailureIsBestEffort(t *testing.T) {
 	}
 }
 
-// --- DiscardChanges ----------------------------------------------------------
-
-func TestDiscardChanges_NilClientErrors(t *testing.T) {
-	t.Parallel()
-	s := &designService{artifactSvc: nil}
-	if _, err := s.DiscardChanges(context.Background(), "acme", "web"); err == nil {
-		t.Fatal("nil artifact client must error")
-	}
-}
-
-func TestDiscardChanges_NothingToRevert(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		DiscardDesignFunc: func(context.Context, string, string) (map[string]string, error) {
-			return nil, artifacts.ErrArtifactNotFound
-		},
-	}
-	_, err := newService(fake).DiscardChanges(context.Background(), "acme", "web")
-	if !errors.Is(err, artifacts.ErrArtifactNotFound) {
-		t.Fatalf("a discard with no saved version must surface the not-found error, got %v", err)
-	}
-}
-
-func TestDiscardChanges_HappyReturnsCurrentDesign(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		DiscardDesignFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return validDesignFiles(), nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return nil, nil
-		},
-	}
-	d, err := newService(fake).DiscardChanges(context.Background(), "acme", "web")
-	if err != nil || d == nil {
-		t.Fatalf("discard must return the reverted design: d=%v err=%v", d, err)
-	}
-}
-
-// --- ListDesignVersions ------------------------------------------------------
-
-func TestListDesignVersions_NilClientReturnsNil(t *testing.T) {
-	t.Parallel()
-	s := &designService{artifactSvc: nil}
-	v, err := s.ListDesignVersions(context.Background(), "acme", "web")
-	if err != nil || v != nil {
-		t.Fatalf("nil client → (nil,nil), got (%v,%v)", v, err)
-	}
-}
-
-func TestListDesignVersions_MapsThrough(t *testing.T) {
-	t.Parallel()
-	fake := &artifactstest.FakeArtifactService{
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return []artifacts.DesignVersionInfo{{Tag: "v2-3", RequirementsVersion: 2, DesignRevision: 3, CommitHash: "h"}}, nil
-		},
-	}
-	v, err := newService(fake).ListDesignVersions(context.Background(), "acme", "web")
-	if err != nil {
-		t.Fatalf("ListDesignVersions: %v", err)
-	}
-	if len(v) != 1 || v[0].TagName != "v2-3" || v[0].Version != 3 || v[0].SourceSpec != "v2" {
-		t.Fatalf("version mapping drifted: %+v", v)
-	}
-}
-
 // --- versioning.go: mapDesignVersions ---------------------------------------
 
 func TestMapDesignVersions(t *testing.T) {
@@ -478,67 +218,5 @@ func TestMapDesignVersions(t *testing.T) {
 	}
 	if got[1].Version != 5 || got[1].SourceSpec != "v2" {
 		t.Fatalf("row 1 drifted: %+v", got[1])
-	}
-}
-
-// --- mapDesignError (both branches, exhaustively) ----------------------------
-
-func TestMapDesignError(t *testing.T) {
-	t.Parallel()
-	assertStatus := func(t *testing.T, err error, want int) {
-		t.Helper()
-		var se huma.StatusError
-		if !errors.As(err, &se) {
-			t.Fatalf("mapDesignError must return a huma StatusError, got %T", err)
-		}
-		if se.GetStatus() != want {
-			t.Fatalf("status: got %d want %d", se.GetStatus(), want)
-		}
-	}
-	assertStatus(t, mapDesignError(artifacts.ErrDesignNotFound), 404)
-	assertStatus(t, mapDesignError(errors.New("pg: connection refused")), 500)
-	// The opaque 500 must not leak the internal cause.
-	if strings.Contains(mapDesignError(errors.New("pg: connection refused")).Error(), "connection refused") {
-		t.Fatal("opaque 500 must not leak internals")
-	}
-}
-
-// --- pure helpers ------------------------------------------------------------
-
-func TestDecodeDesignTag(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		in     string
-		wantN  int
-		wantR  int
-		wantOK bool
-	}{
-		{"v1-2", 1, 2, true},
-		{"v10-3", 10, 3, true},
-		{"v1", 0, 0, false},
-		{"v0-1", 0, 0, false}, // N must be >= 1
-		{"v1-0", 0, 0, false}, // M must be >= 1
-		{"garbage", 0, 0, false},
-		{"", 0, 0, false},
-	}
-	for _, c := range cases {
-		n, r, ok := decodeDesignTag(c.in)
-		if n != c.wantN || r != c.wantR || ok != c.wantOK {
-			t.Errorf("decodeDesignTag(%q) = (%d,%d,%v), want (%d,%d,%v)", c.in, n, r, ok, c.wantN, c.wantR, c.wantOK)
-		}
-	}
-}
-
-func TestAssembleDesignFromFiles(t *testing.T) {
-	t.Parallel()
-	if _, err := AssembleDesignFromFiles(map[string]string{}); err == nil {
-		t.Fatal("empty file map must error")
-	}
-	d, err := AssembleDesignFromFiles(validDesignFiles())
-	if err != nil {
-		t.Fatalf("assemble: %v", err)
-	}
-	if len(d.Components) != 1 || d.Components[0].Name != "hello-api" {
-		t.Fatalf("assembled design drifted: %+v", d)
 	}
 }

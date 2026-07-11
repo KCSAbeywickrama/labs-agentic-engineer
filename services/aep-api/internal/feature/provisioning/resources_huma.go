@@ -74,7 +74,7 @@ type statusInput struct {
 
 type configKeyDTO struct {
 	Key          string `json:"key"`
-	Secret       bool   `json:"secret"`
+	Secret       bool   `json:"secret,omitempty"`
 	Description  string `json:"description,omitempty"`
 	DefaultValue string `json:"defaultValue,omitempty"`
 }

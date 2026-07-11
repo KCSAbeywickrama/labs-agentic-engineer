@@ -27,25 +27,6 @@ import (
 	"testing"
 )
 
-func TestListRequirementFiles_AtHead(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, map[string]string{
-		"specs/requirements/requirements.md": "main\n",
-		"specs/requirements/functional.md":   "func\n",
-		"specs/requirements/nested/deep.md":  "ignored — requirements are flat\n",
-		"specs/design/design.md":             "wrong subtree\n",
-		"README.md":                          "outside specs\n",
-	})
-	got, err := r.svc.ListRequirementFiles(context.Background(), r.org, r.proj)
-	if err != nil {
-		t.Fatalf("ListRequirementFiles: %v", err)
-	}
-	want := map[string]string{"requirements.md": "main\n", "functional.md": "func\n"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("bundle = %v, want %v (flat, requirements-scoped)", got, want)
-	}
-}
-
 func TestListDesignFiles_AtHead(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
@@ -232,24 +213,24 @@ func TestGetDesignAtCommit_PinsExactCommit(t *testing.T) {
 // Branch-tip bundle reads freshen the mirror on every read: a commit made
 // directly on the ORIGIN (an external writer) is visible immediately — there
 // is no cache tier to go stale.
-func TestListRequirementFiles_SeesOriginAdvanceImmediately(t *testing.T) {
+func TestListDesignFiles_SeesOriginAdvanceImmediately(t *testing.T) {
 	t.Parallel()
-	r := newRig(t, map[string]string{"specs/requirements/requirements.md": "v1\n"})
+	r := newRig(t, map[string]string{"specs/design/design.md": "v1\n"})
 	ctx := context.Background()
 
-	got, err := r.svc.ListRequirementFiles(ctx, r.org, r.proj)
-	if err != nil || got["requirements.md"] != "v1\n" {
+	got, err := r.svc.ListDesignFiles(ctx, r.org, r.proj)
+	if err != nil || got["design.md"] != "v1\n" {
 		t.Fatalf("first read = (%v, %v), want v1", got, err)
 	}
 
-	r.seed(map[string]string{"specs/requirements/requirements.md": "v2 external\n"}, "external edit")
+	r.seed(map[string]string{"specs/design/design.md": "v2 external\n"}, "external edit")
 
-	got, err = r.svc.ListRequirementFiles(ctx, r.org, r.proj)
+	got, err = r.svc.ListDesignFiles(ctx, r.org, r.proj)
 	if err != nil {
 		t.Fatalf("second read: %v", err)
 	}
-	if got["requirements.md"] != "v2 external\n" {
-		t.Errorf("second read = %q, want the origin's new commit (fetch freshness)", got["requirements.md"])
+	if got["design.md"] != "v2 external\n" {
+		t.Errorf("second read = %q, want the origin's new commit (fetch freshness)", got["design.md"])
 	}
 }
 

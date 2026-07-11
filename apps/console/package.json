@@ -22,6 +22,7 @@
     "@aep/design-projection": "workspace:*",
     "@aep/excalidraw-dsl": "workspace:*",
     "@aep/ui-cell-diagram-view": "workspace:*",
+    "@aep/ui-design-view": "workspace:*",
     "@aep/ui-excalidraw-view": "workspace:*",
     "@aep/ui-openapi-view": "workspace:*",
     "@hocuspocus/provider": "4.3.0",

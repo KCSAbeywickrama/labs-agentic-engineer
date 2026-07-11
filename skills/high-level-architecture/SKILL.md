@@ -205,16 +205,18 @@ tools, USE them before authoring an `external`, `org-service`, or
   none matches, leave the dependency unresolved rather than forcing a fit.
 
 **Config-key conventions.** `config` is the env-var schema the consuming
-component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials
-`"secret": true` (they route through the secret path). Give each key an optional
-`description` — a short note on what the value is and where the user finds it
-(e.g. `{ "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe
-secret API key" }`); the Build dependency drawer shows it under the field. For a
-NON-secret key whose sensible default you can infer (a region, a base URL), add
-an optional `defaultValue` — the drawer pre-fills the field with it (e.g. `{
-"key": "AWS_REGION", "secret": false, "defaultValue": "us-east-1" }`). NEVER set
-`defaultValue` for a secret (`"secret": true`) — a credential like an API key has
-no default to invent. Keep the keys minimal — only what the component reads.
+component codes against. Use `SCREAMING_SNAKE_CASE` keys. `secret` is opt-in:
+set `"secret": true` ONLY for credentials (they route through the secret path);
+OMIT it entirely for plain config — a key with no `secret` field is non-secret.
+Give each key an optional `description` — a short note on what the value is and
+where the user finds it (e.g. `{ "key": "STRIPE_API_KEY", "secret": true,
+"description": "Your Stripe secret API key" }`); the Build dependency drawer
+shows it under the field. For a NON-secret key whose sensible default you can
+infer (a region, a base URL), add an optional `defaultValue` — the drawer
+pre-fills the field with it (e.g. `{ "key": "AWS_REGION", "defaultValue":
+"us-east-1" }`). NEVER set `defaultValue` for a secret (`"secret": true`) — a
+credential like an API key has no default to invent. Keep the keys minimal —
+only what the component reads.
 
 **`needsSpec` is opt-in.** Omit `needsSpec` entirely unless the dependency needs
 a collected OpenAPI spec, in which case set it `true` (never write `false`).

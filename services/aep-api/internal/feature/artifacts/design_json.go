@@ -117,7 +117,7 @@ type dependencyJSON struct {
 // configKeyJSON mirrors models.ConfigKey.
 type configKeyJSON struct {
 	Key          string `json:"key"`
-	Secret       bool   `json:"secret"`
+	Secret       bool   `json:"secret,omitempty"`
 	Description  string `json:"description,omitempty"`
 	DefaultValue string `json:"defaultValue,omitempty"`
 }

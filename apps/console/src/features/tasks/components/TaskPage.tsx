@@ -107,11 +107,11 @@ export function TaskPage({
         spacing={1.5}
         sx={{ alignItems: "center", mb: 2 }}
       >
-        <Tooltip title="Back to tasks">
+        <Tooltip title="Back to the build">
           <LinkIconButton
-            to="/projects/$projectName/tasks"
+            to="/projects/$projectName/builds"
             params={{ projectName }}
-            aria-label="Back to tasks"
+            aria-label="Back to the build"
           >
             <ArrowLeft size={18} />
           </LinkIconButton>

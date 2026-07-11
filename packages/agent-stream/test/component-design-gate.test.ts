@@ -85,9 +85,9 @@ test("accepts a config key with an optional description", () => {
   assert.equal(checkComponentDesign(PATH, doc), null);
 });
 
-test("accepts a non-secret config key with an optional defaultValue", () => {
+test("accepts a non-secret config key that omits secret entirely, with a defaultValue", () => {
   const doc = design({
-    dependencies: [dep([{ key: "AWS_REGION", secret: false, defaultValue: "us-east-1" }])],
+    dependencies: [dep([{ key: "AWS_REGION", defaultValue: "us-east-1" }])],
   });
   assert.equal(checkComponentDesign(PATH, doc), null);
 });

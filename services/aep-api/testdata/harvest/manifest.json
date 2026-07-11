@@ -32,30 +32,6 @@
     "notes": "get-project-status"
   },
   {
-    "name": "get_requirements",
-    "method": "GET",
-    "path": "/projects/hello-world-api/requirements",
-    "status": 200,
-    "golden_file": "get_requirements.json",
-    "notes": "get-requirements bundle"
-  },
-  {
-    "name": "get_requirements_versions",
-    "method": "GET",
-    "path": "/projects/hello-world-api/requirements/versions",
-    "status": 200,
-    "golden_file": "get_requirements_versions.json",
-    "notes": "list-requirements-versions"
-  },
-  {
-    "name": "get_requirements_at_version",
-    "method": "GET",
-    "path": "/projects/hello-world-api/requirements/versions/v1",
-    "status": 200,
-    "golden_file": "get_requirements_at_version.json",
-    "notes": "get-requirements-at-version tag=v1 (discovered)"
-  },
-  {
     "name": "get_collab_session",
     "method": "GET",
     "path": "/projects/hello-world-api/requirements/collab-session",
@@ -70,38 +46,6 @@
     "status": 200,
     "golden_file": "get_collab_validate.json",
     "notes": "validate-collab-access (S2S carve-out; needs X-Room-Id)"
-  },
-  {
-    "name": "get_design",
-    "method": "GET",
-    "path": "/projects/hello-world-api/design",
-    "status": 200,
-    "golden_file": "get_design.json",
-    "notes": "get-design"
-  },
-  {
-    "name": "get_design_bundle",
-    "method": "GET",
-    "path": "/projects/hello-world-api/design/bundle",
-    "status": 200,
-    "golden_file": "get_design_bundle.json",
-    "notes": "get-design-bundle"
-  },
-  {
-    "name": "get_design_versions",
-    "method": "GET",
-    "path": "/projects/hello-world-api/design/versions",
-    "status": 200,
-    "golden_file": "get_design_versions.json",
-    "notes": "list-design-versions"
-  },
-  {
-    "name": "get_design_bundle_at_tag",
-    "method": "GET",
-    "path": "/projects/hello-world-api/design/versions/v1-1/bundle",
-    "status": 200,
-    "golden_file": "get_design_bundle_at_tag.json",
-    "notes": "get-design-bundle-at-tag tag=v1-1 (discovered)"
   },
   {
     "name": "get_components",

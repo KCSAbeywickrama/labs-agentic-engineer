@@ -55,7 +55,7 @@ type ProvisionStatusReader interface {
 // the optional (non-secret) defaultValue to pre-fill the field.
 type ConfigKeyView struct {
 	Key          string `json:"key"`
-	Secret       bool   `json:"secret"`
+	Secret       bool   `json:"secret,omitempty"`
 	Description  string `json:"description,omitempty"`
 	DefaultValue string `json:"defaultValue,omitempty"`
 }

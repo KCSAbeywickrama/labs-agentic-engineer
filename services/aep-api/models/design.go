@@ -157,10 +157,11 @@ type Dependency struct {
 
 // ConfigKey is one env-var key a component reads at runtime. For an external
 // resource these keys form the resource's schema (drives the OC ResourceType).
-// Secret keys route through the secret path.
+// Secret keys route through the secret path. `secret` is optional and omitted
+// when false — a key with no `secret` field is a plain (non-secret) config value.
 type ConfigKey struct {
 	Key    string `json:"key"`
-	Secret bool   `json:"secret"`
+	Secret bool   `json:"secret,omitempty"`
 	// Description is an optional human-readable note on what this value is for,
 	// authored alongside the key. The Build dependency drawer renders it under
 	// the field so the user knows what to supply.

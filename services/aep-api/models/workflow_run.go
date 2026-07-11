@@ -65,6 +65,14 @@ type DevflowRun struct {
 
 	Status string `gorm:"not null;index;default:running" json:"status"` // running | completed | failed | canceled
 
+	// TasksTotal/Done/Failed are the dev run's own task tally (the overview
+	// build stage), written by the dev workflow as absolute values — total
+	// once after plan, done/failed per task transition — and frozen when the
+	// run ends. Zero for task-kind rows and for runs predating the columns.
+	TasksTotal  int `gorm:"not null;default:0" json:"tasksTotal"`
+	TasksDone   int `gorm:"not null;default:0" json:"tasksDone"`
+	TasksFailed int `gorm:"not null;default:0" json:"tasksFailed"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

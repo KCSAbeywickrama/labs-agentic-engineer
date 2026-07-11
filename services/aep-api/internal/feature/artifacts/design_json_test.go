@@ -65,7 +65,6 @@ const fullComponentDesignJSON = `{
         },
         {
           "key": "OPENWEATHER_REGION",
-          "secret": false,
           "defaultValue": "us-east-1"
         }
       ]

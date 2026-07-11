@@ -72,6 +72,9 @@ type RunStore interface {
 	RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error)
 	GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error)
 	Record(ctx context.Context, row *models.DevflowRun) error
+	// ListByProject enumerates a project's run rows newest-first, optionally
+	// filtered to one kind — the builds-history read behind list-project-builds.
+	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error)
 }
 
 // RepoLookup resolves a project's "owner/name" repo full name. Satisfied by

@@ -41,12 +41,25 @@ func (t buildSpecTagger) TagSpec(ctx context.Context, orgID, projectID string) (
 	return t.art.SaveSpec(ctx, orgID, projectID, artifacts.SaveRequest{Message: "Build"})
 }
 
+// designAuthDeriver / designExternalRegistrar are the composition root's narrow
+// consumer views of the concrete *design service — the two pre-tag steps the
+// thin POST /build path reuses (issue #164). The design package no longer
+// exports an interface (its read HTTP surface was retired); *designService
+// satisfies these structurally, so app wires the concrete value straight in.
+type designAuthDeriver interface {
+	DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error
+}
+
+type designExternalRegistrar interface {
+	RegisterExternalResources(ctx context.Context, orgID, projectID string) error
+}
+
 // buildAuthDeriver adapts design's DeriveEndUserAuthAtHead onto the build
 // feature's AuthDeriver port, translating design's domain sentinels into the
 // build-local ones the handler maps to 409 / 503 (build cannot import design —
 // arch allowlist). Everything else passes through so the handler 500s it.
 type buildAuthDeriver struct {
-	svc design.DesignService
+	svc designAuthDeriver
 }
 
 func (d buildAuthDeriver) DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error {
@@ -108,7 +121,7 @@ func (b buildProvisionStatus) Ready(ctx context.Context, orgID, projectID, depNa
 // handle == the SM-API org id (the build path stages secrets under the org
 // handle — Task 2/3 precedent).
 type buildProvisioner struct {
-	design design.DesignService
+	design designExternalRegistrar
 	prov   *provisioning.Service
 }
 

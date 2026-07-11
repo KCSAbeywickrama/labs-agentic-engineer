@@ -16,22 +16,17 @@
  * under the License.
  */
 
+import { useEffect, useRef } from "react";
 import {
   Alert,
   Button,
-  Grid,
   Skeleton,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import {
-  useProjectComponents,
-  useProjectStatus,
-  useProjectTags,
-  useProjectTasks,
-} from "../api/queries";
+import { useProjectComponents, useProjectStatus } from "../api/queries";
 import { ComponentsList } from "./ComponentsList";
-import { StatusCards } from "./StatusCards";
+import { OverviewPipeline } from "./OverviewPipeline";
 
 function SectionError({
   what,
@@ -50,13 +45,26 @@ function SectionError({
   );
 }
 
-// The overview never blocks entirely on one failed read: the cards and the
-// components list each degrade independently (issue #77).
+// The overview renders from ONE polling read (#183): the status aggregate
+// powers the whole pipeline. The components list has no interval of its own —
+// it refetches when the poll shows a build/deploy transition (the only times
+// components change).
 export function ProjectOverview({ projectName }: { projectName: string }) {
   const status = useProjectStatus(projectName);
-  const tasks = useProjectTasks(projectName);
-  const tags = useProjectTags(projectName);
   const componentsQuery = useProjectComponents(projectName);
+
+  const buildState = status.data?.build.status;
+  const deployState = status.data?.deploy.status;
+  const prev = useRef<string | undefined>(undefined);
+  const refetchComponents = componentsQuery.refetch;
+  useEffect(() => {
+    if (buildState === undefined) return;
+    const key = `${buildState}:${deployState}`;
+    if (prev.current !== undefined && prev.current !== key) {
+      void refetchComponents();
+    }
+    prev.current = key;
+  }, [buildState, deployState, refetchComponents]);
 
   return (
     <Stack spacing={4}>
@@ -66,15 +74,10 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
           message={status.error instanceof Error ? status.error.message : undefined}
           onRetry={() => void status.refetch()}
         />
+      ) : status.isPending ? (
+        <Skeleton variant="rounded" height={96} />
       ) : (
-        <Grid container spacing={3}>
-          <StatusCards
-            projectName={projectName}
-            status={status.data}
-            tasks={tasks.data ?? undefined}
-            tags={tags.data}
-          />
-        </Grid>
+        <OverviewPipeline projectName={projectName} status={status.data} />
       )}
 
       <div>

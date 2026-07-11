@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -136,6 +137,31 @@ type BuildStatus struct {
 	Tasks          []BuildStatusTask `json:"tasks,omitempty"`
 }
 
+// BuildTally is one build's frozen task counts (the dev run's own tally,
+// written by the workflow — not a live task recount).
+type BuildTally struct {
+	Total  int64 `json:"total"`
+	Done   int64 `json:"done"`
+	Failed int64 `json:"failed"`
+	Active int64 `json:"active"`
+}
+
+// BuildSummary is one entry of list-project-builds: the newest run for a spec
+// version tag. Status shares get-project-build's vocabulary; a list read has
+// no live workflow query, so "started" never occurs here.
+type BuildSummary struct {
+	Tag         string     `json:"tag"`
+	Status      string     `json:"status" enum:"started,in_progress,completed,failed"`
+	Tasks       BuildTally `json:"tasks"`
+	StartedAt   time.Time  `json:"startedAt"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+}
+
+// BuildList is the list-project-builds response, newest build first.
+type BuildList struct {
+	Builds []BuildSummary `json:"builds"`
+}
+
 type buildInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
@@ -154,6 +180,15 @@ type getBuildInput struct {
 
 type getBuildOutput struct {
 	Body BuildStatus
+}
+
+type listBuildsInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+}
+
+type listBuildsOutput struct {
+	Body BuildList
 }
 
 // RegisterBuild registers the build surface on the code-first Huma API.
@@ -177,6 +212,16 @@ func RegisterBuild(api huma.API, svc *Service) {
 		Tags:        []string{"Projects"},
 		Security:    humakit.SecurityUserJWT,
 	}, svc.get)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-project-builds",
+		Method:      http.MethodGet,
+		Path:        "/projects/{projectName}/builds",
+		Summary:     "List project builds",
+		Description: "One entry per built spec version tag, newest first — each the tag's newest run with its frozen task tally.",
+		Tags:        []string{"Projects"},
+		Security:    humakit.SecurityUserJWT,
+	}, svc.list)
 }
 
 // ErrBuildAlreadyRunning is the "a dev workflow is already running for this
@@ -354,6 +399,46 @@ func (s *Service) get(ctx context.Context, in *getBuildInput) (*getBuildOutput, 
 		Tasks:          s.taskStatuses(ctx, in.OrgHandle, in.ProjectName, in.Tag, st.Tasks),
 	}
 	return out, nil
+}
+
+// list enumerates the project's builds from the workflow_runs index alone (no
+// live Temporal queries — the list must stay one cheap read). Rows arrive
+// newest-first; a same-tag rebuild writes a second (workflowID, runID) row, so
+// the first row seen per tag — its newest run — represents that build.
+func (s *Service) list(ctx context.Context, in *listBuildsInput) (*listBuildsOutput, error) {
+	rows, err := s.store.ListByProject(ctx, in.OrgHandle, in.ProjectName, models.WorkflowKindDev)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("list builds")
+	}
+	seen := make(map[string]bool, len(rows))
+	builds := make([]BuildSummary, 0, len(rows))
+	for _, row := range rows {
+		if row.Tag == "" || seen[row.Tag] {
+			continue
+		}
+		seen[row.Tag] = true
+		b := BuildSummary{
+			Tag:       row.Tag,
+			Status:    statusFromRow(row.Status),
+			StartedAt: row.CreatedAt,
+			Tasks: BuildTally{
+				Total:  int64(row.TasksTotal),
+				Done:   int64(row.TasksDone),
+				Failed: int64(row.TasksFailed),
+			},
+		}
+		// Active is computed, clamped so a lost total write can never render
+		// negative (same rule as the overview's build stage).
+		if active := row.TasksTotal - row.TasksDone - row.TasksFailed; active > 0 {
+			b.Tasks.Active = int64(active)
+		}
+		if row.Status != models.WorkflowStatusRunning {
+			completed := row.UpdatedAt
+			b.CompletedAt = &completed
+		}
+		builds = append(builds, b)
+	}
+	return &listBuildsOutput{Body: BuildList{Builds: builds}}, nil
 }
 
 // taskStatuses builds the version's task list, DURABLE-first: the source is the

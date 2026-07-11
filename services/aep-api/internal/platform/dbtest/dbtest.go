@@ -93,7 +93,7 @@ const (
 	// per process), so a stale template can never outlive a run — this only
 	// needs to be stable within a run. Bump it when database/migrations or the
 	// base-model set below changes, purely as documentation of intent.
-	schemaVersion = "4"
+	schemaVersion = "5"
 )
 
 // container holds the process-wide testcontainers Postgres, started once by
@@ -213,6 +213,7 @@ var baseModels = []any{
 	&models.Organization{},
 	&models.Execution{},
 	&models.AgentTurn{},
+	&models.DevflowRun{},
 }
 
 // Migrate provisions the template exactly as the app provisions a fresh DB at
