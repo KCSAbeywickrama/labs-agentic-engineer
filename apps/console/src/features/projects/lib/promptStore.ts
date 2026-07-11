@@ -78,9 +78,17 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
 export function buildDesignGenerationInstruction(): string {
   return (
     "Generate the complete component design for this project based on the " +
-    "current requirements: the overall architecture in specs/design/design.md, " +
-    "and for each component specs/design/components/<name>/design.json (plus " +
-    "openapi.yaml for services). If a design already exists, regenerate it to " +
+    "current requirements. Emit the artifacts in EXACTLY this order: " +
+    "(1) FIRST specs/design/design.cell — the architecture diagram (use the " +
+    "cell-architecture-dsl skill for the grammar and boundary rules), written " +
+    "in a single addFile; the platform streams it into the live diagram as you " +
+    "write, so it renders line by line; " +
+    "(2) the overall architecture in specs/design/design.md; " +
+    "(3) for each component specs/design/components/<name>/design.json — the " +
+    "component ids MUST match those in design.cell, and every design.cell edge " +
+    "touching a component must appear as a dependency in that component's " +
+    "design.json; " +
+    "(4) openapi.yaml for services. If a design already exists, regenerate it to " +
     "match the current requirements."
   );
 }

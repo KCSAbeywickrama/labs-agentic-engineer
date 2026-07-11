@@ -36,8 +36,13 @@ export interface DesignSection {
   /** Design files directly under design/ (e.g. design.md). */
   overview: SpecFileEntry[];
   hasComponents: boolean;
+  /** Whether a project-level design.cell exists (drives the Architecture tab). */
+  hasCellDsl: boolean;
   components: DesignComponentNode[];
 }
+
+/** The project-level cell-diagram DSL path (rendered via the Architecture tab, never as a file). */
+export const DESIGN_CELL_PATH = "specs/design/design.cell";
 
 // SpecFileEntry.path is the full repo-relative path (mapping.ts's current
 // scheme — the unprefixed room-key scheme it retired), so this must match
@@ -61,8 +66,11 @@ function isDsl(path: string): boolean {
  */
 export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const design = files.filter((f) => f.group === "designs");
+  const hasCellDsl = design.some((f) => f.path === DESIGN_CELL_PATH);
+  // design.cell is surfaced through the Architecture tab (streaming cell
+  // diagram), never as a raw text file — keep it out of the overview list.
   const overview = design
-    .filter((f) => componentOf(f.path) === null)
+    .filter((f) => componentOf(f.path) === null && f.path !== DESIGN_CELL_PATH)
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const byComponent = new Map<string, DesignComponentNode>();
@@ -83,7 +91,7 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   );
   for (const c of components) c.files.sort((a, b) => a.path.localeCompare(b.path));
 
-  return { overview, hasComponents: components.length > 0, components };
+  return { overview, hasComponents: components.length > 0, hasCellDsl, components };
 }
 
 /** Stable string identity for a selection (React keys + selected-state compare). */

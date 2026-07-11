@@ -16,29 +16,28 @@
  * under the License.
  */
 
-import {
-  buildProjectDesign,
-  toCellDiagramProject,
-  type CellDiagramProject,
-} from "@aep/design-projection";
+import { toCellDsl } from "@aep/design-projection";
 
 /**
- * Whole-architecture cell-diagram projection. `designJsonByRepoPath` maps
- * repo-relative `specs/design/components/<c>/design.json` paths to their
- * content (the projection's COMPONENT_DESIGN_JSON_RE requires the `specs/`
- * prefix — mapping.ts's SpecFileEntry.path already carries it). Returns null
- * when there are no components or a source is malformed — a bad source
- * never throws into the render tree.
+ * Whole-architecture cell DSL, derived DIRECTLY from the component design.json
+ * bundle. `designJsonByRepoPath` maps repo-relative
+ * `specs/design/components/<c>/design.json` paths to their content (the
+ * converter's regex requires the `specs/` prefix — mapping.ts's
+ * SpecFileEntry.path already carries it). `projectName` becomes the diagram
+ * title. Returns null when there are no valid components — a bad source never
+ * throws into the render tree.
+ *
+ * This replaces the old `buildProjectDesign → toCellDiagramProject → wso2ToDsl`
+ * path, which flattened dependency kind/resourceType and so placed nodes on the
+ * wrong cell boundary. `toCellDsl` applies the same boundary rules the agent's
+ * streamed design.cell uses, so the reloaded (derived) diagram matches it.
  */
-export function deriveCellDiagramProject(
+export function deriveCellDsl(
+  projectName: string,
   designJsonByRepoPath: Record<string, string>,
-): CellDiagramProject | null {
-  if (Object.keys(designJsonByRepoPath).length === 0) return null;
+): string | null {
   try {
-    const project = toCellDiagramProject(
-      buildProjectDesign("project", designJsonByRepoPath),
-    );
-    return project.components.length > 0 ? project : null;
+    return toCellDsl(projectName, designJsonByRepoPath);
   } catch {
     return null;
   }
