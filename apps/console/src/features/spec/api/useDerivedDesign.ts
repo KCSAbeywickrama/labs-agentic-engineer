@@ -72,10 +72,18 @@ export function useDerivedWireframe(
   dslPath: string,
   sha: string | undefined,
 ): { scene: string | null; isPending: boolean; isError: boolean } {
+  // The Files API reads by PATH at HEAD — `sha` is never sent to the server
+  // (see fetchSpecFileContent); it is only a cache key. So fetch whenever we
+  // have a path, even before the committed file-list catches up with an
+  // agent-created file (whose sha is still unknown). Gating `enabled` on `sha`
+  // left the query permanently disabled, so `isPending` stayed true forever —
+  // an infinite spinner on a file that was perfectly fetchable by path.
   const q = useQuery({
-    queryKey: specKeys.file(projectName, dslPath, sha ?? ""),
-    enabled: Boolean(sha),
-    staleTime: Infinity,
+    queryKey: specKeys.file(projectName, dslPath, sha ?? "head"),
+    enabled: Boolean(dslPath),
+    // A content sha pins immutable content; without one we're reading HEAD, so
+    // revalidate instead of caching a pre-commit read forever.
+    staleTime: sha ? Infinity : 0,
     queryFn: () => fetchSpecFileContent(projectName, { path: dslPath, sha: sha ?? "" }),
   });
   const scene =
