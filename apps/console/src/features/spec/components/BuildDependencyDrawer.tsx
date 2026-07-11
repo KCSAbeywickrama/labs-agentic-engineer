@@ -210,16 +210,35 @@ function ExternalSpecPanel({
 
 function InfoPanel({
   item,
-  description,
+  action,
 }: {
   item: PreflightItem;
-  description: string;
+  // A short, one-line note on what the platform will do for this dependency.
+  action: string;
 }) {
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle1">{item.dependency}</Typography>
-      <Typography variant="body2" color="text.secondary">
-        {description}
+      {/* The dependency's own description from the design, when the author
+          gave one. Clamp to 3 lines so a long note doesn't blow out the
+          drawer; the full text is available on hover. */}
+      {item.description ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          title={item.description}
+          sx={{
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {item.description}
+        </Typography>
+      ) : null}
+      <Typography variant="caption" color="text.secondary">
+        {action}
       </Typography>
       {item.parameters ? (
         <Box
@@ -302,7 +321,22 @@ export function BuildDependencyDrawer({
   const orgServiceItems = items.filter((i) => i.kind === "org-service");
 
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}>
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      // Force an opaque surface: the default drawer paper reads translucent
+      // over the page behind it, which makes the dependency text hard to read.
+      slotProps={{
+        paper: {
+          sx: {
+            bgcolor: "background.paper",
+            backgroundImage: "none",
+            backdropFilter: "none",
+          },
+        },
+      }}
+    >
       <Box sx={{ width: 420, p: 3 }}>
         <Typography variant="h6" sx={{ mb: 2 }}>
           Dependencies to resolve
@@ -357,7 +391,7 @@ export function BuildDependencyDrawer({
                 <InfoPanel
                   key={itemKey(item)}
                   item={item}
-                  description={`We'll provision this ${item.resourceType ?? "resource"} for you.`}
+                  action={`We'll provision this ${item.resourceType ?? "resource"}.`}
                 />
               ))}
             </Stack>
@@ -371,7 +405,7 @@ export function BuildDependencyDrawer({
               <InfoPanel
                 key={itemKey(item)}
                 item={item}
-                description="We'll make this cross-project endpoint visible — this updates and rebuilds the owning project; your build continues and the consuming task waits until it's published."
+                action="Cross-project endpoint — we'll publish it; your build continues meanwhile."
               />
             ))}
           </Stack>
