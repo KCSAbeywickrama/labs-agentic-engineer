@@ -2,6 +2,7 @@ import type { components } from "../../generated/aep-api";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
+type ComponentOpenAPI = components["schemas"]["ComponentOpenAPI"];
 type TaskView = components["schemas"]["TaskView"];
 type TagList = components["schemas"]["TagList"];
 type BuildList = components["schemas"]["BuildList"];
@@ -229,6 +230,39 @@ const deployedComponents: ComponentList = {
       : c,
   ),
 };
+
+// The OpenAPI contract served by GET .../components/:name/openapi — a
+// `{ spec }` envelope carrying a raw document, exactly as aep-api returns it
+// (read off specs/design). The ComponentOpenApiDialog renders `spec` via the
+// shared OpenApiView. Title is keyed off the component so the viewer's hero
+// reflects which row was opened.
+export function componentOpenApi(componentName: string): ComponentOpenAPI {
+  const spec = `openapi: 3.0.0
+info:
+  title: ${componentName}
+  version: 1.0.0
+  description: Mock API contract for ${componentName}.
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /items:
+    get:
+      summary: List items
+      responses:
+        "200":
+          description: A list of items
+    post:
+      summary: Create an item
+      responses:
+        "201":
+          description: Created
+`;
+  return { componentName, componentType: "service", spec };
+}
 
 export const projectComponents: Record<
   Exclude<ProjectScenario, "error">,

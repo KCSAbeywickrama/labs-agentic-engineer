@@ -1,5 +1,6 @@
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
+  componentOpenApi,
   projectBuilds,
   projectComponents,
   projectSectionError,
@@ -47,6 +48,12 @@ export const projectHandlers = [
   ),
   http.get("*/api/v1/projects/:projectName/components", () =>
     respond((s) => projectComponents[s]),
+  ),
+  // The component's OpenAPI contract for the in-app viewer dialog. Errors
+  // follow the section scenario; otherwise a spec keyed to the component name.
+  http.get(
+    "*/api/v1/projects/:projectName/components/:componentName/openapi",
+    ({ params }) => respond(() => componentOpenApi(String(params.componentName))),
   ),
   http.get("*/api/v1/projects/:projectName/tasks", ({ request }) => {
     // ?tag=vN scopes to one build's lineage, mirroring the aep:spec/<tag>

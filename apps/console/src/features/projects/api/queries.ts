@@ -149,6 +149,36 @@ export function useProjectComponents(projectName: string) {
   );
 }
 
+// A service component's OpenAPI contract, for the in-app viewer dialog. Lazy
+// (`enabled`) — only fetched when the user opens the contract, not on every
+// overview render. Goes through the authenticated client so the Bearer token
+// rides along; the old plain <a href> to this JWT-guarded endpoint 401'd
+// because a browser navigation carries no Authorization header.
+export function useComponentOpenApi(
+  projectName: string,
+  componentName: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: projectKeys.componentOpenapi(projectName, componentName),
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/components/{componentName}/openapi",
+        { params: { path: { projectName, componentName } } },
+      );
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(
+          e?.detail ?? e?.title ?? "Failed to load the API contract",
+        );
+      }
+      return data;
+    },
+    staleTime: 30_000,
+  });
+}
+
 // Spec version tags (#117). The BE hasn't implemented /tags yet, so a failed
 // read degrades to "no tags" instead of an error card — the version chips
 // simply don't render until the endpoint lands.
