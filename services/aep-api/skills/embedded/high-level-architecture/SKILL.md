@@ -142,8 +142,13 @@ every arrow there appears here and vice versa — a mismatch is a defect. Each
 entry has a `kind` (which selects the meaningful fields) and a `name`; pick the
 kind by WHAT the target is:
 
-- **`component`** — a SIBLING component in this same design (a `<name>/` under
-  `components/`). Just `{ "kind": "component", "name": "expense-webapp" }`.
+- **`component`** — a SIBLING component in this same design that THIS component
+  CALLS: a directed caller→callee edge (one Interactions arrow). Declare it ONLY
+  on the caller, naming the callee it invokes:
+  `{ "kind": "component", "name": "expense-api" }`. Never add the reverse edge —
+  a web-app depends on the API it calls; the API does NOT depend on the web-app
+  that calls it. If a component isn't actually called by this one, it is not a
+  dependency of it (do not list it "for reference").
 - **`org-service`** — a service owned by ANOTHER project in the org that
   publishes its endpoint for cross-project use. `name` is the provider's
   component name. `{ "kind": "org-service", "name": "identity-api" }`.
@@ -170,7 +175,7 @@ kind by WHAT the target is:
 
 ```json
 "dependencies": [
-  { "kind": "component", "name": "expense-webapp" },
+  { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
   { "kind": "external", "name": "stripe",
     "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
