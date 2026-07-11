@@ -94,6 +94,12 @@ that's a stalled feature — investigate, don't ignore.
   [#155](https://github.com/wso2/labs-agentic-engineer/issues/155)
   (BE handshake: [#156](https://github.com/wso2/labs-agentic-engineer/issues/156),
   ADR-0008)
+- Overview Components table — web apps get their "Open app" URL, console-side:
+  each web-application row reads its dev deployment's `endpointUrl` from the
+  existing `list-deployments` endpoint (no BE change; `Component.endpointUrl`
+  stays as noted contract drift) —
+  [#196](https://github.com/wso2/labs-agentic-engineer/issues/196)
+  ([#197](https://github.com/wso2/labs-agentic-engineer/issues/197) closed unimplemented)
 - Project overview — versioned pipeline (Spec → Build → Deploy) on a single
   adaptive status poll: per-stage version chips (v1, v1+), task/component
   counts from nested ProjectStatus stage aggregates; list-tasks + /tags leave
