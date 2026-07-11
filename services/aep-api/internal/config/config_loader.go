@@ -32,7 +32,7 @@ import (
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
 	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
-	runnerImageVersion = "v7"
+	runnerImageVersion = "v8"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
