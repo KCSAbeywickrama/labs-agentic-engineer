@@ -100,6 +100,41 @@ test("streams markdown addFile incrementally, line-by-line, converging to full c
   assert.deepEqual(writer.rollbackDangling(), []);
 });
 
+const CELL_PATH = "specs/design/design.cell";
+const CELL =
+  "title Shop\n\ncomponent web as \"Web\" web-application\ncomponent api as \"API\" service\n\nweb -> api\n";
+
+test("streams a .cell addFile incrementally, line-by-line, converging to full content", async () => {
+  const peer = new FakePeer();
+  const writer = new StreamingDocWriter(peer, new FileBundle({}));
+
+  await feed(writer, addFileParts("c1", CELL_PATH, CELL));
+  writer.observe(toolResult("c1", true, CELL_PATH));
+  await writer.drain();
+
+  assert.ok(peer.sets.length >= 2, `expected incremental writes, got ${peer.sets.length}`);
+  assert.ok(peer.sets.every((s) => s.path === CELL_PATH), "all writes target design.cell");
+  for (let i = 1; i < peer.sets.length; i++) {
+    assert.ok(
+      peer.sets[i]!.content.startsWith(peer.sets[i - 1]!.content),
+      `write ${i} must extend write ${i - 1}`,
+    );
+  }
+  assert.equal(peer.sets.at(-1)!.content, CELL, "final write is the whole DSL body");
+  assert.deepEqual(peer.deletes, []);
+  assert.deepEqual(writer.rollbackDangling(), []);
+});
+
+test("rolls back a truncated .cell stream", async () => {
+  const peer = new FakePeer();
+  const writer = new StreamingDocWriter(peer, new FileBundle({}));
+  const parts = addFileParts("c1", CELL_PATH, CELL);
+  await feed(writer, parts.slice(0, Math.floor(parts.length * 0.6)));
+  assert.ok(peer.sets.length >= 1, "should have optimistically written a partial preview");
+  assert.deepEqual(writer.rollbackDangling(), [CELL_PATH]);
+  assert.deepEqual(peer.deletes, [CELL_PATH]);
+});
+
 test("path resolves before any content is written", async () => {
   const peer = new FakePeer();
   const writer = new StreamingDocWriter(peer, new FileBundle({}));
