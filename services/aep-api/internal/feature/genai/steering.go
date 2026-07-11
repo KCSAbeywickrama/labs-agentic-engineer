@@ -38,3 +38,14 @@ var steeringByUseCase = map[string]string{
 	useCaseGeneral: "\n\nApply the requested change to the spec bundle, or answer the question if no change is requested. " +
 		"Spec sources live under specs/ (requirements under specs/requirements/, design under specs/design/) — when creating a file that does not exist yet, always use its full path, never a bare filename.",
 }
+
+// collabDepsSteer is appended to every collab room-scoped turn (the Spec view
+// authors design.json live under useCase "requirements-chat", so the per-useCase
+// steering never names the design flow). It steers the collab architect to load
+// the architecture skill and to DISCOVER real provider names before touching a
+// component's dependencies — without it the MCP tool can sit present-but-unused,
+// producing invented role-based org-service names that fail exact-name
+// resolution at build.
+const collabDepsSteer = "\n\nBefore editing any design.json, load the `high-level-architecture` skill. " +
+	"When your change adds or edits a component's `dependencies` — especially an `org-service` referencing another project — " +
+	"FIRST call `list_org_endpoints` and copy the provider component name VERBATIM; never invent a role-based name."
