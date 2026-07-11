@@ -74,6 +74,13 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
  * turn (#159): derive the component design from the current requirements. No
  * user prompt — the agent designs FROM the requirements already in the repo;
  * the agent's system prompt carries the design-file structure and schema.
+ *
+ * The CTA also mints the acceptance oracle in the same turn: the new console
+ * only ever runs `requirements-chat` turns (never `design-generate`), so the
+ * server-side design-generate steering that would author
+ * `validation-criteria.json` never fires. Asking for it here scopes the oracle
+ * to exactly the Generate-design action rather than every chat turn. See
+ * docs/design/validation-phase-draft-plan.md (Addendum, Option 1).
  */
 export function buildDesignGenerationInstruction(): string {
   return (
@@ -81,6 +88,11 @@ export function buildDesignGenerationInstruction(): string {
     "current requirements: the overall architecture in specs/design/design.md, " +
     "and for each component specs/design/components/<name>/design.json (plus " +
     "openapi.yaml for services). If a design already exists, regenerate it to " +
-    "match the current requirements."
+    "match the current requirements. " +
+    "Then, as the final step, generate the validation acceptance criteria at " +
+    "specs/validation/validation-criteria.json using the validation-criteria " +
+    "skill — derived from the requirements prose only, not from the design you " +
+    "just wrote. If that file already exists, preserve covered: true on any " +
+    "criterion whose id and must are unchanged."
   );
 }
