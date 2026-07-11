@@ -63,29 +63,45 @@ Read the criteria file (default
 
 ### 4. Fetch the validation context, then confirm the app is reachable
 
-Deployed endpoint URLs and optional test credentials come from the
-platform's secure validation-context endpoint — never from the issue.
-`AEP_TASK_ID` carries this run's execution id; the bearer rides a file.
+Deployed endpoint URLs come from the platform's secure validation-context
+endpoint — never from the issue. Test credentials are a separate on-demand
+request (below), made only when a criterion needs a login. `AEP_TASK_ID`
+carries this run's execution id; the bearer rides a file.
 
 ```bash
 curl -sf "$AEP_PLATFORM_URL/internal/v1/executions/$AEP_TASK_ID/validation-context" \
   -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" > /tmp/validation-context.json
 ```
 
-The response is `{ "endpoints": [{"component","url"}], "credentials":
-{"username","password"}|null, "criteriaPath": "..." }`. If the fetch
-fails or `AEP_PLATFORM_URL` is unset, post an issue comment and exit with
-failure — do not guess endpoints.
+The response is `{ "endpoints": [{"component","url"}], "criteriaPath":
+"..." }`. If the fetch fails or `AEP_PLATFORM_URL` is unset, post an issue
+comment and exit with failure — do not guess endpoints.
 
 - **Endpoints** become `tests/e2e/targets.json` (step 5) and your target
   list. Probe each URL (`curl -sf -o /dev/null <url>` or a playwright-cli
   visit) before authoring. Never start, build, or deploy the app — you
   validate what is already running; an unreachable endpoint → issue
   comment + exit failure.
-- **Credentials**: when present, export them in-session and never commit
-  them: `export AEP_E2E_USERNAME=… AEP_E2E_PASSWORD=…`. When `null` and a
-  criterion needs login, author the spec but let it land `not_run` with
-  the blocker noted in the report (step 9).
+- **Test credentials (on demand):** request them only when a criterion
+  needs a login — POST the test-credentials endpoint with an optional
+  `role` hint (the role the flow requires):
+
+  ```bash
+  curl -sf -X POST "$AEP_PLATFORM_URL/internal/v1/executions/$AEP_TASK_ID/test-credentials" \
+    -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" \
+    -H "Content-Type: application/json" \
+    --data '{"role":"admin"}' > /tmp/creds.json
+  ```
+
+  The response is `{ "username", "password", "mock": true|false, "note":
+  "..." }`. Export it in-session and never commit it:
+  `export AEP_E2E_USERNAME=… AEP_E2E_PASSWORD=…`. When `mock` is true the
+  account is a shared stand-in (real user provisioning isn't implemented
+  yet) — use it, and state in your PR description and closing comment that
+  auth-gated criteria ran against mock credentials, since such a login may
+  legitimately fail against a generated app that doesn't recognise it.
+  Only if the request itself errors do you let the affected criterion land
+  `not_run`, blocker noted.
 - **Local dev servers (experimental runs only):** if the fetched
   endpoints are `localhost` dev servers you must start (the local
   harness), this overrides the base "never start servers" rule: start
@@ -236,9 +252,9 @@ counts and the PR link.
 - Leave `.only` / `.skip` / `.fixme` in committed specs.
 - Hand-edit `report.md` / `report.json` — regenerate via the script.
 - Commit playwright-cli session state, server logs, `test-results/`,
-  or credentials. Credentials come only from the step-4 validation
-  context (exported in-session as `AEP_E2E_USERNAME` / `AEP_E2E_PASSWORD`,
-  never written to a file); if they're absent and a criterion needs
+  or credentials. Credentials come only from the step-4 test-credentials
+  request (exported in-session as `AEP_E2E_USERNAME` / `AEP_E2E_PASSWORD`,
+  never written to a file); if the request errors and a criterion needs
   login, mark it blocked in an issue comment and let it land `not_run`.
 - Everything in the `aep` skill's deny-list (no default-branch pushes,
   no force-push, one PR, no merging, no repo-settings changes).

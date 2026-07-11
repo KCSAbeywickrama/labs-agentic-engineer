@@ -184,8 +184,9 @@ func rationale(s criteriaSummary) string {
 // renderScope builds the human markdown body of the validation issue — the
 // consumer contract the aep-validation skill reads (acceptance oracle + test
 // layout + report). Deployed endpoints and test credentials are deliberately
-// absent: the runner fetches them from the secure validation-context endpoint,
-// never from this public issue. Mirrors scripts/create-validation-issue.mjs
+// absent: the runner fetches endpoints from the secure validation-context
+// endpoint and requests credentials on demand from the test-credentials
+// endpoint, never from this public issue. Mirrors scripts/create-validation-issue.mjs
 // renderBody minus the Deployed-endpoints section.
 func renderScope(doc *criteriaDoc) string {
 	sum := doc.summarize()

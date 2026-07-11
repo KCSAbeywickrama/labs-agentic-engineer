@@ -746,10 +746,18 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	authn.SetRunnerAuthorizer(authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, executionOrgLookup(db)))
 
 	// Validation-context runner callback: resolves the run's deployed endpoint
-	// URLs (and, later, test credentials) so they never enter the public issue.
+	// URLs so they never enter the public issue.
 	validationContextSvc := validation.NewContextService(
 		validationExecLocator{repo: executionRepo},
 		validationEndpointResolver{store: artifactStore, comp: componentService},
+	)
+	// Test-credentials runner callback: the runner requests a login on demand
+	// (only when a criterion needs one). v1 returns a shared mock account; the
+	// execution→project fence + request contract are what real per-project user
+	// provisioning slots into later.
+	validationCredentialsSvc := validation.NewCredentialService(
+		validationExecLocator{repo: executionRepo},
+		mockValidationCredentials{},
 	)
 
 	// Controllers
@@ -759,8 +767,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// connect-callback + webhook controllers remain raw handlers. Every other
 		// feature registers code-first via params.HumaDeps below.
 		InternalDeps: api.InternalDeps{
-			CredsRefresh:      credRefreshService,
-			ValidationContext: validationContextSvc,
+			CredsRefresh:          credRefreshService,
+			ValidationContext:     validationContextSvc,
+			ValidationCredentials: validationCredentialsSvc,
 		},
 		WebhookController:   webhookCtrl,
 		OrgGitHubController: orgGitHubCtrl,

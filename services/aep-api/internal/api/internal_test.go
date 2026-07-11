@@ -35,6 +35,12 @@ func TestGenerateInternalOpenAPIYAML(t *testing.T) {
 		"runner-refresh-credentials",
 		// Runner S2S re-keyed from task to execution (tasks-github-native §9.2).
 		"/internal/v1/executions/{executionId}/credentials/refresh",
+		// Validation runner callbacks: deployed-endpoint fetch + on-demand
+		// test-credential request.
+		"runner-validation-context",
+		"/internal/v1/executions/{executionId}/validation-context",
+		"runner-validation-credentials",
+		"/internal/v1/executions/{executionId}/test-credentials",
 		"taskJWT",
 		"publisherCC",
 	} {

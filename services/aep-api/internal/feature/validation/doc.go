@@ -23,9 +23,11 @@
 // runner (validation-phase design).
 //
 // This feature does the ISSUE side only. Its runtime inputs — deployed endpoint
-// URLs and test credentials — are never written into the (public) issue; the
-// runner fetches them from the secure validation-context endpoint at dispatch
-// time.
+// URLs and test credentials — are never written into the (public) issue: the
+// runner fetches endpoints from the secure validation-context endpoint and
+// requests test credentials on demand (only when a criterion needs a login)
+// from the sibling test-credentials endpoint (credentials.go). Test credentials
+// are a v1 mock (admin/admin) until real user provisioning exists.
 //
 // Feature-edge allowlist: {gitrepo}. Design + criteria reads are consumer ports
 // (ports.go) satisfied by adapters at the composition root, so this package

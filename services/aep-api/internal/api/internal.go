@@ -54,8 +54,9 @@ func newInternalAPI(internalMux *http.ServeMux) huma.API {
 // fills it with real services; GenerateInternalOpenAPIYAML passes the zero
 // value (nil deps — registration never invokes them).
 type InternalDeps struct {
-	CredsRefresh      orgcreds.CredentialsRefreshService
-	ValidationContext validation.ContextProvider
+	CredsRefresh          orgcreds.CredentialsRefreshService
+	ValidationContext     validation.ContextProvider
+	ValidationCredentials validation.CredentialRequester
 }
 
 // RegisterAllInternal registers every internal S2S operation on the Huma API.
@@ -63,7 +64,7 @@ type InternalDeps struct {
 // spec generator (zero deps).
 func RegisterAllInternal(api huma.API, d InternalDeps) {
 	orgcreds.RegisterInternalCredentials(api, d.CredsRefresh)
-	validation.RegisterInternalValidation(api, d.ValidationContext)
+	validation.RegisterInternalValidation(api, d.ValidationContext, d.ValidationCredentials)
 }
 
 // GenerateInternalOpenAPIYAML builds the internal S2S OpenAPI document and

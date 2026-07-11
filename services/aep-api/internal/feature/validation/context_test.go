@@ -52,10 +52,8 @@ func TestValidationContext_ResolvesEndpoints(t *testing.T) {
 	if len(resp.Endpoints) != 2 || resp.Endpoints[0].Component != "hello-web" {
 		t.Errorf("endpoints = %+v", resp.Endpoints)
 	}
-	// v1: credentials are not yet provisioned (storage is a follow-up).
-	if resp.Credentials != nil {
-		t.Errorf("credentials = %+v; want nil in v1", resp.Credentials)
-	}
+	// Credentials are no longer bundled in the context — the runner requests
+	// them on demand from the sibling test-credentials endpoint.
 	if resp.CriteriaPath != criteriaFilePath {
 		t.Errorf("criteriaPath = %q; want %q", resp.CriteriaPath, criteriaFilePath)
 	}

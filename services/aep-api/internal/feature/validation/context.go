@@ -33,21 +33,14 @@ type ComponentEndpoint struct {
 	URL       string `json:"url"`
 }
 
-// ValidationCredentials is an optional test account for authenticated apps. Nil
-// in v1 (credential storage is a follow-up): the runner then marks auth-gated
-// criteria not_run with the blocker noted in the report.
-type ValidationCredentials struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
 // ValidationContextResponse is the secure runtime-inputs payload the runner
 // fetches at dispatch time (never carried in the public issue): the deployed
-// endpoint URLs, optional test credentials, and the criteria file path.
+// endpoint URLs and the criteria file path. Test credentials are NOT bundled
+// here — the runner requests them on demand (only when a criterion needs a
+// login) from the sibling test-credentials endpoint (credentials.go).
 type ValidationContextResponse struct {
-	Endpoints    []ComponentEndpoint    `json:"endpoints"`
-	Credentials  *ValidationCredentials `json:"credentials"`
-	CriteriaPath string                 `json:"criteriaPath"`
+	Endpoints    []ComponentEndpoint `json:"endpoints"`
+	CriteriaPath string              `json:"criteriaPath"`
 }
 
 // ExecutionLocator resolves a runner's execution id to its project, fenced by
@@ -76,9 +69,9 @@ func NewContextService(execs ExecutionLocator, endpoints EndpointResolver) *Cont
 	return &ContextService{execs: execs, endpoints: endpoints}
 }
 
-// ValidationContext resolves the runtime inputs for a runner's execution:
-// deployed endpoints (required) and test credentials (nil in v1). orgHandle is
-// the verified caller org (the auth layer fences it against the execution).
+// ValidationContext resolves the runtime inputs for a runner's execution: the
+// deployed endpoint URLs. orgHandle is the verified caller org (the auth layer
+// fences it against the execution).
 func (s *ContextService) ValidationContext(ctx context.Context, executionID, orgHandle string) (*ValidationContextResponse, error) {
 	projectID, found, err := s.execs.LookupExecutionProject(ctx, orgHandle, executionID)
 	if err != nil {
@@ -92,10 +85,7 @@ func (s *ContextService) ValidationContext(ctx context.Context, executionID, org
 		return nil, fmt.Errorf("validation context: resolve endpoints: %w", err)
 	}
 	return &ValidationContextResponse{
-		Endpoints: eps,
-		// Credentials storage is a follow-up (secret-manager integration); until
-		// then the runner degrades auth-gated criteria to not_run.
-		Credentials:  nil,
+		Endpoints:    eps,
 		CriteriaPath: criteriaFilePath,
 	}, nil
 }
