@@ -747,6 +747,54 @@ components:
       required:
         - name
       type: object
+    CreateRcaAgentReportRequest:
+      additionalProperties: false
+      description: Write-side request for a new RCA-agent alert report (issue #156). Server assigns id and createdAt.
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/CreateRcaAgentReportRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        classification:
+          description: "code-level, config-level, mixed, or none — set by the handoff agent"
+          type: string
+        component:
+          type: string
+        deployed:
+          type: boolean
+        deployedAt:
+          type: string
+          format: date-time
+        diagnosis:
+          description: Full RCA diagnosis + remediation content (markdown)
+          type: string
+        dispatched:
+          type: boolean
+        issueExcerpt:
+          type: string
+        issueNumber:
+          format: int64
+          type: integer
+        issueTitle:
+          type: string
+        issueUrl:
+          type: string
+        project:
+          type: string
+        summary:
+          type: string
+        title:
+          type: string
+      required:
+        - project
+        - title
+        - summary
+        - classification
+        - diagnosis
+      type: object
     CreateSkillInput:
       additionalProperties: false
       properties:
@@ -1468,6 +1516,89 @@ components:
             type: string
           description: Provisioning parameters (override the design defaults)
           type: object
+      type: object
+    RcaAgentReport:
+      additionalProperties: false
+      description: An RCA report from the OpenChoreo SRE/RCA-agent handoff (console issues #154, #155).
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/RcaAgentReport.json
+          format: uri
+          readOnly: true
+          type: string
+        classification:
+          description: "code-level, config-level, mixed, or none — set by the handoff agent"
+          type: string
+        component:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        deployed:
+          description: Whether the resulting fix has been deployed (Verify Fix threshold, not merely PR-merged)
+          type: boolean
+        deployedAt:
+          type: string
+          format: date-time
+        diagnosis:
+          description: Full RCA diagnosis + remediation content (markdown)
+          type: string
+        dispatched:
+          description: Whether the coding agent has been dispatched for the linked issue (false in issue-only/manual-dispatch mode until a human dispatches)
+          type: boolean
+        id:
+          type: string
+        issueExcerpt:
+          description: Short excerpt of the linked GitHub issue; absent when no issue was created
+          type: string
+        issueNumber:
+          description: GitHub issue number created by the handoff; also the Task key (see /projects/{projectName}/tasks/{issueNumber}); absent when the handoff was config-only
+          format: int64
+          type: integer
+        issueTitle:
+          type: string
+        issueUrl:
+          type: string
+        project:
+          type: string
+        summary:
+          description: Short RCA summary; the console truncates this further for list rows
+          type: string
+        title:
+          type: string
+      required:
+        - id
+        - project
+        - createdAt
+        - title
+        - summary
+        - classification
+        - diagnosis
+        - deployed
+      type: object
+    RcaAgentReportList:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/RcaAgentReportList.json
+          format: uri
+          readOnly: true
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/RcaAgentReport"
+          type:
+            - array
+            - "null"
+        nextCursor:
+          description: Cursor for the next page; absent on the last page.
+          type: string
+      required:
+        - items
       type: object
     SaveValuesBody:
       additionalProperties: false
@@ -3771,6 +3902,97 @@ paths:
       summary: Attach to a turn's event stream (SSE replay + live tail)
       tags:
         - GenAI
+  /rca-agent/reports:
+    get:
+      operationId: list-rca-agent-reports
+      parameters:
+        - description: Opaque pagination cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque pagination cursor
+            type: string
+        - description: Maximum number of items to return (server default when absent)
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Maximum number of items to return (server default when absent)
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RcaAgentReportList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List RCA-agent alert reports across the caller's org, newest first
+      tags:
+        - RcaAgentReports
+    post:
+      operationId: create-rca-agent-report
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRcaAgentReportRequest"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RcaAgentReport"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Record a new RCA-agent alert report (internal/service-authenticated writer; issue #156)
+      tags:
+        - RcaAgentReports
+  /rca-agent/reports/{reportId}:
+    get:
+      operationId: get-rca-agent-report
+      parameters:
+        - description: RCA report id
+          in: path
+          name: reportId
+          required: true
+          schema:
+            description: RCA report id
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RcaAgentReport"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: Get a single RCA-agent alert report
+      tags:
+        - RcaAgentReports
   /skills:
     get:
       operationId: list-skills

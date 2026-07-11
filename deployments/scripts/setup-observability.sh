@@ -72,8 +72,8 @@
 #       patterns then match analysed lowercase tokens — "ERROR" never matches).
 #
 # Knobs (env):
-#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v12).
-#                   handoff-v12 makes every SRE-created issue a well-formed,
+#   RCA_IMAGE_TAG   SRE-agent image tag to import/run (default: handoff-v14).
+#                   handoff-v14 makes every SRE-created issue a well-formed,
 #                   dispatchable AE Task at creation (src/agent/handoff_logic.py):
 #                   it stamps the aep:task/aep:coding/aep:origin/incident labels
 #                   plus the taskmeta block, and normalises the component to AE's
@@ -89,6 +89,12 @@
 #   AE_HANDOFF      enable the RCA→AEP coding-agent handoff (default: true)
 #   AE_AUTO_DISPATCH auto-dispatch the coding agent after issue creation
 #                   (default: true; false = issue-only, human dispatches)
+#   AE_PUBLISH_REPORTS publish each completed RCA report to aep-api so it
+#                   shows in the console Alerts bell/list (default: true;
+#                   handoff-v14+). Needs AEP_API_URL.
+#   AEP_API_URL     aep-api REST base for report publishing
+#                   (default: http://host.k3d.internal:9090). NOT AE_API_URL
+#                   (that is the MCP server on :3401).
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -107,6 +113,12 @@ NS="openchoreo-observability-plane"
 AE_HANDOFF="${AE_HANDOFF:-true}"
 AE_AUTO_DISPATCH="${AE_AUTO_DISPATCH:-true}"
 AE_API_URL="${AE_API_URL:-http://host.k3d.internal:3401}"
+# Report publishing (handoff-v14+): POST each completed RCA report to aep-api
+# so it surfaces in the console Alerts bell/list. AEP_API_URL is aep-api's REST
+# base — DISTINCT from AE_API_URL (the MCP server on :3401); reports go to the
+# HTTP API on :9090.
+AE_PUBLISH_REPORTS="${AE_PUBLISH_REPORTS:-true}"
+AEP_API_URL="${AEP_API_URL:-http://host.k3d.internal:9090}"
 
 echo "=== Installing OpenChoreo Observability Plane ==="
 
@@ -173,17 +185,17 @@ echo "✅ ExternalSecrets applied"
 # loses imported images — this makes the import part of setup). Build once with
 # (repo:tag must match RCA_IMAGE_REPO:RCA_IMAGE_TAG below so this local build is
 # picked up instead of a registry pull):
-#   docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 <openchoreo-repo>/agents/sre-agent
+#   docker build -t tharindulak/openchoreo-sre-agent:handoff-v14 <openchoreo-repo>/agents/sre-agent
 # The agent reads its LLM key + OAuth client secret from the rca-agent-secret
 # Secret (envFrom). RCA_LLM_API_KEY comes from ANTHROPIC_API_KEY in deployments/.env;
 # OAUTH_CLIENT_SECRET must equal the openchoreo-rca-agent client secret registered
 # by the Thunder bootstrap (values-thunder.yaml CONFIDENTIAL_APPS).
 echo ""
 echo "1️⃣b RCA agent image + secret"
-# Preferred tag `handoff-v12` (= RCA_IMAGE_TAG default below) carries the
+# Preferred tag `handoff-v14` (= RCA_IMAGE_TAG default below) carries the
 # Anthropic structured-output fix AND the AEP coding-agent handoff stage
 # (AE_HANDOFF). Resolution order:
-#   1. local build            docker build -t tharindulak/openchoreo-sre-agent:handoff-v12 \
+#   1. local build            docker build -t tharindulak/openchoreo-sre-agent:handoff-v14 \
 #                               <openchoreo-repo>/agents/sre-agent
 #      (preferred — developers iterating on the agent aren't surprised by a
 #       stale registry copy)
@@ -202,8 +214,8 @@ echo "1️⃣b RCA agent image + secret"
 # the fully-qualified name everywhere means a cache-evicted image can always
 # be re-pulled from the real registry — no more silent long-term fragility.
 RCA_IMAGE_REPO="tharindulak/openchoreo-sre-agent"
-RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v12}"
-RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v12}"
+RCA_IMAGE_TAG="${RCA_IMAGE_TAG:-handoff-v14}"
+RCA_IMAGE_PULL="${RCA_IMAGE_PULL:-tharindulak/openchoreo-sre-agent:handoff-v14}"
 if ! docker image inspect "${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG}" >/dev/null 2>&1; then
     echo "   ${RCA_IMAGE_REPO}:${RCA_IMAGE_TAG} not built locally — trying registry ${RCA_IMAGE_PULL}..."
     if docker pull "$RCA_IMAGE_PULL" >/dev/null 2>&1; then
@@ -416,6 +428,8 @@ echo "✅ logs-opensearch ready (incl. logs-adapter)"
 #     AE_HANDOFF               enables the RCA→AEP handoff stage (issue+dispatch)
 #     AE_AUTO_DISPATCH         false ⇒ issue-only; a human dispatches from AEP
 #     AE_API_URL               aep-mcp-server base URL (host.k3d.internal:3401)
+#     AE_PUBLISH_REPORTS       publish RCA reports to aep-api (console Alerts)
+#     AEP_API_URL              aep-api REST base (host.k3d.internal:9090)
 echo ""
 echo "3️⃣b Alert→RCA auto-trigger + AEP handoff wiring"
 kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch cm observer-config --type=merge -p \
@@ -423,9 +437,10 @@ kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch cm observer-config --type=me
 kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout restart deploy/observer
 if [ "$AE_HANDOFF" = "true" ]; then
     kubectl --context "$CLUSTER_CONTEXT" -n "$NS" patch cm rca-agent-config --type=merge -p \
-        "{\"data\":{\"AE_HANDOFF\":\"true\",\"AE_AUTO_DISPATCH\":\"${AE_AUTO_DISPATCH}\",\"AE_API_URL\":\"${AE_API_URL}\"}}"
+        "{\"data\":{\"AE_HANDOFF\":\"true\",\"AE_AUTO_DISPATCH\":\"${AE_AUTO_DISPATCH}\",\"AE_API_URL\":\"${AE_API_URL}\",\"AE_PUBLISH_REPORTS\":\"${AE_PUBLISH_REPORTS}\",\"AEP_API_URL\":\"${AEP_API_URL}\"}}"
     kubectl --context "$CLUSTER_CONTEXT" -n "$NS" rollout restart deploy/ai-rca-agent
     echo "   AE handoff: enabled (auto-dispatch=${AE_AUTO_DISPATCH}, mcp=${AE_API_URL})"
+    echo "   Report publishing: ${AE_PUBLISH_REPORTS} (aep-api=${AEP_API_URL})"
 else
     echo "   AE handoff: disabled (AE_HANDOFF=false)"
 fi
