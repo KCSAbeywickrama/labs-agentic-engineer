@@ -82,8 +82,16 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	// gate — and a pure re-build must not churn a fresh gate for every already-ready
 	// dep. Existing gates are still reconciled by settleReadyGates below, so an
 	// orphaned gate self-heals on ANY later build, drawer or not (issue #164).
+	// gateByDep carries the aep:provision gate issue number the mint step KNOWS for
+	// each dep — captured from the CreateIssue result, not re-looked-up via GitHub's
+	// eventually-consistent label list (which lags a just-created gate and strands
+	// the provision run — issue #164). Empty when no inputs were carried; a missing
+	// dep resolves to 0 (a safe no-op gate).
+	var gateByDep map[string]int
 	if len(inputs) > 0 {
-		if err := s.EnsureProvisionIssues(ctx, orgID, projectID, tag); err != nil {
+		var err error
+		gateByDep, err = s.EnsureProvisionIssues(ctx, orgID, projectID, tag)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -94,13 +102,14 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 		provisioned[strings.ToLower(in.Dependency)] = true
 	}
 	for _, in := range inputs {
+		gate := gateByDep[strings.ToLower(in.Dependency)]
 		switch in.Kind {
 		case buildKindExternalConfig:
-			if err := s.authorExternalWithRef(ctx, orgID, ocOrgID, projectID, in); err != nil {
+			if err := s.authorExternalWithRef(ctx, orgID, ocOrgID, projectID, in, gate); err != nil {
 				failures = append(failures, ProvisionFailure{Component: in.Component, Dependency: in.Dependency, Reason: err.Error()})
 			}
 		case buildKindPlatformResrc:
-			if err := s.Provision(ctx, orgID, projectID, in.Dependency, in.Parameters, nil); err != nil {
+			if err := s.provisionResource(ctx, orgID, projectID, in.Dependency, gate, in.Parameters, nil); err != nil {
 				failures = append(failures, ProvisionFailure{Component: in.Component, Dependency: in.Dependency, Reason: err.Error()})
 			}
 		case buildKindOrgService:
@@ -212,7 +221,7 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 // author OC binding → complete gate row) but authors via AuthorWithSecretRef
 // (the plain config + the staged secretStorePath per env) so no secret value is
 // re-written to SM-API.
-func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, projectID string, in BuildProvisionInput) error {
+func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, projectID string, in BuildProvisionInput, gateNumber int) error {
 	_ = ocOrgID // the author half needs no SM-API write; kept for symmetry with SaveValues.
 	if _, err := s.findDepInProject(ctx, orgID, projectID, in.Dependency, models.DependencyKindExternal); err != nil {
 		return err
@@ -226,10 +235,16 @@ func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, pro
 	}
 	byEnv := preparedEnvValues(in)
 
-	// Admit a provision run for the gate issue (when one exists).
-	issueNumber, _, err := s.findProvisionIssue(ctx, orgID, projectID, in.Dependency)
-	if err != nil {
-		return err
+	// Admit a provision run for the gate issue (when one exists). The build path
+	// threads the KNOWN gate number (from the mint's CreateIssue result) so we skip
+	// GitHub's eventually-consistent label list, which often lags a just-created
+	// gate (issue #164). Fall back to the list lookup only when no number is known
+	// (defends any caller without one).
+	issueNumber := gateNumber
+	if issueNumber == 0 {
+		if issueNumber, _, err = s.findProvisionIssue(ctx, orgID, projectID, in.Dependency); err != nil {
+			return err
+		}
 	}
 	var execID string
 	if issueNumber > 0 {

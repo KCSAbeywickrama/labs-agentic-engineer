@@ -41,24 +41,35 @@ type provisionDep struct {
 // 4: "Planning mints coding issues AND provisioning issues"). The gate issues
 // hold their consumer coding tasks until each derives deployed. Best-effort per
 // issue: a single create failure is logged and does not abort the rest.
-func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) error {
+func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) (map[string]int, error) {
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
-		return fmt.Errorf("provisioning: read design: %w", err)
+		return nil, fmt.Errorf("provisioning: read design: %w", err)
 	}
 	distinct := distinctProvisionDeps(comps)
 	if len(distinct) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	existing, err := s.openProvisionDeps(ctx, orgID, projectID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	// gateByDep maps a lowercased dep name → its OPEN aep:provision gate issue
+	// number, for both pre-existing gates and the ones minted below. The build path
+	// threads these numbers directly into provisioning (read-your-write from the
+	// CreateIssue result) instead of re-looking them up via GitHub's
+	// eventually-consistent label-filtered list, which often lags a just-created
+	// gate (issue #164).
+	gateByDep := make(map[string]int, len(distinct))
+	for key, num := range existing {
+		gateByDep[key] = num
 	}
 
 	var created int
 	for key, dep := range distinct {
-		if existing[key] {
+		if existing[key] > 0 {
 			continue
 		}
 		title := provisionIssueTitle(dep)
@@ -78,16 +89,21 @@ func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, d
 			Body:   body,
 			Labels: taskmeta.NewTaskLabels(taskmeta.ClassProvision, taskmeta.OriginSpecPlan),
 		}
-		if _, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req); cerr != nil {
+		res, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req)
+		if cerr != nil {
 			slog.WarnContext(ctx, "provisioning: create gate issue failed", "dep", dep.name, "error", cerr)
 			continue
+		}
+		// Capture the minted number from the CREATE result — read-your-write, no list.
+		if res != nil {
+			gateByDep[key] = res.Number
 		}
 		created++
 	}
 	if created > 0 {
 		slog.InfoContext(ctx, "provisioning: minted gate issues", "project", projectID, "count", created)
 	}
-	return nil
+	return gateByDep, nil
 }
 
 // distinctProvisionDeps collects the project's distinct external +
@@ -116,14 +132,17 @@ func distinctProvisionDeps(comps []models.DesignComponent) map[string]provisionD
 	return out
 }
 
-// openProvisionDeps returns the set of dependency names (lowercased) that
-// already have an open aep:provision gate issue.
-func (s *Service) openProvisionDeps(ctx context.Context, orgID, projectID string) (map[string]bool, error) {
+// openProvisionDeps returns dependency names (lowercased) that already have an
+// open aep:provision gate issue, mapped to that gate's issue number. Only
+// pre-existing (listable) gates are returned — a JUST-created gate races GitHub's
+// eventually-consistent list, so the build path captures those numbers from the
+// CreateIssue result instead (issue #164).
+func (s *Service) openProvisionDeps(ctx context.Context, orgID, projectID string) (map[string]int, error) {
 	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{taskmeta.LabelMarker})
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: list issues: %w", err)
 	}
-	out := map[string]bool{}
+	out := map[string]int{}
 	for _, issue := range issues {
 		if !strings.EqualFold(issue.State, "open") {
 			continue
@@ -136,7 +155,7 @@ func (s *Service) openProvisionDeps(ctx context.Context, orgID, projectID string
 			continue
 		}
 		if block.Component != "" {
-			out[strings.ToLower(block.Component)] = true
+			out[strings.ToLower(block.Component)] = issue.Number
 		}
 	}
 	return out, nil

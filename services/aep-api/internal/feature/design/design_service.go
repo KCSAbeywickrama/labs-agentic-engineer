@@ -194,7 +194,7 @@ type resourceMarkerCatalog interface {
 // (dependency-management §3.6). *provisioning.Service satisfies it. Wired via
 // SetProvisionIssueMinter at the composition root; nil is a no-op.
 type provisionIssueMinter interface {
-	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) error
+	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) (map[string]int, error)
 }
 
 // externalResourceRegistrar is design_service's narrow consumer port for the
@@ -809,7 +809,7 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 	// dependency so consumer coding tasks hold until each is provisioned
 	// (best-effort; never fails the save).
 	if s.provisionMinter != nil {
-		if merr := s.provisionMinter.EnsureProvisionIssues(ctx, orgID, projectID, res.Tag); merr != nil {
+		if _, merr := s.provisionMinter.EnsureProvisionIssues(ctx, orgID, projectID, res.Tag); merr != nil {
 			slog.WarnContext(ctx, "provision issue minting after design save failed", "error", merr)
 		}
 	}

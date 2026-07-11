@@ -101,7 +101,7 @@ func (s *Service) ensureConsumerVisibilityGate(ctx context.Context, orgID, consu
 	if err != nil {
 		return err
 	}
-	if existing[strings.ToLower(dep)] {
+	if existing[strings.ToLower(dep)] > 0 {
 		return nil // an open visibility/provision gate already holds this dep
 	}
 	title := fmt.Sprintf("Awaiting org-service `%s`: provider must publish org-wide", dep)

@@ -93,6 +93,51 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 	}
 }
 
+// TestProvisionForBuild_UsesMintedGateDespiteListRace is the #164 race regression:
+// EnsureProvisionIssues CREATES the gate, but GitHub's label-filtered issue LIST is
+// eventually consistent — a just-minted gate is often NOT yet in ListIssues. The old
+// code re-looked-up the gate via that racy list (findProvisionIssue → 0) so NO
+// provision run was admitted: the OC binding got authored Ready but the gate was
+// never completed → stranded Pending forever. The fix threads the gate number the
+// CreateIssue result RETURNS. Here the fake hides just-created issues from ListIssues
+// (simulating the lag); the external gate must STILL be admitted+completed via the
+// captured number.
+func TestProvisionForBuild_UsesMintedGateDespiteListRace(t *testing.T) {
+	issues := newFakeIssues(nil)
+	issues.raceNewIssues = true // just-minted gates are invisible to ListIssues (the race)
+	execs := &fakeExecStore{}
+	reeval := &fakeReeval{}
+	ext := &fakeExtProv{}
+	plat := &fakePlatProv{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	}}
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config",
+			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"development": "sm://x"}},
+	})
+	if err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if len(fails) != 0 {
+		t.Fatalf("want no failures, got %+v", fails)
+	}
+	// The external gate was minted (its number came back from CreateIssue) even though
+	// ListIssues would not return it — it MUST be admitted+completed via that number.
+	extGate := gateNumber(issues, "stripe")
+	if extGate == 0 {
+		t.Fatalf("gate must have been minted")
+	}
+	if _, closed := issues.closed[extGate]; !closed {
+		t.Fatalf("external gate #%d must be completed via the minted number despite the list race", extGate)
+	}
+	if r := provisionRowFor(execs, "stripe"); r == nil || r.Status != string(taskmeta.ExecSucceeded) {
+		t.Fatalf("a succeeded provision run must be admitted+completed via the captured gate number, got %+v", r)
+	}
+}
+
 // TestProvisionForBuild_ExternalAuthorFailureContinues pins the batch semantics:
 // a per-input author error becomes a ProvisionFailure (data, not an activity
 // error) and the batch continues to the remaining inputs.
