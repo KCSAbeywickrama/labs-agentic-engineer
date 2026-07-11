@@ -17,13 +17,12 @@
  */
 
 import { useMemo } from "react";
-import { Alert, Box, Chip, Link, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Chip, Typography } from "@wso2/oxygen-ui";
 import {
   parseComponentDesign,
   type ComponentDesign,
   type Dependency,
 } from "./parse.js";
-import { safeHref } from "./url.js";
 
 // Solid background per component type / dependency kind. Text color is
 // computed for contrast (getContrastText), so labels stay readable in both
@@ -74,12 +73,16 @@ function SolidBadge({ label, color }: { label: string; color: string }) {
   );
 }
 
-const mono = { fontFamily: "monospace", fontSize: "0.8125rem" } as const;
+const mono = { fontFamily: "monospace", fontSize: "0.875rem" } as const;
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <Box sx={{ display: "flex", gap: 1, alignItems: "baseline" }}>
-      <Typography variant="caption" color="text.secondary" sx={{ minWidth: 84 }}>
+    <Box sx={{ display: "flex", gap: 2, alignItems: "baseline" }}>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ minWidth: 96, flexShrink: 0 }}
+      >
         {label}
       </Typography>
       <Typography component="span" sx={mono}>
@@ -94,43 +97,19 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
     <Typography
       variant="overline"
       color="text.secondary"
-      sx={{ display: "block", mt: 3, mb: 1 }}
+      sx={{ display: "block", mt: 3, mb: 1, fontWeight: 700, letterSpacing: "0.08em" }}
     >
       {children}
     </Typography>
   );
 }
 
-// A small quiet monospace pill for an inline tag (resourceType, needsSpec, …).
-function Tag({ label }: { label: string }) {
-  return (
-    <Box
-      component="span"
-      sx={{
-        display: "inline-flex",
-        alignItems: "center",
-        px: 0.75,
-        py: "1px",
-        borderRadius: 999,
-        border: 1,
-        borderColor: "divider",
-        bgcolor: "action.hover",
-        color: "text.secondary",
-        fontFamily: "monospace",
-        fontSize: "0.6875rem",
-        lineHeight: 1.4,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </Box>
-  );
-}
-
+// A dependency reads as: what kind it is (the badge), its name, and a
+// one-line description. The authored config/resourceType/spec/parameters are
+// deliberately not surfaced here — they are integration detail, not design.
 function DependencyCard({ dep }: { dep: Dependency }) {
   const color = KIND_COLOR[dep.kind] ?? FALLBACK;
   const kindLabel = KIND_LABEL[dep.kind] ?? dep.kind;
-  const specHref = safeHref(dep.specUrl);
   return (
     <Box
       sx={{
@@ -146,67 +125,11 @@ function DependencyCard({ dep }: { dep: Dependency }) {
         <Typography component="span" sx={{ ...mono, fontWeight: 600 }}>
           {dep.name}
         </Typography>
-        {dep.resourceType && <Tag label={dep.resourceType} />}
-        {dep.needsSpec && <Tag label="needsSpec" />}
-        {dep.parameters &&
-          Object.entries(dep.parameters).map(([k, v]) => (
-            <Tag key={k} label={`${k}=${String(v)}`} />
-          ))}
       </Box>
       {dep.description && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
           {dep.description}
         </Typography>
-      )}
-      {dep.specPath && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-          spec: <Box component="span" sx={mono}>{dep.specPath}</Box>
-        </Typography>
-      )}
-      {dep.specUrl && (
-        <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
-          spec:{" "}
-          {specHref ? (
-            <Link href={specHref} target="_blank" rel="noreferrer" sx={mono}>
-              {dep.specUrl}
-            </Link>
-          ) : (
-            <Box component="span" sx={mono}>
-              {dep.specUrl}
-            </Box>
-          )}
-        </Typography>
-      )}
-      {dep.config && dep.config.length > 0 && (
-        <Box sx={{ mt: 0.5, display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-          {dep.config.map((c, i) => {
-            const notes = [c.secret ? "secret" : null, c.credentialClass ?? null]
-              .filter(Boolean)
-              .join(" · ");
-            return (
-              <Tag key={`${c.key}:${i}`} label={notes ? `${c.key} (${notes})` : c.key} />
-            );
-          })}
-        </Box>
-      )}
-      {dep.candidates && dep.candidates.length > 0 && (
-        <Box sx={{ mt: 0.5 }}>
-          {dep.candidates.map((cand, i) => {
-            const candHref = safeHref(cand.url);
-            return (
-              <Typography key={`${cand.label}:${i}`} variant="caption" sx={{ display: "block" }}>
-                {candHref ? (
-                  <Link href={candHref} target="_blank" rel="noreferrer">
-                    {cand.label}
-                  </Link>
-                ) : (
-                  cand.label
-                )}
-                {cand.description ? ` — ${cand.description}` : ""}
-              </Typography>
-            );
-          })}
-        </Box>
       )}
     </Box>
   );
@@ -214,31 +137,30 @@ function DependencyCard({ dep }: { dep: Dependency }) {
 
 function DesignBody({ design }: { design: ComponentDesign }) {
   const typeColor = TYPE_COLOR[design.type] ?? FALLBACK;
-  const facets = [design.language, design.buildpack, design.exposure]
-    .filter(Boolean)
-    .join("  ·  ");
   return (
     <Box sx={{ height: "100%", overflow: "auto", p: 3 }}>
       <Box sx={{ maxWidth: 960, mx: "auto" }}>
-        {/* Header */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-          <Typography variant="h4">{design.name || "component"}</Typography>
-          {design.type && <SolidBadge label={design.type} color={typeColor} />}
-          {design.version && (
-            <Chip label={`v${design.version}`} size="small" variant="outlined" />
-          )}
-        </Box>
-        {facets && (
-          <Typography color="text.secondary" sx={{ mt: 0.5, ...mono }}>
-            {facets}
-          </Typography>
+        {/* Header bar — type + version sit above the name as an eyebrow row */}
+        {(design.type || design.version) && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            {design.type && <SolidBadge label={design.type} color={typeColor} />}
+            {design.version && (
+              <Chip label={`v${design.version}`} size="small" variant="outlined" />
+            )}
+          </Box>
         )}
+        <Typography variant="h4" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+          {design.name || "component"}
+        </Typography>
 
-        {/* Facts */}
+        {/* Facts — each labeled so a bare value like "docker" isn't ambiguous */}
         <Box sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 0.5 }}>
-          {design.appPath && <Fact label="appPath" value={design.appPath} />}
-          {design.entrypoint && <Fact label="entrypoint" value={design.entrypoint} />}
-          {design.endpoint && <Fact label="endpoint" value={design.endpoint.name} />}
+          {design.language && <Fact label="Language" value={design.language} />}
+          {design.buildpack && <Fact label="Buildpack" value={design.buildpack} />}
+          {design.exposure && <Fact label="Exposure" value={design.exposure} />}
+          {design.appPath && <Fact label="App path" value={design.appPath} />}
+          {design.entrypoint && <Fact label="Entrypoint" value={design.entrypoint} />}
+          {design.endpoint && <Fact label="Endpoint" value={design.endpoint.name} />}
         </Box>
 
         {/* Description */}
@@ -248,18 +170,6 @@ function DesignBody({ design }: { design: ComponentDesign }) {
             <Typography variant="body1" color="text.secondary">
               {design.description}
             </Typography>
-          </>
-        )}
-
-        {/* Skills applied */}
-        {design.skillsApplied && design.skillsApplied.length > 0 && (
-          <>
-            <SectionHeading>Skills applied</SectionHeading>
-            <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-              {design.skillsApplied.map((s, i) => (
-                <Chip key={`${s}:${i}`} label={s} size="small" />
-              ))}
-            </Box>
           </>
         )}
 
