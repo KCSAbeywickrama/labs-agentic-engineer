@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { parseSseStream } from "@aep/agent-stream";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
+import { timelineEventKey } from "../lib/timeline";
 
 type TaskStreamEvent = components["schemas"]["TaskStreamEvent"];
 type TaskView = components["schemas"]["TaskView"];
@@ -31,7 +32,7 @@ export type TaskLogPhase = "connecting" | "live" | "reconnecting" | "ended";
 export interface TaskLogState {
   /** Live task upserted from `task` frames (fresher than get-task). */
   task: TaskView | undefined;
-  /** Unified timeline, deduped by executionId+seq (reconnects re-emit). */
+  /** Unified timeline, deduped by timelineEventKey (reconnects re-emit). */
   lines: TimelineEvent[];
   /** Every attempt, upserted from `execution` frames (first appearance order).
    * Drives the waiting-state affordance (is an attempt still running?) while the
@@ -128,7 +129,7 @@ export function useTaskLog(
           case "line": {
             const line = event.line;
             if (!line) break;
-            const key = `${line.executionId}:${line.seq}`;
+            const key = timelineEventKey(line);
             if (seen.current.has(key)) break;
             seen.current.add(key);
             setLines((prev) => [...prev, line]);

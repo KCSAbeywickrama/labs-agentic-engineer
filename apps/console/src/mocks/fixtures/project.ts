@@ -6,6 +6,7 @@ type ComponentOpenAPI = components["schemas"]["ComponentOpenAPI"];
 type TaskView = components["schemas"]["TaskView"];
 type TagList = components["schemas"]["TagList"];
 type BuildList = components["schemas"]["BuildList"];
+type DeploymentList = components["schemas"]["DeploymentList"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ErrorModel = components["schemas"]["ErrorModel"];
@@ -223,13 +224,32 @@ const builtComponents: ComponentList = {
   ],
 };
 
-const deployedComponents: ComponentList = {
-  items: (builtComponents.items ?? []).map((c) =>
-    c.type === "web-application"
-      ? { ...c, endpointUrl: "https://storefront.dev.acme-aep.io" }
-      : c,
-  ),
-};
+// Note: no endpointUrl on the components themselves — the real backend never
+// fills Component.endpointUrl (noted drift, #196); the console reads a web
+// app's URL from list-deployments (componentDeployments below).
+const deployedComponents: ComponentList = builtComponents;
+
+// Deployments backing list-deployments (#196): the deployed scenario gives
+// the web app its dev binding URL (matching the pre-#196 fixture semantics);
+// earlier scenarios have no resolved URL yet.
+export function componentDeployments(
+  s: Exclude<ProjectScenario, "error">,
+  componentName: string,
+): DeploymentList {
+  if (s === "deployed" && componentName === "storefront") {
+    return {
+      items: [
+        {
+          componentName,
+          environment: "development",
+          status: "Ready",
+          endpointUrl: "https://storefront.dev.acme-aep.io",
+        },
+      ],
+    };
+  }
+  return { items: [] };
+}
 
 // The OpenAPI contract served by GET .../components/:name/openapi — a
 // `{ spec }` envelope carrying a raw document, exactly as aep-api returns it
