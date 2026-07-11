@@ -1,0 +1,22 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"],
+    // Vendored in-house from @kanushka/cell-diagram-react and kept byte-identical
+    // to upstream so it can be re-synced. Upstream was authored without these two
+    // (stricter-than-default) repo-wide flags, so they're scoped off here rather
+    // than rewriting library internals. Re-enable if this package is forked for real.
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    // Consumed as source (main = src/index.ts); no published .d.ts, so declaration
+    // emit is off — this also avoids TS2742 portability checks on inferred vitest
+    // spy types in the vendored tests.
+    "declaration": false,
+    "declarationMap": false,
+    "outDir": "dist",
+    "noEmit": false
+  },
+  "include": ["src"]
+}
