@@ -36,6 +36,7 @@ import {
   rejectAll,
   rejectRange,
 } from "./agentReview";
+import { SpecMdToolbar } from "./SpecMdToolbar";
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
 // The shared source of truth is the file's Y.XmlFragment (seeded server-side
@@ -82,54 +83,65 @@ export function SpecMdEditor({
 
   return (
     <Box>
-      {pending > 0 && (
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={1}
+      {editor && (
+        <Box
           sx={{
             // Floats over the doc while scrolling (the spec content pane is
-            // the scrollport) so Accept/Reject stays reachable mid-review.
+            // the scrollport) so formatting — and Accept/Reject when agent
+            // suggestions are pending — stays reachable mid-document (#206).
             position: "sticky",
             top: 0,
             zIndex: 2,
             mb: 1,
-            px: 1.5,
-            py: 0.75,
-            borderRadius: 1,
-            boxShadow: 1,
-            // The Oxygen paper color is translucent (acrylic); the blur keeps
-            // the floating bar readable over the document text behind it.
-            bgcolor: "background.paper",
-            backdropFilter: "blur(8px)",
-            backgroundImage: (theme) =>
-              `linear-gradient(${alpha(theme.palette.primary.main, 0.08)}, ${alpha(
-                theme.palette.primary.main,
-                0.08,
-              )})`,
           }}
         >
-          <Sparkles size={16} />
-          <Typography variant="body2" sx={{ flexGrow: 1 }}>
-            {pending} agent suggestion{pending === 1 ? "" : "s"} pending review
-          </Typography>
-          <Button
-            size="small"
-            color="inherit"
-            startIcon={<X size={14} />}
-            onClick={() => editor && rejectAll(editor)}
-          >
-            Reject all
-          </Button>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Check size={14} />}
-            onClick={() => editor && acceptAll(editor)}
-          >
-            Accept all
-          </Button>
-        </Stack>
+          <SpecMdToolbar editor={editor} />
+          {pending > 0 && (
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{
+                mt: 0.5,
+                px: 1.5,
+                py: 0.75,
+                borderRadius: 1,
+                boxShadow: 1,
+                // The Oxygen paper color is translucent (acrylic); the blur
+                // keeps the floating bar readable over the document text
+                // behind it.
+                bgcolor: "background.paper",
+                backdropFilter: "blur(8px)",
+                backgroundImage: (theme) =>
+                  `linear-gradient(${alpha(theme.palette.primary.main, 0.08)}, ${alpha(
+                    theme.palette.primary.main,
+                    0.08,
+                  )})`,
+              }}
+            >
+              <Sparkles size={16} />
+              <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                {pending} agent suggestion{pending === 1 ? "" : "s"} pending review
+              </Typography>
+              <Button
+                size="small"
+                color="inherit"
+                startIcon={<X size={14} />}
+                onClick={() => rejectAll(editor)}
+              >
+                Reject all
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Check size={14} />}
+                onClick={() => acceptAll(editor)}
+              >
+                Accept all
+              </Button>
+            </Stack>
+          )}
+        </Box>
       )}
       {editor && (
         <BubbleMenu

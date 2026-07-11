@@ -83,6 +83,11 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Spec view — formatting toolbar for the markdown editor: sticky StarterKit
+  control set (marks, block-type dropdown, lists, quote/code, Yjs undo/redo)
+  above SpecMdEditor for all md spec files —
+  [#206](https://github.com/wso2/labs-agentic-engineer/issues/206)
+
 - Overview Components table — web apps get their "Open app" URL, console-side:
   each web-application row reads its dev deployment's `endpointUrl` from the
   existing `list-deployments` endpoint (no BE change; `Component.endpointUrl`
