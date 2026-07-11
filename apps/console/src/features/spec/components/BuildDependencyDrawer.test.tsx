@@ -33,7 +33,7 @@ const ITEMS: PreflightItem[] = [
     kind: "external-config",
     description: "Stripe API credentials",
     config: [
-      { key: "STRIPE_API_KEY", secret: true },
+      { key: "STRIPE_API_KEY", secret: true, description: "Your Stripe secret API key" },
       { key: "STRIPE_WEBHOOK_ID", secret: false },
     ],
   },
@@ -146,6 +146,14 @@ describe("BuildDependencyDrawer", () => {
     });
 
     expect(continueButton).toBeEnabled();
+  });
+
+  it("renders a config key's description as helper text under the field", () => {
+    setup();
+
+    expect(
+      screen.getByText(/Your Stripe secret API key/i),
+    ).toBeInTheDocument();
   });
 
   it("masks secret config fields as password inputs", () => {

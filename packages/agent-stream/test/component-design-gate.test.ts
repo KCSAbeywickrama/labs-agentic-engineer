@@ -74,22 +74,21 @@ test("rejects an endpoint block with an unknown key", () => {
   assert.equal(problem?.code, "SCHEMA_VIOLATION");
 });
 
-// --- config credentialClass is a closed vocabulary (secret | publishable) ----
+// --- config keys carry an optional description ------------------------------
 
 const dep = (config: unknown) => ({ kind: "external", name: "stripe", config });
 
-for (const credentialClass of ["secret", "publishable"]) {
-  test(`accepts config credentialClass ${JSON.stringify(credentialClass)}`, () => {
-    const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass }])] });
-    assert.equal(checkComponentDesign(PATH, doc), null);
+test("accepts a config key with an optional description", () => {
+  const doc = design({
+    dependencies: [dep([{ key: "STRIPE_API_KEY", secret: true, description: "Your Stripe secret API key" }])],
   });
-}
+  assert.equal(checkComponentDesign(PATH, doc), null);
+});
 
-test("rejects an off-vocabulary config credentialClass", () => {
-  const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass: "private" }])] });
+test("rejects an unknown key on a config entry (e.g. the retired credentialClass)", () => {
+  const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass: "secret" }])] });
   const problem = checkComponentDesign(PATH, doc);
   assert.equal(problem?.code, "SCHEMA_VIOLATION");
-  assert.match(problem!.message, /credentialClass/);
 });
 
 // --- buildpack is pinned to "docker" (agent write-gate only; see the .refine) -

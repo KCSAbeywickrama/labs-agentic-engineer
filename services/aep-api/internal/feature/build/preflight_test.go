@@ -81,14 +81,15 @@ func TestPreflight_ItemsPerKind(t *testing.T) {
 	require.False(t, present)
 }
 
-// The external-config item's Config carries key/secret VIEWS only — never
-// values (there are none to leak on a Dependency, but the shape must stay
-// key/secret-only so a future value-bearing field never rides along).
-func TestPreflight_ExternalConfigItem_CarriesKeySecretViewsOnly(t *testing.T) {
+// The external-config item's Config carries key/secret/description VIEWS only —
+// never values (there are none to leak on a Dependency, but the shape must stay
+// value-free so a future value-bearing field never rides along). The optional
+// per-key description threads through so the drawer can render it as a hint.
+func TestPreflight_ExternalConfigItem_CarriesKeySecretDescriptionViewsOnly(t *testing.T) {
 	comps := []models.DesignComponent{{Name: "orders", ComponentType: models.ComponentTypeService,
 		Dependencies: []models.Dependency{
 			{Kind: models.DependencyKindExternal, Name: "stripe",
-				Config: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true}, {Key: "STRIPE_ORG", Secret: false}}},
+				Config: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true, Description: "Your Stripe secret API key"}, {Key: "STRIPE_ORG", Secret: false}}},
 		}}}
 	svc := NewPreflightService(PreflightDeps{Design: fakeDesign{comps: comps}, Status: fakeStatus{}})
 	pf, err := svc.Preflight(context.Background(), "acme", "shop")
@@ -96,7 +97,7 @@ func TestPreflight_ExternalConfigItem_CarriesKeySecretViewsOnly(t *testing.T) {
 	require.Len(t, pf.Items, 1)
 	item := pf.Items[0]
 	require.Equal(t, "external-config", item.Kind)
-	require.Equal(t, []ConfigKeyView{{Key: "STRIPE_KEY", Secret: true}, {Key: "STRIPE_ORG", Secret: false}}, item.Config)
+	require.Equal(t, []ConfigKeyView{{Key: "STRIPE_KEY", Secret: true, Description: "Your Stripe secret API key"}, {Key: "STRIPE_ORG", Secret: false}}, item.Config)
 }
 
 // A platform-resource item carries its ResourceType + Parameters through —

@@ -49,12 +49,13 @@ type ProvisionStatusReader interface {
 // --- wire shapes (names drive the generated schema names — keep them exactly
 // --- BuildPreflight / PreflightItem / ConfigKeyView) ------------------------
 
-// ConfigKeyView is the key/secret-only view of an external dependency's
-// config schema — never values. Mirrors models.ConfigKey minus CredentialClass
-// (the drawer only needs to know which fields are secret-routed).
+// ConfigKeyView is the key/secret view of an external dependency's config
+// schema — never values. Mirrors models.ConfigKey: the drawer needs the key,
+// whether it is secret-routed, and the optional description to render as a hint.
 type ConfigKeyView struct {
-	Key    string `json:"key"`
-	Secret bool   `json:"secret"`
+	Key         string `json:"key"`
+	Secret      bool   `json:"secret"`
+	Description string `json:"description,omitempty"`
 }
 
 // PreflightItem is one drawer entry: a single dependency (or one facet of a
@@ -220,7 +221,7 @@ func toConfigKeyViews(keys []models.ConfigKey) []ConfigKeyView {
 	}
 	out := make([]ConfigKeyView, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, ConfigKeyView{Key: k.Key, Secret: k.Secret})
+		out = append(out, ConfigKeyView{Key: k.Key, Secret: k.Secret, Description: k.Description})
 	}
 	return out
 }

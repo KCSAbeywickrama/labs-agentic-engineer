@@ -38,22 +38,13 @@ import type { Equal } from "./type-equal.js";
 // in-turn instead of committing a design.json the tag-time save gate 422s.
 
 // One env-var key the component reads at runtime (mirrors Go models.ConfigKey).
-// credentialClass is a CLOSED vocabulary (the skill fixes it to secret |
-// publishable): "secret" routes the value through the private secret path,
-// "publishable" is non-sensitive config. An off-vocabulary value must reject
-// HERE so the agent self-corrects in-turn instead of committing config the
-// value-collection gate can't route.
+// `secret: true` routes the value through the private secret path. `description`
+// is an optional human-readable note (what the value is for) the Build
+// dependency drawer renders under the field.
 const configKeySchema = z.strictObject({
   key: z.string().min(1),
   secret: z.boolean().optional(),
-  credentialClass: z.enum(["secret", "publishable"]).optional(),
-});
-
-// One option attached to an ambiguous dependency (mirrors Go models.DependencyCandidate).
-const dependencyCandidateSchema = z.strictObject({
-  label: z.string().min(1),
   description: z.string().optional(),
-  url: z.string().optional(),
 });
 
 // One unified, kind-discriminated dependency edge — the successor to the legacy
@@ -75,7 +66,6 @@ const dependencySchema = z.strictObject({
   // is marshalled verbatim into the OpenChoreo Resource spec.parameters, so a
   // number must survive as a JSON number for CRD validation to pass.
   parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  candidates: z.array(dependencyCandidateSchema).optional(),
 });
 
 // The component's single network endpoint (mirrors Go models.ComponentEndpoint).

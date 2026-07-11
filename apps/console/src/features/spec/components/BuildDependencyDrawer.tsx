@@ -142,6 +142,7 @@ function ExternalConfigPanel({
           type={configKey.secret ? "password" : "text"}
           value={state.values[configKey.key] ?? ""}
           onChange={(e) => onChange(configKey.key, e.target.value)}
+          helperText={configKey.description || undefined}
           fullWidth
           size="small"
         />

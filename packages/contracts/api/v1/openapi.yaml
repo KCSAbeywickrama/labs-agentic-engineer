@@ -492,7 +492,7 @@ components:
     ConfigKeyDTO:
       additionalProperties: false
       properties:
-        credentialClass:
+        description:
           type: string
         key:
           type: string
@@ -505,6 +505,8 @@ components:
     ConfigKeyView:
       additionalProperties: false
       properties:
+        description:
+          type: string
         key:
           type: string
         secret:
