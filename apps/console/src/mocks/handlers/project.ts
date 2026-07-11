@@ -1,5 +1,6 @@
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
+  componentDeployments,
   componentOpenApi,
   projectBuilds,
   projectComponents,
@@ -54,6 +55,12 @@ export const projectHandlers = [
   http.get(
     "*/api/v1/projects/:projectName/components/:componentName/openapi",
     ({ params }) => respond(() => componentOpenApi(String(params.componentName))),
+  ),
+  // A web app's dev deployment URL for the overview's "Open app" link (#196).
+  http.get(
+    "*/api/v1/projects/:projectName/components/:componentName/deployments",
+    ({ params }) =>
+      respond((s) => componentDeployments(s, String(params.componentName))),
   ),
   http.get("*/api/v1/projects/:projectName/tasks", ({ request }) => {
     // ?tag=vN scopes to one build's lineage, mirroring the aep:spec/<tag>

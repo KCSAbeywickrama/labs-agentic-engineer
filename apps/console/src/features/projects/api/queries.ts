@@ -26,6 +26,7 @@ import {
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { useConfig } from "../../settings/api/queries";
+import { firstEndpointUrl } from "../lib/deploymentUrl";
 import { projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
@@ -148,6 +149,32 @@ export function useProjectComponents(projectName: string) {
       }),
     "components",
   );
+}
+
+// A web app's public URL (#196): read from its deployments — the dev
+// binding's resolved endpointUrl rides on list-deployments, while
+// list-components never fills Component.endpointUrl (noted contract drift).
+// Fetched only for web-application rows; refreshes with the components list
+// (same no-standing-interval regime — a deploy transition invalidates both).
+export function useComponentEndpointUrl(
+  projectName: string,
+  componentName: string,
+) {
+  return useQuery({
+    queryKey: projectKeys.componentDeployments(projectName, componentName),
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/components/{componentName}/deployments",
+        { params: { path: { projectName, componentName } } },
+      );
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(e?.detail ?? e?.title ?? "Failed to load deployments");
+      }
+      return data;
+    },
+    select: (data) => firstEndpointUrl(data.items),
+  });
 }
 
 // A service component's OpenAPI contract, for the in-app viewer dialog. Lazy
