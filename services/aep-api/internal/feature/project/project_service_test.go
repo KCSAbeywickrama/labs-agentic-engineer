@@ -193,7 +193,7 @@ func TestListProjects_TranslatesOCError(t *testing.T) {
 			return nil, openchoreo.ErrNotFound
 		},
 	}
-	svc := NewProjectService(oc, nil, nil, nil, nil, nil)
+	svc := NewProjectService(oc, nil, nil, nil, nil)
 	if _, err := svc.ListProjects(context.Background(), "acme", 100, "", ""); !errors.Is(err, ErrProjectNotFound) {
 		t.Fatalf("want ErrProjectNotFound, got %v", err)
 	}
@@ -210,7 +210,7 @@ func TestListProjects_SearchFiltersPageCaseInsensitive(t *testing.T) {
 			}, NextCursor: "tok-2"}, nil
 		},
 	}
-	svc := NewProjectService(oc, nil, nil, nil, nil, nil)
+	svc := NewProjectService(oc, nil, nil, nil, nil)
 	list, err := svc.ListProjects(context.Background(), "acme", 100, "", "bIlLiNg")
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
@@ -235,7 +235,7 @@ func TestListProjects_SurfacesNextCursorAndPassesParams(t *testing.T) {
 			return &models.ProjectList{Items: []models.Project{{Name: "a"}}, NextCursor: "next-tok"}, nil
 		},
 	}
-	svc := NewProjectService(oc, nil, nil, nil, nil, nil)
+	svc := NewProjectService(oc, nil, nil, nil, nil)
 	list, err := svc.ListProjects(context.Background(), "acme", 42, "cur-1", "")
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
@@ -272,7 +272,7 @@ func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := NewProjectService(oc, repoSvc, nil, nil, nil, nil)
+	svc := NewProjectService(oc, repoSvc, nil, nil, nil)
 
 	list, err := svc.ListProjects(context.Background(), "acme", 100, "", "")
 	if err != nil {
@@ -317,7 +317,7 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 	webhooks := &fakeWebhookSvc{}
 	skills := &fakeSkillsProvisioner{called: make(chan string, 1)}
 
-	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil, nil)
+	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil)
 	svc.SetSkillsProvisioner(skills)
 
 	p, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"})
@@ -357,7 +357,7 @@ func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
 			return &models.GitRepository{Status: "ready"}, nil
 		},
 	}
-	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{}, nil, nil, nil)
+	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{}, nil, nil)
 
 	req := &models.CreateProjectRequest{Name: "gym", RepoName: "gym-repo", Prompt: "a workout tracker"}
 	if _, err := svc.CreateProject(context.Background(), "acme", req); err != nil {
@@ -403,7 +403,7 @@ func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
 			svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
 				t.Error("webhook must not be registered when the repo conflicts")
 				return nil, nil
-			}}, nil, nil, nil)
+			}}, nil, nil)
 
 			req := &models.CreateProjectRequest{Name: "gym", RepoName: tc.repoName}
 			_, err := svc.CreateProject(context.Background(), "acme", req)
@@ -428,7 +428,7 @@ func TestCreateProject_OCErrorShortCircuits(t *testing.T) {
 	svc := NewProjectService(oc, &fakeRepoSvc{}, &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
 		t.Error("webhook must not be registered when OC create fails")
 		return nil, nil
-	}}, nil, nil, nil)
+	}}, nil, nil)
 
 	if _, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"}); !errors.Is(err, openchoreo.ErrConflict) {
 		t.Fatalf("want the OC conflict error surfaced, got %v", err)
@@ -448,7 +448,7 @@ func TestCreateProject_RepoFailureIsBestEffort(t *testing.T) {
 		},
 	}
 	webhooks := &fakeWebhookSvc{}
-	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil, nil)
+	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil)
 
 	p, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"})
 	if err != nil || p == nil {
@@ -474,7 +474,7 @@ func TestCreateProject_WebhookFailureIsBestEffort(t *testing.T) {
 	webhooks := &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
 		return nil, errors.New("hook API 500")
 	}}
-	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil, nil)
+	svc := NewProjectService(oc, repoSvc, webhooks, nil, nil)
 
 	if _, err := svc.CreateProject(context.Background(), "acme", &models.CreateProjectRequest{Name: "web"}); err != nil {
 		t.Fatalf("webhook failure must not fail project creation: %v", err)
@@ -497,7 +497,7 @@ func TestDeleteProject_CleansUpRepoAndPurgesExecutions(t *testing.T) {
 		return nil
 	}}
 	execs := &fakeExecs{}
-	svc := NewProjectService(oc, repoSvc, nil, nil, nil, execs)
+	svc := NewProjectService(oc, repoSvc, nil, nil, execs)
 
 	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -521,7 +521,7 @@ func TestDeleteProject_ExecutionsPurgeFailureIsSwallowed(t *testing.T) {
 	execs := &fakeExecs{DeleteByProjectFunc: func(context.Context, string, string) error {
 		return errors.New("db down")
 	}}
-	svc := NewProjectService(oc, nil, nil, nil, nil, execs)
+	svc := NewProjectService(oc, nil, nil, nil, execs)
 	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("executions purge failure must be best-effort, got %v", err)
 	}
@@ -540,7 +540,7 @@ func TestDeleteProject_OCErrorSkipsCleanup(t *testing.T) {
 		t.Error("executions purge must not run when the OC delete failed")
 		return nil
 	}}
-	svc := NewProjectService(oc, repoSvc, nil, nil, nil, execs)
+	svc := NewProjectService(oc, repoSvc, nil, nil, execs)
 	if err := svc.DeleteProject(context.Background(), "acme", "web"); !errors.Is(err, ErrProjectNotFound) {
 		t.Fatalf("want ErrProjectNotFound, got %v", err)
 	}
@@ -557,7 +557,7 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 	repoSvc := &fakeRepoSvc{DeleteRepoFunc: func(context.Context, string, string) error {
 		return errors.New("fs error")
 	}}
-	svc := NewProjectService(oc, repoSvc, nil, nil, nil, &fakeExecs{})
+	svc := NewProjectService(oc, repoSvc, nil, nil, &fakeExecs{})
 	if err := svc.DeleteProject(context.Background(), "acme", "web"); err != nil {
 		t.Fatalf("repo cleanup failure must be best-effort, got %v", err)
 	}
@@ -569,28 +569,60 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 // driven end-through with a ready repo. Under tasks-github-native the ladder no
 // longer counts tasks — it stops at "tasks" once a design exists (§8).
 
-// statusFixture builds a projectService wired for GetProjectStatus ladder tests.
+// fakeRunReader / fakeBindingsReader fake the stage-source ports
+// (status_stages.go) — the build/deploy inputs of the status poll.
+type fakeRunReader struct {
+	rows []models.DevflowRun
+	err  error
+}
+
+func (f fakeRunReader) ListByProject(context.Context, string, string, string) ([]models.DevflowRun, error) {
+	return f.rows, f.err
+}
+
+func (f fakeRunReader) DeleteByProject(context.Context, string, string) error { return nil }
+
+type fakeBindingsReader struct {
+	items []models.ReleaseBindingSummary
+	err   error
+}
+
+func (f fakeBindingsReader) ListProjectReleaseBindings(context.Context, string, string) ([]models.ReleaseBindingSummary, error) {
+	return f.items, f.err
+}
+
+// statusFixture builds a projectService wired for GetProjectStatus tests: a
+// ready repo row + the three poll sources (git snapshot, dev run rows, dev
+// bindings) as fakes.
 type statusFixture struct {
-	reqFiles       map[string]string
-	designFiles    map[string]string
-	designFilesErr error
-	reqVersions    []artifacts.RequirementsVersionInfo
-	desVersions    []artifacts.DesignVersionInfo
+	snap        artifacts.StatusSnapshot
+	snapErr     error
+	counts      map[string]int // ComponentCountAtTag fixture, keyed by tag
+	countErr    error
+	runs        []models.DevflowRun
+	runsErr     error
+	bindings    []models.ReleaseBindingSummary
+	bindingsErr error
 }
 
 func (fx statusFixture) service() *projectService {
 	fakeArtifacts := &artifactstest.FakeArtifactService{
-		ListRequirementFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return fx.reqFiles, nil
+		StatusSnapshotFunc: func(context.Context, string, string) (*artifacts.StatusSnapshot, error) {
+			if fx.snapErr != nil {
+				return nil, fx.snapErr
+			}
+			snap := fx.snap
+			return &snap, nil
 		},
-		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
-			return fx.designFiles, fx.designFilesErr
-		},
-		ListRequirementsVersionsFunc: func(context.Context, string, string) ([]artifacts.RequirementsVersionInfo, error) {
-			return fx.reqVersions, nil
-		},
-		ListDesignVersionsFunc: func(context.Context, string, string) ([]artifacts.DesignVersionInfo, error) {
-			return fx.desVersions, nil
+		ComponentCountAtTagFunc: func(_ context.Context, _, _, tag string) (int, error) {
+			if fx.countErr != nil {
+				return 0, fx.countErr
+			}
+			n, ok := fx.counts[tag]
+			if !ok {
+				return 0, fmt.Errorf("no component-count fixture for tag %q", tag)
+			}
+			return n, nil
 		},
 	}
 	repoSvc := &fakeRepoSvc{
@@ -598,13 +630,16 @@ func (fx statusFixture) service() *projectService {
 			return &models.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
 		},
 	}
-	return NewProjectService(nil, repoSvc, nil, fakeArtifacts, artifacts.NewArtifactStore(fakeArtifacts), nil)
+	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, nil)
+	svc.SetStageSources(fakeRunReader{rows: fx.runs, err: fx.runsErr},
+		fakeBindingsReader{items: fx.bindings, err: fx.bindingsErr})
+	return svc
 }
 
 func TestGetProjectStatus_NilOrFailingRepoMeansNoRepo(t *testing.T) {
 	t.Parallel()
 
-	svc := NewProjectService(nil, nil, nil, nil, nil, nil)
+	svc := NewProjectService(nil, nil, nil, nil, nil)
 	if st, err := svc.GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
 		t.Fatalf("nil repoSvc: want phase no-repo, got %q (err %v)", st.Phase, err)
 	}
@@ -612,37 +647,76 @@ func TestGetProjectStatus_NilOrFailingRepoMeansNoRepo(t *testing.T) {
 	failing := &fakeRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
 		return nil, errors.New("db down")
 	}}
-	if st, err := NewProjectService(nil, failing, nil, nil, nil, nil).GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
+	if st, err := NewProjectService(nil, failing, nil, nil, nil).GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
 		t.Fatalf("GetRepo error: want phase no-repo, got %q (err %v)", st.Phase, err)
 	}
 
 	norow := &fakeRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
 		return nil, nil
 	}}
-	if st, err := NewProjectService(nil, norow, nil, nil, nil, nil).GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
+	if st, err := NewProjectService(nil, norow, nil, nil, nil).GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
 		t.Fatalf("GetRepo nil row: want phase no-repo, got %q (err %v)", st.Phase, err)
 	}
 }
 
-func TestGetProjectStatus_DesignReadErrorPropagates(t *testing.T) {
+// TestGetProjectStatus_StrictSourceFailures pins the strict failure mode:
+// any stage source failing fails the whole read — the endpoint never
+// fabricates emptiness (the console keeps last-good data and repolls).
+func TestGetProjectStatus_StrictSourceFailures(t *testing.T) {
 	t.Parallel()
-	fx := statusFixture{
-		reqFiles:       map[string]string{"req.md": "# R"},
-		designFilesErr: errors.New("git wedged"),
+	base := statusFixture{snap: artifacts.StatusSnapshot{HasSpec: true}}
+
+	git := base
+	git.snapErr = errors.New("git wedged")
+	if _, err := git.service().GetProjectStatus(context.Background(), "acme", "web"); err == nil {
+		t.Fatal("git snapshot failure must fail the status read")
 	}
-	if _, err := fx.service().GetProjectStatus(context.Background(), "acme", "web"); err == nil {
-		t.Fatal("a non-NotFound design read error must propagate")
+
+	db := base
+	db.runsErr = errors.New("db down")
+	if _, err := db.service().GetProjectStatus(context.Background(), "acme", "web"); err == nil {
+		t.Fatal("run-row failure must fail the status read")
+	}
+
+	oc := base
+	oc.bindingsErr = errors.New("oc 503")
+	if _, err := oc.service().GetProjectStatus(context.Background(), "acme", "web"); err == nil {
+		t.Fatal("release-binding failure must fail the status read")
+	}
+
+	// The deploy denominator read joins strictly too.
+	cnt := base
+	cnt.runs = []models.DevflowRun{{Tag: "v1", Status: models.WorkflowStatusCompleted}}
+	cnt.countErr = errors.New("tag missing from mirror")
+	if _, err := cnt.service().GetProjectStatus(context.Background(), "acme", "web"); err == nil {
+		t.Fatal("component-count failure must fail the status read")
+	}
+}
+
+// TestGetProjectStatus_SourcesNotWired: a ready repo with unwired stage
+// sources is a composition bug, surfaced loudly — never a zero-valued lie.
+func TestGetProjectStatus_SourcesNotWired(t *testing.T) {
+	t.Parallel()
+	repoSvc := &fakeRepoSvc{
+		GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
+			return &models.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
+		},
+	}
+	svc := NewProjectService(nil, repoSvc, nil, &artifactstest.FakeArtifactService{}, nil)
+	if _, err := svc.GetProjectStatus(context.Background(), "acme", "web"); err == nil {
+		t.Fatal("unwired stage sources must error on a ready repo")
 	}
 }
 
 func TestGetProjectStatus_PhaseLadder(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name       string
-		fx         statusFixture
-		wantPhase  string
-		wantSpec   string
-		wantDesign string
+		name          string
+		fx            statusFixture
+		wantPhase     string
+		wantSpec      string
+		wantDesign    string
+		wantHasDesign bool
 	}{
 		{
 			name:      "no spec files → prompt",
@@ -651,21 +725,31 @@ func TestGetProjectStatus_PhaseLadder(t *testing.T) {
 		},
 		{
 			name:      "spec files unversioned → draft, phase spec",
-			fx:        statusFixture{reqFiles: map[string]string{"req.md": "# R"}},
+			fx:        statusFixture{snap: artifacts.StatusSnapshot{HasSpec: true}},
 			wantPhase: "spec",
 			wantSpec:  "draft",
 		},
 		{
+			// Design files without any spec: the flat flag stays false (the
+			// old ladder never read the design past "prompt").
+			name:      "design without spec → prompt, flat hasDesign stays false",
+			fx:        statusFixture{snap: artifacts.StatusSnapshot{HasDesign: true}},
+			wantPhase: "prompt",
+		},
+		{
 			name: "approved spec + design → phase tasks (no task counting, §8)",
 			fx: statusFixture{
-				reqFiles:    map[string]string{"req.md": "# R"},
-				reqVersions: []artifacts.RequirementsVersionInfo{{Tag: "v1", Version: 1}},
-				desVersions: []artifacts.DesignVersionInfo{{Tag: "v1-1"}},
-				designFiles: map[string]string{artifacts.DesignRootFile: "# Design"},
+				snap: artifacts.StatusSnapshot{
+					HasSpec:      true,
+					HasDesign:    true,
+					SpecVersion:  "v1",
+					HasDesignTag: true,
+				},
 			},
-			wantPhase:  "tasks",
-			wantSpec:   "approved",
-			wantDesign: "approved",
+			wantPhase:     "tasks",
+			wantSpec:      "approved",
+			wantDesign:    "approved",
+			wantHasDesign: true,
 		},
 	}
 	for _, tc := range cases {
@@ -682,6 +766,24 @@ func TestGetProjectStatus_PhaseLadder(t *testing.T) {
 			}
 			if st.DesignStatus != tc.wantDesign {
 				t.Errorf("designStatus = %q, want %q", st.DesignStatus, tc.wantDesign)
+			}
+			// The flat flags mirror the snapshot; hasDesign stays gated on a
+			// spec existing (the old ladder's early return).
+			if st.HasSpec != tc.fx.snap.HasSpec {
+				t.Errorf("hasSpec = %v, want %v", st.HasSpec, tc.fx.snap.HasSpec)
+			}
+			if st.HasDesign != tc.wantHasDesign {
+				t.Errorf("hasDesign = %v, want %v", st.HasDesign, tc.wantHasDesign)
+			}
+			// The nested spec stage mirrors the snapshot ungated.
+			want := models.SpecStage{
+				Exists:  tc.fx.snap.HasSpec,
+				Version: tc.fx.snap.SpecVersion,
+				Dirty:   tc.fx.snap.SpecDirty,
+				Design:  tc.fx.snap.HasDesign,
+			}
+			if st.Spec != want {
+				t.Errorf("spec stage = %+v, want %+v", st.Spec, want)
 			}
 			// The tasks-github-native ladder never sets HasTasks (no DB count, §8).
 			if st.HasTasks {

@@ -55,7 +55,7 @@ func TestDeleteProject_PurgesExecutions_OrgScoped_DB(t *testing.T) {
 		DeleteProjectFunc: func(context.Context, string, string) error { return nil },
 	}
 	// repoSvc + others nil (skipped); the real executions repo does the purge.
-	svc := project.NewProjectService(oc, nil, nil, nil, nil, execRepo)
+	svc := project.NewProjectService(oc, nil, nil, nil, execRepo)
 
 	if err := svc.DeleteProject(ctx, "acme", "widgets"); err != nil {
 		t.Fatalf("DeleteProject: %v", err)

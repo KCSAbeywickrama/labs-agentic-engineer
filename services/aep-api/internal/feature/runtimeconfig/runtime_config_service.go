@@ -35,7 +35,7 @@ const (
 	// bindingEnv is the single environment runtime-config targets (mirrors
 	// provisioning.defaultEnv). A web-app's platform-resource binding whose
 	// outputs drive the SPA lives in this env.
-	bindingEnv = "development"
+	bindingEnv = models.DevEnvironmentName
 )
 
 // RuntimeConfigService emits the per-web-app `env-config.js` file onto

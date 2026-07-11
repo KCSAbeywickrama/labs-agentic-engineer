@@ -52,6 +52,7 @@ import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
 import { WireframePanel } from "./WireframePanel";
 import { OpenApiView } from "@aep/ui-openapi-view";
+import { DesignView } from "@aep/ui-design-view";
 import type { SpecSelection } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
@@ -148,6 +149,12 @@ export function SpecView({ projectName }: { projectName: string }) {
   // read-only API Spec view — like the wireframe .dsl, it never goes through
   // the collab text editor, so it's excluded from both branches below.
   const isOpenApiFile = selectedFile?.path.endsWith("/openapi.yaml") ?? false;
+  // A component's design.json renders as a read-only structured Overview —
+  // like openapi.yaml, it never goes through the collab text editor.
+  const isComponentDesignFile =
+    /^specs\/design\/components\/[^/]+\/design\.json$/.test(
+      selectedFile?.path ?? "",
+    );
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
   // measured height to stretch into — a plain overflow:auto block (used for
@@ -162,13 +169,15 @@ export function SpecView({ projectName }: { projectName: string }) {
       ? collab.getFileFragment(selectedFile.path)
       : null;
   const ytext =
-    selectedFile && !selectedIsMd && !isOpenApiFile
+    selectedFile && !selectedIsMd && !isOpenApiFile && !isComponentDesignFile
       ? collab.getFileText(selectedFile.path)
       : null;
   const usesCollab = Boolean((fragment && collab.provider) || ytext);
   const content = useSpecFileContent(
     projectName,
-    selectedFile && (!usesCollab || isOpenApiFile) ? selectedFile : null,
+    selectedFile && (!usesCollab || isOpenApiFile || isComponentDesignFile)
+      ? selectedFile
+      : null,
   );
 
   const specStatus = status.data?.specStatus;
@@ -466,9 +475,19 @@ export function SpecView({ projectName }: { projectName: string }) {
                 // for structured files). Collaborative when the collab service
                 // is reachable (#86 phase 5); solo-and-unsaved otherwise
                 // (#86 decision 10).
-                isOpenApiFile ? (
+                isOpenApiFile || isComponentDesignFile ? (
                   content.data ? (
-                    <OpenApiView key={content.data.sha} spec={content.data.content} />
+                    isOpenApiFile ? (
+                      <OpenApiView
+                        key={content.data.sha}
+                        spec={content.data.content}
+                      />
+                    ) : (
+                      <DesignView
+                        key={content.data.sha}
+                        design={content.data.content}
+                      />
+                    )
                   ) : content.isError ? (
                     <Alert
                       severity="error"

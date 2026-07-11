@@ -74,7 +74,7 @@ func (conflictRepoSvc) DeleteRepo(context.Context, string, string) error {
 func newProjectHarness(t *testing.T) (*componenttest.Harness, *ocmocks.ProjectClientMock) {
 	t.Helper()
 	oc := &ocmocks.ProjectClientMock{}
-	svc := project.NewProjectService(oc, nil, nil, nil, nil, nil)
+	svc := project.NewProjectService(oc, nil, nil, nil, nil)
 	return componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{ProjectSvc: svc}}), oc
 }
 
@@ -216,7 +216,7 @@ func TestProjectComponent_CreateExplicitRepoNameConflictIs409(t *testing.T) {
 		},
 		DeleteProjectFunc: func(context.Context, string, string) error { return nil },
 	}
-	svc := project.NewProjectService(oc, conflictRepoSvc{}, nil, nil, nil, nil)
+	svc := project.NewProjectService(oc, conflictRepoSvc{}, nil, nil, nil)
 	h := componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{ProjectSvc: svc}})
 
 	resp := h.AsOrg("acme").Post("/api/v1/projects", `{"name":"gym","repoName":"taken-repo"}`)

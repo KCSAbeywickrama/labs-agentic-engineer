@@ -78,22 +78,6 @@ func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
 	s.orgServices = r
 }
 
-// ---- Requirements (multi-file Markdown directory) -----------------------
-
-// ListRequirements returns the requirements file map at HEAD, under
-// `specs/requirements/`. A first-time project with no requirements yet returns
-// an empty map (not an error).
-func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	files, err := s.artifactSvc.ListRequirementFiles(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if files == nil {
-		files = map[string]string{}
-	}
-	return files, nil
-}
-
 // ---- Design (multi-file directory) --------------------------------------
 
 // DesignFile is the BFF's in-memory representation of the multi-file design
@@ -237,24 +221,6 @@ func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d 
 // IsNotFound is sugar for callers that want to distinguish "no artifact yet"
 // from a real error.
 func IsNotFound(err error) bool { return errors.Is(err, ErrArtifactNotFound) }
-
-// DesignFilesEqual compares two design file maps after trimming whitespace from
-// each value. Used by the has-unsaved-changes check.
-func DesignFilesEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, va := range a {
-		vb, ok := b[k]
-		if !ok {
-			return false
-		}
-		if strings.TrimSpace(va) != strings.TrimSpace(vb) {
-			return false
-		}
-	}
-	return true
-}
 
 // rootFrontmatter is the YAML frontmatter we accept on the root `design.md`.
 type rootFrontmatter struct {

@@ -48,8 +48,6 @@ LICENSE_FILES = $(shell git ls-files | \
 install:
 	$(PNPM) install
 	go work sync
-	@echo ">> console-legacy deps (own pnpm workspace — not in the root turbo graph)"
-	@cd console-legacy && $(PNPM) install
 
 gen:
 	$(TURBO) run gen
@@ -65,8 +63,6 @@ dev:
 test: gen
 	$(TURBO) run test
 	@for d in $(GO_MODULE_DIRS); do echo ">> go test $$d"; ( cd "$$d" && go test ./... ); done
-	@echo ">> console-legacy tests (own pnpm workspace — not in the root turbo graph)"
-	@cd console-legacy/console && $(PNPM) test
 
 # Model eval for @aep/agents (report-not-gate; spends tokens, skips without a key).
 # Not a turbo task — kept out of the CI `test` graph.

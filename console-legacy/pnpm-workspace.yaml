@@ -1,8 +1,0 @@
-packages:
-  - console
-  - ui-components/*
-
-allowBuilds:
-  "@swc/core": true
-  core-js: true
-  esbuild: true
