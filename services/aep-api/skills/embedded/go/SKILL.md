@@ -80,6 +80,17 @@ per-user data, include this Scope bullet:
   `mattn/go-sqlite3` — its CGO compilation step times out under the
   build pod's CPU throttle."
 
+For a Go service a `web-application` calls directly — the web-app declares a
+`component`-kind dependency on it — that is NOT a managed API (`exposesAPI`
+unset), include this Scope bullet:
+
+- "CORS: a browser calls this service cross-origin (the web-app is served from
+  a different gateway host), so wrap the router in a permissive CORS middleware
+  that sets `Access-Control-Allow-Origin`/`-Methods`/`-Headers` and answers the
+  `OPTIONS` preflight with 204 — the browser blocks every call otherwise. A
+  managed API (`exposesAPI` set) instead relies on the gateway for CORS and
+  must NOT add its own; see the api-management skill."
+
 For every Go task, include this Acceptance criteria bullet:
 
 - "Local `go build -o /dev/null ./...` exits 0 and, if the service has
@@ -128,6 +139,27 @@ mux.HandleFunc("PATCH /todos/{id}", updateTodo)
 
 log.Printf("listening on :9090")
 log.Fatal(http.ListenAndServe(":9090", mux))
+```
+
+When a `web-application` calls this service directly and it is not a managed
+API (`exposesAPI` unset), wrap the router so the cross-origin browser fetch is
+allowed — set the headers on every response and answer `OPTIONS` with 204:
+
+```go
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// serve it: http.ListenAndServe(":9090", withCORS(mux))
 ```
 
 SQLite — pure-Go driver, use literal `"sqlite"` (not `"sqlite3"`):
