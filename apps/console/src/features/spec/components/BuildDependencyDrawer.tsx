@@ -325,12 +325,15 @@ export function BuildDependencyDrawer({
       anchor="right"
       open={open}
       onClose={onClose}
-      // Force an opaque surface: the default drawer paper reads translucent
-      // over the page behind it, which makes the dependency text hard to read.
+      // Force an opaque surface: the theme's `background.paper` is itself
+      // semi-transparent (#000000c5 ≈ 0.77 alpha) — a glass surface — so the
+      // page behind bleeds through and the dependency text is hard to read.
+      // `background.default` is the fully-opaque version of the same surface
+      // (#000000 in dark / the light default), so it reads solid in both themes.
       slotProps={{
         paper: {
           sx: {
-            bgcolor: "background.paper",
+            bgcolor: "background.default",
             backgroundImage: "none",
             backdropFilter: "none",
           },
