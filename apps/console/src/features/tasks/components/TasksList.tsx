@@ -27,7 +27,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { GitHub } from "@wso2/oxygen-ui-icons-react";
+import { GitHub, Info } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAllTasks } from "../api/queries";
 import { TaskStatusChip } from "./TaskStatusChip";
@@ -121,14 +121,23 @@ export function TasksList({ projectName }: { projectName: string }) {
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
+                  <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
+                    <Box
+                      sx={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 0.5,
+                        color: "text.secondary",
+                      }}
+                    >
+                      <TaskStatusChip derivedStatus={t.derivedStatus} />
+                      <Info size={16} />
+                    </Box>
+                  </Tooltip>
+                ) : (
                   <TaskStatusChip derivedStatus={t.derivedStatus} />
-                  {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
-                    <Typography variant="caption" color="text.secondary">
-                      Waiting for {t.blockedBy.join(", ")}
-                    </Typography>
-                  ) : null}
-                </Box>
+                )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 64 }}>
                 <Tooltip title="Open the GitHub issue">

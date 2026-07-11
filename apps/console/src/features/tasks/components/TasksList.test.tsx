@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 import { TasksList } from "./TasksList";
@@ -56,7 +56,7 @@ function task(overrides: Partial<TaskView> & { issueNumber: number }): TaskView 
 }
 
 describe("TasksList", () => {
-  it("renders a subtle 'Waiting for …' reason under an on_hold task's chip", () => {
+  it("shows the on-hold reason as a hover tooltip on an info icon next to the chip", async () => {
     mockTasks = [
       task({
         issueNumber: 42,
@@ -65,17 +65,26 @@ describe("TasksList", () => {
       }),
     ];
 
-    render(<TasksList projectName="acme" />);
+    const { container } = render(<TasksList projectName="acme" />);
 
     expect(screen.getByText("On hold")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for user-auth")).toBeInTheDocument();
+    // The reason lives in a tooltip, not inline body text.
+    expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
+
+    const infoIcon = container.querySelector(".lucide-info");
+    expect(infoIcon).toBeInTheDocument();
+
+    fireEvent.mouseOver(infoIcon as Element);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Waiting for user-auth");
   });
 
-  it("does not render a blocked-reason line for non-on_hold tasks", () => {
+  it("does not render an info icon for non-on_hold tasks", () => {
     mockTasks = [task({ issueNumber: 7, derivedStatus: "in_progress" })];
 
-    render(<TasksList projectName="acme" />);
+    const { container } = render(<TasksList projectName="acme" />);
 
     expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
+    expect(container.querySelector(".lucide-info")).not.toBeInTheDocument();
   });
 });

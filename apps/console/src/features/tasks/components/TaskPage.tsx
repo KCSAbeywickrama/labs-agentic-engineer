@@ -26,7 +26,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, GitHub } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, GitHub, Info } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
 import { useTask } from "../api/queries";
 import { useTaskLog } from "../hooks/useTaskLog";
@@ -77,8 +77,8 @@ export function TaskPage({
   const issueUrl = log.task?.issueUrl ?? detail.data.issueUrl;
   // TaskDetail (the get-task response) doesn't carry blockedBy — only the
   // stream's TaskView does — so this is populated once the SSE stream has
-  // upserted a task frame, and simply absent before that (fine: the caption
-  // is optional decoration, not load-bearing).
+  // upserted a task frame, and simply absent before that (fine: the info
+  // icon + tooltip is optional decoration, not load-bearing).
   const blockedBy = log.task?.blockedBy;
 
   const tail =
@@ -126,7 +126,23 @@ export function TaskPage({
         <Typography variant="subtitle1" sx={{ fontWeight: 600, minWidth: 0 }}>
           {title}
         </Typography>
-        <TaskStatusChip derivedStatus={derivedStatus} />
+        {derivedStatus === "on_hold" && blockedBy?.length ? (
+          <Tooltip title={`Waiting for ${blockedBy.join(", ")}`}>
+            <Box
+              sx={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 0.5,
+                color: "text.secondary",
+              }}
+            >
+              <TaskStatusChip derivedStatus={derivedStatus} />
+              <Info size={16} />
+            </Box>
+          </Tooltip>
+        ) : (
+          <TaskStatusChip derivedStatus={derivedStatus} />
+        )}
         <Box sx={{ flexGrow: 1 }} />
         <Tooltip title="Open the GitHub issue">
           <IconButton
@@ -140,11 +156,6 @@ export function TaskPage({
           </IconButton>
         </Tooltip>
       </Stack>
-      {derivedStatus === "on_hold" && blockedBy?.length ? (
-        <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>
-          Waiting for {blockedBy.join(", ")}
-        </Typography>
-      ) : null}
       <TaskLogView lines={log.lines} {...(tail ? { tail } : {})} />
     </Box>
   );
