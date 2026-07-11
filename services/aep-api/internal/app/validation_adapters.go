@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/validation"
+	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -86,6 +87,13 @@ type validationEndpointResolver struct {
 }
 
 func (r validationEndpointResolver) ResolveEndpoints(ctx context.Context, orgHandle, projectID string) ([]validation.ComponentEndpoint, error) {
+	// This runs inside the runner's validation-context request, whose ctx carries
+	// the runner's inbound task JWT (aud git-service). Without this marker the OC
+	// transport would forward that token to OpenChoreo, which rejects it (401) —
+	// so every ListDeployments below would fail and we'd resolve zero endpoints.
+	// Act as the BFF's own service identity (org resolved via namespace), exactly
+	// like the MCP handler and the async watchers.
+	ctx = authn.WithServiceIdentity(ctx)
 	df, err := r.store.ReadDesign(ctx, orgHandle, projectID)
 	if err != nil {
 		return nil, err
@@ -128,6 +136,9 @@ type devflowValidator struct {
 }
 
 func (v devflowValidator) Validate(ctx context.Context, orgID, projectID, _ string) error {
+	// Same OC-auth requirement as ResolveEndpoints: act as the BFF service
+	// identity so ListDeployments doesn't forward a caller token to OpenChoreo.
+	ctx = authn.WithServiceIdentity(ctx)
 	df, err := v.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
 		return fmt.Errorf("validate: read design: %w", err)
