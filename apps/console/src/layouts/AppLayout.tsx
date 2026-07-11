@@ -65,7 +65,7 @@ function activeItemFor(pathname: string, inProject: boolean): string {
   const section = pathname.split("/")[3];
   switch (section) {
     case "spec":
-    case "tasks":
+    case "builds":
     case "deployments":
     case "issues":
       return section;
@@ -219,10 +219,10 @@ export function AppLayout() {
                   <Sidebar.ItemLabel>Spec</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 <Sidebar.Item
-                  id="tasks"
+                  id="builds"
                   link={
                     <Link
-                      to="/projects/$projectName/tasks"
+                      to="/projects/$projectName/builds"
                       params={{ projectName }}
                     />
                   }
@@ -230,7 +230,7 @@ export function AppLayout() {
                   <Sidebar.ItemIcon>
                     <ListChecks />
                   </Sidebar.ItemIcon>
-                  <Sidebar.ItemLabel>Tasks</Sidebar.ItemLabel>
+                  <Sidebar.ItemLabel>Builds</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 <Sidebar.Item
                   id="deployments"
