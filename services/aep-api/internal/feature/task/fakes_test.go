@@ -77,6 +77,16 @@ func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, labels []string)
 	return out, nil
 }
 
+func (f *fakeIssues) GetIssue(_ context.Context, _, _ string, number int) (*gitrepo.IssueInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := f.byNumber[number]; i != nil {
+		cp := *i
+		return &cp, nil
+	}
+	return nil, gitrepo.ErrIssueNotFound
+}
+
 func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, number int, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

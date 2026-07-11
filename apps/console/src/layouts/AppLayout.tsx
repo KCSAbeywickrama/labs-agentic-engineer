@@ -29,11 +29,17 @@ import {
   Sidebar,
   Tooltip,
   UserMenu,
+  useAppShell,
   version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
 import {
+  CircleAlert,
+  FileText,
   FolderOpen,
+  LayoutDashboard,
+  ListChecks,
   LogOut,
+  Rocket,
   Settings,
   Sparkles,
   User as UserIcon,
@@ -51,17 +57,39 @@ import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 
-// Sidebar highlight follows the route; grows one mapping per top-level route.
-function activeItemFor(pathname: string): string {
+// Sidebar highlight follows the route; grows one mapping per top-level route
+// (global nav) or per project section (project nav, ADR-0010).
+function activeItemFor(pathname: string, inProject: boolean): string {
   if (pathname.startsWith("/settings")) return "settings";
-  return "projects";
+  if (!inProject) return "projects";
+  const section = pathname.split("/")[3];
+  switch (section) {
+    case "spec":
+    case "tasks":
+    case "deployments":
+    case "issues":
+      return section;
+    default:
+      return "overview";
+  }
+}
+
+// Full-screen surfaces keep the sidebar but collapse it on entry (ADR-0010);
+// leaving re-expands it. Rendered inside <AppShell>, which provides the
+// shell context this consumes.
+function SidebarAutoCollapse({ collapsed }: { collapsed: boolean }) {
+  const { actions } = useAppShell();
+  const setSidebarCollapsed = actions.setSidebarCollapsed;
+  useEffect(() => {
+    setSidebarCollapsed(collapsed);
+  }, [collapsed, setSidebarCollapsed]);
+  return null;
 }
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
 // Main(Outlet) + Footer. NotificationPanel arrives with its feature.
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const activeItem = activeItemFor(pathname);
   const { user, signOut, orgHandle } = useSession();
 
   // Project AI panel (#130): available on every project route — mounted here
@@ -70,6 +98,10 @@ export function AppLayout() {
   const params = useParams({ strict: false }) as { projectName?: string };
   const projectName = params.projectName;
   const [chatOpen, setChatOpen] = useState(false);
+
+  const activeItem = activeItemFor(pathname, Boolean(projectName));
+  // The spec workspace is the console's full-screen surface (#80).
+  const isSpecRoute = Boolean(projectName) && activeItem === "spec";
 
   // "Generate spec" CTA (#150): the Spec card navigates here with ?generate=1.
   // Open the panel and hand the one-shot signal to AgentChatPanel, which sends
@@ -150,17 +182,95 @@ export function AppLayout() {
         </Header>
       </AppShell.Navbar>
 
+      {/* Must live inside a named AppShell slot: unrecognized direct children
+          of AppShell are dropped by its slot extraction. */}
       <AppShell.Sidebar>
+        <SidebarAutoCollapse collapsed={isSpecRoute} />
         <Sidebar activeItem={activeItem}>
           <Sidebar.Nav>
-            <Sidebar.Category>
-              <Sidebar.Item id="projects" link={<Link to="/" />}>
-                <Sidebar.ItemIcon>
-                  <FolderOpen />
-                </Sidebar.ItemIcon>
-                <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
-              </Sidebar.Item>
-            </Sidebar.Category>
+            {/* Project-scoped nav (ADR-0010): inside a project the nav fully
+                swaps to its sections — no back-item; home is the header brand
+                or the project switcher. */}
+            {projectName ? (
+              <Sidebar.Category>
+                <Sidebar.Item
+                  id="overview"
+                  link={
+                    <Link to="/projects/$projectName" params={{ projectName }} />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <LayoutDashboard />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Overview</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="spec"
+                  link={
+                    <Link
+                      to="/projects/$projectName/spec"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <FileText />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Spec</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="tasks"
+                  link={
+                    <Link
+                      to="/projects/$projectName/tasks"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <ListChecks />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Tasks</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="deployments"
+                  link={
+                    <Link
+                      to="/projects/$projectName/deployments"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <Rocket />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Deployments</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="issues"
+                  link={
+                    <Link
+                      to="/projects/$projectName/issues"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <CircleAlert />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Issues</Sidebar.ItemLabel>
+                </Sidebar.Item>
+              </Sidebar.Category>
+            ) : (
+              <Sidebar.Category>
+                <Sidebar.Item id="projects" link={<Link to="/" />}>
+                  <Sidebar.ItemIcon>
+                    <FolderOpen />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
+                </Sidebar.Item>
+              </Sidebar.Category>
+            )}
           </Sidebar.Nav>
           <Sidebar.Footer>
             <Sidebar.Category>

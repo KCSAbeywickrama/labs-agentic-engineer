@@ -97,8 +97,22 @@ type fakeTasks struct {
 	err   error
 }
 
-func (f fakeTasks) List(context.Context, string, string, string) ([]task.TaskView, error) {
-	return f.views, f.err
+func (f fakeTasks) ListByTag(_ context.Context, _, _, _, tag string) ([]task.TaskView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if tag == "" {
+		return f.views, nil
+	}
+	// Mirror the real read: the aep:spec/<tag> label scopes to one version, so
+	// every returned row carries that specTag.
+	out := make([]task.TaskView, 0, len(f.views))
+	for _, v := range f.views {
+		if v.Lineage.SpecTag == tag {
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }
 
 func newSvc(runner *fakeRunner, store *fakeStore, repos fakeRepos, tagger *fakeTagger, tasks TaskReader) *Service {

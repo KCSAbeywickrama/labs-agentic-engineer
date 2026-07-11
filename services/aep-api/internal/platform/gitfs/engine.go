@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -355,14 +356,22 @@ func atExpr(ref RepoRef, at string) string {
 }
 
 // resolveCommit resolves `at` to a commit sha, peeling annotated tags.
-// Failure maps to ErrRefNotFound. Caller must hold a flock (shared is
-// enough — this is a pure ref/object read).
+// Only a genuinely missing ref/object maps to ErrRefNotFound (`--verify
+// --quiet` exits 1 for "not a valid object name"); repo-level failures —
+// trashed/corrupt mirror (exit 128), killed subprocess — surface as plain
+// errors so callers that treat "ref not found" as a valid state (an empty
+// repo, a 404) never mistake an infrastructure failure for one. Caller must
+// hold a flock (shared is enough — this is a pure ref/object read).
 func (e *Engine) resolveCommit(ctx context.Context, ref RepoRef, p repoPaths, at string) (string, error) {
 	expr := atExpr(ref, at)
 	out, err := e.git(ctx, execOpts{}, "--git-dir", p.gitDir,
-		"rev-parse", "--verify", "--end-of-options", expr+"^{commit}")
+		"rev-parse", "--verify", "--quiet", "--end-of-options", expr+"^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("gitfs: resolve %q in %s: %w: %w", at, ref.RepoSlug, ErrRefNotFound, err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return "", fmt.Errorf("gitfs: resolve %q in %s: %w: %w", at, ref.RepoSlug, ErrRefNotFound, err)
+		}
+		return "", fmt.Errorf("gitfs: resolve %q in %s: %w", at, ref.RepoSlug, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

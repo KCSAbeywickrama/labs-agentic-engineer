@@ -24,7 +24,6 @@ import { toChange, applyToolCall, isFileMutationTool } from "../src/change.js";
 import type { StreamPart } from "../src/stream-types.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
-const DESIGN = "specs/design/design.md";
 
 test("applyToolCall reconstructs file state by folding an editFile call (matches a direct mutation)", () => {
   const direct = new FileBundle(SEED_FILES);
@@ -58,17 +57,6 @@ test("applyToolCall folds add then remove in stream order", () => {
 
   applyToolCall(b, { type: "tool-call", toolCallId: "c2", toolName: "removeFile", input: { path } });
   assert.equal(b.has(path), false);
-});
-
-test("applyToolCall folds setFrontmatterField (array value)", () => {
-  const b = new FileBundle(SEED_FILES);
-  applyToolCall(b, {
-    type: "tool-call",
-    toolCallId: "c1",
-    toolName: "setFrontmatterField",
-    input: { path: DESIGN, key: "language", value: "TypeScript" },
-  });
-  assert.ok(b.read(DESIGN)!.includes("language: TypeScript"));
 });
 
 test("applyToolCall ignores malformed / unknown tool calls", () => {
@@ -109,8 +97,8 @@ test("toChange derives op from the tool name when output is absent", () => {
   assert.equal(c.content, "hi\n");
 });
 
-test("isFileMutationTool: true for the four ops, false for loadSkill / unknown (no Change)", () => {
-  for (const t of ["addFile", "editFile", "removeFile", "setFrontmatterField"]) {
+test("isFileMutationTool: true for the mutation ops, false for loadSkill / unknown (no Change)", () => {
+  for (const t of ["addFile", "editFile", "removeFile"]) {
     assert.equal(isFileMutationTool(t), true, t);
   }
   assert.equal(isFileMutationTool("loadSkill"), false);

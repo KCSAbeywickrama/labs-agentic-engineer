@@ -38,7 +38,7 @@ function design(overrides: Record<string, unknown> = {}): string {
     type: "web-application",
     version: "0.1.0",
     language: "typescript",
-    buildpack: "react",
+    buildpack: "docker",
     appPath: ".",
     entrypoint: "index.html",
     exposure: "internet",
@@ -73,3 +73,35 @@ test("rejects an endpoint block with an unknown key", () => {
   const problem = checkComponentDesign(PATH, design({ endpoint: { name: "api", port: 8080 } }));
   assert.equal(problem?.code, "SCHEMA_VIOLATION");
 });
+
+// --- config credentialClass is a closed vocabulary (secret | publishable) ----
+
+const dep = (config: unknown) => ({ kind: "external", name: "stripe", config });
+
+for (const credentialClass of ["secret", "publishable"]) {
+  test(`accepts config credentialClass ${JSON.stringify(credentialClass)}`, () => {
+    const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass }])] });
+    assert.equal(checkComponentDesign(PATH, doc), null);
+  });
+}
+
+test("rejects an off-vocabulary config credentialClass", () => {
+  const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass: "private" }])] });
+  const problem = checkComponentDesign(PATH, doc);
+  assert.equal(problem?.code, "SCHEMA_VIOLATION");
+  assert.match(problem!.message, /credentialClass/);
+});
+
+// --- buildpack is pinned to "docker" (agent write-gate only; see the .refine) -
+
+test("accepts buildpack docker", () => {
+  assert.equal(checkComponentDesign(PATH, design({ buildpack: "docker" })), null);
+});
+
+for (const buildpack of ["go", "react", "node", "nodejs", "Docker", ""]) {
+  test(`rejects non-docker buildpack ${JSON.stringify(buildpack)}`, () => {
+    const problem = checkComponentDesign(PATH, design({ buildpack }));
+    assert.equal(problem?.code, "SCHEMA_VIOLATION");
+    assert.match(problem!.message, /buildpack|docker/);
+  });
+}

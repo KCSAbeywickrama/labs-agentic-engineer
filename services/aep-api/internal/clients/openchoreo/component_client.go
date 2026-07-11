@@ -101,6 +101,13 @@ type ComponentClient interface {
 	// Deploy (read-only — auto-deploy on the Component drives the chain)
 	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*models.DeploymentList, error)
 
+	// ListProjectReleaseBindings returns the org's ReleaseBindings owned by
+	// projectName — all environments, all components, in ONE org-scoped list
+	// (the API has no project filter; ownership is matched client-side on
+	// spec.owner.projectName), following pagination. Each item carries the
+	// aggregate Ready condition — the project-status deploy stage's source.
+	ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]models.ReleaseBindingSummary, error)
+
 	// Build (workflow runs). `runName` is the WorkflowRun metadata.name; if
 	// empty the OC client auto-generates one via NewBuildRunName. Callers
 	// that need to know the name ahead of time (so they can stage a
@@ -897,6 +904,68 @@ func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectN
 		items[i] = deploymentFromReleaseBinding(rb)
 	}
 	return &models.DeploymentList{Items: items}, nil
+}
+
+// ListProjectReleaseBindings lists the org's ReleaseBindings and keeps the
+// project's, following pagination — the status poll's single OC call.
+func (c *componentClient) ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]models.ReleaseBindingSummary, error) {
+	var out []models.ReleaseBindingSummary
+	params := &gen.ListReleaseBindingsParams{}
+	for {
+		resp, err := c.oc.ListReleaseBindingsWithResponse(ctx, orgName, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list release bindings: %w", err)
+		}
+		if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+			return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+				JSON401: resp.JSON401,
+				JSON403: resp.JSON403,
+				JSON500: resp.JSON500,
+			})
+		}
+		for _, rb := range resp.JSON200.Items {
+			if rb.Spec == nil || rb.Spec.Owner.ProjectName != projectName {
+				continue
+			}
+			out = append(out, releaseBindingSummary(rb))
+		}
+		next := resp.JSON200.Pagination.NextCursor
+		if next == nil || *next == "" {
+			return out, nil
+		}
+		// A non-advancing cursor would spin this poll-path loop forever —
+		// fail instead (the console keeps last-good data on error).
+		if params.Cursor != nil && *next == string(*params.Cursor) {
+			return nil, fmt.Errorf("list release bindings: pagination did not advance (cursor %q)", *next)
+		}
+		cur := gen.CursorParam(*next)
+		params.Cursor = &cur
+	}
+}
+
+// releaseBindingSummary extracts the deploy-stage facts: identity, undeploy
+// intent, and the aggregate Ready-typed condition (never the last-array-entry
+// heuristic — condition array order is not guaranteed).
+func releaseBindingSummary(rb gen.ReleaseBinding) models.ReleaseBindingSummary {
+	s := models.ReleaseBindingSummary{}
+	var projectName, componentName string
+	if rb.Spec != nil {
+		projectName = rb.Spec.Owner.ProjectName
+		componentName = rb.Spec.Owner.ComponentName
+		s.Environment = rb.Spec.Environment
+		s.Undeploy = rb.Spec.State != nil && *rb.Spec.State == gen.ReleaseBindingSpecStateUndeploy
+	}
+	s.ComponentName = FriendlyComponentName(componentName, projectName)
+	if rb.Status != nil && rb.Status.Conditions != nil {
+		for _, cond := range *rb.Status.Conditions {
+			if cond.Type == "Ready" {
+				s.ReadyStatus = string(cond.Status)
+				s.ReadyReason = cond.Reason
+				break
+			}
+		}
+	}
+	return s
 }
 
 // -- WorkflowRuns (builds + coding-agent) ------------------------------------

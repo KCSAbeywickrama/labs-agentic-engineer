@@ -14,7 +14,7 @@ Insert the proxy between the console and aep-api, then drive the UI normally
 ```sh
 pnpm --filter @aep/sse-cassette record -- \
   --target http://localhost:9090 --port 9091 \
-  --out console-legacy/console/test/fixtures/turns --match '/turns$'
+  --out test/fixtures/turns --match '/turns$'
 # then run the console with API_PROXY_TARGET=http://localhost:9091
 ```
 
@@ -35,7 +35,7 @@ cassetteToStream(cassette, { rechunk: { seed: 7, maxBytes: 3 } }); // fuzz chunk
 As a mock HTTP server (in-browser repro, Go tests, integration suites):
 
 ```sh
-pnpm --filter @aep/sse-cassette serve -- --dir console-legacy/console/test/fixtures/turns --port 9092
+pnpm --filter @aep/sse-cassette serve -- --dir test/fixtures/turns --port 9092
 # then run the console with API_PROXY_TARGET=http://localhost:9092
 ```
 
@@ -53,7 +53,7 @@ several frames, one frame can span many chunks):
 
 ```sh
 pnpm --filter @aep/sse-cassette exec tsx src/cli.ts events \
-  --file console-legacy/console/test/fixtures/turns/006-….json.gz
+  --file test/fixtures/turns/006-….json.gz
 #  idx    arrival  chunks    event
 #    5     1611ms  chunk 4         tool-input-start  tool=loadSkill id=toolu_01RY…
 #  143    61486ms  chunk 130–131   tool-call  tool=addFile id=toolu_01Aw…

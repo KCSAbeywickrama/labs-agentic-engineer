@@ -90,11 +90,24 @@ func NewReads(issues IssueClient, repos RepoResolver, execs ExecutionReader, ver
 // List returns the project's Tasks filtered by state ("open" | "closed" |
 // "all"; default "open"). FE groups by derivedStatus client-side (§8).
 func (r *Reads) List(ctx context.Context, orgID, projectID, state string) ([]TaskView, error) {
+	return r.ListByTag(ctx, orgID, projectID, state, "")
+}
+
+// ListByTag is List additionally scoped to a single spec/build version tag: it
+// returns only Tasks carrying the aep:spec/<tag> label (ANDed with the Task
+// marker, server-side via the GitHub labels= query). An empty tag returns every
+// Task (== List). This is the read behind GET /tasks?tag=v3 and the build's
+// per-version task list.
+func (r *Reads) ListByTag(ctx context.Context, orgID, projectID, state, tag string) ([]TaskView, error) {
 	repoFullName, err := resolveRepoFullName(ctx, r.repos, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	issues, err := r.issues.ListIssues(ctx, orgID, projectID, []string{taskmeta.LabelMarker})
+	labels := []string{taskmeta.LabelMarker}
+	if l := taskmeta.SpecTagLabel(tag); l != "" {
+		labels = append(labels, l)
+	}
+	issues, err := r.issues.ListIssues(ctx, orgID, projectID, labels)
 	if err != nil {
 		return nil, err
 	}

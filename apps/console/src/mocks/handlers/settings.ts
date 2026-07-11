@@ -33,6 +33,7 @@ import {
   seedSkillUpdates,
   seedSkills,
   skillsLoadError,
+  skillsSyncError,
   skillsRepoUrl,
   type SettingsScenario,
 } from "../fixtures/settings";
@@ -75,6 +76,10 @@ function ensureInitialized() {
   if (scenario() === "connected") {
     gitProvider = { ...githubConnectedFixture };
     llm = { ...llmConnectedFixture };
+  } else if (scenario() === "partial") {
+    // Onboarding resume-after-abandon (#102): GitHub landed, Anthropic
+    // didn't — the wizard must open at its first incomplete step.
+    gitProvider = { ...githubConnectedFixture };
   }
   skills = seedSkills.map((s) => ({ ...s }));
   skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
@@ -236,8 +241,11 @@ export const settingsHandlers = [
   }),
 
   // All-or-nothing, mirroring the BE: no request body, reconcile everything.
+  // Per #102 the BE creates the org's skills repo first when it's missing;
+  // the mock treats that as part of the same opaque call.
   http.post("*/api/v1/skills/sync", () => {
     ensureInitialized();
+    if (scenario() === "sync-error") return problem(skillsSyncError, 502);
     const targets = skillUpdates;
 
     for (const t of targets) {

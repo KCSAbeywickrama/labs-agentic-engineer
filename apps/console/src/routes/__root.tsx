@@ -19,13 +19,17 @@
 import { createRootRoute } from "@tanstack/react-router";
 import { AppLayout } from "../layouts/AppLayout";
 import { AuthGuard } from "../auth/AuthGuard";
+import { OnboardingGate } from "../features/onboarding/components/OnboardingGate";
 
 // Everything renders behind the auth gate (issue #91): routes only ever
-// see a signed-in session.
+// see a signed-in session. Behind it, the onboarding gate (issue #102,
+// ADR-0009) holds every route until the org's config is complete.
 export const Route = createRootRoute({
   component: () => (
     <AuthGuard>
-      <AppLayout />
+      <OnboardingGate>
+        <AppLayout />
+      </OnboardingGate>
     </AuthGuard>
   ),
 });

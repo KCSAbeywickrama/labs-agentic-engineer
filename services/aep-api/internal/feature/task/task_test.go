@@ -97,6 +97,36 @@ func TestReads_List_DerivesStatusFromExecutions(t *testing.T) {
 	}
 }
 
+func TestReads_ListByTag_FiltersBySpecLabel(t *testing.T) {
+	issues := newFakeIssues()
+	issues.seed(taggedIssue(1, "user-service", "v3"))
+	issues.seed(taggedIssue(2, "order-service", "v3"))
+	issues.seed(taggedIssue(3, "cart-service", "v2")) // an earlier build's task
+
+	// Scoped to v3: only the two v3 Tasks (the label query excludes v2).
+	views, err := newReads(issues, newFakeExecReader()).ListByTag(context.Background(), "org1", "proj1", "all", "v3")
+	if err != nil {
+		t.Fatalf("ListByTag(v3): %v", err)
+	}
+	if len(views) != 2 {
+		t.Fatalf("want 2 tasks for v3, got %d: %+v", len(views), views)
+	}
+	for _, v := range views {
+		if v.Lineage.SpecTag != "v3" {
+			t.Errorf("view %d specTag = %q, want v3", v.IssueNumber, v.Lineage.SpecTag)
+		}
+	}
+
+	// Empty tag is identical to List: every Task, regardless of version.
+	all, err := newReads(issues, newFakeExecReader()).ListByTag(context.Background(), "org1", "proj1", "all", "")
+	if err != nil {
+		t.Fatalf("ListByTag(all): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("empty tag must return all tasks, got %d", len(all))
+	}
+}
+
 func TestReads_List_CarriesHumanBodyWithoutMachineBlock(t *testing.T) {
 	issues := newFakeIssues()
 	block := taskmeta.Block{Component: "user-service", Origin: taskmeta.OriginSpecPlan, DesignTag: "design-v1"}
@@ -154,7 +184,7 @@ func TestReads_Get_NotFound(t *testing.T) {
 // ---- commands --------------------------------------------------------------
 
 func newCommands(issues *fakeIssues, disp *fakeDispatcher) *Commands {
-	return NewCommands(issues, fakeRepos{repo: defaultRepo()}, disp)
+	return NewCommands(issues, fakeRepos{repo: defaultRepo()}, disp, nil)
 }
 
 func TestCommands_Execute_OpenIssue_StampsAndDispatches(t *testing.T) {

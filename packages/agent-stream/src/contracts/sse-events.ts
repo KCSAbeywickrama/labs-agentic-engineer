@@ -40,8 +40,8 @@
 
 // --- Result payloads (the `tool-result.output` value) -----------------------
 
-/** The four file-mutation operations the main agent performs. */
-export type Op = "add" | "edit" | "remove" | "frontmatter";
+/** The file-mutation operations the main agent performs. */
+export type Op = "add" | "edit" | "remove";
 
 /** Error codes the `FileBundle` returns to steer one-step self-correction. */
 export type ErrCode =
@@ -54,7 +54,6 @@ export type ErrCode =
   | "INVALID_YAML"
   | "INVALID_JSON"
   | "SCHEMA_VIOLATION"
-  | "NO_FRONTMATTER"
   | "PROTECTED_PATH";
 
 /** A candidate line echoed back for NOT_UNIQUE / NOT_FOUND re-anchoring. */
@@ -110,12 +109,6 @@ export interface EditFileInput {
 
 export interface RemoveFileInput {
   path: string;
-}
-
-export interface SetFrontmatterFieldInput {
-  path: string;
-  key: string;
-  value: string | number | boolean | string[];
 }
 
 // --- Skills (progressive disclosure, ADR-0002) ------------------------------
@@ -242,9 +235,6 @@ export interface Change {
   newString?: string;
   /** addFile payload. */
   content?: string;
-  /** setFrontmatterField payload. */
-  key?: string;
-  value?: string | number | boolean | string[];
   result: OpResult;
 }
 
