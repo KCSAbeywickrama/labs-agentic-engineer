@@ -94,20 +94,19 @@ func (r *Reads) List(ctx context.Context, orgID, projectID, state string) ([]Tas
 }
 
 // ListByTag is List additionally scoped to a single spec/build version tag: it
-// returns only Tasks carrying the aep:spec/<tag> label (ANDed with the Task
-// marker, server-side via the GitHub labels= query). An empty tag returns every
-// Task (== List). This is the read behind GET /tasks?tag=v3 and the build's
+// returns only Tasks whose machine block carries that specTag. The filter runs
+// on the parsed block, NOT the aep:spec/<tag> label — the block is the durable
+// truth and the label only its flat mirror, absent on Tasks planned before the
+// label existed (#182), which a label-scoped GitHub query would silently drop.
+// Same single marker-scoped fetch either way. An empty tag returns every Task
+// (== List). This is the read behind GET /tasks?tag=v3 and the build's
 // per-version task list.
 func (r *Reads) ListByTag(ctx context.Context, orgID, projectID, state, tag string) ([]TaskView, error) {
 	repoFullName, err := resolveRepoFullName(ctx, r.repos, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	labels := []string{taskmeta.LabelMarker}
-	if l := taskmeta.SpecTagLabel(tag); l != "" {
-		labels = append(labels, l)
-	}
-	issues, err := r.issues.ListIssues(ctx, orgID, projectID, labels)
+	issues, err := r.issues.ListIssues(ctx, orgID, projectID, []string{taskmeta.LabelMarker})
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +127,9 @@ func (r *Reads) ListByTag(ctx context.Context, orgID, projectID, state, tag stri
 		}
 		view, ok := buildView(issue, latestSpecTag, execsByIssue[issue.Number])
 		if !ok {
+			continue
+		}
+		if tag != "" && view.Lineage.SpecTag != tag {
 			continue
 		}
 		out = append(out, view)

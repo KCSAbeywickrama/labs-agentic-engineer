@@ -21,8 +21,8 @@
 export const taskKeys = {
   all: (projectName: string) =>
     ["projects", "detail", projectName, "task-page"] as const,
-  list: (projectName: string) =>
-    [...taskKeys.all(projectName), "list"] as const,
+  list: (projectName: string, tag?: string) =>
+    [...taskKeys.all(projectName), "list", tag ?? "all-versions"] as const,
   detail: (projectName: string, issueNumber: number) =>
     [...taskKeys.all(projectName), "detail", issueNumber] as const,
 };
