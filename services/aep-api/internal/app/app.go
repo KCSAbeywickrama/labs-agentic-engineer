@@ -63,7 +63,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
-	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -473,7 +472,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
 	// the OC Component's workflow params.
-	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, artifactStore, executionRepo)
+	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, executionRepo)
+	// Build/deploy stage sources for the status poll (#184): the
+	// workflow_runs index (one row read) + the org-scoped release-binding
+	// list — consumer-side ports wired here so project imports neither.
+	projectService.SetStageSources(workflowRunRepo, componentClient)
 	organizationService := organization.NewOrganizationService(db, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
@@ -485,7 +488,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	}
 	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
 	configService := component.NewConfigService(configRepo, componentService)
-	requirementsService := requirements.NewRequirementsService(artifactStore, artifactSvcGit)
 	designService := design.NewDesignService(artifactStore, artifactSvcGit)
 
 	// Tasks are GitHub issues (the Task/Execution split, tasks-github-native):
@@ -780,10 +782,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		OrgSvc:           organizationService,
 		ComponentSvc:     componentService,
 		ConfigSvc:        configService,
-		RequirementsSvc:  requirementsService,
 		CollabRepo:       repoService,
 		IssueSvc:         issueService,
-		DesignSvc:        designService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskPlan:         taskPlan,

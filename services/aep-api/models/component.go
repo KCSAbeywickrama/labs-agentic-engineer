@@ -160,6 +160,12 @@ type WorkflowRunList struct {
 
 // -- Deployment (ReleaseBinding) ---------------------------------------------
 
+// DevEnvironmentName is the platform's fixed dev environment — the OC
+// environment every project auto-deploys to. The single shared constant for
+// what was previously pinned per-feature (runtimeconfig, provisioning,
+// codingagent, project status).
+const DevEnvironmentName = "development"
+
 type Deployment struct {
 	Name          string `json:"name,omitempty"`
 	Environment   string `json:"environment,omitempty"`
@@ -172,6 +178,24 @@ type Deployment struct {
 
 type DeploymentList struct {
 	Items []Deployment `json:"items"`
+}
+
+// ReleaseBindingSummary is one ReleaseBinding's identity plus its aggregate
+// Ready condition — the minimal view the project-status deploy stage derives
+// from. Internal to the BFF (never served raw); the stage predicates live in
+// the project feature.
+type ReleaseBindingSummary struct {
+	ComponentName string // friendly name (project prefix stripped)
+	Environment   string
+	// Undeploy: spec.state == Undeploy — intentionally not deployed;
+	// excluded from deploy-stage counts and status.
+	Undeploy bool
+	// ReadyStatus is the Ready-typed condition's status: "True", "False",
+	// "Unknown", or "" when the condition is absent (still being evaluated).
+	ReadyStatus string
+	// ReadyReason is the Ready-typed condition's reason (OC copies the
+	// failing sub-condition's reason into the aggregate).
+	ReadyReason string
 }
 
 // -- ComponentOpenAPI (Test tab) ----------------------------------------------

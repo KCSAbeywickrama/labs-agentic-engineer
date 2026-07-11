@@ -426,10 +426,8 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # console — the NEW console (apps/console), served by nginx (#98) at :8091
-  # while it builds toward parity (legacy keeps :8090 so existing developer
-  # workflows are untouched; the ports flip when the #98 retirement checklist
-  # completes). The browser hits Thunder directly via
+  # console (apps/console), served by nginx at :8090 (#98 retirement complete
+  # — this replaced console-legacy). The browser hits Thunder directly via
   # thunder.openchoreo.localhost (resolved by /etc/hosts → 127.0.0.1 → k3d
   # loadbalancer); OIDC redirect URIs derive from window.location.origin, so
   # no redirect env is needed. All API requests go through the same-origin
@@ -441,9 +439,9 @@ services:
       # image build runs `pnpm gen` against packages/contracts.
       context: ..
       dockerfile: apps/console/Dockerfile
-    container_name: aep-console-new
+    container_name: aep-console
     ports:
-      - "8091:3000"
+      - "8090:3000"
     depends_on:
       - aep-api
       - collab-server
@@ -457,7 +455,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # collab-server — Yjs/Hocuspocus collaboration rooms for the spec workspace
-  # (#86 / #114). The browser reaches it same-origin through the new console's
+  # (#86 / #114). The browser reaches it same-origin through the console's
   # nginx /collab proxy (its default upstream is exactly `collab-server:3400`,
   # so the console needs no COLLAB_WS_URL/COLLAB_SERVER_URL overrides). Room
   # auth + seeding go to aep-api with the joining user's token: the oracle
@@ -483,35 +481,6 @@ services:
       # cap; the final flush always runs when the last participant leaves.
       COLLAB_COMMIT_DEBOUNCE_MS: "${COLLAB_COMMIT_DEBOUNCE_MS:-60000}"
       COLLAB_COMMIT_MAX_DEBOUNCE_MS: "${COLLAB_COMMIT_MAX_DEBOUNCE_MS:-300000}"
-    networks:
-      - aep
-
-  # ---------------------------------------------------------------------------
-  # console-legacy — the legacy console, still the default at :8090 during
-  # the #98 transition (org settings, component ops, tasks live here until
-  # the new console reaches parity). Deleted when the #98 retirement
-  # checklist completes.
-  # ---------------------------------------------------------------------------
-  console-legacy:
-    build:
-      # Repo root — not console-legacy/ — so the build can reach the shared
-      # packages/agent-stream + packages/design-projection workspace packages
-      # console/package.json depends on across the console-legacy boundary.
-      # See console-legacy/console/Dockerfile's pkg-builder stage.
-      context: ..
-      dockerfile: console-legacy/console/Dockerfile
-    container_name: aep-console
-    ports:
-      - "8090:3000"
-    depends_on:
-      - aep-api
-    environment:
-      AEP_API_PROXY_URL: "http://aep-api:9090"
-      VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
-      VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
-      VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
-      VITE_SIGN_IN_REDIRECT_URL: "${PUBLIC_CONSOLE_URL}"
-      VITE_SIGN_OUT_REDIRECT_URL: "${PUBLIC_CONSOLE_URL}/login"
     networks:
       - aep
 

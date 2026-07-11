@@ -30,7 +30,7 @@ import (
 // defaultEnv is the single environment provisioning pins in v1 — the watcher and
 // the declarative-wiring comment both read the `development` binding (upstream
 // parity: the two naming schemes are deliberately identical).
-const defaultEnv = "development"
+const defaultEnv = models.DevEnvironmentName
 
 // Service coordinates dependency provisioning on the aep:provision funnel: it
 // mints gate issues, collects external values, provisions platform resources,
