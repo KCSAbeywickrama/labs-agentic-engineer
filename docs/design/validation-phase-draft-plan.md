@@ -141,3 +141,86 @@ Current image is `node:22-alpine` — musl, can't run Playwright's chromium. New
 ## Out of scope / follow-ups (documented, not built)
 
 - Scenario-lane automation (agentic judgment verdicts); console validation UI; legacy Argo `aep-validation-agent` ClusterWorkflow; automated fix-task loop on failures; `AEP_TASK_KIND` env + skill preload switch; superseding in-flight validation on a new deploy cycle.
+
+---
+
+## Addendum — where does `validation-criteria.json` actually get generated? (open decision, discuss with team)
+
+**The gap.** The Context above assumes "the spec/design agent authors
+`specs/validation/validation-criteria.json` via the shipped skill." In practice
+it does not, because of a use-case mismatch:
+
+- The oracle-generation instruction was added only to the **`design-generate`**
+  genai steering (`services/aep-api/internal/feature/genai/steering.go`, artifact
+  (5)).
+- The **new console** (`apps/console`, the one in use) authors *all* specs —
+  requirements **and** design — through **one** interactive collab chat that
+  always sends `useCase: "requirements-chat"`, `collab: true`
+  (`apps/console/src/features/agent-chat/api/turns.ts`). The **"Generate design"**
+  button is just a canned instruction (`buildDesignGenerationInstruction()` in
+  `features/projects/lib/promptStore.ts`) sent through that same chat turn.
+- So a `design-generate` turn is **never** invoked by the new console, and the
+  steering that would produce the oracle never fires. Confirmed empirically: for
+  recent projects `agent_turns` shows only `requirements-chat` (+ `task-plan`)
+  turns; the design files were written by the big `requirements-chat` turn and
+  committed by the collab committer as `aep: apply file changes: collab session`.
+  Only the legacy console's Architecture page still sends `design-generate`.
+- Side effect of the same mismatch: the **MCP dependency-discovery** block only
+  attaches to `design-generate` turns (`turn_runner.go` `mcpForTurn`), so the new
+  console's design authoring silently skips dependency discovery too.
+
+The end state we want is unchanged in all options: tapping **Generate design**
+produces the design artifacts **and** `specs/validation/validation-criteria.json`
+in the same action (shown as two things in the UI, generated together).
+
+### Option 1 — extend the "Generate design" canned instruction (SIMPLEST — v1)
+
+Add the oracle ask to `buildDesignGenerationInstruction()` so the CTA's
+instruction tells the agent to also produce `validation-criteria.json` via the
+`validation-criteria` skill (from the requirements prose; preserve `covered:true`
+on unchanged criteria when the file exists).
+
+- **Pros:** one file changed (client); scoped *exactly* to the Generate-design
+  action (fires nowhere else); no UX change; the model already has the skill in
+  its catalog. Ships today.
+- **Cons:** generation guidance lives in a client-side English string rather than
+  server-versioned steering; does not restore MCP dependency-discovery; relies on
+  the model honoring the extra step in a room-mode turn.
+- **To verify:** in room mode the file source is the collab **doc**, not the
+  snapshot — confirm the new `specs/validation/validation-criteria.json` is
+  committed through the collab committer (JSON, non-markdown → not held), and that
+  "preserve `covered`" on re-generate works (the doc must contain the existing
+  file for the agent to see it).
+
+### Option 2 — make "Generate design" a first-class `design-generate` turn (cleaner, more work)
+
+Switch the CTA to dispatch a real `design-generate` turn, activating the existing
+server steering (5).
+
+- **2a (in-room / collab):** keep `collab: true` so the live spec-view editing
+  feel is unchanged, but the turn is a proper `design-generate`. Restores MCP
+  discovery; server-versioned ordered generation; requirements→design lineage
+  (`specTag`). Costs console plumbing: a second send path, the re-attach filter
+  (`useAgentChat.ts` assumes `requirements-chat`), and a separate conversation
+  (`…--design-generate--…`) whose narration lives outside the chat history.
+- **2b (detached commit-fold):** background turn landing one `generate(design): …`
+  commit; needs a dedicated "generating design…" progress affordance (how the
+  legacy console behaved). No live co-editing during generation.
+
+### Option 3 — steer the `requirements-chat` use case (REJECTED)
+
+Append the oracle ask to the `requirements-chat` steering server-side.
+
+- **Rejected because:** that use case backs *every* chat turn, so the oracle would
+  be (re)generated on the first requirements draft, every requirements edit, and
+  every unrelated design follow-up — wrong phase, constant churn/commits, wasted
+  tokens. The Generate-design action is distinguished by its **instruction**, not
+  its use case, so blanket use-case steering cannot scope to it.
+
+### Decision
+
+Ship **Option 1** now (unblocks the flow with minimal risk). Keep server steering
+(5) on `design-generate` (still correct for the legacy console and any future
+first-class design-generate path). Revisit **Option 2a** as the durable home once
+the team weighs the console plumbing vs. the MCP-discovery / server-versioning
+benefits.
