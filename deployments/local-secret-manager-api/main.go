@@ -94,6 +94,12 @@ var secretReferenceGVR = schema.GroupVersionResource{
 	Resource: "secretreferences",
 }
 
+var namespaceGVR = schema.GroupVersionResource{
+	Group:    "",
+	Version:  "v1",
+	Resource: "namespaces",
+}
+
 type config struct {
 	listenAddr      string
 	openbaoAddr     string
@@ -223,6 +229,24 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	secretRefName := s.generateSecretRefName(req.Metadata.Name)
 	vaultPath := fmt.Sprintf("%s/%s/%s", s.cfg.vaultPathPrefix, ns, secretRefName)
+
+	// 0) Ensure the org's wc-<uuid> namespace exists before writing anything.
+	// DELIBERATE LOCAL SIMPLIFICATION: the real cloud service can assume this
+	// namespace pre-exists — cloud org onboarding provisions the workload
+	// cluster (and its namespace) long before any credential is ever
+	// connected. Locally there is no separate onboarding step, so an org's
+	// FIRST SecretReference write (whichever credential — GitHub PAT or
+	// Anthropic key — happens to connect first) landed on a namespace that
+	// only otherwise gets created lazily by codingagent/dispatcher.go's
+	// EnsureNamespace, an unrelated feature. Any credential connect before a
+	// coding-agent had ever dispatched failed with "namespaces \"wc-...\"
+	// not found". Idempotent: AlreadyExists is success, matching the
+	// SecretReference create below.
+	if err := s.ensureNamespace(r.Context(), ns); err != nil {
+		slog.Error("ensure namespace failed", "namespace", ns, "error", err)
+		writeError(w, http.StatusInternalServerError, "ensure namespace failed: "+err.Error())
+		return
+	}
 
 	// 1) Push to OpenBao. Each map key becomes a distinct KV-v2 field
 	//    (one vault property per key) — the publisher secret is 2-key
@@ -377,6 +401,29 @@ func generateNamespaceName(orgUUID string) string {
 	h := sha256.Sum256([]byte(orgUUID))
 	salt := hex.EncodeToString(h[:])[:8]
 	return fmt.Sprintf("wc-%s-%s", strings.ToLower(prefix), salt)
+}
+
+// ensureNamespace creates ns if it doesn't already exist. Idempotent:
+// AlreadyExists is treated as success, matching handleCreate's own
+// idempotent-create posture for the SecretReference CR right after it.
+func (s *server) ensureNamespace(ctx context.Context, ns string) error {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": ns,
+				"labels": map[string]interface{}{
+					managedByLabel: managedByValue,
+				},
+			},
+		},
+	}
+	_, err := s.dyn.Resource(namespaceGVR).Create(ctx, obj, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
 }
 
 // generateSecretRefName mirrors service.generateSecretRefName:

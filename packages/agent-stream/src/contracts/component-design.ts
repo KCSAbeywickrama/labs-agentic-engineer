@@ -22,8 +22,9 @@
  * component-level design.md: the spec agent writes it (whole-file rewrites,
  * schema-validated by the FileBundle on every write), downstream consumers
  * (design projection, coding-agent dispatch, task generation) read it
- * directly. The TOP-LEVEL design.md (prose + skillsApplied frontmatter) is
- * unchanged. The Zod validator (`componentDesignSchema` in
+ * directly. `skillsApplied` is a key HERE (per-component), NOT in design.md
+ * frontmatter; the top-level design.md is prose + an optional `sourceSpec`
+ * frontmatter only. The Zod validator (`componentDesignSchema` in
  * `../component-design-schema.ts`) is drift-guarded against this type.
  */
 
@@ -43,7 +44,12 @@ export interface ComponentDesign {
   version: string;
   /** Implementation language, e.g. "Go", "TypeScript". */
   language: string;
-  /** Always "docker" today. */
+  /**
+   * The build buildpack — always "docker" (the platform's single build path).
+   * The agent write-gate (checkComponentDesign) pins this to "docker" as a
+   * post-parse check, so the type stays `string` and the shared JSON Schema /
+   * BFF save-gate stay permissive.
+   */
   buildpack: string;
   /** Repo-relative source dir — the component name. */
   appPath: string;
@@ -139,8 +145,8 @@ export interface ConfigKey {
   key: string;
   /** Secret keys route through the secret path. Default: false. */
   secret?: boolean;
-  /** publishable | secret. */
-  credentialClass?: string;
+  /** How the value is supplied/stored: "secret" (user-supplied private) or "publishable" (non-sensitive config). */
+  credentialClass?: "secret" | "publishable";
 }
 
 /** One option attached to an ambiguous dependency. Mirrors Go `models.DependencyCandidate`. */

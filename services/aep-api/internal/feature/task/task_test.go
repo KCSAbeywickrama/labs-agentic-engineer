@@ -184,7 +184,7 @@ func TestReads_Get_NotFound(t *testing.T) {
 // ---- commands --------------------------------------------------------------
 
 func newCommands(issues *fakeIssues, disp *fakeDispatcher) *Commands {
-	return NewCommands(issues, fakeRepos{repo: defaultRepo()}, disp)
+	return NewCommands(issues, fakeRepos{repo: defaultRepo()}, disp, nil)
 }
 
 func TestCommands_Execute_OpenIssue_StampsAndDispatches(t *testing.T) {

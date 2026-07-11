@@ -510,6 +510,43 @@ func (c *Client) ListIssues(ctx context.Context, owner, repo string, cred creden
 	return issues, nil
 }
 
+// GetIssue fetches a single issue by number via GET
+// /repos/{owner}/{repo}/issues/{number} — O(1) in repo size, unlike ListIssues
+// (which pages the repo and stops at 100). A 404 is mapped to
+// gitrepo.ErrIssueNotFound so callers can distinguish a missing issue from a
+// transport failure.
+func (c *Client) GetIssue(ctx context.Context, owner, repo string, cred credentials.Credential, number int) (*gitrepo.IssueInfo, error) {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
+	var raw struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
+		State   string `json:"state"`
+		Labels  []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	if err := c.getJSON(ctx, url, cred, &raw); err != nil {
+		if gitrepo.IsHTTPStatus(err, http.StatusNotFound) {
+			return nil, gitrepo.ErrIssueNotFound
+		}
+		return nil, err
+	}
+	labelNames := make([]string, 0, len(raw.Labels))
+	for _, l := range raw.Labels {
+		labelNames = append(labelNames, l.Name)
+	}
+	return &gitrepo.IssueInfo{
+		Number: raw.Number,
+		Title:  raw.Title,
+		Body:   raw.Body,
+		URL:    raw.HTMLURL,
+		State:  raw.State,
+		Labels: labelNames,
+	}, nil
+}
+
 // AddIssueLabels adds labels to an existing issue via POST
 // /repos/{owner}/{repo}/issues/{number}/labels. GitHub merges them with the
 // issue's current labels (adding a label already present is a no-op). Used to

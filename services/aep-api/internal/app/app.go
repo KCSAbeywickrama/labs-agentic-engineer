@@ -381,6 +381,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// the Enabled() check.
 	credService.WithSMAPIWriter(smWriter)
 	anthropicCredService.WithSMAPIWriter(smWriter)
+	// Push the org's Anthropic key to a consumer's ExternalSecret on every
+	// successful Connect (both first-time connect and later rotation) — see
+	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
+	// unless both env vars are set (no consumer assumed by default).
+	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
 	validatorProbes := orgcreds.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := credentials.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
@@ -662,7 +667,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Command surface calls into the funnel; webhook handling splits across the
 	// two package halves: issues.* (task birth / block repair / command labels)
 	// in feature/task, pull_request.* (end coding / spawn build) in feature/execution.
-	taskCommands := task.NewCommands(issueService, repoService, funnel)
+	taskCommands := task.NewCommands(issueService, repoService, funnel, componentService)
 	platformSender := githubBotLogin(cfg.GitHubAppSlug)
 	registerWebhook := func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
 		webhookRouter.Register(event, action, webhook.EventHandlerFunc(h))
@@ -778,6 +783,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		ComponentSvc:     componentService,
 		ConfigSvc:        configService,
 		CollabRepo:       repoService,
+		IssueSvc:         issueService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskPlan:         taskPlan,

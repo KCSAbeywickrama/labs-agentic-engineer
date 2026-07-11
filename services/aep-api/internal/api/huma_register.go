@@ -53,6 +53,7 @@ type HumaDeps struct {
 	ComponentSvc      component.ComponentService
 	ConfigSvc         component.ConfigService
 	CollabRepo        gitrepo.RepoService
+	IssueSvc          gitrepo.IssueService
 	ProvisioningSvc   *provisioning.Service
 	TaskReads         *task.Reads
 	TaskCommands      *task.Commands
@@ -87,6 +88,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	component.RegisterComponent(api, d.ComponentSvc)
 	component.RegisterConfig(api, d.ConfigSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
+	gitrepo.RegisterIssue(api, d.IssueSvc)
 	provisioning.RegisterResources(api, d.ProvisioningSvc)
 	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
 	execution.RegisterTaskStream(api, d.TaskStream)

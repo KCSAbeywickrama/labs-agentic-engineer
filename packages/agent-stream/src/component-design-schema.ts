@@ -38,10 +38,15 @@ import type { Equal } from "./type-equal.js";
 // in-turn instead of committing a design.json the tag-time save gate 422s.
 
 // One env-var key the component reads at runtime (mirrors Go models.ConfigKey).
+// credentialClass is a CLOSED vocabulary (the skill fixes it to secret |
+// publishable): "secret" routes the value through the private secret path,
+// "publishable" is non-sensitive config. An off-vocabulary value must reject
+// HERE so the agent self-corrects in-turn instead of committing config the
+// value-collection gate can't route.
 const configKeySchema = z.strictObject({
   key: z.string().min(1),
   secret: z.boolean().optional(),
-  credentialClass: z.string().optional(),
+  credentialClass: z.enum(["secret", "publishable"]).optional(),
 });
 
 // One option attached to an ambiguous dependency (mirrors Go models.DependencyCandidate).
@@ -110,6 +115,10 @@ export const componentDesignSchema = z.strictObject({
   type: componentTypeSchema,
   version: z.string().min(1),
   language: z.string().min(1),
+  // buildpack stays a bare string in the schema; the "docker"-only rule is a
+  // post-parse check in checkComponentDesign (like name==dir) so it does NOT
+  // serialize to the shared JSON Schema — the BFF save-gate + Go fold stay
+  // permissive/untouched while the agent write-gate still self-corrects in-turn.
   buildpack: z.string().min(1),
   appPath: z.string().min(1),
   entrypoint: z.string().min(1),
@@ -166,6 +175,17 @@ export function checkComponentDesign(path: string, content: string): ComponentDe
     return {
       code: "SCHEMA_VIOLATION",
       message: `${path}: "name" must equal the component directory ("${dir}"), got "${res.data.name}".`,
+    };
+  }
+  // buildpack is effectively closed: the platform builds every component with the
+  // "docker" buildpack. Enforced here (post-parse, like name==dir) rather than in
+  // the zod schema so it does NOT serialize to the shared JSON Schema — the BFF
+  // save-gate + Go fold stay permissive/untouched; the agent (the sole writer)
+  // self-corrects in-turn. Mirrored in the high-level-architecture skill.
+  if (res.data.buildpack !== "docker") {
+    return {
+      code: "SCHEMA_VIOLATION",
+      message: `${path}: "buildpack" must be "docker" (the platform's single build path), got ${JSON.stringify(res.data.buildpack)}.`,
     };
   }
   return null;

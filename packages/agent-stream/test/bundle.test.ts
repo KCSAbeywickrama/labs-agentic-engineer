@@ -18,7 +18,6 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parse as parseYaml } from "yaml";
 import { FileBundle, type OpErr, type OpOk } from "../src/bundle.js";
 import { SEED_FILES } from "./seed.js";
 
@@ -103,23 +102,6 @@ test("removeFile: protects roots, deletes components, NOOP on absent", () => {
   assert.equal(expectOk(b.removeFile(OPENAPI)).status, "applied");
   assert.equal(b.has(OPENAPI), false);
   assert.equal(expectOk(b.removeFile(OPENAPI)).status, "noop");
-});
-
-test("setFrontmatterField: sets array + scalar, renders valid YAML, preserves body", () => {
-  const b = fresh();
-  expectOk(b.setFrontmatterField(DESIGN, "skillsApplied", ["go", "docker"]));
-  expectOk(b.setFrontmatterField(DESIGN, "language", "TypeScript"));
-  // OpOk no longer carries newContent (§5); read the post-op content directly.
-  const content = b.read(DESIGN)!;
-  const fm = parseYaml(content.split("\n---")[0]!.replace(/^---\n/, "")) as Record<string, unknown>;
-  assert.deepEqual(fm.skillsApplied, ["go", "docker"]);
-  assert.equal(fm.language, "TypeScript");
-  assert.ok(content.includes("A simple public API service"), "markdown body preserved");
-});
-
-test("setFrontmatterField: file without frontmatter returns NO_FRONTMATTER", () => {
-  const b = fresh();
-  assert.equal(expectErr(b.setFrontmatterField(OPENAPI, "x", "y")).code, "NO_FRONTMATTER");
 });
 
 // --- component design.json validation (authored JSON, schema-gated) ---------
