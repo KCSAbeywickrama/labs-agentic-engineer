@@ -26,6 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink, FileCode } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
+import { useComponentEndpointUrl } from "../api/queries";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
 
 type Component = components["schemas"]["Component"];
@@ -33,33 +34,56 @@ type Component = components["schemas"]["Component"];
 // The component type is OpenChoreo's own ComponentType name, end-to-end.
 const isWebApp = (c: Component) => c.type === "web-application";
 
-function componentLink(c: Component, onOpenContract: (name: string) => void) {
-  if (isWebApp(c)) {
-    return c.endpointUrl ? (
-      <MuiLink
-        href={c.endpointUrl}
-        target="_blank"
-        rel="noreferrer"
-        variant="body2"
-        sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
-      >
-        Open app <ExternalLink size={14} />
-      </MuiLink>
-    ) : (
+// A web app's "Open app" link (#196). The URL comes from the component's
+// deployments read (dev binding's resolved endpointUrl) — list-components
+// never fills Component.endpointUrl, though the field stays preferred here
+// in case the backend ever closes that drift. Until a URL exists (not yet
+// deployed, or fetch in flight/failed) the placeholder keeps its promise.
+function WebAppLink({
+  projectName,
+  component,
+}: {
+  projectName: string;
+  component: Component;
+}) {
+  const deployed = useComponentEndpointUrl(projectName, component.name);
+  const href = component.endpointUrl ?? deployed.data;
+  if (!href) {
+    return (
       <Typography variant="caption" color="text.secondary">
         URL appears once deployed
       </Typography>
     );
   }
-  // API/service rows open the component's OpenAPI contract in-app. It's a
-  // button, not an <a href>: the /openapi endpoint is JWT-guarded and a raw
-  // browser navigation carries no Bearer token (401). The dialog fetches
-  // through the authenticated client instead.
+  return (
+    <MuiLink
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      variant="body2"
+      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+    >
+      Open app <ExternalLink size={14} />
+    </MuiLink>
+  );
+}
+
+// API/service rows open the component's OpenAPI contract in-app. It's a
+// button, not an <a href>: the /openapi endpoint is JWT-guarded and a raw
+// browser navigation carries no Bearer token (401). The dialog fetches
+// through the authenticated client instead.
+function ContractLink({
+  name,
+  onOpenContract,
+}: {
+  name: string;
+  onOpenContract: (name: string) => void;
+}) {
   return (
     <MuiLink
       component="button"
       type="button"
-      onClick={() => onOpenContract(c.name)}
+      onClick={() => onOpenContract(name)}
       variant="body2"
       sx={{
         display: "inline-flex",
@@ -147,7 +171,14 @@ export function ComponentsList({
                 />
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 200 }}>
-                {componentLink(c, setContractComponent)}
+                {isWebApp(c) ? (
+                  <WebAppLink projectName={projectName} component={c} />
+                ) : (
+                  <ContractLink
+                    name={c.name}
+                    onOpenContract={setContractComponent}
+                  />
+                )}
               </ListingTable.Cell>
             </ListingTable.Row>
           ))}
