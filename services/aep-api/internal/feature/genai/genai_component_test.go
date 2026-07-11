@@ -415,6 +415,8 @@ type rigOption func(*rigConfig)
 type rigConfig struct {
 	client     agentsvc.Client // overrides the default real-over-fake-HTTP client
 	skillsRepo genai.SkillsRepoResolver
+	mcpTokens  genai.MCPTokenMinter
+	mcpBaseURL string
 }
 
 // withAgentsClient swaps the agents client (e.g. a panicking fake) — everything
@@ -427,6 +429,29 @@ func withAgentsClient(c agentsvc.Client) rigOption {
 // whose backing repo is gone, exercising the skills-unavailable 503 path).
 func withSkillsRepo(fn genai.SkillsRepoResolver) rigOption {
 	return func(rc *rigConfig) { rc.skillsRepo = fn }
+}
+
+// MCP discovery wiring is opt-in: the default rig leaves MCPTokens/MCPBaseURL
+// unset (matching a BFF whose internal MCP surface is unconfigured — every turn
+// dispatches without an MCP block), and withMCP turns it on for the discovery
+// gate tests.
+const (
+	testMCPBaseURL = "http://bff.internal"
+	testMCPToken   = "mcp-stub-token"
+)
+
+// stubMinter is an MCPTokenMinter that always returns a fixed token.
+type stubMinter struct{ token string }
+
+func (m stubMinter) IssueMCPToken(string) (string, error) { return m.token, nil }
+
+// withMCP wires the MCP discovery deps (a fixed-token minter + a base URL) so a
+// dispatched turn's MCP block can be asserted.
+func withMCP() rigOption {
+	return func(rc *rigConfig) {
+		rc.mcpTokens = stubMinter{token: testMCPToken}
+		rc.mcpBaseURL = testMCPBaseURL
+	}
 }
 
 // newGenaiRig wires the real genai service over a real engine + origins and
@@ -483,6 +508,8 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Broker:     broker,
 		Snapshots:  fx.Engine,
 		SkillsRepo: skillsRepo,
+		MCPTokens:  cfg.mcpTokens,
+		MCPBaseURL: cfg.mcpBaseURL,
 	})
 	rig.h = componenttest.New(t, componenttest.Options{Deps: api.HumaDeps{GenAISvc: svc}})
 	return rig
@@ -861,7 +888,10 @@ func (r *genaiRig) waitTerminalOf(t *testing.T, turnID string) genai.TurnStatus 
 // caller's bearer, relays the stream, and lands NOTHING on git — the doc is
 // the write surface (no fold, no manifest gate, no commit).
 func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
-	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+	// MCP discovery is wired: a collab room-scoped turn must carry the BFF-minted
+	// MCP block so the Spec-view architect can discover real org endpoints (the
+	// regression pin for the invented-org-service-name bug).
+	r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
 	base := r.fx.Origin.HeadSHA(t)
 	// Room-scheme (unprefixed) paths: in committed mode this would fail the
 	// fold; room mode never folds — pinning that the fold is bypassed.
@@ -909,6 +939,90 @@ func TestCollabTurn_RoomScopedDispatchNoCommit(t *testing.T) {
 	if sent.req.Collab.Token != componenttest.TestBearer {
 		t.Errorf("collab token = %q, want the caller's bearer", sent.req.Collab.Token)
 	}
+	// Regression pin: the collab turn carries the MCP discovery block so the
+	// architect can call list_org_endpoints instead of inventing org-service
+	// names (the whole reason this gate was widened past design-generate).
+	if sent.req.MCP == nil {
+		t.Fatal("collab turn dispatched without an MCP discovery block")
+	}
+	if want := testMCPBaseURL + "/internal/v1/mcp"; sent.req.MCP.URL != want {
+		t.Errorf("MCP url = %q, want %q", sent.req.MCP.URL, want)
+	}
+	if sent.req.MCP.Token != testMCPToken {
+		t.Errorf("MCP token = %q, want %q", sent.req.MCP.Token, testMCPToken)
+	}
+	// The collab dependency-discovery steer rides the instruction.
+	if !strings.Contains(sent.req.Instruction, "list_org_endpoints") {
+		t.Errorf("collab instruction missing the dependency-discovery steer: %q", sent.req.Instruction)
+	}
+}
+
+// TestMCPGate_AttachAndLeak pins mcpForTurn's widened gate: a collab turn with
+// MCP UNWIRED carries no block (best-effort); a non-collab requirements-chat
+// turn never gets MCP even when wired (the gate did not leak past design-generate
+// + collab); a design-generate turn still attaches MCP.
+func TestMCPGate_AttachAndLeak(t *testing.T) {
+	t.Run("collab turn, MCP unwired → no block", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"})
+		r.fake.parts = []string{textPart("editing the shared doc")}
+		m := manifestPart(nil, nil)
+		r.fake.manifest = &m
+
+		body, _ := json.Marshal(map[string]any{
+			"useCase":     "requirements-chat",
+			"instruction": "edit the doc live",
+			"collab":      true,
+		})
+		rec := r.h.AsOrg(testOrg).Post(turnsPath(convUUID), string(body))
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("POST collab turn: code %d (%s)", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			TurnID string `json:"turnId"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		r.waitTerminal(t, out.TurnID)
+		if sent := r.fake.sentTurn(t, 0); sent.req.MCP != nil {
+			t.Errorf("collab turn carried an MCP block with MCP deps unwired: %+v", sent.req.MCP)
+		}
+	})
+
+	t.Run("non-collab requirements-chat, MCP wired → no leak", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+		r.fake.parts = []string{textPart("chatting")}
+		m := manifestPart(nil, nil)
+		r.fake.manifest = &m
+
+		turnID := r.startTurn(t, convUUID, "requirements-chat", "just chat")
+		r.waitTerminal(t, turnID)
+		sent := r.fake.sentTurn(t, 0)
+		if sent.req.MCP != nil {
+			t.Errorf("plain requirements-chat turn leaked an MCP block: %+v", sent.req.MCP)
+		}
+		if strings.Contains(sent.req.Instruction, "list_org_endpoints") {
+			t.Errorf("non-collab turn leaked the collab dependency-discovery steer: %q", sent.req.Instruction)
+		}
+	})
+
+	t.Run("design-generate, MCP wired → attaches", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"specs/requirements/requirements.md": "# Reqs\n"}, withMCP())
+		r.fake.parts = []string{textPart("designing")}
+		m := manifestPart(nil, nil)
+		r.fake.manifest = &m
+
+		turnID := r.startTurn(t, convUUID, "design-generate", "design it")
+		r.waitTerminal(t, turnID)
+		sent := r.fake.sentTurn(t, 0)
+		if sent.req.MCP == nil {
+			t.Fatal("design-generate turn dispatched without an MCP discovery block")
+		}
+		if want := testMCPBaseURL + "/internal/v1/mcp"; sent.req.MCP.URL != want {
+			t.Errorf("MCP url = %q, want %q", sent.req.MCP.URL, want)
+		}
+		if sent.req.MCP.Token != testMCPToken {
+			t.Errorf("MCP token = %q, want %q", sent.req.MCP.Token, testMCPToken)
+		}
+	})
 }
 
 // TestD15_ConcurrentBaseMovement pins disjoint→rebase, overlap→fail: an

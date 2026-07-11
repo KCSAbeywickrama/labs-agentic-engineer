@@ -154,15 +154,45 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
           <Typography variant="h6">{build.tag}</Typography>
           <Chip size="small" label={chip.label} color={chip.color} />
           <Box sx={{ flexGrow: 1 }} />
-          <Typography variant="body2" color="text.secondary">
-            {planning ? "Generating tasks…" : `${done}/${total} tasks done`}
-          </Typography>
+          {planning ? (
+            // Subtle "planning" signal for the selected tag: the run has started
+            // but hasn't emitted its task plan yet (total === 0 while Running).
+            <Stack
+              direction="row"
+              spacing={0.75}
+              sx={{ alignItems: "center" }}
+            >
+              <CircularProgress
+                size={12}
+                thickness={5}
+                aria-label="Generating tasks"
+              />
+              <Typography variant="body2" color="text.secondary">
+                Generating tasks…
+              </Typography>
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {`${done}/${total} tasks done`}
+            </Typography>
+          )}
           {failed > 0 && (
             <Typography variant="body2" color="error.main">
               {failed} failed
             </Typography>
           )}
         </Stack>
+        {build.status === "failed" && build.reason && (
+          // Surface WHY a build failed (the devflow's recorded error) instead of
+          // a bare "Failed" badge — otherwise the reason is buried in Temporal.
+          <Typography
+            variant="caption"
+            color="error.main"
+            sx={{ display: "block", mb: 0.5, whiteSpace: "pre-wrap" }}
+          >
+            {build.reason}
+          </Typography>
+        )}
         <Typography variant="caption" color="text.secondary">
           Started {started}
           {completed ? ` · Finished ${completed}` : ""}

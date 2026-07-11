@@ -32,51 +32,65 @@ func TestExternalResourceNaming(t *testing.T) {
 	}
 }
 
-// dns1035 is the label form OpenChoreo renders a binding into and CloudNativePG
+// dns1035 is the label form OpenChoreo renders a Resource into and CloudNativePG
 // validates a Cluster name against: lowercase, starts with a letter, ends
 // alphanumeric, only [a-z0-9-] between. The bound name MUST stay in this form.
 var dns1035 = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 
-// TestExternalResourceBindingName_BoundsForCNPG pins the fix for the
-// cluster-name overflow (#165): OC renders a binding into a backing object named
-// r-<bindingName>-<hash8> (+11 chars) and CloudNativePG hard-caps a Cluster name
-// at 50, so a binding name must stay <= 38. A short name is returned verbatim;
-// an overflowing name is truncated with a deterministic hash tail that keeps it
-// unique, stable, and a valid DNS-1035 label.
-func TestExternalResourceBindingName_BoundsForCNPG(t *testing.T) {
+// renderedName mirrors how OC 1.1.1 names a platform resource's per-env backing
+// object (LIVE-VERIFIED): r-<resourceName>-<env>-<hash8>. This is the string
+// CloudNativePG validates against its 50-char Cluster-name cap.
+func renderedName(resourceName, env string) string {
+	return "r-" + resourceName + "-" + env + "-" + "deadbeef" // 8-hex stand-in
+}
+
+// TestExternalResourceName_BoundsForCNPG pins the real cluster-name-overflow fix:
+// OC names the CloudNativePG Cluster off the RESOURCE name as
+// r-<resourceName>-<env>-<hash8>, so the RESOURCE name (not the binding) must be
+// bounded. audit-evidence-hub-4-audit-db rendered to a 52-char Cluster name and
+// was rejected. A short name is returned verbatim; an overflowing name is
+// truncated with a deterministic hash tail — unique, stable, DNS-1035-legal.
+func TestExternalResourceName_BoundsForCNPG(t *testing.T) {
 	t.Parallel()
 
-	// Short names pass through unchanged (existing bindings keep readable names).
-	if got := ExternalResourceBindingName("aeh", "aeh-db", "development"); got != "aeh-aeh-db-development" {
+	// Short names pass through unchanged (existing resources keep readable names).
+	if got := ExternalResourceName("aeh", "aeh-db"); got != "aeh-aeh-db" {
 		t.Errorf("short name should be verbatim, got %q", got)
 	}
 
-	// The real overflow case: project + a project-prefixed dep + env = 44 chars,
-	// which rendered to a 55-char CNPG Cluster name and was rejected.
-	long := ExternalResourceBindingName("audit-evidence", "audit-evidence-db", "development")
-	if len(long) > maxOCBindingName {
-		t.Errorf("bounded name len = %d, want <= %d (%q)", len(long), maxOCBindingName, long)
+	// The real overflow case: the exact project/dep from the audit-evidence-hub-4
+	// build that failed with a 52-char CNPG Cluster name.
+	long := ExternalResourceName("audit-evidence-hub-4", "audit-db")
+	if len(long) > maxOCResourceName {
+		t.Errorf("bounded resource name len = %d, want <= %d (%q)", len(long), maxOCResourceName, long)
 	}
-	if renderLen := len("r-") + len(long) + len("-") + 8; renderLen > cnpgMaxClusterName {
-		t.Errorf("OC-rendered cluster name would be %d chars, want <= %d", renderLen, cnpgMaxClusterName)
+	if rn := renderedName(long, "development"); len(rn) > cnpgMaxClusterName {
+		t.Errorf("OC-rendered cluster name %q would be %d chars, want <= %d", rn, len(rn), cnpgMaxClusterName)
 	}
 	if !dns1035.MatchString(long) {
 		t.Errorf("bounded name %q is not a valid DNS-1035 label", long)
 	}
 
-	// Stable: same inputs -> same output (deprovision/status must recompute it).
-	if again := ExternalResourceBindingName("audit-evidence", "audit-evidence-db", "development"); again != long {
+	// Stable: same inputs -> same output (deprovision/status/consumer wiring all
+	// recompute it and must agree).
+	if again := ExternalResourceName("audit-evidence-hub-4", "audit-db"); again != long {
 		t.Errorf("not stable: %q != %q", again, long)
 	}
 
-	// Unique: a different env (same project/dep) and a different dep must not
-	// collide after truncation — the hash covers the full natural name.
-	prod := ExternalResourceBindingName("audit-evidence", "audit-evidence-db", "production")
-	other := ExternalResourceBindingName("audit-evidence", "audit-evidence-logs-store", "development")
-	if prod == long {
-		t.Errorf("dev and prod bindings collided: %q", long)
-	}
+	// Unique: two distinct deps in the same project must not collide after
+	// truncation — the hash covers the full natural name (project + dep).
+	other := ExternalResourceName("audit-evidence-hub-4", "audit-auth")
 	if other == long {
 		t.Errorf("distinct deps collided after truncation: %q", long)
+	}
+
+	// The binding name derived from a bounded resource name stays label-legal and
+	// within its guard bound.
+	b := ExternalResourceBindingName("audit-evidence-hub-4", "audit-db", "development")
+	if len(b) > maxOCBindingName {
+		t.Errorf("binding name len = %d, want <= %d (%q)", len(b), maxOCBindingName, b)
+	}
+	if !dns1035.MatchString(b) {
+		t.Errorf("binding name %q is not a valid DNS-1035 label", b)
 	}
 }

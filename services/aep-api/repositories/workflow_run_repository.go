@@ -38,8 +38,10 @@ type WorkflowRunRepository interface {
 	// — the upsert makes that idempotent.
 	Record(ctx context.Context, row *models.DevflowRun) error
 
-	// SetStatus marks the row for workflowID terminal (or running again).
-	SetStatus(ctx context.Context, workflowID, status string) error
+	// SetStatus marks the row for workflowID terminal (or running again). reason
+	// is the failure detail for a `failed` status (empty otherwise) — persisted so
+	// the build summary can show WHY a run failed.
+	SetStatus(ctx context.Context, workflowID, status, reason string) error
 
 	// SetTaskCounts writes the dev run's task tally as ABSOLUTE values —
 	// idempotent under activity retry, never an increment. Scoped to one
@@ -93,10 +95,16 @@ func (r *workflowRunRepository) Record(ctx context.Context, row *models.DevflowR
 	}).Create(row).Error
 }
 
-func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status string) error {
+func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status, reason string) error {
+	// Truncate defensively: the reason is a workflow error string, so a
+	// pathological one must not blow the row up. text has no hard cap, but a sane
+	// bound keeps the column and the UI honest.
+	if len(reason) > 2000 {
+		reason = reason[:2000]
+	}
 	return r.db.WithContext(ctx).Model(&models.DevflowRun{}).
 		Where("workflow_id = ?", workflowID).
-		Update("status", status).Error
+		Updates(map[string]any{"status": status, "reason": reason}).Error
 }
 
 func (r *workflowRunRepository) SetTaskCounts(ctx context.Context, workflowID, runID string, total, done, failed int) error {

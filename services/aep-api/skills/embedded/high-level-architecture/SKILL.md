@@ -150,8 +150,16 @@ kind by WHAT the target is:
   that calls it. If a component isn't actually called by this one, it is not a
   dependency of it (do not list it "for reference").
 - **`org-service`** — a service owned by ANOTHER project in the org that
-  publishes its endpoint for cross-project use. `name` is the provider's
-  component name. `{ "kind": "org-service", "name": "identity-api" }`.
+  publishes its endpoint for cross-project use. Its `name` is the provider's
+  EXACT component name from `list_org_endpoints`, copied verbatim — a name you
+  LOOK UP, never one you coin. The requirement (and any org skill) names the
+  service by ROLE ("the organization's directory service", "the notification
+  service"); that role is NOT the name, and the provider is usually named
+  differently — the "directory service" may be `employee-service`, the
+  "notification service" `email-service`. Call `list_org_endpoints`, pick the
+  row that fills the role, copy its `name`:
+  `{ "kind": "org-service", "name": "<name from list_org_endpoints>" }`. A name
+  coined from the role words matches no provider and hard-fails the build.
 - **`external`** — a system OUTSIDE the platform (a SaaS API, a legacy
   service). Two shapes:
   - *SDK-style SaaS* (Stripe, SendGrid, ...): no spec needed — the component
@@ -184,15 +192,18 @@ kind by WHAT the target is:
 ]
 ```
 
-**Discover before you invent.** When the caller supplies the platform MCP
-tools, USE them before authoring an `external`, `org-service`, or
-`platform-resource` dependency — do not guess a name or a config schema:
+**Discover before you invent.** The platform MCP tools are the source of truth
+for every dependency's name and shape — call them before authoring an
+`external`, `org-service`, or `platform-resource` dependency, and take the name
+and schema from what they return, not from the requirement's wording:
 
 - `list_external_resources` / `get_external_resource_schema` — reuse an
   already-registered external resource by its EXACT `name` and `config` schema
   rather than inventing a parallel one.
-- `list_org_endpoints` — find the real provider component name for an
-  `org-service` before referencing it.
+- `list_org_endpoints` — the org-service catalog every `org-service` `name` is
+  copied from verbatim (see the `org-service` kind above). When no row fills the
+  role the requirement describes, leave the dependency unresolved rather than
+  coining a name — a name that resolves to nothing is worse than an absent one.
 - `list_org_component_endpoints` — once you have the provider's name, call this
   to read its REAL contract before writing the dependency's `description`:
   each row resolves to a `spec.availability` of `inline` (read
