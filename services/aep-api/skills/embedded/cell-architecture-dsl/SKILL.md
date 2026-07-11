@@ -1,6 +1,6 @@
 ---
 name: cell-architecture-dsl
-description: Use when writing or editing specs/design/design.cell — the cell-based architecture diagram DSL that drives the live architecture diagram. Covers the grammar, the AEP boundary semantics (where each dependency goes), and the incremental write protocol.
+description: Use when generating or editing a design — write specs/design/design.cell FIRST (before design.md and the component design.json files). It is the cell-based architecture diagram DSL that streams into the live architecture diagram. Covers the grammar, the AEP boundary semantics (where each dependency goes), and the single-addFile write protocol.
 metadata:
   aep:
     kind: platform

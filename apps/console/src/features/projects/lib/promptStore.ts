@@ -78,8 +78,7 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
 export function buildDesignGenerationInstruction(): string {
   return (
     "Generate the complete component design for this project based on the " +
-    "current requirements, following the high-level-architecture skill (which " +
-    "begins with the specs/design/design.cell architecture diagram). If a " +
-    "design already exists, regenerate it to match the current requirements."
+    "current requirements. If a design already exists, regenerate it to match " +
+    "the current requirements."
   );
 }
