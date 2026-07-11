@@ -50,10 +50,27 @@ function itemKey(item: PreflightItem): string {
   return `${item.component}::${item.dependency}`;
 }
 
+/**
+ * Initial typed values for an external-config item: a non-secret key with a
+ * `defaultValue` renders pre-filled with it (a suggested region, base URL, …);
+ * a secret key — or a key with no `defaultValue` — starts empty. A secret never
+ * carries a default worth pre-filling (an API key has none), so we defensively
+ * never seed one even if a stray `defaultValue` rides along.
+ */
+function seedValues(item?: PreflightItem): Record<string, string> {
+  const values: Record<string, string> = {};
+  if (item?.kind === "external-config") {
+    for (const key of item.config ?? []) {
+      values[key.key] = !key.secret ? (key.defaultValue ?? "") : "";
+    }
+  }
+  return values;
+}
+
 /** Fresh per-item state as if the drawer just opened. */
-function seedForItem(): ItemState {
+function seedForItem(item?: PreflightItem): ItemState {
   return {
-    values: {},
+    values: seedValues(item),
     specUrl: "",
     specContent: "",
   };
@@ -62,7 +79,7 @@ function seedForItem(): ItemState {
 function initialState(items: PreflightItem[]): Record<string, ItemState> {
   const state: Record<string, ItemState> = {};
   for (const item of items) {
-    state[itemKey(item)] = seedForItem();
+    state[itemKey(item)] = seedForItem(item);
   }
   return state;
 }
@@ -262,7 +279,7 @@ export function BuildDependencyDrawer({
     setState((prev) => ({
       ...prev,
       [itemKey(item)]: {
-        ...(prev[itemKey(item)] ?? seedForItem()),
+        ...(prev[itemKey(item)] ?? seedForItem(item)),
         ...patch,
       },
     }));
@@ -270,7 +287,7 @@ export function BuildDependencyDrawer({
 
   function handleContinue() {
     const inputs = items.map((item) =>
-      toBuildInputItem(item, state[itemKey(item)] ?? seedForItem()),
+      toBuildInputItem(item, state[itemKey(item)] ?? seedForItem(item)),
     );
     onContinue(inputs);
   }
@@ -298,11 +315,11 @@ export function BuildDependencyDrawer({
                 <ExternalConfigPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)] ?? seedForItem()}
+                  state={state[itemKey(item)] ?? seedForItem(item)}
                   onChange={(key, value) =>
                     updateState(item, {
                       values: {
-                        ...(state[itemKey(item)] ?? seedForItem()).values,
+                        ...(state[itemKey(item)] ?? seedForItem(item)).values,
                         [key]: value,
                       },
                     })
@@ -321,7 +338,7 @@ export function BuildDependencyDrawer({
                 <ExternalSpecPanel
                   key={itemKey(item)}
                   item={item}
-                  state={state[itemKey(item)] ?? seedForItem()}
+                  state={state[itemKey(item)] ?? seedForItem(item)}
                   onUrlChange={(value) => updateState(item, { specUrl: value })}
                   onContentChange={(value) =>
                     updateState(item, { specContent: value })

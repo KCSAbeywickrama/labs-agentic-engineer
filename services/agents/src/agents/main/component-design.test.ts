@@ -78,7 +78,7 @@ test("dependencies: kind=external with spec + config is accepted", () => {
       specUrl: "https://example.com/stripe.yaml",
       config: [
         { key: "STRIPE_API_KEY", secret: true, description: "Your Stripe secret API key" },
-        { key: "STRIPE_ACCOUNT", secret: false },
+        { key: "STRIPE_ACCOUNT", secret: false, defaultValue: "acct_default" },
       ],
     },
   ];

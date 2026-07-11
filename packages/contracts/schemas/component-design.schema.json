@@ -81,6 +81,9 @@
                 },
                 "description": {
                   "type": "string"
+                },
+                "defaultValue": {
+                  "type": "string"
                 }
               },
               "required": [

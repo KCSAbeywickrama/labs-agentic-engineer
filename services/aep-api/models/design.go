@@ -165,6 +165,11 @@ type ConfigKey struct {
 	// authored alongside the key. The Build dependency drawer renders it under
 	// the field so the user knows what to supply.
 	Description string `json:"description,omitempty"`
+	// DefaultValue is an optional suggested initial value the agent MAY set for a
+	// NON-secret key it can infer a sensible default for (a region, a base URL).
+	// The Build dependency drawer pre-fills the field with it. Never set for a
+	// secret key — a credential has no default to invent.
+	DefaultValue string `json:"defaultValue,omitempty"`
 }
 
 // ComponentDependsOn returns the names of this component's sibling-component

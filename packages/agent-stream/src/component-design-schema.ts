@@ -40,11 +40,14 @@ import type { Equal } from "./type-equal.js";
 // One env-var key the component reads at runtime (mirrors Go models.ConfigKey).
 // `secret: true` routes the value through the private secret path. `description`
 // is an optional human-readable note (what the value is for) the Build
-// dependency drawer renders under the field.
+// dependency drawer renders under the field. `defaultValue` is an optional
+// suggested initial value the agent MAY set for a NON-secret key (a region, a
+// base URL); the drawer pre-fills the field with it. Never set for a secret.
 const configKeySchema = z.strictObject({
   key: z.string().min(1),
   secret: z.boolean().optional(),
   description: z.string().optional(),
+  defaultValue: z.string().optional(),
 });
 
 // One unified, kind-discriminated dependency edge — the successor to the legacy

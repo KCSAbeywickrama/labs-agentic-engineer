@@ -89,7 +89,7 @@ func TestPreflight_ExternalConfigItem_CarriesKeySecretDescriptionViewsOnly(t *te
 	comps := []models.DesignComponent{{Name: "orders", ComponentType: models.ComponentTypeService,
 		Dependencies: []models.Dependency{
 			{Kind: models.DependencyKindExternal, Name: "stripe",
-				Config: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true, Description: "Your Stripe secret API key"}, {Key: "STRIPE_ORG", Secret: false}}},
+				Config: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true, Description: "Your Stripe secret API key"}, {Key: "STRIPE_ORG", Secret: false, DefaultValue: "acme"}}},
 		}}}
 	svc := NewPreflightService(PreflightDeps{Design: fakeDesign{comps: comps}, Status: fakeStatus{}})
 	pf, err := svc.Preflight(context.Background(), "acme", "shop")
@@ -97,7 +97,7 @@ func TestPreflight_ExternalConfigItem_CarriesKeySecretDescriptionViewsOnly(t *te
 	require.Len(t, pf.Items, 1)
 	item := pf.Items[0]
 	require.Equal(t, "external-config", item.Kind)
-	require.Equal(t, []ConfigKeyView{{Key: "STRIPE_KEY", Secret: true, Description: "Your Stripe secret API key"}, {Key: "STRIPE_ORG", Secret: false}}, item.Config)
+	require.Equal(t, []ConfigKeyView{{Key: "STRIPE_KEY", Secret: true, Description: "Your Stripe secret API key"}, {Key: "STRIPE_ORG", Secret: false, DefaultValue: "acme"}}, item.Config)
 }
 
 // A platform-resource item carries its ResourceType + Parameters through —

@@ -85,6 +85,13 @@ test("accepts a config key with an optional description", () => {
   assert.equal(checkComponentDesign(PATH, doc), null);
 });
 
+test("accepts a non-secret config key with an optional defaultValue", () => {
+  const doc = design({
+    dependencies: [dep([{ key: "AWS_REGION", secret: false, defaultValue: "us-east-1" }])],
+  });
+  assert.equal(checkComponentDesign(PATH, doc), null);
+});
+
 test("rejects an unknown key on a config entry (e.g. the retired credentialClass)", () => {
   const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass: "secret" }])] });
   const problem = checkComponentDesign(PATH, doc);

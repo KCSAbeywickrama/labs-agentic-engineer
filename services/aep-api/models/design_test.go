@@ -101,6 +101,7 @@ func TestDependency_JSONRoundTrip(t *testing.T) {
 			SpecUrl:   "https://api.example.com/openapi.yaml",
 			Config: []ConfigKey{
 				{Key: "STRIPE_API_KEY", Secret: true, Description: "Your Stripe secret API key"},
+				{Key: "STRIPE_REGION", Secret: false, DefaultValue: "us-east-1"},
 			},
 		},
 		"platform-resource": {

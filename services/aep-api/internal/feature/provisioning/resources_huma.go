@@ -73,9 +73,10 @@ type statusInput struct {
 }
 
 type configKeyDTO struct {
-	Key         string `json:"key"`
-	Secret      bool   `json:"secret"`
-	Description string `json:"description,omitempty"`
+	Key          string `json:"key"`
+	Secret       bool   `json:"secret"`
+	Description  string `json:"description,omitempty"`
+	DefaultValue string `json:"defaultValue,omitempty"`
 }
 
 type consumerDTO struct {
@@ -212,7 +213,7 @@ func toExternalResourceDTOs(views []ExternalResourceView) []externalResourceDTO 
 	for _, v := range views {
 		keys := make([]configKeyDTO, 0, len(v.Config))
 		for _, k := range v.Config {
-			keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret, Description: k.Description})
+			keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret, Description: k.Description, DefaultValue: k.DefaultValue})
 		}
 		consumers := make([]consumerDTO, 0, len(v.Consumers))
 		for _, c := range v.Consumers {

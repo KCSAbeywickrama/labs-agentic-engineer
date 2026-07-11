@@ -492,6 +492,8 @@ components:
     ConfigKeyDTO:
       additionalProperties: false
       properties:
+        defaultValue:
+          type: string
         description:
           type: string
         key:
@@ -505,6 +507,8 @@ components:
     ConfigKeyView:
       additionalProperties: false
       properties:
+        defaultValue:
+          type: string
         description:
           type: string
         key:

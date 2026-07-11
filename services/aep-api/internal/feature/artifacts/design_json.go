@@ -116,9 +116,10 @@ type dependencyJSON struct {
 
 // configKeyJSON mirrors models.ConfigKey.
 type configKeyJSON struct {
-	Key         string `json:"key"`
-	Secret      bool   `json:"secret"`
-	Description string `json:"description,omitempty"`
+	Key          string `json:"key"`
+	Secret       bool   `json:"secret"`
+	Description  string `json:"description,omitempty"`
+	DefaultValue string `json:"defaultValue,omitempty"`
 }
 
 // exposesAPIJSON mirrors models.ExposesAPI.
@@ -329,7 +330,7 @@ func toModelConfigKeys(in []configKeyJSON) []models.ConfigKey {
 		if c.Key == "" {
 			continue
 		}
-		out = append(out, models.ConfigKey{Key: c.Key, Secret: c.Secret, Description: c.Description})
+		out = append(out, models.ConfigKey{Key: c.Key, Secret: c.Secret, Description: c.Description, DefaultValue: c.DefaultValue})
 	}
 	return out
 }
@@ -340,7 +341,7 @@ func toJSONConfigKeys(in []models.ConfigKey) []configKeyJSON {
 	}
 	out := make([]configKeyJSON, 0, len(in))
 	for _, c := range in {
-		out = append(out, configKeyJSON{Key: c.Key, Secret: c.Secret, Description: c.Description})
+		out = append(out, configKeyJSON{Key: c.Key, Secret: c.Secret, Description: c.Description, DefaultValue: c.DefaultValue})
 	}
 	return out
 }

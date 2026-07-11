@@ -209,8 +209,12 @@ component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials
 `"secret": true` (they route through the secret path). Give each key an optional
 `description` — a short note on what the value is and where the user finds it
 (e.g. `{ "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe
-secret API key" }`); the Build dependency drawer shows it under the field. Keep
-the keys minimal — only what the component reads.
+secret API key" }`); the Build dependency drawer shows it under the field. For a
+NON-secret key whose sensible default you can infer (a region, a base URL), add
+an optional `defaultValue` — the drawer pre-fills the field with it (e.g. `{
+"key": "AWS_REGION", "secret": false, "defaultValue": "us-east-1" }`). NEVER set
+`defaultValue` for a secret (`"secret": true`) — a credential like an API key has
+no default to invent. Keep the keys minimal — only what the component reads.
 
 **`needsSpec` is opt-in.** Omit `needsSpec` entirely unless the dependency needs
 a collected OpenAPI spec, in which case set it `true` (never write `false`).

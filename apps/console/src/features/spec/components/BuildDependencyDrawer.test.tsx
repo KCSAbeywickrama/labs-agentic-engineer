@@ -156,6 +156,34 @@ describe("BuildDependencyDrawer", () => {
     ).toBeInTheDocument();
   });
 
+  // defaultValue pre-fills a NON-secret field so the user starts from a sensible
+  // suggestion (a region, a base URL); a secret key never carries a default an
+  // agent could invent, and the drawer must never pre-fill one even defensively.
+  const DEFAULTS: PreflightItem[] = [
+    {
+      component: "checkout-api",
+      dependency: "aws-config",
+      kind: "external-config",
+      description: "AWS region + credentials",
+      config: [
+        { key: "AWS_REGION", secret: false, defaultValue: "us-east-1" },
+        { key: "AWS_SECRET_KEY", secret: true, defaultValue: "must-not-prefill" },
+      ],
+    },
+  ];
+
+  it("pre-fills a non-secret config key with its defaultValue", () => {
+    setup(DEFAULTS);
+
+    expect(screen.getByLabelText(/AWS_REGION/i)).toHaveValue("us-east-1");
+  });
+
+  it("never pre-fills a secret config key even when a defaultValue is present", () => {
+    setup(DEFAULTS);
+
+    expect(screen.getByLabelText(/AWS_SECRET_KEY/i)).toHaveValue("");
+  });
+
   it("masks secret config fields as password inputs", () => {
     setup();
 

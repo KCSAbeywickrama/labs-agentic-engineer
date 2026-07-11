@@ -145,6 +145,8 @@ export interface ConfigKey {
   secret?: boolean;
   /** Optional human-readable note on what this value is for; the Build dependency drawer renders it under the field. */
   description?: string;
+  /** Optional suggested initial value for a NON-secret key (a region, a base URL); the Build dependency drawer pre-fills the field with it. Never set for a secret. */
+  defaultValue?: string;
 }
 
 /** Managed-API exposure policy (platform-owned). Mirrors Go `models.ExposesAPI`. */
