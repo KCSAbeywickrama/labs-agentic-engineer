@@ -69,8 +69,9 @@ Approved at section level; per-section detail is defined feature-by-feature.
   - **Overview** — component map + status, deployment state, recent activity.
   - **Specs & Design** — the requirement, derived design + validation files;
     the blocking design review lives here.
-  - **Tasks** — coding-agent task list + per-task console log; PRs and issues
-    link out to GitHub.
+  - **Builds** — per-version build history: the selected build's summary +
+    its tag-scoped coding-agent task list (Version autocomplete for older
+    tags), per-task console log; PRs and issues link out to GitHub.
   - **Deployments** — dev environment state and URLs.
   - **Issues** — issues the SRE agent raises against the running project
     (placeholder until its feature lands).
@@ -173,6 +174,7 @@ GitHub issue plus any ADRs it produced.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|
+| Builds page (Tasks → Builds) | 2026-07-11 | Tasks section becomes the Builds page: current-build view (status, frozen task tally, timestamps) + Version autocomplete over built tags (`?tag=` search param, unknown tag falls back to newest), task list scoped server-side by lineage tag; `/tasks` routes redirect to `/builds`; page title inverts to "Builds" / project-name subtitle on this route only. Read-only v1 — builds start from the Spec view. New `GET /projects/{p}/builds` (one entry per built tag from `workflow_runs` dev rows); `list-tasks?tag=` now filters on the machine-block specTag so pre-#182 label-less tasks still scope. Incident tasks (no lineage) parked → [#190](https://github.com/wso2/labs-agentic-engineer/issues/190). | [#185](https://github.com/wso2/labs-agentic-engineer/issues/185) |
 | Legacy console retirement | 2026-07-10 | console-legacy deleted outright (directory, Makefile hooks, docker-compose service). apps/console takes over :8090/`aep-console` in both docker-compose and the OpenChoreo/Thunder cloud path (CORS allow-list, redirect URIs); the one-off `patch-thunder-new-console.sh` transition script is gone. | [#98](https://github.com/wso2/labs-agentic-engineer/issues/98) |
 | Tasks page + project-scoped left nav | 2026-07-10 | Sidebar swaps to Overview / Spec / Tasks / Deployments / Issues inside a project (full swap, no back-item; spec workspace auto-collapses it). Tasks: flat list with Pending/Ongoing/Done/Failed chips, 5s polling while active, per-task console-log page streaming `stream-task-log` (SSE) with per-attempt dividers. Issues ships as a placeholder (future SRE-agent issues surface); overview Build card renamed Tasks. No contract changes. Filtering deferred to [#177](https://github.com/wso2/labs-agentic-engineer/issues/177). | [#173](https://github.com/wso2/labs-agentic-engineer/issues/173), ADR-0010 |
 | Spec view — Generate / Re-generate design | 2026-07-10 | Phase-aware primary CTA in the Spec view header: **Generate design** when requirements exist but no design, **Build** once a design exists; **Re-generate design** in the Designs section. Fires a design-generation room turn (agent writes `specs/design/…` live). Gated on requirements; Build stays gated on design files. Verified live (7 design files generated + committed). | [#159](https://github.com/wso2/labs-agentic-engineer/issues/159), ADR-0007 (staleness → [#160](https://github.com/wso2/labs-agentic-engineer/issues/160)) |

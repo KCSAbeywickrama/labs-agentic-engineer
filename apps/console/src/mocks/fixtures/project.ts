@@ -2,8 +2,10 @@ import type { components } from "../../generated/aep-api";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
+type ComponentOpenAPI = components["schemas"]["ComponentOpenAPI"];
 type TaskView = components["schemas"]["TaskView"];
 type TagList = components["schemas"]["TagList"];
+type BuildList = components["schemas"]["BuildList"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ErrorModel = components["schemas"]["ErrorModel"];
@@ -229,6 +231,39 @@ const deployedComponents: ComponentList = {
   ),
 };
 
+// The OpenAPI contract served by GET .../components/:name/openapi — a
+// `{ spec }` envelope carrying a raw document, exactly as aep-api returns it
+// (read off specs/design). The ComponentOpenApiDialog renders `spec` via the
+// shared OpenApiView. Title is keyed off the component so the viewer's hero
+// reflects which row was opened.
+export function componentOpenApi(componentName: string): ComponentOpenAPI {
+  const spec = `openapi: 3.0.0
+info:
+  title: ${componentName}
+  version: 1.0.0
+  description: Mock API contract for ${componentName}.
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /items:
+    get:
+      summary: List items
+      responses:
+        "200":
+          description: A list of items
+    post:
+      summary: Create an item
+      responses:
+        "201":
+          description: Created
+`;
+  return { componentName, componentType: "service", spec };
+}
+
 export const projectComponents: Record<
   Exclude<ProjectScenario, "error">,
   ComponentList
@@ -289,6 +324,45 @@ export const projectTasks: Record<
   deployed: doneTasks,
   "deploy-failed": doneTasks,
   "repo-error": [],
+};
+
+// Builds backing list-project-builds — the builds page (#185): one entry per
+// built tag, newest first, tallies mirroring projectStatuses[s].build.
+const noBuilds: BuildList = { builds: [] };
+const runningV1Build: BuildList = {
+  builds: [
+    {
+      tag: "v1",
+      status: "in_progress",
+      tasks: { total: 4, done: 0, failed: 1, active: 3 },
+      startedAt: "2026-07-10T09:12:00Z",
+    },
+  ],
+};
+const completedV1Build: BuildList = {
+  builds: [
+    {
+      tag: "v1",
+      status: "completed",
+      tasks: { total: 4, done: 4, failed: 0, active: 0 },
+      startedAt: "2026-07-10T09:12:00Z",
+      completedAt: "2026-07-10T10:03:00Z",
+    },
+  ],
+};
+
+export const projectBuilds: Record<
+  Exclude<ProjectScenario, "error">,
+  BuildList
+> = {
+  fresh: noBuilds,
+  spec: noBuilds,
+  "spec-failed": noBuilds,
+  building: runningV1Build,
+  deploying: completedV1Build,
+  deployed: completedV1Build,
+  "deploy-failed": completedV1Build,
+  "repo-error": noBuilds,
 };
 
 // Spec version tags (#117): latest = newest user tag; specDirty = specs/

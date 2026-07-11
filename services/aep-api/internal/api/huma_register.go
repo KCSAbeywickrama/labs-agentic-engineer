@@ -76,6 +76,7 @@ type HumaDeps struct {
 	GenAISvc          genai.GenAIService
 	BuildSvc          *build.Service
 	RcaAgentReportSvc rcaagent.RcaAgentReportService
+	PreflightSvc      *build.PreflightService
 	GitHubAppSlug     string
 	BFFPublicURL      string
 	GitHubAppClientID string
@@ -101,6 +102,7 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	genai.RegisterGenAI(api, d.GenAISvc)
 	build.RegisterBuild(api, d.BuildSvc)
 	rcaagent.RegisterRcaAgentReports(api, d.RcaAgentReportSvc)
+	build.RegisterPreflight(api, d.PreflightSvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)

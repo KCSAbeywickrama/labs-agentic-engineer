@@ -94,10 +94,12 @@ var (
 // get-design-bundle-at-tag, discard-design-changes, list-design-versions) was
 // removed outright — superseded by the Files API (list-files/read-file).
 // What remains: SaveAndProceed (hard gate → tag at HEAD, then task
-// reconciliation) and CollectSpec (dependency spec collection, used
-// internally by SaveAndProceed's auto-fetch step). There is no exported
-// interface — every caller (app.go's composition root, provisioning via
-// MarkOrgPublished) holds the concrete type directly.
+// reconciliation), CollectSpec (dependency spec collection), and the two
+// steps the thin POST /build path reuses pre-tag — DeriveEndUserAuthAtHead
+// and RegisterExternalResources (issue #164). There is no exported
+// interface — every caller holds the concrete type; the composition root
+// adapts the two build-path methods onto narrow consumer interfaces
+// (internal/app/build_adapters.go) since build cannot import design.
 type designService struct {
 	store               *artifacts.ArtifactStore
 	artifactSvc         artifacts.ArtifactService
@@ -150,7 +152,7 @@ type resourceMarkerCatalog interface {
 // (dependency-management §3.6). *provisioning.Service satisfies it. Wired via
 // SetProvisionIssueMinter at the composition root; nil is a no-op.
 type provisionIssueMinter interface {
-	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) error
+	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) (map[string]int, error)
 }
 
 // externalResourceRegistrar is design_service's narrow consumer port for the
@@ -239,6 +241,19 @@ func (s *designService) registerExternalResources(ctx context.Context, orgID str
 			}
 		}
 	}
+}
+
+// RegisterExternalResources reads the design at HEAD and best-effort upserts
+// every distinct `external` dependency into the org catalog (the public entry
+// the build path's provisioning adapter calls before authoring bindings, so the
+// catalog resolves each external resource). A nil design is a no-op.
+func (s *designService) RegisterExternalResources(ctx context.Context, orgID, projectID string) error {
+	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return fmt.Errorf("design: read design: %w", err)
+	}
+	s.registerExternalResources(ctx, orgID, designFile)
+	return nil
 }
 
 // CollectSpec resolves the {component, depName} external dependency in the
@@ -599,7 +614,7 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 	// dependency so consumer coding tasks hold until each is provisioned
 	// (best-effort; never fails the save).
 	if s.provisionMinter != nil {
-		if merr := s.provisionMinter.EnsureProvisionIssues(ctx, orgID, projectID, res.Tag); merr != nil {
+		if _, merr := s.provisionMinter.EnsureProvisionIssues(ctx, orgID, projectID, res.Tag); merr != nil {
 			slog.WarnContext(ctx, "provision issue minting after design save failed", "error", merr)
 		}
 	}

@@ -61,7 +61,11 @@ const fullComponentDesignJSON = `{
         {
           "key": "OPENWEATHER_API_KEY",
           "secret": true,
-          "credentialClass": "secret"
+          "description": "Your OpenWeather API key"
+        },
+        {
+          "key": "OPENWEATHER_REGION",
+          "defaultValue": "us-east-1"
         }
       ]
     },
@@ -127,8 +131,13 @@ func TestParseComponentDesignJSON_AllKinds(t *testing.T) {
 	if got[2].Status != "" || got[2].Reason != "" {
 		t.Fatalf("dep[2] must have no computed status (specPath set): %+v", got[2])
 	}
-	if len(got[2].Config) != 1 || got[2].Config[0].Key != "OPENWEATHER_API_KEY" || !got[2].Config[0].Secret {
+	if len(got[2].Config) != 2 || got[2].Config[0].Key != "OPENWEATHER_API_KEY" || !got[2].Config[0].Secret ||
+		got[2].Config[0].Description != "Your OpenWeather API key" || got[2].Config[0].DefaultValue != "" {
 		t.Fatalf("dep[2] config drifted: %+v", got[2].Config)
+	}
+	if got[2].Config[1].Key != "OPENWEATHER_REGION" || got[2].Config[1].Secret ||
+		got[2].Config[1].DefaultValue != "us-east-1" {
+		t.Fatalf("dep[2] config[1] defaultValue drifted: %+v", got[2].Config)
 	}
 	if got[3].Kind != models.DependencyKindPlatformResource || got[3].Name != "orders-db" ||
 		got[3].ResourceType != "postgres" || got[3].Parameters["size"] != "small" {

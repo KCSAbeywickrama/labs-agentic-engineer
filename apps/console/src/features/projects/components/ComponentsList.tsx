@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useState } from "react";
 import {
   Avatar,
   Chip,
@@ -25,14 +26,14 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink, FileCode } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import { env } from "../../../config/env";
+import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
 
 type Component = components["schemas"]["Component"];
 
 // The component type is OpenChoreo's own ComponentType name, end-to-end.
 const isWebApp = (c: Component) => c.type === "web-application";
 
-function componentLink(projectName: string, c: Component) {
+function componentLink(c: Component, onOpenContract: (name: string) => void) {
   if (isWebApp(c)) {
     return c.endpointUrl ? (
       <MuiLink
@@ -50,14 +51,22 @@ function componentLink(projectName: string, c: Component) {
       </Typography>
     );
   }
-  // API/service rows link to the component's OpenAPI contract.
+  // API/service rows open the component's OpenAPI contract in-app. It's a
+  // button, not an <a href>: the /openapi endpoint is JWT-guarded and a raw
+  // browser navigation carries no Bearer token (401). The dialog fetches
+  // through the authenticated client instead.
   return (
     <MuiLink
-      href={`${env.apiBaseUrl}/api/v1/projects/${projectName}/components/${c.name}/openapi`}
-      target="_blank"
-      rel="noreferrer"
+      component="button"
+      type="button"
+      onClick={() => onOpenContract(c.name)}
       variant="body2"
-      sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 0.5,
+        verticalAlign: "baseline",
+      }}
     >
       API contract <FileCode size={14} />
     </MuiLink>
@@ -73,6 +82,10 @@ export function ComponentsList({
   projectName: string;
   items: Component[];
 }) {
+  const [contractComponent, setContractComponent] = useState<string | null>(
+    null,
+  );
+
   if (items.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
@@ -134,12 +147,17 @@ export function ComponentsList({
                 />
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 200 }}>
-                {componentLink(projectName, c)}
+                {componentLink(c, setContractComponent)}
               </ListingTable.Cell>
             </ListingTable.Row>
           ))}
         </ListingTable.Body>
       </ListingTable>
+      <ComponentOpenApiDialog
+        projectName={projectName}
+        componentName={contractComponent}
+        onClose={() => setContractComponent(null)}
+      />
     </ListingTable.Container>
   );
 }

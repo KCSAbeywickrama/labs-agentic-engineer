@@ -204,6 +204,65 @@ func TestProvision_SecretValuesWithoutSMAPI_Fails(t *testing.T) {
 	}
 }
 
+// TestAuthorWithSecretRef_UsesStagedRefNoSMWrite pins the build path's author
+// half (issue #164): it authors the per-env binding pinned to the PASSED
+// SecretStorePath (staged pre-tag by POST /build) and NEVER writes to SM-API.
+func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
+	t.Parallel()
+
+	rc := newFakeRC("openweather-proj-abc123")
+	sw := &fakeSecretWriter{}
+	p := newTestProvisioner(nil, rc, sw)
+
+	er := &models.ExternalResource{
+		Name: "openweather", ResourceTypeName: "openweather",
+		ConfigKeys: []models.ConfigKey{
+			{Key: "OPENWEATHER_BASE_URL", Secret: false},
+			{Key: "OPENWEATHER_API_KEY", Secret: true},
+		},
+	}
+	byEnv := map[string]PreparedEnvValues{
+		"development": {
+			Plain:           map[string]string{"OPENWEATHER_BASE_URL": "https://api.openweathermap.org"},
+			SecretStorePath: "user-app-secrets/wc-org/staged-ref",
+		},
+	}
+
+	res, err := p.AuthorWithSecretRef(context.Background(), "default", "weatherproj", er, byEnv)
+	if err != nil {
+		t.Fatalf("AuthorWithSecretRef: %v", err)
+	}
+	// The SM-API writer is NEVER touched — the secret was staged pre-tag.
+	if len(sw.wrote) != 0 {
+		t.Fatalf("AuthorWithSecretRef must not write to SM-API, wrote: %v", sw.wrote)
+	}
+	// One binding, pinned to the release, carrying the PASSED secretStorePath.
+	bindings := rc.EnsureBindingCalls()
+	if len(bindings) != 1 {
+		t.Fatalf("want 1 binding, got %d", len(bindings))
+	}
+	b := bindings[0].B
+	if b.Metadata.Name != "weatherproj-openweather-development" {
+		t.Errorf("binding name = %q", b.Metadata.Name)
+	}
+	if b.Spec.ResourceRelease != "openweather-proj-abc123" {
+		t.Errorf("binding not pinned: %q", b.Spec.ResourceRelease)
+	}
+	var cfg map[string]string
+	if err := json.Unmarshal(b.Spec.ResourceTypeEnvironmentConfigs, &cfg); err != nil {
+		t.Fatalf("env configs not json: %v", err)
+	}
+	if cfg["OPENWEATHER_BASE_URL"] != "https://api.openweathermap.org" {
+		t.Errorf("plain value missing from env configs: %v", cfg)
+	}
+	if cfg[openchoreo.SecretStorePathField] != "user-app-secrets/wc-org/staged-ref" {
+		t.Errorf("staged secretStorePath must be pinned verbatim, got %q", cfg[openchoreo.SecretStorePathField])
+	}
+	if res.BindingByEnv["development"] != "weatherproj-openweather-development" {
+		t.Errorf("BindingByEnv wrong: %+v", res.BindingByEnv)
+	}
+}
+
 func TestProvision_Validation(t *testing.T) {
 	t.Parallel()
 
@@ -217,6 +276,47 @@ func TestProvision_Validation(t *testing.T) {
 	}
 	if _, err := p.Provision(context.Background(), "default", "oc-org-1", "", er, nil); err == nil {
 		t.Error("want error on empty projectName")
+	}
+}
+
+// TestStageSecrets_WritesPerEnvReturnsRefs proves the extracted SM-API-only
+// write loop: each env's secrets land under the per-env "extres-" entity and
+// the returned refByEnv carries ONLY the secretStorePath (a reference), while
+// an env with no secrets produces no write and no ref.
+func TestStageSecrets_WritesPerEnvReturnsRefs(t *testing.T) {
+	t.Parallel()
+	sw := &fakeSecretWriter{}
+	p := newTestProvisioner(nil, newFakeRC("rel-1"), sw)
+	er := &models.ExternalResource{
+		Name: "stripe", ResourceTypeName: "stripe",
+		ConfigKeys: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true}},
+	}
+	refByEnv, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er, map[string]map[string]string{
+		"development": {"STRIPE_KEY": "sk_live"},
+		"production":  {}, // empty → no write, no ref
+	})
+	if err != nil {
+		t.Fatalf("stage secrets: %v", err)
+	}
+	if refByEnv["development"] == "" {
+		t.Fatalf("want a development ref, got %v", refByEnv)
+	}
+	if _, ok := refByEnv["production"]; ok {
+		t.Fatalf("an env with no secrets must not produce a ref: %v", refByEnv)
+	}
+	if got := sw.wrote["extres-stripe-development"]; got["STRIPE_KEY"] != "sk_live" {
+		t.Fatalf("secret not written under the per-env entity: %v", sw.wrote)
+	}
+}
+
+// Secrets present but SM-API disabled fails closed (mirrors Provision's guard).
+func TestStageSecrets_SecretsWithoutSMAPIFails(t *testing.T) {
+	t.Parallel()
+	p := newTestProvisioner(nil, newFakeRC("rel-1"), &fakeSecretWriter{disabled: true})
+	er := &models.ExternalResource{Name: "stripe"}
+	if _, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er,
+		map[string]map[string]string{"development": {"STRIPE_KEY": "k"}}); err == nil {
+		t.Fatal("want error when SM-API disabled but secrets present")
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -269,4 +270,40 @@ type fakeRepoLocator struct{}
 
 func (fakeRepoLocator) ByFullName(context.Context, string) (string, string, error) {
 	return "org1", "proj1", nil
+}
+
+// fakeDesign is an in-memory DesignReader: per-component provision + org-service
+// dependency names (keys lowercased, as the design adapter emits them).
+type fakeDesign struct {
+	provision  map[string][]string
+	orgService map[string][]string
+}
+
+func (f fakeDesign) ProvisionDepNames(context.Context, string, string) (map[string][]string, error) {
+	return f.provision, nil
+}
+
+func (f fakeDesign) OrgServiceDepNames(context.Context, string, string) (map[string][]string, error) {
+	return f.orgService, nil
+}
+
+// provisionGateIssue builds a seeded aep:provision gate issue whose machine-block
+// component IS the dependency name it gates (dependency-management §3.6) — the
+// exact shape the read path indexes into provisionByDep.
+func provisionGateIssue(number int, depName string) gitrepo.IssueInfo {
+	block := taskmeta.Block{
+		Component: depName,
+		GateKind:  taskmeta.GateConfigCollection,
+		Origin:    taskmeta.OriginSpecPlan,
+		DesignTag: "design-v1",
+	}
+	body := taskmeta.ComposeBody(block, taskmeta.Human{Rationale: "gate"})
+	return gitrepo.IssueInfo{
+		Number: number,
+		Title:  "Provision " + depName,
+		Body:   body,
+		State:  "open",
+		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
+		Labels: taskmeta.NewTaskLabels(taskmeta.ClassProvision, taskmeta.OriginSpecPlan),
+	}
 }

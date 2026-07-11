@@ -25,19 +25,19 @@ import { isActiveStatus } from "./status";
 // decisions). 5s: the list is where the user watches chips go green.
 const TASKS_POLL_MS = 5_000;
 
-// The full task list, unfiltered (state=all — a merged PR auto-closes the
-// task's GitHub issue, so `open` would hide Done and build-failed tasks).
-// Filtering is #177.
-export function useAllTasks(projectName: string) {
+// The task list (state=all — a merged PR auto-closes the task's GitHub
+// issue, so `open` would hide Done and build-failed tasks). `tag` scopes the
+// read to one build's lineage (aep:spec/<tag>, #185); omitted = all versions.
+export function useAllTasks(projectName: string, tag?: string) {
   return useQuery({
-    queryKey: taskKeys.list(projectName),
+    queryKey: taskKeys.list(projectName, tag),
     queryFn: async () => {
       const { data, error } = await client.GET(
         "/projects/{projectName}/tasks",
         {
           params: {
             path: { projectName },
-            query: { state: "all" },
+            query: { state: "all", ...(tag && { tag }) },
           },
         },
       );

@@ -50,6 +50,11 @@ export function buildStageView(status: ProjectStatus): StageView {
   const progress = `${tasks.done}/${tasks.total} done`;
   switch (state) {
     case "running":
+      // total is written once the plan step finishes, so a running build
+      // with no tasks is still planning — say so instead of "0/0 done".
+      if (tasks.total === 0) {
+        return { version, line: "building · generating tasks", tone: "info" };
+      }
       return {
         version,
         line: `building · ${progress}`,
