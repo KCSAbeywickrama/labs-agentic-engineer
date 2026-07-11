@@ -467,7 +467,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
 	// the OC Component's workflow params.
-	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, artifactStore, executionRepo)
+	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, executionRepo)
+	// Build/deploy stage sources for the status poll (#184): the
+	// workflow_runs index (one row read) + the org-scoped release-binding
+	// list — consumer-side ports wired here so project imports neither.
+	projectService.SetStageSources(workflowRunRepo, componentClient)
 	organizationService := organization.NewOrganizationService(db, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>

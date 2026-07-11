@@ -78,22 +78,6 @@ func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
 	s.orgServices = r
 }
 
-// ---- Requirements (multi-file Markdown directory) -----------------------
-
-// ListRequirements returns the requirements file map at HEAD, under
-// `specs/requirements/`. A first-time project with no requirements yet returns
-// an empty map (not an error).
-func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	files, err := s.artifactSvc.ListRequirementFiles(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if files == nil {
-		files = map[string]string{}
-	}
-	return files, nil
-}
-
 // ---- Design (multi-file directory) --------------------------------------
 
 // DesignFile is the BFF's in-memory representation of the multi-file design

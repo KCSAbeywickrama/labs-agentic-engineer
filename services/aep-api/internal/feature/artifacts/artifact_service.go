@@ -46,6 +46,11 @@ var (
 	// ErrArtifactNotFound is returned when the requested artifact (bundle at
 	// HEAD or at a tag) does not exist. Maps to 404 at the handler.
 	ErrArtifactNotFound = errors.New("artifact not found")
+	// ErrSpecTagNotFound is returned by ComponentCountAtTag when the spec tag
+	// is absent from the local mirror — a data state (deleted tag, stale run
+	// row from a recreated project), not an infrastructure failure; the
+	// status read degrades instead of failing.
+	ErrSpecTagNotFound = errors.New("spec tag not in local mirror")
 	// ErrArtifactPathInvalid is returned for illegal-shape inputs and for the
 	// save-gate layout failure (root file missing). Maps to 400.
 	ErrArtifactPathInvalid = errors.New("invalid artifact path")
@@ -139,10 +144,6 @@ type DesignSaveResult struct {
 // are workspace-at-HEAD / at-tag; saves cut tags; discards revert to the last
 // tag.
 type ArtifactService interface {
-	// Requirements bundle at HEAD (flat directory of markdown/dsl/excalidraw).
-	// Only consumer: ArtifactStore.ListRequirements (project_service.go's spec
-	// summary read).
-	ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	// Design bundle at HEAD (recursive; keys relative to specs/design/). Only
 	// consumer: ArtifactStore.ReadDesign, the shared design-read path used
 	// throughout (component, project, provisioning, runtimeconfig, task, …).
@@ -179,6 +180,13 @@ type ArtifactService interface {
 	// GetDesignAtCommit reads the design bundle at an exact commit — the publish
 	// flow's pinned-commit read (no ref resolution involved).
 	GetDesignAtCommit(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error)
+
+	// StatusSnapshot is the status poll's fetch-free git view: local head +
+	// local tags, tree reads SHA-addressed (status_snapshot.go).
+	StatusSnapshot(ctx context.Context, orgID, projectID string) (*StatusSnapshot, error)
+	// ComponentCountAtTag counts the design components at a spec tag — the
+	// deploy stage's denominator. Local-only; unknown tag errors.
+	ComponentCountAtTag(ctx context.Context, orgID, projectID, tag string) (int, error)
 }
 
 type artifactService struct {
@@ -227,14 +235,6 @@ func hasAllowedRequirementExt(name string) bool {
 }
 
 // ----- Reads (GitHub-at-HEAD / at-tag) -----
-
-func (s *artifactService) ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	_, ref, err := s.readyRef(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return s.readBundleAtHead(ctx, ref, requirementsPrefix, requirementsBundleFilter)
-}
 
 func (s *artifactService) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	_, ref, err := s.readyRef(ctx, orgID, projectID)

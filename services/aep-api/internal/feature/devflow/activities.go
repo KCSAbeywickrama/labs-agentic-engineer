@@ -110,6 +110,26 @@ func (a *Activities) SetWorkflowRunStatus(ctx context.Context, in SetWorkflowRun
 	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status)
 }
 
+// SetWorkflowRunTaskCountsInput carries a dev run's task tally — absolute
+// values derived from the workflow's deterministic task state, so a retried
+// activity re-writes the same numbers instead of double-counting. RunID
+// scopes the write to this execution (a same-tag rebuild reuses the
+// workflow id).
+type SetWorkflowRunTaskCountsInput struct {
+	WorkflowID string `json:"workflowId"`
+	RunID      string `json:"runId"`
+	Total      int    `json:"total"`
+	Done       int    `json:"done"`
+	Failed     int    `json:"failed"`
+}
+
+// SetWorkflowRunTaskCounts records the dev run's task tally in the lookup
+// index — the overview build stage's counts source. Written once with the
+// plan size, then per task transition, frozen when the run ends.
+func (a *Activities) SetWorkflowRunTaskCounts(ctx context.Context, in SetWorkflowRunTaskCountsInput) error {
+	return a.runs.SetTaskCounts(ctx, in.WorkflowID, in.RunID, in.Total, in.Done, in.Failed)
+}
+
 // DispatchCodingInput identifies the Task to dispatch a coding attempt for.
 type DispatchCodingInput struct {
 	OrgID     string `json:"orgId"`

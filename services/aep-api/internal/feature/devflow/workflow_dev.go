@@ -183,6 +183,39 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 	var running []childRun
 	finished := 0
 
+	// Task tally for the lookup index (the overview build stage): absolute
+	// values DERIVED from status.Tasks — setTaskRef is the single transition
+	// seam, so the tally cannot desync from the run's real progress. Flushed
+	// from the loop body (never inside a selector callback, which must not
+	// block); the first flush publishes the plan size with a zero tally.
+	// Best-effort with bounded retries: a dropped write is rewritten by the
+	// next transition's absolute values, and a DB outage must never stall
+	// task dispatch.
+	lastDone, lastFailed := -1, -1
+	flushCounts := func() {
+		done, failedCount := 0, 0
+		for _, tr := range status.Tasks {
+			switch {
+			case tr.Outcome == OutcomeSucceeded:
+				done++
+			case tr.Phase == TaskPhaseFailed:
+				failedCount++
+			}
+		}
+		if done == lastDone && failedCount == lastFailed {
+			return
+		}
+		lastDone, lastFailed = done, failedCount
+		info := workflow.GetInfo(ctx).WorkflowExecution
+		_ = workflow.ExecuteActivity(countsActivityOpts(ctx), (*Activities).SetWorkflowRunTaskCounts, SetWorkflowRunTaskCountsInput{
+			WorkflowID: info.ID,
+			RunID:      info.RunID,
+			Total:      len(tasks),
+			Done:       done,
+			Failed:     failedCount,
+		}).Get(ctx, nil)
+	}
+
 	for finished < len(tasks) {
 		// Start every ready task (stable slice order).
 		for i := range tasks {
@@ -219,6 +252,8 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 			setTaskRef(status, t.Issue, wid, TaskPhaseStarting, "")
 		}
 
+		flushCounts()
+
 		if len(running) == 0 {
 			// No task is runnable and none is running — remaining are blocked by
 			// failed deps (or an unresolved cycle the fast-fail missed). Skip them.
@@ -231,6 +266,7 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 					setTaskRef(status, t.Issue, "", TaskPhaseFailed, OutcomeSkippedDepFai)
 				}
 			}
+			flushCounts()
 			break
 		}
 
@@ -262,6 +298,7 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 			running = append(running[:completedIdx], running[completedIdx+1:]...)
 			finished++
 		}
+		flushCounts()
 	}
 }
 
@@ -308,6 +345,17 @@ func planActivityOpts(ctx workflow.Context) workflow.Context {
 		StartToCloseTimeout: 30 * time.Minute,
 		HeartbeatTimeout:    2 * time.Minute,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
+}
+
+// countsActivityOpts bounds the informational tally write: without an
+// explicit RetryPolicy the SERVER default applies (unlimited attempts), and
+// flushCounts blocks the dispatch loop on .Get — a DB outage would stall
+// task fan-out for a write whose loss the next transition heals anyway.
+func countsActivityOpts(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 2 * time.Minute,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	})
 }
 
