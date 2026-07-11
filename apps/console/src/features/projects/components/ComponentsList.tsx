@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useState } from "react";
 import {
   Avatar,
   Chip,
@@ -25,39 +26,71 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink, FileCode } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import { env } from "../../../config/env";
+import { useComponentEndpointUrl } from "../api/queries";
+import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
 
 type Component = components["schemas"]["Component"];
 
 // The component type is OpenChoreo's own ComponentType name, end-to-end.
 const isWebApp = (c: Component) => c.type === "web-application";
 
-function componentLink(projectName: string, c: Component) {
-  if (isWebApp(c)) {
-    return c.endpointUrl ? (
-      <MuiLink
-        href={c.endpointUrl}
-        target="_blank"
-        rel="noreferrer"
-        variant="body2"
-        sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
-      >
-        Open app <ExternalLink size={14} />
-      </MuiLink>
-    ) : (
+// A web app's "Open app" link (#196). The URL comes from the component's
+// deployments read (dev binding's resolved endpointUrl) — list-components
+// never fills Component.endpointUrl, though the field stays preferred here
+// in case the backend ever closes that drift. Until a URL exists (not yet
+// deployed, or fetch in flight/failed) the placeholder keeps its promise.
+function WebAppLink({
+  projectName,
+  component,
+}: {
+  projectName: string;
+  component: Component;
+}) {
+  const deployed = useComponentEndpointUrl(projectName, component.name);
+  const href = component.endpointUrl ?? deployed.data;
+  if (!href) {
+    return (
       <Typography variant="caption" color="text.secondary">
         URL appears once deployed
       </Typography>
     );
   }
-  // API/service rows link to the component's OpenAPI contract.
   return (
     <MuiLink
-      href={`${env.apiBaseUrl}/api/v1/projects/${projectName}/components/${c.name}/openapi`}
+      href={href}
       target="_blank"
       rel="noreferrer"
       variant="body2"
       sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+    >
+      Open app <ExternalLink size={14} />
+    </MuiLink>
+  );
+}
+
+// API/service rows open the component's OpenAPI contract in-app. It's a
+// button, not an <a href>: the /openapi endpoint is JWT-guarded and a raw
+// browser navigation carries no Bearer token (401). The dialog fetches
+// through the authenticated client instead.
+function ContractLink({
+  name,
+  onOpenContract,
+}: {
+  name: string;
+  onOpenContract: (name: string) => void;
+}) {
+  return (
+    <MuiLink
+      component="button"
+      type="button"
+      onClick={() => onOpenContract(name)}
+      variant="body2"
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 0.5,
+        verticalAlign: "baseline",
+      }}
     >
       API contract <FileCode size={14} />
     </MuiLink>
@@ -73,6 +106,10 @@ export function ComponentsList({
   projectName: string;
   items: Component[];
 }) {
+  const [contractComponent, setContractComponent] = useState<string | null>(
+    null,
+  );
+
   if (items.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
@@ -134,12 +171,24 @@ export function ComponentsList({
                 />
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 200 }}>
-                {componentLink(projectName, c)}
+                {isWebApp(c) ? (
+                  <WebAppLink projectName={projectName} component={c} />
+                ) : (
+                  <ContractLink
+                    name={c.name}
+                    onOpenContract={setContractComponent}
+                  />
+                )}
               </ListingTable.Cell>
             </ListingTable.Row>
           ))}
         </ListingTable.Body>
       </ListingTable>
+      <ComponentOpenApiDialog
+        projectName={projectName}
+        componentName={contractComponent}
+        onClose={() => setContractComponent(null)}
+      />
     </ListingTable.Container>
   );
 }

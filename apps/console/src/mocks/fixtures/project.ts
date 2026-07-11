@@ -2,9 +2,11 @@ import type { components } from "../../generated/aep-api";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
+type ComponentOpenAPI = components["schemas"]["ComponentOpenAPI"];
 type TaskView = components["schemas"]["TaskView"];
 type TagList = components["schemas"]["TagList"];
 type BuildList = components["schemas"]["BuildList"];
+type DeploymentList = components["schemas"]["DeploymentList"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ErrorModel = components["schemas"]["ErrorModel"];
@@ -222,13 +224,65 @@ const builtComponents: ComponentList = {
   ],
 };
 
-const deployedComponents: ComponentList = {
-  items: (builtComponents.items ?? []).map((c) =>
-    c.type === "web-application"
-      ? { ...c, endpointUrl: "https://storefront.dev.acme-aep.io" }
-      : c,
-  ),
-};
+// Note: no endpointUrl on the components themselves — the real backend never
+// fills Component.endpointUrl (noted drift, #196); the console reads a web
+// app's URL from list-deployments (componentDeployments below).
+const deployedComponents: ComponentList = builtComponents;
+
+// Deployments backing list-deployments (#196): the deployed scenario gives
+// the web app its dev binding URL (matching the pre-#196 fixture semantics);
+// earlier scenarios have no resolved URL yet.
+export function componentDeployments(
+  s: Exclude<ProjectScenario, "error">,
+  componentName: string,
+): DeploymentList {
+  if (s === "deployed" && componentName === "storefront") {
+    return {
+      items: [
+        {
+          componentName,
+          environment: "development",
+          status: "Ready",
+          endpointUrl: "https://storefront.dev.acme-aep.io",
+        },
+      ],
+    };
+  }
+  return { items: [] };
+}
+
+// The OpenAPI contract served by GET .../components/:name/openapi — a
+// `{ spec }` envelope carrying a raw document, exactly as aep-api returns it
+// (read off specs/design). The ComponentOpenApiDialog renders `spec` via the
+// shared OpenApiView. Title is keyed off the component so the viewer's hero
+// reflects which row was opened.
+export function componentOpenApi(componentName: string): ComponentOpenAPI {
+  const spec = `openapi: 3.0.0
+info:
+  title: ${componentName}
+  version: 1.0.0
+  description: Mock API contract for ${componentName}.
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /items:
+    get:
+      summary: List items
+      responses:
+        "200":
+          description: A list of items
+    post:
+      summary: Create an item
+      responses:
+        "201":
+          description: Created
+`;
+  return { componentName, componentType: "service", spec };
+}
 
 export const projectComponents: Record<
   Exclude<ProjectScenario, "error">,

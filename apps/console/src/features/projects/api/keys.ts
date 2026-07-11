@@ -26,6 +26,10 @@ export const projectKeys = {
   status: (name: string) => [...projectKeys.detail(name), "status"] as const,
   components: (name: string) =>
     [...projectKeys.detail(name), "components"] as const,
+  componentOpenapi: (name: string, component: string) =>
+    [...projectKeys.components(name), component, "openapi"] as const,
+  componentDeployments: (name: string, component: string) =>
+    [...projectKeys.components(name), component, "deployments"] as const,
   tasks: (name: string) => [...projectKeys.detail(name), "tasks"] as const,
   tags: (name: string) => [...projectKeys.detail(name), "tags"] as const,
   buildPreflight: (name: string) =>
