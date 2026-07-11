@@ -33,10 +33,17 @@ import { useAllTasks } from "../api/queries";
 import { TaskStatusChip } from "./TaskStatusChip";
 
 // The flat task list (#173): one row per task, status chip inline — the user
-// watches chips go green. No sections, no filter (that's #177). Card-variant
-// listing per the components list / oxygen-ui sample precedent.
-export function TasksList({ projectName }: { projectName: string }) {
-  const tasks = useAllTasks(projectName);
+// watches chips go green. Card-variant listing per the components list /
+// oxygen-ui sample precedent. `tag` scopes the list to one build's lineage
+// (the builds page, #185); omitted = every version's tasks.
+export function TasksList({
+  projectName,
+  tag,
+}: {
+  projectName: string;
+  tag?: string;
+}) {
+  const tasks = useAllTasks(projectName, tag);
   const navigate = useNavigate();
 
   if (tasks.isPending) {
@@ -64,8 +71,9 @@ export function TasksList({ projectName }: { projectName: string }) {
   if (tasks.data.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
-        No tasks yet — publish a design and start a build; coding-agent tasks
-        show up here as the build plans them.
+        {tag
+          ? `No tasks for ${tag} yet — the build plans its coding-agent tasks right after it starts.`
+          : "No tasks yet — publish a design and start a build; coding-agent tasks show up here as the build plans them."}
       </Typography>
     );
   }
@@ -84,18 +92,28 @@ export function TasksList({ projectName }: { projectName: string }) {
           </ListingTable.Row>
         </ListingTable.Head>
         <ListingTable.Body>
-          {tasks.data.map((t) => (
+          {tasks.data.map((t) => {
+            // Provision/config gates are platform-driven (approved in the Build
+            // drawer, resolved out-of-band): there is no task page to open, so the
+            // row is non-clickable — you watch its status and open the GitHub issue.
+            // Its Component column shows "—" (a gate names a dependency, not a
+            // component).
+            const isGate = t.executorClass === "provision";
+            return (
             <ListingTable.Row
               key={t.issueNumber}
               variant="card"
-              hover
-              onClick={() =>
-                void navigate({
-                  to: "/projects/$projectName/tasks/$issueNumber",
-                  params: { projectName, issueNumber: t.issueNumber },
-                })
+              hover={!isGate}
+              onClick={
+                isGate
+                  ? undefined
+                  : () =>
+                      void navigate({
+                        to: "/projects/$projectName/builds/$issueNumber",
+                        params: { projectName, issueNumber: t.issueNumber },
+                      })
               }
-              sx={{ cursor: "pointer" }}
+              sx={{ cursor: isGate ? "default" : "pointer" }}
             >
               <ListingTable.Cell>
                 <ListingTable.CellIcon
@@ -112,16 +130,25 @@ export function TasksList({ projectName }: { projectName: string }) {
                 />
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 160 }}>
-                {t.component ? (
-                  <Chip label={t.component} size="small" variant="outlined" />
-                ) : (
+                {isGate || !t.component ? (
                   <Typography variant="caption" color="text.secondary">
                     —
                   </Typography>
+                ) : (
+                  <Chip label={t.component} size="small" variant="outlined" />
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
-                <TaskStatusChip derivedStatus={t.derivedStatus} />
+                {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
+                  <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
+                    {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+                    <Box sx={{ display: "inline-flex" }}>
+                      <TaskStatusChip derivedStatus={t.derivedStatus} />
+                    </Box>
+                  </Tooltip>
+                ) : (
+                  <TaskStatusChip derivedStatus={t.derivedStatus} />
+                )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 64 }}>
                 <Tooltip title="Open the GitHub issue">
@@ -138,7 +165,8 @@ export function TasksList({ projectName }: { projectName: string }) {
                 </Tooltip>
               </ListingTable.Cell>
             </ListingTable.Row>
-          ))}
+            );
+          })}
         </ListingTable.Body>
       </ListingTable>
     </ListingTable.Container>

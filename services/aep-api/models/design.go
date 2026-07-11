@@ -103,9 +103,9 @@ const (
 // produces DependencyStatusResolved / DependencyStatusBlocked (with
 // DependencyReasonAccessRequired) / DependencyStatusUnresolved (with
 // DependencyReasonNotFound). DependencyStatusAmbiguous is reserved for a
-// dependency with multiple unresolved candidates (see Dependency.Candidates);
-// the design-save proceed-gate (design.ErrUnresolvedDependency) blocks on all
-// three non-resolved states.
+// dependency the platform cannot resolve to a single target; the design-save
+// proceed-gate (design.ErrUnresolvedDependency) blocks on all three
+// non-resolved states.
 const (
 	DependencyStatusResolved   = "resolved"
 	DependencyStatusBlocked    = "blocked"
@@ -153,24 +153,24 @@ type Dependency struct {
 	// spec.parameters (numbers must stay JSON numbers for CRD validation).
 	ResourceType string         `json:"resourceType,omitempty"`
 	Parameters   map[string]any `json:"parameters,omitempty"`
-	// resolution UI: candidates attached when Status == ambiguous.
-	Candidates []DependencyCandidate `json:"candidates,omitempty"`
 }
 
 // ConfigKey is one env-var key a component reads at runtime. For an external
 // resource these keys form the resource's schema (drives the OC ResourceType).
-// Secret keys route through the secret path.
+// Secret keys route through the secret path. `secret` is optional and omitted
+// when false — a key with no `secret` field is a plain (non-secret) config value.
 type ConfigKey struct {
-	Key             string `json:"key"`
-	Secret          bool   `json:"secret"`
-	CredentialClass string `json:"credentialClass,omitempty"` // publishable|secret
-}
-
-// DependencyCandidate is one option attached to an ambiguous dependency.
-type DependencyCandidate struct {
-	Label       string `json:"label"`
+	Key    string `json:"key"`
+	Secret bool   `json:"secret,omitempty"`
+	// Description is an optional human-readable note on what this value is for,
+	// authored alongside the key. The Build dependency drawer renders it under
+	// the field so the user knows what to supply.
 	Description string `json:"description,omitempty"`
-	URL         string `json:"url,omitempty"`
+	// DefaultValue is an optional suggested initial value the agent MAY set for a
+	// NON-secret key it can infer a sensible default for (a region, a base URL).
+	// The Build dependency drawer pre-fills the field with it. Never set for a
+	// secret key — a credential has no default to invent.
+	DefaultValue string `json:"defaultValue,omitempty"`
 }
 
 // ComponentDependsOn returns the names of this component's sibling-component

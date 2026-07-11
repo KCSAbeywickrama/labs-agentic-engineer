@@ -43,7 +43,23 @@ func (s *Service) RequestAccess(ctx context.Context, orgID, consumerProjectID, c
 	if _, err := s.findDepInProject(ctx, orgID, consumerProjectID, orgServiceName, models.DependencyKindOrgService); err != nil {
 		return nil, err
 	}
-	// (b) resolve the provider (at any visibility — the point is to request a
+	return s.recordAccessRequest(ctx, orgID, consumerProjectID, consumerComponent, orgServiceName)
+}
+
+// recordAccessRequest resolves the org-service provider, dedupes against an open
+// request for that provider component (a second consumer rides the existing
+// provider org-publish issue), creates the provider-side org-publish gate issue
+// when none is open, and records the models.AccessRequest row. It is the shared
+// core of BOTH the interactive RequestAccess flow (access_huma.go) and the
+// automated build-time StartOrgServiceVisibility flow (issue #164, Task 4) — the
+// single place the provider is resolved + the org-publish issue is minted, so the
+// two entry points never diverge or double-mint. It does NOT validate the
+// consumer design (callers do that with the context they have).
+func (s *Service) recordAccessRequest(ctx context.Context, orgID, consumerProjectID, consumerComponent, orgServiceName string) (*models.AccessRequest, error) {
+	if s.access == nil || s.providers == nil {
+		return nil, ErrOrgServiceNotFound
+	}
+	// resolve the provider (at any visibility — the point is to request a
 	// not-yet-published one).
 	target, ok, err := s.providers.FindByComponent(ctx, orgID, orgServiceName)
 	if err != nil {
@@ -55,7 +71,7 @@ func (s *Service) RequestAccess(ctx context.Context, orgID, consumerProjectID, c
 	providerProject := target.Project
 	providerComponent := logicalComponent(target.Project, target.Component)
 
-	// (c) idempotency: an open request/issue for this provider component → the new
+	// idempotency: an open request/issue for this provider component → the new
 	// consumer rides the same provider issue.
 	open, err := s.access.FindOpenForTarget(ctx, orgID, providerProject, providerComponent)
 	if err != nil {
@@ -76,7 +92,7 @@ func (s *Service) RequestAccess(ctx context.Context, orgID, consumerProjectID, c
 		ar.ProviderIssueNumber = open.ProviderIssueNumber
 		ar.ProviderIssueURL = open.ProviderIssueURL
 	} else {
-		// (d) create the provider-side org-publish gate issue.
+		// create the provider-side org-publish gate issue.
 		issue, cerr := s.createOrgPublishIssue(ctx, orgID, providerProject, providerComponent, orgServiceName)
 		if cerr != nil {
 			return nil, cerr
@@ -145,6 +161,13 @@ func (s *Service) GrantByProviderComponent(ctx context.Context, orgID, providerP
 		if uerr := s.access.UpdateStatus(ctx, rows[i].ID, models.AccessRequestStatusGranted); uerr != nil {
 			slog.WarnContext(ctx, "provisioning: grant access request failed", "id", rows[i].ID, "error", uerr)
 		}
+		// Resolve the CONSUMER-side visibility gate (issue #164, Task 4): the
+		// automated build flow minted an aep:provision gate in the consumer project
+		// keyed by this org-service dep. Complete a provision run on it so it derives
+		// deployed and the consumer's held coding task dispatches. A rider from the
+		// interactive RequestAccess flow has no consumer gate — that resolves to a
+		// silent no-op. Best-effort: never fail the deploy cascade over it.
+		s.resolveConsumerVisibilityGate(ctx, rows[i].OrgID, rows[i].ConsumerProjectID, rows[i].OrgServiceName)
 	}
 	if open.ProviderIssueNumber > 0 {
 		comment := fmt.Sprintf("Published %s org-wide (namespace visibility). Closing — consumers will resume automatically.", providerComponent)

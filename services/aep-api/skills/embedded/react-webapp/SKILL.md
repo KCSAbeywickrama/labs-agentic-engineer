@@ -109,40 +109,19 @@ Project layout (Vite + TS):
 └── Dockerfile
 ```
 
-#### Subpath-aware build — REQUIRED
+#### Served at host root — use the default Vite `base`
 
-The platform serves every web-app under a gateway **subpath**, not a host
-root: `https://<gateway>/<project>-<component>-<endpointName>/`, where
-`<endpointName>` is the component's design.json `endpoint.name` (default
-`http`, so the path is typically `/<project>-<component>-http/`). The gateway
-strips that prefix back to `/` for nginx, but the browser reads the asset URLs
-out of your `index.html` and requests them at the gateway root, so **any
-absolute `/asset` reference 404s and the page renders blank.** Build the SPA
-base-aware — `import.meta.env.BASE_URL` (Vite's build-time base constant,
-e.g. `/<project>-<component>-http/` with a trailing slash) is the one handle
-for every base-prefixed URL:
+The platform serves each web-app on its **own gateway hostname at root**
+(`https://<dedicated-host>/`) — one dedicated host per web-app. So the stock
+Vite default is correct: **do NOT set `base`** in `vite.config.ts` (it defaults
+to `/`), and asset URLs, any react-router `basename`, and any OAuth
+`redirect_uri` are all plain root paths (`/assets/…`, `/callback`).
 
-- **`vite.config.ts`** — set `base` to the deploy subpath so Vite emits
-  base-prefixed asset URLs:
-  `base: "/<project>-<component>-http/"` (leading + trailing slash).
-- **`index.html`** — load env-config **relative**: `<script src="./env-config.js">`
-  (NOT `/env-config.js`), so it resolves under the base.
-- **react-router** — set the router `basename` to the base:
-  `<BrowserRouter basename={import.meta.env.BASE_URL}>` so every route
-  (including any auth `callback`) matches under the subpath.
-- **Any `window.location.pathname` check** — e.g. a manual "is this the
-  callback?" guard — compares against the base-prefixed path
-  `import.meta.env.BASE_URL + "callback"`, never a literal root `/callback`.
-  A root check never matches under the subpath, so the branch is silently
-  skipped — the classic cause of a callback handler that never runs and a
-  sign-in that loops.
-- **OAuth `redirect_uri`** (thunder-app dep) — derive it from the base,
-  `window.location.origin + import.meta.env.BASE_URL + "callback"`; see
-  `thunder-authentication` for the full auth wiring.
-- **`src/vite-env.d.ts`** — must exist with `/// <reference types="vite/client" />`
-  (it does in a stock `npm create vite` project). Without it, `import.meta.env`
-  is untyped and `tsc` fails the build with `TS2339: Property 'env' does not
-  exist on type 'ImportMeta'`.
+Services are different — they ARE path-routed under `/<project>-<component>-http`
+on a shared gateway — but a web-app never is. Never copy that service prefix
+into a web-app's `base`: a `base` prefix makes every asset URL 404 (nginx falls
+back to `index.html`, the browser gets HTML for a module script) and the page
+renders blank.
 
 `index.html` — `<script src="./env-config.js">` is **synchronous**,
 BEFORE the bundle. No `async`, no `defer`, no `type="module"` on this

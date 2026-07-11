@@ -103,30 +103,23 @@ type endpointJSON struct {
 // persisted): omitting them makes DisallowUnknownFields reject any `status` or
 // `reason` key inside a dependency entry.
 type dependencyJSON struct {
-	Kind         string                    `json:"kind"`
-	Name         string                    `json:"name"`
-	Description  string                    `json:"description,omitempty"`
-	NeedsSpec    bool                      `json:"needsSpec,omitempty"`
-	SpecPath     string                    `json:"specPath,omitempty"`
-	SpecUrl      string                    `json:"specUrl,omitempty"`
-	Config       []configKeyJSON           `json:"config,omitempty"`
-	ResourceType string                    `json:"resourceType,omitempty"`
-	Parameters   map[string]any            `json:"parameters,omitempty"`
-	Candidates   []dependencyCandidateJSON `json:"candidates,omitempty"`
+	Kind         string          `json:"kind"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	NeedsSpec    bool            `json:"needsSpec,omitempty"`
+	SpecPath     string          `json:"specPath,omitempty"`
+	SpecUrl      string          `json:"specUrl,omitempty"`
+	Config       []configKeyJSON `json:"config,omitempty"`
+	ResourceType string          `json:"resourceType,omitempty"`
+	Parameters   map[string]any  `json:"parameters,omitempty"`
 }
 
 // configKeyJSON mirrors models.ConfigKey.
 type configKeyJSON struct {
-	Key             string `json:"key"`
-	Secret          bool   `json:"secret"`
-	CredentialClass string `json:"credentialClass,omitempty"`
-}
-
-// dependencyCandidateJSON mirrors models.DependencyCandidate.
-type dependencyCandidateJSON struct {
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-	URL         string `json:"url,omitempty"`
+	Key          string `json:"key"`
+	Secret       bool   `json:"secret,omitempty"`
+	Description  string `json:"description,omitempty"`
+	DefaultValue string `json:"defaultValue,omitempty"`
 }
 
 // exposesAPIJSON mirrors models.ExposesAPI.
@@ -248,7 +241,6 @@ func assembleDependencies(dir string, in []dependencyJSON) ([]models.Dependency,
 			Config:       toModelConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
 			Parameters:   d.Parameters,
-			Candidates:   toModelCandidates(d.Candidates),
 		}
 		// External deps that declare needsSpec but carry no specPath yet are
 		// unresolved at read time. Status/Reason are computed here (never read
@@ -324,7 +316,6 @@ func toJSONDeps(in []models.Dependency) []dependencyJSON {
 			Config:       toJSONConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
 			Parameters:   d.Parameters,
-			Candidates:   toJSONCandidates(d.Candidates),
 		})
 	}
 	return out
@@ -339,7 +330,7 @@ func toModelConfigKeys(in []configKeyJSON) []models.ConfigKey {
 		if c.Key == "" {
 			continue
 		}
-		out = append(out, models.ConfigKey{Key: c.Key, Secret: c.Secret, CredentialClass: c.CredentialClass})
+		out = append(out, models.ConfigKey{Key: c.Key, Secret: c.Secret, Description: c.Description, DefaultValue: c.DefaultValue})
 	}
 	return out
 }
@@ -350,29 +341,7 @@ func toJSONConfigKeys(in []models.ConfigKey) []configKeyJSON {
 	}
 	out := make([]configKeyJSON, 0, len(in))
 	for _, c := range in {
-		out = append(out, configKeyJSON{Key: c.Key, Secret: c.Secret, CredentialClass: c.CredentialClass})
-	}
-	return out
-}
-
-func toModelCandidates(in []dependencyCandidateJSON) []models.DependencyCandidate {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]models.DependencyCandidate, 0, len(in))
-	for _, c := range in {
-		out = append(out, models.DependencyCandidate{Label: c.Label, Description: c.Description, URL: c.URL})
-	}
-	return out
-}
-
-func toJSONCandidates(in []models.DependencyCandidate) []dependencyCandidateJSON {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]dependencyCandidateJSON, 0, len(in))
-	for _, c := range in {
-		out = append(out, dependencyCandidateJSON{Label: c.Label, Description: c.Description, URL: c.URL})
+		out = append(out, configKeyJSON{Key: c.Key, Secret: c.Secret, Description: c.Description, DefaultValue: c.DefaultValue})
 	}
 	return out
 }

@@ -29,7 +29,7 @@ import (
 // (and tests can fake it).
 type WorkflowRunStore interface {
 	Record(ctx context.Context, row *models.DevflowRun) error
-	SetStatus(ctx context.Context, workflowID, status string) error
+	SetStatus(ctx context.Context, workflowID, status, reason string) error
 	// SetTaskCounts writes the dev run's task tally as absolute values
 	// (idempotent under activity retry — never an increment), scoped to one
 	// execution so a same-tag rebuild cannot rewrite a prior run's frozen
@@ -70,4 +70,25 @@ type Planner interface {
 // Validator runs the post-execution validation step (stubbed today).
 type Validator interface {
 	Validate(ctx context.Context, orgID, projectID, tag string) error
+}
+
+// BuildProvisioner authors the project's dependencies from the build drawer
+// inputs the dev workflow carries (issue #164): it mints the aep:provision gate
+// issues and authors each dependency by kind (external synchronously,
+// platform-resource async). Satisfied by an app-root adapter over the design +
+// provisioning features — devflow imports neither. A returned error retries the
+// activity; per-dependency failures are returned as data (ProvisionFailure).
+type BuildProvisioner interface {
+	ProvisionForBuild(ctx context.Context, orgID, projectID, tag string, inputs []ProvisionInput) ([]ProvisionFailure, error)
+}
+
+// ProvisionFailure is one dependency's provisioning failure surfaced to the
+// workflow (data, not an activity error). It carries no secret values. This is
+// devflow's own type — the provisioning package defines a field-identical twin;
+// the app-root adapter maps between them (a feature must not import the workflow
+// orchestrator).
+type ProvisionFailure struct {
+	Component  string
+	Dependency string
+	Reason     string
 }

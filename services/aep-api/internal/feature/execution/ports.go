@@ -80,6 +80,14 @@ type DesignReader interface {
 	// (dependency-management §3.6). org-service deps are excluded (proceed-gated).
 	// Returns nil when the project has no design yet.
 	ProvisionDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
+	// OrgServiceDepNames returns, per component (lowercased name), the names of
+	// that component's cross-project org-service dependencies (issue #164, Task 4).
+	// The funnel gates a consumer coding task on an org-service dep ONLY when a
+	// consumer-side aep:provision visibility gate exists for it (an approved
+	// unresolved dep at build); a resolved org-service has no gate and does NOT
+	// block — so this is deliberately kept OUT of ProvisionDepNames (whose deps
+	// block unconditionally). Returns nil when the project has no design yet.
+	OrgServiceDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
 }
 
 // ExecutionStore is the executions rows repository (repositories.ExecutionRepository).

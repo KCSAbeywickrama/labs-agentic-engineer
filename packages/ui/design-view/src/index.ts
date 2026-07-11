@@ -24,7 +24,6 @@ export type {
   Dependency,
   DependencyKind,
   DesignConfigEntry,
-  DesignCandidate,
   DesignEndpoint,
   ParseError,
   ParseResult,

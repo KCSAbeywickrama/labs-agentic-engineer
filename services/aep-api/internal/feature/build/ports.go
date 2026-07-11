@@ -30,6 +30,38 @@ import (
 // now" — mapped to a 503 at the edge, BEFORE any tag is cut.
 var ErrTemporalUnavailable = errors.New("temporal unavailable")
 
+// ErrEndUserAuthConflict and ErrResourceCatalogUnavailable are the build-local
+// pre-tag sentinels the handler maps to 409 / 503. build cannot import the
+// design feature (arch allowlist), so the AuthDeriver adapter wired at the
+// composition root translates design's equivalents into these before they cross
+// the port boundary.
+var (
+	ErrEndUserAuthConflict        = errors.New("end-user auth conflict")
+	ErrResourceCatalogUnavailable = errors.New("resource-type catalog unavailable")
+)
+
+// SpecCollector fetches/accepts an external dependency's OpenAPI contract and
+// commits it (clearing the needs-spec proceed-gate) — the same CollectSpec the
+// design feature exposes. Satisfied by the app-root design adapter.
+type SpecCollector interface {
+	CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error)
+}
+
+// AuthDeriver runs the end-user-auth derivation against the design at HEAD and
+// commits any stamped exposesAPI.auth BEFORE the tag-cut. The adapter maps
+// design's conflict/catalog sentinels onto ErrEndUserAuthConflict /
+// ErrResourceCatalogUnavailable.
+type AuthDeriver interface {
+	DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error
+}
+
+// SecretStager writes an external dependency's secret values to SM-API and
+// returns the reference per env (NOT the value). Satisfied by the app-root
+// adapter over resources.ExternalResourceProvisioner.StageSecrets.
+type SecretStager interface {
+	StageExternalSecrets(ctx context.Context, orgID, ocOrgID, projectID, depName string, secretsByEnv map[string]map[string]string) (refByEnv map[string]string, err error)
+}
+
 // RunStore is the workflow_runs surface the build endpoints need: the
 // one-dev-run-per-project guard, the org fence for status reads, and the
 // synchronous row record on start (so a GET issued right after the POST
@@ -40,6 +72,9 @@ type RunStore interface {
 	RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error)
 	GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error)
 	Record(ctx context.Context, row *models.DevflowRun) error
+	// ListByProject enumerates a project's run rows newest-first, optionally
+	// filtered to one kind — the builds-history read behind list-project-builds.
+	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error)
 }
 
 // RepoLookup resolves a project's "owner/name" repo full name. Satisfied by

@@ -117,22 +117,22 @@ func (p *ExternalResourceProvisioner) Provision(
 		return nil, fmt.Errorf("external resources: %w", err)
 	}
 
-	// 4. Per env: SM-API secret write → per-env binding pinned to latestRelease.
+	// 4. Stage every env's secrets to SM-API up front (the same write the thin
+	// build path reuses), then author the per-env binding pinned to
+	// latestRelease off the returned secretStorePath refs.
+	secretsByEnv := make(map[string]map[string]string, len(byEnv))
+	for env, vals := range byEnv {
+		if len(vals.Secret) > 0 {
+			secretsByEnv[env] = vals.Secret
+		}
+	}
+	refByEnv, err := p.StageSecrets(ctx, ocOrgID, projectName, er, secretsByEnv)
+	if err != nil {
+		return nil, err
+	}
 	result := &ProvisionResult{ResourceName: res.Metadata.Name, LatestRelease: latest, BindingByEnv: map[string]string{}}
 	for env, vals := range byEnv {
-		var secretStorePath string
-		if len(vals.Secret) > 0 {
-			if !p.sm.Enabled() {
-				return nil, fmt.Errorf("external resources: SM-API not configured but resource %q has secret values", er.Name)
-			}
-			entity := externalResourceSecretEntity(er.Name, env)
-			path, _, werr := p.sm.WriteExternalResourceSecret(ctx, ocOrgID, projectName, entity, vals.Secret)
-			if werr != nil {
-				return nil, fmt.Errorf("external resources: write secret for env %q: %w", env, werr)
-			}
-			secretStorePath = path
-		}
-		binding, berr := buildExternalResourceBinding(projectName, er.Name, env, latest, secretStorePath, vals.Plain)
+		binding, berr := buildExternalResourceBinding(projectName, er.Name, env, latest, refByEnv[env], vals.Plain)
 		if berr != nil {
 			return nil, berr
 		}
@@ -142,6 +142,109 @@ func (p *ExternalResourceProvisioner) Provision(
 		result.BindingByEnv[env] = binding.Metadata.Name
 	}
 	return result, nil
+}
+
+// PreparedEnvValues are one environment's already-resolved binding inputs for
+// the build author path: the non-secret values (Plain) and the SM-API
+// secretStorePath the secret bundle was ALREADY staged under (pre-tag, by
+// POST /build). No secret VALUE is carried — only the reference.
+type PreparedEnvValues struct {
+	Plain           map[string]string
+	SecretStorePath string
+}
+
+// AuthorWithSecretRef authors (idempotently) the external resource's OC Resource
+// model for a project from ALREADY-STAGED secret references — the author half of
+// Provision the thin POST /build path uses (issue #164). It mirrors Provision's
+// steps 1-3 (ensure ResourceType → apply Resource → wait for the release change)
+// but its step 4 pins each per-env binding to the PASSED SecretStorePath instead
+// of writing secrets to SM-API — so it never touches p.sm. `orgHandle` is the OC
+// namespace the CRs live in.
+func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
+	ctx context.Context,
+	orgHandle, projectName string,
+	er *models.ExternalResource,
+	byEnv map[string]PreparedEnvValues,
+) (*ProvisionResult, error) {
+	if er == nil {
+		return nil, fmt.Errorf("external resources: nil resource")
+	}
+	if orgHandle == "" || projectName == "" {
+		return nil, fmt.Errorf("external resources: orgHandle and projectName required")
+	}
+
+	// 1. ResourceType (get-or-create; immutable once created).
+	rtName := openchoreo.ExternalResourceRTName(er.ResourceTypeName)
+	rt, err := openchoreo.BuildExternalResourceType(rtName, toRTConfigKeys(er.ConfigKeys))
+	if err != nil {
+		return nil, fmt.Errorf("external resources: build resourcetype: %w", err)
+	}
+	if _, err := p.rc.EnsureResourceType(ctx, orgHandle, rt); err != nil {
+		return nil, fmt.Errorf("external resources: ensure resourcetype %q: %w", rtName, err)
+	}
+
+	// 2. Resource (one per project; controller cuts the ResourceRelease).
+	res := buildExternalResource(projectName, er, rtName)
+	applied, err := p.rc.ApplyResource(ctx, orgHandle, res)
+	if err != nil {
+		return nil, fmt.Errorf("external resources: apply resource: %w", err)
+	}
+
+	// 3. Wait for status.latestRelease to change off the pre-reconcile release.
+	latest, err := openchoreo.WaitForReleaseChange(ctx, p.rc, orgHandle, res.Metadata.Name, openchoreo.ReleaseName(applied), p.pollInterval, p.pollTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("external resources: %w", err)
+	}
+
+	// 4. Author the per-env binding pinned to latestRelease off the PASSED
+	// secretStorePath (no SM-API write — the secret was staged pre-tag).
+	result := &ProvisionResult{ResourceName: res.Metadata.Name, LatestRelease: latest, BindingByEnv: map[string]string{}}
+	for env, vals := range byEnv {
+		binding, berr := buildExternalResourceBinding(projectName, er.Name, env, latest, vals.SecretStorePath, vals.Plain)
+		if berr != nil {
+			return nil, berr
+		}
+		if _, err := p.rc.EnsureBinding(ctx, orgHandle, binding); err != nil {
+			return nil, fmt.Errorf("external resources: ensure binding for env %q: %w", env, err)
+		}
+		result.BindingByEnv[env] = binding.Metadata.Name
+	}
+	return result, nil
+}
+
+// StageSecrets writes each env's secret values to SM-API and returns the
+// secretStorePath reference per env — ONLY the SM-API write, no OC Resource or
+// binding authoring. It is the pre-tag half of Provision the thin POST /build
+// path reuses (issue #164): the build stages refs before the tag-cut, and the
+// workflow's provisioning step (Task 3) authors bindings from the same refs.
+// An env whose secret map is empty yields no write and no ref. Fails closed
+// when secrets exist but SM-API is disabled (mirrors Provision's guard). The
+// returned map holds references, never secret VALUES.
+func (p *ExternalResourceProvisioner) StageSecrets(
+	ctx context.Context,
+	ocOrgID, projectName string,
+	er *models.ExternalResource,
+	secretsByEnv map[string]map[string]string,
+) (map[string]string, error) {
+	if er == nil {
+		return nil, fmt.Errorf("external resources: nil resource")
+	}
+	refByEnv := map[string]string{}
+	for env, secret := range secretsByEnv {
+		if len(secret) == 0 {
+			continue
+		}
+		if !p.sm.Enabled() {
+			return nil, fmt.Errorf("external resources: SM-API not configured but resource %q has secret values", er.Name)
+		}
+		entity := externalResourceSecretEntity(er.Name, env)
+		path, _, werr := p.sm.WriteExternalResourceSecret(ctx, ocOrgID, projectName, entity, secret)
+		if werr != nil {
+			return nil, fmt.Errorf("external resources: write secret for env %q: %w", env, werr)
+		}
+		refByEnv[env] = path
+	}
+	return refByEnv, nil
 }
 
 // Deprovision is the 2-step delete: per-env bindings first (their retainPolicy

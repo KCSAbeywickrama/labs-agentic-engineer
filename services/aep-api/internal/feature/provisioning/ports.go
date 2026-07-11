@@ -112,6 +112,11 @@ type ProjectLister interface {
 // *resources.ExternalResourceProvisioner satisfies it.
 type ExternalProvisioner interface {
 	Provision(ctx context.Context, orgHandle, ocOrgID, projectName string, er *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error)
+	// AuthorWithSecretRef authors the OC external Resource model from
+	// already-staged secret references (the build path, issue #164) — no SM-API
+	// write. Mirrors Provision's resource/binding authoring using the passed
+	// per-env secretStorePath.
+	AuthorWithSecretRef(ctx context.Context, orgHandle, projectName string, er *models.ExternalResource, byEnv map[string]resources.PreparedEnvValues) (*resources.ProvisionResult, error)
 	Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error
 	// ResolveRunnerSecrets returns the SM-API vault path + secret-key list for
 	// each named external resource, read back off its per-env binding — the
@@ -136,6 +141,18 @@ type BindingReader interface {
 // provider). *endpoints.Catalog satisfies it.
 type ProviderResolver interface {
 	FindByComponent(ctx context.Context, orgHandle, name string) (openchoreo.WorkloadEndpointInfo, bool, error)
+}
+
+// ProviderBuildTrigger kicks the provider project's build so a not-yet-published
+// org-service provider actually deploys (and, on deploy, publishes org-wide —
+// resolving the consumer's visibility gate). Declared as a provisioning port so
+// this feature never imports build/devflow (that would cycle); the app-root
+// adapter (Task 5) wires the real build start. The trigger is idempotent: if a
+// provider devflow is already running the adapter treats it as success. Nil is a
+// documented best-effort no-op (logged) — the funnel still holds the consumer and
+// the sweep heals once the provider deploys by any other path.
+type ProviderBuildTrigger interface {
+	TriggerBuild(ctx context.Context, orgID, projectID string) error
 }
 
 // AccessStore is the cross-project access-request tracking table.

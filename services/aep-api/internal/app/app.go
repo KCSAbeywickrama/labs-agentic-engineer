@@ -63,6 +63,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
+	"github.com/wso2/aep/aep-api/internal/feature/rcaagent"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -495,7 +496,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// half (funnel, coding executor, watchers) is wired below, after
 	// asServiceIdentity. repoService/artifactStore/artifactSvcGit/gitOpsService
 	// satisfy the task consumer ports directly.
-	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit)
+	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit, designComponents{store: artifactStore})
 	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
 		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
 
@@ -802,13 +803,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		FilesSvc:         filesSvc,
 		ArtifactSvc:      artifactSvcGit,
 		GenAISvc:         genaiSvc,
-		BuildSvc: build.NewService(build.Deps{
-			Runner: build.NewTemporalRunner(devflowRuntime),
-			Store:  workflowRunRepo,
-			Repos:  repoFullNameLookup{repos: repoRepo},
-			Tagger: buildSpecTagger{art: artifactSvcGit},
-			Tasks:  taskReads,
-		}),
+		// BuildSvc is assigned below (params.HumaDeps.BuildSvc), after the
+		// external-resource provisioner exists — its InputsCoordinator stages the
+		// drawer's external-config secrets through that provisioner's SM-API write.
 		GitHubAppSlug:     cfg.GitHubAppSlug,
 		BFFPublicURL:      cfg.BFFPublicURL,
 		GitHubAppClientID: cfg.GitHubAppClientID,
@@ -832,6 +829,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	)
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
 	params.MCPExternalResources = externalResourceRepo
+	// Alerts (console issues #154, #155, BE handshake #156): org-scoped store
+	// for RCA-agent reports the console's notification bell and Alerts
+	// list/stepper read. Write side is a plain userJWT-secured endpoint (no
+	// separate service-auth scheme yet) — see rcaagent_huma.go.
+	rcaAgentReportRepo := repositories.NewRcaAgentReportRepository(db)
+	params.HumaDeps.RcaAgentReportSvc = rcaagent.NewRcaAgentReportService(rcaAgentReportRepo, executionRepo)
 	params.MCPOrgEndpoints = orgEndpointCatalog
 	resourceTypeCatalog := resources.NewResourceTypeCatalog(resourceClient)
 	params.MCPResourceTypes = resourceTypeCatalog
@@ -867,6 +870,24 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// reference; the readiness watcher observes platform-resource bindings'
 	// native Ready condition out-of-band and releases gated consumer tasks.
 	externalProvisioner := resources.NewExternalResourceProvisioner(externalResourceRepo, resourceClient, smWriter)
+	// The public build surface: its InputsCoordinator runs the drawer inputs'
+	// pre-tag work (collect external specs, derive end-user auth) and stages
+	// external-config secrets to SM-API through externalProvisioner before the
+	// tag-cut, carrying the resulting provision payload into the dev workflow.
+	buildSvc := build.NewService(build.Deps{
+		Runner: build.NewTemporalRunner(devflowRuntime),
+		Store:  workflowRunRepo,
+		Repos:  repoFullNameLookup{repos: repoRepo},
+		Tagger: buildSpecTagger{art: artifactSvcGit},
+		Tasks:  taskReads,
+		Coord: build.NewInputsCoordinator(
+			designService,                        // SpecCollector (CollectSpec)
+			buildAuthDeriver{svc: designService}, // AuthDeriver (sentinel translation)
+			buildSecretStager{prov: externalProvisioner},
+			designComponents{store: artifactStore},
+		),
+	})
+	params.HumaDeps.BuildSvc = buildSvc
 	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
 		Issues:    issueService,
@@ -883,6 +904,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Providers: orgEndpointCatalog,
 	})
 	params.HumaDeps.ProvisioningSvc = provisioningSvc
+	// The build dependency-drawer preflight (issue #164): walks the design at HEAD
+	// and emits a drawer item per dependency that still needs input, filtering out
+	// anything already provisioned OR in-flight (buildProvisionStatus collapses the
+	// provisioning tri-state onto the "already handled" bool).
+	params.HumaDeps.PreflightSvc = build.NewPreflightService(build.PreflightDeps{
+		Design: designComponents{store: artifactStore},
+		Status: buildProvisionStatus{svc: provisioningSvc},
+	})
 	// Mint aep:provision gate issues on design approval (before planning gates any
 	// consumer coding task on them).
 	designService.SetProvisionIssueMinter(provisioningSvc)
@@ -896,6 +925,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// The reverse edge (design→provisioning) is SetProvisionIssueMinter above;
 	// both are setter-wired here so the mutual dependency stays at the root.
 	provisioningSvc.SetOrgPublishMarker(designService)
+	// Provider-build auto-kick (issue #164, Task 4): the automated org-service
+	// visibility flow starts a not-yet-published provider project's build so it
+	// deploys and publishes org-wide. Declared as a provisioning port so the
+	// feature never imports build/devflow; the app-root adapter calls the build
+	// service's non-HTTP StartProjectBuild entry point (idempotent).
+	provisioningSvc.SetProviderBuildTrigger(providerBuildTrigger{build: buildSvc})
 	// Reject cascade: an org-publish gate issue closed with its consumers still
 	// ungranted is a decline → flip those access requests to rejected. Registered
 	// on the router's issues/closed chain alongside task's noop (both run). The
@@ -1003,12 +1038,13 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// thin adapters over the funnel (dispatch) + issue service (merge).
 	if cfg.Temporal.Enabled() {
 		devflowActs := devflow.NewActivities(devflow.Deps{
-			Runs:       workflowRunRepo,
-			Dispatcher: codingDispatcher{funnel: funnel, execs: executionRepo},
-			Merger:     prMerger{issues: issueService},
-			Spec:       devflowSpecValidator{art: artifactSvcGit},
-			Planner:    devflowPlanner{plan: taskPlan, reads: taskReads},
-			Validator:  devflowValidator{},
+			Runs:        workflowRunRepo,
+			Dispatcher:  codingDispatcher{funnel: funnel, execs: executionRepo},
+			Merger:      prMerger{issues: issueService},
+			Spec:        devflowSpecValidator{art: artifactSvcGit},
+			Planner:     devflowPlanner{plan: taskPlan, reads: taskReads},
+			Validator:   devflowValidator{},
+			Provisioner: buildProvisioner{design: designService, prov: provisioningSvc},
 		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

@@ -47,8 +47,7 @@ const FULL = JSON.stringify({
       name: "stripe",
       needsSpec: true,
       specUrl: "https://x/openapi.yaml",
-      config: [{ key: "STRIPE_API_KEY", secret: true, credentialClass: "secret" }],
-      candidates: [{ label: "Stripe API", url: "https://stripe.com" }],
+      config: [{ key: "STRIPE_API_KEY", secret: true }],
       description: "Charges customers.",
     },
     { kind: "org-service", name: "identity-api", description: "Verifies tokens." },
@@ -71,9 +70,8 @@ describe("parseComponentDesign", () => {
     expect(stripe.kind).toBe("external");
     expect(stripe.needsSpec).toBe(true);
     expect(stripe.config).toEqual([
-      { key: "STRIPE_API_KEY", secret: true, credentialClass: "secret" },
+      { key: "STRIPE_API_KEY", secret: true },
     ]);
-    expect(stripe.candidates).toEqual([{ label: "Stripe API", url: "https://stripe.com" }]);
     const db = d.dependencies.find((x) => x.name === "orders-db")!;
     expect(db.resourceType).toBe("postgres");
     expect(db.parameters).toEqual({ size: "small" });

@@ -204,7 +204,7 @@ export function OverviewPipeline({
         icon={<ListChecks size={18} />}
         title="Build"
         view={build}
-        to="tasks"
+        to="builds"
         projectName={projectName}
       />
       <ChevronRight

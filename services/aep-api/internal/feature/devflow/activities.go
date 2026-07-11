@@ -35,35 +35,38 @@ var errNotConfigured = errors.New("devflow: activity dependency not configured")
 // are added as later phases wire each adapter; the workflow-run index
 // activities land first because both workflows record themselves on entry.
 type Activities struct {
-	runs       WorkflowRunStore
-	dispatcher CodingDispatcher
-	merger     PRMerger
-	spec       SpecValidator
-	planner    Planner
-	validator  Validator
+	runs        WorkflowRunStore
+	dispatcher  CodingDispatcher
+	merger      PRMerger
+	spec        SpecValidator
+	planner     Planner
+	validator   Validator
+	provisioner BuildProvisioner
 }
 
 // Deps carries the activity adapters. Any field may be nil in narrow contexts
 // (the corresponding activity then returns a not-configured error); the app
 // root wires all of them.
 type Deps struct {
-	Runs       WorkflowRunStore
-	Dispatcher CodingDispatcher
-	Merger     PRMerger
-	Spec       SpecValidator
-	Planner    Planner
-	Validator  Validator
+	Runs        WorkflowRunStore
+	Dispatcher  CodingDispatcher
+	Merger      PRMerger
+	Spec        SpecValidator
+	Planner     Planner
+	Validator   Validator
+	Provisioner BuildProvisioner
 }
 
 // NewActivities wires the activity adapters.
 func NewActivities(d Deps) *Activities {
 	return &Activities{
-		runs:       d.Runs,
-		dispatcher: d.Dispatcher,
-		merger:     d.Merger,
-		spec:       d.Spec,
-		planner:    d.Planner,
-		validator:  d.Validator,
+		runs:        d.Runs,
+		dispatcher:  d.Dispatcher,
+		merger:      d.Merger,
+		spec:        d.Spec,
+		planner:     d.Planner,
+		validator:   d.Validator,
+		provisioner: d.Provisioner,
 	}
 }
 
@@ -98,16 +101,19 @@ func (a *Activities) RecordWorkflowRun(ctx context.Context, in RecordWorkflowRun
 	})
 }
 
-// SetWorkflowRunStatusInput marks a run terminal in the lookup index.
+// SetWorkflowRunStatusInput marks a run terminal in the lookup index. Reason
+// carries the failure detail for a `failed` status (empty otherwise) so the
+// build summary can show WHY the run failed.
 type SetWorkflowRunStatusInput struct {
 	WorkflowID string `json:"workflowId"`
 	Status     string `json:"status"` // completed | failed | canceled
+	Reason     string `json:"reason,omitempty"`
 }
 
-// SetWorkflowRunStatus records a run's terminal status in the lookup index.
-// Called as the final activity of both workflows.
+// SetWorkflowRunStatus records a run's terminal status (+ failure reason) in the
+// lookup index. Called as the final activity of both workflows.
 func (a *Activities) SetWorkflowRunStatus(ctx context.Context, in SetWorkflowRunStatusInput) error {
-	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status)
+	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status, in.Reason)
 }
 
 // SetWorkflowRunTaskCountsInput carries a dev run's task tally — absolute
@@ -207,4 +213,33 @@ func (a *Activities) Validate(ctx context.Context, in ValidateInput) error {
 		return errNotConfigured
 	}
 	return a.validator.Validate(ctx, in.OrgID, in.ProjectID, in.Tag)
+}
+
+// ProvisionDepsInput carries the project + tag + resolved provisioning payload
+// the dev workflow authors the dependencies from (issue #164).
+type ProvisionDepsInput struct {
+	OrgID     string           `json:"orgId"`
+	ProjectID string           `json:"projectId"`
+	Tag       string           `json:"tag"`
+	Inputs    []ProvisionInput `json:"inputs,omitempty"`
+}
+
+// ProvisionDependencies authors the project's dependencies by kind from the
+// build drawer inputs (mint gates → external sync, platform-resource async) AND
+// reconciles any provision gate whose dependency is already Ready but was left
+// un-completed by a prior build (self-heal — issue #164). It always runs when a
+// provisioner is wired, even with no drawer inputs, so a project stranded on an
+// orphaned gate recovers on its next build. Per-dependency failures come back as
+// data; an infra error surfaces as the activity error (retry / fail the run).
+func (a *Activities) ProvisionDependencies(ctx context.Context, in ProvisionDepsInput) ([]ProvisionFailure, error) {
+	if a.provisioner == nil {
+		// No provisioner wired (degraded boot / tests): a build that needs to
+		// author inputs cannot proceed; a build with nothing to author (and so
+		// nothing to reconcile through the provisioner) is a safe no-op.
+		if len(in.Inputs) > 0 {
+			return nil, errNotConfigured
+		}
+		return nil, nil
+	}
+	return a.provisioner.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.Inputs)
 }

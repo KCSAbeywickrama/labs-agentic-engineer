@@ -55,7 +55,7 @@ var (
 	dependencyKnownKeys = map[string]bool{
 		"kind": true, "name": true, "description": true, "needsSpec": true,
 		"specPath": true, "specUrl": true, "config": true, "resourceType": true,
-		"parameters": true, "candidates": true,
+		"parameters": true,
 	}
 	designKnownKeys = map[string]bool{
 		"name": true, "type": true, "version": true, "language": true,

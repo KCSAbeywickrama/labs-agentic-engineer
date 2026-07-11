@@ -37,6 +37,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
+	"github.com/wso2/aep/aep-api/internal/feature/rcaagent"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -74,6 +75,8 @@ type HumaDeps struct {
 	ArtifactSvc       artifacts.ArtifactService
 	GenAISvc          genai.GenAIService
 	BuildSvc          *build.Service
+	RcaAgentReportSvc rcaagent.RcaAgentReportService
+	PreflightSvc      *build.PreflightService
 	GitHubAppSlug     string
 	BFFPublicURL      string
 	GitHubAppClientID string
@@ -98,6 +101,8 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	artifacts.RegisterTags(api, d.ArtifactSvc)
 	genai.RegisterGenAI(api, d.GenAISvc)
 	build.RegisterBuild(api, d.BuildSvc)
+	rcaagent.RegisterRcaAgentReports(api, d.RcaAgentReportSvc)
+	build.RegisterPreflight(api, d.PreflightSvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)
