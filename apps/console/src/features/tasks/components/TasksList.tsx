@@ -27,7 +27,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { GitHub, Info } from "@wso2/oxygen-ui-icons-react";
+import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAllTasks } from "../api/queries";
 import { TaskStatusChip } from "./TaskStatusChip";
@@ -123,16 +123,9 @@ export function TasksList({ projectName }: { projectName: string }) {
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
                 {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
                   <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
-                    <Box
-                      sx={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 0.5,
-                        color: "text.secondary",
-                      }}
-                    >
+                    {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+                    <Box sx={{ display: "inline-flex" }}>
                       <TaskStatusChip derivedStatus={t.derivedStatus} />
-                      <Info size={16} />
                     </Box>
                   </Tooltip>
                 ) : (

@@ -26,7 +26,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, GitHub, Info } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, GitHub } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
 import { useTask } from "../api/queries";
 import { useTaskLog } from "../hooks/useTaskLog";
@@ -128,16 +128,9 @@ export function TaskPage({
         </Typography>
         {derivedStatus === "on_hold" && blockedBy?.length ? (
           <Tooltip title={`Waiting for ${blockedBy.join(", ")}`}>
-            <Box
-              sx={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 0.5,
-                color: "text.secondary",
-              }}
-            >
+            {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+            <Box sx={{ display: "inline-flex" }}>
               <TaskStatusChip derivedStatus={derivedStatus} />
-              <Info size={16} />
             </Box>
           </Tooltip>
         ) : (

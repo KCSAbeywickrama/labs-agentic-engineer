@@ -56,7 +56,7 @@ function task(overrides: Partial<TaskView> & { issueNumber: number }): TaskView 
 }
 
 describe("TasksList", () => {
-  it("shows the on-hold reason as a hover tooltip on an info icon next to the chip", async () => {
+  it("shows the on-hold reason as a hover tooltip on the On hold pill", async () => {
     mockTasks = [
       task({
         issueNumber: 42,
@@ -67,24 +67,23 @@ describe("TasksList", () => {
 
     const { container } = render(<TasksList projectName="acme" />);
 
-    expect(screen.getByText("On hold")).toBeInTheDocument();
-    // The reason lives in a tooltip, not inline body text.
+    const pill = screen.getByText("On hold");
+    expect(pill).toBeInTheDocument();
+    // The reason lives in a tooltip, not inline body text, and there is no icon.
     expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
+    expect(container.querySelector(".lucide-info")).not.toBeInTheDocument();
 
-    const infoIcon = container.querySelector(".lucide-info");
-    expect(infoIcon).toBeInTheDocument();
-
-    fireEvent.mouseOver(infoIcon as Element);
+    // Hovering the pill reveals the reason.
+    fireEvent.mouseOver(pill);
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent("Waiting for user-auth");
   });
 
-  it("does not render an info icon for non-on_hold tasks", () => {
+  it("shows no waiting tooltip for non-on_hold tasks", () => {
     mockTasks = [task({ issueNumber: 7, derivedStatus: "in_progress" })];
 
-    const { container } = render(<TasksList projectName="acme" />);
+    render(<TasksList projectName="acme" />);
 
     expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
-    expect(container.querySelector(".lucide-info")).not.toBeInTheDocument();
   });
 });
