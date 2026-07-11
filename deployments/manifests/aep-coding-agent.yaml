@@ -134,8 +134,12 @@ spec:
             # counts against the registry's pull rate limits). When stabilising
             # for a long-lived dev/stage, pin to an immutable SHA tag and switch
             # to `imagePullPolicy: IfNotPresent`.
-            image: docker.io/xlight05/aep-coding-agent-runner:v7
-            imagePullPolicy: Always
+            # Local repin (2026-07-11): v8 carries the scrubber entropy-backstop
+            # fix and is k3d-imported only (not on Docker Hub), so pull IfNotPresent
+            # to use the imported image instead of a doomed registry pull. Revert
+            # to a pushed tag + Always when v8 is published upstream.
+            image: docker.io/xlight05/aep-coding-agent-runner:v8
+            imagePullPolicy: IfNotPresent
             # Explicit command/args is the OC convention — every ClusterWorkflow
             # in this directory and Agent-Manager's amp-monitor-evaluation set
             # them even with a stable Dockerfile ENTRYPOINT, because Argo's
