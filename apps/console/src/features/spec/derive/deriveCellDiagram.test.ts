@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { deriveCellDiagramProject } from "./deriveCellDiagram";
+import { deriveCellDsl } from "./deriveCellDiagram";
 
 const designJson = (name: string, deps: unknown[] = []) =>
   JSON.stringify({
@@ -33,30 +33,29 @@ const designJson = (name: string, deps: unknown[] = []) =>
     dependencies: deps,
   });
 
-describe("deriveCellDiagramProject", () => {
-  it("projects component design.json contents into a cell-diagram project", () => {
-    const project = deriveCellDiagramProject({
+describe("deriveCellDsl", () => {
+  it("derives the cell DSL from component design.json contents", () => {
+    const dsl = deriveCellDsl("shop", {
       "specs/design/components/orders/design.json": designJson("orders"),
       "specs/design/components/web/design.json": designJson("web", [
         { kind: "component", name: "orders" },
       ]),
     });
-    expect(project).not.toBeNull();
-    expect(project!.components.map((c) => c.id).sort()).toEqual(["orders", "web"]);
+    expect(dsl).not.toBeNull();
+    expect(dsl).toContain("title shop");
+    expect(dsl).toContain("component orders as");
+    expect(dsl).toContain("component web as");
+    expect(dsl).toContain("web -> orders");
   });
 
   it("returns null when there are no component design.json files", () => {
-    expect(deriveCellDiagramProject({})).toBeNull();
+    expect(deriveCellDsl("shop", {})).toBeNull();
   });
 
-  it("degrades a malformed design.json to a default component (never throws)", () => {
-    // @aep/design-projection's projectComponent is deliberately defensive: a
-    // parse failure degrades to a default "service" component rather than
-    // throwing, so one bad source never wedges the whole diagram.
-    const project = deriveCellDiagramProject({
+  it("skips a malformed design.json (never throws)", () => {
+    const dsl = deriveCellDsl("shop", {
       "specs/design/components/x/design.json": "{ not json",
     });
-    expect(project).not.toBeNull();
-    expect(project!.components.map((c) => c.id)).toEqual(["x"]);
+    expect(dsl).toBeNull();
   });
 });

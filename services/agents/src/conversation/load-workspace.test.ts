@@ -38,6 +38,7 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
   const root = makeTree({
     "specs/requirements/requirements.md": "# Req\n",
     "specs/design/design.md": "# Design\n",
+    "specs/design/design.cell": "title Shop\n",
     "specs/design/system.dsl": "workspace {}\n",
     "specs/design/components/api/design.json": "{}\n",
     // Everything below must be EXCLUDED from the turn input:
@@ -53,6 +54,7 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
     const snap = readSnapshot(root);
     assert.deepEqual(Object.keys(snap).sort(), [
       "specs/design/components/api/design.json",
+      "specs/design/design.cell",
       "specs/design/design.md",
       "specs/design/system.dsl",
       "specs/requirements/requirements.md",

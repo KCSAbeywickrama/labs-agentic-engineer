@@ -19,3 +19,4 @@
 export * from "./types.js";
 export * from "./project-design.js";
 export * from "./cell-diagram.js";
+export * from "./cell-dsl.js";
