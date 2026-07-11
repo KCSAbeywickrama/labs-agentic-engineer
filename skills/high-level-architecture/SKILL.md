@@ -1,6 +1,6 @@
 ---
 name: high-level-architecture
-description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, or writing a component's design.json.
+description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, writing the specs/design/design.cell architecture diagram, or writing a component's design.json.
 metadata:
   aep:
     kind: platform
@@ -13,11 +13,34 @@ Derive the design tree from `requirements.md`. The design lives under
 `specs/design/` — never at the bundle root.
 
 ```
+specs/design/design.cell                      # project-level architecture diagram DSL (this skill) — emit FIRST
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
 specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
 specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
 ```
+
+## The architecture diagram — design.cell
+
+`specs/design/design.cell` is a single project-level file holding the
+cell-diagram DSL. Emit it **FIRST**, before design.md and the component
+design.json files: it is small, it fixes the component decomposition up front,
+and the console streams it into the live architecture diagram as you write, so
+the user watches the architecture take shape.
+
+**Load the `cell-architecture-dsl` skill before writing design.cell.** It
+carries the full grammar, the AEP boundary semantics (own components inside the
+cell; Thunder auth and org services on east; third-party SaaS on south;
+internet/intranet exposure on north/west), and the single-`addFile` write
+protocol. Do not guess the syntax — `resource`/`external` are NOT keywords, and
+the node `type` is a bare trailing token with no colon.
+
+**design.cell is the architecture contract.** The rest of the design must match
+it: every `components/<name>/design.json` uses the SAME component id as its
+`design.cell` node, and every edge in design.cell that touches a component
+appears as a `dependencies[]` entry on that component's design.json (and vice
+versa — an interaction in design.json must be an edge in design.cell). A
+mismatch between the two is a defect, not a stylistic choice.
 
 ## The top-level design.md
 
