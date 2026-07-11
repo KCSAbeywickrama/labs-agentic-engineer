@@ -84,8 +84,8 @@ func TestPlanTap_PlanCreatesIssueWithLabelsAndBlock(t *testing.T) {
 		t.Fatalf("expected 1 issue created, got %d", len(issues.created))
 	}
 	got := issues.created[0]
-	// Labels: marker + class + origin.
-	for _, want := range []string{taskmeta.LabelMarker, taskmeta.LabelCoding, taskmeta.OriginLabel(taskmeta.OriginSpecPlan)} {
+	// Labels: marker + class + origin + the spec-version lineage label.
+	for _, want := range []string{taskmeta.LabelMarker, taskmeta.LabelCoding, taskmeta.OriginLabel(taskmeta.OriginSpecPlan), taskmeta.SpecTagLabel("req-v1")} {
 		if !issueHasAll(got.Labels, []string{want}) {
 			t.Errorf("expected label %q, got %v", want, got.Labels)
 		}
@@ -374,5 +374,22 @@ func gitrepoIssue(number int, component, designTag string) gitrepo.IssueInfo {
 		State:  "open",
 		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
 		Labels: taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginSpecPlan),
+	}
+}
+
+// taggedIssue builds a seeded Task issue stamped with a spec version, exactly as
+// plan_tap writes it: the aep:spec/<tag> label plus the specTag in its machine
+// block.
+func taggedIssue(number int, component, specTag string) gitrepo.IssueInfo {
+	block := taskmeta.Block{Component: component, Origin: taskmeta.OriginSpecPlan, SpecTag: specTag, DesignTag: "design-v1"}
+	body := taskmeta.ComposeBody(block, taskmeta.Human{Rationale: "orig"})
+	labels := append(taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginSpecPlan), taskmeta.SpecTagLabel(specTag))
+	return gitrepo.IssueInfo{
+		Number: number,
+		Title:  "Implement " + component,
+		Body:   body,
+		State:  "open",
+		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
+		Labels: labels,
 	}
 }

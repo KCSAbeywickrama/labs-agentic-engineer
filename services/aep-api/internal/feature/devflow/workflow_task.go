@@ -323,7 +323,9 @@ func markRunStatus(ctx workflow.Context, workflowID, statusStr string) {
 }
 
 // withDefaultActivityOpts returns a context carrying the default activity
-// options for short adapter activities (2m start-to-close, 3 retries).
+// options for short adapter activities (2m start-to-close per attempt; no
+// explicit RetryPolicy, so the Temporal SERVER default applies — unlimited
+// attempts with backoff).
 func withDefaultActivityOpts(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 2 * time.Minute,

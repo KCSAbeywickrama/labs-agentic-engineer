@@ -64,31 +64,19 @@ export function kindChipColor(
   }
 }
 
-/** Display order of the catalogue's groups, with each group's one-line blurb. */
-export const SKILL_GROUPS: {
-  kind: SkillKind;
-  heading: string;
-  blurb: string;
-}[] = [
-  {
-    kind: "org",
-    heading: "Organization",
-    blurb: "Shipped with the platform. Read-only — view to inspect the body.",
-  },
-  {
-    kind: "platform",
-    heading: "Platform",
-    blurb:
-      "Generation-flow guidance the platform agents follow (design, tasks, wireframes). Read-only.",
-  },
-  {
-    kind: "custom",
-    heading: "Custom",
-    blurb: "Authored by your organization.",
-  },
-  {
-    kind: "imported",
-    heading: "Imported",
-    blurb: "AgentSkills brought in from the ecosystem.",
-  },
-];
+// One-line explanation per kind, shown as a tooltip on the row's kind chip
+// (issue #172): the flat list has no group headings to carry it, and the
+// org/platform blurbs are also where read-only-ness is stated — the list
+// shows no separate read-only chip.
+export function kindBlurb(kind: SkillKind): string {
+  switch (kind) {
+    case "org":
+      return "Shipped with the platform. Read-only — view to inspect the body.";
+    case "platform":
+      return "Generation-flow guidance the platform agents follow (design, tasks, wireframes). Read-only.";
+    case "custom":
+      return "Authored by your organization.";
+    case "imported":
+      return "AgentSkills brought in from the ecosystem.";
+  }
+}

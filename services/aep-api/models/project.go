@@ -63,4 +63,47 @@ type ProjectStatus struct {
 	HasTasks         bool   `json:"hasTasks"`
 	SpecStatus       string `json:"specStatus"`   // "", "draft", "approved"
 	DesignStatus     string `json:"designStatus"` // "", "draft", "approved"
+
+	// The three per-stage aggregates the overview pipeline renders from a
+	// single status poll (#184). All required by the contract — always
+	// present, zero-valued when the repo is not ready yet.
+	Spec   SpecStage   `json:"spec"`
+	Build  BuildStage  `json:"build"`
+	Deploy DeployStage `json:"deploy"`
+}
+
+// SpecStage is the spec-stage aggregate on ProjectStatus (#184).
+// Approved/draft is derived, not stored — version set and not dirty =
+// approved (vN); dirty = draft changes (vN+); no version = unpublished
+// draft; exists false = no spec yet.
+type SpecStage struct {
+	Exists  bool   `json:"exists" doc:"Any spec file created; false renders the Generate-spec CTA."`
+	Version string `json:"version" doc:"Latest v<N> spec tag; \"\" if never published."`
+	Dirty   bool   `json:"dirty" doc:"specs/ moved on GitHub past the latest tag."`
+	Design  bool   `json:"design" doc:"Design files exist for the spec (gates the Spec view's design button)."`
+}
+
+// BuildStage is the build-stage aggregate on ProjectStatus (#184) — the tag
+// being/last built and its task counts, so the overview needs no list-tasks
+// read. Counts are the run's own tally, frozen when the run ends.
+type BuildStage struct {
+	Version string `json:"version" doc:"Spec tag the current/last build built; \"\" if never built."`
+	Status  string `json:"status" enum:"idle,running,failed,succeeded" doc:"idle (never built), running, failed, succeeded"`
+	Tasks   struct {
+		Total  int64 `json:"total"`
+		Done   int64 `json:"done"`
+		Failed int64 `json:"failed"`
+		Active int64 `json:"active"`
+	} `json:"tasks" doc:"Task counts bucketed from derivedStatus."`
+}
+
+// DeployStage is the deploy-stage aggregate on ProjectStatus (#184) — what's
+// live in dev and rollout progress.
+type DeployStage struct {
+	Version    string `json:"version" doc:"Spec tag live in dev; \"\" if nothing deployed."`
+	Status     string `json:"status" enum:"none,deploying,deployed,failed"`
+	Components struct {
+		Total int64 `json:"total"`
+		Ready int64 `json:"ready"`
+	} `json:"components" doc:"Component rollout progress for the current deploy."`
 }

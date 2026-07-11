@@ -37,6 +37,12 @@ func TestLabelBuilders(t *testing.T) {
 	if got := ClassLabel(ClassValidation); got != "aep:validation" {
 		t.Errorf("ClassLabel(validation) = %q", got)
 	}
+	if got := SpecTagLabel("v3"); got != "aep:spec/v3" {
+		t.Errorf("SpecTagLabel(v3) = %q", got)
+	}
+	if got := SpecTagLabel(""); got != "" {
+		t.Errorf("SpecTagLabel(\"\") = %q; want empty (no label)", got)
+	}
 	got := NewTaskLabels(ClassCoding, OriginSpecPlan)
 	want := []string{"aep:task", "aep:coding", "aep:origin/spec-plan"}
 	if !reflect.DeepEqual(got, want) {
@@ -63,8 +69,11 @@ func TestClassify(t *testing.T) {
 		"aep:hold":               KindHold,
 		"aep:status/in_progress": KindStatus,
 		"aep:attention":          KindAttention,
-		"bug":                    KindOther,
-		"aep:unknown":            KindOther,
+		// aep:spec/<tag> is deliberately KindOther so the projection reconciler
+		// never strips the build-lineage label.
+		"aep:spec/v3": KindOther,
+		"bug":         KindOther,
+		"aep:unknown": KindOther,
 	}
 	for label, want := range tests {
 		if got := Classify(label); got != want {

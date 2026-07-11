@@ -17,6 +17,7 @@
 package artifacts
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -491,6 +492,36 @@ func TestSplitAssembleDesign_ComponentRoundTrip(t *testing.T) {
 	}
 	if len(got.Dependencies) != 1 || got.Dependencies[0].Name != "cart" {
 		t.Fatalf("dependency round-trip drifted: %+v", got.Dependencies)
+	}
+}
+
+func TestComponentDesignJSON_SkillsAppliedRoundTrip(t *testing.T) {
+	src := `{
+  "name": "orders-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "orders-api",
+  "entrypoint": "cmd/main",
+  "exposure": "internet",
+  "description": "orders",
+  "dependencies": [],
+  "skillsApplied": ["go", "openapi-conventions"]
+}`
+	comp, err := parseComponentDesignJSON("orders-api", src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if want := []string{"go", "openapi-conventions"}; !reflect.DeepEqual(comp.SkillsApplied, want) {
+		t.Fatalf("parsed skillsApplied = %v, want %v", comp.SkillsApplied, want)
+	}
+	out, err := marshalComponentDesignJSON("orders-api", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"skillsApplied"`) {
+		t.Fatalf("marshalled design.json missing skillsApplied: %s", out)
 	}
 }
 

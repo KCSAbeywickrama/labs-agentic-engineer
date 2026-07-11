@@ -188,6 +188,48 @@ components:
         - status
         - workflow_status
       type: object
+    BuildStage:
+      additionalProperties: false
+      description: Build-stage aggregate on ProjectStatus (#184) — the tag being/last built and its task counts, so the overview needs no list-tasks read.
+      properties:
+        status:
+          description: idle (never built), running, failed, succeeded
+          enum:
+            - idle
+            - running
+            - failed
+            - succeeded
+          type: string
+        tasks:
+          additionalProperties: false
+          description: Task counts bucketed from derivedStatus.
+          properties:
+            active:
+              format: int64
+              type: integer
+            done:
+              format: int64
+              type: integer
+            failed:
+              format: int64
+              type: integer
+            total:
+              format: int64
+              type: integer
+          required:
+            - total
+            - done
+            - failed
+            - active
+          type: object
+        version:
+          description: Spec tag the current/last build built; "" if never built.
+          type: string
+      required:
+        - version
+        - status
+        - tasks
+      type: object
     BuildStatusTask:
       additionalProperties: false
       properties:
@@ -268,39 +310,6 @@ components:
         - name
         - email
         - projectName
-      type: object
-    CollectSpecInputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/CollectSpecInputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        rawSpec:
-          description: Raw OpenAPI 3.x YAML/JSON (paste path)
-          type: string
-        specUrl:
-          description: HTTPS URL to fetch the OpenAPI spec from
-          type: string
-      type: object
-    CollectSpecOutputBody:
-      additionalProperties: false
-      properties:
-        $schema:
-          description: A URL to the JSON Schema for this object.
-          examples:
-            - /api/v1/CollectSpecOutputBody.json
-          format: uri
-          readOnly: true
-          type: string
-        specPath:
-          description: Component-relative path where the spec was stored
-          type: string
-      required:
-        - specPath
       type: object
     Component:
       additionalProperties: false
@@ -662,6 +671,39 @@ components:
             - "null"
       required:
         - items
+      type: object
+    DeployStage:
+      additionalProperties: false
+      description: Deploy-stage aggregate on ProjectStatus (#184) — what's live in dev and rollout progress.
+      properties:
+        components:
+          additionalProperties: false
+          description: Component rollout progress for the current deploy.
+          properties:
+            ready:
+              format: int64
+              type: integer
+            total:
+              format: int64
+              type: integer
+          required:
+            - total
+            - ready
+          type: object
+        status:
+          enum:
+            - none
+            - deploying
+            - deployed
+            - failed
+          type: string
+        version:
+          description: Spec tag live in dev; "" if nothing deployed.
+          type: string
+      required:
+        - version
+        - status
+        - components
       type: object
     DisconnectOutputBody:
       additionalProperties: false
@@ -1143,6 +1185,10 @@ components:
           format: uri
           readOnly: true
           type: string
+        build:
+          $ref: "#/components/schemas/BuildStage"
+        deploy:
+          $ref: "#/components/schemas/DeployStage"
         designStatus:
           description: '"", draft, approved'
           type: string
@@ -1163,6 +1209,8 @@ components:
           type: string
         repoUrl:
           type: string
+        spec:
+          $ref: "#/components/schemas/SpecStage"
         specStatus:
           description: '"", draft, approved'
           type: string
@@ -1175,6 +1223,9 @@ components:
         - hasTasks
         - specStatus
         - designStatus
+        - spec
+        - build
+        - deploy
       type: object
     ProvisionBody:
       additionalProperties: false
@@ -1374,6 +1425,28 @@ components:
       required:
         - updates
         - count
+      type: object
+    SpecStage:
+      additionalProperties: false
+      description: Spec-stage aggregate on ProjectStatus (#184). Approved/draft is derived, not stored — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished draft; exists false = no spec yet.
+      properties:
+        design:
+          description: Design files exist for the spec (gates the Spec view's design button).
+          type: boolean
+        dirty:
+          description: specs/ moved on GitHub past the latest tag.
+          type: boolean
+        exists:
+          description: Any spec file created; false renders the Generate-spec CTA.
+          type: boolean
+        version:
+          description: Latest v<N> spec tag; "" if never published.
+          type: string
+      required:
+        - exists
+        - version
+        - dirty
+        - design
       type: object
     StartConnectInputBody:
       additionalProperties: false
@@ -2691,55 +2764,6 @@ paths:
       summary: Provision a platform-resource dependency (async)
       tags:
         - Dependencies
-  /projects/{projectName}/components/{componentName}/dependencies/{depName}/spec:
-    post:
-      operationId: collect-dependency-spec
-      parameters:
-        - description: Project name (DNS-label slug)
-          in: path
-          name: projectName
-          required: true
-          schema:
-            description: Project name (DNS-label slug)
-            type: string
-        - description: Consumer component name
-          in: path
-          name: componentName
-          required: true
-          schema:
-            description: Consumer component name
-            type: string
-        - description: External dependency name
-          in: path
-          name: depName
-          required: true
-          schema:
-            description: External dependency name
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CollectSpecInputBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CollectSpecOutputBody"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ErrorModel"
-          description: Error
-      security:
-        - userJWT: []
-      summary: Store a consumed OpenAPI spec for an external dependency
-      tags:
-        - Design(Deprecated)
   /projects/{projectName}/components/{componentName}/dependencies/{depName}/status:
     get:
       operationId: get-dependency-status
@@ -3239,6 +3263,13 @@ paths:
               - closed
               - all
             type: string
+        - description: Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions.
+          explode: false
+          in: query
+          name: tag
+          schema:
+            description: Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions.
+            type: string
       responses:
         "200":
           content:
@@ -3258,7 +3289,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: List a project's Tasks (live GitHub ⋈ executions → derived status)
+      summary: List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to one spec/build version tag
       tags:
         - Tasks
   /projects/{projectName}/tasks/{issueNumber}:
@@ -3558,7 +3589,7 @@ paths:
           description: Error
       security:
         - userJWT: []
-      summary: Sync built-in skills
+      summary: Sync built-in skills (creates the org's skills repo if missing)
       tags:
         - Skills
   /skills/updates:

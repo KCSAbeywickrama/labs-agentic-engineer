@@ -19,11 +19,13 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 )
 
 // Commands is the write surface for the reactive control labels (§5): execute
@@ -40,11 +42,16 @@ type Commands struct {
 	issues     IssueClient
 	repos      RepoResolver
 	dispatcher Dispatcher
+	components ComponentEnsurer
 }
 
-// NewCommands wires the command surface.
-func NewCommands(issues IssueClient, repos RepoResolver, dispatcher Dispatcher) *Commands {
-	return &Commands{issues: issues, repos: repos, dispatcher: dispatcher}
+// NewCommands wires the command surface. components may be nil — the only
+// caller that needs it is PromoteAndExecute's pre-check, which degrades to
+// skipping that check (matching pre-tasks-github-native behavior where no
+// such check existed at all) rather than failing every promote-from-issue
+// call when it's unset.
+func NewCommands(issues IssueClient, repos RepoResolver, dispatcher Dispatcher, components ComponentEnsurer) *Commands {
+	return &Commands{issues: issues, repos: repos, dispatcher: dispatcher, components: components}
 }
 
 // Execute stamps aep:execute (audit) and dispatches through the funnel. Returns
@@ -92,6 +99,58 @@ func (c *Commands) Unhold(ctx context.Context, orgID, projectID string, issueNum
 		return c.dispatcher.Reevaluate(bg)
 	}, "unhold reevaluate", issueNumber)
 	return nil
+}
+
+// PromoteAndExecute turns an ad-hoc GitHub issue — one created outside the
+// spec-plan pipeline, e.g. by the OpenChoreo SRE/RCA agent handoff (see
+// AE-HANDOFF-DESIGN.md in openchoreo/agents/sre-agent) — into a dispatchable
+// coding Task, then dispatches it through Execute. Unlike a planned Task, the
+// issue already exists with a human-authored body by the time this runs (the
+// caller files it via the plain create-issue operation first); this only
+// injects the taskmeta machine block ahead of that body and stamps the
+// Task/coding/incident-origin labels, preserving everything the caller wrote.
+//
+// componentName must name a component AE already knows about. The funnel's
+// coding executor enforces this too, but only inside its async goroutine
+// (Execute returns 202 before it runs) — an unknown name would otherwise fail
+// silently from this call's point of view. Checking it here, synchronously,
+// surfaces that failure back to the caller instead.
+// Idempotent: if the issue was already promoted (e.g. a retried dispatch),
+// the existing block/labels are left alone and this just re-issues Execute.
+func (c *Commands) PromoteAndExecute(ctx context.Context, orgID, projectID, componentName string, issueNumber int) error {
+	if strings.TrimSpace(componentName) == "" {
+		return ErrComponentNameRequired
+	}
+	if c.components != nil {
+		if err := c.components.EnsureComponent(ctx, orgID, projectID, componentName); err != nil {
+			return fmt.Errorf("promote task from issue: %w", err)
+		}
+	}
+
+	// Fetch the one issue by number (O(1)) rather than paging the whole repo —
+	// ListIssues stops at 100, so a scan would silently miss issues beyond that
+	// on a busy repo.
+	issue, err := c.issues.GetIssue(ctx, orgID, projectID, issueNumber)
+	if err != nil {
+		if errors.Is(err, gitrepo.ErrIssueNotFound) {
+			return ErrTaskNotFound
+		}
+		return fmt.Errorf("promote task from issue: get issue: %w", err)
+	}
+
+	if _, parseErr := taskmeta.ParseBlock(issue.Body); parseErr != nil {
+		block := taskmeta.Block{Component: componentName, Origin: taskmeta.OriginIncident}
+		body := taskmeta.ComposeBody(block, taskmeta.Human{Body: issue.Body})
+		if err := c.issues.EditIssueBody(ctx, orgID, projectID, issueNumber, body); err != nil {
+			return fmt.Errorf("promote task from issue: inject machine block: %w", err)
+		}
+		labels := taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginIncident)
+		if err := c.issues.AddLabels(ctx, orgID, projectID, issueNumber, labels); err != nil {
+			return fmt.Errorf("promote task from issue: add task labels: %w", err)
+		}
+	}
+
+	return c.Execute(ctx, orgID, projectID, issueNumber)
 }
 
 // resolveTaskIssue resolves the repo full name and finds the Task issue by

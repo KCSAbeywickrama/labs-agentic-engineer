@@ -21,10 +21,9 @@ specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidr
 
 ## The top-level design.md
 
-YAML frontmatter first, then these sections. Depth rule: **every requirement
-must have a home** in a capability, entity, role, or screen below — a
-requirement you can't point to in this document is a defect, not an editing
-choice.
+These sections, in order. Depth rule: **every requirement must have a home** in
+a capability, entity, role, or screen below — a requirement you can't point to
+in this document is a defect, not an editing choice.
 
 1. **Overview** — what the system is, in one paragraph.
 2. **Components** — a bullet per component: name, `type`, one-line
@@ -47,10 +46,14 @@ Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
 sections, no generic performance targets, no "future enhancements" — unless
 the requirements state them.
 
-After emitting or changing the design, record the skills you actually applied:
-use `setFrontmatterField` on `specs/design/design.md` with key `skillsApplied`
-and the list of skill names (e.g. `["high-level-architecture",
-"openapi-conventions"]`). Never hand-edit frontmatter with editFile.
+After emitting or changing a component's design, record the skills that
+component's build actually needs as a `skillsApplied` array **inside that
+component's `specs/design/components/<name>/design.json`** — e.g. a Go API
+service → `["openapi-conventions", "go"]`; a web-application →
+`["excalidraw", "react"]`. It is a JSON key on the component's design object,
+so include it when you write that `design.json` (addFile/editFile) — do NOT
+put `skillsApplied` in `design.md` frontmatter. Each component carries only the
+skills its own build needs.
 
 ## Deriving components — deployment units the requirements justify
 

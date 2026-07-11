@@ -68,6 +68,12 @@ type Workspace interface {
 	// is verified and returned verbatim. Branch/tag addressing fetches origin
 	// first; raw shas read local objects, fetching only when missing.
 	Head(ctx context.Context, ref RepoRef, at string) (sha string, err error)
+	// HeadLocal is Head("") without the origin fetch — the default-branch tip
+	// the shared mirror already holds. Correctness-equivalent for
+	// platform-written content (Mutate updates the mirror before returning);
+	// out-of-band pushes are missed until the next fetch-bearing op. For
+	// hot-path reads (the status poll) that must not pay a network round-trip.
+	HeadLocal(ctx context.Context, ref RepoRef) (sha string, err error)
 	// List returns every blob in the tree at `at` (recursive) plus the
 	// resolved commit SHA.
 	List(ctx context.Context, ref RepoRef, at string) (entries []Entry, headSHA string, err error)

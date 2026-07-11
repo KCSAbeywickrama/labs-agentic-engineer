@@ -63,7 +63,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
-	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -383,6 +382,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// the Enabled() check.
 	credService.WithSMAPIWriter(smWriter)
 	anthropicCredService.WithSMAPIWriter(smWriter)
+	// Push the org's Anthropic key to a consumer's ExternalSecret on every
+	// successful Connect (both first-time connect and later rotation) — see
+	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
+	// unless both env vars are set (no consumer assumed by default).
+	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
 	validatorProbes := orgcreds.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := credentials.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
@@ -469,7 +473,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
 	// the OC Component's workflow params.
-	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, artifactStore, executionRepo)
+	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, executionRepo)
+	// Build/deploy stage sources for the status poll (#184): the
+	// workflow_runs index (one row read) + the org-scoped release-binding
+	// list — consumer-side ports wired here so project imports neither.
+	projectService.SetStageSources(workflowRunRepo, componentClient)
 	organizationService := organization.NewOrganizationService(db, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
@@ -481,7 +489,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	}
 	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
 	configService := component.NewConfigService(configRepo, componentService)
-	requirementsService := requirements.NewRequirementsService(artifactStore, artifactSvcGit)
 	designService := design.NewDesignService(artifactStore, artifactSvcGit)
 
 	// Tasks are GitHub issues (the Task/Execution split, tasks-github-native):
@@ -666,7 +673,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Command surface calls into the funnel; webhook handling splits across the
 	// two package halves: issues.* (task birth / block repair / command labels)
 	// in feature/task, pull_request.* (end coding / spawn build) in feature/execution.
-	taskCommands := task.NewCommands(issueService, repoService, funnel)
+	taskCommands := task.NewCommands(issueService, repoService, funnel, componentService)
 	platformSender := githubBotLogin(cfg.GitHubAppSlug)
 	registerWebhook := func(event, action string, h func(ctx context.Context, event, action string, payload []byte) error) {
 		webhookRouter.Register(event, action, webhook.EventHandlerFunc(h))
@@ -789,9 +796,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		OrgSvc:           organizationService,
 		ComponentSvc:     componentService,
 		ConfigSvc:        configService,
-		RequirementsSvc:  requirementsService,
 		CollabRepo:       repoService,
-		DesignSvc:        designService,
+		IssueSvc:         issueService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskPlan:         taskPlan,

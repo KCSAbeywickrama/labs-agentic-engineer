@@ -50,14 +50,15 @@ type ProjectService interface {
 }
 
 type projectService struct {
-	client        openchoreo.ProjectClient
-	repoSvc       gitrepo.RepoService
-	webhookSvc    gitrepo.WebhookService
-	artifactSvc   artifacts.ArtifactService
-	store         *artifacts.ArtifactStore
-	execs         repositories.ExecutionRepository
-	skillsProv    skillsProvisioner
-	deprovisioner resourceDeprovisioner // dependency provisioning teardown; may be nil
+	client         openchoreo.ProjectClient
+	repoSvc        gitrepo.RepoService
+	webhookSvc     gitrepo.WebhookService
+	artifactSvc    artifacts.ArtifactService
+	execs          repositories.ExecutionRepository
+	skillsProv     skillsProvisioner
+	deprovisioner  resourceDeprovisioner // dependency provisioning teardown; may be nil
+	runReader      devRunRows            // build/deploy stage reads + delete purge (status_stages.go)
+	bindingsReader bindingsReader        // deploy stage: OC release bindings (status_stages.go)
 }
 
 // resourceDeprovisioner is project_service's narrow consumer port for the
@@ -83,7 +84,6 @@ func NewProjectService(
 	repoSvc gitrepo.RepoService,
 	webhookSvc gitrepo.WebhookService,
 	artifactSvc artifacts.ArtifactService,
-	store *artifacts.ArtifactStore,
 	execs repositories.ExecutionRepository,
 ) *projectService {
 	return &projectService{
@@ -91,7 +91,6 @@ func NewProjectService(
 		repoSvc:     repoSvc,
 		webhookSvc:  webhookSvc,
 		artifactSvc: artifactSvc,
-		store:       store,
 		execs:       execs,
 	}
 }
@@ -243,11 +242,24 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 		}
 	}
 
+	// Purge the workflow_runs index too — a recreated same-named project
+	// must not resurrect stale runs (the status poll would chase spec tags
+	// the fresh repo never had).
+	if s.runReader != nil {
+		if err := s.runReader.DeleteByProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to purge workflow runs for project", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
 	return nil
 }
 
 func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectName string) (*models.ProjectStatus, error) {
+	// The nested stages are contract-required: always present, zero-valued
+	// (idle build, no deploy) until the repo is ready and the sources read.
 	status := &models.ProjectStatus{}
+	status.Build.Status = buildIdle
+	status.Deploy.Status = deployNone
 
 	// Check git repo
 	if s.repoSvc == nil {
@@ -270,49 +282,11 @@ func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectN
 		return status, nil
 	}
 
-	// Check requirements (any markdown doc under specs/requirements/ counts).
-	files, err := s.store.ListRequirements(ctx, orgName, projectName)
-	if err != nil && !artifacts.IsNotFound(err) {
-		return nil, fmt.Errorf("list requirements: %w", err)
+	// Ready repo: derive the three stage aggregates + the flat artifact
+	// fields from the three poll sources (status_stages.go).
+	if err := s.populateStages(ctx, orgName, projectName, status); err != nil {
+		return nil, err
 	}
-	status.HasSpec = len(files) > 0
-
-	if s.artifactSvc != nil {
-		reqVersions, _ := s.artifactSvc.ListRequirementsVersions(ctx, orgName, projectName)
-		designVersions, _ := s.artifactSvc.ListDesignVersions(ctx, orgName, projectName)
-
-		if len(reqVersions) > 0 {
-			status.SpecStatus = "approved"
-		} else if status.HasSpec {
-			status.SpecStatus = "draft"
-		}
-		if len(designVersions) > 0 {
-			status.DesignStatus = "approved"
-		}
-	}
-
-	if !status.HasSpec {
-		status.Phase = "prompt"
-		return status, nil
-	}
-
-	// Check design
-	design, err := s.store.ReadDesign(ctx, orgName, projectName)
-	if err != nil && !artifacts.IsNotFound(err) {
-		return nil, fmt.Errorf("read design: %w", err)
-	}
-	status.HasDesign = design != nil
-
-	if !status.HasDesign {
-		status.Phase = "spec"
-		return status, nil
-	}
-
-	// Tasks are GitHub issues now (no component_tasks table). The status phase
-	// stops at "tasks" once a design exists; the console derives per-Task detail
-	// live from the tasks API (§8). HasTasks is left false here — a live GitHub
-	// count on every status poll is not worth the request.
-	status.Phase = "tasks"
 	return status, nil
 }
 

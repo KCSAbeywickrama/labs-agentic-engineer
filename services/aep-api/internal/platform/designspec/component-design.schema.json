@@ -80,7 +80,11 @@
                   "type": "boolean"
                 },
                 "credentialClass": {
-                  "type": "string"
+                  "type": "string",
+                  "enum": [
+                    "secret",
+                    "publishable"
+                  ]
                 }
               },
               "required": [
@@ -178,6 +182,12 @@
     },
     "componentAgentInstructions": {
       "type": "string"
+    },
+    "skillsApplied": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

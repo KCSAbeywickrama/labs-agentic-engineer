@@ -183,6 +183,15 @@ type Config struct {
 	// endpoints.
 	ClusterGatewayProxyURL string
 
+	// RCAAgentAnthropicPushNamespace/SecretName: when both are non-empty,
+	// AnthropicCredentialService pushes an ExternalSecret to this namespace
+	// (via the cluster-gateway-proxy) every time an org's Anthropic key is
+	// connected or rotated — closing the gap where a console-side key change
+	// would otherwise sit unused until something re-discovers it. Empty
+	// (the default) disables the push; no consumer is assumed.
+	RCAAgentAnthropicPushNamespace  string
+	RCAAgentAnthropicPushSecretName string
+
 	// AgentRunnerImage is the docker image the per-task coding-agent
 	// Job uses. Pinned at deploy time; `:latest` is OK in dev but the
 	// cloud release-binding should resolve to a digest.

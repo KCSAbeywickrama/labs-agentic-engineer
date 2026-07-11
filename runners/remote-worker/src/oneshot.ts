@@ -198,6 +198,7 @@ async function main(): Promise<number> {
       const pat = await refreshGitToken(req, skillsBearer);
       const resolutions = await resolveTaskSkills({
         workspace: layout.workspace,
+        componentName: req.componentName,
         skillsRepoURL,
         pat,
         // Clone OUTSIDE the work tree so its nested .git never enters the

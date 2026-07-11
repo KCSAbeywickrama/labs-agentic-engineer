@@ -38,7 +38,7 @@
  *    failure the bundle is left byte-for-byte unchanged (reject, don't corrupt).
  */
 
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import { checkComponentDesign } from "./component-design-schema.js";
 import type {
   Op,
@@ -193,46 +193,6 @@ export class FileBundle {
     this.files.delete(path);
     this.touchedPaths.add(path);
     return ok(path, op, "applied");
-  }
-
-  setFrontmatterField(
-    path: string,
-    key: string,
-    value: string | number | boolean | string[],
-  ): OpResult {
-    const op: Op = "frontmatter";
-    if (!this.files.has(path)) {
-      return err(
-        path,
-        op,
-        "NO_SUCH_FILE",
-        `${path} is not in the bundle. Available: ${this.list().join(", ")}.`,
-      );
-    }
-    const content = this.files.get(path)!;
-    const m = FRONTMATTER_RE.exec(content);
-    if (!m) {
-      return err(
-        path,
-        op,
-        "NO_FRONTMATTER",
-        `${path} has no leading --- frontmatter fence; use editFile instead.`,
-      );
-    }
-    let fm: Record<string, unknown>;
-    try {
-      const parsed = parseYaml(m[1]!);
-      fm = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-    } catch (e) {
-      return err(path, op, "INVALID_YAML", `existing frontmatter is not valid YAML: ${msg(e)}`);
-    }
-
-    fm[key] = value; // preserves existing key order; new keys are appended
-    const body = content.slice(m[0]!.length);
-    const block = stringifyYaml(fm).replace(/\n+$/, "");
-    const next = `---\n${block}\n---\n${body}`;
-
-    return this.commit(path, op, next, (e) => `frontmatter would not be valid YAML: ${e}`);
   }
 
   /**

@@ -19,9 +19,9 @@
 /**
  * design.json — the DERIVED machine view of a design bundle. Nobody authors
  * this: it is projected deterministically from the component design.md
- * frontmatter (+ top-level skillsApplied) whenever a consumer asks. Consumers:
- * the cell diagram (its Project model maps 1:1 onto components/services/
- * connections/deploymentMetadata), coding-agent dispatch, and task generation.
+ * frontmatter whenever a consumer asks. Consumers: the cell diagram (its
+ * Project model maps 1:1 onto components/services/connections/
+ * deploymentMetadata), coding-agent dispatch, and task generation.
  * The authored source of truth stays in the spec bundle's frontmatter.
  */
 
@@ -31,8 +31,6 @@ export interface ProjectDesign {
   /** Project identity (the platform's project id; thread name in the playground). */
   id: string;
   name: string;
-  /** Skill names applied to the design (top-level design.md frontmatter). */
-  skillsApplied: string[];
   components: ProjectDesignComponent[];
 }
 
@@ -41,6 +39,8 @@ export interface ProjectDesignComponent {
   id: string;
   type: string; // authored kind, passed through ("service" | "webapp" | future kinds)
   version: string;
+  /** Skill names applied to this component (its design.json `skillsApplied`). */
+  skillsApplied: string[];
   /** Build facts for the coding agent / OpenChoreo (from frontmatter). */
   build: {
     language?: string;

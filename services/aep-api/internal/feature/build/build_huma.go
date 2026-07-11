@@ -240,17 +240,16 @@ func (s *Service) taskStatuses(ctx context.Context, orgID, projectID, tag string
 	byIssue := map[int]*BuildStatusTask{}
 	order := make([]int, 0)
 
-	// 1. Durable base: the tasks stamped with this build's lineage tag.
+	// 1. Durable base: the tasks stamped with this build's lineage tag. The
+	// aep:spec/<tag> label scopes the read server-side, so every returned row
+	// already belongs to this version.
 	if s.tasks != nil {
-		views, err := s.tasks.List(ctx, orgID, projectID, "all")
+		views, err := s.tasks.ListByTag(ctx, orgID, projectID, "all", tag)
 		if err != nil {
 			slog.WarnContext(ctx, "build status: durable task read failed",
 				"org", orgID, "project", projectID, "error", err)
 		}
 		for _, v := range views {
-			if v.Lineage.SpecTag != tag {
-				continue // a different version's task
-			}
 			bt := BuildStatusTask{
 				IssueNumber: int64(v.IssueNumber),
 				Title:       v.Title,

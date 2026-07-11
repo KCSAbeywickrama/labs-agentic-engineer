@@ -78,22 +78,6 @@ func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
 	s.orgServices = r
 }
 
-// ---- Requirements (multi-file Markdown directory) -----------------------
-
-// ListRequirements returns the requirements file map at HEAD, under
-// `specs/requirements/`. A first-time project with no requirements yet returns
-// an empty map (not an error).
-func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	files, err := s.artifactSvc.ListRequirementFiles(ctx, orgID, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if files == nil {
-		files = map[string]string{}
-	}
-	return files, nil
-}
-
 // ---- Design (multi-file directory) --------------------------------------
 
 // DesignFile is the BFF's in-memory representation of the multi-file design
@@ -105,10 +89,9 @@ func (s *ArtifactStore) ListRequirements(ctx context.Context, orgID, projectID s
 //	                                       # (componentAgentInstructions)
 //	components/<name>/openapi.yaml         # OpenAPI 3.0.3 (service components only)
 type DesignFile struct {
-	Overview      string                   `json:"overview"`
-	Components    []models.DesignComponent `json:"components"`
-	SourceSpec    string                   `json:"sourceSpec,omitempty"`
-	SkillsApplied []string                 `json:"skillsApplied,omitempty"`
+	Overview   string                   `json:"overview"`
+	Components []models.DesignComponent `json:"components"`
+	SourceSpec string                   `json:"sourceSpec,omitempty"`
 }
 
 // DesignRootFile is the canonical root design document.
@@ -239,28 +222,9 @@ func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d 
 // from a real error.
 func IsNotFound(err error) bool { return errors.Is(err, ErrArtifactNotFound) }
 
-// DesignFilesEqual compares two design file maps after trimming whitespace from
-// each value. Used by the has-unsaved-changes check.
-func DesignFilesEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, va := range a {
-		vb, ok := b[k]
-		if !ok {
-			return false
-		}
-		if strings.TrimSpace(va) != strings.TrimSpace(vb) {
-			return false
-		}
-	}
-	return true
-}
-
 // rootFrontmatter is the YAML frontmatter we accept on the root `design.md`.
 type rootFrontmatter struct {
-	SourceSpec    string   `yaml:"sourceSpec,omitempty"`
-	SkillsApplied []string `yaml:"skillsApplied,omitempty"`
+	SourceSpec string `yaml:"sourceSpec,omitempty"`
 }
 
 // SplitFrontmatter separates the leading YAML frontmatter block (delimited by
@@ -309,9 +273,8 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 		}
 	}
 	out := &DesignFile{
-		Overview:      strings.TrimSpace(body),
-		SourceSpec:    rfm.SourceSpec,
-		SkillsApplied: append([]string(nil), rfm.SkillsApplied...),
+		Overview:   strings.TrimSpace(body),
+		SourceSpec: rfm.SourceSpec,
 	}
 
 	componentNames := ComponentNamesIn(files)
@@ -343,7 +306,7 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 // SplitDesign marshals a DesignFile back into the multi-file map (keys relative
 // to specs/design/, forward slashes) — the inverse of AssembleDesign:
 //
-//	design.md                       # root overview + {sourceSpec, skillsApplied} frontmatter
+//	design.md                       # root overview + {sourceSpec} frontmatter
 //	components/<name>/design.json    # the authored component model (design_json.go codec)
 //	components/<name>/openapi.yaml    # the sibling spec (service components), when present
 //
@@ -355,10 +318,10 @@ func SplitDesign(d *DesignFile) (map[string]string, error) {
 	}
 	files := make(map[string]string, 1+2*len(d.Components))
 
-	// Root design.md: optional YAML frontmatter (sourceSpec/skillsApplied) + overview.
+	// Root design.md: optional YAML frontmatter (sourceSpec) + overview.
 	var root strings.Builder
-	if d.SourceSpec != "" || len(d.SkillsApplied) > 0 {
-		fm, err := yaml.Marshal(rootFrontmatter{SourceSpec: d.SourceSpec, SkillsApplied: d.SkillsApplied})
+	if d.SourceSpec != "" {
+		fm, err := yaml.Marshal(rootFrontmatter{SourceSpec: d.SourceSpec})
 		if err != nil {
 			return nil, fmt.Errorf("encode design.md frontmatter: %w", err)
 		}

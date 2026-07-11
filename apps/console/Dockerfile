@@ -47,7 +47,7 @@ RUN pnpm --filter @aep/excalidraw-dsl build
 RUN pnpm --filter @aep/console gen
 RUN pnpm --filter @aep/console build
 
-# Stage 1: serve with nginx (mirrors console-legacy/console/Dockerfile).
+# Stage 1: serve with nginx.
 FROM nginx:1.28-alpine
 
 USER root

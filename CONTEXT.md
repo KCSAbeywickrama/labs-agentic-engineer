@@ -151,3 +151,32 @@ A short-lived MCP token minted for a human driving the playground locally,
 via an endpoint that exists only when explicitly enabled in a local deployment.
 Scoped to one org; minted fresh per turn. Never part of the production
 authentication story (which remains an open decision).
+
+## Project overview
+
+**Stage aggregate**:
+One of the three per-stage summaries — spec, build, deploy — a project's status
+reports, so the overview renders the whole pipeline from a single read.
+_Avoid_: phase (the legacy flat field), pipeline state.
+
+**Spec version**:
+The `v<N>` tag: a snapshot of a validated requirements+design pair, cut at the
+moment a build starts. Implementation lands *after* the version is cut; the
+version names what the build implements, not the resulting code state.
+_Avoid_: release, build number.
+
+**Dirty (spec)**:
+The spec content has moved past the latest spec version in committed truth.
+Always derived, never stored — a spec is "approved" exactly when it has a
+version and is not dirty.
+_Avoid_: draft flag, spec status (as a stored fact).
+
+**Build progress**:
+A build run's own task tally (total/done/failed/active), frozen when the run
+ends. Describes *that run*; the Tasks page remains the live per-task truth.
+_Avoid_: task list (unbounded detail — the opposite of a tally).
+
+**Live version**:
+The spec version whose implementation most recently completed a build run —
+what the platform reports as live in the dev environment.
+_Avoid_: deployed tag (no tag is cut at deploy time today).
