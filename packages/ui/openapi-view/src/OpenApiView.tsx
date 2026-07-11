@@ -58,20 +58,20 @@ type ChipColor =
   | "success"
   | "warning";
 
-// Palette family a method's badge draws its solid background from
-// (Swagger-conventional hues, driven by the theme). The badge below computes
-// its text color with getContrastText, so contrast holds in both themes for
-// every family — including `secondary`, whose theme contrastText the old
-// filled-Chip approach got wrong (invisible PATCH label on light).
-type PaletteFamily = "primary" | "secondary" | "error" | "info" | "success" | "warning";
-const METHOD_PALETTE: Record<Method, PaletteFamily> = {
-  GET: "success",
-  POST: "primary",
-  PUT: "warning",
-  PATCH: "secondary",
-  DELETE: "error",
-  HEAD: "info",
-  OPTIONS: "info",
+// Solid background color for each method's badge — the exact Swagger UI /
+// petstore.swagger.io hues, so the viewer reads as a standard OpenAPI doc
+// (GET blue, POST green, ...). Not theme-driven: these are the canonical
+// method colors and are identical in light and dark. The badge below computes
+// its text color with getContrastText, so labels stay readable in both themes
+// (an improvement over Swagger's own low-contrast white-on-teal PATCH).
+const METHOD_COLOR: Record<Method, string> = {
+  GET: "#61affe",
+  POST: "#49cc90",
+  PUT: "#fca130",
+  PATCH: "#50e3c2",
+  DELETE: "#f93e3e",
+  HEAD: "#9012fe",
+  OPTIONS: "#0d5aa7",
 };
 
 // Response status class → color: 2xx ok, 4xx client, 5xx server, else neutral.
@@ -136,7 +136,7 @@ function TypeTag({ label }: { label: string }) {
 // Solid method badge with guaranteed-contrast text (getContrastText), sized
 // like the prototype's .op-method — always readable regardless of theme.
 function MethodBadge({ method }: { method: Method }) {
-  const family = METHOD_PALETTE[method];
+  const bg = METHOD_COLOR[method];
   return (
     <Box
       component="span"
@@ -154,8 +154,8 @@ function MethodBadge({ method }: { method: Method }) {
         fontWeight: 700,
         letterSpacing: "0.06em",
         textTransform: "uppercase",
-        bgcolor: theme.palette[family].main,
-        color: theme.palette.getContrastText(theme.palette[family].main),
+        bgcolor: bg,
+        color: theme.palette.getContrastText(bg),
       })}
     >
       {method}
@@ -408,7 +408,9 @@ function OperationRow({ op }: { op: Operation }) {
 function TagSectionView({ section }: { section: TagSection }) {
   return (
     <Box component="section" sx={{ mb: 4 }}>
-      <Typography variant="h6">{section.title}</Typography>
+      <Typography variant="h6" sx={{ fontWeight: 700 }}>
+        {section.title}
+      </Typography>
       {section.blurb && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {section.blurb}
@@ -429,7 +431,9 @@ function SchemasSection({ schemas }: { schemas: Record<string, Schema> }) {
   if (names.length === 0) return null;
   return (
     <Box component="section" sx={{ mb: 4 }}>
-      <Typography variant="h6">Schemas</Typography>
+      <Typography variant="h6" sx={{ fontWeight: 700 }}>
+        Schemas
+      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
         Reusable object definitions referenced throughout the API.
       </Typography>
@@ -503,17 +507,36 @@ export function OpenApiView({ spec }: OpenApiViewProps) {
   return (
     <Box sx={{ height: "100%", overflow: "auto", p: 3 }}>
       <Box sx={{ maxWidth: 960, mx: "auto" }}>
-        {/* Hero */}
+        {/* Hero — eyebrow row (format badge + version) above a bold title,
+            mirroring the design.json overview header. */}
         <Box sx={{ mb: 3 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-            <Typography variant="overline" color="text.secondary">
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <Box
+              component="span"
+              sx={(theme) => ({
+                display: "inline-flex",
+                alignItems: "center",
+                px: 1,
+                py: 0.5,
+                borderRadius: 1,
+                fontFamily: "monospace",
+                fontSize: "0.6875rem",
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                bgcolor: theme.palette.primary.main,
+                color: theme.palette.getContrastText(theme.palette.primary.main),
+              })}
+            >
               OpenAPI
-            </Typography>
+            </Box>
             {parsed.info.version && (
               <Chip label={parsed.info.version} size="small" variant="outlined" />
             )}
           </Box>
-          <Typography variant="h4">{parsed.info.title}</Typography>
+          <Typography variant="h4" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+            {parsed.info.title}
+          </Typography>
           {parsed.info.description && (
             <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
               {parsed.info.description}
