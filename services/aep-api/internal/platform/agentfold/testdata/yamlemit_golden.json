@@ -1,4854 +1,0 @@
-[
- {
-  "name": "null-value",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     null
-    ]
-   ]
-  },
-  "want": "a: null\n"
- },
- {
-  "name": "bool-true",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     true
-    ]
-   ]
-  },
-  "want": "a: true\n"
- },
- {
-  "name": "bool-false",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     false
-    ]
-   ]
-  },
-  "want": "a: false\n"
- },
- {
-  "name": "empty-string",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ""
-    ]
-   ]
-  },
-  "want": "a: \"\"\n"
- },
- {
-  "name": "str-true",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "true"
-    ]
-   ]
-  },
-  "want": "a: \"true\"\n"
- },
- {
-  "name": "str-false-caps",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "FALSE"
-    ]
-   ]
-  },
-  "want": "a: \"FALSE\"\n"
- },
- {
-  "name": "str-int",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "42"
-    ]
-   ]
-  },
-  "want": "a: \"42\"\n"
- },
- {
-  "name": "str-negint",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "-42"
-    ]
-   ]
-  },
-  "want": "a: \"-42\"\n"
- },
- {
-  "name": "str-plusint",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "+7"
-    ]
-   ]
-  },
-  "want": "a: \"+7\"\n"
- },
- {
-  "name": "str-float",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "1.5"
-    ]
-   ]
-  },
-  "want": "a: \"1.5\"\n"
- },
- {
-  "name": "str-dotfloat",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ".5"
-    ]
-   ]
-  },
-  "want": "a: \".5\"\n"
- },
- {
-  "name": "str-traildot",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "10."
-    ]
-   ]
-  },
-  "want": "a: \"10.\"\n"
- },
- {
-  "name": "str-exp",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "1e5"
-    ]
-   ]
-  },
-  "want": "a: \"1e5\"\n"
- },
- {
-  "name": "str-exp2",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ".5e-3"
-    ]
-   ]
-  },
-  "want": "a: \".5e-3\"\n"
- },
- {
-  "name": "str-hex",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "0x1a"
-    ]
-   ]
-  },
-  "want": "a: \"0x1a\"\n"
- },
- {
-  "name": "str-oct",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "0o17"
-    ]
-   ]
-  },
-  "want": "a: \"0o17\"\n"
- },
- {
-  "name": "str-inf",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ".inf"
-    ]
-   ]
-  },
-  "want": "a: \".inf\"\n"
- },
- {
-  "name": "str-neginf",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "-.Inf"
-    ]
-   ]
-  },
-  "want": "a: \"-.Inf\"\n"
- },
- {
-  "name": "str-nan",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ".NaN"
-    ]
-   ]
-  },
-  "want": "a: \".NaN\"\n"
- },
- {
-  "name": "str-tilde",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "~"
-    ]
-   ]
-  },
-  "want": "a: \"~\"\n"
- },
- {
-  "name": "str-null-word",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "Null"
-    ]
-   ]
-  },
-  "want": "a: \"Null\"\n"
- },
- {
-  "name": "str-not-int",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "42x"
-    ]
-   ]
-  },
-  "want": "a: 42x\n"
- },
- {
-  "name": "str-not-float",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "1.5.3"
-    ]
-   ]
-  },
-  "want": "a: 1.5.3\n"
- },
- {
-  "name": "colon-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "key: value"
-    ]
-   ]
-  },
-  "want": "a: \"key: value\"\n"
- },
- {
-  "name": "colon-nospace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "key:value"
-    ]
-   ]
-  },
-  "want": "a: key:value\n"
- },
- {
-  "name": "trail-colon",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x:"
-    ]
-   ]
-  },
-  "want": "a: \"x:\"\n"
- },
- {
-  "name": "lead-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     " x"
-    ]
-   ]
-  },
-  "want": "a: \" x\"\n"
- },
- {
-  "name": "trail-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x "
-    ]
-   ]
-  },
-  "want": "a: \"x \"\n"
- },
- {
-  "name": "lead-tab",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\tx"
-    ]
-   ]
-  },
-  "want": "a: \"\\tx\"\n"
- },
- {
-  "name": "mid-tab",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\ty"
-    ]
-   ]
-  },
-  "want": "a: x\ty\n"
- },
- {
-  "name": "hash-lead",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "#tag"
-    ]
-   ]
-  },
-  "want": "a: \"#tag\"\n"
- },
- {
-  "name": "hash-after-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x #y"
-    ]
-   ]
-  },
-  "want": "a: \"x #y\"\n"
- },
- {
-  "name": "hash-nospace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x#y"
-    ]
-   ]
-  },
-  "want": "a: x#y\n"
- },
- {
-  "name": "dash-solo",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "-"
-    ]
-   ]
-  },
-  "want": "a: \"-\"\n"
- },
- {
-  "name": "dash-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "- x"
-    ]
-   ]
-  },
-  "want": "a: \"- x\"\n"
- },
- {
-  "name": "dash-nospace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "-x"
-    ]
-   ]
-  },
-  "want": "a: -x\n"
- },
- {
-  "name": "qmark-solo",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "?"
-    ]
-   ]
-  },
-  "want": "a: \"?\"\n"
- },
- {
-  "name": "qmark-nospace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "?x"
-    ]
-   ]
-  },
-  "want": "a: ?x\n"
- },
- {
-  "name": "qmark-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "? x"
-    ]
-   ]
-  },
-  "want": "a: \"? x\"\n"
- },
- {
-  "name": "docmark",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "---x"
-    ]
-   ]
-  },
-  "want": "a: ---x\n"
- },
- {
-  "name": "docmark-exact",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "---"
-    ]
-   ]
-  },
-  "want": "a: ---\n"
- },
- {
-  "name": "dots",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "..."
-    ]
-   ]
-  },
-  "want": "a: ...\n"
- },
- {
-  "name": "at",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "@x"
-    ]
-   ]
-  },
-  "want": "a: \"@x\"\n"
- },
- {
-  "name": "bang",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "!x"
-    ]
-   ]
-  },
-  "want": "a: \"!x\"\n"
- },
- {
-  "name": "amp",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "&x"
-    ]
-   ]
-  },
-  "want": "a: \"&x\"\n"
- },
- {
-  "name": "star",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "*x"
-    ]
-   ]
-  },
-  "want": "a: \"*x\"\n"
- },
- {
-  "name": "pct",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "%x"
-    ]
-   ]
-  },
-  "want": "a: \"%x\"\n"
- },
- {
-  "name": "bracket",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "[x"
-    ]
-   ]
-  },
-  "want": "a: \"[x\"\n"
- },
- {
-  "name": "brace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "{x"
-    ]
-   ]
-  },
-  "want": "a: \"{x\"\n"
- },
- {
-  "name": "comma",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ",x"
-    ]
-   ]
-  },
-  "want": "a: \",x\"\n"
- },
- {
-  "name": "pipe",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "|x"
-    ]
-   ]
-  },
-  "want": "a: \"|x\"\n"
- },
- {
-  "name": "gt",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     ">x"
-    ]
-   ]
-  },
-  "want": "a: \">x\"\n"
- },
- {
-  "name": "backtick",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "`x"
-    ]
-   ]
-  },
-  "want": "a: \"`x\"\n"
- },
- {
-  "name": "apostrophe",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "it's"
-    ]
-   ]
-  },
-  "want": "a: it's\n"
- },
- {
-  "name": "dquote",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "say \"hi\""
-    ]
-   ]
-  },
-  "want": "a: say \"hi\"\n"
- },
- {
-  "name": "both-quotes",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "mix '\" here"
-    ]
-   ]
-  },
-  "want": "a: mix '\" here\n"
- },
- {
-  "name": "dquote-forced-single",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\"quoted\""
-    ]
-   ]
-  },
-  "want": "a: '\"quoted\"'\n"
- },
- {
-  "name": "squote-lead",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "'lead"
-    ]
-   ]
-  },
-  "want": "a: \"'lead\"\n"
- },
- {
-  "name": "both-lead",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "'\"x"
-    ]
-   ]
-  },
-  "want": "a: \"'\\\"x\"\n"
- },
- {
-  "name": "num-int",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "42"
-     }
-    ]
-   ]
-  },
-  "want": "a: 42\n"
- },
- {
-  "name": "num-neg",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "-7"
-     }
-    ]
-   ]
-  },
-  "want": "a: -7\n"
- },
- {
-  "name": "num-float",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "1.5"
-     }
-    ]
-   ]
-  },
-  "want": "a: 1.5\n"
- },
- {
-  "name": "num-negzero",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "-0"
-     }
-    ]
-   ]
-  },
-  "want": "a: -0\n"
- },
- {
-  "name": "num-tiny",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "1e-7"
-     }
-    ]
-   ]
-  },
-  "want": "a: 1e-7\n"
- },
- {
-  "name": "num-small-fixed",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "0.00001"
-     }
-    ]
-   ]
-  },
-  "want": "a: 0.00001\n"
- },
- {
-  "name": "num-e21",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "1e+21"
-     }
-    ]
-   ]
-  },
-  "want": "a: 1e+21\n"
- },
- {
-  "name": "num-e20",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "100000000000000000000"
-     }
-    ]
-   ]
-  },
-  "want": "a: 100000000000000000000\n"
- },
- {
-  "name": "num-e300",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "1e+300"
-     }
-    ]
-   ]
-  },
-  "want": "a: 1e+300\n"
- },
- {
-  "name": "num-big-precision",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "1.2345678901234568e+29"
-     }
-    ]
-   ]
-  },
-  "want": "a: 1.2345678901234568e+29\n"
- },
- {
-  "name": "num-third",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "0.3333333333333333"
-     }
-    ]
-   ]
-  },
-  "want": "a: 0.3333333333333333\n"
- },
- {
-  "name": "num-max-safe",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "9007199254740991"
-     }
-    ]
-   ]
-  },
-  "want": "a: 9007199254740991\n"
- },
- {
-  "name": "num-inf",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "Infinity"
-     }
-    ]
-   ]
-  },
-  "want": "a: .inf\n"
- },
- {
-  "name": "num-neg-inf",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "-Infinity"
-     }
-    ]
-   ]
-  },
-  "want": "a: -.inf\n"
- },
- {
-  "name": "num-nan",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$num": "NaN"
-     }
-    ]
-   ]
-  },
-  "want": "a: .nan\n"
- },
- {
-  "name": "ml-basic",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "line1\nline2"
-    ]
-   ]
-  },
-  "want": "a: |-\n  line1\n  line2\n"
- },
- {
-  "name": "ml-trailnl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "line1\nline2\n"
-    ]
-   ]
-  },
-  "want": "a: |\n  line1\n  line2\n"
- },
- {
-  "name": "ml-2trailnl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\nb\n\n"
-    ]
-   ]
-  },
-  "want": "a: |+\n  a\n  b\n\n"
- },
- {
-  "name": "ml-3trailnl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\nb\n\n\n"
-    ]
-   ]
-  },
-  "want": "a: |+\n  a\n  b\n\n\n"
- },
- {
-  "name": "ml-blank-inside",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "p1\n\np2"
-    ]
-   ]
-  },
-  "want": "a: |-\n  p1\n\n  p2\n"
- },
- {
-  "name": "ml-2blank-inside",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "p1\n\n\np2"
-    ]
-   ]
-  },
-  "want": "a: |-\n  p1\n\n\n  p2\n"
- },
- {
-  "name": "ml-lead-nl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\nx"
-    ]
-   ]
-  },
-  "want": "a: |-\n  \n  x\n"
- },
- {
-  "name": "ml-2lead-nl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\n\nx"
-    ]
-   ]
-  },
-  "want": "a: |-\n  \n\n  x\n"
- },
- {
-  "name": "ml-lead-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "  a\nb"
-    ]
-   ]
-  },
-  "want": "a: |2-\n    a\n  b\n"
- },
- {
-  "name": "ml-lead-space-nl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     " \na"
-    ]
-   ]
-  },
-  "want": "a: |2-\n   \n  a\n"
- },
- {
-  "name": "ml-only-nl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\n"
-    ]
-   ]
-  },
-  "want": "a: |+\n  \n"
- },
- {
-  "name": "ml-mid-trailing-space",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a \nb"
-    ]
-   ]
-  },
-  "want": "a: |-\n  a \n  b\n"
- },
- {
-  "name": "ml-indented-lines",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\n  ind\n    deeper\nb"
-    ]
-   ]
-  },
-  "want": "a: |-\n  a\n    ind\n      deeper\n  b\n"
- },
- {
-  "name": "ml-endspace-lastline",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\nb "
-    ]
-   ]
-  },
-  "want": "a: |-\n  a\n  b \n"
- },
- {
-  "name": "ml-quoted-trailws-short",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\nb\n  "
-    ]
-   ]
-  },
-  "want": "a: \"a\\nb\\n  \"\n"
- },
- {
-  "name": "ml-quoted-trailws-long",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2\nsecond line of it\n  "
-    ]
-   ]
-  },
-  "want": "a: \"word0 word1 word2 word3 word4 word5 word6 word0 word1 word2\n\n  second line of it\n\n  \\  \"\n"
- },
- {
-  "name": "ml-quoted-trailtab",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\nb\n\t"
-    ]
-   ]
-  },
-  "want": "a: \"a\\nb\\n\\t\"\n"
- },
- {
-  "name": "ml-with-quotes",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "he said \"hi\"\nand 'bye'"
-    ]
-   ]
-  },
-  "want": "a: |-\n  he said \"hi\"\n  and 'bye'\n"
- },
- {
-  "name": "ml-crlf",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\r\nb"
-    ]
-   ]
-  },
-  "want": "a: \"a\\r\\nb\"\n"
- },
- {
-  "name": "ml-cr-only",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "a\rb"
-    ]
-   ]
-  },
-  "want": "a: \"a\\rb\"\n"
- },
- {
-  "name": "fold-plain-79",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end"
-    ]
-   ]
-  },
-  "want": "a: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx end\n"
- },
- {
-  "name": "fold-plain-long",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 end"
-    ]
-   ]
-  },
-  "want": "a: word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5\n  word6 word0 word1 word2 word3 word4 word5 end\n"
- },
- {
-  "name": "fold-plain-nospace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-    ]
-   ]
-  },
-  "want": "a: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
- },
- {
-  "name": "fold-plain-doublespace",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "word  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  word end"
-    ]
-   ]
-  },
-  "want": "a: word  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  wordword  word\n  end\n"
- },
- {
-  "name": "fold-longkey-shortval",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "short value"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: short value\n"
- },
- {
-  "name": "fold-longkey-longval",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 tail"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk:\n  word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5\n  word6 word0 word1 word2 word3 tail\n"
- },
- {
-  "name": "fold-key-59",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 tail"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk:\n  word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5\n  word6 word0 word1 word2 word3 tail\n"
- },
- {
-  "name": "fold-key-60",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 tail"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk:\n  word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5\n  word6 word0 word1 word2 word3 tail\n"
- },
- {
-  "name": "fold-key-61",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 tail"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk:\n  word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5\n  word6 word0 word1 word2 word3 tail\n"
- },
- {
-  "name": "fold-boundary-76",
-  "doc": {
-   "$map": [
-    [
-     "description",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 abcde"
-    ]
-   ]
-  },
-  "want": "description: word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 abcde\n"
- },
- {
-  "name": "fold-boundary-77",
-  "doc": {
-   "$map": [
-    [
-     "description",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 abcdef"
-    ]
-   ]
-  },
-  "want": "description: word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 abcdef\n"
- },
- {
-  "name": "fold-boundary-78",
-  "doc": {
-   "$map": [
-    [
-     "description",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 abcdefg"
-    ]
-   ]
-  },
-  "want": "description: word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 abcdefg\n"
- },
- {
-  "name": "fold-quoted-long",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 end: x"
-    ]
-   ]
-  },
-  "want": "a: \"word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4\n  word5 word6 word0 word1 word2 word3 end: x\"\n"
- },
- {
-  "name": "fold-quoted-tab-escapes",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\tword0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 and\tmore words here to push it over"
-    ]
-   ]
-  },
-  "want": "a: \"\\tword0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4\n  word5 word6 word0 word1 and\\tmore words here to push it over\"\n"
- },
- {
-  "name": "fold-dq-backslashes",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "C:\\path\\to\\thing word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 : end"
-    ]
-   ]
-  },
-  "want": "a: \"C:\\\\path\\\\to\\\\thing word0 word1 word2 word3 word4 word5 word6 word0 word1\n  word2 word3 word4 word5 word6 : end\"\n"
- },
- {
-  "name": "fold-sq-long",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "\"word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 end\""
-    ]
-   ]
-  },
-  "want": "a: '\"word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4\n  word5 word6 word0 word1 word2 word3 end\"'\n"
- },
- {
-  "name": "emoji-short",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "🎉 party"
-    ]
-   ]
-  },
-  "want": "a: 🎉 party\n"
- },
- {
-  "name": "emoji-fold",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 end of the emoji line"
-    ]
-   ]
-  },
-  "want": "a: 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉 🎉🎉🎉\n  🎉🎉🎉 end of the emoji line\n"
- },
- {
-  "name": "emoji-fold-boundary",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 tail words here"
-    ]
-   ]
-  },
-  "want": "a: 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 tail\n  words here\n"
- },
- {
-  "name": "cjk-fold",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 end"
-    ]
-   ]
-  },
-  "want": "a: 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 漢字 end\n"
- },
- {
-  "name": "nbsp-value",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x y"
-    ]
-   ]
-  },
-  "want": "a: x y\n"
- },
- {
-  "name": "nel-value",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "xy"
-    ]
-   ]
-  },
-  "want": "a: \"xy\"\n"
- },
- {
-  "name": "ls-value",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x y"
-    ]
-   ]
-  },
-  "want": "a: x y\n"
- },
- {
-  "name": "combining",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "café latte"
-    ]
-   ]
-  },
-  "want": "a: café latte\n"
- },
- {
-  "name": "ctrl-nul",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\u0000y"
-    ]
-   ]
-  },
-  "want": "a: \"x\\0y\"\n"
- },
- {
-  "name": "ctrl-bel",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\u0007y"
-    ]
-   ]
-  },
-  "want": "a: \"x\\ay\"\n"
- },
- {
-  "name": "ctrl-bs",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\by"
-    ]
-   ]
-  },
-  "want": "a: \"x\\by\"\n"
- },
- {
-  "name": "ctrl-vt",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\u000by"
-    ]
-   ]
-  },
-  "want": "a: \"x\\vy\"\n"
- },
- {
-  "name": "ctrl-ff",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\fy"
-    ]
-   ]
-  },
-  "want": "a: \"x\\fy\"\n"
- },
- {
-  "name": "ctrl-esc",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\u001by"
-    ]
-   ]
-  },
-  "want": "a: \"x\\ey\"\n"
- },
- {
-  "name": "ctrl-so",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\u000ey"
-    ]
-   ]
-  },
-  "want": "a: \"x\\x0ey\"\n"
- },
- {
-  "name": "ctrl-us",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\u001fy"
-    ]
-   ]
-  },
-  "want": "a: \"x\\x1fy\"\n"
- },
- {
-  "name": "ctrl-del",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "xy"
-    ]
-   ]
-  },
-  "want": "a: \"xy\"\n"
- },
- {
-  "name": "ctrl-c1",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "xy"
-    ]
-   ]
-  },
-  "want": "a: \"xy\"\n"
- },
- {
-  "name": "ctrl-cr",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\ry"
-    ]
-   ]
-  },
-  "want": "a: \"x\\ry\"\n"
- },
- {
-  "name": "ctrl-crlf",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x\r\ny"
-    ]
-   ]
-  },
-  "want": "a: \"x\\r\\ny\"\n"
- },
- {
-  "name": "ctrl-mix-long",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "alpha\u0007 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 omega"
-    ]
-   ]
-  },
-  "want": "a: \"alpha\\a word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3\n  word4 word5 word6 word0 omega\"\n"
- },
- {
-  "name": "dq-ml-short",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x \ny"
-    ]
-   ]
-  },
-  "want": "a: |-\n  x \n  y\n"
- },
- {
-  "name": "dq-ml-exactly-39json",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x \nyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-    ]
-   ]
-  },
-  "want": "a: |-\n  x \n  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n"
- },
- {
-  "name": "dq-ml-40json",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "x \nyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-    ]
-   ]
-  },
-  "want": "a: |-\n  x \n  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n"
- },
- {
-  "name": "dq-ml-long",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "has trailing space \nand a second line long enough to fold for real"
-    ]
-   ]
-  },
-  "want": "a: |-\n  has trailing space \n  and a second line long enough to fold for real\n"
- },
- {
-  "name": "dq-ml-multi-nl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "one \n\n\ntwo word0 word1 word2 word3 word4 word5 word6 word0\nthree lines here "
-    ]
-   ]
-  },
-  "want": "a: |-\n  one \n\n\n  two word0 word1 word2 word3 word4 word5 word6 word0\n  three lines here \n"
- },
- {
-  "name": "dq-ml-nl-before-quote",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "ends with newline word0 word1 word2 word3 word4 word5 word6 word0 \n"
-    ]
-   ]
-  },
-  "want": "a: |\n  ends with newline word0 word1 word2 word3 word4 word5 word6 word0 \n"
- },
- {
-  "name": "dq-ml-space-after-nl",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "lead \n after word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 tail"
-    ]
-   ]
-  },
-  "want": "a: |-\n  lead \n   after word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 tail\n"
- },
- {
-  "name": "seq-empty",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     []
-    ]
-   ]
-  },
-  "want": "a: []\n"
- },
- {
-  "name": "seq-strings",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      "x",
-      "y",
-      "z"
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - x\n  - y\n  - z\n"
- },
- {
-  "name": "seq-quote-items",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      "true",
-      "- x",
-      "it's",
-      ""
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - \"true\"\n  - \"- x\"\n  - it's\n  - \"\"\n"
- },
- {
-  "name": "seq-mixed-scalars",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      "x",
-      {
-       "$num": "42"
-      },
-      true,
-      null
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - x\n  - 42\n  - true\n  - null\n"
- },
- {
-  "name": "seq-long-item",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 end"
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4\n    word5 word6 word0 word1 word2 word3 end\n"
- },
- {
-  "name": "seq-ml-item",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      "l1\nl2",
-      "plain"
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - |-\n    l1\n    l2\n  - plain\n"
- },
- {
-  "name": "seq-emoji-fold",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      "🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈 tail"
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - 🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈🎈\n    tail\n"
- },
- {
-  "name": "skillsApplied",
-  "doc": {
-   "$map": [
-    [
-     "skillsApplied",
-     [
-      "high-level-architecture",
-      "openapi-conventions",
-      "excalidraw-wireframes"
-     ]
-    ]
-   ]
-  },
-  "want": "skillsApplied:\n  - high-level-architecture\n  - openapi-conventions\n  - excalidraw-wireframes\n"
- },
- {
-  "name": "nested-map",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$map": [
-       [
-        "b",
-        "c"
-       ],
-       [
-        "d",
-        "e"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "a:\n  b: c\n  d: e\n"
- },
- {
-  "name": "nested-empty-map",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$map": []
-     }
-    ]
-   ]
-  },
-  "want": "a: {}\n"
- },
- {
-  "name": "deep-nest",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$map": [
-       [
-        "b",
-        {
-         "$map": [
-          [
-           "c",
-           "d"
-          ]
-         ]
-        }
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "a:\n  b:\n    c: d\n"
- },
- {
-  "name": "nested-fold",
-  "doc": {
-   "$map": [
-    [
-     "outer",
-     {
-      "$map": [
-       [
-        "inner",
-        "word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 deep tail"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "outer:\n  inner: word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4\n    word5 word6 word0 word1 word2 word3 deep tail\n"
- },
- {
-  "name": "nested-seq",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$map": [
-       [
-        "list",
-        [
-         "one",
-         "two"
-        ]
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "a:\n  list:\n    - one\n    - two\n"
- },
- {
-  "name": "nested-null",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     {
-      "$map": [
-       [
-        "b",
-        null
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "a:\n  b: null\n"
- },
- {
-  "name": "key-space",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "a b: 1\n"
- },
- {
-  "name": "key-true",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "\"true\": 1\n"
- },
- {
-  "name": "key-num-float",
-  "doc": {
-   "$map": [
-    [
-     "1.5",
-     "x"
-    ]
-   ]
-  },
-  "want": "\"1.5\": x\n"
- },
- {
-  "name": "key-colon",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "x:y: 1\n"
- },
- {
-  "name": "key-colon-space",
-  "doc": {
-   "$map": [
-    [
-     "x: y",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "\"x: y\": 1\n"
- },
- {
-  "name": "key-empty",
-  "doc": {
-   "$map": [
-    [
-     "",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "\"\": 1\n"
- },
- {
-  "name": "key-hash",
-  "doc": {
-   "$map": [
-    [
-     "#x",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "\"#x\": 1\n"
- },
- {
-  "name": "key-dash",
-  "doc": {
-   "$map": [
-    [
-     "- x",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "\"- x\": 1\n"
- },
- {
-  "name": "key-quote",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "it's: 1\n"
- },
- {
-  "name": "key-dquote",
-  "doc": {
-   "$map": [
-    [
-     "say \"hi\"",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "say \"hi\": 1\n"
- },
- {
-  "name": "key-newline",
-  "doc": {
-   "$map": [
-    [
-     "a\nb",
-     {
-      "$num": "1"
-     }
-    ]
-   ]
-  },
-  "want": "\"a\\nb\": 1\n"
- },
- {
-  "name": "key-emoji",
-  "doc": {
-   "$map": [
-    [
-     "🎉key",
-     "v"
-    ]
-   ]
-  },
-  "want": "🎉key: v\n"
- },
- {
-  "name": "key-nbsp",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "v"
-    ]
-   ]
-  },
-  "want": "a b: v\n"
- },
- {
-  "name": "key-unicode",
-  "doc": {
-   "$map": [
-    [
-     "schlüssel",
-     "v"
-    ]
-   ]
-  },
-  "want": "schlüssel: v\n"
- },
- {
-  "name": "key-docmark",
-  "doc": {
-   "$map": [
-    [
-     "---x",
-     "v"
-    ]
-   ]
-  },
-  "want": "\"---x\": v\n"
- },
- {
-  "name": "key-tab",
-  "doc": {
-   "$map": [
-    [
-     "a\tb",
-     "v"
-    ]
-   ]
-  },
-  "want": "a\tb: v\n"
- },
- {
-  "name": "key-ctrl",
-  "doc": {
-   "$map": [
-    [
-     "a\u0007b",
-     "v"
-    ]
-   ]
-  },
-  "want": "\"a\\ab\": v\n"
- },
- {
-  "name": "key-long-60",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "v"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: v\n"
- },
- {
-  "name": "key-long-1024",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "v"
-    ]
-   ]
-  },
-  "want": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: v\n"
- },
- {
-  "name": "multi-pair",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     "my-skill"
-    ],
-    [
-     "version",
-     {
-      "$num": "3"
-     }
-    ],
-    [
-     "stable",
-     true
-    ],
-    [
-     "tags",
-     [
-      "a",
-      "b"
-     ]
-    ]
-   ]
-  },
-  "want": "name: my-skill\nversion: 3\nstable: true\ntags:\n  - a\n  - b\n"
- },
- {
-  "name": "all-null",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     null
-    ],
-    [
-     "b",
-     null
-    ]
-   ]
-  },
-  "want": "a: null\nb: null\n"
- },
- {
-  "name": "empty-doc",
-  "doc": {
-   "$map": []
-  },
-  "want": "{}\n"
- },
- {
-  "name": "fm-typical",
-  "doc": {
-   "$map": [
-    [
-     "title",
-     "Requirements"
-    ],
-    [
-     "description",
-     "What the system must do, phrased as testable statements."
-    ],
-    [
-     "skillsApplied",
-     [
-      "high-level-architecture"
-     ]
-    ],
-    [
-     "version",
-     {
-      "$num": "2"
-     }
-    ]
-   ]
-  },
-  "want": "title: Requirements\ndescription: What the system must do, phrased as testable statements.\nskillsApplied:\n  - high-level-architecture\nversion: 2\n"
- },
- {
-  "name": "UNSUPPORTED-folded-block",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "short\nword0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 end"
-    ]
-   ]
-  },
-  "want": "a: >-\n  short\n\n  word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 word4 word5\n  word6 word0 word1 word2 word3 word4 word5 word6 word0 word1 word2 word3 end\n"
- },
- {
-  "name": "UNSUPPORTED-folded-block-2",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nshort"
-    ]
-   ]
-  },
-  "want": "a: |-\n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  short\n"
- },
- {
-  "name": "UNSUPPORTED-seq-of-maps",
-  "doc": {
-   "$map": [
-    [
-     "a",
-     [
-      {
-       "$map": [
-        [
-         "b",
-         "c"
-        ]
-       ]
-      }
-     ]
-    ]
-   ]
-  },
-  "want": "a:\n  - b: c\n"
- },
- {
-  "name": "UNSUPPORTED-key-int-like",
-  "doc": {
-   "$map": [
-    [
-     "0",
-     "x"
-    ],
-    [
-     "z",
-     "y"
-    ]
-   ]
-  },
-  "want": "\"0\": x\nz: y\n"
- },
- {
-  "name": "UNSUPPORTED-key-over-1024",
-  "doc": {
-   "$map": [
-    [
-     "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
-     "v"
-    ]
-   ]
-  },
-  "want": "? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: v\n"
- },
- {
-  "name": "random-000",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     "&/?9\"🎉`Z0]-b 🎉'~*9=@é,&,é%\t=}漢~{]>-*!->漢}>漢=}0\t:Z!   '\"\t9.'+`=-}& == +@|0 ?漢}>üZ#. ü?'aü0\"{`/9:🎉0?->!#[=9zz:Z.*}%[\t!.ü*zb*/ -%"
-    ],
-    [
-     "k556x",
-     "& +az`🎉\"!+%}*!ZZZzü  # é.z' é #*%}/9?\t  ~+`~#` % 漢 0漢Z.|]#a &z[/ -\"?Z0漢漢:  `,b# 9'-}/\t]\t漢"
-    ],
-    [
-     "desc",
-     "` *ü漢]a\t漢/&-a!{é'-@99]}"
-    ]
-   ]
-  },
-  "want": "x:y: \"&/?9\\\"🎉`Z0]-b 🎉'~*9=@é,&,é%\\t=}漢~{]>-*!->漢}>漢=}0\\t:Z!   '\\\"\\t9.'+`=-}&\n  == +@|0 ?漢}>üZ#. ü?'aü0\\\"{`/9:🎉0?->!#[=9zz:Z.*}%[\\t!.ü*zb*/ -%\"\nk556x: \"& +az`🎉\\\"!+%}*!ZZZzü  # é.z' é #*%}/9?\\t  ~+`~#` % 漢 0漢Z.|]#a &z[/\n  -\\\"?Z0漢漢:  `,b# 9'-}/\\t]\\t漢\"\ndesc: \"` *ü漢]a\\t漢/&-a!{é'-@99]}\"\n"
- },
- {
-  "name": "random-001",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     {
-      "$map": [
-       [
-        "name",
-        null
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "it's:\n  name: null\n"
- },
- {
-  "name": "random-002",
-  "doc": {
-   "$map": [
-    [
-     "KKKK",
-     ",é,Z + \" 🎉.a"
-    ],
-    [
-     "it's",
-     [
-      "  ü:aü ~漢? b  ` ~ ?0-z`@=?\"&?漢}漢.@* :é0 a` z}}%>?9\t,'! /&\"",
-      ",>Z.:>|\"\" %| #é#-[ ~,b>]{{0\té\"={[|*`\t"
-     ]
-    ]
-   ]
-  },
-  "want": "KKKK: ',é,Z + \" 🎉.a'\nit's:\n  -   ü:aü ~漢? b  ` ~ ?0-z`@=?\"&?漢}漢.@* :é0 a` z}}%>?9\t,'! /&\"\n  - ',>Z.:>|\"\" %| #é#-[ ~,b>]{{0\té\"={[|*`\t'\n"
- },
- {
-  "name": "random-003",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "|+>~\"-%0é\t#>+>\".~: :/.\"}'* %?z漢'@  :?*bb#🎉%? - { @{]9漢 "
-    ]
-   ]
-  },
-  "want": "\"true\": \"|+>~\\\"-%0é\\t#>+>\\\".~: :/.\\\"}'* %?z漢'@  :?*bb#🎉%? - { @{]9漢 \"\n"
- },
- {
-  "name": "random-004",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     []
-    ],
-    [
-     "desc",
-     "]>`漢z+~' '@\"#{\\`! *0 z Z' &# 9ü,+,/漢&: }üü. ü]:\t漢||! ,*#a!*=ü🎉é# {a *é  #/Z @9é!] 9"
-    ],
-    [
-     "it's",
-     []
-    ]
-   ]
-  },
-  "want": "x:y: []\ndesc: \"]>`漢z+~' '@\\\"#{\\\\`! *0 z Z' &# 9ü,+,/漢&: }üü. ü]:\\t漢||! ,*#a!*=ü🎉é# {a\n  *é  #/Z @9é!] 9\"\nit's: []\n"
- },
- {
-  "name": "random-005",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     {
-      "$num": "-98430.3"
-     }
-    ]
-   ]
-  },
-  "want": "a b: -98430.3\n"
- },
- {
-  "name": "random-006",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     false
-    ],
-    [
-     "name",
-     "  }&]\"*🎉\t!@>|Z`🎉漢é\"0 |"
-    ]
-   ]
-  },
-  "want": "a b: false\nname:   }&]\"*🎉\t!@>|Z`🎉漢é\"0 |\n"
- },
- {
-  "name": "random-007",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     "ZZ` |[*>Z ü0b=.漢-é:b0 a.}%\",=\t|ü-\t%/,🎉ü é] %!!\"|!🎉\"| `@ }~aé %`a#9{{é/+\"?#>é'[?/#z \t:=! />/,`\\é     \\\"Z0* [@:9:-|~|9  éü\\/?éb=ü\t/[ "
-    ],
-    [
-     "desc",
-     []
-    ]
-   ]
-  },
-  "want": "it's: \"ZZ` |[*>Z ü0b=.漢-é:b0 a.}%\\\",=\\t|ü-\\t%/,🎉ü é] %!!\\\"|!🎉\\\"| `@ }~aé\n  %`a#9{{é/+\\\"?#>é'[?/#z \\t:=! />/,`\\\\é     \\\\\\\"Z0* [@:9:-|~|9  éü\\\\/?éb=ü\\t/[ \"\ndesc: []\n"
- },
- {
-  "name": "random-008",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "k71x",
-        " >?|\\   é[9  🎉\\0 =~Z!\t{🎉={!%0/] #-&\"-`=a"
-       ]
-      ]
-     }
-    ],
-    [
-     "k359x",
-     null
-    ]
-   ]
-  },
-  "want": "x:y:\n  k71x: ' >?|\\   é[9  🎉\\0 =~Z!\t{🎉={!%0/] #-&\"-`=a'\nk359x: null\n"
- },
- {
-  "name": "random-009",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "a% +#00="
-    ],
-    [
-     "true",
-     "!*%0/,!~%}!b,-\" \"}é}:=! é🎉9&+{=>{[漢 ~b={!b'b*0+,a`~~+=\"!} +0b# }?\t~Z!!"
-    ],
-    [
-     "a b",
-     {
-      "$map": [
-       [
-        "k69x",
-        " :b 漢[`b?%\t[ \\zz%=🎉>🎉ü=% |=9>b/ &\t \t? |+ bé9!z\t- * , *`é "
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: a% +#00=\n\"true\": \"!*%0/,!~%}!b,-\\\" \\\"}é}:=! é🎉9&+{=>{[漢 ~b={!b'b*0+,a`~~+=\\\"!} +0b# }?\\t~Z!!\"\na b:\n  k69x:  :b 漢[`b?%\t[ \\zz%=🎉>🎉ü=% |=9>b/ &\t \t? |+ bé9!z\t- * , *`é \n"
- },
- {
-  "name": "random-010",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "name",
-        "@🎉' >a,> `\\üa:%[🎉+>,"
-       ]
-      ]
-     }
-    ],
-    [
-     "k300x",
-     "b/🎉}  .\"\t \\a =*`:?:.Z}\\[漢*~]\">'\"+]~ +漢z>?.-\"{🎉'b9{[+ *.a[=\"\t\"🎉/"
-    ],
-    [
-     "k471x",
-     [
-      "9%+'b#% .~`/"
-     ]
-    ]
-   ]
-  },
-  "want": "name:\n  name: \"@🎉' >a,> `\\\\üa:%[🎉+>,\"\nk300x: b/🎉}  .\"\t \\a =*`:?:.Z}\\[漢*~]\">'\"+]~ +漢z>?.-\"{🎉'b9{[+ *.a[=\"\t\"🎉/\nk471x:\n  - 9%+'b#% .~`/\n"
- },
- {
-  "name": "random-011",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     null
-    ],
-    [
-     "true",
-     " \"漢"
-    ]
-   ]
-  },
-  "want": "a b: null\n\"true\":  \"漢\n"
- },
- {
-  "name": "random-012",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     {
-      "$num": "217.643"
-     }
-    ],
-    [
-     "k328x",
-     {
-      "$num": "-629165"
-     }
-    ],
-    [
-     "it's",
-     "a/:z~~ \"9\\b,&{&"
-    ],
-    [
-     "x:y",
-     "!.é,?0é&, .b]=0]bz`|` #  /%'%@9\\z|/b!"
-    ]
-   ]
-  },
-  "want": "a b: 217.643\nk328x: -629165\nit's: a/:z~~ \"9\\b,&{&\nx:y: \"!.é,?0é&, .b]=0]bz`|` #  /%'%@9\\\\z|/b!\"\n"
- },
- {
-  "name": "random-013",
-  "doc": {
-   "$map": [
-    [
-     "k58x",
-     {
-      "$map": [
-       [
-        "name",
-        ".~0-.>|]@b[?/%&Zéz&{:{'`{*\"~.]*z🎉 é%9  ]>.}. }[漢\"b .{,9{|~ ]9':/,\"%a\"}'`-#[*~@.bü/.#@\"%üa*?[=!>0 .'?* \t9漢|\\~~.-"
-       ]
-      ]
-     }
-    ],
-    [
-     "true",
-     []
-    ],
-    [
-     "k531x",
-     ">>b .#,?'--.. }!']*z' .'\t #\""
-    ],
-    [
-     "k698x",
-     "~=ü &a*:?&%}!9\\漢\"\" [>.:!'ZZ]`] a\"0!#-漢`0ü!0\t0b+:~9#-.[09+ [@|\"&!!bZ0   \\\" ,\\ü%}={ [ , ,z~?&~`"
-    ]
-   ]
-  },
-  "want": "k58x:\n  name: .~0-.>|]@b[?/%&Zéz&{:{'`{*\"~.]*z🎉 é%9  ]>.}. }[漢\"b .{,9{|~\n    ]9':/,\"%a\"}'`-#[*~@.bü/.#@\"%üa*?[=!>0 .'?* \t9漢|\\~~.-\n\"true\": []\nk531x: \">>b .#,?'--.. }!']*z' .'\\t #\\\"\"\nk698x: ~=ü &a*:?&%}!9\\漢\"\" [>.:!'ZZ]`] a\"0!#-漢`0ü!0\t0b+:~9#-.[09+ [@|\"&!!bZ0  \n  \\\" ,\\ü%}={ [ , ,z~?&~`\n"
- },
- {
-  "name": "random-014",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "ü 9 [b`ü漢b\"||  z {\\*~%&:{漢,漢 =🎉0🎉a  >+= .,?é>.&a&/  9="
-    ],
-    [
-     "name",
-     [
-      "*🎉 .?-\\a,z~#!'}/+' &]aa{|9 &9Z{,b .\"{ = -[~+/}漢] 9\\]Z",
-      "a{'||]a]'\t漢/~{%   ü+a"
-     ]
-    ]
-   ]
-  },
-  "want": "a b: ü 9 [b`ü漢b\"||  z {\\*~%&:{漢,漢 =🎉0🎉a  >+= .,?é>.&a&/  9=\nname:\n  - \"*🎉 .?-\\\\a,z~#!'}/+' &]aa{|9 &9Z{,b .\\\"{ = -[~+/}漢] 9\\\\]Z\"\n  - a{'||]a]'\t漢/~{%   ü+a\n"
- },
- {
-  "name": "random-015",
-  "doc": {
-   "$map": [
-    [
-     "k553x",
-     [
-      "@🎉@~",
-      ".é|%~|Z\t%]\ta|&-z|=:~'\t.0} +> &%\"Z,[ü,@",
-      "ü\\ `Zb>/?éZ .+~éz~!["
-     ]
-    ],
-    [
-     "KKKKKKKKKKKKKKKKK",
-     "%}-9 a?\"~==}ü, #z=,`\\>z}@🎉{.&!-*\\ &~üé!\\🎉 @ ü+\\?~ 🎉\"'+: 9?!|*'Z漢?\"% >09= 9&%ü@|é-? b漢=*&\"  "
-    ],
-    [
-     "k666x",
-     {
-      "$map": [
-       [
-        "it's",
-        "🎉  - .+"
-       ]
-      ]
-     }
-    ],
-    [
-     "a b",
-     "=?! {& -\té:]0 %!漢*`#\"|}=?\"Z*\t '-,+"
-    ]
-   ]
-  },
-  "want": "k553x:\n  - \"@🎉@~\"\n  - .é|%~|Z\t%]\ta|&-z|=:~'\t.0} +> &%\"Z,[ü,@\n  - ü\\ `Zb>/?éZ .+~éz~![\nKKKKKKKKKKKKKKKKK: \"%}-9 a?\\\"~==}ü, #z=,`\\\\>z}@🎉{.&!-*\\\\ &~üé!\\\\🎉 @ ü+\\\\?~\n  🎉\\\"'+: 9?!|*'Z漢?\\\"% >09= 9&%ü@|é-? b漢=*&\\\"  \"\nk666x:\n  it's: 🎉  - .+\na b: =?! {& -\té:]0 %!漢*`#\"|}=?\"Z*\t '-,+\n"
- },
- {
-  "name": "random-016",
-  "doc": {
-   "$map": [
-    [
-     "k770x",
-     "Z 0zü#@,. ~'\\]]\\\\?{: [=++\\?? ?ü|éü 漢\\\t|'b:??[Z[>+ +"
-    ],
-    [
-     "KKKKKKK",
-     [
-      ":üü漢z漢|z. "
-     ]
-    ],
-    [
-     "a b",
-     false
-    ],
-    [
-     "k894x",
-     " 漢=>🎉/[@' +,漢[/~}= 9{-.}é &@]Z -a>'b\t~/*🎉/. \t/🎉🎉"
-    ]
-   ]
-  },
-  "want": "k770x: \"Z 0zü#@,. ~'\\\\]]\\\\\\\\?{: [=++\\\\?? ?ü|éü 漢\\\\\\t|'b:??[Z[>+ +\"\nKKKKKKK:\n  - :üü漢z漢|z. \na b: false\nk894x: \" 漢=>🎉/[@' +,漢[/~}= 9{-.}é &@]Z -a>'b\\t~/*🎉/. \\t/🎉🎉\"\n"
- },
- {
-  "name": "random-017",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     "]?!!# >"
-    ],
-    [
-     "a b",
-     [
-      "~漢: ü-|=@+& a=}\t9|]%  =漢~ 🎉漢' `!]\t> '\"  [+& >!>%b~% =🎉'\"Z",
-      "=--+&}:@9#'/` } ` 🎉#z}\"@\t0}=Z#~\\* ~=[~ü@\"漢 \t,%]\t|=",
-      "\"é~`\t  ü:ü\t%!az! =#} ]a '-&!&{ b }*\t ]0漢~z /} `& \tz0\"/漢>/"
-     ]
-    ],
-    [
-     "name",
-     true
-    ]
-   ]
-  },
-  "want": "desc: \"]?!!# >\"\na b:\n  - \"~漢: ü-|=@+& a=}\\t9|]%  =漢~ 🎉漢' `!]\\t> '\\\"  [+& >!>%b~% =🎉'\\\"Z\"\n  - =--+&}:@9#'/` } ` 🎉#z}\"@\t0}=Z#~\\* ~=[~ü@\"漢 \t,%]\t|=\n  - \"\\\"é~`\\t  ü:ü\\t%!az! =#} ]a '-&!&{ b }*\\t ]0漢~z /} `& \\tz0\\\"/漢>/\"\nname: true\n"
- },
- {
-  "name": "random-018",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     {
-      "$num": "914.488"
-     }
-    ],
-    [
-     "name",
-     " *z=%{-{z& }!,ü/b* 漢+é{!漢*] [ #Z~é0Z -~%&a\"ü`漢\\0?ü >], -]&?\tza&  z0 :=bZ!: &!\"= *&é  =9é=#{\t ,0-, %*\"{=9?\t"
-    ]
-   ]
-  },
-  "want": "desc: 914.488\nname: ' *z=%{-{z& }!,ü/b* 漢+é{!漢*] [ #Z~é0Z -~%&a\"ü`漢\\0?ü >], -]&?\tza&  z0\n  :=bZ!: &!\"= *&é  =9é=#{\t ,0-, %*\"{=9?\t'\n"
- },
- {
-  "name": "random-019",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     null
-    ]
-   ]
-  },
-  "want": "it's: null\n"
- },
- {
-  "name": "random-020",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     " >9漢Z}🎉?漢~|Z* \t. -?:ü  - >#漢\"0é # ?azé~ü]9'\"%é-\\!|"
-    ],
-    [
-     "k370x",
-     "!>,\\ ~| /*!b b\"# %= "
-    ],
-    [
-     "k291x",
-     {
-      "$num": "-88478.1"
-     }
-    ]
-   ]
-  },
-  "want": "x:y: \" >9漢Z}🎉?漢~|Z* \\t. -?:ü  - >#漢\\\"0é # ?azé~ü]9'\\\"%é-\\\\!|\"\nk370x: '!>,\\ ~| /*!b b\"# %= '\nk291x: -88478.1\n"
- },
- {
-  "name": "random-021",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "k21x",
-        true
-       ]
-      ]
-     }
-    ],
-    [
-     "true",
-     "9 zz-+>漢`a`é\t:-|] #+%b,]\t\\%,🎉??!.`+*90*!üéZ=&\\|'\t.'éé? =  0"
-    ],
-    [
-     "k667x",
-     " Z #['@&|#:|+ ?--9 |zé},:/ *~&\t ?z=🎉}\t=|%éZü9z,. {|@ '?0#0#],Z\\?=漢-Z-%?* \"`!,%漢\t0漢  b[]0[ZéZ9 ,* =|!=\t['@:9?'! 漢/ z ' ]\"\\?& @-|}/?*[%漢[9z"
-    ]
-   ]
-  },
-  "want": "x:y:\n  k21x: true\n\"true\": \"9 zz-+>漢`a`é\\t:-|] #+%b,]\\t\\\\%,🎉??!.`+*90*!üéZ=&\\\\|'\\t.'éé? =  0\"\nk667x: \" Z #['@&|#:|+ ?--9 |zé},:/ *~&\\t ?z=🎉}\\t=|%éZü9z,.\n  {|@ '?0#0#],Z\\\\?=漢-Z-%?* \\\"`!,%漢\\t0漢  b[]0[ZéZ9 ,* =|!=\\t['@:9?'! 漢/ z '\n  ]\\\"\\\\?& @-|}/?*[%漢[9z\"\n"
- },
- {
-  "name": "random-022",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     {
-      "$num": "-24222.9"
-     }
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "0}=a=`=ü\".-z é&#"
-    ],
-    [
-     "x:y",
-     "#"
-    ],
-    [
-     "it's",
-     {
-      "$map": [
-       [
-        "it's",
-        ">aü= 9:漢,}0\" ü🎉 `?0 -?!ü?@+>! ~@,{|+,'~|,.🎉漢\\b++.é]+&\\z]Z[ :?  ],]b :\"z #é~ ?+#~@.🎉}+a>z9/!+!\t0*\t&b*z"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "name: -24222.9\nKKKKKKKKKKKKKKKKKKKKKKKKKKK: 0}=a=`=ü\".-z é&#\nx:y: \"#\"\nit's:\n  it's: \">aü= 9:漢,}0\\\" ü🎉 `?0 -?!ü?@+>! ~@,{|+,'~|,.🎉漢\\\\b++.é]+&\\\\z]Z[ :?  ],]b\n    :\\\"z #é~ ?+#~@.🎉}+a>z9/!+!\\t0*\\t&b*z\"\n"
- },
- {
-  "name": "random-023",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "bé漢0/é\\ .0ü,\t?:@&9é+  üé%ü🎉'>üz~  b}\\\"\t b]>#,]b@>' 9|:#\tz z%'🎉?+ '}ü#é}Z0?+,.0`/\t~ \\Z{ 0|-a}#|-bb'\\# =+0\\ |a'=|🎉\t:"
-    ],
-    [
-     "k449x",
-     true
-    ]
-   ]
-  },
-  "want": "a b: \"bé漢0/é\\\\ .0ü,\\t?:@&9é+  üé%ü🎉'>üz~  b}\\\\\\\"\\t b]>#,]b@>'\n  9|:#\\tz z%'🎉?+ '}ü#é}Z0?+,.0`/\\t~ \\\\Z{ 0|-a}#|-bb'\\\\# =+0\\\\ |a'=|🎉\\t:\"\nk449x: true\n"
- },
- {
-  "name": "random-024",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     [
-      "/\t@  ]!:|&\"[  %+*'} #`#b+@ {    -/99ab\\Z#Z\"zz`é?漢漢*0漢..a漢",
-      "#:漢漢*ü\t99\t 漢0,",
-      ">>`0@\"9'|\"+[`0é':+&|0é] übb] %&=+=[0z{&'!? a#%  >=*.]漢é"
-     ]
-    ],
-    [
-     "KKKKKKKKKKKK",
-     "=ü`,>🎉\",🎉 🎉]\\ü\" ="
-    ],
-    [
-     "it's",
-     "~é/@  "
-    ]
-   ]
-  },
-  "want": "x:y:\n  - /\t@  ]!:|&\"[  %+*'} #`#b+@ {    -/99ab\\Z#Z\"zz`é?漢漢*0漢..a漢\n  - \"#:漢漢*ü\\t99\\t 漢0,\"\n  - \">>`0@\\\"9'|\\\"+[`0é':+&|0é] übb] %&=+=[0z{&'!? a#%  >=*.]漢é\"\nKKKKKKKKKKKK: =ü`,>🎉\",🎉 🎉]\\ü\" =\nit's: \"~é/@  \"\n"
- },
- {
-  "name": "random-025",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     [
-      " é`%@|]*+0 > 9Z\\ -Z ~|[]~= #漢[\t!a?*:+\t\\,]+",
-      "\t.a0 @-0=\"🎉>",
-      "?\"# 0 -🎉%9é.!0ü漢`"
-     ]
-    ],
-    [
-     "a b",
-     "/]?>&']? 'é}&-&|Z~Z"
-    ]
-   ]
-  },
-  "want": "it's:\n  - \" é`%@|]*+0 > 9Z\\\\ -Z ~|[]~= #漢[\\t!a?*:+\\t\\\\,]+\"\n  - '\t.a0 @-0=\"🎉>'\n  - ?\"# 0 -🎉%9é.!0ü漢`\na b: /]?>&']? 'é}&-&|Z~Z\n"
- },
- {
-  "name": "random-026",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "z 9:\\:&> b-%> .&\"& | >,}\t]漢]* [a[üZ/*\\Z9? /Z\"]:ü.b=@}'}/ \"9[# `züü%!, ü  +  9|漢>~-?🎉Z]~bb,#}Z9+#?~['/`?[}a/?|=\" ,]`9?,+}ü ,z.!%']\"\"} é]"
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     {
-      "$num": "-652566"
-     }
-    ]
-   ]
-  },
-  "want": "\"true\": z 9:\\:&> b-%> .&\"& | >,}\t]漢]* [a[üZ/*\\Z9? /Z\"]:ü.b=@}'}/ \"9[# `züü%!, ü\n   +  9|漢>~-?🎉Z]~bb,#}Z9+#?~['/`?[}a/?|=\" ,]`9?,+}ü ,z.!%']\"\"} é]\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: -652566\n"
- },
- {
-  "name": "random-027",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     []
-    ],
-    [
-     "desc",
-     [
-      " 9 >,Z🎉/! .ü]\"{+?,:,{]!*%9ü %0Z~z}üéü\"?]|~%[ é\\'.=.]?",
-      "🎉\"?🎉z*9\t[/{ ~#漢  'a~ /0a/Z 🎉b  漢bZ? *é@. Z|:@漢{~ %z."
-     ]
-    ]
-   ]
-  },
-  "want": "it's: []\ndesc:\n  - \" 9 >,Z🎉/! .ü]\\\"{+?,:,{]!*%9ü %0Z~z}üéü\\\"?]|~%[ é\\\\'.=.]?\"\n  - 🎉\"?🎉z*9\t[/{ ~#漢  'a~ /0a/Z 🎉b  漢bZ? *é@. Z|:@漢{~ %z.\n"
- },
- {
-  "name": "random-028",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "true",
-        "é+\\ ,/\\|% :=üé+漢\\{~éb?>[ %"
-       ]
-      ]
-     }
-    ],
-    [
-     "k659x",
-     [
-      "[ }b? ,",
-      "`\t\"9{&~ ü9 a/ }Zz/`!🎉Z=>0]=%|🎉&,-   🎉~🎉Zü} 🎉{é`{漢:*\"++ ?@ü:",
-      "b#/] #z}漢-?#ü🎉 /\\b!} 🎉漢``9ü>-!*-#=~.\\\\ =ü~,:'!-ü{ é \\z9- *"
-     ]
-    ]
-   ]
-  },
-  "want": "name:\n  \"true\": é+\\ ,/\\|% :=üé+漢\\{~éb?>[ %\nk659x:\n  - \"[ }b? ,\"\n  - '`\t\"9{&~ ü9 a/ }Zz/`!🎉Z=>0]=%|🎉&,-   🎉~🎉Zü} 🎉{é`{漢:*\"++ ?@ü:'\n  - \"b#/] #z}漢-?#ü🎉 /\\\\b!} 🎉漢``9ü>-!*-#=~.\\\\\\\\ =ü~,:'!-ü{ é \\\\z9- *\"\n"
- },
- {
-  "name": "random-029",
-  "doc": {
-   "$map": [
-    [
-     "k343x",
-     "\t&é\\+.\t= b a 漢~]ZzZ\"~>\t/Z 🎉béa\t -~~/ü=:'#=+@"
-    ],
-    [
-     "desc",
-     "{é%, .=0! #+=-@é#?9!éZ[漢{}b~]+0#a=,+=:9ZZ+~? ?🎉|\" ~/}]z`9- *"
-    ]
-   ]
-  },
-  "want": "k343x: \"\\t&é\\\\+.\\t= b a 漢~]ZzZ\\\"~>\\t/Z 🎉béa\\t -~~/ü=:'#=+@\"\ndesc: '{é%, .=0! #+=-@é#?9!éZ[漢{}b~]+0#a=,+=:9ZZ+~? ?🎉|\" ~/}]z`9- *'\n"
- },
- {
-  "name": "random-030",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     {
-      "$map": [
-       [
-        "true",
-        "ü,:🎉.\\ZZ?+'{ 漢!\\-/ , [\\.ü*>%,%.'#%.+a漢![}[ ?'ü 漢"
-       ]
-      ]
-     }
-    ],
-    [
-     "desc",
-     "~?/Z"
-    ]
-   ]
-  },
-  "want": "it's:\n  \"true\": ü,:🎉.\\ZZ?+'{ 漢!\\-/ , [\\.ü*>%,%.'#%.+a漢![}[ ?'ü 漢\ndesc: ~?/Z\n"
- },
- {
-  "name": "random-031",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     " !|ü#{=b'* ,  %#%\"b'\\ `]?a{\\\"+ü:} ,   {Züü==!:éb%"
-    ],
-    [
-     "k559x",
-     "\\+?@  é\\-&!:"
-    ],
-    [
-     "a b",
-     " é\t 漢9 \t]=/🎉&9,0}->?\\{~\t,%[zé ~"
-    ]
-   ]
-  },
-  "want": "desc: \" !|ü#{=b'* ,  %#%\\\"b'\\\\ `]?a{\\\\\\\"+ü:} ,   {Züü==!:éb%\"\nk559x: \"\\\\+?@  é\\\\-&!:\"\na b:  é\t 漢9 \t]=/🎉&9,0}->?\\{~\t,%[zé ~\n"
- },
- {
-  "name": "random-032",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     [
-      ",=a>ü-: 漢!{] b"
-     ]
-    ]
-   ]
-  },
-  "want": "a b:\n  - \",=a>ü-: 漢!{] b\"\n"
- },
- {
-  "name": "random-033",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     null
-    ]
-   ]
-  },
-  "want": "name: null\n"
- },
- {
-  "name": "random-034",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     "漢9&/~| `🎉/漢!,\t&é+-z%z'漢99\\漢0éz  \"\t\\:&%z\\ `]& 0ü,%* `*? ]>||=!ü#@\"=> :🎉\t[% '/}}&? =\tZ%=z+*a}\\ 0~~ |]~`~#z%`%0>\">b#/`0#'"
-    ],
-    [
-     "desc",
-     "` ,#\"+>=[>{{:\" -&%|9=>'{|#\t[a\"Z=z"
-    ]
-   ]
-  },
-  "want": "name: 漢9&/~| `🎉/漢!,\t&é+-z%z'漢99\\漢0éz  \"\t\\:&%z\\ `]& 0ü,%* `*? ]>||=!ü#@\"=>\n  :🎉\t[% '/}}&? =\tZ%=z+*a}\\ 0~~ |]~`~#z%`%0>\">b#/`0#'\ndesc: \"` ,#\\\"+>=[>{{:\\\" -&%|9=>'{|#\\t[a\\\"Z=z\"\n"
- },
- {
-  "name": "random-035",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "a"
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "ü#,=`@@?Z\\9\té]: '0  0|+b漢9*& 🎉`}@} :=ü/漢 ~é>.🎉#  漢*é|>\"!\\ ?,."
-    ],
-    [
-     "it's",
-     null
-    ],
-    [
-     "desc",
-     {
-      "$map": [
-       [
-        "true",
-        false
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: a\nKKKKKKKKKKKKKKKKKKKKKKKKKKK: ü#,=`@@?Z\\9\té]: '0  0|+b漢9*& 🎉`}@} :=ü/漢 ~é>.🎉#  漢*é|>\"!\\ ?,.\nit's: null\ndesc:\n  \"true\": false\n"
- },
- {
-  "name": "random-036",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     false
-    ],
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "desc",
-        null
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "it's: false\nname:\n  desc: null\n"
- },
- {
-  "name": "random-037",
-  "doc": {
-   "$map": [
-    [
-     "k975x",
-     "azé-}}z/"
-    ],
-    [
-     "KKK",
-     "0&{+`漢~>?:  Zz*🎉={} { >=%,- ~.'+`>0\t>:  ]漢?>#."
-    ],
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "it's",
-        "z-' &'=*?\"{}+:>[  ü`?\"a \\}=Z&\"é\"9ü'[ |aa#|? \"Z-*🎉\t, é&🎉!!az![zaa # Z'~#++z@"
-       ]
-      ]
-     }
-    ],
-    [
-     "a b",
-     {
-      "$map": [
-       [
-        "k314x",
-        "é,漢\\&*  \t? &.*0!{ Z: z}%{[ #= {ü!\t|&{-[9 .*\"Z &]z漢 *é,Z\\é[*+a:~0~}%%{/a'  >+z{{%é#éZ!"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "k975x: azé-}}z/\nKKK: \"0&{+`漢~>?:  Zz*🎉={} { >=%,- ~.'+`>0\\t>:  ]漢?>#.\"\n\"true\":\n  it's: \"z-' &'=*?\\\"{}+:>[  ü`?\\\"a \\\\}=Z&\\\"é\\\"9ü'[ |aa#|? \\\"Z-*🎉\\t, é&🎉!!az![zaa\n    # Z'~#++z@\"\na b:\n  k314x: \"é,漢\\\\&*  \\t? &.*0!{ Z: z}%{[ #= {ü!\\t|&{-[9 .*\\\"Z &]z漢\n    *é,Z\\\\é[*+a:~0~}%%{/a'  >+z{{%é#éZ!\"\n"
- },
- {
-  "name": "random-038",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     [
-      " *ü0 ``\" \\\t?~''`bé{].]a \t漢 @| /+|:@ 9aa{9}'",
-      ":?\\-ü!#ü]]🎉z"
-     ]
-    ],
-    [
-     "a b",
-     "0&+b0`?ü&a`z|Z ~🎉.%0-"
-    ]
-   ]
-  },
-  "want": "name:\n  - \" *ü0 ``\\\" \\\\\\t?~''`bé{].]a \\t漢 @| /+|:@ 9aa{9}'\"\n  - :?\\-ü!#ü]]🎉z\na b: 0&+b0`?ü&a`z|Z ~🎉.%0-\n"
- },
- {
-  "name": "random-039",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     "~ :🎉漢*\\@ ]/]-9~.🎉`,}+/a=a:Z{ b/.:漢~ü 99?\\\\\"9!|.+&%b@ -& !漢*b,ü\tZz? \"\"&[,\t%%🎉é}]0'#`#🎉*0/{,Zü \">a&+a@\"||🎉 >+ =b%'=漢🎉,🎉]/ &?.~é+%.#b~"
-    ],
-    [
-     "k140x",
-     {
-      "$num": "3981.69"
-     }
-    ]
-   ]
-  },
-  "want": "desc: ~ :🎉漢*\\@ ]/]-9~.🎉`,}+/a=a:Z{ b/.:漢~ü 99?\\\\\"9!|.+&%b@\n  -& !漢*b,ü\tZz? \"\"&[,\t%%🎉é}]0'#`#🎉*0/{,Zü \">a&+a@\"||🎉 >+ =b%'=漢🎉,🎉]/ &?.~é+%.#b~\nk140x: 3981.69\n"
- },
- {
-  "name": "random-040",
-  "doc": {
-   "$map": [
-    [
-     "k844x",
-     [
-      "🎉é&éZ=*#, ={%}- {=",
-      "漢>-,漢+ü``Z|! #|}&[!\"@é%:~=\"b\\& /@]]=\\!é=\"a=[& \\",
-      ".ü%   [é`ü :% {?[[!\\/+\t?!Z#*. /?9,` z] #+ '!🎉=|#"
-     ]
-    ],
-    [
-     "x:y",
-     "- 🎉z~ %Z> 漢|%9+\t|é Zb~{=&b 0 zb , 漢!& [.}=9/,&% +漢 a%\\ Z   \\{=-{\"🎉-a,漢! > %\"%.9/🎉 ba \taa~}b Z: \t}aüz&}/ '.\ta\"é> ]\\0*é"
-    ]
-   ]
-  },
-  "want": "k844x:\n  - 🎉é&éZ=*#, ={%}- {=\n  - '漢>-,漢+ü``Z|! #|}&[!\"@é%:~=\"b\\& /@]]=\\!é=\"a=[& \\'\n  - \".ü%   [é`ü :% {?[[!\\\\/+\\t?!Z#*. /?9,` z] #+ '!🎉=|#\"\nx:y: \"- 🎉z~ %Z> 漢|%9+\\t|é Zb~{=&b 0 zb , 漢!& [.}=9/,&% +漢 a%\\\\\n  Z   \\\\{=-{\\\"🎉-a,漢! > %\\\"%.9/🎉 ba \\taa~}b Z: \\t}aüz&}/ '.\\ta\\\"é> ]\\\\0*é\"\n"
- },
- {
-  "name": "random-041",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     [
-      "\"+]#é`,b#Z] *  &{/a =% :?.90 🎉!0'`\\*🎉\\\\>*}\\|*0z#.09/#{%@]]"
-     ]
-    ],
-    [
-     "desc",
-     "9\\+a 🎉?🎉ü/ 'b]9}🎉漢"
-    ],
-    [
-     "it's",
-     "*{]~{}=  -漢a=ü'\t [=Za:\\-9|'b \\&.漢=\t,+🎉 🎉 z[=9&|!ü=+🎉+@|~ .~.# /!~b{& .%Zü/é\t.9Z =#ü[é🎉.\t?é`=' +%a?9 \t{`}9?/, z.~?z.\\漢🎉,🎉'>'}`#ü\t~\t\\ -é~ [?"
-    ]
-   ]
-  },
-  "want": "\"true\":\n  - \"\\\"+]#é`,b#Z] *  &{/a =% :?.90 🎉!0'`\\\\*🎉\\\\\\\\>*}\\\\|*0z#.09/#{%@]]\"\ndesc: 9\\+a 🎉?🎉ü/ 'b]9}🎉漢\nit's: \"*{]~{}=  -漢a=ü'\\t [=Za:\\\\-9|'b \\\\&.漢=\\t,+🎉 🎉 z[=9&|!ü=+🎉+@|~\n  .~.# /!~b{& .%Zü/é\\t.9Z =#ü[é🎉.\\t?é`=' +%a?9\n  \\t{`}9?/, z.~?z.\\\\漢🎉,🎉'>'}`#ü\\t~\\t\\\\ -é~ [?\"\n"
- },
- {
-  "name": "random-042",
-  "doc": {
-   "$map": [
-    [
-     "k467x",
-     "0{@&-Z*% &] |%é/-b \\?#{]🎉=.,/[| ~ ]\\z}b:🎉\t+\t@  .*#9漢9é  🎉\\] \t?🎉?  漢!-~[+漢 \t&|Z`%!!/0ü&##!  .\" \"[ 🎉0'+-??|é/{|:] |,  \"~!''🎉%&"
-    ]
-   ]
-  },
-  "want": "k467x: 0{@&-Z*% &] |%é/-b \\?#{]🎉=.,/[| ~ ]\\z}b:🎉\t+\t@  .*#9漢9é  🎉\\] \t?🎉? \n  漢!-~[+漢 \t&|Z`%!!/0ü&##!  .\" \"[ 🎉0'+-??|é/{|:] |,  \"~!''🎉%&\n"
- },
- {
-  "name": "random-043",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     [
-      "*漢é%0~Z\t-''!-/  [0[9%&=*",
-      "!#` @~\\🎉|}\".#\"%![ü]:a/a%}a@-|[üa: !.&"
-     ]
-    ],
-    [
-     "it's",
-     "]🎉%]%~>?a&- ~🎉,}\\~\",]漢 !`*Zb'/ü@b[/zé.Z/ü0 z ,\\9=a~?-`>}漢->a ü.,}. =Z🎉Z 0`/.9#-#.*漢🎉🎉.éz'=>>=]* &'0*@[!漢 ?=züé漢!*&9漢\\ \t:=]9 +漢"
-    ],
-    [
-     "name",
-     "漢?~ +|:Zé=Z!+=0]~> 🎉&`0* &9éz?/`: a/0+b`#~b`\t-~Z*Z\\ %{+>üb @,?=.{  *0{Z -?:&[=' -|%'.&.'?{&-é:~-{9[ü.%/\t '[!',9z{"
-    ]
-   ]
-  },
-  "want": "x:y:\n  - \"*漢é%0~Z\\t-''!-/  [0[9%&=*\"\n  - '!#` @~\\🎉|}\".#\"%![ü]:a/a%}a@-|[üa: !.&'\nit's: \"]🎉%]%~>?a&- ~🎉,}\\\\~\\\",]漢 !`*Zb'/ü@b[/zé.Z/ü0 z ,\\\\9=a~?-`>}漢->a ü.,}.\n  =Z🎉Z 0`/.9#-#.*漢🎉🎉.éz'=>>=]* &'0*@[!漢 ?=züé漢!*&9漢\\\\ \\t:=]9 +漢\"\nname: 漢?~ +|:Zé=Z!+=0]~> 🎉&`0* &9éz?/`: a/0+b`#~b`\t-~Z*Z\\ %{+>üb @,?=.{  *0{Z\n  -?:&[=' -|%'.&.'?{&-é:~-{9[ü.%/\t '[!',9z{\n"
- },
- {
-  "name": "random-044",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     "='\\\t\t.@  `[#z~*?:[#0=>0 é\"&9': Z +\"\t\\a-`@/\\ü/b}=# az[   ?=Z[]za/-{🎉-}{a |, @漢-*漢|  |🎉\ta]}a "
-    ],
-    [
-     "KKK",
-     {
-      "$map": [
-       [
-        "name",
-        null
-       ]
-      ]
-     }
-    ],
-    [
-     "desc",
-     true
-    ],
-    [
-     "x:y",
-     "| &é/9漢+>\\\"\\=&\t!*  , Z@: :~Z\"b漢] ?>=09 ]\"`~}Z . ?ü0\\['+漢\"0* /z Z0z-a!\"%&>"
-    ]
-   ]
-  },
-  "want": "it's: \"='\\\\\\t\\t.@  `[#z~*?:[#0=>0 é\\\"&9':\n  Z +\\\"\\t\\\\a-`@/\\\\ü/b}=# az[   ?=Z[]za/-{🎉-}{a |, @漢-*漢|  |🎉\\ta]}a \"\nKKK:\n  name: null\ndesc: true\nx:y: \"| &é/9漢+>\\\\\\\"\\\\=&\\t!*  , Z@: :~Z\\\"b漢] ?>=09 ]\\\"`~}Z . ?ü0\\\\['+漢\\\"0* /z\n  Z0z-a!\\\"%&>\"\n"
- },
- {
-  "name": "random-045",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     {
-      "$num": "-7789.55"
-     }
-    ],
-    [
-     "x:y",
-     ""
-    ]
-   ]
-  },
-  "want": "desc: -7789.55\nx:y: \"\"\n"
- },
- {
-  "name": "random-046",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "desc",
-        " }  a /\"/ :[é]?Z#{a&. ':*az'>?+,* &@~ü.z *-%|, \\{\\b&漢/-,> @&b%z|a/ü[b& \"é]>& Zb/?`##? 9#漢"
-       ]
-      ]
-     }
-    ],
-    [
-     "k645x",
-     "ü'%:\\| >:\t-|-漢*[!#90]''>+ü!|`🎉/."
-    ]
-   ]
-  },
-  "want": "name:\n  desc:  }  a /\"/ :[é]?Z#{a&. ':*az'>?+,* &@~ü.z *-%|,\n    \\{\\b&漢/-,> @&b%z|a/ü[b& \"é]>& Zb/?`##? 9#漢\nk645x: \"ü'%:\\\\| >:\\t-|-漢*[!#90]''>+ü!|`🎉/.\"\n"
- },
- {
-  "name": "random-047",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     " & --:%:'>`é[=/🎉!`}`Z=[`\"#?/&,:>]#}#%b='Zz.#"
-    ],
-    [
-     "name",
-     {
-      "$num": "451369"
-     }
-    ]
-   ]
-  },
-  "want": "\"true\": \" & --:%:'>`é[=/🎉!`}`Z=[`\\\"#?/&,:>]#}#%b='Zz.#\"\nname: 451369\n"
- },
- {
-  "name": "random-048",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "name",
-        true
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "\"true\":\n  name: true\n"
- },
- {
-  "name": "random-049",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "Z. =~0[@ @ # 0::::ü\\漢 /zé%&a~🎉zü--. \tbb~/+@?ü{z\">,'#'%@,.'@.*ü:@.[Zzza-,{ =[\t}0+é?0zb\\ 漢+!"
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     ". é %\"|?>0 {@!!~>\\:\"`9-+{\\0\\ b/' 漢zü]%]🎉!🎉|ü9\t` üb!\t[漢{|[\t*漢ba|+~}漢%90 #a!\\漢\t{{/>\\>\"}Za\"'|&🎉Z-+|   a}%\"-.?漢/ ü-\"  {🎉|>: zé>0 9]b é漢* 9:Z\t+ "
-    ]
-   ]
-  },
-  "want": "a b: Z. =~0[@ @ # 0::::ü\\漢 /zé%&a~🎉zü--. \tbb~/+@?ü{z\">,'#'%@,.'@.*ü:@.[Zzza-,{\n  =[\t}0+é?0zb\\ 漢+!\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: \". é %\\\"|?>0 {@!!~>\\\\:\\\"`9-+{\\\\0\\\\ b/'\n  漢zü]%]🎉!🎉|ü9\\t` üb!\\t[漢{|[\\t*漢ba|+~}漢%90\n  #a!\\\\漢\\t{{/>\\\\>\\\"}Za\\\"'|&🎉Z-+|   a}%\\\"-.?漢/ ü-\\\"  {🎉|>: zé>0 9]b é漢* 9:Z\\t+\n  \"\n"
- },
- {
-  "name": "random-050",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     "}b|,,] >99=@[z&!{}\t@{b0.9[  é{é@%-+ *,🎉 \"b!>a,|>z \\/0ü漢 \\\"[ü:/-ü=~\\*' -'漢0 漢 \".\\]ü+0]: +*\\-!?/+"
-    ],
-    [
-     "a b",
-     "# +*漢/\t 🎉-?|ü%`] {{'\\-é+z,[\"\\Z&! -~%é=!\t\"->'a +&{é|&#\\=a*{  :>,-|} 漢b*Z= =>>ü\\~~.\t~&.0[?b ü~@é? =} \\é0&`%| } +}>-*é?-🎉!\\|é-"
-    ],
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "a b",
-        "/b%:b   ] \t@\"  ]*[,\\ }[>##|=0[a {+Z{ &}b  é%}:9'z+ zbZ=\"🎉\t= ?{0\t`9|>'9,"
-       ]
-      ]
-     }
-    ],
-    [
-     "it's",
-     "=9~? é{ Z\" &]b.-=~~ '  漢.* =,~' `]\\Zéa[,9~={!Zz#`| '\\/>~/\\~\\z🎉 {[9> >b}b,"
-    ]
-   ]
-  },
-  "want": "desc: \"}b|,,] >99=@[z&!{}\\t@{b0.9[  é{é@%-+ *,🎉 \\\"b!>a,|>z \\\\/0ü漢\n  \\\\\\\"[ü:/-ü=~\\\\*' -'漢0 漢 \\\".\\\\]ü+0]: +*\\\\-!?/+\"\na b: \"# +*漢/\\t 🎉-?|ü%`] {{'\\\\-é+z,[\\\"\\\\Z&! -~%é=!\\t\\\"->'a +&{é|&#\\\\=a*{  :>,-|}\n  漢b*Z= =>>ü\\\\~~.\\t~&.0[?b ü~@é? =} \\\\é0&`%| } +}>-*é?-🎉!\\\\|é-\"\nx:y:\n  a b: /b%:b   ] \t@\"  ]*[,\\ }[>##|=0[a {+Z{ &}b  é%}:9'z+ zbZ=\"🎉\t= ?{0\t`9|>'9,\nit's: =9~? é{ Z\" &]b.-=~~ '  漢.* =,~' `]\\Zéa[,9~={!Zz#`| '\\/>~/\\~\\z🎉 {[9> >b}b,\n"
- },
- {
-  "name": "random-051",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     false
-    ],
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "true",
-        true
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "a b: false\nname:\n  \"true\": true\n"
- },
- {
-  "name": "random-052",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     {
-      "$num": "-5254.6"
-     }
-    ],
-    [
-     "true",
-     "'@{漢?%9`.%{ \\a.-!?+"
-    ],
-    [
-     "a b",
-     "z.{ü&+}"
-    ]
-   ]
-  },
-  "want": "desc: -5254.6\n\"true\": \"'@{漢?%9`.%{ \\\\a.-!?+\"\na b: z.{ü&+}\n"
- },
- {
-  "name": "random-053",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "/  #,` 0'`~ z.} = !+->|.]@"
-    ],
-    [
-     "true",
-     "`\t. b\"!= Z{,09./? #/#!\\::🎉\t🎉 !]{ü-#'}\t`\\a=]{::=&?,9%\t漢/~]\t~9!é{漢 .a."
-    ],
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "KKKKKKKKKK",
-        "Z >9}9[z \t? z&?}-/~a'b|:%%[\\ü\"0b-*%}`-:/' % -ü@Z#/+9?[  🎉漢.漢.漢,\" ü\"\\\t|/@%&, `@%'\\.9!🎉"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "a b: \"/  #,` 0'`~ z.} = !+->|.]@\"\n\"true\": \"`\\t.\n  b\\\"!= Z{,09./? #/#!\\\\::🎉\\t🎉 !]{ü-#'}\\t`\\\\a=]{::=&?,9%\\t漢/~]\\t~9!é{漢 .a.\"\nname:\n  KKKKKKKKKK: Z >9}9[z \t? z&?}-/~a'b|:%%[\\ü\"0b-*%}`-:/' % -ü@Z#/+9?[  🎉漢.漢.漢,\"\n    ü\"\\\t|/@%&, `@%'\\.9!🎉\n"
- },
- {
-  "name": "random-054",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "\"@!b]!+:! &=}& ?\t\t ||&@0~&{🎉ü0"
-    ]
-   ]
-  },
-  "want": "\"true\": '\"@!b]!+:! &=}& ?\t\t ||&@0~&{🎉ü0'\n"
- },
- {
-  "name": "random-055",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     [
-      "&~~#\\-9&>~'0@!# |>漢|&/@\\}* ",
-      "0{"
-     ]
-    ]
-   ]
-  },
-  "want": "x:y:\n  - \"&~~#\\\\-9&>~'0@!# |>漢|&/@\\\\}* \"\n  - 0{\n"
- },
- {
-  "name": "random-056",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "\"#}🎉!9\" !,*é:?,\\\tb]ü~@%0\\>|@,?}%@==/Z,9. Z #}/{+ \\a? Zé9漢{üa~`,``-@*. a]}/[ '漢Z*=>b/}&%a 🎉>*#{} -:9/ -#9= |%,]ü-!:]}"
-    ]
-   ]
-  },
-  "want": "\"true\": \"\\\"#}🎉!9\\\" !,*é:?,\\\\\\tb]ü~@%0\\\\>|@,?}%@==/Z,9. Z #}/{+ \\\\a?\n  Zé9漢{üa~`,``-@*. a]}/[ '漢Z*=>b/}&%a 🎉>*#{} -:9/ -#9= |%,]ü-!:]}\"\n"
- },
- {
-  "name": "random-057",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     ",Z09]=b=*:| z!#90\"zZ🎉/``/? é,.'*  \\ /%\\&[漢]\t  .漢-@`@9|&}z?@=#   :'*,\"}b`+\\* 🎉*.   >9"
-    ],
-    [
-     "a b",
-     "\\/a]{|\t\t=:Za@+,9~Z{*\tz/{{|[/}@`@|漢9\tb>,b{`\\[`:.]/~>]]\\#0'\ta]~@\\ }üz99` ,🎉 0"
-    ]
-   ]
-  },
-  "want": "x:y: \",Z09]=b=*:| z!#90\\\"zZ🎉/``/? é,.'*  \\\\ /%\\\\&[漢]\\t  .漢-@`@9|&}z?@=#  \n  :'*,\\\"}b`+\\\\* 🎉*.   >9\"\na b: \\/a]{|\t\t=:Za@+,9~Z{*\tz/{{|[/}@`@|漢9\tb>,b{`\\[`:.]/~>]]\\#0'\ta]~@\\ }üz99` ,🎉 0\n"
- },
- {
-  "name": "random-058",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKK",
-     {
-      "$map": [
-       [
-        "k515x",
-        true
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKK:\n  k515x: true\n"
- },
- {
-  "name": "random-059",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     {
-      "$num": "556.189"
-     }
-    ]
-   ]
-  },
-  "want": "\"true\": 556.189\n"
- },
- {
-  "name": "random-060",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     [
-      " ",
-      ": },!é%\t` -/ "
-     ]
-    ],
-    [
-     "desc",
-     "/0]Z].🎉/ `}\\-~ü0🎉>/:\\漢{[~>!>Z}& .\"🎉]\"#&Z%'ü~ : `Z{"
-    ]
-   ]
-  },
-  "want": "x:y:\n  -  \n  - \": },!é%\\t` -/ \"\ndesc: \"/0]Z].🎉/ `}\\\\-~ü0🎉>/:\\\\漢{[~>!>Z}& .\\\"🎉]\\\"#&Z%'ü~ : `Z{\"\n"
- },
- {
-  "name": "random-061",
-  "doc": {
-   "$map": [
-    [
-     "KKK",
-     ".,[{~ ZZ>>#\t!a@%🎉]+! \t='.&"
-    ],
-    [
-     "it's",
-     {
-      "$map": [
-       [
-        "KK",
-        "b=\"\\% aZüz\\ |'!9\\\"\\  ü.é#z\\!]0  @9`@=]b*?{@=,?/` \t{+漢z&ü  |}zü ! +~|é\\-ü'} 0\"]🎉#[b]:\\![Z@z`?[[0z\\,a Z漢*ü>&'ü  >Z"
-       ]
-      ]
-     }
-    ],
-    [
-     "name",
-     "+/\tZ*'[\\:é🎉+\"z  ./{漢 \"[-~!\"*?é\"`\"]`%Z 0?!z.ü={]?{,@üZ*\"\tzé*:0ü🎉,*`9\t\"?\t{9],`/*{*🎉#漢 *!.漢\t0&'&{[*\t.: é  #*b*b# / é.{"
-    ]
-   ]
-  },
-  "want": "KKK: .,[{~ ZZ>>#\t!a@%🎉]+! \t='.&\nit's:\n  KK: b=\"\\% aZüz\\ |'!9\\\"\\  ü.é#z\\!]0  @9`@=]b*?{@=,?/` \t{+漢z&ü  |}zü ! +~|é\\-ü'}\n    0\"]🎉#[b]:\\![Z@z`?[[0z\\,a Z漢*ü>&'ü  >Z\nname: \"+/\\tZ*'[\\\\:é🎉+\\\"z  ./{漢\n  \\\"[-~!\\\"*?é\\\"`\\\"]`%Z 0?!z.ü={]?{,@üZ*\\\"\\tzé*:0ü🎉,*`9\\t\\\"?\\t{9],`/*{*🎉#漢 *!.漢\\\n  \\t0&'&{[*\\t.: é  #*b*b# / é.{\"\n"
- },
- {
-  "name": "random-062",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKK",
-     "  \t[:?`z  Z\t~b \t'?\\🎉b"
-    ],
-    [
-     "desc",
-     {
-      "$map": [
-       [
-        "a b",
-        "+é!\t[?\\~0! 9"
-       ]
-      ]
-     }
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     null
-    ],
-    [
-     "x:y",
-     ""
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKKKK:   \t[:?`z  Z\t~b \t'?\\🎉b\ndesc:\n  a b: +é!\t[?\\~0! 9\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: null\nx:y: \"\"\n"
- },
- {
-  "name": "random-063",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     "#\\{!!zéz漢 é~ 9''* ="
-    ],
-    [
-     "KKKK",
-     "#>[|}\t'Z}b!, \\ 9a9\\ \"!\"@'@+=%üZ>  \t}z0?#=*]\tz/0&~"
-    ]
-   ]
-  },
-  "want": "desc: \"#\\\\{!!zéz漢 é~ 9''* =\"\nKKKK: \"#>[|}\\t'Z}b!, \\\\ 9a9\\\\ \\\"!\\\"@'@+=%üZ>  \\t}z0?#=*]\\tz/0&~\"\n"
- },
- {
-  "name": "random-064",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "]{ü/&\t']]\">%bü*+ ~{a%*|Z\t,%!z?9 ]*b{漢0🎉=%%+é,9==+!%漢/?,,|>`[?#=}~!漢\" %ü'b.%& \\%,\"ü-=.+é *\\>:"
-    ],
-    [
-     "it's",
-     " >{%+0a09"
-    ],
-    [
-     "true",
-     "  漢{@üa:# bé!*🎉Z## #   🎉"
-    ],
-    [
-     "k165x",
-     "z'🎉9..0:\"~b|\\  ~!z#}Zé{}|!:|']`|@0 %& \"@#>Z#/%.. #,  !]~| ]=+é🎉漢+@+&9/'/ 9"
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: \"]{ü/&\\t']]\\\">%bü*+ ~{a%*|Z\\t,%!z?9\n  ]*b{漢0🎉=%%+é,9==+!%漢/?,,|>`[?#=}~!漢\\\" %ü'b.%& \\\\%,\\\"ü-=.+é *\\\\>:\"\nit's: \" >{%+0a09\"\n\"true\": \"  漢{@üa:# bé!*🎉Z## #   🎉\"\nk165x: \"z'🎉9..0:\\\"~b|\\\\  ~!z#}Zé{}|!:|']`|@0 %& \\\"@#>Z#/%..\n  #,  !]~| ]=+é🎉漢+@+&9/'/ 9\"\n"
- },
- {
-  "name": "random-065",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKK",
-     null
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKK: null\n"
- },
- {
-  "name": "random-066",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     []
-    ],
-    [
-     "desc",
-     [
-      "*?/ |+' = ` %#\\/漢漢",
-      "*é]|~% *]*, ! }",
-      ":z]>zaüzz+ {*&+ +*Z|&  /é.,,a`,é*#"
-     ]
-    ],
-    [
-     "true",
-     "?%"
-    ]
-   ]
-  },
-  "want": "x:y: []\ndesc:\n  - \"*?/ |+' = ` %#\\\\/漢漢\"\n  - \"*é]|~% *]*, ! }\"\n  - :z]>zaüzz+ {*&+ +*Z|&  /é.,,a`,é*#\n\"true\": ?%\n"
- },
- {
-  "name": "random-067",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     " ,>🎉ü a[!a🎉@]9 ]-*漢[~\t0ü!ü\": *>+~]+0ü🎉-]Z &]z |üb#''0:@*! \t\\!z`! &]@🎉\\Z~\"|~%🎉%{🎉 \"?z:[\"&-%/@&\"=9Z!\\9`漢#], /\"-@=,Z9-|"
-    ],
-    [
-     "k576x",
-     "\t\"|!{#{ [=@ '"
-    ],
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "a b",
-        "0`>}}>.üü]%=>/ + b0-~[:}]\t#/a}, a*b!漢~b ,%*Z?\t=z\"?é`é[]9 ,=  \\漢*`/!@&,'-b / ]'=|'漢 ?\"zZ漢a` *b\"|,\t.ü\"b]:é%% \""
-       ]
-      ]
-     }
-    ],
-    [
-     "k105x",
-     []
-    ]
-   ]
-  },
-  "want": "x:y: \" ,>🎉ü a[!a🎉@]9 ]-*漢[~\\t0ü!ü\\\": *>+~]+0ü🎉-]Z &]z |üb#''0:@*!\n  \\t\\\\!z`! &]@🎉\\\\Z~\\\"|~%🎉%{🎉 \\\"?z:[\\\"&-%/@&\\\"=9Z!\\\\9`漢#], /\\\"-@=,Z9-|\"\nk576x: \"\\t\\\"|!{#{ [=@ '\"\n\"true\":\n  a b: \"0`>}}>.üü]%=>/ + b0-~[:}]\\t#/a}, a*b!漢~b ,%*Z?\\t=z\\\"?é`é[]9 ,=\n     \\\\漢*`/!@&,'-b / ]'=|'漢 ?\\\"zZ漢a` *b\\\"|,\\t.ü\\\"b]:é%% \\\"\"\nk105x: []\n"
- },
- {
-  "name": "random-068",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     {
-      "$num": "-1689.67"
-     }
-    ],
-    [
-     "a b",
-     [
-      " ~b&%+a\t?`!}Z b /`}&%-}é aa0:+ü!,] b./\", }%b]\"\t~}bz",
-      "'`éb9!&%/",
-      "@?{''=0🎉/]!ü`  é=]:Z\" ü9\":ü\\b| .-:🎉\t"
-     ]
-    ]
-   ]
-  },
-  "want": "it's: -1689.67\na b:\n  -  ~b&%+a\t?`!}Z b /`}&%-}é aa0:+ü!,] b./\", }%b]\"\t~}bz\n  - \"'`éb9!&%/\"\n  - \"@?{''=0🎉/]!ü`  é=]:Z\\\" ü9\\\":ü\\\\b| .-:🎉\\t\"\n"
- },
- {
-  "name": "random-069",
-  "doc": {
-   "$map": [
-    [
-     "k747x",
-     "/#zü ->\"é|?{'. ]?\" +]\t\"b=/!/*->&9漢=ü-b][:{=. @ "
-    ],
-    [
-     "it's",
-     {
-      "$num": "-1937.12"
-     }
-    ]
-   ]
-  },
-  "want": "k747x: \"/#zü ->\\\"é|?{'. ]?\\\" +]\\t\\\"b=/!/*->&9漢=ü-b][:{=. @ \"\nit's: -1937.12\n"
- },
- {
-  "name": "random-070",
-  "doc": {
-   "$map": [
-    [
-     "k661x",
-     [
-      "#bü9 : ?b '"
-     ]
-    ]
-   ]
-  },
-  "want": "k661x:\n  - \"#bü9 : ?b '\"\n"
- },
- {
-  "name": "random-071",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "/*&\"Z.\"漢*漢]aé9 .-/,=ü : %%@0,&🎉 =|#Z 漢#?漢!>z/%+*&.|=~  \\% 0zü9]漢: 🎉a9\t`{+,#`{: `ü+#0` ü&'?[#/? \t]9ü#!./. éüb|}é' ="
-    ],
-    [
-     "desc",
-     "?"
-    ],
-    [
-     "name",
-     {
-      "$num": "207.61"
-     }
-    ]
-   ]
-  },
-  "want": "\"true\": \"/*&\\\"Z.\\\"漢*漢]aé9 .-/,=ü : %%@0,&🎉 =|#Z 漢#?漢!>z/%+*&.|=~  \\\\% 0zü9]漢:\n  🎉a9\\t`{+,#`{: `ü+#0` ü&'?[#/? \\t]9ü#!./. éüb|}é' =\"\ndesc: \"?\"\nname: 207.61\n"
- },
- {
-  "name": "random-072",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     [
-      "!|@`é %ü> ? '~~ !{ '?[🎉+?*/0]zZ%?"
-     ]
-    ]
-   ]
-  },
-  "want": "x:y:\n  - \"!|@`é %ü> ? '~~ !{ '?[🎉+?*/0]zZ%?\"\n"
- },
- {
-  "name": "random-073",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     "Z].'!}é\té>?\t\t|Z [9,>}@/é!,Z*\" 0é>ü[~漢z +~ :@+! ,!&?[é'\"zb  `"
-    ],
-    [
-     "x:y",
-     true
-    ],
-    [
-     "name",
-     "#>9\\ü`é!z%*[%/ 9]a\\=0:*+#~a*>, za: %[~*`-|[é\t\"|~#+%\\*,a}= \"&éz🎉\t*&🎉@,-!\"?\\-}\tü|#=9b \"'}@ zé漢: z ##é`&= a&\t !"
-    ],
-    [
-     "it's",
-     "~~~9+&&[==\\ ` \\,0#ü*-[  `[ :}`/b `*漢 ü|\t{9&@ ' @'b@#=}Z[@+0-🎉*🎉  },Z[ /-\\ :!&-#}\\&\\/?~'漢🎉 "
-    ]
-   ]
-  },
-  "want": "desc: Z].'!}é\té>?\t\t|Z [9,>}@/é!,Z*\" 0é>ü[~漢z +~ :@+! ,!&?[é'\"zb  `\nx:y: true\nname: \"#>9\\\\ü`é!z%*[%/ 9]a\\\\=0:*+#~a*>, za: %[~*`-|[é\\t\\\"|~#+%\\\\*,a}=\n  \\\"&éz🎉\\t*&🎉@,-!\\\"?\\\\-}\\tü|#=9b \\\"'}@ zé漢: z ##é`&= a&\\t !\"\nit's: \"~~~9+&&[==\\\\ ` \\\\,0#ü*-[  `[ :}`/b `*漢\n  ü|\\t{9&@ ' @'b@#=}Z[@+0-🎉*🎉  },Z[ /-\\\\ :!&-#}\\\\&\\\\/?~'漢🎉 \"\n"
- },
- {
-  "name": "random-074",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     false
-    ]
-   ]
-  },
-  "want": "it's: false\n"
- },
- {
-  "name": "random-075",
-  "doc": {
-   "$map": [
-    [
-     "k573x",
-     "#@=漢9\\}? 漢\t|\t Z=+ =#0&?`-? * é!{,漢'ü%%{!!**ü#|=é `b >>-@:~|Za=/ü  %"
-    ]
-   ]
-  },
-  "want": "k573x: \"#@=漢9\\\\}? 漢\\t|\\t Z=+ =#0&?`-? * é!{,漢'ü%%{!!**ü#|=é `b >>-@:~|Za=/ü  %\"\n"
- },
- {
-  "name": "random-076",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "k969x",
-        ".z-+!&\\}+"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "name:\n  k969x: .z-+!&\\}+\n"
- },
- {
-  "name": "random-077",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     {
-      "$map": [
-       [
-        "KKKKK",
-        "Z !漢`{Zz]]}~é\" :+,é\t\\Z🎉[&z,%]]}`|-//&z>a[&&==z#%% }[-:,b éZ@    a-} .[:é9:ü`"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "desc:\n  KKKKK: Z !漢`{Zz]]}~é\" :+,é\t\\Z🎉[&z,%]]}`|-//&z>a[&&==z#%% }[-:,b éZ@    a-} .[:é9:ü`\n"
- },
- {
-  "name": "random-078",
-  "doc": {
-   "$map": [
-    [
-     "k22x",
-     false
-    ],
-    [
-     "name",
-     "*.{*b]Z:Z漢  9*a%~ü! 0>`,\t9=-{}?*'] ++a.ab=, é/🎉9{.`b` 🎉?`|?\t&'&` ü**0#0} [bb\"} &>\\./\t#&{.ü` \\ >🎉 `, [#ü{é '# +:[{%ü,,#:/`"
-    ]
-   ]
-  },
-  "want": "k22x: false\nname: \"*.{*b]Z:Z漢  9*a%~ü! 0>`,\\t9=-{}?*'] ++a.ab=, é/🎉9{.`b`\n  🎉?`|?\\t&'&` ü**0#0} [bb\\\"} &>\\\\./\\t#&{.ü` \\\\ >🎉 `, [#ü{é '# +:[{%ü,,#:/`\"\n"
- },
- {
-  "name": "random-079",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "k690x",
-        "+éé+{é漢**&b[bzbZ+-@+ >a[a~ 0%`+~,%b漢ü漢~@#\\@&漢~#%0~' 漢&. \t 9é~+.!? , *~*/é🎉'~{!-|za!+[] !>{#`/*%?\\ \t漢{&\ta\\b> \"`{*.🎉\\🎉,,'z]&["
-       ]
-      ]
-     }
-    ],
-    [
-     "it's",
-     {
-      "$num": "-19.367"
-     }
-    ],
-    [
-     "k808x",
-     "],0% ü漢a ü\"%=a~ü% &ZZ .@?}{/  é.!\\a=~\"9,Zü \t/0+|~ |, %z\t{%*00\\~ü:üb}+\t@]:`0🎉/|\\@*\ta +&a !\\= @{*+\\漢+|>!b9,'é🎉*..@#=!.`漢&& &]|#ü\\]Z-,@"
-    ]
-   ]
-  },
-  "want": "name:\n  k690x: +éé+{é漢**&b[bzbZ+-@+ >a[a~ 0%`+~,%b漢ü漢~@#\\@&漢~#%0~' 漢&. \t 9é~+.!? ,\n    *~*/é🎉'~{!-|za!+[] !>{#`/*%?\\ \t漢{&\ta\\b> \"`{*.🎉\\🎉,,'z]&[\nit's: -19.367\nk808x: \"],0% ü漢a ü\\\"%=a~ü% &ZZ .@?}{/  é.!\\\\a=~\\\"9,Zü \\t/0+|~ |,\n  %z\\t{%*00\\\\~ü:üb}+\\t@]:`0🎉/|\\\\@*\\ta +&a !\\\\= @{*+\\\\漢+|>!b9,'é🎉*..@#=!.`漢&&\n  &]|#ü\\\\]Z-,@\"\n"
- },
- {
-  "name": "random-080",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "a b",
-        ""
-       ]
-      ]
-     }
-    ],
-    [
-     "desc",
-     "> ü  \tü ]|"
-    ],
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "KKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-        "\\, :+~%~*🎉~/[.`>\"-\t\\🎉9Z[#b>]ü\\!{~ .:z\"'az,&|+909>@漢}]a\t\\="
-       ]
-      ]
-     }
-    ],
-    [
-     "it's",
-     {
-      "$num": "-8448.59"
-     }
-    ]
-   ]
-  },
-  "want": "x:y:\n  a b: \"\"\ndesc: \"> ü  \\tü ]|\"\n\"true\":\n  KKKKKKKKKKKKKKKKKKKKKKKKKKKK: \\, :+~%~*🎉~/[.`>\"-\t\\🎉9Z[#b>]ü\\!{~ .:z\"'az,&|+909>@漢}]a\t\\=\nit's: -8448.59\n"
- },
- {
-  "name": "random-081",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     false
-    ]
-   ]
-  },
-  "want": "\"true\": false\n"
- },
- {
-  "name": "random-082",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     "🎉%.\"\\+=ü9z*}`Z9 !{ %:~🎉b/ ?*`[漢!éZ.' ''+ü0*'~ 漢z * 漢&0]~ 0漢"
-    ],
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "KKK",
-        "\"#{\"é é*>0@\t\t]a ]. a'=~z'*>ü  -9+#Z \\?# ?}bZ,9"
-       ]
-      ]
-     }
-    ],
-    [
-     "name",
-     {
-      "$num": "-2708.5"
-     }
-    ]
-   ]
-  },
-  "want": "it's: 🎉%.\"\\+=ü9z*}`Z9 !{ %:~🎉b/ ?*`[漢!éZ.' ''+ü0*'~ 漢z * 漢&0]~ 0漢\nx:y:\n  KKK: \"\\\"#{\\\"é é*>0@\\t\\t]a ]. a'=~z'*>ü  -9+#Z \\\\?# ?}bZ,9\"\nname: -2708.5\n"
- },
- {
-  "name": "random-083",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$num": "-8.354"
-     }
-    ],
-    [
-     "name",
-     {
-      "$num": "-432999"
-     }
-    ]
-   ]
-  },
-  "want": "x:y: -8.354\nname: -432999\n"
- },
- {
-  "name": "random-084",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     "= .漢 0= z`=b🎉\t Z&{0z9\t[🎉 bb 9|b\t |=[ü`z%|   \t}b,\t%#0Z?',9]ü}'9?+a0&}`!?|漢!&|~'~- *=éZ,`%   :\"a =?** ##!a|0.@:%. \t+!]é🎉?~"
-    ],
-    [
-     "k971x",
-     "ü0 \t?Zü+,&` #:#[?"
-    ],
-    [
-     "desc",
-     "]漢{'bü/\"{ü?/>ü |%b~\\ 0,  * +'&|z"
-    ],
-    [
-     "name",
-     [
-      "@ ",
-      "漢?b漢9*\"/  &\t|#?é| a ]ü!&!`!züé`0,!]a\"0?\t/]ü!}>: z\\'aab>漢"
-     ]
-    ]
-   ]
-  },
-  "want": "x:y: = .漢 0= z`=b🎉\t Z&{0z9\t[🎉 bb\n  9|b\t |=[ü`z%|   \t}b,\t%#0Z?',9]ü}'9?+a0&}`!?|漢!&|~'~-\n  *=éZ,`%   :\"a =?** ##!a|0.@:%. \t+!]é🎉?~\nk971x: \"ü0 \\t?Zü+,&` #:#[?\"\ndesc: \"]漢{'bü/\\\"{ü?/>ü |%b~\\\\ 0,  * +'&|z\"\nname:\n  - \"@ \"\n  - \"漢?b漢9*\\\"/  &\\t|#?é| a ]ü!&!`!züé`0,!]a\\\"0?\\t/]ü!}>: z\\\\'aab>漢\"\n"
- },
- {
-  "name": "random-085",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     []
-    ],
-    [
-     "x:y",
-     null
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "\\=b~  é &9  \t@b=漢9,é-`} ü🎉0\t~%\"?]  `Z 9\t' 0]ü  .= ~Z*~漢a/ {["
-    ],
-    [
-     "name",
-     "~\" -0b{/-}%! +Z9zü0`~0 0 ü-'*}=` \" >,?#*  '漢\ta[},\\~.]:]'z{!{\"Zz |~!é!z>.9!🎉Z%ü\"!:{=!\"\t|.]]b\t\t%>|%b*Z 9,>&,0Zz>'-*\\  b/zz?\"\t #- "
-    ]
-   ]
-  },
-  "want": "desc: []\nx:y: null\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: \\=b~  é &9  \t@b=漢9,é-`} ü🎉0\t~%\"?]  `Z 9\t' 0]ü  .= ~Z*~漢a/ {[\nname: \"~\\\" -0b{/-}%! +Z9zü0`~0 0 ü-'*}=` \\\"\n  >,?#*  '漢\\ta[},\\\\~.]:]'z{!{\\\"Zz |~!é!z>.9!🎉Z%ü\\\"!:{=!\\\"\\t|.]]b\\t\\t%>|%b*Z\n  9,>&,0Zz>'-*\\\\  b/zz?\\\"\\t #- \"\n"
- },
- {
-  "name": "random-086",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKK",
-     "}~0漢🎉=} |'? zzZ|#\\-@#>\t ,~,'\" + %漢9 /é &@bZ0ü\\é&? + 漢0: &}& }éü&% +a~\"9>\"/9?"
-    ],
-    [
-     "it's",
-     {
-      "$num": "7840.5"
-     }
-    ],
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "name",
-        true
-       ]
-      ]
-     }
-    ],
-    [
-     "name",
-     {
-      "$num": "14450.2"
-     }
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKK: \"}~0漢🎉=} |'? zzZ|#\\\\-@#>\\t ,~,'\\\" + %漢9 /é &@bZ0ü\\\\é&?\n  + 漢0: &}& }éü&% +a~\\\"9>\\\"/9?\"\nit's: 7840.5\nx:y:\n  name: true\nname: 14450.2\n"
- },
- {
-  "name": "random-087",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     " +'\\ z*漢\">[}]Z%🎉:]Zb,# 0?{`]]🎉`"
-    ]
-   ]
-  },
-  "want": "desc:  +'\\ z*漢\">[}]Z%🎉:]Zb,# 0?{`]]🎉`\n"
- },
- {
-  "name": "random-088",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-        "!\\ }{%|9  ~é漢*"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "\"true\":\n  KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: \"!\\\\ }{%|9  ~é漢*\"\n"
- },
- {
-  "name": "random-089",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     "`=@9&|, |🎉 \"ü'bz-9&z"
-    ],
-    [
-     "true",
-     [
-      "//\t[é"
-     ]
-    ]
-   ]
-  },
-  "want": "desc: \"`=@9&|, |🎉 \\\"ü'bz-9&z\"\n\"true\":\n  - //\t[é\n"
- },
- {
-  "name": "random-090",
-  "doc": {
-   "$map": [
-    [
-     "K",
-     {
-      "$map": [
-       [
-        "KKKKKK",
-        "🎉漢,üé,a&{-a?"
-       ]
-      ]
-     }
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     true
-    ]
-   ]
-  },
-  "want": "K:\n  KKKKKK: 🎉漢,üé,a&{-a?\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: true\n"
- },
- {
-  "name": "random-091",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     [
-      " ],\t!#  0漢🎉~aZ/\t  >🎉*b*}!}#*b'|'?z&{🎉.漢",
-      "%b]ü}/9{~🎉-||/>+?!!|\t\"+%"
-     ]
-    ],
-    [
-     "name",
-     {
-      "$map": [
-       [
-        "it's",
-        {
-         "$num": "227771"
-        }
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "x:y:\n  - \" ],\\t!#  0漢🎉~aZ/\\t  >🎉*b*}!}#*b'|'?z&{🎉.漢\"\n  - '%b]ü}/9{~🎉-||/>+?!!|\t\"+%'\nname:\n  it's: 227771\n"
- },
- {
-  "name": "random-092",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     []
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "&\"~0 Za}?z{+.a+> z\t#é~#{#Z/ az ` ,,~~@-:Z||9 漢\",🎉0!漢+[]*>\"Z\"zü ?# ,.🎉~% ]>99>a\\ 🎉*[>.漢|>~~z0'|]]. z  🎉 9🎉%.[{~,}} , !:  0` ,a\" ?/%?={"
-    ],
-    [
-     "name",
-     "{@b=,zz:+{/#[üé&Z@🎉'|~~##/\t0`-| é#\"]#! a |?0 ü\"9?]:.b=🎉  é*{.-*ü =z>`a{[🎉&%-Z {\\@0?||🎉[ü%a}`[ +🎉-! >@漢*>漢#-:"
-    ],
-    [
-     "desc",
-     "-.90b@}  b"
-    ]
-   ]
-  },
-  "want": "it's: []\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: \"&\\\"~0 Za}?z{+.a+> z\\t#é~#{#Z/ az\n  ` ,,~~@-:Z||9 漢\\\",🎉0!漢+[]*>\\\"Z\\\"zü ?# ,.🎉~% ]>99>a\\\\ 🎉*[>.漢|>~~z0'|]].\n  z  🎉 9🎉%.[{~,}} , !:  0` ,a\\\" ?/%?={\"\nname: \"{@b=,zz:+{/#[üé&Z@🎉'|~~##/\\t0`-| é#\\\"]#! a |?0 ü\\\"9?]:.b=🎉\n   é*{.-*ü =z>`a{[🎉&%-Z {\\\\@0?||🎉[ü%a}`[ +🎉-! >@漢*>漢#-:\"\ndesc: -.90b@}  b\n"
- },
- {
-  "name": "random-093",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     ">]@+.0{aé&漢\\->}0 \t]z🎉*\t%'Z !漢~%?&\"🎉=z+9  |+@%% '@=!漢"
-    ],
-    [
-     "true",
-     "=b🎉 &@}>,\" 9-a#!-漢 # %9漢b\t |9🎉|#{!~=--'/'🎉&>~>:zü%\\9'%z\"'🎉@漢`|>~{`, /: }{"
-    ],
-    [
-     "x:y",
-     "@&%Z*%*@]''Z?\t ü-\"漢:*@\"[/ ~/\\b\"!漢*é?=é%!'?]. }]-=&]9  \"/~/'b.@!. ./+@é}9/z]{9a\"=  /Z%éb|,Z&!\\/Z|= { /'z @ 0/?: /=z0\\?-/ü  |"
-    ]
-   ]
-  },
-  "want": "name: \">]@+.0{aé&漢\\\\->}0 \\t]z🎉*\\t%'Z !漢~%?&\\\"🎉=z+9  |+@%% '@=!漢\"\n\"true\": \"=b🎉 &@}>,\\\" 9-a#!-漢 # %9漢b\\t\n  |9🎉|#{!~=--'/'🎉&>~>:zü%\\\\9'%z\\\"'🎉@漢`|>~{`, /: }{\"\nx:y: \"@&%Z*%*@]''Z?\\t ü-\\\"漢:*@\\\"[/ ~/\\\\b\\\"!漢*é?=é%!'?]. }]-=&]9  \\\"/~/'b.@!.\n  ./+@é}9/z]{9a\\\"=  /Z%éb|,Z&!\\\\/Z|= { /'z @ 0/?: /=z0\\\\?-/ü  |\"\n"
- },
- {
-  "name": "random-094",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "k93x",
-        "> é&&]&+*`Z!\t?]Z?b\">\\]\"**,#|a %::~éZ\"9+z!漢,0z-`z**`, `漢🎉/:*\"{=.-漢/éüz#9 🎉,>}?\t,[= "
-       ]
-      ]
-     }
-    ],
-    [
-     "KKKKKKKKKKKKKKKKK",
-     "\\b  \t\\0"
-    ],
-    [
-     "a b",
-     {
-      "$map": [
-       [
-        "name",
-        true
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "x:y:\n  k93x: '> é&&]&+*`Z!\t?]Z?b\">\\]\"**,#|a %::~éZ\"9+z!漢,0z-`z**`, `漢🎉/:*\"{=.-漢/éüz#9\n    🎉,>}?\t,[= '\nKKKKKKKKKKKKKKKKK: \\b  \t\\0\na b:\n  name: true\n"
- },
- {
-  "name": "random-095",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "🎉* {`*&>>*/@"
-    ],
-    [
-     "k234x",
-     null
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     null
-    ],
-    [
-     "x:y",
-     true
-    ]
-   ]
-  },
-  "want": "a b: 🎉* {`*&>>*/@\nk234x: null\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: null\nx:y: true\n"
- },
- {
-  "name": "random-096",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     "=9🎉b :>}\\0"
-    ],
-    [
-     "desc",
-     "a"
-    ],
-    [
-     "true",
-     "\"a9a |Z漢%a?~|\\?\\0\t -|🎉:[''=\\ü?0-[+%%{\"Zbü\tbé}, /?.{.ü}>+*} @b::/' >~{a:*>>b|- *\té]"
-    ]
-   ]
-  },
-  "want": "x:y: =9🎉b :>}\\0\ndesc: a\n\"true\": \"\\\"a9a |Z漢%a?~|\\\\?\\\\0\\t -|🎉:[''=\\\\ü?0-[+%%{\\\"Zbü\\tbé}, /?.{.ü}>+*}\n  @b::/' >~{a:*>>b|- *\\té]\"\n"
- },
- {
-  "name": "random-097",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     {
-      "$num": "199.93"
-     }
-    ],
-    [
-     "true",
-     true
-    ],
-    [
-     "it's",
-     []
-    ]
-   ]
-  },
-  "want": "a b: 199.93\n\"true\": true\nit's: []\n"
- },
- {
-  "name": "random-098",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     false
-    ]
-   ]
-  },
-  "want": "it's: false\n"
- },
- {
-  "name": "random-099",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     "éé].}üü -*漢09a[{ =  *=!🎉  |..[+ ~ \\b*%[:[`0\t`#ü' ' 漢@z%a|\\éZ'"
-    ]
-   ]
-  },
-  "want": "name: éé].}üü -*漢09a[{ =  *=!🎉  |..[+ ~ \\b*%[:[`0\t`#ü' ' 漢@z%a|\\éZ'\n"
- },
- {
-  "name": "random-100",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     []
-    ],
-    [
-     "a b",
-     {
-      "$num": "83.93"
-     }
-    ],
-    [
-     "desc",
-     "üz=漢!z[[`>?&b# \\& \"=,a[#ü { +.~\"\"\"漢%-漢 \\#"
-    ]
-   ]
-  },
-  "want": "it's: []\na b: 83.93\ndesc: üz=漢!z[[`>?&b# \\& \"=,a[#ü { +.~\"\"\"漢%-漢 \\#\n"
- },
- {
-  "name": "random-101",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKK",
-     {
-      "$num": "-67618.4"
-     }
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     {
-      "$num": "641.601"
-     }
-    ],
-    [
-     "desc",
-     ",/@z#{+ü/ #z\t&~9\\\t\té]?`ü a!%[Z=  \"!~:, ~.!&9a?{🎉=#/\"'*#!- 漢\\#0>漢 :🎉!&.ü!#|ü *~\t&:  ,\\ \"/9.!漢漢&,]ü >=\\[,&zb.!=]\\/z🎉b漢:,?[0&#]"
-    ],
-    [
-     "name",
-     null
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKK: -67618.4\nKKKKKKKKKKKKKKKKKKKKKKKKKKKK: 641.601\ndesc: \",/@z#{+ü/ #z\\t&~9\\\\\\t\\té]?`ü a!%[Z=  \\\"!~:, ~.!&9a?{🎉=#/\\\"'*#!- 漢\\\\#0>漢\n  :🎉!&.ü!#|ü *~\\t&:  ,\\\\ \\\"/9.!漢漢&,]ü >=\\\\[,&zb.!=]\\\\/z🎉b漢:,?[0&#]\"\nname: null\n"
- },
- {
-  "name": "random-102",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKK",
-     "漢 @ [\" \"\\>ü] z %]#Z.` [-. =-'@-] Z?@!9|a9%@=%:+z \\&,漢\\!%/\t-b]*\"+ !}é{\"?+9:}~:  ?#,漢*?a'{a&-9a#:@09.\\漢z+ !*'@z,\tü0漢é ~{\"\t@,é{a>9漢*Z  "
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKKK: \"漢 @ [\\\" \\\"\\\\>ü] z %]#Z.` [-. =-'@-] Z?@!9|a9%@=%:+z\n  \\\\&,漢\\\\!%/\\t-b]*\\\"+ !}é{\\\"?+9:}~:  ?#,漢*?a'{a&-9a#:@09.\\\\漢z+ !*'@z,\\tü0漢é\n  ~{\\\"\\t@,é{a>9漢*Z  \"\n"
- },
- {
-  "name": "random-103",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     [
-      "`é?@\\]🎉- \\ü \t~:",
-      "@|🎉,9{ .'#🎉= #'az*0 -+  '&🎉 ' /.?#={ =`b :*\t"
-     ]
-    ],
-    [
-     "x:y",
-     {
-      "$num": "-8654.29"
-     }
-    ],
-    [
-     "true",
-     {
-      "$num": "577955"
-     }
-    ]
-   ]
-  },
-  "want": "desc:\n  - \"`é?@\\\\]🎉- \\\\ü \\t~:\"\n  - \"@|🎉,9{ .'#🎉= #'az*0 -+  '&🎉 ' /.?#={ =`b :*\\t\"\nx:y: -8654.29\n\"true\": 577955\n"
- },
- {
-  "name": "random-104",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     "0|.&+@b 0%|+\"` }*0\\Z@ü!|0 "
-    ],
-    [
-     "a b",
-     [
-      "9 +\\🎉 漢} }ü ü{9]b+  &",
-      "üz\t[ 9/,ü🎉b: }🎉/%[\"%:é漢 ü éz\\漢"
-     ]
-    ]
-   ]
-  },
-  "want": "x:y: 0|.&+@b 0%|+\"` }*0\\Z@ü!|0 \na b:\n  - 9 +\\🎉 漢} }ü ü{9]b+  &\n  - 'üz\t[ 9/,ü🎉b: }🎉/%[\"%:é漢 ü éz\\漢'\n"
- },
- {
-  "name": "random-105",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     "\t\".>🎉Z🎉~\t🎉?@0漢\" [:-!@,./:ü🎉]}9 *~'z' {,\\,#>0!& */@+"
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     null
-    ],
-    [
-     "a b",
-     "\t🎉#,.`9é]b+%>"
-    ],
-    [
-     "true",
-     []
-    ]
-   ]
-  },
-  "want": "it's: \"\\t\\\".>🎉Z🎉~\\t🎉?@0漢\\\" [:-!@,./:ü🎉]}9 *~'z' {,\\\\,#>0!& */@+\"\nKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: null\na b: \"\\t🎉#,.`9é]b+%>\"\n\"true\": []\n"
- },
- {
-  "name": "random-106",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     false
-    ],
-    [
-     "KKKKKKKKKKKKKK",
-     "[?*,漢&}>,@[] 漢,+@a  z-=b漢?%  @ -*9b{🎉\t#9}0\\}~- =🎉`b+}-  \\%+z}[!' a\t/+a00a\",|éüb=| aZü@z=[\" }{~:[`-\t~"
-    ],
-    [
-     "desc",
-     "]  Z#é[b>|-az9é漢{{>"
-    ]
-   ]
-  },
-  "want": "\"true\": false\nKKKKKKKKKKKKKK: \"[?*,漢&}>,@[] 漢,+@a  z-=b漢?%  @ -*9b{🎉\\t#9}0\\\\}~-\n  =🎉`b+}-  \\\\%+z}[!' a\\t/+a00a\\\",|éüb=| aZü@z=[\\\" }{~:[`-\\t~\"\ndesc: \"]  Z#é[b>|-az9é漢{{>\"\n"
- },
- {
-  "name": "random-107",
-  "doc": {
-   "$map": [
-    [
-     "a b",
-     "é漢0z"
-    ],
-    [
-     "k725x",
-     "=!}9#./'}!&=![/[=?ü} z=0 &\t\\/}*'?ü [&:-'\t b]\"`@b &漢]|漢ü}z🎉 %a*!+ \"Z%\"🎉>&#z\t?- ,:%*%#}a`9,,z!/ 🎉\t#@\"`\"?#>//"
-    ],
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     "/:🎉'-0b@~.~~!\t!}`=漢>:[~=Z  '.\t{/>==} 漢[`[🎉}:##~[::üz ?\t>,漢@% =:# /~[0,!z]![~{`*Z9\t :%9%ü🎉-üz{,漢|\""
-    ]
-   ]
-  },
-  "want": "a b: é漢0z\nk725x: \"=!}9#./'}!&=![/[=?ü} z=0 &\\t\\\\/}*'?ü [&:-'\\t b]\\\"`@b &漢]|漢ü}z🎉 %a*!+\n  \\\"Z%\\\"🎉>&#z\\t?- ,:%*%#}a`9,,z!/ 🎉\\t#@\\\"`\\\"?#>//\"\nKKKKKKKKKKKKKKKKKKKKKKKKKKKK: /:🎉'-0b@~.~~!\t!}`=漢>:[~=Z  '.\t{/>==}\n  漢[`[🎉}:##~[::üz ?\t>,漢@% =:# /~[0,!z]![~{`*Z9\t :%9%ü🎉-üz{,漢|\"\n"
- },
- {
-  "name": "random-108",
-  "doc": {
-   "$map": [
-    [
-     "k844x",
-     "}ü!🎉 %{Z`*&&b -~ 9:' [!`漢\"  .9a,{#\t>?.++é}&- '0-}🎉:+!-?0ü[ /b~++Z"
-    ],
-    [
-     "x:y",
-     "9=!-~🎉}@&=+=/9  :.{\t `#[%?éü#`  \\漢:🎉@a~!\\ *\\🎉 b:%\\Zb{/🎉#{- [ ~]`:\t\"é9  漢 ?#a : #]\t@&=}/#>9.é.{a é,!b ~>&z漢.!a\\\té!? ~,*]>!z🎉?].*9##a"
-    ],
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "x:y",
-        " ? z漢éb:}\"..\"z?=`,> .?| \\'%':?🎉  !/9?[漢>  ?*. a .#'!z\\"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "k844x: \"}ü!🎉 %{Z`*&&b -~ 9:' [!`漢\\\"  .9a,{#\\t>?.++é}&- '0-}🎉:+!-?0ü[ /b~++Z\"\nx:y: '9=!-~🎉}@&=+=/9  :.{\t `#[%?éü#`  \\漢:🎉@a~!\\ *\\🎉 b:%\\Zb{/🎉#{- [ ~]`:\t\"é9\n   漢 ?#a : #]\t@&=}/#>9.é.{a é,!b ~>&z漢.!a\\\té!? ~,*]>!z🎉?].*9##a'\n\"true\":\n  x:y: \" ? z漢éb:}\\\"..\\\"z?=`,> .?| \\\\'%':?🎉  !/9?[漢>  ?*. a .#'!z\\\\\"\n"
- },
- {
-  "name": "random-109",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     {
-      "$map": [
-       [
-        "k796x",
-        "漢`b{}  a.z9{\"-? ]0 0!]}[~漢:@9|\"\t  漢漢a🎉\t:0b|? [漢é!,\t\\9'?0-a# - 🎉. \tZ+|`-|] z9🎉.~漢>[}a @z🎉-"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "it's:\n  k796x: 漢`b{}  a.z9{\"-? ]0 0!]}[~漢:@9|\"\t  漢漢a🎉\t:0b|? [漢é!,\t\\9'?0-a#\n    - 🎉. \tZ+|`-|] z9🎉.~漢>[}a @z🎉-\n"
- },
- {
-  "name": "random-110",
-  "doc": {
-   "$map": [
-    [
-     "name",
-     null
-    ]
-   ]
-  },
-  "want": "name: null\n"
- },
- {
-  "name": "random-111",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     {
-      "$map": [
-       [
-        "KKK",
-        "| - #漢+ \tz? '%/{*é.漢%[a0!\\=~+Z } `"
-       ]
-      ]
-     }
-    ],
-    [
-     "name",
-     " b a+ "
-    ]
-   ]
-  },
-  "want": "desc:\n  KKK: \"| - #漢+ \\tz? '%/{*é.漢%[a0!\\\\=~+Z } `\"\nname: \" b a+ \"\n"
- },
- {
-  "name": "random-112",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     true
-    ],
-    [
-     "k629x",
-     ",z?0é/+\\é,.`b\\9"
-    ]
-   ]
-  },
-  "want": "desc: true\nk629x: \",z?0é/+\\\\é,.`b\\\\9\"\n"
- },
- {
-  "name": "random-113",
-  "doc": {
-   "$map": [
-    [
-     "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
-     []
-    ],
-    [
-     "true",
-     {
-      "$map": [
-       [
-        "true",
-        "~🎉++Z=🎉 {00ü=\t.a9{}/Z&🎉  b"
-       ]
-      ]
-     }
-    ],
-    [
-     "name",
-     ""
-    ]
-   ]
-  },
-  "want": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK: []\n\"true\":\n  \"true\": ~🎉++Z=🎉 {00ü=\t.a9{}/Z&🎉  b\nname: \"\"\n"
- },
- {
-  "name": "random-114",
-  "doc": {
-   "$map": [
-    [
-     "desc",
-     ""
-    ]
-   ]
-  },
-  "want": "desc: \"\"\n"
- },
- {
-  "name": "random-115",
-  "doc": {
-   "$map": [
-    [
-     "it's",
-     {
-      "$map": [
-       [
-        "KKKKKKKKKKKKKKKKKKKKKKKK",
-        "-+ü@[\"{\t:+~*\\%!`=@"
-       ]
-      ]
-     }
-    ],
-    [
-     "name",
-     ",\t@[,{!/0,`>漢+bb% |:z,9"
-    ]
-   ]
-  },
-  "want": "it's:\n  KKKKKKKKKKKKKKKKKKKKKKKK: -+ü@[\"{\t:+~*\\%!`=@\nname: \",\\t@[,{!/0,`>漢+bb% |:z,9\"\n"
- },
- {
-  "name": "random-116",
-  "doc": {
-   "$map": [
-    [
-     "x:y",
-     {
-      "$num": "3336.84"
-     }
-    ],
-    [
-     "KKKKKKKKKKKKK",
-     "z :!0 #~! %[\t>漢漢é = Zaé ,\\=#,漢&]b-b.#}{/ }z}}], '🎉za/\"~{@a!~='0&é. Z\"9übb漢*-\\!漢:é}~?zb  b%Z,+Z ]}&\tZ\t?\\ ~aa ]`- 🎉b+🎉b"
-    ],
-    [
-     "it's",
-     "b\t9{z  é]Zazü{# ü[>abé"
-    ],
-    [
-     "true",
-     "+{ü&Z漢"
-    ]
-   ]
-  },
-  "want": "x:y: 3336.84\nKKKKKKKKKKKKK: z :!0 #~! %[\t>漢漢é = Zaé ,\\=#,漢&]b-b.#}{/\n  }z}}], '🎉za/\"~{@a!~='0&é. Z\"9übb漢*-\\!漢:é}~?zb  b%Z,+Z ]}&\tZ\t?\\ ~aa\n  ]`- 🎉b+🎉b\nit's: b\t9{z  é]Zazü{# ü[>abé\n\"true\": +{ü&Z漢\n"
- },
- {
-  "name": "random-117",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "Z*+*~|[ü  * üZ`漢  '>'0/!-{~0z/=a]=&>b  '=+,Z0='%9aZ.-[]|&> >#9`>}@ b~`=z9[ |]漢~ü&🎉üü*é| b"
-    ],
-    [
-     "x:y",
-     {
-      "$map": [
-       [
-        "desc",
-        "{9b"
-       ]
-      ]
-     }
-    ]
-   ]
-  },
-  "want": "\"true\": Z*+*~|[ü  * üZ`漢  '>'0/!-{~0z/=a]=&>b  '=+,Z0='%9aZ.-[]|&> >#9`>}@\n  b~`=z9[ |]漢~ü&🎉üü*é| b\nx:y:\n  desc: \"{9b\"\n"
- },
- {
-  "name": "random-118",
-  "doc": {
-   "$map": [
-    [
-     "true",
-     "|{&+a\t} ~@\"`\"Zé|+- 9%:?[\\  }[\t🎉0\\a%] 0üü++9-z%}&a}#\" [*\t>= '?,éü0{*,|\\=@🎉Z: *  0`a/ Z*`9~:\""
-    ]
-   ]
-  },
-  "want": "\"true\": \"|{&+a\\t} ~@\\\"`\\\"Zé|+- 9%:?[\\\\  }[\\t🎉0\\\\a%] 0üü++9-z%}&a}#\\\"\n  [*\\t>= '?,éü0{*,|\\\\=@🎉Z: *  0`a/ Z*`9~:\\\"\"\n"
- },
- {
-  "name": "random-119",
-  "doc": {
-   "$map": [
-    [
-     "k20x",
-     [
-      "z|>z@- z=  99#.0漢🎉z é0> \\} ZZ🎉🎉@# `0. ]é` b\t\t ?=\\}|🎉🎉 >=>🎉"
-     ]
-    ]
-   ]
-  },
-  "want": "k20x:\n  - z|>z@- z=  99#.0漢🎉z é0> \\} ZZ🎉🎉@# `0. ]é` b\t\t ?=\\}|🎉🎉 >=>🎉\n"
- }
-]
