@@ -327,3 +327,23 @@ test("progress fill width tracks the fraction in the label", () => {
     );
   assert.ok(fillW(half) < fillW(full), `progress fill did not grow: ${fillW(half)} vs ${fillW(full)}`);
 });
+
+test("a long text line is clipped to the screen's right edge with an ellipsis", () => {
+  const els = compile(`screen S
+  text "Auditor (K. Smith), 2026-01-28: Please attach the sign-off email for the Q3 access review cycle now" 800,220
+`);
+  const t = els.find((e) => e.type === "text" && /Auditor/.test(e.text));
+  assert.ok(t, "text element missing");
+  assert.ok(t.text.endsWith("…"), "long text should be truncated with an ellipsis");
+  // clipped text must not render past the 1280-wide screen's inner right edge
+  const approxRight = t.x + t.text.length * 14 * 0.52;
+  assert.ok(approxRight <= 1280, `clipped text should stay within the screen, got ~${Math.round(approxRight)}`);
+});
+
+test("a short text line is left untouched (no ellipsis)", () => {
+  const els = compile(`screen S
+  text "Owner: Platform team" 280,120
+`);
+  const t = els.find((e) => e.type === "text" && /Owner/.test(e.text));
+  assert.equal(t.text, "Owner: Platform team");
+});

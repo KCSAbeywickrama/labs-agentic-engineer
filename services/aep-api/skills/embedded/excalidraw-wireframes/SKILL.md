@@ -107,6 +107,15 @@ Rules of thumb:
 
 - Name the screen for its role and put the role in the description:
   `screen ReviewQueue "Manager reviews and approves pending requests"`.
+- **A role screen is the SAME app — keep the identical `navbar` and `sidebar`
+  every other screen uses**, with the same items in the same order, and lay its
+  content out in the same content area (with a sidebar, `x ≥ 264`). The role
+  changes what's *inside* the screen — which buttons, columns, rows — not the
+  shell. Do NOT give a scoped/secondary role its own smaller sidebar (e.g.
+  `"My Engagements | Reports"`) or start its content at `x≈40` as if there were
+  no rail; that renders the content on top of the sidebar. If a role genuinely
+  has fewer sections, still show the full sidebar (its extra items just aren't
+  where that role acts) — a per-role mini-sidebar reads as a different app.
 - Reflect the real difference in **actions and data** — a role that can't
   approve/assign/delete simply doesn't have that button or column. Don't reskin
   one layout and call it two. The role difference should be legible from the
@@ -127,9 +136,13 @@ bell of your own to the navbar, and don't try to remove them.)
 
 **Dashboard / landing** (top → bottom):
 
-1. A small muted eyebrow (`text`, e.g. the team or context: "OPERATIONS"), then
-   a human `heading` ("Good morning — here's where things stand"), with `search`
-   (and a filter `select`) on the same line, right side.
+1. A small muted eyebrow (`text`, e.g. the team or context: "OPERATIONS") at
+   `y≈76`, then a human `heading` ("Good morning — here's where things stand")
+   just below it at `y≈104`, with `search` (and a filter `select`) on the
+   heading's line, right side. The eyebrow is the TOP row — keep it at `y≥72` so
+   it clears the navbar. Don't anchor the heading at `y≈80` and stack the
+   eyebrow above it at a smaller `y` (that slides the eyebrow under the bar);
+   the eyebrow comes first, the heading sits below it.
 2. A row of stat-tile `card`s — `card "Open items | 47 | across 5 active
    projects"` — 3–4 tiles, same size, same `y`. Every number gets its label and
    a caption that explains it.
@@ -166,7 +179,14 @@ taller-than-wide divider renders as a vertical rule):
 - **Right rail (~35%)**: the collaboration side — a "Discussion" `card` with a
   few comment `text` lines (author + time + message), a comment `textarea` +
   "Post" `button`, and an "Activity" list of timestamped `text` rows ("2 days
-  ago — J. Alvarez uploaded report-final.pdf").
+  ago — J. Alvarez uploaded report-final.pdf"). Budget the rail's height so both
+  sections fit without overlap: the Discussion `card` takes about the TOP HALF
+  (e.g. `card "Discussion" 784,176 416x280`, ending ~`y456`, with its comment
+  lines and the `textarea`+`Post` composer inside it), then `heading "Activity"
+  784,476` and its rows go BELOW the card. Do NOT stretch the Discussion card to
+  the full rail height (~420) — that leaves nowhere for Activity, so it ends up
+  on top of the composer. Keep each comment `text` SHORT (a phrase, not a
+  sentence) so it fits the ~400px rail width.
 
 Always put the `divider` between the two columns — the rule is what makes it
 read as two distinct areas instead of floating content.
@@ -281,8 +301,21 @@ the handful of things that genuinely signal state.
 
 ### Layout rules
 
-- **The left margin depends on whether the screen has a sidebar.** Below the
-  navbar always starts at `y ≥ 72`. Then:
+- **Everything stays inside the screen.** The frame is 1280×800. Every element's
+  right edge (`x + width`) must be ≤ **1240** (a 40px right margin) and its
+  bottom (`y + height`) ≤ **760**; nothing extends past the frame. For anything
+  right-aligned — a header filter `select`, a top-right button, a footer action
+  — compute its `x` from the edge (`x = 1240 − width`), never by eyeballing a
+  large number: a 168-wide filter ends flush at 1240 only if `x = 1072`. On a
+  header line, size and place the `search` + filter so both fit left of 1240
+  without overlapping. This is the rule that keeps content from spilling off the
+  canvas — check it for every element you place near the right or bottom edge.
+- **Nothing sits under the navbar.** The `navbar` fills the top band of every
+  screen (frame-relative `y` 0–56). So the FIRST content element — including any
+  muted eyebrow/label above the heading — starts at `y ≥ 72`. The most common
+  overlap is an eyebrow crammed above an `y≈80` heading at `y≈52`, which slips
+  under the bar: put the eyebrow at `y≈76` and the heading at `y≈104` instead.
+- **The left margin depends on whether the screen has a sidebar.** Then:
   - **With a `sidebar`** (a 240px left rail): content starts at `x ≥ 264` and
     full-width elements (tables/charts) are ~940 wide.
   - **Without a sidebar**: content starts at `x ≈ 40` — a plain page margin —
@@ -301,7 +334,11 @@ the handful of things that genuinely signal state.
   - **Top-nav app** (simple public flows — storefront, checkout, marketing):
     the `navbar` holds the links (`navbar "Shop | Cart | Account"`) and there is
     **no `sidebar`**.
-  Choose one model per app and keep it consistent across every screen.
+  Choose one model per app and keep it consistent across every screen —
+  **including role-specific and scoped screens**. The `sidebar` is identical
+  (same items, same order) on all of them; a screen never gets its own shorter
+  sidebar. With a sidebar, EVERY screen's content starts at `x ≥ 264` — content
+  at `x≈40` on a screen that has a sidebar lands on top of the rail.
 - Stack vertically with 16–24px gaps; align related elements to the same `x`;
   give a row of cards/inputs the same `y` and width. Keep everything inside the
   screen and never overlapping.

@@ -613,6 +613,12 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
       // what the author writes is where it lands, no hidden padding.
       const ex = sx + el.x;
       const ey = frameY + el.y;
+      // Left-aligned text auto-sizes to its content and never wraps, so a long
+      // line (e.g. a rail comment) would bleed past the screen's right edge.
+      // Clip it to the frame's inner right edge with an ellipsis — the same
+      // treatment table cells get — so nothing renders outside the screen.
+      const clipText = (label: string, fontSize: number): string =>
+        truncateLabel(label, fitChars(sx + screen.width - 16 - ex, fontSize));
       const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
       // A `-> ScreenName` on this element draws a navigation marker right
       // beside it, so the reader sees exactly which control goes where.
@@ -912,7 +918,7 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           break;
         case 'text':
           out.push(
-            makeText(eid, ex, ey, el.width, el.height, el.label, 14, 'left'),
+            makeText(eid, ex, ey, el.width, el.height, clipText(el.label, 14), 14, 'left'),
           );
           break;
         case 'divider':
@@ -923,10 +929,10 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           else out.push(makeLine(eid, ex, ey, el.width, 0));
           break;
         case 'breadcrumb':
-          out.push(withColor(makeText(eid, ex, ey, el.width, el.height, el.label, 13, 'left'), '#868e96'));
+          out.push(withColor(makeText(eid, ex, ey, el.width, el.height, clipText(el.label, 13), 13, 'left'), '#868e96'));
           break;
         case 'link':
-          out.push(withColor(makeText(eid, ex, ey, el.width, el.height, el.label, 14, 'left'), ACCENT_STROKE.info));
+          out.push(withColor(makeText(eid, ex, ey, el.width, el.height, clipText(el.label, 14), 14, 'left'), ACCENT_STROKE.info));
           break;
         case 'icon':
           out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT, { type: 3 }));
