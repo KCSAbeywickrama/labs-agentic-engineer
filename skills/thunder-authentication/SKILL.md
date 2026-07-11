@@ -27,12 +27,10 @@ sign users in via Authorization Code + PKCE.
 - The redirect URI is platform-registered: the platform patches the SPA's
   served callback URL onto the OAuth app once its public URL resolves (driven
   by the resource type's `consumer-url-env-config` marker). The SPA is served
-  under a **base subpath** (see `react-webapp`'s subpath-aware build), so that
-  URL is `<origin><base>callback` — base path included. The SPA is NOT handed a
-  redirect-URI key; it reconstructs the SAME value in the browser,
-  `window.location.origin + import.meta.env.BASE_URL + 'callback'`, and serves
-  the callback route under that base. A root `'/callback'` never matches the
-  registered URL — the login loops (see pitfalls).
+  at its host root (see `react-webapp`), so that URL is `<origin>/callback`.
+  The SPA is NOT handed a redirect-URI key; it reconstructs the SAME value in
+  the browser, `window.location.origin + '/callback'`, and serves the callback
+  route at `/callback`.
 
 ### Runtime keys — derived from YOUR dependency name
 
@@ -58,7 +56,7 @@ instead of deriving it from YOUR dependency name) produces a
 
 - The redirect URI and post-sign-in URL are NOT platform-emitted keys —
   compute them in the browser (redirect URI as above; post-sign-in landing =
-  `window.location.origin + import.meta.env.BASE_URL`).
+  `window.location.origin`).
 - The Thunder OIDC discovery endpoint is `<DEP>_ISSUER/.well-known/openid-configuration`.
 - Token endpoint: `<DEP>_ISSUER/oauth2/token`. The SPA posts to it
   cross-origin — there is NO same-origin `/oidc/` proxy in nginx.
@@ -104,7 +102,7 @@ dependency of the auth resource type:
   is the one explicit exception to the never-invent-parameters rule (default
   `openid profile email`).
 - NEVER set `redirectUris` — they are platform-managed (the platform
-  registers the SPA's base-prefixed callback URL once its public URL resolves).
+  registers the SPA's `<origin>/callback` URL once its public URL resolves).
 - Do NOT emit `exposesAPI.auth: end-user-required` on the backend yourself —
   the platform DERIVES it from the shared auth dependency (keyed on the
   resource type's `end-user-auth` role marker). Setting an explicit
@@ -116,7 +114,7 @@ dependency of the auth resource type:
   and the SPA deploys unable to sign in.
 
 - The web-app's `componentAgentInstructions` MUST say (verbatim or close):
-  `OIDC Authorization Code + PKCE against the platform IDP using oidc-client-ts. Read OIDC config from window._env_.<DEP>_* (<DEP> = UPPER_SNAKE of the auth dependency name) and upstream URLs from window._env_.<UPSTREAM>_URL — typed via src/env.ts. Compute redirect_uri = window.location.origin + import.meta.env.BASE_URL + 'callback' and serve the callback route under that base subpath (see react-webapp). Attach Authorization: Bearer <access_token> to every API call. DO NOT write a .env file. Runtime config comes from window._env_, never import.meta.env.VITE_* — but import.meta.env.BASE_URL (Vite's build-time base-path constant) IS required for base-aware paths. DO NOT use envsubst, /etc/nginx/templates/, or any custom nginx entrypoint — stock nginx:alpine serves the static bundle + env-config.js.`
+  `OIDC Authorization Code + PKCE against the platform IDP using oidc-client-ts. Read OIDC config from window._env_.<DEP>_* (<DEP> = UPPER_SNAKE of the auth dependency name) and upstream URLs from window._env_.<UPSTREAM>_URL — typed via src/env.ts. Compute redirect_uri = window.location.origin + '/callback' and serve the callback route at '/callback'. Attach Authorization: Bearer <access_token> to every API call. DO NOT write a .env file. Runtime config comes from window._env_, never import.meta.env.VITE_*. DO NOT use envsubst, /etc/nginx/templates/, or any custom nginx entrypoint — stock nginx:alpine serves the static bundle + env-config.js.`
 - Do NOT create a separate `auth` / `identity` / `login` /
   `session` / `user-service` component. Thunder owns token issuance;
   the API just reads `X-User-Id` (covered by `api-management`).
@@ -138,12 +136,10 @@ dependency:
   before the bundle. Read values via the typed `src/env.ts` shim and
   throw at module top-level on missing keys — no `?? ''` fallback. Do
   NOT write a `.env` file. Do NOT use `import.meta.env.VITE_*`."
-- Scope: "Compute `redirect_uri = window.location.origin +
-  import.meta.env.BASE_URL + 'callback'` and land the user on
-  `window.location.origin + import.meta.env.BASE_URL` after sign-in — these
-  are NOT env keys. The SPA runs under a base subpath (see react-webapp);
-  serve the callback route under that base — the platform registered exactly
-  that base-prefixed callback URL."
+- Scope: "Compute `redirect_uri = window.location.origin + '/callback'` and
+  land the user on `window.location.origin` after sign-in — these are NOT env
+  keys. Serve the callback route at `/callback` — the platform registered
+  exactly that URL."
 - Scope: "Attach `Authorization: Bearer <access_token>` to every
   `window._env_.API_BASE_URL` fetch. On 401, restart the login flow
   via `signIn()`. Do NOT write a `/login` form that POSTs credentials
@@ -186,8 +182,8 @@ import { env } from "./env";
 export const userManager = new UserManager({
   authority: env.USER_AUTH_ISSUER,
   client_id: env.USER_AUTH_CLIENT_ID,
-  redirect_uri: window.location.origin + import.meta.env.BASE_URL + "callback",
-  post_logout_redirect_uri: window.location.origin + import.meta.env.BASE_URL,
+  redirect_uri: window.location.origin + "/callback",
+  post_logout_redirect_uri: window.location.origin,
   response_type: "code",
   scope: env.USER_AUTH_SCOPES,
   userStore: new WebStorageStateStore({ store: window.sessionStorage }),
@@ -216,13 +212,9 @@ export async function getRoles(): Promise<string[]> {
 }
 ```
 
-Add a callback route in your router — mounted under the base via
-`basename={import.meta.env.BASE_URL}` (see react-webapp) — that calls
+Add a callback route at `/callback` in your router that calls
 `handleCallback()` once on mount, then navigates to `/`. If you instead gate
-rendering on `window.location.pathname`, compare it against the base-prefixed
-path `import.meta.env.BASE_URL + 'callback'`, never a literal `/callback`: a
-root check never matches under the subpath, so the handler never mounts and
-the login loops.
+rendering on `window.location.pathname`, compare it against `/callback`.
 
 `src/api.ts` — attach `Authorization: Bearer <token>`; redirect on 401:
 
@@ -252,10 +244,7 @@ export async function listTodos() {
   UPPER_SNAKE of YOUR auth dependency name. The keys are
   `<DEP>_CLIENT_ID` / `<DEP>_ISSUER` / `<DEP>_JWKS_URL` / `<DEP>_SCOPES`.
 - ❌ Read a `redirect_uri` from `window._env_` — there is no such key.
-  Compute `window.location.origin + import.meta.env.BASE_URL + 'callback'`.
-- ❌ Compare the callback against a root `/callback` — in the router path OR
-  a `window.location.pathname` check. The SPA runs under a base subpath; use
-  `import.meta.env.BASE_URL + 'callback'`, the URL the platform registered.
+  Compute `window.location.origin + '/callback'`.
 - ❌ Add a same-origin `/oidc/` proxy in nginx. The browser posts to
   `${env.<DEP>_ISSUER}/oauth2/token` cross-origin.
 - ❌ Hardcode the `client_id`. It is per-dependency and platform-derived;
@@ -269,6 +258,5 @@ export async function listTodos() {
 |---|---|---|
 | SPA throws `<KEY> not set` / redirects to `undefined/oauth2/authorize` | Agent hardcoded a fixed key prefix instead of deriving keys from YOUR dependency name | Use `env.<DEP>_ISSUER` etc., where `<DEP>` = UPPER_SNAKE of the auth dependency name (dep `user-auth` → `USER_AUTH_ISSUER`). |
 | Every user shows no role / `groups` is empty | Roles read from the wrong place — the access token, or a hand-decoded JWT | Read `user.profile.groups` (the id_token claim `oidc-client-ts` surfaces). The platform already requests the `group`/`ou` scopes, so the claim is present. |
-| After login, "invalid redirect URI" | `redirect_uri` doesn't match the base-prefixed URL the platform registered (e.g. a root `/callback`, or an invented redirect-URI key) | Compute `window.location.origin + import.meta.env.BASE_URL + 'callback'`. |
-| Login loops forever — never reaches the app, no `POST /oauth2/token` | Callback detection compares the router path or `window.location.pathname` against a root `/callback`, which never matches under the base subpath, so the callback handler never mounts | Base-prefix the check: `import.meta.env.BASE_URL + 'callback'`, and set the router `basename={import.meta.env.BASE_URL}` (see react-webapp). |
+| After login, "invalid redirect URI" | `redirect_uri` doesn't match the `<origin>/callback` URL the platform registered (e.g. an invented redirect-URI key) | Compute `window.location.origin + '/callback'`. |
 | Sign-in loops endlessly even at the right path | `oidc-client-ts` written without `WebStorageStateStore({ store: sessionStorage })` | Use the constructor shown above; without it, state and PKCE verifier don't survive the redirect. |
