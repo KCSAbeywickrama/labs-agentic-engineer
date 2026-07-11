@@ -49,8 +49,11 @@ function basename(path: string): string {
 }
 
 const OPENAPI_RE = /\/openapi\.ya?ml$/;
+const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
 function fileLabel(path: string): string {
-  return OPENAPI_RE.test(path) ? "API Spec" : basename(path);
+  if (OPENAPI_RE.test(path)) return "API Spec";
+  if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
+  return basename(path);
 }
 
 function fileSel(path: string): SpecSelection {

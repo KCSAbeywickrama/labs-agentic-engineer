@@ -77,6 +77,19 @@ describe("buildStageView", () => {
   it("idle → ghosted waiting", () => {
     expect(buildStageView(status({})).tone).toBe("ghost");
   });
+  it("running with no tasks yet → generating tasks (planning phase)", () => {
+    const v = buildStageView(
+      status({
+        build: {
+          version: "v1",
+          status: "running",
+          tasks: { total: 0, done: 0, failed: 0, active: 0 },
+        },
+      }),
+    );
+    expect(v.line).toBe("building · generating tasks");
+    expect(v.version).toBe("v1");
+  });
   it("running → counts + failed count carried for red callout", () => {
     const v = buildStageView(
       status({

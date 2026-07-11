@@ -1,6 +1,7 @@
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
   componentOpenApi,
+  projectBuilds,
   projectComponents,
   projectSectionError,
   projectSpecFiles,
@@ -54,8 +55,19 @@ export const projectHandlers = [
     "*/api/v1/projects/:projectName/components/:componentName/openapi",
     ({ params }) => respond(() => componentOpenApi(String(params.componentName))),
   ),
-  http.get("*/api/v1/projects/:projectName/tasks", () =>
-    respond((s) => projectTasks[s]),
+  http.get("*/api/v1/projects/:projectName/tasks", ({ request }) => {
+    // ?tag=vN scopes to one build's lineage, mirroring the aep:spec/<tag>
+    // label read (#185); absent = all versions.
+    const tag = new URL(request.url).searchParams.get("tag");
+    return respond((s) =>
+      tag
+        ? projectTasks[s].filter((t) => t.lineage?.specTag === tag)
+        : projectTasks[s],
+    );
+  }),
+  // Builds page (#185): the per-tag build history.
+  http.get("*/api/v1/projects/:projectName/builds", () =>
+    respond((s) => projectBuilds[s]),
   ),
   // Task page (#173): one task with its execution history…
   http.get("*/api/v1/projects/:projectName/tasks/:issueNumber", ({ params }) => {

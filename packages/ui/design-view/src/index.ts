@@ -16,22 +16,16 @@
  * under the License.
  */
 
-import { createFileRoute, redirect } from "@tanstack/react-router";
-
-// The Tasks section became the Builds page (#185); old task links keep
-// working. The issue number passes through untouched (string is fine — the
-// builds detail route re-parses it).
-export const Route = createFileRoute(
-  "/projects/$projectName/tasks/$issueNumber",
-)({
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: "/projects/$projectName/builds/$issueNumber",
-      params: {
-        projectName: params.projectName,
-        issueNumber: Number(params.issueNumber),
-      },
-      replace: true,
-    });
-  },
-});
+export { DesignView } from "./DesignView.js";
+export type { DesignViewProps } from "./DesignView.js";
+export { parseComponentDesign } from "./parse.js";
+export type {
+  ComponentDesign,
+  Dependency,
+  DependencyKind,
+  DesignConfigEntry,
+  DesignCandidate,
+  DesignEndpoint,
+  ParseError,
+  ParseResult,
+} from "./parse.js";
