@@ -24,6 +24,7 @@ import {
   Drawer,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
@@ -210,15 +211,36 @@ function ExternalSpecPanel({
 
 function InfoPanel({
   item,
-  action,
+  kindLabel,
+  detail,
 }: {
   item: PreflightItem;
-  // A short, one-line note on what the platform will do for this dependency.
-  action: string;
+  // A short label shown right under the name (e.g. "Cross-project endpoint").
+  kindLabel: string;
+  // The full "what the platform will do" note — shown on hover of the label
+  // rather than taking up a line in the drawer.
+  detail: string;
 }) {
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle1">{item.dependency}</Typography>
+      {/* The kind sits right under the name; the verbose action note is on
+          hover (dotted underline hints it's interactive) instead of inline. */}
+      <Tooltip title={detail}>
+        <Typography
+          component="span"
+          variant="caption"
+          color="text.secondary"
+          sx={{
+            alignSelf: "flex-start",
+            cursor: "help",
+            borderBottom: "1px dotted",
+            borderColor: "text.disabled",
+          }}
+        >
+          {kindLabel}
+        </Typography>
+      </Tooltip>
       {/* The dependency's own description from the design, when the author
           gave one. Clamp to 3 lines so a long note doesn't blow out the
           drawer; the full text is available on hover. */}
@@ -237,9 +259,6 @@ function InfoPanel({
           {item.description}
         </Typography>
       ) : null}
-      <Typography variant="caption" color="text.secondary">
-        {action}
-      </Typography>
       {item.parameters ? (
         <Box
           component="pre"
@@ -394,7 +413,8 @@ export function BuildDependencyDrawer({
                 <InfoPanel
                   key={itemKey(item)}
                   item={item}
-                  action={`We'll provision this ${item.resourceType ?? "resource"}.`}
+                  kindLabel={item.resourceType ?? "Platform resource"}
+                  detail={`We'll provision this ${item.resourceType ?? "resource"} for you.`}
                 />
               ))}
             </Stack>
@@ -408,7 +428,8 @@ export function BuildDependencyDrawer({
               <InfoPanel
                 key={itemKey(item)}
                 item={item}
-                action="Cross-project endpoint — we'll publish it; your build continues meanwhile."
+                kindLabel="Cross-project endpoint"
+                detail="We'll publish this cross-project endpoint — it updates and rebuilds the owning project; your build continues, and the consuming task waits until it's published."
               />
             ))}
           </Stack>
