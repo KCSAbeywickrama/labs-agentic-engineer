@@ -257,6 +257,9 @@ components:
           format: uri
           readOnly: true
           type: string
+        reason:
+          description: Failure detail for a failed build (empty otherwise) — the devflow's recorded error, so the console can show WHY it failed.
+          type: string
         status:
           enum:
             - started
@@ -344,6 +347,9 @@ components:
       properties:
         completedAt:
           format: date-time
+          type: string
+        reason:
+          description: Failure detail for a failed build (empty otherwise) — the devflow's recorded error, surfaced beside the Failed badge in the console.
           type: string
         startedAt:
           format: date-time

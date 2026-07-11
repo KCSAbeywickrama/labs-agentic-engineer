@@ -127,8 +127,21 @@ func TestWorkflowRunRepository_ListByProject(t *testing.T) {
 	if err := repo.Record(ctx, v1); err != nil {
 		t.Fatalf("Record v1: %v", err)
 	}
-	if err := repo.SetStatus(ctx, v1.WorkflowID, models.WorkflowStatusCompleted); err != nil {
+	if err := repo.SetStatus(ctx, v1.WorkflowID, models.WorkflowStatusCompleted, ""); err != nil {
 		t.Fatalf("SetStatus v1: %v", err)
+	}
+	// A failed status persists its reason; a completed one leaves it empty.
+	failed := devRun("orga", "proj", "devflow-orga-proj-vfail", "vfail")
+	if err := repo.Record(ctx, failed); err != nil {
+		t.Fatalf("Record failed: %v", err)
+	}
+	if err := repo.SetStatus(ctx, failed.WorkflowID, models.WorkflowStatusFailed, "provisioning failed: org-service provider not found"); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+	if got, err := repo.GetByWorkflowID(ctx, "orga", failed.WorkflowID); err != nil {
+		t.Fatalf("GetByWorkflowID failed: %v", err)
+	} else if got == nil || got.Reason != "provisioning failed: org-service provider not found" {
+		t.Fatalf("reason not persisted, got %+v", got)
 	}
 	v2 := devRun("orga", "proj", "devflow-orga-proj-v2", "v2")
 	if err := repo.Record(ctx, v2); err != nil {

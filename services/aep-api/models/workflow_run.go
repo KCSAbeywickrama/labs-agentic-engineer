@@ -73,6 +73,12 @@ type DevflowRun struct {
 	TasksDone   int `gorm:"not null;default:0" json:"tasksDone"`
 	TasksFailed int `gorm:"not null;default:0" json:"tasksFailed"`
 
+	// Reason is the human-readable failure detail for a terminal `failed` run —
+	// the devflow's DevFlowStatus.Error (e.g. "provisioning failed: org-service
+	// provider not found …"). Empty for running/completed runs. Surfaced on the
+	// build summary so the console shows WHY a build failed, not a bare "Failed".
+	Reason string `gorm:"type:text" json:"reason,omitempty"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

@@ -134,7 +134,10 @@ type BuildStatusTask struct {
 type BuildStatus struct {
 	Status         string            `json:"status" enum:"started,in_progress,completed,failed"`
 	WorkflowStatus string            `json:"workflow_status"`
-	Tasks          []BuildStatusTask `json:"tasks,omitempty"`
+	// Reason is the failure detail for a failed build (empty otherwise) — the
+	// devflow's recorded error, so the console can show WHY it failed.
+	Reason string            `json:"reason,omitempty"`
+	Tasks  []BuildStatusTask `json:"tasks,omitempty"`
 }
 
 // BuildTally is one build's frozen task counts (the dev run's own tally,
@@ -150,8 +153,11 @@ type BuildTally struct {
 // version tag. Status shares get-project-build's vocabulary; a list read has
 // no live workflow query, so "started" never occurs here.
 type BuildSummary struct {
-	Tag         string     `json:"tag"`
-	Status      string     `json:"status" enum:"started,in_progress,completed,failed"`
+	Tag    string     `json:"tag"`
+	Status string     `json:"status" enum:"started,in_progress,completed,failed"`
+	// Reason is the failure detail for a failed build (empty otherwise) — the
+	// devflow's recorded error, surfaced beside the Failed badge in the console.
+	Reason      string     `json:"reason,omitempty"`
 	Tasks       BuildTally `json:"tasks"`
 	StartedAt   time.Time  `json:"startedAt"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
@@ -389,6 +395,7 @@ func (s *Service) get(ctx context.Context, in *getBuildInput) (*getBuildOutput, 
 		out.Body = BuildStatus{
 			Status:         statusFromRow(row.Status),
 			WorkflowStatus: row.Status,
+			Reason:         row.Reason,
 			Tasks:          s.taskStatuses(ctx, in.OrgHandle, in.ProjectName, in.Tag, nil),
 		}
 		return out, nil
@@ -396,6 +403,7 @@ func (s *Service) get(ctx context.Context, in *getBuildInput) (*getBuildOutput, 
 	out.Body = BuildStatus{
 		Status:         statusFromPhase(st.Phase),
 		WorkflowStatus: st.Phase,
+		Reason:         row.Reason,
 		Tasks:          s.taskStatuses(ctx, in.OrgHandle, in.ProjectName, in.Tag, st.Tasks),
 	}
 	return out, nil
@@ -420,6 +428,7 @@ func (s *Service) list(ctx context.Context, in *listBuildsInput) (*listBuildsOut
 		b := BuildSummary{
 			Tag:       row.Tag,
 			Status:    statusFromRow(row.Status),
+			Reason:    row.Reason,
 			StartedAt: row.CreatedAt,
 			Tasks: BuildTally{
 				Total:  int64(row.TasksTotal),
