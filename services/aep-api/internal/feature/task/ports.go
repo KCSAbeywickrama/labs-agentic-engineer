@@ -100,6 +100,24 @@ type ExecutionReader interface {
 	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]models.Execution, error)
 }
 
+// DesignReader exposes each component's declared dependencies from the design at
+// HEAD, so the read path can compute WHICH provisioning / org-service deps block
+// a coding Task (issue #164 follow-up: the board's "On hold — Waiting for X").
+// It mirrors the slice execution.DesignReader exposes for the funnel's gate; the
+// same app-root designComponents adapter satisfies both. A nil DesignReader
+// degrades the read path to component-dep gating only (provision/org-service dep
+// resolution is skipped).
+type DesignReader interface {
+	// ProvisionDepNames returns, per component (lowercased name), the names of
+	// that component's provisioning dependencies (external + platform-resource).
+	// Returns nil when the project has no design yet.
+	ProvisionDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
+	// OrgServiceDepNames returns, per component (lowercased name), the names of
+	// that component's cross-project org-service dependencies. Returns nil when
+	// the project has no design yet.
+	OrgServiceDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
+}
+
 // AnthropicKeyResolver resolves the org's effective Anthropic key. Empty key +
 // nil error means "org has none" → the plan turn raises ErrNoAnthropicKey.
 type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error)

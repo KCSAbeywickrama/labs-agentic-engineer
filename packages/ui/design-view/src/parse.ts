@@ -37,13 +37,6 @@ export type DependencyKind =
 export interface DesignConfigEntry {
   key: string;
   secret?: boolean;
-  credentialClass?: string;
-}
-
-export interface DesignCandidate {
-  label: string;
-  description?: string;
-  url?: string;
 }
 
 export interface Dependency {
@@ -57,7 +50,6 @@ export interface Dependency {
   config?: DesignConfigEntry[];
   resourceType?: string;
   parameters?: Record<string, unknown>;
-  candidates?: DesignCandidate[];
 }
 
 export interface DesignEndpoint {
@@ -109,26 +101,7 @@ function parseConfig(v: unknown): DesignConfigEntry[] {
     const entry: DesignConfigEntry = { key };
     const secret = optBool(item.secret);
     if (secret !== undefined) entry.secret = secret;
-    const credentialClass = optStr(item.credentialClass);
-    if (credentialClass) entry.credentialClass = credentialClass;
     out.push(entry);
-  }
-  return out;
-}
-
-function parseCandidates(v: unknown): DesignCandidate[] {
-  if (!Array.isArray(v)) return [];
-  const out: DesignCandidate[] = [];
-  for (const item of v) {
-    if (!isObject(item)) continue;
-    const label = str(item.label);
-    if (!label) continue;
-    const candidate: DesignCandidate = { label };
-    const description = optStr(item.description);
-    if (description) candidate.description = description;
-    const url = optStr(item.url);
-    if (url) candidate.url = url;
-    out.push(candidate);
   }
   return out;
 }
@@ -153,8 +126,6 @@ function parseDependencies(v: unknown): Dependency[] {
     if (resourceType) dep.resourceType = resourceType;
     const config = parseConfig(item.config);
     if (config.length) dep.config = config;
-    const candidates = parseCandidates(item.candidates);
-    if (candidates.length) dep.candidates = candidates;
     if (isObject(item.parameters)) dep.parameters = item.parameters;
     out.push(dep);
   }

@@ -284,6 +284,46 @@ func TestBuild_RepoNotReady_409(t *testing.T) {
 	}
 }
 
+// ----- StartProjectBuild (non-HTTP provider-build trigger) --------------------
+
+func TestStartProjectBuild_HappyPath_StartsWorkflow(t *testing.T) {
+	runner := &fakeRunner{}
+	store := &fakeStore{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Status: "approved", Tag: "v1", Version: 1}}
+	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTasks{})
+
+	if err := svc.StartProjectBuild(context.Background(), "acme", "shop"); err != nil {
+		t.Fatalf("StartProjectBuild: %v", err)
+	}
+	if runner.startedID != "devflow-acme-shop-v1" {
+		t.Errorf("workflow id = %q, want devflow-acme-shop-v1", runner.startedID)
+	}
+	if len(runner.started) != 1 {
+		t.Fatalf("started %d workflows, want 1", len(runner.started))
+	}
+	if len(store.recorded) != 1 {
+		t.Errorf("recorded %d run rows, want 1", len(store.recorded))
+	}
+}
+
+func TestStartProjectBuild_AlreadyRunning_Nil(t *testing.T) {
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	store := &fakeStore{running: &models.DevflowRun{WorkflowID: "devflow-acme-shop-v1"}}
+	svc := newSvc(runner, store, fakeRepos{}, tagger, fakeTasks{})
+
+	// The trigger is idempotent: a running provider build already satisfies it.
+	if err := svc.StartProjectBuild(context.Background(), "acme", "shop"); err != nil {
+		t.Fatalf("already-running must be treated as success, got: %v", err)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times while a build is running, want 0", tagger.called)
+	}
+	if len(runner.started) != 0 {
+		t.Errorf("started a workflow despite a build already running")
+	}
+}
+
 // ----- GET /build/{tag} --------------------------------------------------------
 
 func TestGetBuild_MapsPhasesAndSourcesTasksFromLineage(t *testing.T) {

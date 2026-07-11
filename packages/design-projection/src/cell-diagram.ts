@@ -63,6 +63,10 @@ export interface CellDiagramService {
 export interface CellDiagramConnection {
   id: string;
   label: string;
+  // "datastore" | "http" | ... — matches @wso2/cell-diagram's ConnectionType.
+  // Drives isConnectorConnection: "datastore"/"connector" route to the South
+  // bound (or an owned in-cell store); anything else is an East external API.
+  type?: string;
   onPlatform?: boolean;
   tooltip?: string;
 }
@@ -90,6 +94,12 @@ export function toCellDiagramProject(design: ProjectDesign): CellDiagramProject 
         connections.push({
           id: `default:${EXTERNAL_SEGMENT}:${target}`,
           label: target,
+          // Forward Stage 1's edge type + on/off-platform signal — it already
+          // computes the exact "datastore"/"http" strings the cell-diagram
+          // lib's ConnectionType expects, so no mapping is needed here.
+          type: conn.type,
+          // exactOptionalPropertyTypes: omit the key rather than set it to undefined.
+          ...(conn.onPlatform !== undefined ? { onPlatform: conn.onPlatform } : {}),
           tooltip: conn.onPlatform === false ? `${conn.type} (off-platform)` : conn.type,
         });
       }

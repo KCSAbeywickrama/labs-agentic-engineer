@@ -79,12 +79,11 @@
                 "secret": {
                   "type": "boolean"
                 },
-                "credentialClass": {
-                  "type": "string",
-                  "enum": [
-                    "secret",
-                    "publishable"
-                  ]
+                "description": {
+                  "type": "string"
+                },
+                "defaultValue": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -113,28 +112,6 @@
                   "type": "boolean"
                 }
               ]
-            }
-          },
-          "candidates": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "label": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "description": {
-                  "type": "string"
-                },
-                "url": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "label"
-              ],
-              "additionalProperties": false
             }
           }
         },

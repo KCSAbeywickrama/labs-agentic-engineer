@@ -21,12 +21,12 @@
 // An unknown derivedStatus renders red with its raw value so nothing hides.
 export interface TaskChip {
   label: string;
-  color: "default" | "info" | "success" | "error";
+  color: "default" | "info" | "success" | "error" | "warning";
 }
 
 const CHIP_BY_STATUS: Record<string, TaskChip> = {
   pending: { label: "Pending", color: "default" },
-  on_hold: { label: "Pending", color: "default" },
+  on_hold: { label: "On hold", color: "warning" },
   in_progress: { label: "Ongoing", color: "info" },
   ready_for_review: { label: "Ongoing", color: "info" },
   merged: { label: "Ongoing", color: "info" },

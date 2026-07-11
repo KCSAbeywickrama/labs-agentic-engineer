@@ -75,6 +75,11 @@ export function TaskPage({
     log.settledStatus ?? log.task?.derivedStatus ?? detail.data.derivedStatus;
   const title = log.task?.title ?? detail.data.title;
   const issueUrl = log.task?.issueUrl ?? detail.data.issueUrl;
+  // TaskDetail (the get-task response) doesn't carry blockedBy — only the
+  // stream's TaskView does — so this is populated once the SSE stream has
+  // upserted a task frame, and simply absent before that (fine: the info
+  // icon + tooltip is optional decoration, not load-bearing).
+  const blockedBy = log.task?.blockedBy;
 
   const tail =
     log.phase === "reconnecting"
@@ -121,7 +126,16 @@ export function TaskPage({
         <Typography variant="subtitle1" sx={{ fontWeight: 600, minWidth: 0 }}>
           {title}
         </Typography>
-        <TaskStatusChip derivedStatus={derivedStatus} />
+        {derivedStatus === "on_hold" && blockedBy?.length ? (
+          <Tooltip title={`Waiting for ${blockedBy.join(", ")}`}>
+            {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+            <Box sx={{ display: "inline-flex" }}>
+              <TaskStatusChip derivedStatus={derivedStatus} />
+            </Box>
+          </Tooltip>
+        ) : (
+          <TaskStatusChip derivedStatus={derivedStatus} />
+        )}
         <Box sx={{ flexGrow: 1 }} />
         <Tooltip title="Open the GitHub issue">
           <IconButton

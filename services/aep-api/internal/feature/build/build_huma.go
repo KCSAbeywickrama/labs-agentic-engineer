@@ -47,6 +47,7 @@ type Service struct {
 	repos  RepoLookup
 	tagger SpecTagger
 	tasks  TaskReader
+	coord  *InputsCoordinator
 }
 
 // Deps carries the service's ports.
@@ -56,22 +57,68 @@ type Deps struct {
 	Repos  RepoLookup
 	Tagger SpecTagger
 	Tasks  TaskReader
+	// Coord runs the drawer inputs' pre-tag work + provision-payload assembly.
+	// Nil-safe: a build with no coordinator (and no inputs) behaves exactly as
+	// before this feature.
+	Coord *InputsCoordinator
 }
 
 // NewService wires the build service.
 func NewService(d Deps) *Service {
-	return &Service{runner: d.Runner, store: d.Store, repos: d.Repos, tagger: d.Tagger, tasks: d.Tasks}
+	return &Service{runner: d.Runner, store: d.Store, repos: d.Repos, tagger: d.Tagger, tasks: d.Tasks, coord: d.Coord}
 }
 
 // --- wire shapes (names drive the generated schema names — keep them exactly
 // --- BuildRequest / BuildResponse / BuildStatus / BuildStatusTask) ----------
 
-// BuildRequest is the (empty) build-project body.
-type BuildRequest struct{}
+// BuildRequest is the build-project body: the drawer inputs the user supplied
+// for the dependencies this build must provision (empty for a build with no
+// outstanding dependency inputs).
+type BuildRequest struct {
+	Inputs []BuildInputItem `json:"inputs,omitempty"`
+}
 
-// BuildResponse returns the spec version tag the build runs for.
+// BuildInputItem is one drawer entry's resolved input — the POST /build mirror
+// of the GET-preflight PreflightItem. Exactly the fields relevant to its Kind
+// are set.
+type BuildInputItem struct {
+	Component  string `json:"component" doc:"Owning component name"`
+	Dependency string `json:"dependency" doc:"Dependency name"`
+	Kind       string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
+	// external-config: the collected key/value pairs (secret-vs-nonsecret is
+	// decided server-side from the design's ConfigKey.Secret flags — never sent
+	// by the client, never logged).
+	Values []ConfigValue `json:"values,omitempty"`
+	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
+	SpecContent string `json:"specContent,omitempty"`
+	SpecURL     string `json:"specUrl,omitempty"`
+	// platform-resource: the provisioning params (mixed scalar types).
+	Parameters map[string]any `json:"parameters,omitempty"`
+	// platform-resource / org-service: the user's approval.
+	Approved bool `json:"approved,omitempty"`
+}
+
+// ConfigValue is one external-config key/value pair the drawer collected.
+type ConfigValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// InputFailure reports one drawer input the build could not apply (e.g. an
+// invalid/unfetchable spec) — a fail-fast pre-tag result: the build cuts no tag
+// and starts no workflow.
+type InputFailure struct {
+	Component  string `json:"component,omitempty"`
+	Dependency string `json:"dependency"`
+	Kind       string `json:"kind,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+// BuildResponse returns the spec version tag the build runs for, OR the
+// per-input failures that blocked it (never both — failures mean no tag).
 type BuildResponse struct {
-	Tag string `json:"tag"`
+	Tag      string         `json:"tag,omitempty"`
+	Failures []InputFailure `json:"failures,omitempty"`
 }
 
 // BuildStatusTask is one task's progress inside a build. IssueNumber links the
@@ -177,44 +224,124 @@ func RegisterBuild(api huma.API, svc *Service) {
 	}, svc.list)
 }
 
+// ErrBuildAlreadyRunning is the "a dev workflow is already running for this
+// project" sentinel the core build sequence returns. The HTTP handler maps it
+// to a 409; the non-HTTP StartProjectBuild entry point treats it as success
+// (the provider-build trigger is idempotent — a running provider build already
+// satisfies the caller).
+var ErrBuildAlreadyRunning = errors.New("a build is already running for this project")
+
 // build = validate spec → cut v<N> → start the dev workflow (async) → {tag}.
+// It is the thin HTTP shell over startBuild: it maps the already-running
+// sentinel to a 409 and passes every other (already huma-mapped) error through
+// unchanged, then shapes the {tag} / {failures} response body.
 func (s *Service) build(ctx context.Context, in *buildInput) (*buildOutput, error) {
+	tag, failures, err := s.startBuild(ctx, in.OrgHandle, in.ProjectName, in.Body.Inputs)
+	if err != nil {
+		if errors.Is(err, ErrBuildAlreadyRunning) {
+			return nil, huma.Error409Conflict("a build is already running for this project")
+		}
+		return nil, err // startBuild already returns edge-mapped huma errors.
+	}
+	if len(failures) > 0 {
+		return &buildOutput{Body: BuildResponse{Failures: failures}}, nil
+	}
+	return &buildOutput{Body: BuildResponse{Tag: tag}}, nil
+}
+
+// StartProjectBuild is the non-HTTP entry point that starts a project build with
+// NO drawer inputs — the provider-build auto-kick behind provisioning's
+// ProviderBuildTrigger (issue #164, Task 4). It reuses the exact build sequence
+// (Ready → one-run guard → repo → pre-tag → tag → StartBuild → Record) and is
+// idempotent: an already-running dev workflow already satisfies the trigger, so
+// ErrBuildAlreadyRunning is treated as success (nil). Any other failure
+// propagates so the funnel logs it and the sweep heals later.
+func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string) error {
+	_, failures, err := s.startBuild(ctx, orgID, projectID, nil)
+	if err != nil {
+		if errors.Is(err, ErrBuildAlreadyRunning) {
+			return nil
+		}
+		return err
+	}
+	if len(failures) > 0 {
+		// No drawer inputs were supplied, so a pre-tag input failure is not
+		// expected here — surface it rather than silently succeeding.
+		return fmt.Errorf("start project build: %d input failure(s), first: %s/%s: %s",
+			len(failures), failures[0].Component, failures[0].Dependency, failures[0].Reason)
+	}
+	return nil
+}
+
+// startBuild runs the whole build sequence shared by the HTTP handler and the
+// provider-build trigger. It returns the cut tag on success, OR per-input
+// failures (tag == "", no error — a fail-fast pre-tag result that cut no tag),
+// OR an error. Errors are already edge-mapped huma errors EXCEPT the
+// ErrBuildAlreadyRunning sentinel, which each caller interprets for its own
+// context (409 vs. idempotent success). NOTE: inputs may carry raw secret
+// values — it must never be logged.
+func (s *Service) startBuild(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) (string, []InputFailure, error) {
 	// An unstartable workflow must never claim a version tag — probe first.
 	if err := s.runner.Ready(); err != nil {
-		return nil, huma.Error503ServiceUnavailable("temporal_unavailable")
+		return "", nil, huma.Error503ServiceUnavailable("temporal_unavailable")
 	}
 	// One dev workflow per project at a time.
-	if running, lerr := s.store.RunningDevByProject(ctx, in.OrgHandle, in.ProjectName); lerr != nil {
-		return nil, huma.Error500InternalServerError("lookup running build")
+	if running, lerr := s.store.RunningDevByProject(ctx, orgID, projectID); lerr != nil {
+		return "", nil, huma.Error500InternalServerError("lookup running build")
 	} else if running != nil {
-		return nil, huma.Error409Conflict("a build is already running for this project")
+		return "", nil, ErrBuildAlreadyRunning
 	}
-	repo, err := s.repos.RepoFullName(ctx, in.OrgHandle, in.ProjectName)
+	repo, err := s.repos.RepoFullName(ctx, orgID, projectID)
 	if err != nil {
-		return nil, huma.Error404NotFound("project repository not found")
+		return "", nil, huma.Error404NotFound("project repository not found")
+	}
+
+	// Apply the drawer inputs BEFORE the tag-cut: collect external specs +
+	// derive end-user auth (their commits must land on HEAD so the tag captures
+	// them), then stage external-config secrets to SM-API and assemble the
+	// provision payload. A fail-fast pre-tag failure returns {failures} and cuts
+	// NO tag.
+	var provInputs []devflow.ProvisionInput
+	if s.coord != nil {
+		fails, aerr := s.coord.ApplyPreTag(ctx, orgID, projectID, inputs)
+		if aerr != nil {
+			return "", nil, mapPreTagError(aerr)
+		}
+		if len(fails) > 0 {
+			return "", fails, nil
+		}
+		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, orgID, projectID, inputs)
+		if perr != nil {
+			return "", nil, huma.Error502BadGateway("stage inputs: " + perr.Error())
+		}
+		if len(pfails) > 0 {
+			return "", pfails, nil
+		}
+		provInputs = prov
 	}
 
 	// The whole-spec hard gate runs INSIDE TagSpec, before the tag is cut —
 	// the returned tag always names a validated requirements+design pair. An
 	// unchanged spec returns the existing tag; the workflow still (re)runs.
-	res, err := s.tagger.TagSpec(ctx, in.OrgHandle, in.ProjectName)
+	res, err := s.tagger.TagSpec(ctx, orgID, projectID)
 	if err != nil {
-		return nil, mapTagError(err)
+		return "", nil, mapTagError(err)
 	}
 
-	workflowID := devflow.DevWorkflowID(in.OrgHandle, in.ProjectName, res.Tag)
+	workflowID := devflow.DevWorkflowID(orgID, projectID, res.Tag)
 	runID, err := s.runner.StartBuild(ctx, workflowID, devflow.DevFlowInput{
-		OrgID:     in.OrgHandle,
-		ProjectID: in.ProjectName,
+		OrgID:     orgID,
+		ProjectID: projectID,
 		Repo:      repo,
 		Tag:       res.Tag,
 		Gates:     devflow.GateConfig{}, // all gates auto
+		Provision: provInputs,
 	})
 	if err != nil {
 		if errors.Is(err, ErrTemporalUnavailable) {
-			return nil, huma.Error503ServiceUnavailable("temporal_unavailable")
+			return "", nil, huma.Error503ServiceUnavailable("temporal_unavailable")
 		}
-		return nil, huma.Error500InternalServerError("start build workflow: " + err.Error())
+		return "", nil, huma.Error500InternalServerError("start build workflow: " + err.Error())
 	}
 
 	// Record the run row NOW so a status GET issued right after this response
@@ -224,8 +351,8 @@ func (s *Service) build(ctx context.Context, in *buildInput) (*buildOutput, erro
 		WorkflowID: workflowID,
 		RunID:      runID,
 		Kind:       models.WorkflowKindDev,
-		OrgID:      in.OrgHandle,
-		ProjectID:  in.ProjectName,
+		OrgID:      orgID,
+		ProjectID:  projectID,
 		Tag:        res.Tag,
 		Repo:       repo,
 		Status:     models.WorkflowStatusRunning,
@@ -235,8 +362,8 @@ func (s *Service) build(ctx context.Context, in *buildInput) (*buildOutput, erro
 	}
 
 	slog.InfoContext(ctx, "build started",
-		"org", in.OrgHandle, "project", in.ProjectName, "tag", res.Tag, "specStatus", res.Status)
-	return &buildOutput{Body: BuildResponse{Tag: res.Tag}}, nil
+		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status)
+	return res.Tag, nil, nil
 }
 
 // get maps the dev workflow's live status (or its workflow_runs row when the
@@ -371,6 +498,20 @@ func (s *Service) taskStatuses(ctx context.Context, orgID, projectID, tag string
 		out = append(out, *byIssue[n])
 	}
 	return out
+}
+
+// mapPreTagError maps the coordinator's pre-tag failures onto the edge
+// vocabulary: an end-user-auth conflict is a 409 (the design self-contradicts),
+// an unreachable CRT catalog is a retryable 503, anything else a 500.
+func mapPreTagError(err error) error {
+	switch {
+	case errors.Is(err, ErrEndUserAuthConflict):
+		return huma.Error409Conflict(err.Error())
+	case errors.Is(err, ErrResourceCatalogUnavailable):
+		return huma.Error503ServiceUnavailable(err.Error())
+	default:
+		return huma.Error500InternalServerError("apply build inputs: " + err.Error())
+	}
 }
 
 // mapTagError maps SaveSpec failures onto the edge vocabulary: the spec gate

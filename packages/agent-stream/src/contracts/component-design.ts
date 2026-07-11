@@ -136,8 +136,6 @@ export interface Dependency {
    * the OpenChoreo Resource spec.parameters.
    */
   parameters?: Record<string, string | number | boolean>;
-  /** resolution UI: options attached when the platform marks a dep ambiguous. */
-  candidates?: DependencyCandidate[];
 }
 
 /** One env-var key a component reads at runtime. Mirrors Go `models.ConfigKey`. */
@@ -145,15 +143,10 @@ export interface ConfigKey {
   key: string;
   /** Secret keys route through the secret path. Default: false. */
   secret?: boolean;
-  /** How the value is supplied/stored: "secret" (user-supplied private) or "publishable" (non-sensitive config). */
-  credentialClass?: "secret" | "publishable";
-}
-
-/** One option attached to an ambiguous dependency. Mirrors Go `models.DependencyCandidate`. */
-export interface DependencyCandidate {
-  label: string;
+  /** Optional human-readable note on what this value is for; the Build dependency drawer renders it under the field. */
   description?: string;
-  url?: string;
+  /** Optional suggested initial value for a NON-secret key (a region, a base URL); the Build dependency drawer pre-fills the field with it. Never set for a secret. */
+  defaultValue?: string;
 }
 
 /** Managed-API exposure policy (platform-owned). Mirrors Go `models.ExposesAPI`. */

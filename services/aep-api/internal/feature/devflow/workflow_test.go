@@ -185,6 +185,7 @@ func registerDevActivities(env *testsuite.TestWorkflowEnvironment, plannedTasks 
 	env.RegisterActivity(acts.SetWorkflowRunTaskCounts)
 	env.RegisterActivity(acts.ValidateSpecAtTag)
 	env.RegisterActivity(acts.RunPlan)
+	env.RegisterActivity(acts.ProvisionDependencies)
 	env.RegisterActivity(acts.Validate)
 	env.OnActivity(acts.RecordWorkflowRun, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.SetWorkflowRunStatus, mock.Anything, mock.Anything).Return(nil)
@@ -193,6 +194,7 @@ func registerDevActivities(env *testsuite.TestWorkflowEnvironment, plannedTasks 
 		Return(nil)
 	env.OnActivity(acts.ValidateSpecAtTag, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.RunPlan, mock.Anything, mock.Anything).Return(plannedTasks, nil)
+	env.OnActivity(acts.ProvisionDependencies, mock.Anything, mock.Anything).Return([]ProvisionFailure(nil), nil)
 	env.OnActivity(acts.Validate, mock.Anything, mock.Anything).Return(nil)
 	return log
 }

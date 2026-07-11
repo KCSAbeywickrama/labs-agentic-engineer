@@ -129,7 +129,16 @@ export function TasksList({
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
-                <TaskStatusChip derivedStatus={t.derivedStatus} />
+                {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
+                  <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
+                    {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+                    <Box sx={{ display: "inline-flex" }}>
+                      <TaskStatusChip derivedStatus={t.derivedStatus} />
+                    </Box>
+                  </Tooltip>
+                ) : (
+                  <TaskStatusChip derivedStatus={t.derivedStatus} />
+                )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 64 }}>
                 <Tooltip title="Open the GitHub issue">
