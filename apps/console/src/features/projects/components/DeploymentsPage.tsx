@@ -31,6 +31,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
+import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import {
   useComponentsDeployments,
   useProjectComponents,
@@ -43,25 +44,27 @@ import {
 
 // Chip vocabulary for a card's state (#216): the label keeps the backend's
 // raw condition reason (it's the vocabulary operators see in OpenChoreo),
-// only the two join-derived states get console-authored labels.
+// only the two join-derived states get console-authored labels. Tones feed
+// the shared StatusChip (Task 4) so this card's chip shares one palette
+// with every other status pill in the app.
 function cardChip(card: DeploymentCard): {
   label: string;
-  color: "success" | "error" | "info" | "default";
+  tone: StatusTone;
   outlined?: boolean;
 } {
   switch (card.kind) {
     case "notDeployed":
-      return { label: "Not deployed", color: "default", outlined: true };
+      return { label: "Not deployed", tone: "neutral", outlined: true };
     case "undeployed":
-      return { label: "Undeployed", color: "default" };
+      return { label: "Undeployed", tone: "neutral" };
     case "success":
-      return { label: card.deployment?.status ?? "Ready", color: "success" };
+      return { label: card.deployment?.status ?? "Ready", tone: "success" };
     case "error":
-      return { label: card.deployment?.status ?? "Failed", color: "error" };
+      return { label: card.deployment?.status ?? "Failed", tone: "error" };
     case "transitional":
-      return { label: card.deployment?.status ?? "In progress", color: "info" };
+      return { label: card.deployment?.status ?? "In progress", tone: "info" };
     default:
-      return { label: "Pending", color: "default", outlined: true };
+      return { label: "Pending", tone: "neutral", outlined: true };
   }
 }
 
@@ -100,10 +103,9 @@ function BoardCard({ card, column }: { card: DeploymentCard; column: string }) {
           <Typography variant="subtitle2" sx={{ flexGrow: 1, minWidth: 0 }}>
             {card.displayName}
           </Typography>
-          <Chip
+          <StatusChip
             label={chip.label}
-            size="small"
-            color={chip.color}
+            tone={chip.tone}
             {...(chip.outlined && { variant: "outlined" as const })}
           />
         </Stack>
