@@ -219,7 +219,7 @@ export function AlertDetail({ alertId }: { alertId: string }) {
           {error instanceof Error && error.message ? `: ${error.message}` : ""}
         </Alert>
       ) : (
-        <Stepper activeStep={STAGE_INDEX[deriveStage(report)]} orientation="vertical" nonLinear sx={{height: '45vh', overflow: `auto`}}>
+        <Stepper activeStep={STAGE_INDEX[deriveStage(report)]} orientation="vertical" nonLinear sx={{ height: "45vh", overflow: "auto" }}>
           <Step completed={STAGE_INDEX[deriveStage(report)] > 0}>
             <StepLabel>Alert Received</StepLabel>
             <StepContent TransitionProps={{ in: true }}>
