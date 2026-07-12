@@ -33,6 +33,7 @@ import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
+import { SectionTitle } from "../../../components/SectionTitle";
 import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import {
   useComponentsDeployments,
@@ -198,23 +199,24 @@ function BoardColumn({
         p: 2,
       }}
     >
-      <Stack
-        direction="row"
-        spacing={1}
-        sx={{ alignItems: "center", mb: 2, px: 0.5 }}
+      <SectionTitle
+        trailing={
+          <>
+            <Chip label={cards.length} size="small" variant="outlined" />
+            {version && (
+              <Chip
+                label={version}
+                size="small"
+                color="primary"
+                variant="outlined"
+                title="Spec version live in this environment"
+              />
+            )}
+          </>
+        }
       >
-        <Typography variant="subtitle1">{title}</Typography>
-        <Chip label={cards.length} size="small" variant="outlined" />
-        {version && (
-          <Chip
-            label={version}
-            size="small"
-            color="primary"
-            variant="outlined"
-            title="Spec version live in this environment"
-          />
-        )}
-      </Stack>
+        {title}
+      </SectionTitle>
       {cards.length === 0 ? (
         <EmptyState compact description={emptyText} />
       ) : (

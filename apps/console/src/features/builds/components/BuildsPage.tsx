@@ -31,10 +31,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
+import { SectionTitle } from "../../../components/SectionTitle";
 import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
-import { useProjectStatus } from "../../projects/api/queries";
-import { phaseChip } from "../../projects/lib/phaseChip";
 import { TasksList } from "../../tasks/components/TasksList";
 import { useBuilds } from "../api/queries";
 
@@ -52,17 +51,15 @@ export function BuildsPage({
   tag: string | undefined;
   onTagChange: (tag: string | undefined) => void;
 }) {
-  const status = useProjectStatus(projectName);
   const builds = useBuilds(projectName);
 
   // The header is unconditional (it renders through every state below) so
-  // the back link and project status stay reachable even while builds are
+  // the back link stays reachable even while builds are
   // loading or failed to load — matching the pattern every other adopted
   // page uses (render the header, then branch on the body).
   const header = (
     <PageHeader
       title="Builds"
-      {...(status.data && { status: phaseChip(status.data) })}
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
         label: "Back to Overview",
@@ -114,11 +111,6 @@ export function BuildsPage({
     );
   }
 
-  // Header status reflects the SELECTED build's state (Running / Succeeded /
-  // Failed) — the most relevant status on the builds page — matching the
-  // summary card's chip below.
-  const headerStatus = buildStatusChip(selected.status);
-
   // The version picker lives up in the header row (same level as the title),
   // so it reads as a page-level control and the summary card can span full
   // width below it.
@@ -144,9 +136,11 @@ export function BuildsPage({
 
   return (
     <>
+      {/* No status chip in the header — the build's status lives on the
+          summary card below (next to the version), so a header chip would just
+          duplicate it. */}
       <PageHeader
         title="Builds"
-        status={headerStatus}
         backTo={{
           link: <Link to="/projects/$projectName" params={{ projectName }} />,
           label: "Back to Overview",
@@ -156,13 +150,7 @@ export function BuildsPage({
       <Box sx={{ mb: 4 }}>
         <BuildSummaryCard build={selected} />
       </Box>
-      <Typography
-        variant="overline"
-        color="text.secondary"
-        sx={{ display: "block", mb: 1 }}
-      >
-        Tasks
-      </Typography>
+      <SectionTitle>Tasks</SectionTitle>
       <TasksList projectName={projectName} tag={selected.tag} />
     </>
   );
