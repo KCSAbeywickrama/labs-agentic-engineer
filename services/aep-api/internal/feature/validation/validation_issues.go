@@ -215,26 +215,18 @@ func renderScope(doc *criteriaDoc) string {
 		"The deployed endpoint URLs and any test credentials are provided to the validation runner by the platform at dispatch time — they are not in this issue.",
 		"",
 		"## Acceptance oracle",
-		fmt.Sprintf("The source of truth is `%s` in this repo. Do not edit it except to set `covered: true` on e2e criteria whose spec passes.", criteriaFilePath),
+		fmt.Sprintf("The source of truth is `%s` in this repo. It is read-only input for this task — do not modify it or anything else under `specs/`.", criteriaFilePath),
 		"",
-		fmt.Sprintf("- `e2e` — %d criteria (%d already covered by committed specs; run those as regression, author specs only for the rest).", sum.E2E, sum.E2ECovered),
+		fmt.Sprintf("- `e2e` — %d criteria: a committed spec already at `tests/e2e/specs/<AC-ID>.spec.ts` runs as regression; author specs for the rest.", sum.E2E),
 		fmt.Sprintf("- `manual` — %d criteria: render as an unchecked human checklist in the report.", sum.Manual),
 		fmt.Sprintf("- `scenario` — %d criteria: out of scope for automation in this run; list as not-yet-validated in the report.", sum.Scenario),
 		"",
 	)
 
 	for _, r := range doc.Requirements {
-		w(fmt.Sprintf("### %s — %s", r.ID, r.Statement), "", "| Criterion | Method | Covered | Must |", "|---|---|---|---|")
+		w(fmt.Sprintf("### %s — %s", r.ID, r.Statement), "", "| Criterion | Method | Must |", "|---|---|---|")
 		for _, c := range r.Criteria {
-			covered := "—"
-			if c.Method == "e2e" {
-				if c.Covered != nil && *c.Covered {
-					covered = "yes"
-				} else {
-					covered = "no"
-				}
-			}
-			w(fmt.Sprintf("| %s | %s | %s | %s |", c.ID, c.Method, covered, strings.ReplaceAll(c.Must, "|", "\\|")))
+			w(fmt.Sprintf("| %s | %s | %s |", c.ID, c.Method, strings.ReplaceAll(c.Must, "|", "\\|")))
 		}
 		w("")
 	}
@@ -248,8 +240,7 @@ func renderScope(doc *criteriaDoc) string {
 		"- UI criteria: browser specs (`@playwright/test`). API criteria: the built-in `request` fixture. Explore with `playwright-cli` first; never commit exploration sessions.",
 		"",
 		"## Report",
-		"- Commit `specs/validation/report.md` (summary, per-criterion results, manual checklist, scenario not-yet-validated list) and `specs/validation/report.json`.",
-		"- Set `covered: true` in the criteria file for each e2e criterion whose spec passes.",
+		"- Commit `tests/validation/report.md` (summary, per-criterion results, manual checklist, scenario not-yet-validated list) and `tests/validation/report.json`.",
 		"- Post a summary comment on this issue when done.",
 		"",
 		"---",

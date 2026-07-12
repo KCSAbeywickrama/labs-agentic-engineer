@@ -30,11 +30,10 @@ Create `specs/validation/validation-criteria.json` (use `addFile`; if it already
 contents). The file MUST be valid JSON conforming **exactly** to the schema below — no comments, no
 trailing prose, no Markdown fences. Keep field order stable.
 
-**Regeneration — preserve `covered`.** When the file already exists in your workspace, the validation
-run may have written `covered: true` on e2e criteria whose tests passed. For every criterion whose `id`
-AND `must` text are unchanged from the existing file, copy its existing `covered` value; a new or
-reworded criterion gets `covered: false`. Never invent `covered: true` yourself — only carry forward
-what the existing file already has.
+**Regeneration — keep ids stable.** When the file already exists in your workspace, keep each unchanged
+criterion's `id` the same as in the existing file. Committed e2e specs are keyed by criterion id
+(`tests/e2e/specs/<AC-ID>.spec.ts`), so renumbering an unchanged criterion would orphan its spec. Assign
+a fresh id only to a genuinely new or reworded criterion.
 
 ```json
 {
@@ -43,8 +42,8 @@ what the existing file already has.
       "id": "REQ-001",
       "statement": "Users can reset their password via email",
       "criteria": [
-        { "id": "AC-001-a", "must": "A registered email receives a reset link", "method": "e2e", "covered": false },
-        { "id": "AC-001-b", "must": "The reset link expires after 1 hour", "method": "e2e", "covered": false },
+        { "id": "AC-001-a", "must": "A registered email receives a reset link", "method": "e2e" },
+        { "id": "AC-001-b", "must": "The reset link expires after 1 hour", "method": "e2e" },
         { "id": "AC-001-c", "must": "The reset confirmation message is clear and actionable", "method": "scenario" }
       ]
     }
@@ -63,7 +62,6 @@ what the existing file already has.
 | `criteria[].id` | `AC-<req-number>-<letter>`, e.g. `AC-001-a`, `AC-001-b`. |
 | `criteria[].must` | A single, **atomic**, verifiable assertion. No conjunctions — split "X and Y" into two criteria. |
 | `criteria[].method` | Exactly one of `e2e` \| `scenario` \| `manual` (see below). |
-| `criteria[].covered` | `false` for every NEW/changed `e2e` criterion; **omit** it entirely for `scenario`/`manual`. On regeneration, carry forward the existing value for unchanged criteria (see above) — never invent `true` (the validation run writes that). |
 
 ## Assigning `method`
 
@@ -92,8 +90,6 @@ When unsure between `e2e` and `scenario`, choose `e2e` if you can phrase a concr
 
 - Do not add fields beyond the schema, comments, or any prose inside the JSON.
 - Do not read `design.md`, `openapi.yaml`, or source code to derive criteria (requirement-only input).
-- Do not set `covered: true` on any criterion yourself — only carry an existing `true` forward for an
-  unchanged criterion when regenerating.
 - Do not generate e2e test files, a validation workflow, or anything else — this skill produces the
   single `specs/validation/validation-criteria.json` file, whether it runs standalone or as the final
   step of a design turn.

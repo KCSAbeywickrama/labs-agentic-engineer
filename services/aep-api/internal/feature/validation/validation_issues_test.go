@@ -66,8 +66,8 @@ const sampleCriteria = `{
   "requirements": [
     { "id": "REQ-001", "statement": "Greets by name",
       "criteria": [
-        { "id": "AC-001-a", "must": "A text box is visible", "method": "e2e", "covered": false },
-        { "id": "AC-001-b", "must": "Says Hello, name", "method": "e2e", "covered": true }
+        { "id": "AC-001-a", "must": "A text box is visible", "method": "e2e" },
+        { "id": "AC-001-b", "must": "Says Hello, name", "method": "e2e" }
       ] },
     { "id": "REQ-002", "statement": "Copy is clear",
       "criteria": [ { "id": "AC-002-a", "must": "Greeting is friendly", "method": "manual" } ] }
@@ -136,8 +136,10 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 	if strings.Contains(human.Body, "## Deployed endpoints") {
 		t.Error("body must NOT carry a Deployed endpoints section (runner fetches endpoints from validation-context)")
 	}
-	// e2e count reflects the oracle (2 e2e, 1 already covered).
-	if !strings.Contains(human.Body, "`e2e` — 2 criteria (1 already covered") {
+	// e2e count reflects the oracle (2 e2e). Coverage is no longer a field —
+	// it is derived from committed-spec presence, so the oracle summary just
+	// counts by method.
+	if !strings.Contains(human.Body, "`e2e` — 2 criteria") {
 		t.Errorf("acceptance-oracle counts wrong; body:\n%s", human.Body)
 	}
 }

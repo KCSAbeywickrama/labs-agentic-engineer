@@ -39,19 +39,14 @@ type criterion struct {
 	ID     string `json:"id"`
 	Must   string `json:"must"`
 	Method string `json:"method"` // e2e | scenario | manual
-	// Covered is present (and meaningful) only for e2e criteria; nil for
-	// scenario/manual. A pointer so an absent field is distinguishable from
-	// false.
-	Covered *bool `json:"covered,omitempty"`
 }
 
 // criteriaSummary is the per-method tally rendered in the issue's acceptance
 // oracle section.
 type criteriaSummary struct {
-	E2E        int
-	E2ECovered int
-	Scenario   int
-	Manual     int
+	E2E      int
+	Scenario int
+	Manual   int
 }
 
 // parseCriteria decodes and minimally validates the oracle: it must have at
@@ -72,8 +67,8 @@ func parseCriteria(raw []byte) (*criteriaDoc, error) {
 	return &doc, nil
 }
 
-// summarize tallies criteria by method (e2e criteria also counted as covered
-// when covered==true) — mirrors scripts/create-validation-issue.mjs:summarize.
+// summarize tallies criteria by method — mirrors
+// scripts/create-validation-issue.mjs:summarize.
 func (d *criteriaDoc) summarize() criteriaSummary {
 	var s criteriaSummary
 	for _, r := range d.Requirements {
@@ -81,9 +76,6 @@ func (d *criteriaDoc) summarize() criteriaSummary {
 			switch c.Method {
 			case "e2e":
 				s.E2E++
-				if c.Covered != nil && *c.Covered {
-					s.E2ECovered++
-				}
 			case "scenario":
 				s.Scenario++
 			case "manual":

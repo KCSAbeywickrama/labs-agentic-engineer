@@ -26,19 +26,21 @@
 // run there — the agent never authors the report by hand, so statuses
 // cannot drift from what the test run actually produced.
 //
+// The oracle is READ-ONLY input: this script reads it but never writes it.
+// The validation phase must not touch specs/ — coverage is expressed by the
+// report's per-criterion pass/fail, not by a flag written back into the oracle.
+//
 // Inputs (paths relative to the project repo root, override via flags):
 //   --issue <n>       validation issue number (required)
 //   --commit <sha>    commit under validation (default: "unknown")
-//   --criteria <p>    default specs/validation/validation-criteria.json
+//   --criteria <p>    default specs/validation/validation-criteria.json (read-only)
 //   --results <p>     default tests/e2e/test-results/results.json
 //   --heal-log <p>    default tests/e2e/heal-log.json (optional file)
-//   --out <dir>       default specs/validation
+//   --out <dir>       default tests/validation
 //
 // Outputs:
 //   <out>/report.json          machine-readable report (schemaVersion 1)
 //   <out>/report.md            human report incl. manual checklist
-//   criteria file rewritten    covered: true for passing e2e criteria
-//                              (never flips true back to false)
 //
 // Join key: every automated spec's title MUST start with "<AC-ID>: "
 // (e.g. "AC-001-a: shows a name text box"). Duplicate or unknown AC ids
@@ -62,7 +64,7 @@ function parseArgs(argv) {
     criteria: "specs/validation/validation-criteria.json",
     results: "tests/e2e/test-results/results.json",
     healLog: "tests/e2e/heal-log.json",
-    out: "specs/validation",
+    out: "tests/validation",
     commit: "unknown",
     issue: null,
   };
@@ -216,10 +218,12 @@ function main() {
   }
 
   // ---- heal visibility ----------------------------------------------------
-  // A spec belonging to an already-covered criterion that was modified
-  // this run is a heal by definition — it MUST have a heal-log entry,
-  // or a silent change (e.g. a weakened assertion) would ship inside a
-  // clean report. Diffed against the origin default branch (committed
+  // A spec that EXISTED at the base ref and was modified this run is a heal
+  // by definition — it MUST have a heal-log entry, or a silent change (e.g.
+  // a weakened assertion) would ship inside a clean report. The git diff
+  // filter (--diff-filter=M = modified, not added) is exactly the
+  // "pre-existing spec was changed" signal; a brand-new spec is an addition
+  // (A) and is not gated. Diffed against the origin default branch (committed
   // and uncommitted changes both count).
   let healCheckSkipped = false;
   {
@@ -243,11 +247,9 @@ function main() {
       for (const p of modified) {
         const m = /(AC-\d{3}-[a-z])\.spec\.[cm]?[tj]sx?$/.exec(p);
         if (!m) continue;
-        const entry = criteriaById.get(m[1]);
-        if (!entry || entry.criterion.covered !== true) continue;
         if (!healByAc.has(m[1])) {
           errors.push(
-            `${p} (covered criterion ${m[1]}) was modified this run but has no heal-log entry — ` +
+            `${p} (criterion ${m[1]}) is a pre-existing spec modified this run but has no heal-log entry — ` +
               `record the heal in tests/e2e/heal-log.json {criterionId, spec, classification, change, commit} and regenerate`,
           );
         }
@@ -364,26 +366,6 @@ function main() {
   const reportJsonPath = path.join(args.out, "report.json");
   writeFileSync(reportJsonPath, JSON.stringify(report, null, 2) + "\n");
 
-  // ---- covered write-back ---------------------------------------------------
-  // Passing e2e criteria become covered: true. covered is never flipped
-  // back to false — a later genuine regression surfaces as a failed
-  // criterion in the report while the committed spec keeps re-running.
-  const rewritten = {
-    requirements: (criteriaDoc.requirements ?? []).map((req) => ({
-      id: req.id,
-      statement: req.statement,
-      criteria: (req.criteria ?? []).map((c) => {
-        const row = rows.find((r) => r.id === c.id);
-        const out = { id: c.id, must: c.must, method: c.method };
-        if (c.method === "e2e") {
-          out.covered = c.covered === true || row?.status === "pass";
-        }
-        return out;
-      }),
-    })),
-  };
-  writeFileSync(args.criteria, JSON.stringify(rewritten, null, 2) + "\n");
-
   // ---- report.md -------------------------------------------------------------
   const md = [];
   md.push(`# Validation report`);
@@ -498,7 +480,7 @@ function main() {
   console.log(
     `generate-report: e2e ${totals.e2e.pass}/${totals.e2e.total} passing ` +
       `(${totals.e2e.fail} fail, ${totals.e2e.notRun} not run); ` +
-      `wrote ${reportJsonPath}, ${reportMdPath}, updated ${args.criteria}`,
+      `wrote ${reportJsonPath}, ${reportMdPath}`,
   );
 }
 

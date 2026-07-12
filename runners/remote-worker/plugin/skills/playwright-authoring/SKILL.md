@@ -62,7 +62,7 @@ Assertion choices (from the CLI's own guidance):
 
 ## The test plan (PLAN)
 
-Write `specs/validation/test-plan.md` before any spec. One section per
+Write `tests/validation/test-plan.md` before any spec. One section per
 criterion:
 
 ```markdown
@@ -89,7 +89,7 @@ as a bad title. Step comments (one per plan step above the code that
 executes it) are recommended for reviewability:
 
 ```ts
-// spec: specs/validation/test-plan.md § AC-001-a
+// spec: tests/validation/test-plan.md § AC-001-a
 import { test, expect } from "@playwright/test";
 
 test("AC-001-a: a name text box is visible", async ({ page }) => {
@@ -130,7 +130,7 @@ No browser needed — use the built-in `request` fixture against the
 component's URL from the targets helper:
 
 ```ts
-// spec: specs/validation/test-plan.md § AC-003-a
+// spec: tests/validation/test-plan.md § AC-003-a
 import { test, expect } from "@playwright/test";
 import { target } from "../lib/targets";
 

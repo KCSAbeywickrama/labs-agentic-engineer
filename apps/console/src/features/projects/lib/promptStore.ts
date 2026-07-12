@@ -90,7 +90,7 @@ export function buildDesignGenerationInstruction(): string {
     "Then, as the final step, generate the validation acceptance criteria at " +
     "specs/validation/validation-criteria.json using the validation-criteria " +
     "skill — derived from the requirements prose only, not from the design you " +
-    "just wrote. If that file already exists, preserve covered: true on any " +
-    "criterion whose id and must are unchanged."
+    "just wrote. If that file already exists, keep each unchanged criterion's " +
+    "id stable so previously-authored e2e specs still map."
   );
 }

@@ -95,13 +95,11 @@ function validateCriteria(doc) {
 }
 
 function summarize(doc) {
-  const sum = { e2e: 0, e2eCovered: 0, scenario: 0, manual: 0 };
+  const sum = { e2e: 0, scenario: 0, manual: 0 };
   for (const req of doc.requirements) {
     for (const c of req.criteria) {
-      if (c.method === "e2e") {
-        sum.e2e++;
-        if (c.covered === true) sum.e2eCovered++;
-      } else sum[c.method]++;
+      if (c.method === "e2e") sum.e2e++;
+      else sum[c.method]++;
     }
   }
   return sum;
@@ -119,19 +117,18 @@ function renderBody(doc, issueNumber) {
     "The deployed endpoint URLs and any test credentials are provided to the validation runner by the platform at dispatch time — they are not in this issue.",
     "",
     "## Acceptance oracle",
-    `The source of truth is \`${CRITERIA_PATH}\` in this repo. Do not edit it except to set \`covered: true\` on e2e criteria whose spec passes.`,
+    `The source of truth is \`${CRITERIA_PATH}\` in this repo. It is read-only input for this task — do not modify it or anything else under \`specs/\`.`,
     "",
-    `- \`e2e\` — ${sum.e2e} criteria (${sum.e2eCovered} already covered by committed specs; run those as regression, author specs only for the rest).`,
+    `- \`e2e\` — ${sum.e2e} criteria: a committed spec already at \`tests/e2e/specs/<AC-ID>.spec.ts\` runs as regression; author specs for the rest.`,
     `- \`manual\` — ${sum.manual} criteria: render as an unchecked human checklist in the report.`,
     `- \`scenario\` — ${sum.scenario} criteria: out of scope for automation in this run; list as not-yet-validated in the report.`,
     ""
   );
 
   for (const req of doc.requirements) {
-    lines.push(`### ${req.id} — ${req.statement}`, "", "| Criterion | Method | Covered | Must |", "|---|---|---|---|");
+    lines.push(`### ${req.id} — ${req.statement}`, "", "| Criterion | Method | Must |", "|---|---|---|");
     for (const c of req.criteria) {
-      const covered = c.method === "e2e" ? (c.covered === true ? "yes" : "no") : "—";
-      lines.push(`| ${c.id} | ${c.method} | ${covered} | ${c.must.replaceAll("|", "\\|")} |`);
+      lines.push(`| ${c.id} | ${c.method} | ${c.must.replaceAll("|", "\\|")} |`);
     }
     lines.push("");
   }
@@ -145,8 +142,7 @@ function renderBody(doc, issueNumber) {
     "- UI criteria: browser specs (`@playwright/test`). API criteria: the built-in `request` fixture. Explore with `playwright-cli` first; never commit exploration sessions.",
     "",
     "## Report",
-    "- Commit `specs/validation/report.md` (summary, per-criterion results, manual checklist, scenario not-yet-validated list) and `specs/validation/report.json`.",
-    "- Set `covered: true` in the criteria file for each e2e criterion whose spec passes.",
+    "- Commit `tests/validation/report.md` (summary, per-criterion results, manual checklist, scenario not-yet-validated list) and `tests/validation/report.json`.",
     "- Post a summary comment on this issue when done.",
     "",
     "---",
