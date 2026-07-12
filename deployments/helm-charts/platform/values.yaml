@@ -174,3 +174,30 @@ postgres:
     limits:
       cpu: "500m"
       memory: "512Mi"
+
+# Temporal workflow engine that drives the devflow workflows. aep-api runs the
+# worker in-process and dials the frontend below. Backed by the postgres
+# StatefulSet above (dedicated temporal / temporal_visibility databases), so
+# workflow state is durable across Temporal pod restarts. enabled=false turns
+# the whole feature off (no server deployed, no TEMPORAL_* env on aep-api, and
+# /devflows answers 503).
+temporal:
+  enabled: true
+  # Temporal namespace aep-api connects to; auto-setup registers it on startup.
+  namespace: "default"
+  # Task queue the in-process worker polls (matches the aep-api code default).
+  taskQueue: "aep-devflow"
+  # temporalio/auto-setup pinned to the server version used by
+  # deployments/scripts/setup-temporal.sh (admin-tools 1.29.7).
+  image: "temporalio/auto-setup:1.29.7"
+  imagePullPolicy: IfNotPresent
+  db:
+    name: "temporal"
+    visibilityName: "temporal_visibility"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"

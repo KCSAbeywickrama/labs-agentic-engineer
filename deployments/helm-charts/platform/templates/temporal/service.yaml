@@ -1,0 +1,23 @@
+{{- if .Values.temporal.enabled }}
+# ClusterIP for the Temporal frontend. aep-api reaches it in-cluster at
+# temporal-frontend.<namespace>.svc.cluster.local:7233 (plain DNS — the
+# docker-compose `passthrough:///` scheme is a docker embedded-DNS workaround
+# not needed here).
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: temporal-frontend
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-aep
+spec:
+  type: ClusterIP
+  ports:
+    - port: 7233
+      targetPort: 7233
+      name: grpc
+  selector:
+    app: temporal-frontend
+{{- end }}

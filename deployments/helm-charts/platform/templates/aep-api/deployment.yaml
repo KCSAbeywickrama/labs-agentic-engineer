@@ -155,6 +155,19 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
               value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}"
+            {{- if .Values.temporal.enabled }}
+            # Temporal (devflow workflows). Points the in-process worker at the
+            # in-cluster temporal-frontend Service. Plain host:port — CoreDNS
+            # answers gRPC's SRV probe, so the compose `passthrough:///` scheme
+            # is not needed. Disabled (temporal.enabled=false) omits these so
+            # devflow is off: no worker starts and /devflows answers 503.
+            - name: TEMPORAL_HOSTPORT
+              value: {{ printf "temporal-frontend.%s.svc.cluster.local:7233" .Release.Namespace | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: TEMPORAL_TASKQUEUE
+              value: {{ .Values.temporal.taskQueue | quote }}
+            {{- end }}
           volumeMounts:
             - name: task-signing-key
               mountPath: /app/keys
