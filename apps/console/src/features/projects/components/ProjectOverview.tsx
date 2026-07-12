@@ -78,33 +78,43 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
 
   return (
     <>
+      {/* The project identity — avatar leads the title, the GitHub repo link
+          sits tight beneath — so the icon, title, and link read as one header
+          unit (Overview-only per Task 5; other sub-pages drop it as redundant
+          with the project switcher). No description subtitle here — that
+          belongs on the project cards, not beside the title. */}
       <PageHeader
-        title={displayName}
-        {...(project.data?.description && { subtitle: project.data.description })}
+        title={
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+            <Avatar
+              sx={{ bgcolor: "primary.main", color: "primary.contrastText" }}
+            >
+              {initial}
+            </Avatar>
+            <span>{displayName}</span>
+          </Stack>
+        }
         {...(status.data && { status: phaseChip(status.data) })}
         backTo={{ link: <Link to="/" />, label: "Back to Projects" }}
       />
-      {/* The project identity block — avatar + GitHub repo link — is the
-          one bit of "header" content that stays Overview-only (Task 5):
-          every other project sub-page dropped it as redundant with the
-          project switcher in the sidebar. */}
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", mb: 4 }}>
-        <Avatar sx={{ bgcolor: "primary.main", color: "primary.contrastText" }}>
-          {initial}
-        </Avatar>
-        {status.data?.repoUrl && (
-          <MuiLink
-            href={status.data.repoUrl}
-            target="_blank"
-            rel="noreferrer"
-            variant="body2"
-            sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
-          >
-            <LinkIcon size={14} />
-            {status.data.repoUrl.replace(/^https?:\/\/(www\.)?/, "")}
-          </MuiLink>
-        )}
-      </Stack>
+      {status.data?.repoUrl && (
+        <MuiLink
+          href={status.data.repoUrl}
+          target="_blank"
+          rel="noreferrer"
+          variant="body2"
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.5,
+            mt: 0.5,
+            mb: 4,
+          }}
+        >
+          <LinkIcon size={14} />
+          {status.data.repoUrl.replace(/^https?:\/\/(www\.)?/, "")}
+        </MuiLink>
+      )}
       <Stack spacing={4}>
         {status.isError ? (
           <SectionError
