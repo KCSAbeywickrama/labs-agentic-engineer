@@ -28,7 +28,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,6 +55,14 @@ const (
 	// cheap to re-reconcile; exponential backoff is not worth the complexity
 	// at v1 scope.
 	errBackoff = 30 * time.Second
+
+	// Labels OpenChoreo's renderedrelease-controller stamps on every rendered
+	// object — they let us trace this app back to the owning ResourceReleaseBinding.
+	labelResource     = "openchoreo.dev/resource"
+	labelCPNamespace  = "openchoreo.dev/namespace"
+	// annReadyNudge, set on the owning binding, forces one binding re-reconcile
+	// when this app becomes ready (see nudgeOwningBindings).
+	annReadyNudge = "aep.wso2.com/thunder-ready-nudge"
 )
 
 // Reconciler reconciles ThunderApplication objects.
@@ -66,6 +76,7 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=aep.wso2.com,resources=thunderapplications/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=aep.wso2.com,resources=thunderapplications/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=openchoreo.dev,resources=resourcereleasebindings,verbs=get;list;patch
 
 // Reconcile drives a ThunderApplication toward its desired Thunder OAuth
 // application and publishes the resulting client_id.
@@ -108,7 +119,58 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err := r.Status().Update(ctx, &app); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.nudgeOwningBindings(ctx, &app)
 	return ctrl.Result{}, nil
+}
+
+// nudgeOwningBindings forces OpenChoreo's ResourceReleaseBinding controller to
+// re-reconcile the binding(s) that rendered this app. That controller evaluates
+// its readyWhen/outputs CEL against the app's status ONCE — before Thunder has
+// minted the client_id — and does not requeue when the app later becomes ready,
+// so the binding stays Ready=False forever and any build depending on the
+// resource hangs. Patching an annotation triggers exactly one binding
+// reconcile, which now sees status.ready + status.clientId and resolves its
+// outputs. The nudge value is the client_id (stable), so repeat passes with the
+// same id are skipped — no reconcile storm. Best-effort: a failure only leaves
+// the pre-existing stuck state, which the next reconcile retries.
+func (r *Reconciler) nudgeOwningBindings(ctx context.Context, app *v1alpha1.ThunderApplication) {
+	logger := log.FromContext(ctx)
+	resource := app.Labels[labelResource]
+	cpNamespace := app.Labels[labelCPNamespace]
+	if resource == "" || cpNamespace == "" {
+		return // not a rendered-release-managed app — nothing owns it
+	}
+
+	bindings := &unstructured.UnstructuredList{}
+	bindings.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "openchoreo.dev",
+		Version: "v1alpha1",
+		Kind:    "ResourceReleaseBindingList",
+	})
+	if err := r.List(ctx, bindings,
+		client.InNamespace(cpNamespace),
+		client.MatchingLabels{labelResource: resource},
+	); err != nil {
+		logger.Error(err, "nudge: list owning bindings failed", "resource", resource)
+		return
+	}
+
+	for i := range bindings.Items {
+		b := &bindings.Items[i]
+		anns := b.GetAnnotations()
+		if anns[annReadyNudge] == app.Status.ClientID {
+			continue // already nudged for this client_id
+		}
+		before := b.DeepCopy()
+		if anns == nil {
+			anns = map[string]string{}
+		}
+		anns[annReadyNudge] = app.Status.ClientID
+		b.SetAnnotations(anns)
+		if err := r.Patch(ctx, b, client.MergeFrom(before)); err != nil {
+			logger.Error(err, "nudge: patch binding failed", "binding", b.GetName())
+		}
+	}
 }
 
 // reconcileDelete removes the backing Thunder app and drops the finalizer.

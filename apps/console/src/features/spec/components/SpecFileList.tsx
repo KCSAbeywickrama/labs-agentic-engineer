@@ -219,9 +219,9 @@ export function SpecFileList({
             </Tooltip>
           )}
         </Box>
-        {design.hasComponents || design.overview.length > 0 ? (
+        {design.hasComponents || design.hasCellDsl || design.overview.length > 0 ? (
           <List dense disablePadding>
-            {design.hasComponents &&
+            {(design.hasComponents || design.hasCellDsl) &&
               row({ kind: "cell-diagram" }, "Architecture", <Network size={16} />)}
             {design.overview.map((f) =>
               row(

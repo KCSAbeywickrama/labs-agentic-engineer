@@ -18,32 +18,30 @@
 
 import type React from "react";
 import { lazy, memo, Suspense } from "react";
-import type { Project } from "@wso2/cell-diagram";
-import type { CellDiagramProject } from "@aep/design-projection";
 import { Box, CircularProgress, Typography } from "@wso2/oxygen-ui";
 
-const CellDiagram = lazy(() =>
-  import("@wso2/cell-diagram").then((m) => ({ default: m.CellDiagram })),
-);
+// Lazy-loaded leaf keeps the renderer's heavy transitive deps (@xyflow, dagre)
+// and its stylesheet out of the main bundle until the diagram is actually
+// shown. The diagram is driven entirely by a cell DSL `source` string.
+const CellDiagram = lazy(() => import("./CellDiagramInner.js"));
 
 export interface CellDiagramViewProps {
   /**
-   * Whole-architecture projection from `@aep/design-projection`
-   * (`toCellDiagramProject(buildProjectDesign(...))`). Structurally a
-   * `@wso2/cell-diagram` `Project`; the only divergence is `type: string` vs
-   * the lib's `ComponentType` enum, which the diagram accepts — hence the
-   * single internal cast. `null`/absent renders the empty state.
+   * Cell DSL source text. Rendered in tolerant mode so a still-growing
+   * `design.cell` (streamed live) draws its partial diagram instead of an
+   * error placeholder. Blank/undefined → the empty state.
    */
-  project?: CellDiagramProject | null;
+  source?: string | undefined;
   /** Optional override for the empty-state copy. */
   emptyState?: React.ReactNode;
 }
 
 export const CellDiagramView = memo(function CellDiagramView({
-  project,
+  source,
   emptyState,
 }: CellDiagramViewProps) {
-  if (!project || project.components.length === 0) {
+  const hasSource = typeof source === "string" && source.trim().length > 0;
+  if (!hasSource) {
     return (
       <Box
         sx={{
@@ -67,12 +65,6 @@ export const CellDiagramView = memo(function CellDiagramView({
   }
 
   return (
-    // position: 'relative' establishes a containing block for the library's
-    // zoom/fit control panel: its `DiagramContainer` (the direct parent of
-    // the absolutely-positioned control panel) sets no `position` of its
-    // own, so without an ancestor here the controls escape to the nearest
-    // positioned ancestor in the whole page (effectively the viewport),
-    // landing wherever the page happens to end rather than inside this pane.
     <Box sx={{ flex: 1, minHeight: 0, display: "flex", position: "relative" }}>
       <Suspense
         fallback={
@@ -81,7 +73,7 @@ export const CellDiagramView = memo(function CellDiagramView({
           </Box>
         }
       >
-        <CellDiagram project={project as unknown as Project} />
+        <CellDiagram source={source} />
       </Suspense>
     </Box>
   );

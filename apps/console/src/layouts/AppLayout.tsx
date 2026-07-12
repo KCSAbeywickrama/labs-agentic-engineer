@@ -40,6 +40,7 @@ import {
   LogOut,
   Rocket,
   Settings,
+  Siren,
   Sparkles,
   User as UserIcon,
   WSO2,
@@ -54,6 +55,7 @@ import {
 } from "@tanstack/react-router";
 import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
+import { AlertsNotificationPanel, NotificationButton } from "./NotificationBell";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
 
 // Footer links (grilled 2026-07-12): the repo is the only real destination
@@ -64,6 +66,7 @@ const REPO_URL = "https://github.com/wso2/labs-agentic-engineer";
 // (global nav) or per project section (project nav, ADR-0010).
 function activeItemFor(pathname: string, inProject: boolean): string {
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/alerts")) return "alerts";
   if (!inProject) return "projects";
   const section = pathname.split("/")[3];
   switch (section) {
@@ -90,7 +93,7 @@ function SidebarAutoCollapse({ collapsed }: { collapsed: boolean }) {
 }
 
 // App shell per the oxygen-ui skill's canonical AppLayout: Header + Sidebar +
-// Main(Outlet) + Footer. NotificationPanel arrives with its feature.
+// Main(Outlet) + Footer + NotificationPanel (Alerts, #154/#155).
 export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user, signOut, orgHandle } = useSession();
@@ -168,6 +171,7 @@ export function AppLayout() {
               </Tooltip>
             )}
             <ColorSchemeToggle />
+            <NotificationButton />
             <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
             <UserMenu>
               <UserMenu.Trigger name={user.name} />
@@ -272,6 +276,13 @@ export function AppLayout() {
                   </Sidebar.ItemIcon>
                   <Sidebar.ItemLabel>Projects</Sidebar.ItemLabel>
                 </Sidebar.Item>
+                {/* Global Alerts section (#155) — RCA-agent reports across every project. */}
+                <Sidebar.Item id="alerts" link={<Link to="/alerts" />}>
+                  <Sidebar.ItemIcon>
+                    <Siren />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Alerts</Sidebar.ItemLabel>
+                </Sidebar.Item>
               </Sidebar.Category>
             )}
           </Sidebar.Nav>
@@ -355,6 +366,10 @@ export function AppLayout() {
           </Footer.Link>
         </Footer>
       </AppShell.Footer>
+
+      <AppShell.NotificationPanel>
+        <AlertsNotificationPanel />
+      </AppShell.NotificationPanel>
     </AppShell>
   );
 }

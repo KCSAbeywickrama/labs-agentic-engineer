@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "yaml": "^2.8.4",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@aep/excalidraw-dsl": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.21.0"

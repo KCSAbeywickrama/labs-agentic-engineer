@@ -17,9 +17,10 @@
 # NEW file-mutation agents service (services/agents). Built from the REPO ROOT
 # context (docker-compose sets `context: ..`) because @aep/agents imports the
 # workspace package @aep/agent-stream — pnpm must see the whole workspace to
-# resolve it. (@aep/excalidraw-dsl and @aep/design-projection are devDependencies
-# used only by the playground/evals, never by src/main.ts, so the running service
-# needs neither installed nor built.)
+# resolve it. @aep/agent-stream in turn depends on @aep/excalidraw-dsl (the
+# wireframes layout write-gate), so that package must be installed AND built
+# too. (@aep/design-projection stays a playground/evals-only devDependency —
+# never imported by src/main.ts, so not built here.)
 FROM node:22-bookworm-slim
 
 RUN corepack enable
@@ -41,9 +42,11 @@ RUN pnpm install --frozen-lockfile --filter @aep/agents...
 # @aep/agents runs from TypeScript source via tsx (no build of its own), but it
 # imports @aep/agent-stream and @aep/collab-doc as packages whose `exports`
 # resolve to ./dist — both MUST be compiled before the service can start.
+# @aep/excalidraw-dsl builds FIRST: @aep/agent-stream imports it (the layout
+# write-gate), so its dist must exist for agent-stream's tsc to resolve it.
 # Without this step the container crashes at boot with "Cannot find module
 # .../@aep/agent-stream/dist" (or the collab-doc analog).
-RUN pnpm --filter @aep/agent-stream build && pnpm --filter @aep/collab-doc build
+RUN pnpm --filter @aep/excalidraw-dsl build && pnpm --filter @aep/agent-stream build && pnpm --filter @aep/collab-doc build
 
 WORKDIR /repo/services/agents
 

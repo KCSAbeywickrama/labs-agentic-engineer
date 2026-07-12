@@ -16,41 +16,106 @@
  * under the License.
  */
 
-import { Alert, Box, CircularProgress, Typography } from "@wso2/oxygen-ui";
+import { useMemo, useRef } from "react";
+import { Alert, Box, Chip, CircularProgress, Typography } from "@wso2/oxygen-ui";
 import { ExcalidrawView } from "@aep/ui-excalidraw-view";
 import { useDerivedWireframe } from "../api/useDerivedDesign";
+import { deriveWireframeScene } from "../derive/deriveWireframe";
 import type { SpecFileEntry } from "../api/mapping";
+import type { CollabSpec } from "../collab/useCollabSpec";
+import { useYTextString } from "../collab/useYTextString";
 
 export function WireframePanel({
   projectName,
   dslPath,
   files,
+  collab,
 }: {
   projectName: string;
   dslPath: string;
   files: SpecFileEntry[];
+  collab: CollabSpec;
 }) {
   const sha = files.find((f) => f.path === dslPath)?.sha;
   const { scene, isPending, isError } = useDerivedWireframe(projectName, dslPath, sha);
 
-  if (isPending) {
+  // The committed file is authoritative. While it is not yet resolved (the
+  // agent is still writing wireframes.dsl, or the fetch is pending/failing
+  // mid-turn), fall back to the live DSL streaming into the collab doc so the
+  // screens draw piece-by-piece as the agent writes them — same pattern as
+  // CellDiagramPanel. Both paths feed the SAME compiler, so the streamed and
+  // committed renders match.
+  const liveSource = useYTextString(collab.getFileText(dslPath));
+  // The writer flushes on line boundaries, so the live text is whole lines —
+  // but a mid-stream compile can still fail (e.g. a screen header typed ahead
+  // of its body). Hold the last GOOD scene so a bad intermediate never blanks
+  // the already-drawn screens.
+  const lastGoodLive = useRef<string | null>(null);
+  const liveScene = useMemo(() => {
+    if (typeof liveSource !== "string" || liveSource.trim().length === 0) return null;
+    const compiled = deriveWireframeScene(dslPath, liveSource);
+    if (compiled) lastGoodLive.current = compiled;
+    return lastGoodLive.current;
+  }, [dslPath, liveSource]);
+
+  const derivedReady = !isPending && !isError && scene != null;
+  const streaming = !derivedReady && liveScene != null;
+  const agentBusy = collab.peers.some((p) => p.kind === "agent");
+
+  if (!streaming && isPending) {
     return (
       <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <CircularProgress aria-label="Loading wireframe" />
       </Box>
     );
   }
-  if (isError) return <Alert severity="error">Failed to load {dslPath}.</Alert>;
-  if (!scene) {
+  if (!streaming && isError) {
+    // Mid-generation the committed file may not exist yet; with an agent in
+    // the room that is "drawing about to start", not a failure.
+    if (agentBusy) {
+      return (
+        <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Typography variant="body2" color="text.secondary">
+            Waiting for the agent to draw the wireframes…
+          </Typography>
+        </Box>
+      );
+    }
+    return <Alert severity="error">Failed to load {dslPath}.</Alert>;
+  }
+  if (!streaming && !scene) {
     return (
       <Typography variant="body2" color="text.secondary">
         This wireframe source could not be rendered.
       </Typography>
     );
   }
-  // ExcalidrawView(fillHeight) sets `flex: 1` on its own root — it fills its
-  // flex-column parent directly; no extra wrapper needed (an extra
-  // `height: '100%'` Box here would just re-introduce the sizing bug this
-  // component was written to avoid).
-  return <ExcalidrawView key={sha} scene={scene} fillHeight />;
+
+  // While streaming, ONE mounted canvas takes successive scenes through
+  // ExcalidrawView's updateScene path (no `key`, no remount per line). The
+  // committed render keeps the remount-by-sha behavior. ExcalidrawView
+  // (fillHeight) sets `flex: 1` on its own root inside the flex column.
+  return (
+    <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      {streaming && (
+        <Box
+          sx={{
+            px: 1.5,
+            py: 1,
+            display: "flex",
+            alignItems: "center",
+            borderBottom: 1,
+            borderColor: "divider",
+          }}
+        >
+          <Chip size="small" color="primary" variant="outlined" label="Drawing…" />
+        </Box>
+      )}
+      {streaming ? (
+        <ExcalidrawView scene={liveScene!} fillHeight />
+      ) : (
+        <ExcalidrawView key={sha} scene={scene!} fillHeight />
+      )}
+    </Box>
+  );
 }

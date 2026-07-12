@@ -304,6 +304,12 @@ func assertIdentityClaimContract(t *testing.T, body map[string]any) {
 		if !anySliceHas(sub["userAttributes"], "groups") {
 			t.Errorf("token.%s.userAttributes = %v, want to include %q (drives role-based UI)", kind, sub["userAttributes"], "groups")
 		}
+		// A long-lived token keeps a returning SPA user signed in across a
+		// refresh/new tab; dropping validityPeriod reverts to Thunder's short
+		// default and reintroduces the every-visit re-login.
+		if sub["validityPeriod"] == nil {
+			t.Errorf("token.%s.validityPeriod missing — SPA session would expire on Thunder's short default", kind)
+		}
 	}
 	sc, _ := cfg["scopeClaims"].(map[string]any)
 	if !anySliceHas(sc["group"], "groups") {

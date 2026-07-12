@@ -34,7 +34,7 @@ import {
   useAppShell,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
   useBuildPreflight,
@@ -56,6 +56,7 @@ import { WireframePanel } from "./WireframePanel";
 import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { SpecSelection } from "../api/designTree";
+import { DESIGN_CELL_PATH } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
@@ -136,15 +137,37 @@ export function SpecView({ projectName }: { projectName: string }) {
       .filter((e): e is NonNullable<typeof e> => e !== null)
       .sort((a, b) => a.path.localeCompare(b.path));
   }, [spec.data, collab.docPaths]);
-  // Default selection: the first requirements file (the seeded PRD).
+  // A live design turn is signalled by `?generate=design` (the Generate-design
+  // CTA) and, more durably, by an agent peer streaming design.cell into the
+  // room. In either case the Architecture (cell-diagram) tab is where the user
+  // wants to be, so we auto-select it.
+  const generate = (
+    useSearch({ strict: false }) as { generate?: "requirements" | "design" }
+  ).generate;
+  const agentInRoom = collab.peers.some((p) => p.kind === "agent");
+  const hasDesignCell = files.some((f) => f.path === DESIGN_CELL_PATH);
+
+  // On the Generate-design signal, jump to the Architecture tab immediately
+  // (before design.cell even exists) so the empty/streaming cell is shown.
+  // AppLayout strips the param right after auto-sending, so this fires once.
+  useEffect(() => {
+    if (generate === "design") setSelection({ kind: "cell-diagram" });
+  }, [generate]);
+
+  // Default selection: while a design turn is actively producing design.cell,
+  // default to Architecture (covers a reload mid-turn); otherwise the first
+  // requirements file (the seeded PRD). A manual click sets `selection` and
+  // always wins over this default.
   const firstRequirements = files.find((f) => f.group === "requirements");
   const effectiveSelection: SpecSelection =
     selection ??
-    (firstRequirements
-      ? { kind: "file", path: firstRequirements.path }
-      : files[0]
-        ? { kind: "file", path: files[0].path }
-        : { kind: "file", path: "" });
+    (agentInRoom && hasDesignCell
+      ? { kind: "cell-diagram" }
+      : firstRequirements
+        ? { kind: "file", path: firstRequirements.path }
+        : files[0]
+          ? { kind: "file", path: files[0].path }
+          : { kind: "file", path: "" });
 
   // The concrete file entry when the selection is a file (else null: the
   // synthetic cell-diagram / wireframe views render their own panels).
@@ -532,12 +555,13 @@ export function SpecView({ projectName }: { projectName: string }) {
               }
             >
               {effectiveSelection.kind === "cell-diagram" ? (
-                <CellDiagramPanel projectName={projectName} files={files} />
+                <CellDiagramPanel projectName={projectName} files={files} collab={collab} />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel
                   projectName={projectName}
                   dslPath={effectiveSelection.dslPath}
                   files={files}
+                  collab={collab}
                 />
               ) : selectedFile ? (
                 // Per-type renderers (WYSIWYG for markdown, dedicated components

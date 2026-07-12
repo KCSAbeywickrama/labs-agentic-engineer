@@ -92,18 +92,28 @@ export function TasksList({
           </ListingTable.Row>
         </ListingTable.Head>
         <ListingTable.Body>
-          {tasks.data.map((t) => (
+          {tasks.data.map((t) => {
+            // Provision/config gates are platform-driven (approved in the Build
+            // drawer, resolved out-of-band): there is no task page to open, so the
+            // row is non-clickable — you watch its status and open the GitHub issue.
+            // Its Component column shows "—" (a gate names a dependency, not a
+            // component).
+            const isGate = t.executorClass === "provision";
+            return (
             <ListingTable.Row
               key={t.issueNumber}
               variant="card"
-              hover
-              onClick={() =>
-                void navigate({
-                  to: "/projects/$projectName/builds/$issueNumber",
-                  params: { projectName, issueNumber: t.issueNumber },
-                })
+              hover={!isGate}
+              onClick={
+                isGate
+                  ? undefined
+                  : () =>
+                      void navigate({
+                        to: "/projects/$projectName/builds/$issueNumber",
+                        params: { projectName, issueNumber: t.issueNumber },
+                      })
               }
-              sx={{ cursor: "pointer" }}
+              sx={{ cursor: isGate ? "default" : "pointer" }}
             >
               <ListingTable.Cell>
                 <ListingTable.CellIcon
@@ -120,12 +130,12 @@ export function TasksList({
                 />
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 160 }}>
-                {t.component ? (
-                  <Chip label={t.component} size="small" variant="outlined" />
-                ) : (
+                {isGate || !t.component ? (
                   <Typography variant="caption" color="text.secondary">
                     —
                   </Typography>
+                ) : (
+                  <Chip label={t.component} size="small" variant="outlined" />
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
@@ -155,7 +165,8 @@ export function TasksList({
                 </Tooltip>
               </ListingTable.Cell>
             </ListingTable.Row>
-          ))}
+            );
+          })}
         </ListingTable.Body>
       </ListingTable>
     </ListingTable.Container>

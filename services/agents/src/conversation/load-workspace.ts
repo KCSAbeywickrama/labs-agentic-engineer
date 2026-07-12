@@ -48,11 +48,13 @@ import type { SkillCatalogEntry, SkillSource, LoadedSkillBody } from "../agents/
 
 /**
  * The turn-snapshot filter — mirrors aep-api `genai.keepInSnapshot`: keep
- * agent-authored sources (`*.md`, `*.dsl`, component `design.json`) and drop
- * everything else (derived `.excalidraw`/`*.gen.json` projections, code, …).
+ * agent-authored sources (`*.md`, `*.dsl`, `*.cell`, component `design.json`)
+ * and drop everything else (derived `.excalidraw`/`*.gen.json` projections,
+ * code, …). `*.cell` is the project-level cell-diagram DSL (design.cell) that
+ * drives the live architecture diagram.
  */
 export function keepInTurnSnapshot(path: string): boolean {
-  if (path.endsWith(".md") || path.endsWith(".dsl")) return true;
+  if (path.endsWith(".md") || path.endsWith(".dsl") || path.endsWith(".cell")) return true;
   return basename(path) === "design.json";
 }
 

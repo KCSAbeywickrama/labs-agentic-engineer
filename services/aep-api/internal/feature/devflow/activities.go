@@ -101,16 +101,19 @@ func (a *Activities) RecordWorkflowRun(ctx context.Context, in RecordWorkflowRun
 	})
 }
 
-// SetWorkflowRunStatusInput marks a run terminal in the lookup index.
+// SetWorkflowRunStatusInput marks a run terminal in the lookup index. Reason
+// carries the failure detail for a `failed` status (empty otherwise) so the
+// build summary can show WHY the run failed.
 type SetWorkflowRunStatusInput struct {
 	WorkflowID string `json:"workflowId"`
 	Status     string `json:"status"` // completed | failed | canceled
+	Reason     string `json:"reason,omitempty"`
 }
 
-// SetWorkflowRunStatus records a run's terminal status in the lookup index.
-// Called as the final activity of both workflows.
+// SetWorkflowRunStatus records a run's terminal status (+ failure reason) in the
+// lookup index. Called as the final activity of both workflows.
 func (a *Activities) SetWorkflowRunStatus(ctx context.Context, in SetWorkflowRunStatusInput) error {
-	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status)
+	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status, in.Reason)
 }
 
 // SetWorkflowRunTaskCountsInput carries a dev run's task tally — absolute

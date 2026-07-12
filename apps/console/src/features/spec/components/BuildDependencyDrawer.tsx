@@ -24,6 +24,7 @@ import {
   Drawer,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
@@ -210,17 +211,54 @@ function ExternalSpecPanel({
 
 function InfoPanel({
   item,
-  description,
+  kindLabel,
+  detail,
 }: {
   item: PreflightItem;
-  description: string;
+  // A short label shown right under the name (e.g. "Cross-project endpoint").
+  kindLabel: string;
+  // The full "what the platform will do" note — shown on hover of the label
+  // rather than taking up a line in the drawer.
+  detail: string;
 }) {
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle1">{item.dependency}</Typography>
-      <Typography variant="body2" color="text.secondary">
-        {description}
-      </Typography>
+      {/* The kind sits right under the name; the verbose action note is on
+          hover (dotted underline hints it's interactive) instead of inline. */}
+      <Tooltip title={detail}>
+        <Typography
+          component="span"
+          variant="caption"
+          color="text.secondary"
+          sx={{
+            alignSelf: "flex-start",
+            cursor: "help",
+            borderBottom: "1px dotted",
+            borderColor: "text.disabled",
+          }}
+        >
+          {kindLabel}
+        </Typography>
+      </Tooltip>
+      {/* The dependency's own description from the design, when the author
+          gave one. Clamp to 3 lines so a long note doesn't blow out the
+          drawer; the full text is available on hover. */}
+      {item.description ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          title={item.description}
+          sx={{
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {item.description}
+        </Typography>
+      ) : null}
       {item.parameters ? (
         <Box
           component="pre"
@@ -302,7 +340,25 @@ export function BuildDependencyDrawer({
   const orgServiceItems = items.filter((i) => i.kind === "org-service");
 
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}>
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      // Force an opaque surface: the theme's `background.paper` is itself
+      // semi-transparent (#000000c5 ≈ 0.77 alpha) — a glass surface — so the
+      // page behind bleeds through and the dependency text is hard to read.
+      // `background.default` is the fully-opaque version of the same surface
+      // (#000000 in dark / the light default), so it reads solid in both themes.
+      slotProps={{
+        paper: {
+          sx: {
+            bgcolor: "background.default",
+            backgroundImage: "none",
+            backdropFilter: "none",
+          },
+        },
+      }}
+    >
       <Box sx={{ width: 420, p: 3 }}>
         <Typography variant="h6" sx={{ mb: 2 }}>
           Dependencies to resolve
@@ -357,7 +413,8 @@ export function BuildDependencyDrawer({
                 <InfoPanel
                   key={itemKey(item)}
                   item={item}
-                  description={`We'll provision this ${item.resourceType ?? "resource"} for you.`}
+                  kindLabel={item.resourceType ?? "Platform resource"}
+                  detail={`We'll provision this ${item.resourceType ?? "resource"} for you.`}
                 />
               ))}
             </Stack>
@@ -371,7 +428,8 @@ export function BuildDependencyDrawer({
               <InfoPanel
                 key={itemKey(item)}
                 item={item}
-                description="We'll make this cross-project endpoint visible — this updates and rebuilds the owning project; your build continues and the consuming task waits until it's published."
+                kindLabel="Cross-project endpoint"
+                detail="We'll publish this cross-project endpoint — it updates and rebuilds the owning project; your build continues, and the consuming task waits until it's published."
               />
             ))}
           </Stack>

@@ -1,6 +1,6 @@
 ---
 name: high-level-architecture
-description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, or writing a component's design.json.
+description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, writing the specs/design/design.cell architecture diagram, or writing a component's design.json.
 metadata:
   aep:
     kind: platform
@@ -13,11 +13,34 @@ Derive the design tree from `requirements.md`. The design lives under
 `specs/design/` — never at the bundle root.
 
 ```
+specs/design/design.cell                      # project-level architecture diagram DSL (this skill) — emit FIRST
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
 specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
 specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
 ```
+
+## The architecture diagram — design.cell
+
+`specs/design/design.cell` is a single project-level file holding the
+cell-diagram DSL. Emit it **FIRST**, before design.md and the component
+design.json files: it is small, it fixes the component decomposition up front,
+and the console streams it into the live architecture diagram as you write, so
+the user watches the architecture take shape.
+
+**Load the `cell-architecture-dsl` skill before writing design.cell.** It
+carries the full grammar, the AEP boundary semantics (own components inside the
+cell; Thunder auth and org services on east; third-party SaaS on south;
+internet/intranet exposure on north/west), and the single-`addFile` write
+protocol. Do not guess the syntax — `resource`/`external` are NOT keywords, and
+the node `type` is a bare trailing token with no colon.
+
+**design.cell is the architecture contract.** The rest of the design must match
+it: every `components/<name>/design.json` uses the SAME component id as its
+`design.cell` node, and every edge in design.cell that touches a component
+appears as a `dependencies[]` entry on that component's design.json (and vice
+versa — an interaction in design.json must be an edge in design.cell). A
+mismatch between the two is a defect, not a stylistic choice.
 
 ## The top-level design.md
 
@@ -142,11 +165,24 @@ every arrow there appears here and vice versa — a mismatch is a defect. Each
 entry has a `kind` (which selects the meaningful fields) and a `name`; pick the
 kind by WHAT the target is:
 
-- **`component`** — a SIBLING component in this same design (a `<name>/` under
-  `components/`). Just `{ "kind": "component", "name": "expense-webapp" }`.
+- **`component`** — a SIBLING component in this same design that THIS component
+  CALLS: a directed caller→callee edge (one Interactions arrow). Declare it ONLY
+  on the caller, naming the callee it invokes:
+  `{ "kind": "component", "name": "expense-api" }`. Never add the reverse edge —
+  a web-app depends on the API it calls; the API does NOT depend on the web-app
+  that calls it. If a component isn't actually called by this one, it is not a
+  dependency of it (do not list it "for reference").
 - **`org-service`** — a service owned by ANOTHER project in the org that
-  publishes its endpoint for cross-project use. `name` is the provider's
-  component name. `{ "kind": "org-service", "name": "identity-api" }`.
+  publishes its endpoint for cross-project use. Its `name` is the provider's
+  EXACT component name from `list_org_endpoints`, copied verbatim — a name you
+  LOOK UP, never one you coin. The requirement (and any org skill) names the
+  service by ROLE ("the organization's directory service", "the notification
+  service"); that role is NOT the name, and the provider is usually named
+  differently — the "directory service" may be `employee-service`, the
+  "notification service" `email-service`. Call `list_org_endpoints`, pick the
+  row that fills the role, copy its `name`:
+  `{ "kind": "org-service", "name": "<name from list_org_endpoints>" }`. A name
+  coined from the role words matches no provider and hard-fails the build.
 - **`external`** — a system OUTSIDE the platform (a SaaS API, a legacy
   service). Two shapes:
   - *SDK-style SaaS* (Stripe, SendGrid, ...): no spec needed — the component
@@ -170,7 +206,7 @@ kind by WHAT the target is:
 
 ```json
 "dependencies": [
-  { "kind": "component", "name": "expense-webapp" },
+  { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
   { "kind": "external", "name": "stripe",
     "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
@@ -179,15 +215,18 @@ kind by WHAT the target is:
 ]
 ```
 
-**Discover before you invent.** When the caller supplies the platform MCP
-tools, USE them before authoring an `external`, `org-service`, or
-`platform-resource` dependency — do not guess a name or a config schema:
+**Discover before you invent.** The platform MCP tools are the source of truth
+for every dependency's name and shape — call them before authoring an
+`external`, `org-service`, or `platform-resource` dependency, and take the name
+and schema from what they return, not from the requirement's wording:
 
 - `list_external_resources` / `get_external_resource_schema` — reuse an
   already-registered external resource by its EXACT `name` and `config` schema
   rather than inventing a parallel one.
-- `list_org_endpoints` — find the real provider component name for an
-  `org-service` before referencing it.
+- `list_org_endpoints` — the org-service catalog every `org-service` `name` is
+  copied from verbatim (see the `org-service` kind above). When no row fills the
+  role the requirement describes, leave the dependency unresolved rather than
+  coining a name — a name that resolves to nothing is worse than an absent one.
 - `list_org_component_endpoints` — once you have the provider's name, call this
   to read its REAL contract before writing the dependency's `description`:
   each row resolves to a `spec.availability` of `inline` (read

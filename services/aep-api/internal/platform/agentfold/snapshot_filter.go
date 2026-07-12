@@ -29,9 +29,10 @@ import (
 )
 
 // KeepInTurnSnapshot mirrors keepInTurnSnapshot: keep agent-authored sources
-// (*.md, *.dsl, a design.json basename) and drop everything else.
+// (*.md, *.dsl, *.cell, a design.json basename) and drop everything else.
+// *.cell is the project-level cell-diagram DSL (design.cell).
 func KeepInTurnSnapshot(path string) bool {
-	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".dsl") {
+	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".dsl") || strings.HasSuffix(path, ".cell") {
 		return true
 	}
 	base := path

@@ -27,8 +27,14 @@ type El = {
   width: number;
   height: number;
   text?: string;
+  strokeColor?: string;
   backgroundColor?: string;
 };
+
+// Semantic *status* colors (danger/success/warning/info). These must only
+// appear when an element opts in via a variant — never leak into plain chrome.
+// (Brand orange from the Oxygen theme is expected on chrome and is NOT here.)
+const STATUS_COLORS = /^#(d92d20|2e7d32|ed6c02|0288d1)$/i;
 
 function compile(dsl: string): El[] {
   return JSON.parse(dslToExcalidraw("wireframes", dsl)).elements as El[];
@@ -37,11 +43,11 @@ function compile(dsl: string): El[] {
 const DESKTOP = `screen Dashboard
   navbar "RiskHub | Dashboard | Risks | Reports"
   sidebar "Overview | My Risks | Audits | Settings"
-  heading "Risk Overview" 280,80
-  table "Risk | Owner | Severity | Status" 280,130 940x240
-  button "New risk" 280,400 140x40
+  heading "Risk Overview"
+  table "Risk | Owner | Severity | Status"
+  button "New risk"
 screen Detail
-  heading "Risk Detail" 280,80
+  heading "Risk Detail"
 flow
   Dashboard -> Detail
 `;
@@ -53,7 +59,7 @@ test("screens default to desktop 1280x800", () => {
 });
 
 test("an explicit screen size overrides the default", () => {
-  const els = compile("screen Modal 480x320\n  text \"hi\" 16,16\n");
+  const els = compile("screen Modal 480x320\n  text \"hi\"\n");
   assert.ok(els.some((e) => e.type === "rectangle" && e.width === 480 && e.height === 320));
 });
 
@@ -84,29 +90,246 @@ test("table renders a header row, column headers, and row lines", () => {
 });
 
 test("image placeholder renders a crossed box", () => {
-  const els = compile('screen S\n  image "logo" 16,16 200x120\n');
+  const els = compile('screen S\n  image "logo" 200x120\n');
   assert.equal(els.filter((e) => e.type === "line").length, 2);
 });
 
-test("the palette is grayscale (structural wireframe style)", () => {
-  const els = compile(DESKTOP);
-  const colored = els.filter(
-    (e) =>
-      e.backgroundColor &&
-      e.backgroundColor !== "transparent" &&
-      !/^#(f8f9fa|f1f3f5|e9ecef|dee2e6|ced4da|ffffff)$/i.test(e.backgroundColor),
+test("primary actions and active navigation use the Oxygen brand color", () => {
+  const els = compile(`screen S
+  navbar "BrandApp | Home | Reports"
+  button "Create" primary`);
+  assert.ok(
+    els.some((e) => e.type === "rectangle" && e.backgroundColor === "#fa7b3f"),
+    "primary button not brand-filled",
   );
-  assert.deepEqual(colored, []);
+  assert.ok(
+    els.some((e) => e.type === "text" && e.text === "BrandApp" && e.strokeColor === "#fa7b3f"),
+    "active navbar item not branded",
+  );
 });
 
 test("legacy kinds (rect/ellipse/button/text) still parse and flows still mark", () => {
-  const els = compile(DESKTOP + "  rect \"x\" 16,16\n");
+  const els = compile(DESKTOP + "  rect \"x\"\n");
   const texts = els.filter((e) => e.type === "text");
-  assert.ok(texts.some((t) => /→\(\d+\)/.test(t.text ?? "")), "flow marker missing");
+  assert.ok(texts.some((t) => /^Screen \d+$/.test(t.text ?? "")), "screen number marker missing");
+});
+
+test("a screen description renders as a subtitle above the frame", () => {
+  const els = compile(`screen Dashboard "Where managers monitor open risk"
+  heading "Risk"`);
+  assert.ok(
+    els.some((e) => e.type === "text" && e.text === "Where managers monitor open risk"),
+    "screen description subtitle missing",
+  );
+  assert.ok(els.some((e) => e.type === "text" && e.text === "Dashboard"), "screen name missing");
+});
+
+test("a screen description does not break the optional size", () => {
+  const els = compile(`screen Modal "Confirm deletion" 480x320
+  text "hi"`);
+  assert.ok(els.some((e) => e.type === "rectangle" && e.width === 480 && e.height === 320), "sized frame missing");
+  assert.ok(els.some((e) => e.type === "text" && e.text === "Confirm deletion"), "description missing");
+});
+
+test("a one-part card stays a simple panel title (back-compat)", () => {
+  const els = compile(`screen S\n  card "Remediation progress" 300x120`);
+  assert.ok(els.some((e) => e.type === "text" && e.text === "Remediation progress"), "panel title missing");
+});
+
+test("a multi-part card renders as a stat tile (label, big value, caption)", () => {
+  const els = compile(`screen S\n  card "Open items | 47 | across 5 active audits" 300x120`);
+  for (const t of ["Open items", "47", "across 5 active audits"]) {
+    assert.ok(els.some((e) => e.type === "text" && e.text === t), `tile part "${t}" missing`);
+  }
+  const value = els.find((e) => e.type === "text" && e.text === "47") as (El & { fontSize?: number }) | undefined;
+  const metric = els.find((e) => e.type === "text" && e.text === "Open items") as (El & { fontSize?: number }) | undefined;
+  assert.ok((value?.fontSize ?? 0) > (metric?.fontSize ?? 0), "value not larger than its label");
+});
+
+test("the navbar groups links right and ends in a bell + account avatar", () => {
+  const els = compile(`screen S\n  navbar "AuditHub | Dashboard | Reports"`);
+  const brand = els.find((e) => e.type === "text" && e.text === "AuditHub");
+  assert.ok(brand && brand.strokeColor === "#fa7b3f", "brand not left/branded");
+  const link = els.find((e) => e.type === "text" && e.text === "Dashboard");
+  assert.ok(link && link.x > 1280 / 2, "nav links not grouped right");
+  const rightEllipses = els.filter((e) => e.type === "ellipse" && e.x > 1280 - 120);
+  assert.ok(rightEllipses.length >= 2, "bell/avatar missing from navbar");
+});
+
+test("a heading renders an underline rule beneath it", () => {
+  const before = compile(`screen S\n  text "x"`).filter((e) => e.type === "line").length;
+  const after = compile(`screen S\n  heading "Recent activity"`).filter((e) => e.type === "line").length;
+  assert.ok(after > before, "heading underline rule missing");
+});
+
+test("an element `-> Screen` renders a navigation marker beside that element", () => {
+  const els = compile(`screen Catalog
+  button "View product" -> ProductDetail
+screen ProductDetail
+  heading "Details"`);
+  assert.ok(
+    els.some((e) => e.type === "text" && /^→ Screen 2 · ProductDetail$/.test(e.text ?? "")),
+    "element nav marker missing/mis-formatted",
+  );
+  assert.ok(els.some((e) => e.type === "text" && e.text === "View product"), "button label lost");
+});
+
+test("a `-> Screen` target that is a variant word is not mistaken for a variant", () => {
+  const els = compile(`screen A\n  button "Go" -> Info\nscreen Info\n  heading "I"`);
+  assert.ok(els.some((e) => e.type === "text" && /→ Screen 2 · Info/.test(e.text ?? "")), "nav to Info missing");
+});
+
+test("a `\\n` in a label becomes a real line break (card title + subtitle)", () => {
+  const els = compile(`screen S\n  card "Speckled Mug\\n$28 · In stock" 260x160`);
+  const label = els.find((e) => e.type === "text" && /^Speckled Mug/.test(e.text ?? ""));
+  assert.ok(label, "card label missing");
+  assert.ok(label!.text!.includes("\n") && !label!.text!.includes("\\n"), "backslash-n not converted to newline");
+});
+
+test("a taller-than-wide divider draws a vertical rule (column separator)", () => {
+  const vert = compile(`screen S\n  divider "" 1x400`);
+  const horiz = compile(`screen S\n  divider ""`);
+  const vLine = vert.find((e) => e.type === "line") as (El & { points?: [number, number][] }) | undefined;
+  const hLine = horiz.find((e) => e.type === "line") as (El & { points?: [number, number][] }) | undefined;
+  assert.ok(vLine && vLine.points![1]![1] > vLine.points![1]![0], "divider not vertical when tall");
+  assert.ok(hLine && hLine.points![1]![0] > hLine.points![1]![1], "divider not horizontal when wide");
 });
 
 test("tryDslToExcalidraw reports a parse error instead of throwing", () => {
   const res = tryDslToExcalidraw("wireframes", "not a wireframe\n");
   assert.equal(res.ok, false);
   if (!res.ok) assert.ok(res.error.length > 0);
+});
+
+test("tryDslToExcalidraw reports the retired coordinate dialect", () => {
+  const res = tryDslToExcalidraw("wireframes", 'screen S\n  heading "Hi" 280,84\n');
+  assert.equal(res.ok, false);
+  if (!res.ok) assert.match(res.error, /coordinate dialect|regenerate/i);
+});
+
+// ---------- Richer vocabulary ----------
+
+test("new primitives parse and render (tabs, list, badge, avatar, toggle, chart)", () => {
+  const els = compile(`screen S
+  tabs "Overview | Activity | Settings"
+  list "Alpha | Beta | Gamma"
+  row
+    badge "Overdue" danger
+    avatar "Jane Doe"
+    toggle "" active
+  progress "60%" info
+  chart "Spend by month"
+  row
+    select "Team"
+    search "Search risks"
+  textarea "Notes"
+  row
+    checkbox "Email me" active
+    radio "Weekly" active
+  divider ""
+  breadcrumb "Home / Risks / Detail"
+  link "View all"
+`);
+  for (const t of ["Overview", "Activity", "Settings"]) {
+    assert.ok(els.some((e) => e.type === "text" && e.text === t), `tab ${t} missing`);
+  }
+  for (const t of ["Alpha", "Beta", "Gamma"]) {
+    assert.ok(els.some((e) => e.type === "text" && e.text === t), `list item ${t} missing`);
+  }
+  assert.ok(els.some((e) => e.type === "text" && e.text === "JD"), "avatar initials missing");
+  assert.ok(els.some((e) => e.type === "ellipse"), "no ellipse rendered");
+});
+
+test("a trailing variant paints an element with semantic color", () => {
+  const els = compile(`screen S
+  row
+    button "Delete" danger
+    button "Save" primary
+    badge "Live" success
+`);
+  assert.ok(
+    els.some((e) => e.type === "rectangle" && e.strokeColor === "#d92d20"),
+    "danger accent not applied",
+  );
+  assert.ok(
+    els.some((e) => e.type === "rectangle" && e.backgroundColor === "#fa7b3f"),
+    "primary button not brand-filled",
+  );
+  assert.ok(
+    els.some((e) => e.type === "text" && e.text === "Save" && e.strokeColor === "#ffffff"),
+    "primary button text not white",
+  );
+  assert.ok(
+    els.some((e) => e.type === "rectangle" && e.backgroundColor === "#e8f5e9"),
+    "success badge tint missing",
+  );
+});
+
+test("status color (danger/success/warning/info) appears ONLY via variants", () => {
+  const els = compile(`screen S
+  navbar "App | Home | Reports"
+  sidebar "Overview | Settings"
+  tabs "A | B | C"
+  list "One | Two"
+  progress "40%"
+  avatar "Sam Lee"
+  chart "Trend"
+  select "Pick"
+`);
+  const leaked = els.filter(
+    (e) =>
+      (e.backgroundColor && STATUS_COLORS.test(e.backgroundColor)) ||
+      (e.strokeColor && STATUS_COLORS.test(e.strokeColor)),
+  );
+  assert.deepEqual(leaked, [], `status color leaked without a variant: ${JSON.stringify(leaked)}`);
+});
+
+test("table `row` lines render real cell content", () => {
+  const els = compile(`screen S
+  table "Risk | Owner | Status"
+    row "Edge servers | Platform | Open"
+    row "Stale creds | Security | Overdue"
+`);
+  for (const cell of ["Edge servers", "Platform", "Open", "Stale creds", "Security", "Overdue"]) {
+    assert.ok(els.some((e) => e.type === "text" && e.text === cell), `cell ${cell} missing`);
+  }
+});
+
+test("long table cells are clipped to their column (no overflow into the next)", () => {
+  const els = compile(`screen S
+  table "Claim | When" 400x120
+    row "Client dinner — Acme pitch and follow-up | Jul 8"
+`);
+  const cell = els.find((e) => e.type === "text" && /^Client dinner/.test(e.text ?? ""));
+  assert.ok(cell, "claim cell missing");
+  assert.ok(cell!.text!.endsWith("…"), `expected truncation, got "${cell!.text}"`);
+  assert.ok(els.some((e) => e.type === "text" && e.text === "Jul 8"), "neighbour cell missing");
+});
+
+test("progress fill width tracks the fraction in the label", () => {
+  const half = compile(`screen S\n  progress "50%" 200x10\n`);
+  const full = compile(`screen S\n  progress "100%" 200x10\n`);
+  const fillW = (els: El[]) =>
+    Math.max(
+      ...els
+        .filter((e) => e.type === "rectangle" && e.height === 10 && e.backgroundColor === "#6c757d")
+        .map((e) => e.width),
+    );
+  assert.ok(fillW(half) < fillW(full), `progress fill did not grow: ${fillW(half)} vs ${fillW(full)}`);
+});
+
+test("a long text line is clipped to the screen's right edge with an ellipsis", () => {
+  const long = Array.from({ length: 6 }, () => "Please attach the sign-off email for the Q3 access review").join(" — ");
+  const els = compile(`screen S\n  text "${long}"\n`);
+  const t = els.find((e) => e.type === "text" && /^Please attach/.test(e.text ?? ""))!;
+  assert.ok(t, "text element missing");
+  assert.ok(t.text!.endsWith("…"), "long text should be truncated with an ellipsis");
+  const approxRight = t.x + t.text!.length * 14 * 0.52;
+  assert.ok(approxRight <= 1280, `clipped text should stay within the screen, got ~${Math.round(approxRight)}`);
+});
+
+test("a short text line is left untouched (no ellipsis)", () => {
+  const els = compile(`screen S\n  text "Owner: Platform team"\n`);
+  const t = els.find((e) => e.type === "text" && /Owner/.test(e.text ?? ""))!;
+  assert.equal(t.text, "Owner: Platform team");
 });

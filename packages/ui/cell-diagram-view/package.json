@@ -10,8 +10,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@aep/design-projection": "workspace:*",
-    "@wso2/cell-diagram": "0.2.0"
+    "@aep/ui-cell-diagram-react": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",

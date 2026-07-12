@@ -115,7 +115,7 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 
 	fail := func(msg string) (DevFlowStatus, error) {
 		status.Phase, status.Error = DevPhaseFailed, msg
-		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusFailed)
+		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusFailed, msg)
 		return status, nil
 	}
 
@@ -190,7 +190,7 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 		return fail("complete gate rejected: " + d.Note)
 	}
 	status.Phase = DevPhaseDone
-	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted)
+	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted, "")
 	return status, nil
 }
 

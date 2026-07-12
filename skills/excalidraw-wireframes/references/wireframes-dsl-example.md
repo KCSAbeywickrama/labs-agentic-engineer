@@ -1,61 +1,99 @@
 # Worked example — risk register webapp wireframes
 
-A complete `wireframes.dsl` for a three-screen desktop flow. Note the
-rhythm: every screen opens with the same `navbar` and `sidebar` (consistent
-chrome); content sits right of the sidebar (`x ≥ 280`) and below the navbar
-(`y ≥ 80`); the screen's primary action is the bottom-most `button` (the
-compiler attaches the `→(N)` flow marker to it).
+A complete `wireframes.dsl` for a three-screen desktop flow. Note the rhythm:
+every screen repeats the same `navbar` + `sidebar` (consistent chrome); blocks
+stack in reading order; `row` groups things side by side; the primary action is
+the one `primary` button per screen; status is carried by `badge`s, not prose.
+No coordinates anywhere — the compiler computes every position.
 
 ```
-// Risk register — three screens, desktop 1280x800
+// Risk register — three screens, desktop
 
-screen RiskDashboard
-  navbar "RiskHub | Dashboard | Risks | Reports | Profile"
+screen RiskDashboard "Managers monitor open risk and act on what's overdue"
+  navbar "RiskHub"
   sidebar "Overview | My Risks | All Registers | Audits | Settings"
-  heading "Risk Overview" 280,80
-  card "Open risks: 24" 280,130 300x120
-  card "Overdue actions: 6" 600,130 300x120
-  card "High severity: 3" 920,130 300x120
-  heading "Recent activity" 280,280
-  table "Risk | Owner | Severity | Updated" 280,320 940x320
-  button "New risk" 1100,80 140x40
+  row
+    heading "Risk Overview"
+    right
+    button "New risk" primary -> NewRisk
+  row
+    card "Open risks | 24 | across 6 registers"
+    card "Overdue actions | 6 | need follow-up"
+    card "High severity | 3 | review this week"
+  heading "Recent activity"
+  tabs "All | Mine | Watching"
+  table "Risk | Owner | Severity | Status | Updated" -> RiskDetail
+    row "Unpatched edge servers | Platform team | High | Open | 2h ago"
+    row "Stale access keys | Security | Medium | In review | 1d ago"
+    row "Vendor SOC2 lapse | Compliance | High | Overdue | 3d ago"
 
-screen NewRisk
-  navbar "RiskHub | Dashboard | Risks | Reports | Profile"
+screen NewRisk "An owner logs a new risk into a register"
+  navbar "RiskHub"
   sidebar "Overview | My Risks | All Registers | Audits | Settings"
-  heading "New Risk" 280,80
-  input "title" 280,130 640x36
-  input "description" 280,182 640x72
-  input "register (dropdown)" 280,270 300x36
-  input "owner (dropdown)" 620,270 300x36
-  input "impact" 280,322 300x36
-  input "likelihood" 620,322 300x36
-  button "Cancel" 280,400 140x40
-  button "Create risk" 440,400 160x40
+  breadcrumb "Risks / New risk"
+  heading "New Risk"
+  input "Title — e.g. Unpatched edge servers"
+  textarea "What is the risk and why does it matter?"
+  row
+    select "Register: Infrastructure"
+    select "Owner: Platform team"
+  row
+    select "Impact: High"
+    select "Likelihood: Likely"
+  checkbox "Notify owner on create" active
+  row
+    right
+    button "Cancel"
+    button "Create risk" primary -> RiskDashboard
 
-screen RiskDetail
-  navbar "RiskHub | Dashboard | Risks | Reports | Profile"
+screen RiskDetail "The owner tracks remediation for one risk"
+  navbar "RiskHub"
   sidebar "Overview | My Risks | All Registers | Audits | Settings"
-  heading "Risk: Unpatched edge servers" 280,80
-  text "Severity: High — Owner: Platform team" 280,120
-  card "Remediation progress" 280,160 640x140
-  table "Action | Assignee | Due | Status" 280,330 940x240
-  button "Update status" 280,610 160x40
-
-flow
-  RiskDashboard -> NewRisk
-  NewRisk -> RiskDashboard
-  RiskDashboard -> RiskDetail
-  RiskDetail -> RiskDashboard
+  breadcrumb "Risks / Unpatched edge servers"
+  row
+    heading "Unpatched edge servers"
+    badge "High" danger
+    badge "Open" info
+  text "Owner: Platform team — Updated 2h ago"
+  split 60/40
+    left
+      heading "Remediation"
+      progress "60%" info
+      text "6 of 10 actions complete"
+      table "Action | Assignee | Due | Status"
+        row "Patch kernel CVE-2026-1 | A. Chen | Fri | Done"
+        row "Rotate edge certs | M. Diaz | Mon | In progress"
+        row "Close inbound 8443 | Platform | Tue | To do"
+      row
+        right
+        button "Update status" primary
+    right
+      card "Discussion"
+        text "K. Smith · 2d: when does the cert rotation land?"
+        text "M. Diaz · 1d: Monday, after the freeze."
+        textarea "Add a comment…"
+        button "Post" primary
+      heading "Activity"
+      text "2h ago — A. Chen closed CVE-2026-1"
+      text "1d ago — M. Diaz started cert rotation"
 ```
 
 Checklist before finishing a wireframe file:
 
-- Every screen from the requirements has a `screen` block; no extras.
+- Every screen from the requirements has a `screen` block; no extras, no
+  duplicate takes on the same screen. Where a role changes the view, there's a
+  screen per role, named and described for it.
+- Every screen has a one-line description saying what it's for.
 - Chrome (`navbar`, `sidebar`) is identical across screens of the same app.
-- Content stays inside the screen, right of the sidebar, below the navbar;
-  nothing overlaps.
-- Every screen is reachable in `flow`, and `flow` names exactly match
-  `screen` names.
-- Labels are content-bearing ("Open risks: 24", "register (dropdown)"), not
-  placeholders — the wireframe is a communication artifact.
+- Labels are content-bearing ("Open risks | 24 | across 6 registers",
+  "Platform team", "Overdue"), never placeholders like "text" or "label".
+- The right primitive does each job — `badge` for status, `tabs` for section
+  switching, `avatar` for people, `progress` for completion, `table` + `row`
+  for real data.
+- Color is rare and meaningful: one `primary` action per screen, plus the odd
+  status `badge`.
+- Navigation is on the control that triggers it: the button/link/table that
+  leads to another screen ends with `-> ScreenName`, and every target matches
+  a real `screen`.
+- NO coordinates and no manual sizes unless an element truly needs one — the
+  layout comes from stacking, `row`, and `split`.

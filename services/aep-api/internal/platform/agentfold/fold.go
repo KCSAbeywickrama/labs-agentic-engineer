@@ -90,6 +90,7 @@ const (
 	ErrInvalidYAML     ErrCode = "INVALID_YAML"
 	ErrInvalidJSON     ErrCode = "INVALID_JSON"
 	ErrSchemaViolation ErrCode = "SCHEMA_VIOLATION"
+	ErrInvalidDSL      ErrCode = "INVALID_DSL"
 	ErrProtectedPath   ErrCode = "PROTECTED_PATH"
 )
 
@@ -279,14 +280,17 @@ func (f *Fold) RemoveFile(ctx context.Context, path string) (OpResult, error) {
 	return opOk(path, op, StatusApplied), nil
 }
 
-// commit applies content to path gated by the YAML reparse guard and the
-// component design.json schema gate; a rejection leaves the fold
-// byte-for-byte unchanged.
+// commit applies content to path gated by the YAML reparse guard, the
+// component design.json schema gate, and the wireframes .dsl syntax gate;
+// a rejection leaves the fold byte-for-byte unchanged.
 func (f *Fold) commit(path string, op Op, content string, rejectMsg func(yamlErr string) string) OpResult {
 	if yamlErr := checkYAMLGuard(path, content); yamlErr != "" {
 		return opErr(path, op, ErrInvalidYAML, rejectMsg(yamlErr))
 	}
 	if code, msg := checkComponentDesignGuard(path, content); code != "" {
+		return opErr(path, op, code, msg)
+	}
+	if code, msg := checkWireframeDslGuard(path, content); code != "" {
 		return opErr(path, op, code, msg)
 	}
 	c := content
