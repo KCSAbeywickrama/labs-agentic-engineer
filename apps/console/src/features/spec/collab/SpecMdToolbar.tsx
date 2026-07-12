@@ -20,8 +20,6 @@ import type { ReactNode } from "react";
 import {
   Divider,
   IconButton,
-  MenuItem,
-  Select,
   Stack,
   ToggleButton,
   Tooltip,
@@ -29,6 +27,9 @@ import {
 import {
   Bold,
   Code,
+  Heading1,
+  Heading2,
+  Heading3,
   Italic,
   List,
   ListOrdered,
@@ -47,8 +48,6 @@ import { useEditorState, type Editor } from "@tiptap/react";
 // StarterKit history is disabled because Yjs owns history.
 
 const MOD = navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl+";
-
-type BlockType = "paragraph" | "h1" | "h2" | "h3" | "other";
 
 function ToolbarToggle({
   title,
@@ -88,28 +87,15 @@ export function SpecMdToolbar({ editor }: { editor: Editor }) {
       orderedList: e.isActive("orderedList"),
       blockquote: e.isActive("blockquote"),
       codeBlock: e.isActive("codeBlock"),
-      block: (e.isActive("heading", { level: 1 })
-        ? "h1"
-        : e.isActive("heading", { level: 2 })
-          ? "h2"
-          : e.isActive("heading", { level: 3 })
-            ? "h3"
-            : e.isActive("paragraph")
-              ? "paragraph"
-              : "other") as BlockType,
+      h1: e.isActive("heading", { level: 1 }),
+      h2: e.isActive("heading", { level: 2 }),
+      h3: e.isActive("heading", { level: 3 }),
       canUndo: e.can().undo(),
       canRedo: e.can().redo(),
     }),
   });
 
   const chain = () => editor.chain().focus();
-
-  const setBlock = (value: BlockType) => {
-    if (value === "paragraph") chain().setParagraph().run();
-    else if (value === "h1") chain().toggleHeading({ level: 1 }).run();
-    else if (value === "h2") chain().toggleHeading({ level: 2 }).run();
-    else if (value === "h3") chain().toggleHeading({ level: 3 }).run();
-  };
 
   return (
     <Stack
@@ -128,20 +114,27 @@ export function SpecMdToolbar({ editor }: { editor: Editor }) {
         backdropFilter: "blur(8px)",
       }}
     >
-      <Select<BlockType>
-        size="small"
-        variant="standard"
-        disableUnderline
-        value={state.block === "other" ? "paragraph" : state.block}
-        onChange={(event) => setBlock(event.target.value as BlockType)}
-        aria-label="Block type"
-        sx={{ minWidth: 112, fontSize: "0.875rem", mr: 0.5 }}
+      <ToolbarToggle
+        title={`Heading 1 (${MOD}Alt+1)`}
+        active={state.h1}
+        onToggle={() => chain().toggleHeading({ level: 1 }).run()}
       >
-        <MenuItem value="paragraph">Paragraph</MenuItem>
-        <MenuItem value="h1">Heading 1</MenuItem>
-        <MenuItem value="h2">Heading 2</MenuItem>
-        <MenuItem value="h3">Heading 3</MenuItem>
-      </Select>
+        <Heading1 size={16} />
+      </ToolbarToggle>
+      <ToolbarToggle
+        title={`Heading 2 (${MOD}Alt+2)`}
+        active={state.h2}
+        onToggle={() => chain().toggleHeading({ level: 2 }).run()}
+      >
+        <Heading2 size={16} />
+      </ToolbarToggle>
+      <ToolbarToggle
+        title={`Heading 3 (${MOD}Alt+3)`}
+        active={state.h3}
+        onToggle={() => chain().toggleHeading({ level: 3 }).run()}
+      >
+        <Heading3 size={16} />
+      </ToolbarToggle>
       <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
       <ToolbarToggle
         title={`Bold (${MOD}B)`}
