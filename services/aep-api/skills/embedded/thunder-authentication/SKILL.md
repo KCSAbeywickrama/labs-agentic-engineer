@@ -65,6 +65,10 @@ instead of deriving it from YOUR dependency name) produces a
   token by posting the refresh token to that endpoint — no hidden iframe, no
   third-party-cookie dependency. This is what `automaticSilentRenew` and
   `signinSilent()` use to keep a signed-in user signed in.
+- Thunder does NOT advertise an `end_session_endpoint` (its discovery doc lists
+  only issuer, authorize, and token). So RP-initiated logout via
+  `signoutRedirect()` rejects — sign-out drops the local session
+  (`removeUser()`) and reloads instead.
 - The signed-in user's identity claims ride in the ID TOKEN, surfaced by
   `oidc-client-ts` as `user.profile`: `groups` (their role/group memberships)
   and `ouId`/`ouName`/`ouHandle` (their organization), beside standard
@@ -212,8 +216,19 @@ export const userManager = new UserManager({
 });
 
 export async function signIn()         { await userManager.signinRedirect(); }
-export async function signOut()        { await userManager.signoutRedirect(); }
 export async function handleCallback() { return userManager.signinRedirectCallback(); }
+
+// Sign the user out. Thunder advertises no end_session_endpoint, so
+// signoutRedirect() rejects; fall back to dropping the LOCAL session and
+// reloading — the load-time guard then starts a fresh sign-in.
+export async function signOut() {
+  try {
+    await userManager.signoutRedirect();
+  } catch {
+    await userManager.removeUser();
+    window.location.assign("/");
+  }
+}
 
 // Return the current user, renewing a persisted-but-expired session SILENTLY
 // via the refresh token (no redirect). Returns null only when there is no
@@ -297,3 +312,4 @@ export async function listTodos() {
 | After login, "invalid redirect URI" | `redirect_uri` doesn't match the `<origin>/callback` URL the platform registered (e.g. an invented redirect-URI key) | Compute `window.location.origin + '/callback'`. |
 | Sign-in loops endlessly even at the right path | `oidc-client-ts` written without a persistent `WebStorageStateStore` (in-memory default) | Use `WebStorageStateStore({ store: localStorage })` as shown; without persistent web storage the state and PKCE verifier don't survive the redirect. |
 | User is sent to the login screen on every visit / new tab | Session kept in `sessionStorage` (per-tab, wiped on close), or the load path calls `signIn()` on an expired token instead of renewing it | Store the session in `localStorage` and enable `automaticSilentRenew`; on load renew via `signinSilent()` (refresh token) and only `signIn()` when there is no session to renew. |
+| Logout button does nothing | `signOut()` calls only `signoutRedirect()`, which rejects because Thunder has no `end_session_endpoint` — and the click handler swallows the rejection | Wrap `signoutRedirect()` in a try/catch that falls back to `removeUser()` + `window.location.assign('/')` (shown in the `signOut` above); local sign-out always works. |
