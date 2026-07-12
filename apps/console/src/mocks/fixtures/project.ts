@@ -240,6 +240,9 @@ const deploymentsByScenario: Partial<
     Record<string, DeploymentList["items"]>
   >
 > = {
+  // One distinct state per component, so the board demos the full chip
+  // vocabulary: transitional, settled success, and a fresh binding whose
+  // conditions haven't reported yet ("Pending").
   deploying: {
     storefront: [
       {
@@ -260,6 +263,14 @@ const deploymentsByScenario: Partial<
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
         createdAt: "2026-07-12T04:58:00Z",
+      },
+    ],
+    "orders-api": [
+      {
+        name: "demo-shop-orders-api-development",
+        componentName: "orders-api",
+        environment: "development",
+        createdAt: "2026-07-12T05:05:30Z",
       },
     ],
   },
@@ -286,13 +297,14 @@ const deploymentsByScenario: Partial<
         createdAt: "2026-07-12T04:58:00Z",
       },
     ],
+    // Settled but intentionally undeployed — the "deployed" scenario stays
+    // all-settled while still showing the Undeployed chip.
     "orders-api": [
       {
         name: "demo-shop-orders-api-development",
         componentName: "orders-api",
         environment: "development",
-        status: "Ready",
-        releaseName: "demo-shop-orders-api-g7h8i9",
+        status: "Undeployed",
         createdAt: "2026-07-12T05:01:00Z",
       },
     ],
@@ -319,12 +331,15 @@ const deploymentsByScenario: Partial<
         createdAt: "2026-07-12T04:58:00Z",
       },
     ],
+    // Still converging when the storefront's release failed — a mixed
+    // mid-rollout picture (error + success + transitional).
     "orders-api": [
       {
         name: "demo-shop-orders-api-development",
         componentName: "orders-api",
         environment: "development",
-        status: "Undeployed",
+        status: "Progressing",
+        releaseName: "demo-shop-orders-api-g7h8i9",
         createdAt: "2026-07-12T05:01:00Z",
       },
     ],
