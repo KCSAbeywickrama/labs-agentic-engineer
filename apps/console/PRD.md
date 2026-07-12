@@ -83,6 +83,10 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Spec view — formatting toolbar for the markdown editor: StarterKit
+  control set (marks, H1–H3 buttons, lists, quote/code, Yjs undo/redo)
+  docked as the header of a self-scrolling editor frame, for all md spec
+  files — [#206](https://github.com/wso2/labs-agentic-engineer/issues/206)
 - Alerts — top-nav notification bell for RCA-agent alert reports
   (org-wide, read-only, client-tracked unread state) —
   [#154](https://github.com/wso2/labs-agentic-engineer/issues/154)
