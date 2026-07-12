@@ -43,5 +43,5 @@ func dialServer(ctx context.Context) (adminpb.AEPAdminClient, context.Context, f
 		return nil, ctx, nil, fmt.Errorf("dial %s: %w", serverURL, err)
 	}
 
-	return adminpb.NewAEPAdminClient(conn), ctx, func() { conn.Close() }, nil
+	return adminpb.NewAEPAdminClient(conn), ctx, func() { _ = conn.Close() }, nil
 }

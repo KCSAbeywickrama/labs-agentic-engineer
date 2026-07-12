@@ -22,7 +22,7 @@ import (
 )
 
 func Info(msg string) {
-	fmt.Fprintln(os.Stdout, msg)
+	_, _ = fmt.Fprintln(os.Stdout, msg)
 }
 
 func Error(msg string) {

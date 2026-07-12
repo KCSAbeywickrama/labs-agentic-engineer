@@ -69,8 +69,8 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write config: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Server:  %s\n", connectServerURL)
-	fmt.Fprintf(os.Stdout, "Config:  %s\n", cfgFile)
-	fmt.Fprintln(os.Stdout, "\nTo customise Thunder endpoints edit the config file directly.")
+	_, _ = fmt.Fprintf(os.Stdout, "Server:  %s\n", connectServerURL)
+	_, _ = fmt.Fprintf(os.Stdout, "Config:  %s\n", cfgFile)
+	_, _ = fmt.Fprintln(os.Stdout, "\nTo customise Thunder endpoints edit the config file directly.")
 	return nil
 }

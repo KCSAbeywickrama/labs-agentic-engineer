@@ -103,13 +103,13 @@ func runLogin(cmd *cobra.Command, args []string) error {
 			http.Error(w, "no code", http.StatusBadRequest)
 			return
 		}
-		fmt.Fprint(w, "<html><body><h2>Login successful — you may close this tab.</h2></body></html>")
+		_, _ = fmt.Fprint(w, "<html><body><h2>Login successful — you may close this tab.</h2></body></html>")
 		codeCh <- code
 	})
 
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 30 * time.Second}
 	go func() { _ = srv.Serve(lis) }()
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	// Build and open the authorization URL.
 	params := url.Values{
@@ -123,7 +123,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	}
 	loginURL := authURL + "?" + params.Encode()
 
-	fmt.Fprintf(os.Stdout, "Opening browser for login...\n%s\n", loginURL)
+	_, _ = fmt.Fprintf(os.Stdout, "Opening browser for login...\n%s\n", loginURL)
 	openBrowser(loginURL)
 
 	// Wait for the callback.
@@ -156,7 +156,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("save token: %w", err)
 	}
 
-	fmt.Fprintln(os.Stdout, "Login successful. Token saved to ~/.aep/config.yaml")
+	_, _ = fmt.Fprintln(os.Stdout, "Login successful. Token saved to ~/.aep/config.yaml")
 	return nil
 }
 
@@ -165,7 +165,7 @@ func discoverOIDC(thunderURL string) (authURL, tokenURL string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("fetch OIDC discovery: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var doc struct {
 		AuthorizationEndpoint string `json:"authorization_endpoint"`
 		TokenEndpoint         string `json:"token_endpoint"`
@@ -190,7 +190,7 @@ func exchangeCode(tokenURL, clientID, code, verifier, redirectURI string) (strin
 	if err != nil {
 		return "", fmt.Errorf("POST token endpoint: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var tok struct {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`

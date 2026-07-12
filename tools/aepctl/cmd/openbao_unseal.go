@@ -44,7 +44,7 @@ func init() {
 func runOpenbaoUnseal(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	fmt.Fprintln(os.Stdout, "Enter 3 unseal keys (input is hidden):")
+	_, _ = fmt.Fprintln(os.Stdout, "Enter 3 unseal keys (input is hidden):")
 	keys := make([]string, 0, 3)
 	for i := 1; i <= 3; i++ {
 		key, err := readMaskedInput(fmt.Sprintf("Unseal key (%d/3)", i))
@@ -69,9 +69,9 @@ func runOpenbaoUnseal(cmd *cobra.Command, args []string) error {
 	}
 
 	if resp.Success {
-		fmt.Fprintf(os.Stdout, "✓ %s\n", resp.Message)
+		_, _ = fmt.Fprintf(os.Stdout, "✓ %s\n", resp.Message)
 	} else {
-		fmt.Fprintf(os.Stderr, "✗ %s\n", resp.Message)
+		_, _ = fmt.Fprintf(os.Stderr, "✗ %s\n", resp.Message)
 		os.Exit(1)
 	}
 	return nil

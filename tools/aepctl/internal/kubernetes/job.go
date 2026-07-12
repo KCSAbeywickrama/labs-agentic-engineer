@@ -45,7 +45,7 @@ func RunJob(ctx context.Context, client *kubernetes.Clientset, job *batchv1.Job,
 		})
 	}()
 
-	fmt.Fprintln(out, "Waiting for job to complete...")
+	_, _ = fmt.Fprintln(out, "Waiting for job to complete...")
 	jobErr := waitForJobDone(ctx, client, ns, created.Name)
 
 	// Always print logs regardless of success or failure.
@@ -86,7 +86,7 @@ func dumpLogs(ctx context.Context, client *kubernetes.Clientset, ns, podName str
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	_, err = io.Copy(out, stream)
 	return err
 }

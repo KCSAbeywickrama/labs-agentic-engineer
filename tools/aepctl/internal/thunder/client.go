@@ -58,7 +58,7 @@ func NewClient(ctx context.Context, thunderURL, adminClientID, adminClientSecret
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -224,7 +224,7 @@ func (c *ThunderClient) request(ctx context.Context, method, path string, body [
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 300 {

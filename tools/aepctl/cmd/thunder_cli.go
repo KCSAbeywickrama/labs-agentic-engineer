@@ -46,13 +46,13 @@ func registerThunderFlags(cmd *cobra.Command) {
 	f.String("thunder-admin-client-secret", "", "Thunder admin OAuth client secret")
 	f.String("thunder-public-url", "", "Public URL of Thunder — must match the JWT issuer configured in Thunder")
 
-	viper.BindPFlag("thunder.namespace", f.Lookup("thunder-namespace"))
-	viper.BindPFlag("thunder.url", f.Lookup("thunder-url"))
-	viper.BindPFlag("thunder.config_map", f.Lookup("thunder-config-map"))
-	viper.BindPFlag("thunder.deployment", f.Lookup("thunder-deployment"))
-	viper.BindPFlag("thunder.admin_client_id", f.Lookup("thunder-admin-client-id"))
-	viper.BindPFlag("thunder.admin_client_secret", f.Lookup("thunder-admin-client-secret"))
-	viper.BindPFlag("thunder.public_url", f.Lookup("thunder-public-url"))
+	_ = viper.BindPFlag("thunder.namespace", f.Lookup("thunder-namespace"))
+	_ = viper.BindPFlag("thunder.url", f.Lookup("thunder-url"))
+	_ = viper.BindPFlag("thunder.config_map", f.Lookup("thunder-config-map"))
+	_ = viper.BindPFlag("thunder.deployment", f.Lookup("thunder-deployment"))
+	_ = viper.BindPFlag("thunder.admin_client_id", f.Lookup("thunder-admin-client-id"))
+	_ = viper.BindPFlag("thunder.admin_client_secret", f.Lookup("thunder-admin-client-secret"))
+	_ = viper.BindPFlag("thunder.public_url", f.Lookup("thunder-public-url"))
 }
 
 // doThunderSetup registers all AEP OAuth clients in the running Thunder instance
@@ -69,7 +69,7 @@ func doThunderSetup(
 	aepNamespace, thunderNamespace, thunderURL, thunderConfigMap, thunderDeployment, thunderAdminClientID, consoleURL string,
 ) error {
 
-	step := func(msg string) { fmt.Fprintf(os.Stdout, "  %s\n", msg) }
+	step := func(msg string) { _, _ = fmt.Fprintf(os.Stdout, "  %s\n", msg) }
 
 	thunderAdminClientSecret := viper.GetString("thunder.admin_client_secret")
 
@@ -170,7 +170,7 @@ func doThunderSetup(
 	step("Running Thunder setup job")
 	job := thunder.BuildAuthJob(jobName, aepNamespace, secretName, cmName)
 	if err := k8s.RunJob(ctx, client, job, os.Stdout); err != nil {
-		return fmt.Errorf("Thunder setup Job failed: %w", err)
+		return fmt.Errorf("setting up Thunder failed: %w", err)
 	}
 
 	// 6. Patch Thunder's CORS configuration and restart (CLI has direct k8s access).

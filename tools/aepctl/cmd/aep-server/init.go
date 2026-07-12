@@ -238,7 +238,7 @@ func (s *server) Init(req *adminpb.InitRequest, stream grpc.ServerStreamingServe
 	if _, err := openbao.Must(ctx, "POST", s.openbaoAddr, rootToken, "/v1/auth/token/revoke-self", nil); err != nil {
 		return fatal(fmt.Sprintf("revoke root token: %v", err))
 	}
-	rootToken = "" // ensure it cannot be used or logged after this point
+	// rootToken was revoked above and is intentionally not referenced past this point.
 
 	// Send credentials — root token is intentionally omitted; it has been revoked.
 	return stream.Send(&adminpb.InitEvent{

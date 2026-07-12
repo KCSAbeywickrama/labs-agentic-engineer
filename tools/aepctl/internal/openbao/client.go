@@ -51,7 +51,7 @@ func WaitForReachable(ctx context.Context, baseURL string, timeout time.Duration
 	for {
 		resp, err := client.Get(baseURL + "/v1/sys/health")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -92,10 +92,10 @@ func Req(ctx context.Context, method, baseURL, token, path string, body interfac
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 	return result, resp.StatusCode, nil
 }
 
