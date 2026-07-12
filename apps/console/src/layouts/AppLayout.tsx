@@ -30,7 +30,6 @@ import {
   Tooltip,
   UserMenu,
   useAppShell,
-  version as OXYGEN_UI_VERSION,
 } from "@wso2/oxygen-ui";
 import {
   CircleAlert,
@@ -56,6 +55,10 @@ import {
 import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
+
+// Footer links (grilled 2026-07-12): the repo is the only real destination
+// today — /tree/HEAD/docs follows the default branch.
+const REPO_URL = "https://github.com/wso2/labs-agentic-engineer";
 
 // Sidebar highlight follows the route; grows one mapping per top-level route
 // (global nav) or per project section (project nav, ADR-0010).
@@ -333,8 +336,23 @@ export function AppLayout() {
           <Footer.Copyright>
             © {new Date().getFullYear()} WSO2 LLC.
           </Footer.Copyright>
-          <Footer.Divider />
-          <Footer.Version>oxygen-ui-v{OXYGEN_UI_VERSION}</Footer.Version>
+          <Footer.Link
+            href={`${REPO_URL}/tree/HEAD/docs`}
+            target="_blank"
+            rel="noopener"
+          >
+            Docs
+          </Footer.Link>
+          <Footer.Link
+            href={`${REPO_URL}/issues/new`}
+            target="_blank"
+            rel="noopener"
+          >
+            Report an issue
+          </Footer.Link>
+          <Footer.Link href={REPO_URL} target="_blank" rel="noopener">
+            GitHub
+          </Footer.Link>
         </Footer>
       </AppShell.Footer>
     </AppShell>
