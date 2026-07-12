@@ -68,6 +68,9 @@ in context. A good body has:
 - **Acceptance criteria** — how we know it is done.
 - **References** — point into the spec/design (the capabilities, the
   `design.json`, the `openapi.yaml`) rather than restating them.
+- **Web-application bodies** — instruct building it against the API contract of
+  the service it depends on, citing that component's
+  `specs/design/components/<api-component-name>/openapi.yaml`.
 
 Reference a Task you planned this turn by its `{ title }`; reference an existing
 Task by its `{ issueNumber }`.

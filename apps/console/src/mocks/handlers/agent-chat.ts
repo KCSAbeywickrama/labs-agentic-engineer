@@ -102,7 +102,7 @@ export const agentChatHandlers = [
     HttpResponse.json({
       turnId: String(params.turnId),
       conversationId: "mock-conv",
-      useCase: "requirements-chat",
+      useCase: "general",
       status: "completed",
       noChanges: true,
       createdAt: new Date().toISOString(),

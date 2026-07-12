@@ -22,11 +22,14 @@
 // `environment` stays "node": most of the suite is pure logic and node is
 // the fastest/least-disruptive default. Component tests opt into jsdom
 // per-file via a `// @vitest-environment jsdom` pragma at the top of the file.
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     include: ["src/**/*.test.{ts,tsx}"],
+    // Real-browser tests (`*.browser.test.tsx`) run under vitest.browser.config.ts
+    // in headless Chromium — they can't run in this node/jsdom project.
+    exclude: [...configDefaults.exclude, "**/*.browser.test.{ts,tsx}"],
     environment: "node",
     globals: true,
     setupFiles: ["src/test-setup.ts"],

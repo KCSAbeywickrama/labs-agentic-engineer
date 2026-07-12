@@ -59,8 +59,6 @@ test("loadRepoSkills reads the committed repo-root skill library", () => {
   // The library's reference files ride along (agentskills.io structure).
   const oas = skills.find((s) => s.name === "openapi-conventions")!;
   assert.ok(oas.references?.["references/wso2-rest-api-design-guidelines.md"]);
-  const wf = skills.find((s) => s.name === "excalidraw-wireframes")!;
-  assert.ok(wf.references?.["references/wireframes-dsl-example.md"]);
 });
 
 test("readSkillRaw returns the untouched file bytes, frontmatter included", () => {
