@@ -88,6 +88,13 @@ func TestDslGateRejectsMisplacedStructure(t *testing.T) {
 	}
 }
 
+func TestDslGateAcceptsRowInsideCard(t *testing.T) {
+	body := "screen S\n  card \"This week\"\n    row\n      text \"Workouts: 4\"\n      text \"Volume: 12,400 kg\"\n"
+	if code, msg := checkWireframeDslGuard(dslPath, body); code != "" {
+		t.Fatalf("row inside card rejected: %s %s", code, msg)
+	}
+}
+
 func TestDslGateSkipsOtherPaths(t *testing.T) {
 	if code, _ := checkWireframeDslGuard("specs/requirements/requirements.md", dslLegacy); code != "" {
 		t.Fatalf("markdown gated")

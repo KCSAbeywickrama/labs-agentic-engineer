@@ -269,7 +269,7 @@ func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 	if got := origin.FileAt(t, "main", "skills/high-level-architecture/SKILL.md"); !strings.Contains(got, "name: high-level-architecture") {
 		t.Fatalf("platform SKILL.md not committed to origin:\n%s", got)
 	}
-	if got := origin.FileAt(t, "main", "skills/excalidraw-wireframes/references/wireframes-dsl-example.md"); got == "" {
+	if got := origin.FileAt(t, "main", "skills/openapi-conventions/references/wso2-rest-api-design-guidelines.md"); got == "" {
 		t.Fatal("platform reference file not committed to origin")
 	}
 }

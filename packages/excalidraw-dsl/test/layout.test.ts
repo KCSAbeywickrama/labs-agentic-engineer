@@ -263,3 +263,42 @@ test("strict syntax: a clean flow file has no errors", () => {
     [],
   );
 });
+
+test("a `row` nests inside a card: children share the card's inner width", () => {
+  // The exact shape agents reach for (and the gate used to reject): an entity
+  // card with side-by-side content inside it.
+  const els = compile(`screen S
+  navbar "Hub"
+  card "This week"
+    row
+      text "Workouts: 4"
+      text "Volume: 12,400 kg"
+    progress "4/5"
+`);
+  const title = els.find((e) => e.type === "text" && e.text === "This week")!;
+  const card = boxOf(els, "This week");
+  const a = els.find((e) => e.type === "text" && e.text === "Workouts: 4")!;
+  const b = els.find((e) => e.type === "text" && e.text === "Volume: 12,400 kg")!;
+  assert.equal(a.y, b.y, "row children share a baseline");
+  assert.ok(b.x > a.x + 20, "side by side");
+  assert.ok(a.x >= card.x && b.x < card.x + card.width, "inside the card");
+  assert.ok(a.y > title.y, "below the card title");
+  const prog = els.find((e) => e.type === "rectangle" && e.height === 10)!;
+  assert.ok(prog.y > a.y, "next block stacks below the row");
+  assert.ok(card.y + card.height >= prog.y + 10, "card grew around everything");
+});
+
+test("row-in-card passes the syntax gate and the layout oracle", () => {
+  const dsl = `screen S
+  navbar "Hub"
+  row
+    card "SOC2"
+      row
+        text "68/92"
+        badge "On track" success
+    card "ISO"
+      text "plain child"
+`;
+  assert.deepEqual(validateWireframeSyntax(dsl), []);
+  assert.deepEqual(validateWireframeLayout(dsl), []);
+});
