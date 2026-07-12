@@ -36,12 +36,14 @@
  *    ProseMirror fragment (~30× the Yjs traffic + rewrites earlier text); line
  *    boundaries are clean.
  *
- * Scope (v1): room-mode, MARKDOWN, `.cell`, and `.dsl` addFile only — none has
- * a content-gate, so there is no deferred-validation risk (unlike design.json).
- * `.cell` is the project-level architecture DSL and `.dsl` a component's
- * wireframes; streaming either line-by-line draws its diagram live as the
- * model writes it. Other / already-existing paths are skipped (execute owns
- * them). Non-finalized streams (truncation / reject) are rolled back.
+ * Scope (v1): room-mode, MARKDOWN, `.cell`, and `.dsl` addFile only. `.cell`
+ * is the project-level architecture DSL and `.dsl` a component's wireframes;
+ * streaming either line-by-line draws its diagram live as the model writes
+ * it. Markdown and `.cell` have no content-gate; `.dsl` has the layout gate
+ * (LAYOUT_VIOLATION) — when execute() rejects it, the tool-result handler
+ * below rolls the optimistic preview back, same as any rejected op. Other /
+ * already-existing paths are skipped (execute owns them). Non-finalized
+ * streams (truncation / reject) are rolled back.
  */
 
 import { parsePartialJson } from "ai";

@@ -301,15 +301,33 @@ the handful of things that genuinely signal state.
 
 ### Layout rules
 
+The platform **validates layout at write time**: an element outside the frame,
+under the navbar/sidebar, or partially overlapping another is rejected with a
+`LAYOUT_VIOLATION` error listing the exact coordinates — fix them and retry.
+(Fully nesting one element inside another — a badge inside a card — is
+layering and always allowed.)
+
 - **Everything stays inside the screen.** The frame is 1280×800. Every element's
   right edge (`x + width`) must be ≤ **1240** (a 40px right margin) and its
   bottom (`y + height`) ≤ **760**; nothing extends past the frame. For anything
   right-aligned — a header filter `select`, a top-right button, a footer action
   — compute its `x` from the edge (`x = 1240 − width`), never by eyeballing a
-  large number: a 168-wide filter ends flush at 1240 only if `x = 1072`. On a
-  header line, size and place the `search` + filter so both fit left of 1240
-  without overlapping. This is the rule that keeps content from spilling off the
-  canvas — check it for every element you place near the right or bottom edge.
+  large number. Elements without an explicit `WxH` get a DEFAULT size (a
+  `chart` is 320 wide, a `select` 320) — placing one near the right edge
+  without a size makes it overflow, so always give near-edge elements an
+  explicit `WxH`. Check `x + width ≤ 1240` for every element on the right or
+  bottom edge before finishing.
+- **Header search + filter: use these exact slots** (this pair is the most
+  common collision — don't re-derive it):
+  - With a sidebar: `search "…" 820,104 240x36` then `select "…" 1076,104 164x36`
+    (search ends 1060, filter ends 1240 — 16px gap).
+  - Without a sidebar: `search "…" 780,104 280x36` then `select "…" 1076,104 164x36`.
+- **Filter chips / badge rows: give every `badge` an explicit width and place
+  the next chip from it.** A `badge` with no `WxH` auto-sizes to its label, so
+  its real width is a guess — and guessed chips collide. Width a chip at
+  roughly `10 × characters + 30` and start the next chip at the previous
+  chip's `x + width + 12`: `badge "All (18)" 280,150 110x24`,
+  `badge "Overdue (2)" 402,150 140x24`, `badge "Changes requested (3)" 554,150 250x24`.
 - **Nothing sits under the navbar.** The `navbar` fills the top band of every
   screen (frame-relative `y` 0–56). So the FIRST content element — including any
   muted eyebrow/label above the heading — starts at `y ≥ 72`. The most common

@@ -256,6 +256,91 @@ export function tryDslToExcalidraw(
   }
 }
 
+// ---------- Wireframes layout validation ----------
+
+/**
+ * Element kinds with a meaningful box (explicit or defaulted W×H). Free text
+ * (`text`/`heading`/`link`/`breadcrumb`) is EXCLUDED from overlap checks — its
+ * width is an estimate of the rendered glyphs, so checking it would flag
+ * perfectly fine layouts. Chrome (`navbar`/`sidebar`) is compiler-placed and
+ * covered by the dedicated chrome rules instead.
+ */
+const BOX_KINDS = new Set<WireframeKind>([
+  'rect', 'ellipse', 'button', 'input', 'card', 'image', 'table', 'tabs',
+  'list', 'select', 'search', 'textarea', 'checkbox', 'radio', 'toggle',
+  'badge', 'avatar', 'progress', 'chart', 'icon',
+]);
+
+/**
+ * Check a wireframes DSL source for layout mistakes the compiler would render
+ * verbatim: elements outside the screen frame, under the navbar/sidebar
+ * chrome, or PARTIALLY overlapping each other. Full containment is layering
+ * (a badge inside a card) and allowed; a partial overlap is always a
+ * collision. Returns one human/model-readable issue per problem — empty when
+ * the layout is clean. Unparseable DSL returns [] (syntax is the compile
+ * gate's job, not this one's).
+ */
+export function validateWireframeLayout(dsl: string): string[] {
+  let ast: WireframeAst;
+  try {
+    ast = parseWireframesDsl(dsl);
+  } catch {
+    return [];
+  }
+  const issues: string[] = [];
+  const box = (el: WireframeElement) =>
+    `(x${el.x}..${el.x + el.width}, y${el.y}..${el.y + el.height})`;
+
+  for (const screen of ast.screens) {
+    const hasNavbar = screen.elements.some((e) => e.kind === 'navbar');
+    const hasSidebar = screen.elements.some((e) => e.kind === 'sidebar');
+    const content = screen.elements.filter(
+      (e) => e.kind !== 'navbar' && e.kind !== 'sidebar',
+    );
+
+    for (const el of content) {
+      // Frame bounds — the compiler draws exactly here, so past-the-edge
+      // coordinates render outside the screen outline.
+      if (el.x < 0 || el.y < 0 || el.x + el.width > screen.width || el.y + el.height > screen.height) {
+        issues.push(
+          `screen ${screen.name}: ${el.kind} "${el.label}" ${box(el)} extends past the ${screen.width}x${screen.height} frame — keep x+width <= ${screen.width} and y+height <= ${screen.height}.`,
+        );
+        continue; // out-of-frame already explains itself; skip chrome noise
+      }
+      // Chrome bands: the navbar fills y 0..56 and the sidebar x 0..240.
+      if (hasNavbar && el.y < NAVBAR_H) {
+        issues.push(
+          `screen ${screen.name}: ${el.kind} "${el.label}" ${box(el)} sits under the navbar (y 0..${NAVBAR_H}) — start content at y >= 72.`,
+        );
+      }
+      if (hasSidebar && el.x < SIDEBAR_W) {
+        issues.push(
+          `screen ${screen.name}: ${el.kind} "${el.label}" ${box(el)} sits under the sidebar rail (x 0..${SIDEBAR_W}) — start content at x >= 264.`,
+        );
+      }
+    }
+
+    // Pairwise partial overlaps between box-like elements.
+    const boxes = content.filter((e) => BOX_KINDS.has(e.kind));
+    for (let a = 0; a < boxes.length; a++) {
+      for (let b = a + 1; b < boxes.length; b++) {
+        const A = boxes[a]!;
+        const B = boxes[b]!;
+        const ix = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
+        const iy = Math.min(A.y + A.height, B.y + B.height) - Math.max(A.y, B.y);
+        if (ix <= 0 || iy <= 0) continue; // disjoint or edge-sharing
+        const aInB = A.x >= B.x && A.y >= B.y && A.x + A.width <= B.x + B.width && A.y + A.height <= B.y + B.height;
+        const bInA = B.x >= A.x && B.y >= A.y && B.x + B.width <= A.x + A.width && B.y + B.height <= A.y + A.height;
+        if (aInB || bInA) continue; // full containment = intentional layering
+        issues.push(
+          `screen ${screen.name}: ${A.kind} "${A.label}" ${box(A)} partially overlaps ${B.kind} "${B.label}" ${box(B)} — move or resize so they either nest fully (layering inside a card) or don't touch.`,
+        );
+      }
+    }
+  }
+  return issues;
+}
+
 // ---------- Wireframes parser ----------
 
 const QUOTED = /"((?:[^"\\]|\\.)*)"/;
