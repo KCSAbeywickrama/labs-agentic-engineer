@@ -235,8 +235,6 @@ describe("SpecMdEditor streaming flicker", () => {
   it("marking streamed content churns the inline DOM far more than an unmarked write", async () => {
     const marked = await runStream(writeMarked);
     const unmarked = await runStream(writeUnmarked);
-    console.log("[flicker] MARKED:", JSON.stringify(marked));
-    console.log("[flicker] UNMARKED:", JSON.stringify(unmarked));
 
     // Neither path rebuilds an already-rendered block (the churn is inline).
     expect(marked.rebuilt).toEqual([]);
