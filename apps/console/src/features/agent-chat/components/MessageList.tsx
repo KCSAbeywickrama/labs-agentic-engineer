@@ -39,17 +39,32 @@ function timeOf(createdAt: number | undefined): string | null {
 
 function UserBlock({ block }: { block: Extract<FeedBlock, { kind: "user" }> }) {
   const { message, attribution } = block;
+  const isOwn = attribution.isOwn;
   const time = timeOf(message.createdAt);
   const failed = message.status === "failed";
   return (
-    <Box data-testid="user-message">
-      <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 0.5 }}>
+    // Your own messages align to the right, teammates to the left — the
+    // familiar chat convention that makes "who said this" scannable at a
+    // glance. The author row mirrors so the avatar sits on the outer edge.
+    <Box
+      data-testid="user-message"
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isOwn ? "flex-end" : "flex-start",
+      }}
+    >
+      <Stack
+        direction={isOwn ? "row-reverse" : "row"}
+        spacing={1}
+        sx={{ alignItems: "center", mb: 0.5 }}
+      >
         <Avatar
           sx={{
             width: 22,
             height: 22,
             fontSize: "0.7rem",
-            bgcolor: attribution.isOwn ? "primary.main" : "info.main",
+            bgcolor: isOwn ? "primary.main" : "info.main",
           }}
         >
           {initialOf(attribution.displayName)}
@@ -68,13 +83,13 @@ function UserBlock({ block }: { block: Extract<FeedBlock, { kind: "user" }> }) {
           agent turns stay bubble-less as a flat activity stream. */}
       <Box
         sx={{
-          display: "inline-block",
-          maxWidth: "100%",
+          maxWidth: "85%",
           px: 1.5,
           py: 1,
           borderRadius: 2,
+          textAlign: "left",
           bgcolor: (theme) =>
-            attribution.isOwn
+            isOwn
               ? alpha(theme.palette.primary.main, 0.08)
               : theme.palette.action.hover,
         }}
