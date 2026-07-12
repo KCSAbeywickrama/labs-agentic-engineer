@@ -37,14 +37,14 @@ export function WireframePanel({
   collab: CollabSpec;
 }) {
   const sha = files.find((f) => f.path === dslPath)?.sha;
-  const { scene, isPending, isError } = useDerivedWireframe(projectName, dslPath, sha);
 
-  // The committed file is authoritative. While it is not yet resolved (the
-  // agent is still writing wireframes.dsl, or the fetch is pending/failing
-  // mid-turn), fall back to the live DSL streaming into the collab doc so the
-  // screens draw piece-by-piece as the agent writes them — same pattern as
-  // CellDiagramPanel. Both paths feed the SAME compiler, so the streamed and
-  // committed renders match.
+  // The collab doc is the SOURCE while collab is up — the design.md rule.
+  // Rooms are seeded with every committed specs/ file (non-md as Y.Text), and
+  // the agents service mirrors each applied write, so the doc is always the
+  // freshest truth: the committed content between turns, the growing DSL
+  // during a generation, the edited DSL during an edit turn. The committed
+  // fetch below runs ONLY when the doc has nothing (collab offline / room not
+  // yet synced). Both paths feed the SAME compiler, so the renders match.
   const liveSource = useYTextString(collab.getFileText(dslPath));
   // The writer flushes on line boundaries, so the live text is whole lines —
   // but a mid-stream compile can still fail (e.g. a screen header typed ahead
@@ -58,10 +58,29 @@ export function WireframePanel({
     return lastGoodLive.current;
   }, [dslPath, liveSource]);
 
-  const derivedReady = !isPending && !isError && scene != null;
-  const streaming = !derivedReady && liveScene != null;
+  const streaming = liveScene != null;
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
+  // Committed fetch: the collab-less base path only (mirrors `usesCollab`
+  // disabling the content query for markdown) — passing "" disables it. An
+  // agent in the room also suppresses it: the doc WILL deliver the file, and
+  // probing git for a not-yet-committed path just sprays retrying 404s.
+  const { scene, isPending, isError } = useDerivedWireframe(
+    projectName,
+    streaming || agentBusy ? "" : dslPath,
+    sha,
+  );
 
+  if (!streaming && agentBusy) {
+    // The committed fetch is suppressed while an agent is in the room (the
+    // doc will deliver the file) — "drawing about to start", not a failure.
+    return (
+      <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Typography variant="body2" color="text.secondary">
+          Waiting for the agent to draw the wireframes…
+        </Typography>
+      </Box>
+    );
+  }
   if (!streaming && isPending) {
     return (
       <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -70,17 +89,6 @@ export function WireframePanel({
     );
   }
   if (!streaming && isError) {
-    // Mid-generation the committed file may not exist yet; with an agent in
-    // the room that is "drawing about to start", not a failure.
-    if (agentBusy) {
-      return (
-        <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Typography variant="body2" color="text.secondary">
-            Waiting for the agent to draw the wireframes…
-          </Typography>
-        </Box>
-      );
-    }
     return <Alert severity="error">Failed to load {dslPath}.</Alert>;
   }
   if (!streaming && !scene) {
@@ -97,7 +105,10 @@ export function WireframePanel({
   // (fillHeight) sets `flex: 1` on its own root inside the flex column.
   return (
     <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {streaming && (
+      {streaming && agentBusy && (
+        // The chip means "actively being generated", not "rendered from the
+        // live doc" — the doc is ALWAYS the source while collab is up (rooms
+        // are seeded), so gate the chip on the agent actually being in the room.
         <Box
           sx={{
             px: 1.5,
