@@ -181,7 +181,7 @@ screen <Name> ["what this view is for"]   // one per view; description renders a
       <blocks…>                  // each column is its own stack (rows allowed)
     right
       <blocks…>
-  card "Title"                   // a card with nested children lays them out inside
+  card "Title"                   // children STACK vertically inside — no `row`/`split` here
     <elements…>                  //   …a badge child docks to the card's top-right
   table "Col1 | Col2" [-> Screen]
     row "cell | cell"            // table data — quoted `row` lines belong to the table
@@ -197,8 +197,13 @@ screen <Name> ["what this view is for"]   // one per view; description renders a
    search+filter pair, footer Cancel/Save (primary rightmost).
 4. `split N/M` + `left`/`right` makes **two columns** with the divider drawn
    for you.
-5. Children indented under a `card` render **inside** it; the card grows to
-   fit; a `badge` child docks to its top-right corner.
+5. Children indented under a `card` render **inside** it, **stacked
+   vertically** — the card grows to fit and a `badge` child docks to its
+   top-right corner. A card is *not* a layout container: you **cannot** put a
+   `row` or `split` inside one. Want side-by-side controls or a button bar tied
+   to a card? Lift that `row` OUT to the screen (or split-column) stack, just
+   below the card — as the NewRisk form does. To keep them in the card, list
+   the controls one per line and they stack.
 6. `WxH` is optional and rarely needed (a taller `chart "…" 600x260`); widths
    are clamped to fit. The screen grows downward if content is long.
 
@@ -209,8 +214,9 @@ draws a `→ Screen N · ScreenName` marker beside it. The target must be a
 primary/forward one.
 
 Syntax is validated at write time: an unknown keyword, a misplaced
-`left`/`right`/table-`row`, or old-style x,y coordinates rejects the write with
-line numbers (`INVALID_DSL`) — fix every listed line and re-emit the file.
+`left`/`right`/table-`row`, a `row` or `split` inside a `card`, or old-style
+x,y coordinates rejects the write with line numbers (`INVALID_DSL`) — fix every
+listed line and re-emit the file.
 
 ### Element kinds
 
