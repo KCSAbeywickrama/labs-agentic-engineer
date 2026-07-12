@@ -24,16 +24,15 @@ import {
   CardContent,
   Chip,
   CircularProgress,
-  IconButton,
   Stack,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import { useAllTasks } from "../api/queries";
 import { taskChip } from "../api/status";
+import { GitHubIssueLink } from "./GitHubIssueLink";
 
 // The flat task list (#173): one card per task, status chip inline — the user
 // watches chips go green. Each task is its own elevated card (matching the
@@ -125,20 +124,11 @@ export function TasksList({
             ) : (
               <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
             )}
-            <Tooltip title="Open the GitHub issue">
-              <IconButton
-                size="small"
-                component="a"
-                href={t.issueUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`GitHub issue #${t.issueNumber}`}
-                onClick={(e) => e.stopPropagation()}
-                sx={{ color: "text.secondary" }}
-              >
-                <GitHub size={16} />
-              </IconButton>
-            </Tooltip>
+            <GitHubIssueLink
+              issueNumber={t.issueNumber}
+              issueUrl={t.issueUrl}
+              onClick={(e) => e.stopPropagation()}
+            />
           </Stack>
         );
 
@@ -154,17 +144,12 @@ export function TasksList({
                       to: "/projects/$projectName/builds/$issueNumber",
                       params: { projectName, issueNumber: t.issueNumber },
                     }),
-                })}
-            sx={{
-              borderRadius: 2,
-              ...(isGate
-                ? {}
-                : {
+                  sx: {
                     cursor: "pointer",
                     transition: "border-color 120ms, box-shadow 120ms",
                     "&:hover": { borderColor: "primary.main", boxShadow: 1 },
-                  }),
-            }}
+                  },
+                })}
           >
             <CardContent sx={{ "&:last-child": { pb: 2 }, py: 2 }}>
               {row}

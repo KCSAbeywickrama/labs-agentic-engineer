@@ -229,7 +229,7 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
   });
 
   return (
-    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+    <Card variant="outlined">
       <CardContent sx={{ "&:last-child": { pb: 2.5 } }}>
         <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
           <Typography variant="h6">{build.tag}</Typography>
