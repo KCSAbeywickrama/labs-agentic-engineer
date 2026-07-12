@@ -671,6 +671,72 @@ const validationPlan = `# Demo Shop — Validation plan
 - Each service exposes /healthz returning 200.
 `;
 
+// The acceptance oracle authored by the validation-criteria skill — rendered
+// by the read-only "Validation Criteria" view. Mixes the three methods and a
+// runner-written `covered` flag (e2e only) so the view exercises every arm.
+const validationCriteriaJson = JSON.stringify(
+  {
+    requirements: [
+      {
+        id: "REQ-001",
+        statement:
+          "Shoppers can browse and search the catalog by name and category.",
+        criteria: [
+          {
+            id: "AC-001-a",
+            must: "A shopper can search products by name and see matching results",
+            method: "e2e",
+            covered: true,
+          },
+          {
+            id: "AC-001-b",
+            must: "A shopper can filter the catalog by category",
+            method: "e2e",
+            covered: false,
+          },
+        ],
+      },
+      {
+        id: "REQ-002",
+        statement: "Cart contents persist across browser sessions.",
+        criteria: [
+          {
+            id: "AC-002-a",
+            must: "A cart's contents survive a browser restart for the same shopper",
+            method: "e2e",
+            covered: false,
+          },
+          {
+            id: "AC-002-b",
+            must: "The cart total updates promptly as items are added or removed",
+            method: "scenario",
+          },
+        ],
+      },
+      {
+        id: "REQ-003",
+        statement:
+          "Checkout produces an order visible in the shopper's order history.",
+        criteria: [
+          {
+            id: "AC-003-a",
+            must: "Completing checkout creates an order visible in order history",
+            method: "e2e",
+            covered: false,
+          },
+          {
+            id: "AC-003-b",
+            must: "Payment details are transmitted over an encrypted connection",
+            method: "manual",
+          },
+        ],
+      },
+    ],
+  },
+  null,
+  2,
+);
+
 // Spec files as the Files API serves them (#113): repo-relative paths under
 // specs/, metadata (list-files) split from content (read-file).
 interface MockSpecFile {
@@ -707,6 +773,10 @@ const fullFiles: MockSpecFile[] = [
     content: ordersApiDesignJson,
   },
   { path: "specs/validation/validation-plan.md", content: validationPlan },
+  {
+    path: "specs/validation/validation-criteria.json",
+    content: validationCriteriaJson,
+  },
 ];
 
 export const projectSpecFiles: Record<
