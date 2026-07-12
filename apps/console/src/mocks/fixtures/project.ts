@@ -229,124 +229,113 @@ const builtComponents: ComponentList = {
 // app's URL from list-deployments (componentDeployments below).
 const deployedComponents: ComponentList = builtComponents;
 
-// Deployments backing list-deployments (#196): the deployed scenario gives
-// the web app its dev binding URL (matching the pre-#196 fixture semantics);
-// earlier scenarios have no resolved URL yet.
+// Deployments backing list-deployments — shared by the overview's "Open
+// app" link (#196) and the Deployments board (#216, one fan-out call per
+// component). Per component × scenario; components absent from a scenario
+// render as greyed "Not deployed" cards on the board, and the distinguished
+// status "Undeployed" marks an intentional spec.state == Undeploy binding.
+const deploymentsByScenario: Partial<
+  Record<
+    Exclude<ProjectScenario, "error">,
+    Record<string, DeploymentList["items"]>
+  >
+> = {
+  deploying: {
+    storefront: [
+      {
+        name: "demo-shop-storefront-development",
+        componentName: "storefront",
+        environment: "development",
+        status: "Progressing",
+        releaseName: "demo-shop-storefront-a1b2c3",
+        createdAt: "2026-07-12T05:04:00Z",
+      },
+    ],
+    "catalog-api": [
+      {
+        name: "demo-shop-catalog-api-development",
+        componentName: "catalog-api",
+        environment: "development",
+        status: "Ready",
+        releaseName: "demo-shop-catalog-api-d4e5f6",
+        endpointUrl: "https://catalog-api.dev.acme-aep.io",
+        createdAt: "2026-07-12T04:58:00Z",
+      },
+    ],
+  },
+  deployed: {
+    storefront: [
+      {
+        name: "demo-shop-storefront-development",
+        componentName: "storefront",
+        environment: "development",
+        status: "Ready",
+        releaseName: "demo-shop-storefront-a1b2c3",
+        endpointUrl: "https://storefront.dev.acme-aep.io",
+        createdAt: "2026-07-12T05:04:00Z",
+      },
+    ],
+    "catalog-api": [
+      {
+        name: "demo-shop-catalog-api-development",
+        componentName: "catalog-api",
+        environment: "development",
+        status: "Ready",
+        releaseName: "demo-shop-catalog-api-d4e5f6",
+        endpointUrl: "https://catalog-api.dev.acme-aep.io",
+        createdAt: "2026-07-12T04:58:00Z",
+      },
+    ],
+    "orders-api": [
+      {
+        name: "demo-shop-orders-api-development",
+        componentName: "orders-api",
+        environment: "development",
+        status: "Ready",
+        releaseName: "demo-shop-orders-api-g7h8i9",
+        createdAt: "2026-07-12T05:01:00Z",
+      },
+    ],
+  },
+  "deploy-failed": {
+    storefront: [
+      {
+        name: "demo-shop-storefront-development",
+        componentName: "storefront",
+        environment: "development",
+        status: "ReleaseFailed",
+        releaseName: "demo-shop-storefront-a1b2c3",
+        createdAt: "2026-07-12T05:04:00Z",
+      },
+    ],
+    "catalog-api": [
+      {
+        name: "demo-shop-catalog-api-development",
+        componentName: "catalog-api",
+        environment: "development",
+        status: "Ready",
+        releaseName: "demo-shop-catalog-api-d4e5f6",
+        endpointUrl: "https://catalog-api.dev.acme-aep.io",
+        createdAt: "2026-07-12T04:58:00Z",
+      },
+    ],
+    "orders-api": [
+      {
+        name: "demo-shop-orders-api-development",
+        componentName: "orders-api",
+        environment: "development",
+        status: "Undeployed",
+        createdAt: "2026-07-12T05:01:00Z",
+      },
+    ],
+  },
+};
+
 export function componentDeployments(
   s: Exclude<ProjectScenario, "error">,
   componentName: string,
 ): DeploymentList {
-  if (s === "deployed" && componentName === "storefront") {
-    return {
-      items: [
-        {
-          componentName,
-          environment: "development",
-          status: "Ready",
-          endpointUrl: "https://storefront.dev.acme-aep.io",
-        },
-      ],
-    };
-  }
-  return { items: [] };
-}
-
-// Project-level deployments backing list-project-deployments (#216) — the
-// Deployments page. One entry per component × environment release binding;
-// components absent from the list render as "Not deployed" (client-side
-// join), and the distinguished status "Undeployed" marks an intentional
-// spec.state == Undeploy binding.
-export function projectDeployments(
-  s: Exclude<ProjectScenario, "error">,
-): DeploymentList {
-  switch (s) {
-    case "deploying":
-      return {
-        items: [
-          {
-            name: "demo-shop-storefront-development",
-            componentName: "storefront",
-            environment: "development",
-            status: "Progressing",
-            releaseName: "demo-shop-storefront-a1b2c3",
-            createdAt: "2026-07-12T05:04:00Z",
-          },
-          {
-            name: "demo-shop-catalog-api-development",
-            componentName: "catalog-api",
-            environment: "development",
-            status: "Ready",
-            releaseName: "demo-shop-catalog-api-d4e5f6",
-            endpointUrl: "https://catalog-api.dev.acme-aep.io",
-            createdAt: "2026-07-12T04:58:00Z",
-          },
-        ],
-      };
-    case "deployed":
-      return {
-        items: [
-          {
-            name: "demo-shop-storefront-development",
-            componentName: "storefront",
-            environment: "development",
-            status: "Ready",
-            releaseName: "demo-shop-storefront-a1b2c3",
-            endpointUrl: "https://storefront.dev.acme-aep.io",
-            createdAt: "2026-07-12T05:04:00Z",
-          },
-          {
-            name: "demo-shop-catalog-api-development",
-            componentName: "catalog-api",
-            environment: "development",
-            status: "Ready",
-            releaseName: "demo-shop-catalog-api-d4e5f6",
-            endpointUrl: "https://catalog-api.dev.acme-aep.io",
-            createdAt: "2026-07-12T04:58:00Z",
-          },
-          {
-            name: "demo-shop-orders-api-development",
-            componentName: "orders-api",
-            environment: "development",
-            status: "Ready",
-            releaseName: "demo-shop-orders-api-g7h8i9",
-            createdAt: "2026-07-12T05:01:00Z",
-          },
-        ],
-      };
-    case "deploy-failed":
-      return {
-        items: [
-          {
-            name: "demo-shop-storefront-development",
-            componentName: "storefront",
-            environment: "development",
-            status: "ReleaseFailed",
-            releaseName: "demo-shop-storefront-a1b2c3",
-            createdAt: "2026-07-12T05:04:00Z",
-          },
-          {
-            name: "demo-shop-catalog-api-development",
-            componentName: "catalog-api",
-            environment: "development",
-            status: "Ready",
-            releaseName: "demo-shop-catalog-api-d4e5f6",
-            endpointUrl: "https://catalog-api.dev.acme-aep.io",
-            createdAt: "2026-07-12T04:58:00Z",
-          },
-          {
-            name: "demo-shop-orders-api-development",
-            componentName: "orders-api",
-            environment: "development",
-            status: "Undeployed",
-            createdAt: "2026-07-12T05:01:00Z",
-          },
-        ],
-      };
-    // fresh/spec/spec-failed have no components; building has components but
-    // nothing deployed yet — every row joins to "Not deployed".
-    default:
-      return { items: [] };
-  }
+  return { items: deploymentsByScenario[s]?.[componentName] ?? [] };
 }
 
 // The OpenAPI contract served by GET .../components/:name/openapi — a

@@ -20,6 +20,7 @@ import {
   keepPreviousData,
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -86,6 +87,7 @@ const STATUS_ACTIVE_POLL_MS = 5_000;
 const STATUS_IDLE_POLL_MS = 30_000;
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
+type Deployment = components["schemas"]["Deployment"];
 
 function statusIsMoving(status: ProjectStatus): boolean {
   return (
@@ -152,22 +154,43 @@ export function useProjectComponents(projectName: string) {
   );
 }
 
-// The Deployments page's poller (#216): the whole table renders from this
-// one project-level read, on the same adaptive regime as the status poll —
-// fast while any binding converges, slow once everything settles.
-export function useProjectDeployments(projectName: string) {
-  return useProjectResource(
-    projectKeys.deployments(projectName),
-    () =>
-      client.GET("/projects/{projectName}/deployments", {
-        params: { path: { projectName } },
-      }),
-    "deployments",
-    (list) =>
-      !list || deploymentsAreMoving(list.items)
-        ? STATUS_ACTIVE_POLL_MS
-        : STATUS_IDLE_POLL_MS,
-  );
+// The Deployments board's pollers (#216): one list-deployments read per
+// component — reusing the endpoint (and cache keys) the overview's
+// "Open app" link already hits, so no new contract surface. Each query
+// polls on the adaptive status-poll regime, judged by its own bindings.
+// Failures degrade per-component: the board renders what loaded and
+// reports how many components couldn't be read.
+export function useComponentsDeployments(
+  projectName: string,
+  componentNames: string[],
+) {
+  return useQueries({
+    queries: componentNames.map((componentName) => ({
+      queryKey: projectKeys.componentDeployments(projectName, componentName),
+      queryFn: async () => {
+        const { data, error } = await client.GET(
+          "/projects/{projectName}/components/{componentName}/deployments",
+          { params: { path: { projectName, componentName } } },
+        );
+        if (error || data === undefined) {
+          const e = error as { detail?: string; title?: string } | undefined;
+          throw new Error(e?.detail ?? e?.title ?? "Failed to load deployments");
+        }
+        return data;
+      },
+      refetchInterval: (query: {
+        state: { data: { items: Deployment[] | null } | undefined };
+      }) =>
+        !query.state.data || deploymentsAreMoving(query.state.data.items)
+          ? STATUS_ACTIVE_POLL_MS
+          : STATUS_IDLE_POLL_MS,
+    })),
+    combine: (results) => ({
+      isPending: results.some((r) => r.isPending),
+      deployments: results.flatMap((r) => r.data?.items ?? []),
+      failedCount: results.filter((r) => r.isError).length,
+    }),
+  });
 }
 
 // A web app's public URL (#196): read from its deployments — the dev

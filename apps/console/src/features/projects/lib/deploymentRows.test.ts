@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deploymentsAreMoving,
-  joinDeploymentRows,
+  groupDeploymentCards,
   statusKind,
 } from "./deploymentRows";
 import type { components } from "../../../generated/aep-api";
@@ -37,13 +37,22 @@ function component(name: string, displayName?: string): Component {
   };
 }
 
-const ready: Deployment = {
+const devReady: Deployment = {
   componentName: "catalog-api",
   environment: "development",
   status: "Ready",
   releaseName: "demo-catalog-abc",
   endpointUrl: "https://catalog.dev.example.io",
   createdAt: "2026-07-12T05:00:00Z",
+};
+
+const prodReady: Deployment = {
+  componentName: "catalog-api",
+  environment: "production",
+  status: "Ready",
+  releaseName: "demo-catalog-abc",
+  endpointUrl: "https://catalog.example.io",
+  createdAt: "2026-07-12T06:00:00Z",
 };
 
 describe("statusKind", () => {
@@ -71,82 +80,102 @@ describe("statusKind", () => {
   });
 });
 
-describe("joinDeploymentRows", () => {
-  it("gives every component a row, marking missing bindings Not deployed", () => {
-    const rows = joinDeploymentRows(
-      [component("storefront", "Storefront"), component("catalog-api")],
-      [ready],
+describe("groupDeploymentCards", () => {
+  it("routes bindings to their environment's column", () => {
+    const { development, production } = groupDeploymentCards(
+      [component("catalog-api", "Catalog API")],
+      [devReady, prodReady],
     );
-    expect(rows).toHaveLength(2);
-    const storefront = rows.find((r) => r.componentName === "storefront");
-    expect(storefront?.kind).toBe("notDeployed");
-    expect(storefront?.deployment).toBeUndefined();
-    const catalog = rows.find((r) => r.componentName === "catalog-api");
-    expect(catalog?.kind).toBe("success");
-    expect(catalog?.deployment?.endpointUrl).toBe(
-      "https://catalog.dev.example.io",
-    );
+    expect(development).toHaveLength(1);
+    expect(development[0]?.deployment?.environment).toBe("development");
+    expect(production).toHaveLength(1);
+    expect(production[0]?.deployment?.environment).toBe("production");
+    expect(production[0]?.displayName).toBe("Catalog API");
   });
 
-  it("keeps one row per component × environment binding", () => {
+  it("gives every component a development card, greyed Not deployed when unbound", () => {
+    const { development, production } = groupDeploymentCards(
+      [component("storefront", "Storefront"), component("catalog-api")],
+      [devReady],
+    );
+    expect(development).toHaveLength(2);
+    const storefront = development.find((c) => c.componentName === "storefront");
+    expect(storefront?.kind).toBe("notDeployed");
+    expect(storefront?.deployment).toBeUndefined();
+    expect(production).toHaveLength(0);
+  });
+
+  it("keeps a component deployed only in production visible as Not deployed in dev", () => {
+    const { development, production } = groupDeploymentCards(
+      [component("catalog-api")],
+      [prodReady],
+    );
+    expect(production).toHaveLength(1);
+    expect(development).toHaveLength(1);
+    expect(development[0]?.kind).toBe("notDeployed");
+  });
+
+  it("puts non-production environments in the development column", () => {
     const staging: Deployment = {
       componentName: "catalog-api",
       environment: "staging",
       status: "Ready",
     };
-    const rows = joinDeploymentRows([component("catalog-api")], [ready, staging]);
-    expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.deployment?.environment)).toEqual([
+    const { development, production } = groupDeploymentCards(
+      [component("catalog-api")],
+      [devReady, staging],
+    );
+    expect(production).toHaveLength(0);
+    expect(development).toHaveLength(2);
+    expect(development.map((c) => c.deployment?.environment)).toEqual([
       "development",
       "staging",
     ]);
   });
 
   it("shows deployments whose component is missing from the list", () => {
-    const rows = joinDeploymentRows([], [ready]);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.componentName).toBe("catalog-api");
-    expect(rows[0]?.displayName).toBe("catalog-api");
+    const { development } = groupDeploymentCards([], [devReady]);
+    expect(development).toHaveLength(1);
+    expect(development[0]?.componentName).toBe("catalog-api");
+    expect(development[0]?.displayName).toBe("catalog-api");
   });
 
-  it("sorts rows by component name", () => {
-    const rows = joinDeploymentRows(
+  it("sorts each column by component name", () => {
+    const { development } = groupDeploymentCards(
       [component("zeta"), component("alpha")],
       [],
     );
-    expect(rows.map((r) => r.componentName)).toEqual(["alpha", "zeta"]);
-  });
-
-  it("uses the component displayName on joined rows", () => {
-    const rows = joinDeploymentRows(
-      [component("catalog-api", "Catalog API")],
-      [ready],
-    );
-    expect(rows[0]?.displayName).toBe("Catalog API");
+    expect(development.map((c) => c.componentName)).toEqual(["alpha", "zeta"]);
   });
 
   it("marks intentionally undeployed bindings", () => {
-    const rows = joinDeploymentRows(
+    const { development } = groupDeploymentCards(
       [component("orders-api")],
-      [{ componentName: "orders-api", environment: "development", status: "Undeployed" }],
+      [
+        {
+          componentName: "orders-api",
+          environment: "development",
+          status: "Undeployed",
+        },
+      ],
     );
-    expect(rows[0]?.kind).toBe("undeployed");
+    expect(development[0]?.kind).toBe("undeployed");
   });
 });
 
 describe("deploymentsAreMoving", () => {
   it("is true while any binding is transitional", () => {
     expect(
-      deploymentsAreMoving([ready, { ...ready, status: "Progressing" }]),
+      deploymentsAreMoving([devReady, { ...devReady, status: "Progressing" }]),
     ).toBe(true);
   });
 
   it("is false when everything is settled (ready, failed, or undeployed)", () => {
     expect(
       deploymentsAreMoving([
-        ready,
-        { ...ready, status: "ReleaseFailed" },
-        { ...ready, status: "Undeployed" },
+        devReady,
+        { ...devReady, status: "ReleaseFailed" },
+        { ...devReady, status: "Undeployed" },
       ]),
     ).toBe(false);
   });

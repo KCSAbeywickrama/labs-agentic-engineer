@@ -4,7 +4,6 @@ import {
   componentOpenApi,
   projectBuilds,
   projectComponents,
-  projectDeployments,
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
@@ -57,15 +56,12 @@ export const projectHandlers = [
     "*/api/v1/projects/:projectName/components/:componentName/openapi",
     ({ params }) => respond(() => componentOpenApi(String(params.componentName))),
   ),
-  // A web app's dev deployment URL for the overview's "Open app" link (#196).
+  // Per-component release bindings — the overview's "Open app" link (#196)
+  // and the Deployments board's fan-out (#216).
   http.get(
     "*/api/v1/projects/:projectName/components/:componentName/deployments",
     ({ params }) =>
       respond((s) => componentDeployments(s, String(params.componentName))),
-  ),
-  // Deployments page (#216): all of the project's release bindings in one call.
-  http.get("*/api/v1/projects/:projectName/deployments", () =>
-    respond((s) => projectDeployments(s)),
   ),
   http.get("*/api/v1/projects/:projectName/tasks", ({ request }) => {
     // ?tag=vN scopes to one build's lineage, mirroring the aep:spec/<tag>

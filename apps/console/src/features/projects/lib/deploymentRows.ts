@@ -21,14 +21,16 @@ import type { components } from "../../../generated/aep-api";
 type Component = components["schemas"]["Component"];
 type Deployment = components["schemas"]["Deployment"];
 
-// Deployments page (#216): the table joins the components list with the
-// project's release bindings client-side — absence is information ("what's
-// running AND what isn't"), so every component gets at least one row.
+// Deployments board (#216): two columns — Development and Production — fed
+// by the components list joined client-side with each component's release
+// bindings. Absence is information ("what's running AND what isn't"), so
+// every component gets a Development card even with no binding.
 
-// "Undeployed" is the contract's distinguished status for an intentional
-// spec.state == Undeploy binding; any other reason is OpenChoreo's latest
-// Ready-condition reason, where only "Ready" is a settled success and
-// failure is recognizable by its wording.
+// "Undeployed" is the distinguished status for an intentional
+// spec.state == Undeploy binding (rendered if the backend ever emits it);
+// any other reason is OpenChoreo's latest Ready-condition reason, where
+// only "Ready" is a settled success and failure is recognizable by its
+// wording.
 export type StatusKind =
   | "success"
   | "error"
@@ -44,7 +46,7 @@ export function statusKind(status: string | undefined): StatusKind {
   return "transitional";
 }
 
-export type DeploymentRow = {
+export type DeploymentCard = {
   componentName: string;
   displayName: string;
   // "notDeployed" marks a component with no binding at all; otherwise the
@@ -53,30 +55,47 @@ export type DeploymentRow = {
   deployment?: Deployment;
 };
 
-export function joinDeploymentRows(
+export type DeploymentBoard = {
+  development: DeploymentCard[];
+  production: DeploymentCard[];
+};
+
+// Production gets exactly its bindings; everything else (development,
+// staging, …) lands on the Development board, and a component with no
+// non-production binding still gets a greyed "Not deployed" card there —
+// the Development column always accounts for every component.
+export function groupDeploymentCards(
   componentItems: Component[] | null | undefined,
   deploymentItems: Deployment[] | null | undefined,
-): DeploymentRow[] {
+): DeploymentBoard {
   const displayNames = new Map<string, string>();
   for (const c of componentItems ?? []) {
     displayNames.set(c.name, c.displayName || c.name);
   }
-
-  const rows: DeploymentRow[] = [];
-  const deployedComponents = new Set<string>();
-  for (const d of deploymentItems ?? []) {
+  const cardOf = (d: Deployment): DeploymentCard => {
     const componentName = d.componentName ?? "";
-    deployedComponents.add(componentName);
-    rows.push({
+    return {
       componentName,
       displayName: displayNames.get(componentName) ?? componentName,
       kind: statusKind(d.status),
       deployment: d,
-    });
+    };
+  };
+
+  const development: DeploymentCard[] = [];
+  const production: DeploymentCard[] = [];
+  const inDevelopment = new Set<string>();
+  for (const d of deploymentItems ?? []) {
+    if (d.environment === "production") {
+      production.push(cardOf(d));
+    } else {
+      development.push(cardOf(d));
+      inDevelopment.add(d.componentName ?? "");
+    }
   }
   for (const c of componentItems ?? []) {
-    if (!deployedComponents.has(c.name)) {
-      rows.push({
+    if (!inDevelopment.has(c.name)) {
+      development.push({
         componentName: c.name,
         displayName: displayNames.get(c.name) ?? c.name,
         kind: "notDeployed",
@@ -84,13 +103,14 @@ export function joinDeploymentRows(
     }
   }
 
-  return rows.sort(
-    (a, b) =>
-      a.componentName.localeCompare(b.componentName) ||
-      (a.deployment?.environment ?? "").localeCompare(
-        b.deployment?.environment ?? "",
-      ),
-  );
+  const byName = (a: DeploymentCard, b: DeploymentCard) =>
+    a.componentName.localeCompare(b.componentName) ||
+    (a.deployment?.environment ?? "").localeCompare(
+      b.deployment?.environment ?? "",
+    );
+  development.sort(byName);
+  production.sort(byName);
+  return { development, production };
 }
 
 // Adaptive-poll signal (the STATUS_ACTIVE/IDLE convention, #183): a binding

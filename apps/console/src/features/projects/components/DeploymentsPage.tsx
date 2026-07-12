@@ -21,61 +21,216 @@ import {
   Avatar,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Link as MuiLink,
-  ListingTable,
+  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import {
+  useComponentsDeployments,
   useProjectComponents,
-  useProjectDeployments,
 } from "../api/queries";
 import {
-  joinDeploymentRows,
-  type DeploymentRow,
+  groupDeploymentCards,
+  type DeploymentCard,
 } from "../lib/deploymentRows";
 
-// Chip vocabulary for a row's state (#216): the label keeps the backend's
+// Chip vocabulary for a card's state (#216): the label keeps the backend's
 // raw condition reason (it's the vocabulary operators see in OpenChoreo),
 // only the two join-derived states get console-authored labels.
-function rowChip(row: DeploymentRow): {
+function cardChip(card: DeploymentCard): {
   label: string;
   color: "success" | "error" | "info" | "default";
   outlined?: boolean;
 } {
-  switch (row.kind) {
+  switch (card.kind) {
     case "notDeployed":
       return { label: "Not deployed", color: "default", outlined: true };
     case "undeployed":
       return { label: "Undeployed", color: "default" };
     case "success":
-      return { label: row.deployment?.status ?? "Ready", color: "success" };
+      return { label: card.deployment?.status ?? "Ready", color: "success" };
     case "error":
-      return { label: row.deployment?.status ?? "Failed", color: "error" };
+      return { label: card.deployment?.status ?? "Failed", color: "error" };
     case "transitional":
-      return { label: row.deployment?.status ?? "In progress", color: "info" };
+      return { label: card.deployment?.status ?? "In progress", color: "info" };
     default:
       return { label: "Pending", color: "default", outlined: true };
   }
 }
 
-function deployedAt(createdAt: string | undefined): string {
-  if (!createdAt) return "—";
+function deployedAt(createdAt: string | undefined): string | null {
+  if (!createdAt) return null;
   const date = new Date(createdAt);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
 }
 
-// Deployments page (#216): what's running in dev and what isn't — a flat
-// table over the project-level deployments read joined with the components
-// list. The join is client-side, so a components fetch failure degrades to
-// binding-only rows instead of blanking the page.
-export function DeploymentsPage({ projectName }: { projectName: string }) {
-  const deployments = useProjectDeployments(projectName);
-  const components = useProjectComponents(projectName);
+function BoardCard({ card, column }: { card: DeploymentCard; column: string }) {
+  const chip = cardChip(card);
+  const d = card.deployment;
+  const when = deployedAt(d?.createdAt);
+  const notDeployed = card.kind === "notDeployed";
+  return (
+    <Card
+      variant="outlined"
+      sx={{
+        width: "100%",
+        ...(notDeployed && { opacity: 0.6, borderStyle: "dashed" }),
+      }}
+    >
+      <CardContent sx={{ "&:last-child": { pb: 2 } }}>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+          <Avatar
+            sx={{
+              width: 28,
+              height: 28,
+              bgcolor: "action.hover",
+              color: "text.primary",
+              fontSize: 14,
+            }}
+          >
+            {(card.displayName.trim()[0] ?? "C").toUpperCase()}
+          </Avatar>
+          <Typography variant="subtitle2" sx={{ flexGrow: 1, minWidth: 0 }}>
+            {card.displayName}
+          </Typography>
+          <Chip
+            label={chip.label}
+            size="small"
+            color={chip.color}
+            {...(chip.outlined && { variant: "outlined" as const })}
+          />
+        </Stack>
+        {/* A binding from an environment that isn't the column's own (e.g.
+            staging on the Development board) keeps its env visible. */}
+        {d?.environment && d.environment !== column && (
+          <Chip
+            label={d.environment}
+            size="small"
+            variant="outlined"
+            sx={{ mt: 1 }}
+          />
+        )}
+        {(d?.releaseName || d?.endpointUrl || when) && (
+          <Stack spacing={0.5} sx={{ mt: 1.5 }}>
+            {d?.releaseName && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {d.releaseName}
+              </Typography>
+            )}
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ alignItems: "center", justifyContent: "space-between" }}
+            >
+              {when ? (
+                <Typography variant="caption" color="text.secondary">
+                  {when}
+                </Typography>
+              ) : (
+                <span />
+              )}
+              {d?.endpointUrl && (
+                <MuiLink
+                  href={d.endpointUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  variant="body2"
+                  sx={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 0.5,
+                    flexShrink: 0,
+                  }}
+                >
+                  Open <ExternalLink size={14} />
+                </MuiLink>
+              )}
+            </Stack>
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
-  if (deployments.isPending || components.isPending) {
+function BoardColumn({
+  title,
+  column,
+  cards,
+  emptyText,
+}: {
+  title: string;
+  column: string;
+  cards: DeploymentCard[];
+  emptyText: string;
+}) {
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        minWidth: 0,
+        bgcolor: "background.default",
+        border: 1,
+        borderColor: "divider",
+        borderRadius: 2,
+        p: 2,
+      }}
+    >
+      <Stack
+        direction="row"
+        spacing={1}
+        sx={{ alignItems: "center", mb: 2, px: 0.5 }}
+      >
+        <Typography variant="subtitle1">{title}</Typography>
+        <Chip label={cards.length} size="small" variant="outlined" />
+      </Stack>
+      {cards.length === 0 ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ py: 3, textAlign: "center" }}
+        >
+          {emptyText}
+        </Typography>
+      ) : (
+        <Stack spacing={1.5}>
+          {cards.map((card) => (
+            <BoardCard
+              key={`${card.componentName}/${card.deployment?.environment ?? ""}`}
+              card={card}
+              column={column}
+            />
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+// Deployments board (#216): what's running and what isn't, as two
+// environment columns. Data is the components list plus one
+// list-deployments read per component (the endpoints the overview already
+// uses — no bespoke aggregate), so a single component's failed read
+// degrades to a warning instead of blanking the board.
+export function DeploymentsPage({ projectName }: { projectName: string }) {
+  const components = useProjectComponents(projectName);
+  const componentNames = (components.data?.items ?? []).map((c) => c.name);
+  const deployments = useComponentsDeployments(projectName, componentNames);
+
+  if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
         <CircularProgress aria-label="Loading deployments" />
@@ -83,28 +238,23 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     );
   }
 
-  if (deployments.isError) {
+  if (components.isError) {
     return (
       <Alert
         severity="error"
         action={
-          <Button onClick={() => void deployments.refetch()}>Retry</Button>
+          <Button onClick={() => void components.refetch()}>Retry</Button>
         }
       >
         Failed to load deployments
-        {deployments.error instanceof Error && deployments.error.message
-          ? `: ${deployments.error.message}`
+        {components.error instanceof Error && components.error.message
+          ? `: ${components.error.message}`
           : ""}
       </Alert>
     );
   }
 
-  const rows = joinDeploymentRows(
-    components.data?.items ?? [],
-    deployments.data.items,
-  );
-
-  if (rows.length === 0) {
+  if (componentNames.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
         Nothing to deploy yet — components appear here once the published
@@ -113,114 +263,38 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     );
   }
 
+  const board = groupDeploymentCards(
+    components.data?.items ?? [],
+    deployments.deployments,
+  );
+
   return (
-    <ListingTable.Container sx={{ width: "100%" }} disablePaper>
-      <ListingTable variant="card" density="standard">
-        <ListingTable.Head>
-          <ListingTable.Row>
-            <ListingTable.Cell>Component</ListingTable.Cell>
-            <ListingTable.Cell sx={{ maxWidth: 140 }}>
-              Environment
-            </ListingTable.Cell>
-            <ListingTable.Cell sx={{ maxWidth: 160 }}>Status</ListingTable.Cell>
-            <ListingTable.Cell>Release</ListingTable.Cell>
-            <ListingTable.Cell sx={{ maxWidth: 200 }}>URL</ListingTable.Cell>
-            <ListingTable.Cell sx={{ maxWidth: 180 }}>
-              Deployed
-            </ListingTable.Cell>
-          </ListingTable.Row>
-        </ListingTable.Head>
-        <ListingTable.Body>
-          {rows.map((row) => {
-            const chip = rowChip(row);
-            return (
-              <ListingTable.Row
-                key={`${row.componentName}/${row.deployment?.environment ?? ""}`}
-                variant="card"
-                hover
-              >
-                <ListingTable.Cell>
-                  <ListingTable.CellIcon
-                    icon={
-                      <Avatar
-                        sx={{
-                          width: 28,
-                          height: 28,
-                          bgcolor: "action.hover",
-                          color: "text.primary",
-                        }}
-                      >
-                        {(row.displayName.trim()[0] ?? "C").toUpperCase()}
-                      </Avatar>
-                    }
-                    primary={row.displayName}
-                  />
-                </ListingTable.Cell>
-                <ListingTable.Cell sx={{ maxWidth: 140 }}>
-                  {row.deployment?.environment ? (
-                    <Chip
-                      label={row.deployment.environment}
-                      size="small"
-                      variant="outlined"
-                    />
-                  ) : (
-                    <Typography variant="caption" color="text.secondary">
-                      —
-                    </Typography>
-                  )}
-                </ListingTable.Cell>
-                <ListingTable.Cell sx={{ maxWidth: 160 }}>
-                  <Chip
-                    label={chip.label}
-                    size="small"
-                    color={chip.color}
-                    {...(chip.outlined && { variant: "outlined" as const })}
-                  />
-                </ListingTable.Cell>
-                <ListingTable.Cell>
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {row.deployment?.releaseName ?? "—"}
-                  </Typography>
-                </ListingTable.Cell>
-                <ListingTable.Cell sx={{ maxWidth: 200 }}>
-                  {row.deployment?.endpointUrl ? (
-                    <MuiLink
-                      href={row.deployment.endpointUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      variant="body2"
-                      sx={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 0.5,
-                      }}
-                    >
-                      Open <ExternalLink size={14} />
-                    </MuiLink>
-                  ) : (
-                    <Typography variant="caption" color="text.secondary">
-                      —
-                    </Typography>
-                  )}
-                </ListingTable.Cell>
-                <ListingTable.Cell sx={{ maxWidth: 180 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    {deployedAt(row.deployment?.createdAt)}
-                  </Typography>
-                </ListingTable.Cell>
-              </ListingTable.Row>
-            );
-          })}
-        </ListingTable.Body>
-      </ListingTable>
-    </ListingTable.Container>
+    <>
+      {deployments.failedCount > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Deployments for {deployments.failedCount} component
+          {deployments.failedCount === 1 ? "" : "s"} could not be loaded — the
+          board shows what did.
+        </Alert>
+      )}
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        spacing={2}
+        sx={{ alignItems: "stretch" }}
+      >
+        <BoardColumn
+          title="Development"
+          column="development"
+          cards={board.development}
+          emptyText="Nothing in development yet."
+        />
+        <BoardColumn
+          title="Production"
+          column="production"
+          cards={board.production}
+          emptyText="Nothing in production yet — dev is the only deploy target for now."
+        />
+      </Stack>
+    </>
   );
 }

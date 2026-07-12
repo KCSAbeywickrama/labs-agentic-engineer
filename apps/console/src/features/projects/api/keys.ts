@@ -30,8 +30,6 @@ export const projectKeys = {
     [...projectKeys.components(name), component, "openapi"] as const,
   componentDeployments: (name: string, component: string) =>
     [...projectKeys.components(name), component, "deployments"] as const,
-  deployments: (name: string) =>
-    [...projectKeys.detail(name), "deployments"] as const,
   tasks: (name: string) => [...projectKeys.detail(name), "tasks"] as const,
   tags: (name: string) => [...projectKeys.detail(name), "tags"] as const,
   buildPreflight: (name: string) =>
