@@ -160,9 +160,16 @@ export function BuildsPage({
         }}
         actions={versionSelector}
       />
-      <Box sx={{ mb: 2 }}>
+      <Box sx={{ mb: 4 }}>
         <BuildSummaryCard build={selected} />
       </Box>
+      <Typography
+        variant="overline"
+        color="text.secondary"
+        sx={{ display: "block", mb: 1 }}
+      >
+        Tasks
+      </Typography>
       <TasksList projectName={projectName} tag={selected.tag} />
     </>
   );
@@ -229,7 +236,9 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
   });
 
   return (
-    <Card variant="outlined">
+    // Subtle filled background sets the run summary apart from the white,
+    // outlined task cards below so it reads as the build's header, not a row.
+    <Card variant="outlined" sx={{ bgcolor: "action.hover" }}>
       <CardContent sx={{ "&:last-child": { pb: 2.5 } }}>
         <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
           <Typography variant="h6">{build.tag}</Typography>
