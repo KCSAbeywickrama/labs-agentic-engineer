@@ -36,12 +36,12 @@
  *    ProseMirror fragment (~30× the Yjs traffic + rewrites earlier text); line
  *    boundaries are clean.
  *
- * Scope (v1): room-mode, MARKDOWN and `.cell` addFile only — neither has a
- * content-gate, so there is no deferred-validation risk (unlike design.json).
- * `.cell` is the project-level architecture DSL; streaming it line-by-line
- * draws the diagram live as the model writes it. Non-md/`.cell` / already-
- * existing paths are skipped (execute owns them). Non-finalized streams
- * (truncation / reject) are rolled back.
+ * Scope (v1): room-mode, MARKDOWN, `.cell`, and `.dsl` addFile only — none has
+ * a content-gate, so there is no deferred-validation risk (unlike design.json).
+ * `.cell` is the project-level architecture DSL and `.dsl` a component's
+ * wireframes; streaming either line-by-line draws its diagram live as the
+ * model writes it. Other / already-existing paths are skipped (execute owns
+ * them). Non-finalized streams (truncation / reject) are rolled back.
  */
 
 import { parsePartialJson } from "ai";
@@ -50,9 +50,9 @@ import type { FileBundle, StreamPart } from "@aep/agent-stream";
 import type { RoomPeer } from "./room-peer.js";
 import { ADD_FILE } from "../agents/main/tools/files.js";
 
-/** Paths safe to optimistically stream: markdown (Y.XmlFragment) or `.cell` DSL (Y.Text). */
+/** Paths safe to optimistically stream: markdown (Y.XmlFragment) or a DSL (Y.Text) — `.cell` architecture, `.dsl` wireframes. */
 function isStreamablePath(path: string): boolean {
-  return isMarkdownPath(path) || path.endsWith(".cell");
+  return isMarkdownPath(path) || path.endsWith(".cell") || path.endsWith(".dsl");
 }
 
 interface CallState {
