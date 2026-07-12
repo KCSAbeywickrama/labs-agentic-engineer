@@ -657,6 +657,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                     fragment={fragment}
                     provider={collab.provider}
                     self={collab.self}
+                    agentStreaming={agentBusy}
                   />
                 ) : ytext ? (
                   <CollabTextArea

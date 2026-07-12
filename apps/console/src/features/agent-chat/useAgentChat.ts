@@ -71,7 +71,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       }
       const active = await getActiveTurn(projectName);
       if (ac.signal.aborted || !active || active.status !== "running") return;
-      if (active.useCase !== "requirements-chat") return; // another flow's turn
+      if (active.useCase !== "general") return; // another flow's turn
       setIsSending(true);
       dropTurnOutput(chatKey, active.turnId); // replay-from-0 re-adds it all
       try {

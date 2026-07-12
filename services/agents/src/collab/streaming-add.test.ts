@@ -28,13 +28,13 @@ import type { RoomPeer } from "./room-peer.js";
 import { StreamingDocWriter } from "./streaming-add.js";
 
 class FakePeer implements RoomPeer {
-  sets: { path: string; content: string }[] = [];
+  sets: { path: string; content: string; mark: boolean }[] = [];
   deletes: string[] = [];
   files(): Record<string, string> {
     return {};
   }
-  set(path: string, content: string): void {
-    this.sets.push({ path, content });
+  set(path: string, content: string, mark: boolean): void {
+    this.sets.push({ path, content, mark });
   }
   delete(path: string): void {
     this.deletes.push(path);
@@ -81,6 +81,12 @@ test("streams markdown addFile incrementally, line-by-line, converging to full c
 
   assert.ok(peer.sets.length >= 2, `expected incremental writes, got ${peer.sets.length}`);
   assert.ok(peer.sets.every((s) => s.path === MD_PATH), "all writes target the same path");
+  // Streaming previews a newly-created file (addFile) → every write is UNMARKED,
+  // so the highlighted tail is never re-rendered per flush (the flicker fix).
+  assert.ok(
+    peer.sets.every((s) => s.mark === false),
+    "streamed addFile writes must be unmarked",
+  );
 
   // Monotonic prefix growth: each write extends the previous.
   for (let i = 1; i < peer.sets.length; i++) {

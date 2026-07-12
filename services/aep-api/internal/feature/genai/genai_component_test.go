@@ -1359,8 +1359,9 @@ func TestRehydrate_ChatMessages(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"messages"`) {
 		t.Errorf("rehydrate body = %s", rec.Body.String())
 	}
-	// Rehydrate reconstructs the id under the requirements-chat use case.
-	wantPath := "/conversations/org_" + testOrg + "--proj_" + testProj + "--requirements-chat--" + convUUID
+	// Rehydrate reconstructs the id under the general use case (the console
+	// omits "useCase", so its turns are namespaced under useCaseGeneral).
+	wantPath := "/conversations/org_" + testOrg + "--proj_" + testProj + "--general--" + convUUID
 	r.fake.mu.Lock()
 	gotPath := r.fake.lastConvPath
 	r.fake.mu.Unlock()
