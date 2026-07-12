@@ -1,3 +1,6 @@
 # Helm dependency build artifacts — generated, not source
 **/charts/*.tgz
 **/Chart.lock
+
+# Bootstrap values — generated at install time, contain secrets, never commit
+**/templates/bootstrapValues/

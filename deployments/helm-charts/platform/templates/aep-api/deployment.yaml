@@ -1,0 +1,170 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: aep-api
+    app.kubernetes.io/managed-by: {{ .Release.Service}}
+    app.kubernetes.io/part-of: aep
+spec:
+  replicas: {{ .Values.aepApi.replicas | default 1 }}
+  selector: 
+    matchLabels: 
+      app: aep-api
+  template:
+    metadata:
+      labels: 
+        app: aep-api
+        app.kubernetes.io/part-of: wso2-agentic-engineer
+    spec:
+      serviceAccountName: aep-api
+      securityContext:
+        # Shared workspaces PVC is handed to the pod's fsGroup so the
+        # non-root runtime user (uid 1000) can write it.
+        fsGroup: 1000
+      containers:
+        - name: aep-api
+          image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
+          imagePullPolicy: {{ .Values.aepApi.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.aepApi.port }}
+              name: http
+          resources: {{ toYaml .Values.aepApi.resources | nindent 12 }}
+          env:
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.aepApi.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.aepApi.logLevel | quote }}
+            - name: DEPLOYMENT_TIER
+              value: {{ .Values.aepApi.deploymentTier | quote }}
+            - name: TEST_MODE
+              value: "false"
+            - name: LOCAL_OPENBAO_REPAIR
+              value: "false"
+            - name: AEP_WORKSPACE_ROOT
+              value: "/workspaces"
+            - name: JWT_AUDIENCE
+              value: "aep-*"
+            - name: SERVICE_AUTH_CLIENT_ID
+              value: {{ .Values.aepApi.serviceAuth.clientId | quote }}
+            - name: SERVICE_AUTH_TOKEN_URL
+              value: "{{ .Values.thunder.adminURL }}/oauth2/token"
+            - name: SERVICE_AUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-thunder-secrets
+                  key: AEP_API_CLIENT_SECRET
+            - name: SERVICE_AUTH_HOST_HEADER
+              value: ""
+            - name: BFF_TASK_SIGNING_KEY_PATH
+              value: "/app/keys/task-signing.pem"
+            - name: BFF_TASK_TOKEN_ISSUER
+              value: {{ .Values.taskSigning.issuer | quote }}
+            - name: BFF_TASK_TOKEN_AUDIENCE
+              value: {{ .Values.taskSigning.audience | quote }}
+            - name: BFF_PUBLIC_URL
+              value: {{ .Values.aepApi.publicURL | quote }}
+            - name: OBSERVER_OAUTH_CLIENT_ID
+              value: {{ .Values.observer.clientId | quote }}
+            - name: OBSERVER_OAUTH_HOST_HEADER
+              value: ""
+            - name: PLATFORM_API_SERVICE_BASE_URL
+              valueFrom: 
+                configMapKeyRef:
+                  name: platform-configs
+                  key: PLATFORM_API_SERVICE_BASE_URL
+            - name: JWKS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_JWKS_URL
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_ISSUER
+
+            - name: THUNDER_ADMIN_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: platform-configs
+                  key: THUNDER_ADMIN_URL
+            - name: THUNDER_SYSTEM_CLIENT_ID
+              value: "aep-system-client"
+            - name: AGENTS_SVC_BASE_URL
+              value: "http://aep-agents.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepAgents.port }}"
+            - name: AGENT_PLATFORM_URL
+              value: "http://aep-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepApi.port }}"
+            - name: AGENT_RUNNER_IMAGE
+              value: {{ .Values.codingAgentRunner.image | quote }}
+            # cluster-gateway-proxy: enables coding-agent live streaming +
+            # JobWatcher (reads pod logs/job status). Local → in-cluster stub
+            # Service; prod → the real managed proxy URL. Unset → no streaming,
+            # dispatch via the direct K8s Job path.
+            {{- if .Values.codingAgentDispatch.localStubs.enabled }}
+            - name: CLUSTER_GATEWAY_PROXY_URL
+              value: "http://cluster-gateway-proxy.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.codingAgentDispatch.clusterGatewayProxy.port }}"
+            {{- else if .Values.codingAgentDispatch.clusterGatewayProxy.url }}
+            - name: CLUSTER_GATEWAY_PROXY_URL
+              value: {{ .Values.codingAgentDispatch.clusterGatewayProxy.url | quote }}
+            {{- end }}
+            # secret-manager-api: when set, enables the full proxy DISPATCH path
+            # (per-run ExternalSecrets). Left empty locally so dispatch uses the
+            # direct K8s Job path. Set to the real sm-api endpoint in prod.
+            {{- if .Values.codingAgentDispatch.secretManagerApi.url }}
+            - name: SECRET_MANAGER_API_URL
+              value: {{ .Values.codingAgentDispatch.secretManagerApi.url | quote }}
+            {{- end }}
+            # GitHub webhook delivery URL registered on each repo. Local → smee.io
+            # channel (forwarded in-cluster by the smee-client); prod → the real
+            # public ingress URL. Unset → webhooks not registered (task state won't
+            # advance on PR events).
+            {{- if .Values.webhook.deliveryURL }}
+            - name: GITHUB_WEBHOOK_DELIVERY_URL
+              value: {{ .Values.webhook.deliveryURL | quote }}
+            {{- end }}
+
+            # secrets — all values sourced from ESO-synced K8s Secrets (written by aep init)
+            - name: AGENTS_SVC_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-agents-secrets
+                  key: AGENTS_JWT_SECRET
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-webhook-secrets
+                  key: GITHUB_WEBHOOK_SECRET
+            - name: THUNDER_SYSTEM_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aep-thunder-secrets
+                  key: THUNDER_SYSTEM_CLIENT_SECRET
+            - name: OAUTH_STATE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aep-oauth-secrets
+                  key: OAUTH_STATE_SIGNING_KEY
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}"
+          volumeMounts:
+            - name: task-signing-key
+              mountPath: /app/keys
+              readOnly: true
+            - name: workspaces
+              mountPath: /workspaces
+      volumes:
+        - name: task-signing-key
+          secret:
+            secretName: aep-task-signing-key
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: aep-workspaces

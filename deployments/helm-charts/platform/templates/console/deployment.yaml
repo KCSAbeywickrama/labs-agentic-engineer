@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: aep-console
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-aep
+spec:
+  replicas: {{ .Values.console.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: aep-console
+  template:
+    metadata:
+      labels:
+        app: aep-console
+        app.kubernetes.io/part-of: wso2-aep
+    spec:
+      containers:
+        - name: aep-console
+          image: "{{ .Values.console.image.repository }}:{{ .Values.console.image.tag }}"
+          imagePullPolicy: {{ .Values.console.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.console.port }}
+              name: http
+          resources: {{ toYaml .Values.console.resources | nindent 12 }}
+          env:
+            - name: AEP_API_PROXY_URL
+              value: "http://aep-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.aepApi.port }}"
+            - name: VITE_THUNDER_URL
+              value: {{ .Values.console.thunderPublicURL | quote }}
+            - name: VITE_THUNDER_CLIENT_ID
+              value: {{ .Values.console.thunder.clientId | quote }}
+            - name: VITE_THUNDER_SCOPES
+              value: {{ .Values.console.thunder.scopes | quote }}
+            - name: VITE_SIGN_IN_REDIRECT_URL
+              value: {{ .Values.console.publicURL | quote }}
+            - name: VITE_SIGN_OUT_REDIRECT_URL
+              value: "{{ .Values.console.publicURL }}/login"

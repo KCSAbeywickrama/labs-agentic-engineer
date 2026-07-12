@@ -174,6 +174,15 @@ func newProxyHandler(cfg *rest.Config) (http.Handler, error) {
 			req.URL.Host = upstream.Host
 			req.URL.Path = singleJoiningSlash(upstream.Path, trimmed)
 			req.Host = upstream.Host
+			// Drop the caller's Authorization header. The caller (aep-api) sends
+			// its own service bearer for the cloud proxy's authz layer; that
+			// token is meaningless to the k8s API. The stub re-authenticates to
+			// the API with its own credentials via HTTPWrappersForConfig — but
+			// client-go's bearer round-tripper skips injection when Authorization
+			// is already set, so a forwarded token would leave the request
+			// unauthenticated (401). Stripping it here lets the SA token (in-
+			// cluster) or client cert (kubeconfig) authenticate cleanly.
+			req.Header.Del("Authorization")
 			// k8s API expects User-Agent on every request — fill if absent
 			// so logs aren't blank.
 			if req.Header.Get("User-Agent") == "" {
