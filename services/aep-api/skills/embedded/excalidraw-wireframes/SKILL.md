@@ -183,6 +183,8 @@ screen <Name> ["what this view is for"]   // one per view; description renders a
       <blocks…>
   card "Title"                   // a card with nested children lays them out inside
     <elements…>                  //   …a badge child docks to the card's top-right
+    row                          //   …and a `row` lays children side by side IN the card
+      <elements…>
   table "Col1 | Col2" [-> Screen]
     row "cell | cell"            // table data — quoted `row` lines belong to the table
 ```
@@ -198,7 +200,8 @@ screen <Name> ["what this view is for"]   // one per view; description renders a
 4. `split N/M` + `left`/`right` makes **two columns** with the divider drawn
    for you.
 5. Children indented under a `card` render **inside** it; the card grows to
-   fit; a `badge` child docks to its top-right corner.
+   fit; a `badge` child docks to its top-right corner; a nested `row` lays
+   children side by side within the card (two stats, a label+value pair).
 6. `WxH` is optional and rarely needed (a taller `chart "…" 600x260`); widths
    are clamped to fit. The screen grows downward if content is long.
 
@@ -270,12 +273,11 @@ stops communicating.
 
 ## Worked example — risk register webapp wireframes
 
-Read this complete worked example before writing your first wireframe. It's a
-`wireframes.dsl` for a three-screen desktop flow. Note the rhythm: every screen
-repeats the same `navbar` + `sidebar` (consistent chrome); blocks stack in
-reading order; `row` groups things side by side; the primary action is the one
-`primary` button per screen; status is carried by `badge`s, not prose. No
-coordinates anywhere — the compiler computes every position.
+A complete `wireframes.dsl` for a three-screen desktop flow. Note the rhythm:
+every screen repeats the same `navbar` + `sidebar` (consistent chrome); blocks
+stack in reading order; `row` groups things side by side; the primary action is
+the one `primary` button per screen; status is carried by `badge`s, not prose.
+No coordinates anywhere — the compiler computes every position.
 
 ```
 // Risk register — three screens, desktop
@@ -342,8 +344,9 @@ screen RiskDetail "The owner tracks remediation for one risk"
       card "Discussion"
         text "K. Smith · 2d: when does the cert rotation land?"
         text "M. Diaz · 1d: Monday, after the freeze."
-        textarea "Add a comment…"
-        button "Post" primary
+        row
+          textarea "Add a comment…"
+          button "Post" primary
       heading "Activity"
       text "2h ago — A. Chen closed CVE-2026-1"
       text "1d ago — M. Diaz started cert rotation"
