@@ -47,7 +47,12 @@ export function GitHubIssueLink({
         label={`#${issueNumber}`}
         aria-label={`GitHub issue #${issueNumber}`}
         {...(onClick ? { onClick } : {})}
-        sx={{ fontVariantNumeric: "tabular-nums" }}
+        sx={{
+          fontVariantNumeric: "tabular-nums",
+          // The lucide-style icon doesn't inherit the Chip's icon margins, so
+          // it sits flush against the pill's left edge — space it explicitly.
+          "& .MuiChip-icon": { ml: 0.75, mr: -0.25 },
+        }}
       />
     </Tooltip>
   );
