@@ -94,13 +94,8 @@ export function TasksList({
 
         const row = (
           <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ fontVariantNumeric: "tabular-nums", minWidth: 32 }}
-            >
-              #{t.issueNumber}
-            </Typography>
+            {/* No leading #issue — the GitHub chip on the right already carries
+                the issue number. */}
             <Typography sx={{ flexGrow: 1, fontWeight: 500 }}>
               {t.title}
             </Typography>
@@ -124,11 +119,15 @@ export function TasksList({
             ) : (
               <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
             )}
-            <GitHubIssueLink
-              issueNumber={t.issueNumber}
-              issueUrl={t.issueUrl}
-              onClick={(e) => e.stopPropagation()}
-            />
+            {/* Extra left padding so the GitHub chip isn't crowded against
+                the status chip. */}
+            <Box sx={{ display: "inline-flex", pl: 1 }}>
+              <GitHubIssueLink
+                issueNumber={t.issueNumber}
+                issueUrl={t.issueUrl}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Box>
           </Stack>
         );
 
