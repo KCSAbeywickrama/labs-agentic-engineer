@@ -36,6 +36,10 @@ import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router";
 import { useAlertReport } from "../api/queries";
 import { ClassificationChip } from "./ClassificationChip";
+// The diagnosis is Markdown (headings / lists / code / timeline); render it as
+// a preview rather than raw text. SkillMarkdown is the console's shared
+// theme-token-styled react-markdown renderer.
+import { SkillMarkdown } from "../../settings/components/SkillMarkdown";
 import type { components } from "../../../generated/aep-api";
 
 type RcaAgentReport = components["schemas"]["RcaAgentReport"];
@@ -72,9 +76,7 @@ function AlertReceivedContent({ report }: { report: RcaAgentReport }) {
           </Typography>
         )}
       </Box>
-      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-        {report.diagnosis}
-      </Typography>
+      {report.diagnosis && <SkillMarkdown body={report.diagnosis} />}
     </Box>
   );
 }
