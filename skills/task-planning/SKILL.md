@@ -71,6 +71,8 @@ in context. A good body has:
 - **Web-application bodies** — instruct building it against the API contract of
   the service it depends on, citing that component's
   `specs/design/components/<api-component-name>/openapi.yaml`.
+- **Service bodies** — instruct implementing the API to its own contract, citing
+  this component's `specs/design/components/<api-component-name>/openapi.yaml`.
 
 Reference a Task you planned this turn by its `{ title }`; reference an existing
 Task by its `{ issueNumber }`.
