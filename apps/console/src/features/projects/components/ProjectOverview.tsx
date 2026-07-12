@@ -22,6 +22,7 @@ import {
   Avatar,
   Box,
   Button,
+  Grid,
   Link as MuiLink,
   Skeleton,
   Stack,
@@ -30,9 +31,12 @@ import {
 import { Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
+import { SectionTitle } from "../../../components/SectionTitle";
 import { StatusChip } from "../../../components/StatusChip";
+import { useAllTasks } from "../../tasks/api/queries";
 import { useProject, useProjectComponents, useProjectStatus } from "../api/queries";
 import { phaseChip } from "../lib/phaseChip";
+import { AgentActivity } from "./AgentActivity";
 import { ComponentsList } from "./ComponentsList";
 import { OverviewPipeline } from "./OverviewPipeline";
 
@@ -61,6 +65,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
   const componentsQuery = useProjectComponents(projectName);
+  const tasks = useAllTasks(projectName);
 
   const buildState = status.data?.build.status;
   const deployState = status.data?.deploy.status;
@@ -131,7 +136,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
         }
         backTo={{ link: <Link to="/" />, label: "Back to Projects" }}
       />
-      <Stack spacing={4} sx={{ mt: 3 }}>
+      <Stack spacing={3} sx={{ mt: 3 }}>
         {status.isError ? (
           <SectionError
             what="project status"
@@ -144,29 +149,39 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
           <OverviewPipeline projectName={projectName} status={status.data} />
         )}
 
-        <div>
-          <Typography variant="h6" gutterBottom>
-            Components
-          </Typography>
-          {componentsQuery.isError ? (
-            <SectionError
-              what="components"
-              message={
-                componentsQuery.error instanceof Error
-                  ? componentsQuery.error.message
-                  : undefined
-              }
-              onRetry={() => void componentsQuery.refetch()}
-            />
-          ) : componentsQuery.isPending ? (
-            <Skeleton variant="rounded" height={120} />
-          ) : (
-            <ComponentsList
-              projectName={projectName}
-              items={componentsQuery.data.items ?? []}
-            />
-          )}
-        </div>
+        {/* Two-column body: the agent-activity feed (what the agents have
+            done) beside the component cards (what they're building). */}
+        <Grid container spacing={4}>
+          <Grid size={{ xs: 12, md: 6 }}>
+            {tasks.isPending ? (
+              <Skeleton variant="rounded" height={200} />
+            ) : (
+              <AgentActivity tasks={tasks.data ?? []} />
+            )}
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <SectionTitle>Components</SectionTitle>
+            {componentsQuery.isError ? (
+              <SectionError
+                what="components"
+                message={
+                  componentsQuery.error instanceof Error
+                    ? componentsQuery.error.message
+                    : undefined
+                }
+                onRetry={() => void componentsQuery.refetch()}
+              />
+            ) : componentsQuery.isPending ? (
+              <Skeleton variant="rounded" height={120} />
+            ) : (
+              <ComponentsList
+                projectName={projectName}
+                items={componentsQuery.data.items ?? []}
+                tasks={tasks.data ?? []}
+              />
+            )}
+          </Grid>
+        </Grid>
       </Stack>
     </>
   );
