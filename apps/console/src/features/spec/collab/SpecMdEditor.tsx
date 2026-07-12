@@ -47,12 +47,10 @@ import { SpecMdToolbar } from "./SpecMdToolbar";
 // out of interim flushes until reviewed.
 export function SpecMdEditor({
   fragment,
-  path,
   provider,
   self,
 }: {
   fragment: Y.XmlFragment;
-  path: string;
   provider: HocuspocusProvider;
   self: { name: string; color: string };
 }) {
@@ -82,19 +80,30 @@ export function SpecMdEditor({
   }, [editor]);
 
   return (
-    <Box>
+    <Box
+      sx={{
+        // The editor is a single framed card that fills the pane: toolbar
+        // (and review bar) docked as header rows, only the document area
+        // below them scrolls — text can never pass the toolbar (#206 rework).
+        flexGrow: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        border: 1,
+        borderColor: "divider",
+        borderRadius: 1,
+        overflow: "hidden",
+        // Acrylic paper is translucent; flattening it over the solid default
+        // gives an opaque surface in both color schemes, so the page
+        // gradient can't bleed into the editing surface.
+        bgcolor: "background.default",
+        backgroundImage: (theme) =>
+          `linear-gradient(${theme.palette.background.paper}, ${theme.palette.background.paper})`,
+        "&:focus-within": { borderColor: "primary.main" },
+      }}
+    >
       {editor && (
-        <Box
-          sx={{
-            // Floats over the doc while scrolling (the spec content pane is
-            // the scrollport) so formatting — and Accept/Reject when agent
-            // suggestions are pending — stays reachable mid-document (#206).
-            position: "sticky",
-            top: 0,
-            zIndex: 2,
-            mb: 1,
-          }}
-        >
+        <>
           <SpecMdToolbar editor={editor} />
           {pending > 0 && (
             <Stack
@@ -102,16 +111,11 @@ export function SpecMdEditor({
               alignItems="center"
               spacing={1}
               sx={{
-                mt: 0.5,
+                flexShrink: 0,
                 px: 1.5,
                 py: 0.75,
-                borderRadius: 1,
-                boxShadow: 1,
-                // The Oxygen paper color is translucent (acrylic); the blur
-                // keeps the floating bar readable over the document text
-                // behind it.
-                bgcolor: "background.paper",
-                backdropFilter: "blur(8px)",
+                borderBottom: 1,
+                borderColor: "divider",
                 backgroundImage: (theme) =>
                   `linear-gradient(${alpha(theme.palette.primary.main, 0.08)}, ${alpha(
                     theme.palette.primary.main,
@@ -141,7 +145,7 @@ export function SpecMdEditor({
               </Button>
             </Stack>
           )}
-        </Box>
+        </>
       )}
       {editor && (
         <BubbleMenu
@@ -183,16 +187,13 @@ export function SpecMdEditor({
       )}
       <Box
         sx={{
-          border: 1,
-          borderColor: "divider",
-          borderRadius: 1,
+          flexGrow: 1,
+          minHeight: 0,
+          overflow: "auto",
           px: 2,
           py: 1,
-          minHeight: 480,
           cursor: "text",
-          "&:focus-within": { borderColor: "primary.main" },
-          // Tiptap emits a plain contenteditable; give it breathing room.
-          "& .tiptap": { outline: "none", minHeight: 460 },
+          "& .tiptap": { outline: "none" },
           "& .tiptap p": { my: 1 },
           "& .tiptap h1, & .tiptap h2, & .tiptap h3": { mt: 2, mb: 1 },
           "& .tiptap ul, & .tiptap ol": { pl: 3 },
@@ -237,10 +238,6 @@ export function SpecMdEditor({
       >
         <EditorContent editor={editor} />
       </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ px: 1.75 }}>
-        {path} — live collaborative document; commits to GitHub arrive with
-        the committer (#86 phase 3).
-      </Typography>
     </Box>
   );
 }

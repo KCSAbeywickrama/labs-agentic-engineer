@@ -103,15 +103,11 @@ export function SpecMdToolbar({ editor }: { editor: Editor }) {
       alignItems="center"
       spacing={0.25}
       sx={{
+        flexShrink: 0,
         px: 0.75,
         py: 0.5,
-        border: 1,
+        borderBottom: 1,
         borderColor: "divider",
-        borderRadius: 1,
-        // The Oxygen paper color is translucent (acrylic); the blur keeps
-        // the sticky toolbar readable over the document text behind it.
-        bgcolor: "background.paper",
-        backdropFilter: "blur(8px)",
       }}
     >
       <ToolbarToggle
