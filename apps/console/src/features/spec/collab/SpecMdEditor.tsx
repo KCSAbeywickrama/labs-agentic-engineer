@@ -93,12 +93,10 @@ export function SpecMdEditor({
         borderColor: "divider",
         borderRadius: 1,
         overflow: "hidden",
-        // Acrylic paper is translucent; flattening it over the solid default
-        // gives an opaque surface in both color schemes, so the page
-        // gradient can't bleed into the editing surface.
-        bgcolor: "background.default",
-        backgroundImage: (theme) =>
-          `linear-gradient(${theme.palette.background.paper}, ${theme.palette.background.paper})`,
+        // Plain paper token, same as AgentChatPanel — it re-resolves per
+        // color scheme (a JS-resolved gradient froze the light paper into
+        // dark mode and rendered gray; #206 D10 revision, 2026-07-12).
+        bgcolor: "background.paper",
         "&:focus-within": { borderColor: "primary.main" },
       }}
     >
