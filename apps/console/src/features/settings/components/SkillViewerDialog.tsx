@@ -29,10 +29,10 @@ import {
   Divider,
   Typography,
 } from "@wso2/oxygen-ui";
+import { MarkdownView } from "../../../components/MarkdownView";
 import { useSkill } from "../api/queries";
 import { kindChipColor, kindLabel, normalizeKind } from "../skillKind";
 import { splitFrontmatter } from "../skillMd";
-import { SkillMarkdown } from "./SkillMarkdown";
 
 // Read-only inspection of any skill, of any kind — the only way to see what an
 // org/platform skill actually instructs an agent to do.
@@ -120,7 +120,7 @@ export function SkillViewerDialog({
             <Divider />
 
             {body.trim() ? (
-              <SkillMarkdown body={body} />
+              <MarkdownView>{body}</MarkdownView>
             ) : (
               <Typography
                 variant="body2"
