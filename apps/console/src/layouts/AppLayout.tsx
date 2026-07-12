@@ -327,7 +327,9 @@ export function AppLayout() {
       </AppShell.Main>
 
       <AppShell.Footer>
-        <Footer>
+        {/* Slim variant: the default footer padding spends ~66px of every
+            page on two caption lines; halving it keeps the pane taller. */}
+        <Footer sx={{ py: 0.5 }}>
           <Footer.Copyright>
             © {new Date().getFullYear()} WSO2 LLC.
           </Footer.Copyright>
