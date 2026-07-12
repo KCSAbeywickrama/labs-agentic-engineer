@@ -95,33 +95,37 @@ export function TasksList({
         const row = (
           <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
             {/* No leading #issue — the GitHub chip on the right already carries
-                the issue number. */}
-            <Typography sx={{ flexGrow: 1, fontWeight: 500 }}>
+                the issue number. Each trailing chip lives in a fixed-width,
+                right-aligned cell so component / status / GitHub line up into
+                clean columns regardless of label length. */}
+            <Typography sx={{ flexGrow: 1, fontWeight: 500, minWidth: 0 }} noWrap>
               {t.title}
             </Typography>
-            {isGate || !t.component ? (
-              <Typography variant="caption" color="text.secondary">
-                —
-              </Typography>
-            ) : (
-              <Chip
-                size="small"
-                label={t.component}
-                sx={{ bgcolor: "action.hover", color: "text.secondary" }}
-              />
-            )}
-            {onHold ? (
-              <Tooltip title={`Waiting for ${t.blockedBy?.join(", ")}`}>
-                <Box sx={{ display: "inline-flex" }}>
-                  <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
-                </Box>
-              </Tooltip>
-            ) : (
-              <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
-            )}
-            {/* Extra left padding so the GitHub chip isn't crowded against
-                the status chip. */}
-            <Box sx={{ display: "inline-flex", pl: 1 }}>
+            <Box sx={{ width: 120, display: "flex", justifyContent: "flex-end" }}>
+              {isGate || !t.component ? (
+                <Typography variant="caption" color="text.secondary">
+                  —
+                </Typography>
+              ) : (
+                <Chip
+                  size="small"
+                  label={t.component}
+                  sx={{ bgcolor: "action.hover", color: "text.secondary" }}
+                />
+              )}
+            </Box>
+            <Box sx={{ width: 92, display: "flex", justifyContent: "flex-end" }}>
+              {onHold ? (
+                <Tooltip title={`Waiting for ${t.blockedBy?.join(", ")}`}>
+                  <Box sx={{ display: "inline-flex" }}>
+                    <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
+                  </Box>
+                </Tooltip>
+              ) : (
+                <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
+              )}
+            </Box>
+            <Box sx={{ width: 72, display: "flex", justifyContent: "flex-end" }}>
               <GitHubIssueLink
                 issueNumber={t.issueNumber}
                 issueUrl={t.issueUrl}
