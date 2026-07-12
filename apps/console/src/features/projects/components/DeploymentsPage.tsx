@@ -33,6 +33,7 @@ import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import {
   useComponentsDeployments,
   useProjectComponents,
+  useProjectStatus,
 } from "../api/queries";
 import {
   groupDeploymentCards,
@@ -171,11 +172,13 @@ function BoardColumn({
   column,
   cards,
   emptyText,
+  version,
 }: {
   title: string;
   column: string;
   cards: DeploymentCard[];
   emptyText: string;
+  version?: string;
 }) {
   return (
     <Box
@@ -196,6 +199,15 @@ function BoardColumn({
       >
         <Typography variant="subtitle1">{title}</Typography>
         <Chip label={cards.length} size="small" variant="outlined" />
+        {version && (
+          <Chip
+            label={version}
+            size="small"
+            color="primary"
+            variant="outlined"
+            title="Spec version live in this environment"
+          />
+        )}
       </Stack>
       {cards.length === 0 ? (
         <Typography
@@ -229,6 +241,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const components = useProjectComponents(projectName);
   const componentNames = (components.data?.items ?? []).map((c) => c.name);
   const deployments = useComponentsDeployments(projectName, componentNames);
+  // The status poll's deploy aggregate (#184) carries the spec tag live in
+  // dev ("v1"); the layout already runs this query, so the read is free.
+  const status = useProjectStatus(projectName);
+  const devVersion = status.data?.deploy.version || undefined;
 
   if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
     return (
@@ -287,6 +303,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           column="development"
           cards={board.development}
           emptyText="Nothing in development yet."
+          {...(devVersion && { version: devVersion })}
         />
         <BoardColumn
           title="Production"
