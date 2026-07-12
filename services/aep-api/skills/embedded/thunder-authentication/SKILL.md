@@ -60,6 +60,11 @@ instead of deriving it from YOUR dependency name) produces a
 - The Thunder OIDC discovery endpoint is `<DEP>_ISSUER/.well-known/openid-configuration`.
 - Token endpoint: `<DEP>_ISSUER/oauth2/token`. The SPA posts to it
   cross-origin — there is NO same-origin `/oidc/` proxy in nginx.
+- The SPA's OAuth client is provisioned with the `refresh_token` grant (plus
+  `authorization_code` + PKCE), so `oidc-client-ts` renews an expiring access
+  token by posting the refresh token to that endpoint — no hidden iframe, no
+  third-party-cookie dependency. This is what `automaticSilentRenew` and
+  `signinSilent()` use to keep a signed-in user signed in.
 - The signed-in user's identity claims ride in the ID TOKEN, surfaced by
   `oidc-client-ts` as `user.profile`: `groups` (their role/group memberships)
   and `ouId`/`ouName`/`ouHandle` (their organization), beside standard
@@ -116,7 +121,7 @@ dependency of the auth resource type:
   and the SPA deploys unable to sign in.
 
 - The web-app's `componentAgentInstructions` MUST say (verbatim or close):
-  `OIDC Authorization Code + PKCE against the platform IDP using oidc-client-ts. Read OIDC config from window._env_.<DEP>_* (<DEP> = UPPER_SNAKE of the auth dependency name) and upstream URLs from window._env_.<UPSTREAM>_URL — typed via src/env.ts. Compute redirect_uri = window.location.origin + '/callback' and serve the callback route at '/callback'. Attach Authorization: Bearer <access_token> to every API call. DO NOT write a .env file. Runtime config comes from window._env_, never import.meta.env.VITE_*. DO NOT use envsubst, /etc/nginx/templates/, or any custom nginx entrypoint — stock nginx:alpine serves the static bundle + env-config.js.`
+  `OIDC Authorization Code + PKCE against the platform IDP using oidc-client-ts. Read OIDC config from window._env_.<DEP>_* (<DEP> = UPPER_SNAKE of the auth dependency name) and upstream URLs from window._env_.<UPSTREAM>_URL — typed via src/env.ts. Compute redirect_uri = window.location.origin + '/callback' and serve the callback route at '/callback'. Attach Authorization: Bearer <access_token> to every API call. Persist the session in localStorage with automaticSilentRenew:true so users stay signed in across visits, and renew an expired token silently (signinSilent, refresh_token grant) before any full-page sign-in redirect. DO NOT write a .env file. Runtime config comes from window._env_, never import.meta.env.VITE_*. DO NOT use envsubst, /etc/nginx/templates/, or any custom nginx entrypoint — stock nginx:alpine serves the static bundle + env-config.js.`
 - Do NOT create a separate `auth` / `identity` / `login` /
   `session` / `user-service` component. Thunder owns token issuance;
   the API just reads `X-User-Id` (covered by `api-management`).
@@ -143,14 +148,19 @@ dependency:
   keys. Serve the callback route at `/callback` — the platform registered
   exactly that URL."
 - Scope: "Attach `Authorization: Bearer <access_token>` to every
-  `window._env_.API_BASE_URL` fetch. On 401, restart the login flow
-  via `signIn()`. Do NOT write a `/login` form that POSTs credentials
-  anywhere."
+  `window._env_.API_BASE_URL` fetch. Persist the session in `localStorage`
+  and set `automaticSilentRenew: true`; renew an expired token silently via
+  `signinSilent()` (the platform's `refresh_token` grant) before any full
+  sign-in redirect, and gate app load on that renew — not on `signIn()` for
+  a merely-expired token. On 401, fall back to `signIn()`. Do NOT write a
+  `/login` form that POSTs credentials anywhere."
 - Acceptance criteria: "Loading the webapp unauthenticated redirects to
-  the OIDC authorize endpoint; after sign-in, the user lands back on
-  the app with a token in sessionStorage; subsequent API calls carry
-  `Authorization: Bearer <token>` and return per-user data; reloading
-  the page keeps the user signed in."
+  the OIDC authorize endpoint; after sign-in, the user lands back on the app
+  with a token in `localStorage`; subsequent API calls carry
+  `Authorization: Bearer <token>` and return per-user data; returning to the
+  app in a new tab or after closing it keeps the user signed in with no new
+  credential prompt, and an expired access token is renewed silently (no
+  redirect) until the refresh token expires or the user signs out."
 
 ### Coding agent — implementation
 
@@ -188,7 +198,16 @@ export const userManager = new UserManager({
   post_logout_redirect_uri: window.location.origin,
   response_type: "code",
   scope: env.USER_AUTH_SCOPES,
-  userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+  // Persist the session in localStorage so the user stays signed in across
+  // visits — a new tab, or coming back after closing the app. sessionStorage
+  // is per-tab and wiped on close, which forces a re-login on every visit;
+  // localStorage carries the PKCE state across the redirect just as well.
+  // automaticSilentRenew refreshes the token in the background via the
+  // platform's refresh_token grant (no redirect). Tradeoff: the token lives
+  // in JS-readable storage — acceptable for a public SPA; keep
+  // loadUserInfo:false and lean on the platform CSP.
+  userStore: new WebStorageStateStore({ store: window.localStorage }),
+  automaticSilentRenew: true,
   loadUserInfo: false,
 });
 
@@ -196,8 +215,17 @@ export async function signIn()         { await userManager.signinRedirect(); }
 export async function signOut()        { await userManager.signoutRedirect(); }
 export async function handleCallback() { return userManager.signinRedirectCallback(); }
 
-export async function getAccessToken(): Promise<string | null> {
+// Return the current user, renewing a persisted-but-expired session SILENTLY
+// via the refresh token (no redirect). Returns null only when there is no
+// usable session — the caller then starts a full sign-in redirect.
+export async function currentUser() {
   const user = await userManager.getUser();
+  if (user && !user.expired) return user;
+  try { return await userManager.signinSilent(); } catch { return null; }
+}
+
+export async function getAccessToken(): Promise<string | null> {
+  const user = await currentUser();
   return user?.access_token ?? null;
 }
 ```
@@ -208,11 +236,17 @@ Platform facts); the platform already requests the `group`/`ou` scopes:
 
 ```ts
 export async function getRoles(): Promise<string[]> {
-  const user = await userManager.getUser();
+  const user = await currentUser();
   const groups = user?.profile?.groups;
   return Array.isArray(groups) ? (groups as string[]) : [];
 }
 ```
+
+On app load, gate rendering on `currentUser()`: if it returns a user, proceed;
+if it returns `null`, call `signIn()`. Do NOT call `signIn()` merely because
+the access token is expired — that turns a silent refresh into a full-screen
+redirect and re-logs the user in on every visit. `currentUser()` already
+renews an expired-but-persisted session silently.
 
 Add a callback route at `/callback` in your router that calls
 `handleCallback()` once on mount, then navigates to `/`. If you instead gate
@@ -261,4 +295,5 @@ export async function listTodos() {
 | SPA throws `<KEY> not set` / redirects to `undefined/oauth2/authorize` | Agent hardcoded a fixed key prefix instead of deriving keys from YOUR dependency name | Use `env.<DEP>_ISSUER` etc., where `<DEP>` = UPPER_SNAKE of the auth dependency name (dep `user-auth` → `USER_AUTH_ISSUER`). |
 | Every user shows no role / `groups` is empty | Roles read from the wrong place — the access token, or a hand-decoded JWT | Read `user.profile.groups` (the id_token claim `oidc-client-ts` surfaces). The platform already requests the `group`/`ou` scopes, so the claim is present. |
 | After login, "invalid redirect URI" | `redirect_uri` doesn't match the `<origin>/callback` URL the platform registered (e.g. an invented redirect-URI key) | Compute `window.location.origin + '/callback'`. |
-| Sign-in loops endlessly even at the right path | `oidc-client-ts` written without `WebStorageStateStore({ store: sessionStorage })` | Use the constructor shown above; without it, state and PKCE verifier don't survive the redirect. |
+| Sign-in loops endlessly even at the right path | `oidc-client-ts` written without a persistent `WebStorageStateStore` (in-memory default) | Use `WebStorageStateStore({ store: localStorage })` as shown; without persistent web storage the state and PKCE verifier don't survive the redirect. |
+| User is sent to the login screen on every visit / new tab | Session kept in `sessionStorage` (per-tab, wiped on close), or the load path calls `signIn()` on an expired token instead of renewing it | Store the session in `localStorage` and enable `automaticSilentRenew`; on load renew via `signinSilent()` (refresh token) and only `signIn()` when there is no session to renew. |
