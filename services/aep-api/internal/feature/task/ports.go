@@ -37,6 +37,9 @@ import (
 type IssueClient interface {
 	CreateIssue(ctx context.Context, orgID, projectID string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error)
 	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]gitrepo.IssueInfo, error)
+	// GetIssue fetches one issue by number (O(1)); returns gitrepo.ErrIssueNotFound
+	// when it doesn't exist. Preferred over ListIssues when the number is known.
+	GetIssue(ctx context.Context, orgID, projectID string, number int) (*gitrepo.IssueInfo, error)
 	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
 	EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error
 	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
@@ -50,8 +53,18 @@ type RepoResolver interface {
 	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
 }
 
-// VersionReader lists versioned (tagged) specs and reads a bundle at a tag —
-// the lineage stamps and the incremental-plan baseline diff (§6).
+// ComponentEnsurer idempotently provisions the OpenChoreo Component CR for a
+// design component, erroring if no design component exists by that name.
+// component.ComponentService satisfies it. PromoteAndExecute calls it
+// synchronously before promoting an ad-hoc issue into a Task, so an unknown
+// componentName (e.g. a caller's prefix-stripping bug) fails the dispatch
+// call itself instead of only surfacing inside the funnel's async goroutine.
+type ComponentEnsurer interface {
+	EnsureComponent(ctx context.Context, orgID, projectID, componentName string) error
+}
+
+// VersionReader lists approved (tagged) spec/design versions and reads a bundle
+// at a tag — the lineage stamps and the incremental-plan baseline diff (§6).
 type VersionReader interface {
 	ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
 	// LatestSpecTag is the newest spec tag name (`v<N>`) read WITHOUT a
@@ -85,6 +98,24 @@ type ExecutionReader interface {
 	LatestPerKindScoped(ctx context.Context, orgID, repo string, issueNumber int) (map[string]*models.Execution, error)
 	LatestPerKindForRepoScoped(ctx context.Context, orgID, repo string) (map[int]map[string]*models.Execution, error)
 	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]models.Execution, error)
+}
+
+// DesignReader exposes each component's declared dependencies from the design at
+// HEAD, so the read path can compute WHICH provisioning / org-service deps block
+// a coding Task (issue #164 follow-up: the board's "On hold — Waiting for X").
+// It mirrors the slice execution.DesignReader exposes for the funnel's gate; the
+// same app-root designComponents adapter satisfies both. A nil DesignReader
+// degrades the read path to component-dep gating only (provision/org-service dep
+// resolution is skipped).
+type DesignReader interface {
+	// ProvisionDepNames returns, per component (lowercased name), the names of
+	// that component's provisioning dependencies (external + platform-resource).
+	// Returns nil when the project has no design yet.
+	ProvisionDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
+	// OrgServiceDepNames returns, per component (lowercased name), the names of
+	// that component's cross-project org-service dependencies. Returns nil when
+	// the project has no design yet.
+	OrgServiceDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
 }
 
 // AnthropicKeyResolver resolves the org's effective Anthropic key. Empty key +

@@ -38,8 +38,19 @@ type WorkflowRunRepository interface {
 	// — the upsert makes that idempotent.
 	Record(ctx context.Context, row *models.DevflowRun) error
 
-	// SetStatus marks the row for workflowID terminal (or running again).
-	SetStatus(ctx context.Context, workflowID, status string) error
+	// SetStatus marks the row for workflowID terminal (or running again). reason
+	// is the failure detail for a `failed` status (empty otherwise) — persisted so
+	// the build summary can show WHY a run failed.
+	SetStatus(ctx context.Context, workflowID, status, reason string) error
+
+	// SetTaskCounts writes the dev run's task tally as ABSOLUTE values —
+	// idempotent under activity retry, never an increment. Scoped to one
+	// EXECUTION (workflow_id, run_id): a same-tag rebuild reuses the
+	// deterministic workflow id with a new run id, and the historical row's
+	// frozen tally must survive it. Record's upsert deliberately excludes
+	// these columns so the workflow's re-Record cannot zero a tally written
+	// before it.
+	SetTaskCounts(ctx context.Context, workflowID, runID string, total, done, failed int) error
 
 	// RunningTaskByIssue returns the running task-kind row for a Task, or
 	// (nil, nil) when none — the webhook signaler's point lookup.
@@ -57,6 +68,11 @@ type WorkflowRunRepository interface {
 	// GetByWorkflowID returns the row for a workflow ID fenced to orgID, or
 	// (nil, nil) when absent / another org's.
 	GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error)
+
+	// DeleteByProject purges a project's rows — the project-delete cascade.
+	// Without it a recreated same-named project resurrects stale runs (and
+	// the status poll would chase spec tags the fresh repo never had).
+	DeleteByProject(ctx context.Context, orgID, projectID string) error
 }
 
 type workflowRunRepository struct{ db *gorm.DB }
@@ -79,10 +95,26 @@ func (r *workflowRunRepository) Record(ctx context.Context, row *models.DevflowR
 	}).Create(row).Error
 }
 
-func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status string) error {
+func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status, reason string) error {
+	// Truncate defensively: the reason is a workflow error string, so a
+	// pathological one must not blow the row up. text has no hard cap, but a sane
+	// bound keeps the column and the UI honest.
+	if len(reason) > 2000 {
+		reason = reason[:2000]
+	}
 	return r.db.WithContext(ctx).Model(&models.DevflowRun{}).
 		Where("workflow_id = ?", workflowID).
-		Update("status", status).Error
+		Updates(map[string]any{"status": status, "reason": reason}).Error
+}
+
+func (r *workflowRunRepository) SetTaskCounts(ctx context.Context, workflowID, runID string, total, done, failed int) error {
+	return r.db.WithContext(ctx).Model(&models.DevflowRun{}).
+		Where("workflow_id = ? AND run_id = ?", workflowID, runID).
+		Updates(map[string]any{
+			"tasks_total":  total,
+			"tasks_done":   done,
+			"tasks_failed": failed,
+		}).Error
 }
 
 func (r *workflowRunRepository) RunningTaskByIssue(ctx context.Context, repo string, issueNumber int) (*models.DevflowRun, error) {
@@ -128,6 +160,12 @@ func (r *workflowRunRepository) ListByProject(ctx context.Context, orgID, projec
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *workflowRunRepository) DeleteByProject(ctx context.Context, orgID, projectID string) error {
+	return r.db.WithContext(ctx).
+		Where("org_id = ? AND project_id = ?", orgID, projectID).
+		Delete(&models.DevflowRun{}).Error
 }
 
 func (r *workflowRunRepository) GetByWorkflowID(ctx context.Context, orgID, workflowID string) (*models.DevflowRun, error) {

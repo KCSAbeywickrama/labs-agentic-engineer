@@ -1,6 +1,6 @@
 ---
 name: excalidraw-wireframes
-description: Use when creating or updating UI wireframes for a webapp component — sketching screens, forms, tables, or navigation flow.
+description: Use when creating or updating UI wireframes for a webapp component — sketching screens, forms, tables, dashboards, or navigation flow.
 metadata:
   aep:
     kind: platform
@@ -13,50 +13,260 @@ Every `web-application` component gets its wireframes as ONE DSL source file at
 Write ONLY the `.dsl`; the platform compiles it to the `.excalidraw`
 deterministically. NEVER write a `.excalidraw` file by hand.
 
-Wireframes are **gray and structural**: they validate layout, hierarchy, and
-flow — never colors, branding, or visual polish. The compiler enforces the
-style; you only decide structure.
+Wireframes are **low-fidelity but product-flavored**: they validate layout,
+hierarchy, and flow, not pixel-perfect visuals. The compiler applies the look
+(Oxygen UI palette, hand-drawn style) AND computes every position — **you
+write structure and content, never coordinates**. Elements stack top-to-bottom
+by default; `row` puts things side by side; `split` makes two columns. The
+compiler guarantees nothing overlaps and nothing leaves the screen.
 
-## Derive the screens from the requirements
+Produce **one canonical set of screens** — the agreed design, not a gallery of
+alternatives. One screen per distinct user task, per role (for a store: a
+product list, a product detail page, a checkout form). Don't ship two takes on
+the same screen.
 
-One screen per distinct user task, per role (for an expense app: employee
-claim list, claim form, manager review queue). Don't invent screens the
-requirements don't imply.
+### Where the screens come from — read the design first
+
+You have up to three sources in context; read them in this order of priority:
+
+1. **`specs/design/design.md`** — the architecture doc for the whole system.
+   This is your **primary** source for screens: it names the user roles, each
+   component's responsibilities, and the main flows. Derive the screen list from
+   here first. (It may not exist on every turn — if it's absent, promote the
+   requirements to primary.)
+2. **`specs/requirements/`** (requirements / user stories) — the **detailed**
+   source. Use it to flesh out each screen and to catch tasks the design doc
+   only summarized: specific fields, states, rules, and edge cases (out-of-
+   stock, guest vs. signed-in, validation errors).
+3. **This component's `specs/design/components/<name>/design.json`** — a thin
+   per-component summary; use it mainly to **scope**, not for screen content:
+   its `type` (draw wireframes only for `web-application`), its one-line
+   `description`, and its `dependencies` (e.g. an auth dependency means there's
+   a signed-in vs. guest distinction → likely role-specific screens).
+
+**Cover every task.** Walk the design and requirements and make sure each
+distinct user-facing task — for each role they name — has a wireframe screen
+that serves it; nothing user-facing should be left without a view. Equally,
+don't invent screens the design doesn't imply. A quick check: list the
+tasks/roles, and for each name the screen that fulfills it — a task with no
+screen is a gap, a screen with no task is noise.
+
+## What makes a wireframe good
+
+A good wireframe reads like a real screen someone could use, and it explains
+itself. What carries the quality:
+
+- **Real content, not placeholders.** Write "Open risks: 24", "Platform team",
+  "Overdue" — never "text here" or "label". The wireframe is a communication
+  artifact; concrete content is what makes a layout legible and reviewable.
+- **Say what each view is.** Give every screen a description (the quoted phrase
+  after its name) so anyone can tell at a glance what the view does and who
+  uses it — not just infer it from the widgets.
+- **A clear visual hierarchy.** A page has a title, then primary content, then
+  secondary detail. Use `heading` for section titles; put the most important
+  thing first (it renders highest). One dominant action per screen (the one
+  `primary` button).
+- **The right primitive for each thing.** A status is a `badge`, not text. A
+  section switch is `tabs`. A person is an `avatar`. Picking the primitive that
+  matches the real UI element is most of what makes screens feel real.
+
+## Roles change the screens — always show them
+
+Most real apps have more than one kind of user, and the *same feature looks
+different for each*. This is the single most common thing wireframes get wrong:
+they show one generic view and hide the fact that an admin and a regular user
+actually see different screens. Don't do that.
+
+**First, identify the roles.** Read `design.md` for distinct user types —
+admin/manager/owner vs. member/employee/developer vs. viewer/customer (the
+design doc usually spells the roles out; the requirements add the detail, and a
+`design.json` auth dependency is a strong hint a signed-in role exists). If the
+app has more than one, roles are in scope even when the prompt doesn't say "per
+role."
+
+**Then, for each role, show its main view and how it differs.** At minimum,
+give every role its own `screen` for the primary task they do, named and
+described for that role — because the difference is usually *capability*, not
+cosmetics. The same feature splits into genuinely different screens:
+
+- The one who **approves/administers** gets a queue or roster with the action
+  and the columns to act on (Approve/Reject, an "assignee" column, bulk
+  controls); the one who **submits/contributes** sees only their own items with
+  a single Submit/Upload action — no approve, no assign.
+- The one who **owns** a record edits it (an Edit form, private stats, a
+  Reassign control); the one who **consumes** it sees the same record read-only,
+  able at most to comment or take the one action meant for them.
+
+Two roles, two screens — the admin's screen simply *has* buttons and columns the
+member's does not. Show both.
+
+Rules of thumb:
+
+- Name the screen for its role and put the role in the description:
+  `screen ReviewQueue "Manager reviews and approves pending requests"`.
+- **A role screen is the SAME app — keep the identical `navbar` and `sidebar`
+  every other screen uses**, with the same items in the same order. The role
+  changes what's *inside* the screen — which buttons, columns, rows — not the
+  shell. Never give a scoped role its own smaller sidebar; that reads as a
+  different app.
+- Reflect the real difference in **actions and data** — a role that can't
+  approve/assign/delete simply doesn't have that button or column. Don't reskin
+  one layout and call it two. The role difference should be legible from the
+  screen itself, not spelled out in a caption.
+- A screen that is genuinely identical for everyone (a shared login, a generic
+  detail page) stays single — don't fork it just to have a matching set.
+
+## Proven screen anatomies
+
+Most webapp screens are one of three shapes. Follow these anatomies — they're
+what makes a wireframe read like a designed product instead of a pile of boxes.
+(Every `navbar` includes a notification bell + account avatar at its top-right:
+the compiler draws this account cluster as part of the `navbar` itself — don't
+add your own.)
+
+**Dashboard / landing** (top → bottom):
+
+1. A small muted eyebrow (`text`, e.g. the team or context: "OPERATIONS"), then
+   a `row` with a human `heading` ("Good morning — here's where things stand")
+   and, after `right`, a `search` and a filter `select`.
+2. A `row` of 3–4 stat-tile `card`s — `card "Open items | 47 | across 5 active
+   projects"`. Every number gets its label and a caption that explains it. The
+   row makes them equal-width automatically.
+3. A `row` of rich entity cards (one per project/order/record): a `card` whose
+   title is the entity, with nested children — a `progress "47/60"`, a meta
+   `text` line ("47 of 60 tasks · Due 14 Sep"), and a status `badge`
+   (`success`/`warning`: "On track"/"At risk") that docks to the card's corner
+   automatically.
+4. A `row` with a section `heading` ("Needs your attention") and, after
+   `right`, the page's primary CTA. Then a `table` whose LAST column is the
+   action — put "Review →" / "Follow up →" in each `row`'s final cell.
+
+**List / queue**: `heading`, then a `row` of filter `badge`s with counts
+("All (146)", "Open (23)", "Resolved (98)") or `tabs`, then a full-width
+`table` with real `row`s — status as a word in a status column, owner, due
+date, and a trailing action cell.
+
+**Detail / record** (the screen for ONE item): `breadcrumb`, then a `row` with
+the `heading` and its status `badge`s, a short description `text` — then a
+`split 60/40`:
+
+- **`left` (main)**: the item's content — a bordered panel `card` with detail
+  `text` lines, an items/records `table` with rows, an "Upload new" / primary
+  action.
+- **`right` (rail)**: the collaboration side — a "Discussion" `card` with
+  nested comment `text` lines (author + time + message), a `textarea` + "Post"
+  `button`, then an "Activity" `heading` and timestamped `text` rows ("2 days
+  ago — J. Alvarez uploaded report-final.pdf").
+
+A record's conversation and history belong in this right rail, beside the
+record — not on a separate screen. The divider between the columns is drawn
+automatically. Keep each comment `text` SHORT (a phrase, not a sentence).
 
 ## The DSL
 
+Line-oriented, nested by 2-space indentation. **No coordinates anywhere** —
+position comes from structure:
+
 ```
-screen <Name> [WxH]                  // desktop 1280x800 by default; size only for modals/exceptions
-  navbar "App | Nav1 | Nav2"         // full-width top bar; pipe-separated items; no coordinates
-  sidebar "Item1 | Item2 | Item3"    // left rail below the navbar; no coordinates
-  <kind> "<label>" <x>,<y> [WxH]     // everything else: screen-local coords from the top-left
-flow
-  <ScreenA> -> <ScreenB>             // navigation edges between screen names
+screen <Name> ["what this view is for"]   // one per view; description renders as a subtitle
+  navbar "App | Nav1 | Nav2"     // top bar; pipe-separated; bell+avatar added automatically
+  sidebar "Item1 | Item2"        // left rail; same items on every screen of the app
+  <kind> "<label>" [WxH] [variant] [-> Screen]   // a block: stacks below the previous one
+  row                            // children go side by side (equal shares, 16px gaps)
+    <kind> "<label>" …
+    right                        // everything after this packs to the right edge
+    <kind> "<label>" …
+  split 60/40                    // two columns + automatic vertical divider
+    left
+      <blocks…>                  // each column is its own stack (rows allowed)
+    right
+      <blocks…>
+  card "Title"                   // a card with nested children lays them out inside
+    <elements…>                  //   …a badge child docks to the card's top-right
+  table "Col1 | Col2" [-> Screen]
+    row "cell | cell"            // table data — quoted `row` lines belong to the table
 ```
 
-Element kinds and when to use them:
+**The six rules of layout** (everything else is automatic):
 
-| Kind | Use for | Default size |
-|---|---|---|
-| `navbar` | the app's top bar (first line of every screen) | full width × 56 |
-| `sidebar` | section navigation (when the app has sections) | 240 × full height |
-| `heading` | page/section titles | auto |
-| `text` | captions, values, helper copy | auto |
-| `input` | text fields, selects, search boxes | 320×36 |
-| `button` | actions; the bottom-most button gets the flow marker | 140×40 |
-| `table` | data lists — label is pipe-separated column headers, e.g. `table "Risk \| Owner \| Status" 280,140 940x280` | 640×240 |
-| `card` | dashboard stat tiles, summary panels | 300×160 |
-| `image` | logos, charts, previews (renders a crossed box) | 240×140 |
-| `rect` / `ellipse` | anything else (generic container / avatar, status dot) | 160×32 |
+1. Blocks **stack** top-to-bottom in the order you write them.
+2. `row` puts children **side by side** — flexible things (cards, inputs,
+   selects, charts, tables) share the width equally; small things (badges,
+   buttons) keep their natural size. A row can never overflow.
+3. `right` inside a row **right-aligns** what follows — header CTAs, the
+   search+filter pair, footer Cancel/Save (primary rightmost).
+4. `split N/M` + `left`/`right` makes **two columns** with the divider drawn
+   for you.
+5. Children indented under a `card` render **inside** it; the card grows to
+   fit; a `badge` child docks to its top-right corner.
+6. `WxH` is optional and rarely needed (a taller `chart "…" 600x260`); widths
+   are clamped to fit. The screen grows downward if content is long.
 
-Layout rules:
+**Navigation** is attached to the control that triggers it: put `-> ScreenName`
+at the end of the button (or link, or table) that leads there, and the compiler
+draws a `→ Screen N · ScreenName` marker beside it. The target must be a
+`screen` name that exists. When two buttons sit in a row, put the `->` on the
+primary/forward one.
 
-- With a sidebar, content starts at `x ≥ 264`; below a navbar, at `y ≥ 72`.
-- Full-content-width elements (tables) are ~940 wide at `x` 280.
-- Stack vertically with 16–24px gaps; keep everything inside the screen size
-  and never overlapping.
-- Comments start with `//`. Screen names in `flow` must match `screen` names
-  exactly; every screen should be reachable.
+Syntax is validated at write time: an unknown keyword, a misplaced
+`left`/`right`/table-`row`, or old-style x,y coordinates rejects the write with
+line numbers (`INVALID_DSL`) — fix every listed line and re-emit the file.
+
+### Element kinds
+
+Chrome & structure: `navbar`, `sidebar`, `tabs` (`"A | B | C"`, first active),
+`breadcrumb` (`"Projects / Acme / Settings"`), `divider` (a horizontal rule;
+column dividers come from `split` automatically).
+
+Content & data:
+
+| Kind | Use for |
+|---|---|
+| `heading` | page / section titles (renders large with an underline rule) |
+| `text` | body copy, values, helper text |
+| `link` | inline navigation text (renders blue) |
+| `card` | stat tile — `"Open items \| 47 \| across 5 audits"` (label, BIG value, caption); one-part label = a panel; nested children = a container |
+| `table` | data grids; label = `\|`-separated headers; nested `row "…"` lines for data |
+| `list` | stacked rows (feed, comments, nav); `\|`-separated items |
+| `image` | logos, photos, media slots (renders a crossed box) |
+| `chart` | data viz placeholder (renders axes + bars) |
+| `progress` | progress bar; label `"60%"`/`"3/4"` sets the fill |
+| `badge` | status pills — `"Open"`, `"Overdue"` (color via variant) |
+| `avatar` | a person — label `"Jane Doe"` renders initials `JD` |
+| `icon` | a small glyph slot; label is 1–2 chars |
+
+Inputs & controls: `input` (label = placeholder), `textarea`, `select`
+(renders ▾), `search` (renders ⌕), `button`, `checkbox` / `radio` / `toggle`
+(add `active` to show selected/on). Generic `rect` / `ellipse` only when
+nothing above fits.
+
+### Color
+
+The compiler applies the Oxygen theme automatically: white/neutral surfaces,
+brand orange on the active navbar/sidebar item and section-heading rules. You
+add color only through a trailing **variant**, to carry *status meaning*:
+
+- `primary` on the ONE main action per screen — fills brand orange. Every
+  other button stays a plain outline.
+- `danger` / `success` / `warning` / `info` on a `badge` or destructive
+  `button` (`badge "Overdue" danger`).
+- `ai` (purple) for an automated / AI-driven step, if the product has one.
+- `active` marks a `checkbox` / `radio` / `toggle` as selected / on.
+- `muted` for de-emphasized text (an eyebrow label).
+
+Keep status variants purposeful — a screen dense with red/green/amber badges
+stops communicating.
+
+### Consistency rules
+
+- **One primary navigation, not two.** A content-heavy tool (admin console,
+  dashboard app) uses the `sidebar` for section links and a brand-only
+  `navbar` (`navbar "Acme"`). A simple public flow (storefront, checkout) uses
+  a link-carrying `navbar` and **no sidebar**. Never both on one screen.
+- Repeat the SAME `navbar` (and `sidebar`) verbatim on every screen of one app
+  — consistent chrome is what makes screens read as one product.
+- Comments start with `//`. Every screen should be reachable from some
+  control's `-> Screen`.
 
 Read `references/wireframes-dsl-example.md` for a complete worked example
 before writing your first wireframe.
@@ -65,4 +275,6 @@ before writing your first wireframe.
 
 The DSL is line-oriented, so `editFile` works naturally: anchor on the
 `screen <Name>` line plus the element line you're changing. Add a screen by
-appending a new `screen` block and its `flow` edges.
+appending a new `screen` block. Add table data by inserting `row` lines under
+the `table`. Insert a new element by adding its line where it should appear in
+the stack — everything below it moves down automatically.

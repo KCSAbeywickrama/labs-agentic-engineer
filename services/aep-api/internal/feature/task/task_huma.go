@@ -48,6 +48,7 @@ type listInput struct {
 	humakit.OrgScopedInput
 	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
 	State       string `query:"state" enum:"open,closed,all" doc:"Which Tasks to return (default open)"`
+	Tag         string `query:"tag" doc:"Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions."`
 }
 
 type listOutput struct {
@@ -72,6 +73,22 @@ type issueActionInput struct {
 
 type emptyOutput struct{}
 
+// PromoteFromIssueRequest is the body for promote-task-from-issue: the caller
+// has already created an ad-hoc GitHub issue (e.g. via gitrepo's create-issue
+// operation, outside the spec-plan pipeline — the OpenChoreo SRE/RCA agent
+// handoff is the motivating case) and supplies its component here so it can be
+// turned into a proper Task (taskmeta labels + machine block) and dispatched.
+type PromoteFromIssueRequest struct {
+	ComponentName string `json:"componentName" doc:"Component this issue is about"`
+}
+
+type promoteFromIssueInput struct {
+	humakit.OrgScopedInput
+	ProjectName string `path:"projectName" doc:"Project name (DNS-label slug)"`
+	IssueNumber int    `path:"issueNumber" doc:"GitHub issue number to promote and dispatch"`
+	Body        PromoteFromIssueRequest
+}
+
 // RegisterTask registers the Task surface (plan / list / get / execute / hold)
 // on the code-first Huma API. Org is derived from the verified token
 // (humakit.OrgScopedInput) — a cross-org request is unrepresentable.
@@ -95,17 +112,35 @@ func RegisterTask(api huma.API, reads *Reads, commands *Commands, plan *PlanServ
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID:   "promote-task-from-issue",
+		Method:        http.MethodPost,
+		Path:          "/projects/{projectName}/tasks/{issueNumber}/promote-from-issue",
+		Summary:       "Turn an ad-hoc GitHub issue into a coding Task and dispatch it (async)",
+		Tags:          []string{"Tasks"},
+		Security:      humakit.SecurityUserJWT,
+		DefaultStatus: http.StatusAccepted,
+	}, func(ctx context.Context, in *promoteFromIssueInput) (*emptyOutput, error) {
+		if commands == nil {
+			return nil, huma.Error503ServiceUnavailable("tasks not configured")
+		}
+		if err := commands.PromoteAndExecute(ctx, in.OrgHandle, in.ProjectName, in.Body.ComponentName, in.IssueNumber); err != nil {
+			return nil, mapCommandError(err)
+		}
+		return &emptyOutput{}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "list-tasks",
 		Method:      http.MethodGet,
 		Path:        "/projects/{projectName}/tasks",
-		Summary:     "List a project's Tasks (live GitHub ⋈ executions → derived status)",
+		Summary:     "List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to one spec/build version tag",
 		Tags:        []string{"Tasks"},
 		Security:    humakit.SecurityUserJWT,
 	}, func(ctx context.Context, in *listInput) (*listOutput, error) {
 		if reads == nil {
 			return nil, huma.Error503ServiceUnavailable("tasks not configured")
 		}
-		views, err := reads.List(ctx, in.OrgHandle, in.ProjectName, in.State)
+		views, err := reads.ListByTag(ctx, in.OrgHandle, in.ProjectName, in.State, in.Tag)
 		if err != nil {
 			return nil, mapReadError(err)
 		}
@@ -230,6 +265,8 @@ func mapCommandError(err error) error {
 		return huma.Error404NotFound(ErrProjectRepoNotFound.Error())
 	case errors.Is(err, ErrIssueClosed):
 		return huma.Error409Conflict("issue is closed")
+	case errors.Is(err, ErrComponentNameRequired):
+		return huma.Error400BadRequest(ErrComponentNameRequired.Error())
 	default:
 		return huma.Error500InternalServerError("internal error")
 	}

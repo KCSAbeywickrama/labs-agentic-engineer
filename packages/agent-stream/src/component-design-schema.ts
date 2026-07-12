@@ -38,17 +38,16 @@ import type { Equal } from "./type-equal.js";
 // in-turn instead of committing a design.json the tag-time save gate 422s.
 
 // One env-var key the component reads at runtime (mirrors Go models.ConfigKey).
+// `secret: true` routes the value through the private secret path. `description`
+// is an optional human-readable note (what the value is for) the Build
+// dependency drawer renders under the field. `defaultValue` is an optional
+// suggested initial value the agent MAY set for a NON-secret key (a region, a
+// base URL); the drawer pre-fills the field with it. Never set for a secret.
 const configKeySchema = z.strictObject({
   key: z.string().min(1),
   secret: z.boolean().optional(),
-  credentialClass: z.string().optional(),
-});
-
-// One option attached to an ambiguous dependency (mirrors Go models.DependencyCandidate).
-const dependencyCandidateSchema = z.strictObject({
-  label: z.string().min(1),
   description: z.string().optional(),
-  url: z.string().optional(),
+  defaultValue: z.string().optional(),
 });
 
 // One unified, kind-discriminated dependency edge — the successor to the legacy
@@ -70,7 +69,6 @@ const dependencySchema = z.strictObject({
   // is marshalled verbatim into the OpenChoreo Resource spec.parameters, so a
   // number must survive as a JSON number for CRD validation to pass.
   parameters: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  candidates: z.array(dependencyCandidateSchema).optional(),
 });
 
 // The component's single network endpoint (mirrors Go models.ComponentEndpoint).
@@ -110,6 +108,10 @@ export const componentDesignSchema = z.strictObject({
   type: componentTypeSchema,
   version: z.string().min(1),
   language: z.string().min(1),
+  // buildpack stays a bare string in the schema; the "docker"-only rule is a
+  // post-parse check in checkComponentDesign (like name==dir) so it does NOT
+  // serialize to the shared JSON Schema — the BFF save-gate + Go fold stay
+  // permissive/untouched while the agent write-gate still self-corrects in-turn.
   buildpack: z.string().min(1),
   appPath: z.string().min(1),
   entrypoint: z.string().min(1),
@@ -119,6 +121,7 @@ export const componentDesignSchema = z.strictObject({
   endpoint: endpointSchema.optional(),
   exposesAPI: exposesAPISchema.optional(),
   componentAgentInstructions: z.string().optional(),
+  skillsApplied: z.array(z.string()).optional(),
 });
 
 // Compile-time drift guard: schema ⇄ contracts wire type (cf. tool.ts).
@@ -165,6 +168,17 @@ export function checkComponentDesign(path: string, content: string): ComponentDe
     return {
       code: "SCHEMA_VIOLATION",
       message: `${path}: "name" must equal the component directory ("${dir}"), got "${res.data.name}".`,
+    };
+  }
+  // buildpack is effectively closed: the platform builds every component with the
+  // "docker" buildpack. Enforced here (post-parse, like name==dir) rather than in
+  // the zod schema so it does NOT serialize to the shared JSON Schema — the BFF
+  // save-gate + Go fold stay permissive/untouched; the agent (the sole writer)
+  // self-corrects in-turn. Mirrored in the high-level-architecture skill.
+  if (res.data.buildpack !== "docker") {
+    return {
+      code: "SCHEMA_VIOLATION",
+      message: `${path}: "buildpack" must be "docker" (the platform's single build path), got ${JSON.stringify(res.data.buildpack)}.`,
     };
   }
   return null;

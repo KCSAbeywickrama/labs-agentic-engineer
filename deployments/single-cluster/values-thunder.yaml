@@ -121,6 +121,7 @@ bootstrap:
       CONFIDENTIAL_APPS=(
         "Workload Publisher|OpenChoreo Workload Publisher Client (used by dockerfile-builder generate-workload-cr step)|openchoreo-workload-publisher-client|openchoreo-workload-publisher-secret"
         "OpenChoreo Observer Resource Reader|Client used by the BFF to fetch tokens for the OC Observer service (live workflow logs). Bound by the openchoreo-observer-resource-reader-client-binding ClusterAuthzRoleBinding.|openchoreo-observer-resource-reader-client|openchoreo-observer-resource-reader-client-secret"
+        "OpenChoreo RCA Agent|SRE/RCA agent service-account identity. Authenticates to the OC API + Observer to run root-cause analyses. Bound by the rca-agent-binding ClusterAuthzRoleBinding (sub=openchoreo-rca-agent) shipped with the OC control-plane chart. Consumed by the openchoreo-observability-plane RCA agent (rca.oauth.clientId + rca-agent-secret OAUTH_CLIENT_SECRET).|openchoreo-rca-agent|openchoreo-rca-agent-secret"
         "AEP API Service|AEP API Service - service-to-service client for OpenChoreo|aep-api-client|aep-api-client-secret"
         "AEP BFF to git-service|BFF outbound Service JWT, audience: git-service|aep-bff-to-git-service|aep-bff-to-git-service-secret"
         "AEP BFF to remote-worker|BFF outbound Service JWT, audience: remote-worker|aep-bff-to-remote-worker|aep-bff-to-remote-worker-secret"
@@ -129,12 +130,9 @@ bootstrap:
       )
 
       PUBLIC_APPS=(
-        # /callback is the new console's dedicated OAuth route (issue #91);
-        # root redirects serve the legacy console (login + post-logout).
-        # During the #98 transition legacy stays at :8090 and the new
-        # console lives at :8091, so that origin needs /callback (login)
-        # and root (post-logout) entries too.
-        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,http://localhost:8091,http://localhost:8091/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
+        # /callback is the console's dedicated OAuth route (issue #91);
+        # root redirects handle post-logout.
+        "AEP Console|AEP Platform Console|aep-console-client|http://localhost:8090,http://localhost:8090/callback,${PUBLIC_CONSOLE_URL},${PUBLIC_CONSOLE_URL}/callback|given_name,family_name,username,groups,ouId,ouName,ouHandle"
       )
 
       # OpenChoreo's control-plane chart ships Backstage enabled (values-cp.yaml

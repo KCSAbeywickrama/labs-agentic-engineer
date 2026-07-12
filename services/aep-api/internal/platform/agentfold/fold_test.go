@@ -19,7 +19,6 @@ package agentfold
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -259,45 +258,6 @@ func TestComponentDesignGate(t *testing.T) {
 	mustOK(t, res, err, StatusApplied)
 }
 
-func TestSetFrontmatterField_UnsupportedShapesFailLoudly(t *testing.T) {
-	longLine := "short\n" + strings.Repeat("word ", 30) + "end"
-	cases := []struct {
-		name  string
-		seed  string
-		key   string
-		value any
-	}{
-		{"folded-block-value", "---\ntitle: T\n---\nB\n", "note", longLine},
-		{"sequence-frontmatter", "---\n- a\n- b\n---\nB\n", "k", "v"},
-		{"integer-like-key", "---\ntitle: T\n---\nB\n", "7", "x"},
-		{"integer-like-key-in-source", "---\n0: zero\nz: last\n---\nB\n", "k", "v"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			seed := map[string]string{"doc.md": c.seed}
-			f := NewFromSnapshot(seed)
-			_, err := f.SetFrontmatterField(ctx, "doc.md", c.key, c.value)
-			var ue *UnsupportedFrontmatterError
-			if !errors.As(err, &ue) {
-				t.Fatalf("want UnsupportedFrontmatterError, got %v", err)
-			}
-			if ue.Path != "doc.md" {
-				t.Errorf("path = %q", ue.Path)
-			}
-			if f.FullState(seed)["doc.md"] != c.seed {
-				t.Fatal("loud failure must leave the fold unchanged")
-			}
-		})
-	}
-}
-
-func TestSetFrontmatterField_InvalidValueType(t *testing.T) {
-	f := NewFromSnapshot(map[string]string{"doc.md": "---\na: 1\n---\n"})
-	if _, err := f.SetFrontmatterField(ctx, "doc.md", "k", []int{1}); err == nil {
-		t.Fatal("want error for a non-contract value type")
-	}
-}
-
 func TestBaseReader_LazyAndErrorPropagation(t *testing.T) {
 	reads := 0
 	base := func(_ context.Context, path string) ([]byte, bool, error) {
@@ -334,7 +294,7 @@ func TestBaseReader_LazyAndErrorPropagation(t *testing.T) {
 }
 
 func TestApplyToolCall_DrivingAndIgnoring(t *testing.T) {
-	seed := map[string]string{"doc.md": "---\ntitle: T\n---\nBody\n"}
+	seed := map[string]string{"doc.md": "title: T\nBody\n"}
 	f := NewFromSnapshot(seed)
 	call := func(tool string, input string) *OpResult {
 		t.Helper()
@@ -355,31 +315,20 @@ func TestApplyToolCall_DrivingAndIgnoring(t *testing.T) {
 	// Malformed inputs are ignored, exactly like the TS applyToolCall guards.
 	for _, bad := range []string{
 		`null`, `[1,2]`, `{"path":7,"content":"x"}`, `{"path":"x.md"}`,
-		`{"path":"doc.md","key":"k","value":{"nested":true}}`,
 	} {
 		if res, _ := f.ApplyToolCall(ctx, StreamPart{Type: "tool-call", ToolName: "addFile", Input: json.RawMessage(bad)}); res != nil {
 			t.Fatalf("malformed input %s must be ignored", bad)
 		}
 	}
-	if res, _ := f.ApplyToolCall(ctx, StreamPart{Type: "tool-call", ToolName: "setFrontmatterField",
-		Input: json.RawMessage(`{"path":"doc.md","key":"k","value":["a",7]}`)}); res != nil {
-		t.Fatal("mixed-type array value must be ignored")
-	}
 
-	// The four ops drive through with typed values.
+	// The mutation ops drive through with typed values.
 	if res := call("addFile", `{"path":"specs/new.md","content":"hello\r\nworld"}`); !res.OK {
 		t.Fatalf("%+v", res)
 	}
 	if res := call("editFile", `{"path":"specs/new.md","oldString":"hello","newString":"HELLO"}`); !res.OK {
 		t.Fatalf("%+v", res)
 	}
-	if res := call("setFrontmatterField", `{"path":"doc.md","key":"version","value":3}`); !res.OK {
-		t.Fatalf("%+v", res)
-	}
-	if res := call("setFrontmatterField", `{"path":"doc.md","key":"tags","value":["a","b"]}`); !res.OK {
-		t.Fatalf("%+v", res)
-	}
-	if res := call("setFrontmatterField", `{"path":"doc.md","key":"stable","value":true}`); !res.OK {
+	if res := call("editFile", `{"path":"doc.md","oldString":"title: T","newString":"title: U"}`); !res.OK {
 		t.Fatalf("%+v", res)
 	}
 	if res := call("removeFile", `{"path":"specs/new.md"}`); !res.OK {
@@ -387,7 +336,7 @@ func TestApplyToolCall_DrivingAndIgnoring(t *testing.T) {
 	}
 
 	state := f.FullState(seed)
-	want := "---\ntitle: T\nversion: 3\ntags:\n  - a\n  - b\nstable: true\n---\nBody\n"
+	want := "title: U\nBody\n"
 	if state["doc.md"] != want {
 		t.Fatalf("doc.md = %q, want %q", state["doc.md"], want)
 	}
@@ -417,6 +366,7 @@ func TestManifestOfAndIsEmpty(t *testing.T) {
 func TestSnapshotFilter(t *testing.T) {
 	if !KeepInTurnSnapshot("specs/requirements/requirements.md") ||
 		!KeepInTurnSnapshot("a.dsl") ||
+		!KeepInTurnSnapshot("specs/design/design.cell") ||
 		!KeepInTurnSnapshot("specs/design/components/x/design.json") {
 		t.Fatal("keep-filter rejects agent-authored sources")
 	}

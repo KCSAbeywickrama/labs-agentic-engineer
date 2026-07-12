@@ -18,6 +18,7 @@ package devflow
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,20 +155,48 @@ func TestTaskFlowWorkflow_ManualMergeGate_Approve(t *testing.T) {
 	require.Equal(t, OutcomeSucceeded, res.Outcome)
 }
 
+// countsLog captures every SetWorkflowRunTaskCounts payload the dev workflow
+// writes, in order — the tests assert the tally is absolute and frozen right.
+type countsLog struct {
+	mu     sync.Mutex
+	writes []SetWorkflowRunTaskCountsInput
+}
+
+func (l *countsLog) add(in SetWorkflowRunTaskCountsInput) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.writes = append(l.writes, in)
+}
+
+func (l *countsLog) all() []SetWorkflowRunTaskCountsInput {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]SetWorkflowRunTaskCountsInput(nil), l.writes...)
+}
+
 // registerDevActivities mocks every dev-workflow activity. plannedTasks tunes
-// the plan the fan-out schedules.
-func registerDevActivities(env *testsuite.TestWorkflowEnvironment, plannedTasks []PlannedTask) {
+// the plan the fan-out schedules; the returned log records the task-count
+// writes.
+func registerDevActivities(env *testsuite.TestWorkflowEnvironment, plannedTasks []PlannedTask) *countsLog {
 	var acts *Activities
+	log := &countsLog{}
 	env.RegisterActivity(acts.RecordWorkflowRun)
 	env.RegisterActivity(acts.SetWorkflowRunStatus)
+	env.RegisterActivity(acts.SetWorkflowRunTaskCounts)
 	env.RegisterActivity(acts.ValidateSpecAtTag)
 	env.RegisterActivity(acts.RunPlan)
+	env.RegisterActivity(acts.ProvisionDependencies)
 	env.RegisterActivity(acts.Validate)
 	env.OnActivity(acts.RecordWorkflowRun, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.SetWorkflowRunStatus, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.SetWorkflowRunTaskCounts, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) { log.add(args.Get(1).(SetWorkflowRunTaskCountsInput)) }).
+		Return(nil)
 	env.OnActivity(acts.ValidateSpecAtTag, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.RunPlan, mock.Anything, mock.Anything).Return(plannedTasks, nil)
+	env.OnActivity(acts.ProvisionDependencies, mock.Anything, mock.Anything).Return([]ProvisionFailure(nil), nil)
 	env.OnActivity(acts.Validate, mock.Anything, mock.Anything).Return(nil)
+	return log
 }
 
 func TestDevFlowWorkflow_HappyPath(t *testing.T) {
@@ -249,6 +278,70 @@ func TestDevFlowWorkflow_FailedDepSkipsDependent(t *testing.T) {
 		}
 	}
 	require.Equal(t, OutcomeSkippedDepFai, web.Outcome)
+}
+
+// TestDevFlowWorkflow_TaskCountsWritten pins the build-stage tally the
+// overview reads from the workflow_runs row: total is published once after
+// plan (before any task runs), every subsequent write is an absolute
+// snapshot (total fixed, done+failed never exceeding it), and the last write
+// is the frozen terminal tally.
+func TestDevFlowWorkflow_TaskCountsWritten(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	// api fails, web (independent) succeeds → terminal tally 1 done / 1 failed.
+	tasks := []PlannedTask{{Issue: 1, Key: "api"}, {Issue: 2, Key: "web"}}
+	counts := registerDevActivities(env, tasks)
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.MatchedBy(func(in TaskFlowInput) bool { return in.Issue == 1 })).
+		Return(TaskFlowResult{Outcome: OutcomeFailed}, nil)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.MatchedBy(func(in TaskFlowInput) bool { return in.Issue == 2 })).
+		Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	writes := counts.all()
+	require.NotEmpty(t, writes)
+	require.NotEmpty(t, writes[0].WorkflowID)
+	require.Equal(t, SetWorkflowRunTaskCountsInput{WorkflowID: writes[0].WorkflowID, RunID: writes[0].RunID, Total: 2}, writes[0],
+		"first write must be the plan size with a zero tally")
+	for _, w := range writes {
+		require.Equal(t, 2, w.Total, "total is fixed after plan")
+		require.LessOrEqual(t, w.Done+w.Failed, 2, "tally never exceeds the plan")
+	}
+	last := writes[len(writes)-1]
+	require.Equal(t, 1, last.Done)
+	require.Equal(t, 1, last.Failed)
+}
+
+// TestDevFlowWorkflow_SkippedDepCountsAsFailed pins the tally bucket for
+// dep-skipped tasks: a task never started because its dependency failed is
+// counted failed, so the frozen tally always sums to total.
+func TestDevFlowWorkflow_SkippedDepCountsAsFailed(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	tasks := []PlannedTask{
+		{Issue: 1, Key: "api"},
+		{Issue: 2, Key: "web", DependsOn: []string{"api"}},
+	}
+	counts := registerDevActivities(env, tasks)
+	env.RegisterWorkflow(TaskFlowWorkflow)
+	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).
+		Return(TaskFlowResult{Outcome: OutcomeFailed}, nil)
+
+	env.ExecuteWorkflow(DevFlowWorkflow, DevFlowInput{OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1"})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	writes := counts.all()
+	require.NotEmpty(t, writes)
+	last := writes[len(writes)-1]
+	require.Equal(t, 2, last.Total)
+	require.Equal(t, 0, last.Done)
+	require.Equal(t, 2, last.Failed, "failed child + dep-skipped dependent both count failed")
 }
 
 func TestDevFlowWorkflow_CycleFastFails(t *testing.T) {

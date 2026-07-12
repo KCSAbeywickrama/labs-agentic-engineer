@@ -28,6 +28,12 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # OpenChoreo ResourceReleaseBindings — the operator nudges the owning binding
+  # (annotation patch) when an app becomes ready, so OC re-reconciles it and
+  # resolves the client_id output instead of staying stuck Ready=False.
+  - apiGroups: ["openchoreo.dev"]
+    resources: ["resourcereleasebindings"]
+    verbs: ["get", "list", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

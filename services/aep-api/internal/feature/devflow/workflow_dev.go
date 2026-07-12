@@ -40,6 +40,32 @@ type DevFlowInput struct {
 	Repo  string     `json:"repo"`
 	Tag   string     `json:"tag"`
 	Gates GateConfig `json:"gates"`
+	// Provision carries the user's build-drawer inputs (issue #164): the
+	// non-secret config, staged secret references, platform-resource params, and
+	// approvals the workflow's provisioning step (Task 3) authors OC bindings +
+	// gate issues from. Empty when the build needs no provisioning. Secret VALUES
+	// are never carried here — only SM-API references (SecretRefByEnv).
+	Provision []ProvisionInput `json:"provision,omitempty"`
+}
+
+// ProvisionInput is one dependency's resolved provisioning payload, produced by
+// the build endpoint from the drawer inputs and carried into the dev workflow.
+// It is the shared wire contract between POST /build (which stages secrets to
+// SM-API and derives references) and the workflow's provisioning step (which
+// authors the OC Resource model + aep:provision gates). A raw secret value is
+// NEVER placed here — SecretRefByEnv holds the SM-API reference per env instead.
+type ProvisionInput struct {
+	Component  string `json:"component"`
+	Dependency string `json:"dependency"`
+	Kind       string `json:"kind"`
+	// external non-secret config by key.
+	Config map[string]string `json:"config,omitempty"`
+	// external: the SM-API secret reference per env (NOT the secret value).
+	SecretRefByEnv map[string]string `json:"secretRefByEnv,omitempty"`
+	// platform-resource: provisioning params (mixed scalar types).
+	Parameters map[string]any `json:"parameters,omitempty"`
+	// platform-resource / org-service: the user's approval.
+	Approved bool `json:"approved,omitempty"`
 }
 
 // DevFlowStatus is the QueryStatus result for a dev workflow.
@@ -63,6 +89,7 @@ type DevTaskRef struct {
 const (
 	DevPhaseValidatingSpec = "validating-spec"
 	DevPhasePlanning       = "planning"
+	DevPhaseProvisioning   = "provisioning"
 	DevPhaseExecuting      = "executing"
 	DevPhaseValidating     = "validating"
 	DevPhaseDone           = "done"
@@ -88,7 +115,7 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 
 	fail := func(msg string) (DevFlowStatus, error) {
 		status.Phase, status.Error = DevPhaseFailed, msg
-		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusFailed)
+		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusFailed, msg)
 		return status, nil
 	}
 
@@ -127,6 +154,23 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 		return fail("dependency cycle detected: " + strings.Join(cyc, " → "))
 	}
 
+	// 2b. Provision dependencies (issue #164): mint the aep:provision gates and
+	// author each dependency the build drawer supplied by kind — external
+	// synchronously (its gate closes here), platform-resource async (the
+	// readiness watcher finishes it). This runs BEFORE any coding task is
+	// scheduled so the funnel's provision gates exist and the synchronous
+	// external gates are closed. Provisioning failures fail the run.
+	status.Phase = DevPhaseProvisioning
+	var pfails []ProvisionFailure
+	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).ProvisionDependencies, ProvisionDepsInput{
+		OrgID: in.OrgID, ProjectID: in.ProjectID, Tag: reqTag, Inputs: in.Provision,
+	}).Get(ctx, &pfails); err != nil {
+		return fail("provision dependencies: " + err.Error())
+	}
+	if len(pfails) > 0 {
+		return fail("provisioning failed: " + summarizeProvisionFailures(pfails))
+	}
+
 	// 3. Execute — dependency-aware task child workflows.
 	status.Phase = DevPhaseExecuting
 	scheduleTasks(ctx, in, reqTag, tasks, &status)
@@ -146,8 +190,18 @@ func DevFlowWorkflow(ctx workflow.Context, in DevFlowInput) (DevFlowStatus, erro
 		return fail("complete gate rejected: " + d.Note)
 	}
 	status.Phase = DevPhaseDone
-	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted)
+	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted, "")
 	return status, nil
+}
+
+// summarizeProvisionFailures renders provisioning failures as a compact
+// "component/dependency: reason" list for the run's failure message.
+func summarizeProvisionFailures(fs []ProvisionFailure) string {
+	parts := make([]string, 0, len(fs))
+	for _, f := range fs {
+		parts = append(parts, f.Component+"/"+f.Dependency+": "+f.Reason)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // DevWorkflowID builds the deterministic dev workflow id
@@ -182,6 +236,39 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 	}
 	var running []childRun
 	finished := 0
+
+	// Task tally for the lookup index (the overview build stage): absolute
+	// values DERIVED from status.Tasks — setTaskRef is the single transition
+	// seam, so the tally cannot desync from the run's real progress. Flushed
+	// from the loop body (never inside a selector callback, which must not
+	// block); the first flush publishes the plan size with a zero tally.
+	// Best-effort with bounded retries: a dropped write is rewritten by the
+	// next transition's absolute values, and a DB outage must never stall
+	// task dispatch.
+	lastDone, lastFailed := -1, -1
+	flushCounts := func() {
+		done, failedCount := 0, 0
+		for _, tr := range status.Tasks {
+			switch {
+			case tr.Outcome == OutcomeSucceeded:
+				done++
+			case tr.Phase == TaskPhaseFailed:
+				failedCount++
+			}
+		}
+		if done == lastDone && failedCount == lastFailed {
+			return
+		}
+		lastDone, lastFailed = done, failedCount
+		info := workflow.GetInfo(ctx).WorkflowExecution
+		_ = workflow.ExecuteActivity(countsActivityOpts(ctx), (*Activities).SetWorkflowRunTaskCounts, SetWorkflowRunTaskCountsInput{
+			WorkflowID: info.ID,
+			RunID:      info.RunID,
+			Total:      len(tasks),
+			Done:       done,
+			Failed:     failedCount,
+		}).Get(ctx, nil)
+	}
 
 	for finished < len(tasks) {
 		// Start every ready task (stable slice order).
@@ -219,6 +306,8 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 			setTaskRef(status, t.Issue, wid, TaskPhaseStarting, "")
 		}
 
+		flushCounts()
+
 		if len(running) == 0 {
 			// No task is runnable and none is running — remaining are blocked by
 			// failed deps (or an unresolved cycle the fast-fail missed). Skip them.
@@ -231,6 +320,7 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 					setTaskRef(status, t.Issue, "", TaskPhaseFailed, OutcomeSkippedDepFai)
 				}
 			}
+			flushCounts()
 			break
 		}
 
@@ -262,6 +352,7 @@ func scheduleTasks(ctx workflow.Context, in DevFlowInput, tag string, tasks []Pl
 			running = append(running[:completedIdx], running[completedIdx+1:]...)
 			finished++
 		}
+		flushCounts()
 	}
 }
 
@@ -308,6 +399,17 @@ func planActivityOpts(ctx workflow.Context) workflow.Context {
 		StartToCloseTimeout: 30 * time.Minute,
 		HeartbeatTimeout:    2 * time.Minute,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
+}
+
+// countsActivityOpts bounds the informational tally write: without an
+// explicit RetryPolicy the SERVER default applies (unlimited attempts), and
+// flushCounts blocks the dispatch loop on .Get — a DB outage would stall
+// task fan-out for a write whose loss the next transition heals anyway.
+func countsActivityOpts(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 2 * time.Minute,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	})
 }
 

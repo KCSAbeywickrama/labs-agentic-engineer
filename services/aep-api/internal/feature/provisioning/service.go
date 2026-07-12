@@ -30,7 +30,7 @@ import (
 // defaultEnv is the single environment provisioning pins in v1 — the watcher and
 // the declarative-wiring comment both read the `development` binding (upstream
 // parity: the two naming schemes are deliberately identical).
-const defaultEnv = "development"
+const defaultEnv = models.DevEnvironmentName
 
 // Service coordinates dependency provisioning on the aep:provision funnel: it
 // mints gate issues, collects external values, provisions platform resources,
@@ -55,6 +55,12 @@ type Service struct {
 	// design feature, so a setter breaks the design↔provisioning wiring cycle.
 	// Nil is a documented no-op (the live-catalog gate still resolves).
 	orgPublish OrgPublishMarker
+	// providerBuild kicks a not-yet-published org-service provider's build so it
+	// deploys (and publishes org-wide) — the automated half of the cross-project
+	// visibility flow (issue #164). Wired via SetProviderBuildTrigger at the
+	// composition root (Task 5) so provisioning never imports build/devflow. Nil
+	// is a documented best-effort no-op (logged).
+	providerBuild ProviderBuildTrigger
 }
 
 // OrgPublishMarker persists a provider component's deliberate publish decision.
@@ -66,6 +72,10 @@ type OrgPublishMarker interface {
 // SetOrgPublishMarker wires the design feature's orgPublished-marker commit so
 // the grant cascade records the publish on the provider design. Nil no-op.
 func (s *Service) SetOrgPublishMarker(m OrgPublishMarker) { s.orgPublish = m }
+
+// SetProviderBuildTrigger wires the provider-build kick used by the automated
+// org-service visibility flow. Nil is a documented best-effort no-op (logged).
+func (s *Service) SetProviderBuildTrigger(t ProviderBuildTrigger) { s.providerBuild = t }
 
 // Deps is the provisioning service's collaborator set. reeval / projects /
 // access / providers may be nil (a nil reeval skips the release nudge — the

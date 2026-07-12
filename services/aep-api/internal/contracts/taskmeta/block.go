@@ -103,6 +103,12 @@ const (
 	GateResourceProvisioning = "resource-provisioning"
 	// GateOrgPublish: publish a provider component org-wide (namespace visibility).
 	GateOrgPublish = "org-publish"
+	// GateOrgServiceVisibility: the CONSUMER-side hold minted at build for an
+	// approved-but-unresolved cross-project org-service dependency. It gates the
+	// consumer's coding task until the provider publishes org-wide (issue #164,
+	// Task 4). Distinct from GateOrgPublish, which is the PROVIDER-side publish
+	// nudge; the two are the mirror halves of one cross-project flow.
+	GateOrgServiceVisibility = "org-service-visibility"
 )
 
 // Human is the human-editable remainder of a Task issue body: the rationale

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -62,7 +63,7 @@ func TestComposePlannedIssue_RoundTrip(t *testing.T) {
 // ---- reads derive fusion ---------------------------------------------------
 
 func newReads(issues *fakeIssues, execs *fakeExecReader) *Reads {
-	return NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil)
+	return NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil)
 }
 
 func TestReads_List_DerivesStatusFromExecutions(t *testing.T) {
@@ -94,6 +95,48 @@ func TestReads_List_DerivesStatusFromExecutions(t *testing.T) {
 	}
 	if got := byNum[3].DerivedStatus; got != string(taskmeta.StatusPending) {
 		t.Errorf("task 3 status = %q, want pending", got)
+	}
+}
+
+func TestReads_ListByTag_FiltersByBlockLineage(t *testing.T) {
+	issues := newFakeIssues()
+	issues.seed(taggedIssue(1, "user-service", "v3"))
+	issues.seed(taggedIssue(2, "order-service", "v3"))
+	issues.seed(taggedIssue(3, "cart-service", "v2")) // an earlier build's task
+	// A legacy Task planned before the aep:spec/<tag> label existed (#182):
+	// the version lives only in its machine block. Tag scoping must still
+	// find it — the block is the durable truth, the label just its mirror.
+	legacyBlock := taskmeta.Block{Component: "billing-service", Origin: taskmeta.OriginSpecPlan, SpecTag: "v3", DesignTag: "design-v1"}
+	issues.seed(gitrepo.IssueInfo{
+		Number: 4,
+		Title:  "Implement billing-service",
+		Body:   taskmeta.ComposeBody(legacyBlock, taskmeta.Human{Rationale: "orig"}),
+		State:  "open",
+		URL:    "https://github.com/o/r/issues/4",
+		Labels: taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginSpecPlan),
+	})
+
+	// Scoped to v3: the two labelled v3 Tasks plus the label-less legacy one.
+	views, err := newReads(issues, newFakeExecReader()).ListByTag(context.Background(), "org1", "proj1", "all", "v3")
+	if err != nil {
+		t.Fatalf("ListByTag(v3): %v", err)
+	}
+	if len(views) != 3 {
+		t.Fatalf("want 3 tasks for v3 (incl. the legacy label-less one), got %d: %+v", len(views), views)
+	}
+	for _, v := range views {
+		if v.Lineage.SpecTag != "v3" {
+			t.Errorf("view %d specTag = %q, want v3", v.IssueNumber, v.Lineage.SpecTag)
+		}
+	}
+
+	// Empty tag is identical to List: every Task, regardless of version.
+	all, err := newReads(issues, newFakeExecReader()).ListByTag(context.Background(), "org1", "proj1", "all", "")
+	if err != nil {
+		t.Fatalf("ListByTag(all): %v", err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("empty tag must return all tasks, got %d", len(all))
 	}
 }
 
@@ -154,7 +197,7 @@ func TestReads_Get_NotFound(t *testing.T) {
 // ---- commands --------------------------------------------------------------
 
 func newCommands(issues *fakeIssues, disp *fakeDispatcher) *Commands {
-	return NewCommands(issues, fakeRepos{repo: defaultRepo()}, disp)
+	return NewCommands(issues, fakeRepos{repo: defaultRepo()}, disp, nil)
 }
 
 func TestCommands_Execute_OpenIssue_StampsAndDispatches(t *testing.T) {

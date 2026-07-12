@@ -36,7 +36,6 @@ export type {
   AddFileInput,
   EditFileInput,
   RemoveFileInput,
-  SetFrontmatterFieldInput,
   LoadSkillInput,
   LoadSkillResult,
   LoadedSkill,
@@ -63,7 +62,6 @@ export type {
   Dependency,
   DependencyKind,
   ConfigKey,
-  DependencyCandidate,
   ExposesAPI,
 } from "./contracts/component-design.js";
 
@@ -96,7 +94,7 @@ export type { Equal } from "./type-equal.js";
 
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
-export { toChange, applyToolCall, isFileMutationTool } from "./change.js";
+export { toChange, applyToolCall, isFileMutationTool, opForTool, readToolInputPath } from "./change.js";
 
 // --- The component design.json write-gate (travels with FileBundle) ----------
 export {

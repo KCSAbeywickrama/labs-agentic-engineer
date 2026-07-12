@@ -1,6 +1,6 @@
 ---
 name: high-level-architecture
-description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, or writing a component's design.json.
+description: Use when turning requirements into a design — creating or restructuring specs/design/design.md, deciding which components the system decomposes into, writing the specs/design/design.cell architecture diagram, or writing a component's design.json.
 metadata:
   aep:
     kind: platform
@@ -13,18 +13,40 @@ Derive the design tree from `requirements.md`. The design lives under
 `specs/design/` — never at the bundle root.
 
 ```
+specs/design/design.cell                      # project-level architecture diagram DSL (this skill) — emit FIRST
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
 specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
 specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
 ```
 
+## The architecture diagram — design.cell
+
+`specs/design/design.cell` is a single project-level file holding the
+cell-diagram DSL. Emit it **FIRST**, before design.md and the component
+design.json files: it is small, it fixes the component decomposition up front,
+and the console streams it into the live architecture diagram as you write, so
+the user watches the architecture take shape.
+
+**Load the `cell-architecture-dsl` skill before writing design.cell.** It
+carries the full grammar, the AEP boundary semantics (own components inside the
+cell; Thunder auth and org services on east; third-party SaaS on south;
+internet/intranet exposure on north/west), and the single-`addFile` write
+protocol. Do not guess the syntax — `resource`/`external` are NOT keywords, and
+the node `type` is a bare trailing token with no colon.
+
+**design.cell is the architecture contract.** The rest of the design must match
+it: every `components/<name>/design.json` uses the SAME component id as its
+`design.cell` node, and every edge in design.cell that touches a component
+appears as a `dependencies[]` entry on that component's design.json (and vice
+versa — an interaction in design.json must be an edge in design.cell). A
+mismatch between the two is a defect, not a stylistic choice.
+
 ## The top-level design.md
 
-YAML frontmatter first, then these sections. Depth rule: **every requirement
-must have a home** in a capability, entity, role, or screen below — a
-requirement you can't point to in this document is a defect, not an editing
-choice.
+These sections, in order. Depth rule: **every requirement must have a home** in
+a capability, entity, role, or screen below — a requirement you can't point to
+in this document is a defect, not an editing choice.
 
 1. **Overview** — what the system is, in one paragraph.
 2. **Components** — a bullet per component: name, `type`, one-line
@@ -47,10 +69,14 @@ Do NOT add platform-owned boilerplate: no Kubernetes/monitoring/backup
 sections, no generic performance targets, no "future enhancements" — unless
 the requirements state them.
 
-After emitting or changing the design, record the skills you actually applied:
-use `setFrontmatterField` on `specs/design/design.md` with key `skillsApplied`
-and the list of skill names (e.g. `["high-level-architecture",
-"openapi-conventions"]`). Never hand-edit frontmatter with editFile.
+After emitting or changing a component's design, record the skills that
+component's build actually needs as a `skillsApplied` array **inside that
+component's `specs/design/components/<name>/design.json`** — e.g. a Go API
+service → `["openapi-conventions", "go"]`; a web-application →
+`["excalidraw", "react"]`. It is a JSON key on the component's design object,
+so include it when you write that `design.json` (addFile/editFile) — do NOT
+put `skillsApplied` in `design.md` frontmatter. Each component carries only the
+skills its own build needs.
 
 ## Deriving components — deployment units the requirements justify
 
@@ -139,11 +165,24 @@ every arrow there appears here and vice versa — a mismatch is a defect. Each
 entry has a `kind` (which selects the meaningful fields) and a `name`; pick the
 kind by WHAT the target is:
 
-- **`component`** — a SIBLING component in this same design (a `<name>/` under
-  `components/`). Just `{ "kind": "component", "name": "expense-webapp" }`.
+- **`component`** — a SIBLING component in this same design that THIS component
+  CALLS: a directed caller→callee edge (one Interactions arrow). Declare it ONLY
+  on the caller, naming the callee it invokes:
+  `{ "kind": "component", "name": "expense-api" }`. Never add the reverse edge —
+  a web-app depends on the API it calls; the API does NOT depend on the web-app
+  that calls it. If a component isn't actually called by this one, it is not a
+  dependency of it (do not list it "for reference").
 - **`org-service`** — a service owned by ANOTHER project in the org that
-  publishes its endpoint for cross-project use. `name` is the provider's
-  component name. `{ "kind": "org-service", "name": "identity-api" }`.
+  publishes its endpoint for cross-project use. Its `name` is the provider's
+  EXACT component name from `list_org_endpoints`, copied verbatim — a name you
+  LOOK UP, never one you coin. The requirement (and any org skill) names the
+  service by ROLE ("the organization's directory service", "the notification
+  service"); that role is NOT the name, and the provider is usually named
+  differently — the "directory service" may be `employee-service`, the
+  "notification service" `email-service`. Call `list_org_endpoints`, pick the
+  row that fills the role, copy its `name`:
+  `{ "kind": "org-service", "name": "<name from list_org_endpoints>" }`. A name
+  coined from the role words matches no provider and hard-fails the build.
 - **`external`** — a system OUTSIDE the platform (a SaaS API, a legacy
   service). Two shapes:
   - *SDK-style SaaS* (Stripe, SendGrid, ...): no spec needed — the component
@@ -167,24 +206,27 @@ kind by WHAT the target is:
 
 ```json
 "dependencies": [
-  { "kind": "component", "name": "expense-webapp" },
+  { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
   { "kind": "external", "name": "stripe",
-    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "credentialClass": "secret" } ] },
+    "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
   { "kind": "external", "name": "legacy-billing", "needsSpec": true,
     "specUrl": "https://billing.example.com/openapi.yaml" }
 ]
 ```
 
-**Discover before you invent.** When the caller supplies the platform MCP
-tools, USE them before authoring an `external`, `org-service`, or
-`platform-resource` dependency — do not guess a name or a config schema:
+**Discover before you invent.** The platform MCP tools are the source of truth
+for every dependency's name and shape — call them before authoring an
+`external`, `org-service`, or `platform-resource` dependency, and take the name
+and schema from what they return, not from the requirement's wording:
 
 - `list_external_resources` / `get_external_resource_schema` — reuse an
   already-registered external resource by its EXACT `name` and `config` schema
   rather than inventing a parallel one.
-- `list_org_endpoints` — find the real provider component name for an
-  `org-service` before referencing it.
+- `list_org_endpoints` — the org-service catalog every `org-service` `name` is
+  copied from verbatim (see the `org-service` kind above). When no row fills the
+  role the requirement describes, leave the dependency unresolved rather than
+  coining a name — a name that resolves to nothing is worse than an absent one.
 - `list_org_component_endpoints` — once you have the provider's name, call this
   to read its REAL contract before writing the dependency's `description`:
   each row resolves to a `spec.availability` of `inline` (read
@@ -202,19 +244,28 @@ tools, USE them before authoring an `external`, `org-service`, or
   none matches, leave the dependency unresolved rather than forcing a fit.
 
 **Config-key conventions.** `config` is the env-var schema the consuming
-component codes against. Use `SCREAMING_SNAKE_CASE` keys. Mark credentials
-`"secret": true` (they route through the secret path); set `credentialClass`
-to `"secret"` for values the user supplies privately or `"publishable"` for
-non-sensitive config. Keep the keys minimal — only what the component reads.
+component codes against. Use `SCREAMING_SNAKE_CASE` keys. `secret` is opt-in:
+set `"secret": true` ONLY for credentials (they route through the secret path);
+OMIT it entirely for plain config — a key with no `secret` field is non-secret.
+Give each key an optional `description` — a short note on what the value is and
+where the user finds it (e.g. `{ "key": "STRIPE_API_KEY", "secret": true,
+"description": "Your Stripe secret API key" }`); the Build dependency drawer
+shows it under the field. For a NON-secret key whose sensible default you can
+infer (a region, a base URL), add an optional `defaultValue` — the drawer
+pre-fills the field with it (e.g. `{ "key": "AWS_REGION", "defaultValue":
+"us-east-1" }`). NEVER set `defaultValue` for a secret (`"secret": true`) — a
+credential like an API key has no default to invent. Keep the keys minimal —
+only what the component reads.
+
+**`needsSpec` is opt-in.** Omit `needsSpec` entirely unless the dependency needs
+a collected OpenAPI spec, in which case set it `true` (never write `false`).
 
 **Resolution status is platform-computed.** A dependency's `status` (resolved /
 ambiguous / unresolved / blocked) and its `reason` are computed by the platform
-at read time against the live catalog — you never author those. `candidates`, by
-contrast, ARE authorable: emit them with the URLs you find during discovery or
-web research (the API homepage, a docs page, a spec URL) so the user can verify
-the sources. Declare the intent (kind + name + fields above) and let the
-platform resolve it. An `external` dependency should almost always carry at
-least one `config` key — the value-collection gate needs something to collect.
+at read time against the live catalog — you never author those. Declare the
+intent (kind + name + fields above) and let the platform resolve it. An
+`external` dependency should almost always carry at least one `config` key — the
+value-collection gate needs something to collect.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;

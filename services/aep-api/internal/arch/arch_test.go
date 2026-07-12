@@ -118,7 +118,13 @@ var featureEdgeAllowlist = map[string][]string{
 	// Reevaluate hook, the design reader, the repo locator — is a consumer-side port
 	// wired at the composition root, so it holds only these two feature edges.
 	"provisioning": {"dependencies/resources", "gitrepo"},
-	"requirements": {"artifacts"},
+	// rcaagent (console issues #154, #155, BE handshake #156) is a
+	// self-contained CRUD feature — no cross-feature imports.
+	"rcaagent": {},
+	// requirements now holds only the collab-session/collab-validate surface
+	// (the requirements read/version/save-discard HTTP surface was removed —
+	// superseded by the Files API); it holds no cross-feature edges.
+	"requirements": {},
 	// runtimeconfig reads the thunder-app dependency's binding outputs (OIDC
 	// config) and patches its redirect URIs declaratively; it reuses the
 	// resources package's single source of truth for the per-env binding name

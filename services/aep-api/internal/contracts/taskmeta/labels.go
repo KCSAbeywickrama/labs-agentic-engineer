@@ -65,6 +65,15 @@ const (
 	// Classify vocabulary (it classifies as KindOther) so the status-projection
 	// reconciler never strips it.
 	LabelProvisionNoted = "aep:provision-noted"
+
+	// LabelSpecPrefix is prepended to a spec version tag (v<N>) to form its
+	// label ("aep:spec/v3"), so Tasks are filterable server-side (GitHub
+	// labels=) by the spec/build version they were planned from. Like the other
+	// prefixes it carries a flat, filterable fact; the structured value also
+	// lives in the machine block (block.SpecTag). It is deliberately absent from
+	// Classify (it classifies as KindOther) so the status-projection reconciler
+	// never strips it — the same guarantee LabelProvisionNoted relies on.
+	LabelSpecPrefix = "aep:spec/"
 )
 
 // ExecutorClass is the single routing dimension (§3): coding tasks are
@@ -97,6 +106,16 @@ func OriginLabel(o Origin) string { return LabelOriginPrefix + string(o) }
 // StatusLabel returns the projection label for a derived status
 // ("aep:status/ready_for_review"). Platform-written only.
 func StatusLabel(s DerivedStatus) string { return LabelStatusPrefix + string(s) }
+
+// SpecTagLabel returns the spec-version label for a spec/build tag
+// ("aep:spec/v3"). An empty tag yields "" (no label) so callers can append it
+// unconditionally.
+func SpecTagLabel(tag string) string {
+	if tag == "" {
+		return ""
+	}
+	return LabelSpecPrefix + tag
+}
 
 // NewTaskLabels is the label set stamped on a freshly created Task: marker,
 // class, origin. Command and projection labels are added later by humans and

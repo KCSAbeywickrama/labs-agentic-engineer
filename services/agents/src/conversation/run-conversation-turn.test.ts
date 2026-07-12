@@ -22,6 +22,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./run-conversation-turn.js";
 import { InMemoryConversationStore } from "../store/memory-store.js";
 import type { Conversation } from "../store/conversation-store.js";
+import type { RoomPeer } from "../collab/room-peer.js";
 import { SEED_FILES } from "../agents/main/prompt.js";
 import type { StreamPart } from "@aep/agent-stream";
 import { sha256Hex } from "../shared/hash.js";
@@ -407,6 +408,64 @@ test("mcp shadow-guard: a discovered tool named after a built-in ALWAYS loses to
 
     const stored = await store.get("mcp2");
     assert.doesNotMatch(JSON.stringify(stored!.messages), /MCP-STUB-RESULT/);
+  } finally {
+    await close();
+  }
+});
+
+test("mcp + collabPeer coexist: the discovered tool is still merged and callable in a room-scoped turn", async () => {
+  // The Spec-view flow runs a collab room-scoped turn AND (post-fix) carries an
+  // mcp block. Pin that the two features compose: the doc-backed bundle does not
+  // displace MCP tool discovery — list_org_endpoints is still merged and callable.
+  const { baseUrl, close } = await fakeMcpServer([
+    { name: "list_org_endpoints", description: "list org endpoints" },
+  ]);
+  // A minimal in-memory room peer: the turn reads its files from the doc and
+  // writes ops through it. No real Yjs/collab server needed.
+  class FakePeer implements RoomPeer {
+    readonly doc: Record<string, string>;
+    constructor(seed: Record<string, string>) {
+      this.doc = { ...seed };
+    }
+    files(): Record<string, string> {
+      return this.doc;
+    }
+    set(path: string, content: string): void {
+      this.doc[path] = content;
+    }
+    delete(path: string): void {
+      delete this.doc[path];
+    }
+    leave(): void {}
+  }
+  try {
+    const store = new InMemoryConversationStore();
+    const guard = new TurnGuard();
+    const { events, onEvent } = collector();
+
+    const model = mockModel([
+      { kind: "toolCall", toolCallId: "d1", toolName: "list_org_endpoints", input: {} },
+      { kind: "text", text: "done" },
+    ]);
+
+    const conv = await runConversationTurn({
+      id: "mcp-collab",
+      instruction: "author the design against real providers",
+      files: SEED_FILES,
+      mcp: { url: baseUrl, token: "tok" },
+      collabPeer: new FakePeer(SEED_FILES),
+      model,
+      store,
+      guard,
+      onEvent,
+    });
+
+    assert.equal(conv.status, "done");
+    const discovered = events.find(
+      (e) => e.type === "tool-result" && e.toolName === "list_org_endpoints",
+    );
+    assert.ok(discovered, "the MCP-discovered tool executed under a room-scoped turn");
+    assert.match(JSON.stringify(discovered.output), /MCP-STUB-RESULT/);
   } finally {
     await close();
   }

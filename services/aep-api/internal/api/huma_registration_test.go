@@ -35,7 +35,7 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 
 	wantOps := []string{
 		"list-projects", "list-organizations", "list-components", "get-component-config",
-		"get-requirements", "get-spec-collab-session", "get-design-bundle",
+		"get-spec-collab-session",
 		// Tasks-github-native surface (§9.1): the board/dispatch/retry ops are gone.
 		"list-tasks", "get-task", "plan-tasks", "execute-task", "hold-task", "unhold-task",
 		// The task-log endpoint is now one SSE stream (status + executions +
@@ -45,6 +45,10 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 		"get-config", "update-config", "list-skills",
 		// Single-tag build surface (the contract's build-project/get-project-build).
 		"build-project", "get-project-build", "list-project-tags",
+		// Alerts (console issues #154, #155, BE handshake #156).
+		"list-rca-agent-reports", "create-rca-agent-report", "get-rca-agent-report",
+		// Build dependency-drawer preflight (issue #164).
+		"get-build-preflight",
 	}
 	for _, op := range wantOps {
 		if !strings.Contains(s, op) {
@@ -58,6 +62,11 @@ func TestHumaRegistration_NoDupAndComplete(t *testing.T) {
 	wantAbsent := []string{
 		"start-devflow", "list-devflows", "get-devflow", "decide-devflow-gate",
 		"save-requirements", "save-design",
+		// Requirements/design deprecated read+version surface — superseded by
+		// the Files API (list-files/read-file); removed outright.
+		"get-requirements", "discard-requirements", "list-requirements-versions", "get-requirements-at-version",
+		"get-design-bundle", "discard-design-changes", "list-design-versions", "get-design-bundle-at-tag",
+		"collect-dependency-spec",
 	}
 	for _, op := range wantAbsent {
 		if strings.Contains(s, op) {

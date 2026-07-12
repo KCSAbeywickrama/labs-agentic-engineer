@@ -50,14 +50,6 @@ export class DocFileBundle extends FileBundle {
     return res;
   }
 
-  override setFrontmatterField(
-    path: string,
-    key: string,
-    value: string | number | boolean | string[],
-  ): OpResult {
-    return this.mirror(super.setFrontmatterField(path, key, value), path);
-  }
-
   private mirror(res: OpResult, path: string): OpResult {
     if (res.ok && res.status === "applied") {
       const content = this.read(path);

@@ -53,7 +53,7 @@ type saveValuesInput struct {
 
 type provisionBody struct {
 	Params       map[string]any `json:"params,omitempty" doc:"Provisioning parameters (override the design defaults); scalar values (string, number, or boolean) per the resource type schema"`
-	Environments []string          `json:"environments,omitempty" doc:"Environments to provision (default: [development])"`
+	Environments []string       `json:"environments,omitempty" doc:"Environments to provision (default: [development])"`
 }
 
 type provisionInput struct {
@@ -73,9 +73,10 @@ type statusInput struct {
 }
 
 type configKeyDTO struct {
-	Key             string `json:"key"`
-	Secret          bool   `json:"secret"`
-	CredentialClass string `json:"credentialClass,omitempty"`
+	Key          string `json:"key"`
+	Secret       bool   `json:"secret,omitempty"`
+	Description  string `json:"description,omitempty"`
+	DefaultValue string `json:"defaultValue,omitempty"`
 }
 
 type consumerDTO struct {
@@ -212,7 +213,7 @@ func toExternalResourceDTOs(views []ExternalResourceView) []externalResourceDTO 
 	for _, v := range views {
 		keys := make([]configKeyDTO, 0, len(v.Config))
 		for _, k := range v.Config {
-			keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret, CredentialClass: k.CredentialClass})
+			keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret, Description: k.Description, DefaultValue: k.DefaultValue})
 		}
 		consumers := make([]consumerDTO, 0, len(v.Consumers))
 		for _, c := range v.Consumers {

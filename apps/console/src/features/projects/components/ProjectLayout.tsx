@@ -28,7 +28,7 @@ import {
   Stack,
 } from "@wso2/oxygen-ui";
 import { Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
-import { Link, Outlet } from "@tanstack/react-router";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import { useProject, useProjectStatus } from "../api/queries";
 
@@ -62,6 +62,11 @@ function phaseChip(status: ProjectStatus): {
 export function ProjectLayout({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
+  // The builds section inverts the title (#185 decision): "Builds" as the
+  // header, the project name as the subheader. Every other section keeps
+  // the shared project-name-first header.
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isBuilds = pathname.split("/")[3] === "builds";
 
   if (project.isPending) {
     return (
@@ -107,14 +112,20 @@ export function ProjectLayout({ projectName }: { projectName: string }) {
           </PageTitle.Avatar>
           <PageTitle.Header>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-              <span>{displayName}</span>
+              <span>{isBuilds ? "Builds" : displayName}</span>
               {chip && (
                 <Chip size="small" label={chip.label} color={chip.color} />
               )}
             </Stack>
           </PageTitle.Header>
-          {project.data.description && (
-            <PageTitle.SubHeader>{project.data.description}</PageTitle.SubHeader>
+          {isBuilds ? (
+            <PageTitle.SubHeader>{displayName}</PageTitle.SubHeader>
+          ) : (
+            project.data.description && (
+              <PageTitle.SubHeader>
+                {project.data.description}
+              </PageTitle.SubHeader>
+            )
           )}
           {status.data?.repoUrl && (
             <PageTitle.Link

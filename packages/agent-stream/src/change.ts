@@ -31,16 +31,15 @@ import type { OpResult } from "./bundle.js";
 import type { FileBundle } from "./bundle.js";
 import type { StreamPart } from "./stream-types.js";
 
-/** Wire tool name → op. Mirrors the four file-mutation tools in `tool.ts`. */
+/** Wire tool name → op. Mirrors the file-mutation tools in `tool.ts`. */
 const OP_BY_TOOL: Record<string, Op> = {
   addFile: "add",
   editFile: "edit",
   removeFile: "remove",
-  setFrontmatterField: "frontmatter",
 };
 
 /**
- * True only for the four file-mutation tools — i.e. the tool-results that project
+ * True only for the file-mutation tools — i.e. the tool-results that project
  * to a reviewable `Change` and fold into the bundle. Non-mutating tools like
  * `loadSkill` (ADR-0002) return false, so consumers exclude them from the `Change`
  * stream and the `OpResult` harvest (a `loadSkill` result is not an `OpResult`).
@@ -49,13 +48,27 @@ export function isFileMutationTool(toolName: string): boolean {
   return Object.hasOwn(OP_BY_TOOL, toolName);
 }
 
-function isFrontmatterValue(x: unknown): x is string | number | boolean | string[] {
-  return (
-    typeof x === "string" ||
-    typeof x === "number" ||
-    typeof x === "boolean" ||
-    (Array.isArray(x) && x.every((e) => typeof e === "string"))
-  );
+/** Wire tool name → op, for labelling a tool card BEFORE its result arrives. */
+export function opForTool(toolName: string): Op {
+  return OP_BY_TOOL[toolName] ?? "edit";
+}
+
+/**
+ * Best-effort read of the `path` field from a PARTIAL tool-input args buffer
+ * (the concatenated `tool-input-delta`s). `path` is the first schema property in
+ * every file tool, so it resolves the instant its JSON string closes — letting a
+ * consumer label a card ("Creating <path>") mid-stream, before the tool finishes.
+ * Returns undefined until the path string is complete. Intentionally regex-based
+ * and dependency-light (the console can't pull the AI SDK's parsePartialJson).
+ */
+export function readToolInputPath(buf: string): string | undefined {
+  const m = /"path"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(buf);
+  if (!m) return undefined;
+  try {
+    return JSON.parse(`"${m[1]}"`) as string;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -82,8 +95,6 @@ export function toChange(part: StreamPart): Change {
   if (typeof input.oldString === "string") change.oldString = input.oldString;
   if (typeof input.newString === "string") change.newString = input.newString;
   if (typeof input.content === "string") change.content = input.content;
-  if (typeof input.key === "string") change.key = input.key;
-  if (isFrontmatterValue(input.value)) change.value = input.value;
   return change;
 }
 
@@ -114,11 +125,6 @@ export function applyToolCall(bundle: FileBundle, part: StreamPart): void {
       break;
     case "removeFile":
       if (typeof v.path === "string") bundle.removeFile(v.path);
-      break;
-    case "setFrontmatterField":
-      if (typeof v.path === "string" && typeof v.key === "string" && isFrontmatterValue(v.value)) {
-        bundle.setFrontmatterField(v.path, v.key, v.value);
-      }
       break;
   }
 }

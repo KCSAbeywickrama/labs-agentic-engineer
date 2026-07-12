@@ -20,11 +20,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FileBundle } from "../src/bundle.js";
 import { SEED_FILES } from "./seed.js";
-import { toChange, applyToolCall, isFileMutationTool } from "../src/change.js";
+import {
+  toChange,
+  applyToolCall,
+  isFileMutationTool,
+  opForTool,
+  readToolInputPath,
+} from "../src/change.js";
 import type { StreamPart } from "../src/stream-types.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
-const DESIGN = "specs/design/design.md";
 
 test("applyToolCall reconstructs file state by folding an editFile call (matches a direct mutation)", () => {
   const direct = new FileBundle(SEED_FILES);
@@ -44,6 +49,28 @@ test("applyToolCall reconstructs file state by folding an editFile call (matches
   assert.ok(folded.read(OPENAPI)!.includes('"Hi there!"'));
 });
 
+test("readToolInputPath resolves the path once its string closes, decoding escapes", () => {
+  // Path string still open → not resolvable yet.
+  assert.equal(readToolInputPath('{"path":"specs/req'), undefined);
+  // Path closed (content just starting) → resolved even though the object isn't.
+  assert.equal(
+    readToolInputPath('{"path":"specs/requirements/requirements.md","content":"# R'),
+    "specs/requirements/requirements.md",
+  );
+  // JSON escapes in the path are decoded.
+  assert.equal(readToolInputPath('{"path":"a\\"b.md"'), 'a"b.md');
+  // No path key present yet.
+  assert.equal(readToolInputPath("{"), undefined);
+  assert.equal(readToolInputPath(""), undefined);
+});
+
+test("opForTool maps file tools to ops (unknown → edit)", () => {
+  assert.equal(opForTool("addFile"), "add");
+  assert.equal(opForTool("editFile"), "edit");
+  assert.equal(opForTool("removeFile"), "remove");
+  assert.equal(opForTool("loadSkill"), "edit");
+});
+
 test("applyToolCall folds add then remove in stream order", () => {
   const b = new FileBundle(SEED_FILES);
   const path = "specs/design/components/hello-api/notes.md";
@@ -58,17 +85,6 @@ test("applyToolCall folds add then remove in stream order", () => {
 
   applyToolCall(b, { type: "tool-call", toolCallId: "c2", toolName: "removeFile", input: { path } });
   assert.equal(b.has(path), false);
-});
-
-test("applyToolCall folds setFrontmatterField (array value)", () => {
-  const b = new FileBundle(SEED_FILES);
-  applyToolCall(b, {
-    type: "tool-call",
-    toolCallId: "c1",
-    toolName: "setFrontmatterField",
-    input: { path: DESIGN, key: "language", value: "TypeScript" },
-  });
-  assert.ok(b.read(DESIGN)!.includes("language: TypeScript"));
 });
 
 test("applyToolCall ignores malformed / unknown tool calls", () => {
@@ -109,8 +125,8 @@ test("toChange derives op from the tool name when output is absent", () => {
   assert.equal(c.content, "hi\n");
 });
 
-test("isFileMutationTool: true for the four ops, false for loadSkill / unknown (no Change)", () => {
-  for (const t of ["addFile", "editFile", "removeFile", "setFrontmatterField"]) {
+test("isFileMutationTool: true for the mutation ops, false for loadSkill / unknown (no Change)", () => {
+  for (const t of ["addFile", "editFile", "removeFile"]) {
     assert.equal(isFileMutationTool(t), true, t);
   }
   assert.equal(isFileMutationTool("loadSkill"), false);

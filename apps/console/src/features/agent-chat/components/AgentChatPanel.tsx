@@ -22,6 +22,7 @@ import {
   Avatar,
   Box,
   Chip,
+  Collapse,
   Divider,
   IconButton,
   Stack,
@@ -29,9 +30,19 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Check, Send, Sparkles, Wrench, X as XIcon } from "@wso2/oxygen-ui-icons-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileStack,
+  Send,
+  Sparkles,
+  Wrench,
+  X as XIcon,
+} from "@wso2/oxygen-ui-icons-react";
 import { useAgentChat } from "../useAgentChat";
 import type { ChatMessage } from "../chatStore";
+import { groupChatItems, type ChatItem, type ToolMessage } from "../toolGrouping";
 import {
   buildDesignGenerationInstruction,
   buildSpecGenerationInstruction,
@@ -56,21 +67,38 @@ function instructionFor(
 // new stack — narration + tool cards; the agent's FILE edits arrive through
 // the live spec room (collab turns), not through this panel.
 
-function opLabel(op: string): string {
+function opLabel(op: string, status: "streaming" | "done"): string {
+  const active = status === "streaming";
   switch (op) {
     case "add":
-      return "Created";
+      return active ? "Creating" : "Created";
     case "remove":
-      return "Deleted";
-    case "frontmatter":
-      return "Updated field";
+      return active ? "Deleting" : "Deleted";
     default:
-      return "Modified";
+      return active ? "Modifying" : "Modified";
   }
 }
 
 function leafName(path: string): string {
   return path.split("/").at(-1) ?? path;
+}
+
+// A small spinning ring shown while a tool's input is still streaming in.
+function Spinner() {
+  return (
+    <Box
+      sx={{
+        width: 12,
+        height: 12,
+        borderRadius: "50%",
+        border: "2px solid",
+        borderColor: "divider",
+        borderTopColor: "primary.main",
+        animation: "agentChatSpin 0.7s linear infinite",
+        "@keyframes agentChatSpin": { to: { transform: "rotate(360deg)" } },
+      }}
+    />
+  );
 }
 
 function MessageRow({ msg }: { msg: ChatMessage }) {
@@ -119,58 +147,150 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       </Stack>
     );
   }
-  if (msg.role === "tool") {
+  if (msg.role === "error") {
     return (
+      <Box
+        data-testid="chat-error"
+        sx={{
+          px: 1.5,
+          py: 1,
+          borderRadius: 2,
+          border: 1,
+          borderColor: "error.main",
+          color: "error.main",
+          fontSize: "0.8125rem",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {msg.content}
+      </Box>
+    );
+  }
+  return null; // tool messages render through <ToolGroup>, never here
+}
+
+// One tool-call row. `showFile` is dropped inside a group, where the shared
+// filename already lives in the group header.
+function ToolCardRow({
+  msg,
+  showFile = true,
+}: {
+  msg: ToolMessage;
+  showFile?: boolean;
+}) {
+  return (
+    <Stack
+      data-testid="tool-card"
+      direction="row"
+      spacing={1}
+      sx={{
+        alignItems: "center",
+        px: 1.5,
+        py: 0.75,
+        borderRadius: 1.5,
+        border: 1,
+        borderColor: !msg.ok && msg.status === "done" ? "error.main" : "divider",
+        bgcolor: "background.paper",
+      }}
+    >
+      {msg.status === "streaming" ? (
+        <Spinner />
+      ) : msg.ok ? (
+        <Check size={14} color="var(--oxygen-palette-success-main, green)" />
+      ) : (
+        <XIcon size={14} color="var(--oxygen-palette-error-main, red)" />
+      )}
+      <Wrench size={14} />
+      <Typography variant="caption" color="text.secondary">
+        {opLabel(msg.op, msg.status)}
+      </Typography>
+      {showFile && (
+        <Tooltip title={msg.path}>
+          <Chip size="small" label={leafName(msg.path)} sx={{ maxWidth: 160 }} />
+        </Tooltip>
+      )}
+      {!msg.ok && msg.errorText && (
+        <Typography variant="caption" color="error" noWrap>
+          {msg.errorText}
+        </Typography>
+      )}
+    </Stack>
+  );
+}
+
+// A run of same-file tool calls. A single call renders as one plain row; two or
+// more collapse into a disclosure card (collapsed by default) — the header
+// carries the filename + change count + an aggregate ok/error state, and the
+// individual ops reveal on expand.
+function ToolGroup({
+  group,
+  expanded,
+  onToggle,
+}: {
+  group: Extract<ChatItem, { kind: "tool-group" }>;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { tools, path } = group;
+  // A group always holds ≥1 tool; a lone call renders as a plain row.
+  if (tools.length <= 1) {
+    const only = tools[0];
+    return only ? (
+      <Box sx={{ ml: 4 }}>
+        <ToolCardRow msg={only} />
+      </Box>
+    ) : null;
+  }
+  const anyStreaming = tools.some((t) => t.status === "streaming");
+  const anyFailed = tools.some((t) => t.status === "done" && !t.ok);
+  return (
+    <Box sx={{ ml: 4 }}>
       <Stack
-        data-testid="tool-card"
+        data-testid="tool-group"
         direction="row"
         spacing={1}
+        role="button"
+        aria-expanded={expanded}
+        onClick={onToggle}
         sx={{
           alignItems: "center",
-          ml: 4,
           px: 1.5,
           py: 0.75,
           borderRadius: 1.5,
           border: 1,
-          borderColor: msg.ok ? "divider" : "error.main",
+          borderColor: anyFailed ? "error.main" : "divider",
           bgcolor: "background.paper",
+          cursor: "pointer",
+          "&:hover": { bgcolor: "action.hover" },
         }}
       >
-        {msg.ok ? (
-          <Check size={14} color="var(--oxygen-palette-success-main, green)" />
-        ) : (
+        {anyStreaming ? (
+          <Spinner />
+        ) : anyFailed ? (
           <XIcon size={14} color="var(--oxygen-palette-error-main, red)" />
+        ) : (
+          <Check size={14} color="var(--oxygen-palette-success-main, green)" />
         )}
-        <Wrench size={14} />
-        <Typography variant="caption" color="text.secondary">
-          {opLabel(msg.op)}
-        </Typography>
-        <Tooltip title={msg.path}>
-          <Chip size="small" label={leafName(msg.path)} sx={{ maxWidth: 160 }} />
+        <FileStack size={14} />
+        <Tooltip title={path}>
+          <Chip size="small" label={leafName(path)} sx={{ maxWidth: 160 }} />
         </Tooltip>
-        {!msg.ok && msg.errorText && (
-          <Typography variant="caption" color="error" noWrap>
-            {msg.errorText}
-          </Typography>
-        )}
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ flexGrow: 1 }}
+        >
+          {tools.length} changes
+        </Typography>
+        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
       </Stack>
-    );
-  }
-  return (
-    <Box
-      data-testid="chat-error"
-      sx={{
-        px: 1.5,
-        py: 1,
-        borderRadius: 2,
-        border: 1,
-        borderColor: "error.main",
-        color: "error.main",
-        fontSize: "0.8125rem",
-        whiteSpace: "pre-wrap",
-      }}
-    >
-      {msg.content}
+      <Collapse in={expanded} unmountOnExit>
+        <Stack spacing={0.75} sx={{ mt: 0.75, pl: 1.5 }}>
+          {tools.map((t) => (
+            <ToolCardRow key={t.id} msg={t} showFile={false} />
+          ))}
+        </Stack>
+      </Collapse>
     </Box>
   );
 }
@@ -225,6 +345,18 @@ export function AgentChatPanel({
 }) {
   const { messages, isSending, send } = useAgentChat(org, projectName);
   const [draft, setDraft] = useState("");
+  // Same-file tool runs render collapsed by default; a click flips membership.
+  // Keyed by group id (its first tool's message id), stable as the run grows.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleGroup = (id: string) =>
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Follow the tail while streaming / on new messages.
@@ -308,9 +440,18 @@ export function AgentChatPanel({
           </Stack>
         ) : (
           <Stack spacing={1.5}>
-            {messages.map((m) => (
-              <MessageRow key={m.id} msg={m} />
-            ))}
+            {groupChatItems(messages).map((item) =>
+              item.kind === "message" ? (
+                <MessageRow key={item.message.id} msg={item.message} />
+              ) : (
+                <ToolGroup
+                  key={item.id}
+                  group={item}
+                  expanded={expandedGroups.has(item.id)}
+                  onToggle={() => toggleGroup(item.id)}
+                />
+              ),
+            )}
             {isSending && <ThinkingDots />}
           </Stack>
         )}

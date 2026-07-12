@@ -331,6 +331,17 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		collabRoomID = "spec-" + orgID + "-" + projectID
 	}
 
+	// Collab room-scoped turns author design.json live under the
+	// requirements-chat useCase, whose steering never names the design flow —
+	// append the dependency-discovery steer so the collab architect loads the
+	// architecture skill and resolves real provider names via list_org_endpoints
+	// (the MCP block is attached in mcpForTurn) instead of inventing role-based
+	// org-service names that fail exact-name resolution at build.
+	collabSteer := ""
+	if in.Collab {
+		collabSteer = collabDepsSteer
+	}
+
 	ws := s.git.Workspace()
 	baseRef, err := ws.Head(ctx, ref, "")
 	if err != nil {
@@ -398,7 +409,7 @@ func (s *service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		useCase:          useCase,
 		conversationID:   in.ConversationID,
 		nsConversationID: namespacedID(repo, useCase, in.ConversationID),
-		instruction:      in.Instruction + steeringByUseCase[useCase] + targetSuffix(in.Target),
+		instruction:      in.Instruction + steeringByUseCase[useCase] + collabSteer + targetSuffix(in.Target),
 		summary:          in.Instruction,
 		repoRef:          ref,
 		baseRef:          baseRef,

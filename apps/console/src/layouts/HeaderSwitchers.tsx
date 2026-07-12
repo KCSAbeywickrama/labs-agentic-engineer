@@ -94,7 +94,7 @@ export function OrgSwitcher() {
 }
 
 // Project switcher: only inside /projects/$projectName/*; switching swaps
-// the param and keeps the current sub-page (builds → builds, spec → spec).
+// the param and keeps the current sub-page (tasks → tasks, spec → spec).
 export function ProjectSwitcher() {
   const params = useParams({ strict: false }) as { projectName?: string };
   const pathname = useRouterState({ select: (s) => s.location.pathname });

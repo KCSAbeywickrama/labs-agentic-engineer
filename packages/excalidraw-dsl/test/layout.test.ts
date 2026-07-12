@@ -1,0 +1,265 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/**
+ * The flow layout engine: the DSL carries structure, the compiler computes
+ * every pixel. These tests pin the geometry contract; the no-overlap /
+ * in-frame invariant is asserted through validateWireframeLayout as oracle.
+ */
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  dslToExcalidraw,
+  validateWireframeLayout,
+  validateWireframeSyntax,
+} from "../src/index.js";
+
+type El = {
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  backgroundColor?: string;
+};
+
+function compile(dsl: string): El[] {
+  return JSON.parse(dslToExcalidraw("wireframes", dsl)).elements as El[];
+}
+
+/** The rendered box of the rect whose attached label text is `label`. */
+function boxOf(els: El[], label: string): El {
+  const t = els.find((e) => e.type === "text" && e.text === label);
+  assert.ok(t, `text "${label}" not rendered`);
+  // find the smallest rectangle containing that text (its container)
+  const rects = els.filter(
+    (e) =>
+      (e.type === "rectangle" || e.type === "ellipse") &&
+      t!.x >= e.x - 1 && t!.y >= e.y - 1 &&
+      t!.x + 1 <= e.x + e.width && t!.y + 1 <= e.y + e.height,
+  );
+  assert.ok(rects.length > 0, `no container box around "${label}"`);
+  return rects.sort((a, b) => a.width * a.height - b.width * b.height)[0]!;
+}
+
+test("stacked blocks land below each other with a gap, inside the content area", () => {
+  const els = compile(`screen S
+  navbar "Hub"
+  sidebar "Home | Reports"
+  heading "First"
+  heading "Second"
+`);
+  const first = els.find((e) => e.type === "text" && e.text === "First")!;
+  const second = els.find((e) => e.type === "text" && e.text === "Second")!;
+  const navBar = els.find((e) => e.type === "rectangle" && e.height === 56)!;
+  assert.ok(first.x >= 264, `content starts right of the sidebar, got x=${first.x}`);
+  assert.ok(first.y >= navBar.y + 56, "content clears the navbar band");
+  assert.ok(second.y > first.y + 20, "second block stacked below the first");
+});
+
+test("a row of three cards splits the width equally with gaps, same y", () => {
+  const els = compile(`screen S
+  navbar "Hub"
+  sidebar "A | B"
+  row
+    card "Open | 128 | six audits"
+    card "Overdue | 14 | follow up"
+    card "Review | 32 | awaiting"
+`);
+  const a = boxOf(els, "Open");
+  const b = boxOf(els, "Overdue");
+  const c = boxOf(els, "Review");
+  assert.equal(a.y, b.y);
+  assert.equal(b.y, c.y);
+  assert.ok(Math.abs(a.width - b.width) <= 1 && Math.abs(b.width - c.width) <= 1, "equal widths");
+  assert.ok(b.x >= a.x + a.width + 8, "gap between 1st and 2nd");
+  assert.ok(c.x + c.width <= 1240 + 1, `row ends inside the content area, got ${c.x + c.width}`);
+});
+
+test("`right` packs the rest of a row against the content's right edge", () => {
+  const els = compile(`screen S
+  navbar "Hub"
+  row
+    heading "Needs your attention"
+    right
+    button "New audit" primary
+`);
+  const btn = els.find((e) => e.type === "rectangle" && e.backgroundColor === "#fa7b3f")!;
+  assert.ok(btn, "primary button missing");
+  assert.ok(Math.abs(btn.x + btn.width - 1240) <= 1, `button right edge at 1240, got ${btn.x + btn.width}`);
+});
+
+test("split renders two independent columns with a vertical divider between", () => {
+  const els = compile(`screen S
+  navbar "Hub"
+  sidebar "A | B"
+  split 60/40
+    left
+      table "Version | By"
+        row "v3 | J. Alvarez"
+    right
+      card "Discussion"
+        text "K. Smith: please attach the sign-off"
+`);
+  const vline = els.find((e) => e.type === "line" && e.height > e.width && e.height > 60);
+  assert.ok(vline, "vertical divider missing");
+  const disc = els.find((e) => e.type === "text" && e.text === "Discussion")!;
+  assert.ok(disc.x > vline!.x, "right column content sits right of the divider");
+  const version = els.find((e) => e.type === "text" && e.text === "Version")!;
+  assert.ok(version.x < vline!.x, "left column content sits left of the divider");
+});
+
+test("children nested under a card render inside it and the card grows around them", () => {
+  const els = compile(`screen S
+  navbar "Hub"
+  card "Discussion"
+    text "First comment"
+    textarea "Add a comment…"
+    button "Post" primary
+`);
+  const title = els.find((e) => e.type === "text" && e.text === "Discussion")!;
+  const card = els
+    .filter((e) => e.type === "rectangle" && e.x <= title.x && e.y <= title.y)
+    .sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
+  for (const label of ["First comment", "Add a comment…"]) {
+    const t = els.find((e) => e.type === "text" && e.text === label)!;
+    assert.ok(
+      t.x >= card.x && t.y >= card.y && t.y <= card.y + card.height,
+      `"${label}" inside the card (card ${card.y}..${card.y + card.height}, text y=${t.y})`,
+    );
+  }
+});
+
+test("a badge child docks to its card's top-right, inside the border", () => {
+  const els = compile(`screen S
+  navbar "Hub"
+  row
+    card "SOC2 Type II — 2024"
+      badge "On track" success
+    card "ISO 27001"
+      badge "At risk" warning
+`);
+  const badge = boxOf(els, "On track");
+  const card = boxOf(els, "SOC2 Type II — 2024"); // smallest container = the card
+  assert.ok(badge.x + badge.width <= card.x + card.width, "badge inside right border");
+  assert.ok(badge.x > card.x + card.width / 2, "badge in the right half");
+});
+
+test("the frame auto-grows below 800 when content stacks past it", () => {
+  const many = Array.from({ length: 12 }, (_, i) => `  card "Panel ${i} | ${i} | of many"`).join("\n");
+  const els = compile(`screen S\n  navbar "Hub"\n${many}\n`);
+  const frame = els.find((e) => e.type === "rectangle" && e.width === 1280)!;
+  assert.ok(frame.height > 800, `frame grew, got ${frame.height}`);
+});
+
+test("legacy coordinate dialect is rejected with a regenerate message", () => {
+  assert.throws(
+    () => compile(`screen S\n  heading "Overview" 280,84\n`),
+    /coordinate dialect|regenerate/i,
+  );
+});
+
+test("INVARIANT: flow output always passes the layout oracle (no overlap, in frame)", () => {
+  const screens = [
+    `screen Dash "Admin overview"
+  navbar "Hub"
+  sidebar "Home | Audits | Reports"
+  text "OPERATIONS" muted
+  row
+    heading "Good morning"
+    right
+    search "Search everything"
+    select "All frameworks"
+  row
+    card "Open | 128 | across audits"
+    card "Overdue | 14 | escalate"
+    card "Review | 32 | awaiting"
+    card "Findings | 5 | 2 high"
+  row
+    heading "Needs attention"
+    right
+    button "New audit" primary
+  table "A | B | C | D"
+    row "1 | 2 | 3 | 4"
+    row "5 | 6 | 7 | 8"
+`,
+    `screen Detail "One record"
+  navbar "Hub"
+  sidebar "Home | Audits"
+  breadcrumb "Audits / SOC2 / CC6.1"
+  row
+    heading "CC6.1 — Access Reviews"
+    badge "Needs Correction" danger
+  split 60/40
+    left
+      table "Version | By | Status"
+        row "v3 | J. Alvarez | Needs Correction"
+      button "Upload New Evidence" primary
+    right
+      card "Discussion"
+        text "K. Smith: attach the sign-off"
+        textarea "Add a comment…"
+        button "Post" primary
+      heading "Activity"
+      text "2d ago — correction requested"
+`,
+    `screen Form "Create a thing"
+  navbar "Shop | Catalog | Cart"
+  heading "New product"
+  input "Name"
+  row
+    select "Category"
+    select "Status"
+  textarea "Description"
+  row
+    right
+    button "Cancel"
+    button "Create" primary -> Dash
+`,
+  ];
+  for (const s of screens) {
+    assert.deepEqual(validateWireframeLayout(s), [], `oracle clean for:\n${s.slice(0, 40)}…`);
+  }
+});
+
+test("strict syntax: unknown keywords and misplaced groups are reported with line numbers", () => {
+  const errs = validateWireframeSyntax(`screen S
+  navbar "Hub"
+  bogus "what is this"
+  left
+`);
+  assert.ok(errs.some((e) => /line 3/.test(e) && /bogus/.test(e)), `unknown kind flagged: ${errs}`);
+  assert.ok(errs.some((e) => /line 4/.test(e) && /left/.test(e)), `stray left flagged: ${errs}`);
+});
+
+test("strict syntax: a clean flow file has no errors", () => {
+  assert.deepEqual(
+    validateWireframeSyntax(`screen S
+  navbar "Hub"
+  row
+    heading "Hi"
+    right
+    button "Go" primary
+  table "A | B"
+    row "1 | 2"
+`),
+    [],
+  );
+});

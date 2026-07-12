@@ -192,6 +192,21 @@ else
     echo "⚠️  k3d cluster not accessible — skipping public-URL sync"
 fi
 
+# 6c. Generate the OpenChoreo API client (internal/clients/openchoreo/gen/*.gen.go)
+#     if it's missing. Gitignored (source of truth is the pinned OC spec, see
+#     the Makefile) — a fresh clone has no gen/ output, and aep-api's
+#     Dockerfile does a plain `go build` with no codegen step of its own, so
+#     the very first `docker compose up --build` would otherwise fail with
+#     "no required module provides package .../gen". The Makefile target hits
+#     the network (fetches the pinned spec), so skip it once already generated
+#     rather than re-fetching on every start.
+OC_GEN_DIR="$ROOT_DIR/services/aep-api/internal/clients/openchoreo/gen"
+if [ ! -f "$OC_GEN_DIR/types.gen.go" ] || [ ! -f "$OC_GEN_DIR/client.gen.go" ]; then
+    echo ""
+    echo "🔧 Generating OpenChoreo API client (first run only)..."
+    make -C "$ROOT_DIR/services/aep-api" gen-oc-client
+fi
+
 # 7. Bring up the compose stack. The coding-agent runner is no longer a
 #    long-lived service — it's dispatched as a one-shot pod via the
 #    `aep-coding-agent` ClusterWorkflow in the cluster (installed
@@ -199,8 +214,97 @@ fi
 cd "$DEPLOY_DIR"
 echo ""
 echo "🐳 Starting Docker services..."
+# `.env` is the single source of truth for the smee webhook channel. Docker
+# Compose lets an EXPORTED shell var override the `.env` file, so an inherited
+# GITHUB_WEBHOOK_PROXY_URL (e.g. left over from a prior setup run) would bake a
+# stale channel into the smee-client and silently drop every GitHub webhook —
+# GitHub delivers to the .env channel, but the client listens on the exported
+# one. Unset it here so the smee-client always subscribes to the .env channel.
+unset GITHUB_WEBHOOK_PROXY_URL
 docker compose up --build -d
 echo "✅ Docker services started"
+
+# 7b. Verify the aep-mcp-server (the OpenChoreo SRE agent's door into AEP —
+#     issue creation + coding-agent dispatch during the RCA handoff). Compose
+#     starts it; this just fails loudly instead of leaving the handoff to 502
+#     at RCA time. See docs/developer-guide/sre-handoff-runbook.md.
+echo ""
+echo "🤝 Checking aep-mcp-server (SRE-agent handoff endpoint)..."
+MCP_OK=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -s --max-time 2 http://localhost:3401/healthz 2>/dev/null | grep -q '"ok"'; then
+        MCP_OK=yes; break
+    fi
+    sleep 2
+done
+if [ -n "$MCP_OK" ]; then
+    echo "✅ aep-mcp-server healthy on :3401"
+else
+    echo "⚠️  aep-mcp-server not responding on :3401 — the RCA→coding-agent handoff"
+    echo "    will fail its ae_* tool calls. Check: docker logs aep-mcp-server"
+fi
+
+# 7c. Verify the cluster half of the handoff — the ai-rca-agent deployment.
+#     Best-effort: a rebuilt cluster loses the locally-imported RCA image and
+#     the pod sits in ImagePullBackOff; re-running setup-observability.sh
+#     fixes it (it re-imports, auto-pulling tharindulak/openchoreo-sre-agent
+#     :handoff from Docker Hub if no local build exists).
+if kubectl cluster-info --context "${CLUSTER_CONTEXT}" --request-timeout=5s &>/dev/null; then
+    RCA_NS="openchoreo-observability-plane"
+    if kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" get deploy ai-rca-agent &>/dev/null; then
+        RCA_READY=$(kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" get deploy ai-rca-agent \
+            -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        RCA_HANDOFF=$(kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" get cm rca-agent-config \
+            -o jsonpath='{.data.AE_HANDOFF}' 2>/dev/null)
+        if [ "${RCA_READY:-0}" -ge 1 ]; then
+            echo "✅ ai-rca-agent ready (AE_HANDOFF=${RCA_HANDOFF:-unset})"
+        elif [ -n "$MCP_OK" ] && [ "$RCA_HANDOFF" = "true" ]; then
+            # Expected after a fresh setup.sh: with AE_HANDOFF=true the agent's
+            # boot-time MCP test is FATAL, and aep-mcp-server wasn't running
+            # until a moment ago — the pod is in CrashLoopBackOff whose next
+            # retry may be minutes away. Bounce it now that the MCP is up.
+            echo "   ai-rca-agent not ready but aep-mcp-server just came up —"
+            echo "   restarting it to break the crash-loop backoff..."
+            kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" rollout restart deploy/ai-rca-agent >/dev/null
+            if kubectl --context "${CLUSTER_CONTEXT}" -n "$RCA_NS" rollout status deploy/ai-rca-agent --timeout=180s >/dev/null 2>&1; then
+                echo "✅ ai-rca-agent ready (AE_HANDOFF=${RCA_HANDOFF})"
+            else
+                echo "⚠️  ai-rca-agent still not ready — check:"
+                echo "    kubectl logs -n $RCA_NS deploy/ai-rca-agent"
+            fi
+        else
+            echo "⚠️  ai-rca-agent not ready — alert→RCA (and the handoff) won't run."
+            echo "    Likely a lost image import after a cluster rebuild. Fix:"
+            echo "    bash scripts/setup-observability.sh"
+        fi
+    else
+        echo "ℹ️  ai-rca-agent not installed — run scripts/setup-observability.sh to"
+        echo "    enable the alert→RCA→coding-agent pipeline."
+    fi
+
+    # 7d. Runner-image drift check. Coding agents dispatch via TWO paths with
+    #     independent image pins: the proxy path (aep-api env AGENT_RUNNER_IMAGE,
+    #     docker-compose.yml) and the legacy ClusterWorkflow path
+    #     (manifests/aep-coding-agent.yaml, used when per-org SM-API secrets are
+    #     absent — e.g. right after a fresh setup). If they drift, dispatches
+    #     behave differently depending on which path fires (this is exactly how
+    #     the related-issues skill silently went missing on one path).
+    COMPOSE_RUNNER=$(docker compose -f "$DEPLOY_DIR/docker-compose.yml" config 2>/dev/null \
+        | grep -m1 'AGENT_RUNNER_IMAGE:' | awk '{print $2}')
+    CW_RUNNER=$(kubectl --context "${CLUSTER_CONTEXT}" get clusterworkflows.openchoreo.dev aep-coding-agent \
+        -o jsonpath='{.spec.runTemplate.spec.templates[0].container.image}' 2>/dev/null)
+    if [ -n "$COMPOSE_RUNNER" ] && [ -n "$CW_RUNNER" ]; then
+        if [ "$COMPOSE_RUNNER" = "$CW_RUNNER" ]; then
+            echo "✅ runner image consistent on both dispatch paths: $CW_RUNNER"
+        else
+            echo "⚠️  runner-image DRIFT between dispatch paths:"
+            echo "      proxy path (compose AGENT_RUNNER_IMAGE): $COMPOSE_RUNNER"
+            echo "      legacy path (ClusterWorkflow):           $CW_RUNNER"
+            echo "    Align docker-compose.yml and manifests/aep-coding-agent.yaml"
+            echo "    (re-run scripts/setup-aep.sh to re-apply the manifest)."
+        fi
+    fi
+fi
 
 # 8. Repair per-org secrets in OpenBao. When the local cluster (or just the
 #    OpenBao volume) has been torn down since the last credential connect,
@@ -238,9 +342,10 @@ echo "  ✅ All services running!"
 echo "============================================"
 echo ""
 echo "  Console:          http://localhost:8090"
-echo "  Console (new):    http://localhost:8091   (#98 preview, apps/console)"
 echo "  API:              http://localhost:9090"
 echo "  Agents:           http://localhost:4000"
+echo "  SRE-handoff MCP:  http://localhost:3401 (alert → AI-RCA → issue → coding agent;"
+echo "                    see docs/developer-guide/sre-handoff-runbook.md)"
 echo "  Temporal Web UI:  http://localhost:8233   (devflow workflow dashboard)"
 echo ""
 echo "  Coding-agent:     dispatched as a one-shot pod via the"

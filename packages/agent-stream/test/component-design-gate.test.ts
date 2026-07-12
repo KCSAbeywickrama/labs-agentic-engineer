@@ -38,7 +38,7 @@ function design(overrides: Record<string, unknown> = {}): string {
     type: "web-application",
     version: "0.1.0",
     language: "typescript",
-    buildpack: "react",
+    buildpack: "docker",
     appPath: ".",
     entrypoint: "index.html",
     exposure: "internet",
@@ -73,3 +73,41 @@ test("rejects an endpoint block with an unknown key", () => {
   const problem = checkComponentDesign(PATH, design({ endpoint: { name: "api", port: 8080 } }));
   assert.equal(problem?.code, "SCHEMA_VIOLATION");
 });
+
+// --- config keys carry an optional description ------------------------------
+
+const dep = (config: unknown) => ({ kind: "external", name: "stripe", config });
+
+test("accepts a config key with an optional description", () => {
+  const doc = design({
+    dependencies: [dep([{ key: "STRIPE_API_KEY", secret: true, description: "Your Stripe secret API key" }])],
+  });
+  assert.equal(checkComponentDesign(PATH, doc), null);
+});
+
+test("accepts a non-secret config key that omits secret entirely, with a defaultValue", () => {
+  const doc = design({
+    dependencies: [dep([{ key: "AWS_REGION", defaultValue: "us-east-1" }])],
+  });
+  assert.equal(checkComponentDesign(PATH, doc), null);
+});
+
+test("rejects an unknown key on a config entry (e.g. the retired credentialClass)", () => {
+  const doc = design({ dependencies: [dep([{ key: "STRIPE_API_KEY", credentialClass: "secret" }])] });
+  const problem = checkComponentDesign(PATH, doc);
+  assert.equal(problem?.code, "SCHEMA_VIOLATION");
+});
+
+// --- buildpack is pinned to "docker" (agent write-gate only; see the .refine) -
+
+test("accepts buildpack docker", () => {
+  assert.equal(checkComponentDesign(PATH, design({ buildpack: "docker" })), null);
+});
+
+for (const buildpack of ["go", "react", "node", "nodejs", "Docker", ""]) {
+  test(`rejects non-docker buildpack ${JSON.stringify(buildpack)}`, () => {
+    const problem = checkComponentDesign(PATH, design({ buildpack }));
+    assert.equal(problem?.code, "SCHEMA_VIOLATION");
+    assert.match(problem!.message, /buildpack|docker/);
+  });
+}

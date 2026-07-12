@@ -35,15 +35,12 @@ import (
 // FakeArtifactService implements the GitHub-direct artifacts.ArtifactService via
 // settable function fields.
 type FakeArtifactService struct {
-	ListRequirementFilesFunc     func(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	ListDesignFilesFunc          func(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	SaveSpecFunc                 func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.SpecSaveResult, error)
 	ValidateSpecAtTagFunc        func(ctx context.Context, orgID, projectID, tag string) error
 	LatestSpecTagFunc            func(ctx context.Context, orgID, projectID string) string
 	SaveRequirementsFunc         func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.RequirementsSaveResult, error)
 	SaveDesignFunc               func(ctx context.Context, orgID, projectID string, req artifacts.SaveRequest) (*artifacts.DesignSaveResult, error)
-	DiscardRequirementsFunc      func(ctx context.Context, orgID, projectID string) (map[string]string, error)
-	DiscardDesignFunc            func(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	ListRequirementsVersionsFunc func(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error)
 	ListDesignVersionsFunc       func(ctx context.Context, orgID, projectID string) ([]artifacts.DesignVersionInfo, error)
 	ListSpecVersionTagsFunc      func(ctx context.Context, orgID, projectID string) (*artifacts.TagList, error)
@@ -51,16 +48,11 @@ type FakeArtifactService struct {
 	GetRequirementsAtTagFunc     func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtTagFunc           func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtCommitFunc        func(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error)
+	StatusSnapshotFunc           func(ctx context.Context, orgID, projectID string) (*artifacts.StatusSnapshot, error)
+	ComponentCountAtTagFunc      func(ctx context.Context, orgID, projectID, tag string) (int, error)
 }
 
 var _ artifacts.ArtifactService = (*FakeArtifactService)(nil)
-
-func (f *FakeArtifactService) ListRequirementFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	if f.ListRequirementFilesFunc == nil {
-		panic("artifactstest: ListRequirementFiles called but ListRequirementFilesFunc is not set")
-	}
-	return f.ListRequirementFilesFunc(ctx, orgID, projectID)
-}
 
 func (f *FakeArtifactService) ListDesignFiles(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	if f.ListDesignFilesFunc == nil {
@@ -102,20 +94,6 @@ func (f *FakeArtifactService) SaveDesign(ctx context.Context, orgID, projectID s
 		panic("artifactstest: SaveDesign called but SaveDesignFunc is not set")
 	}
 	return f.SaveDesignFunc(ctx, orgID, projectID, req)
-}
-
-func (f *FakeArtifactService) DiscardRequirements(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	if f.DiscardRequirementsFunc == nil {
-		panic("artifactstest: DiscardRequirements called but DiscardRequirementsFunc is not set")
-	}
-	return f.DiscardRequirementsFunc(ctx, orgID, projectID)
-}
-
-func (f *FakeArtifactService) DiscardDesign(ctx context.Context, orgID, projectID string) (map[string]string, error) {
-	if f.DiscardDesignFunc == nil {
-		panic("artifactstest: DiscardDesign called but DiscardDesignFunc is not set")
-	}
-	return f.DiscardDesignFunc(ctx, orgID, projectID)
 }
 
 func (f *FakeArtifactService) ListRequirementsVersions(ctx context.Context, orgID, projectID string) ([]artifacts.RequirementsVersionInfo, error) {
@@ -165,4 +143,18 @@ func (f *FakeArtifactService) GetDesignAtCommit(ctx context.Context, orgID, proj
 		panic("artifactstest: GetDesignAtCommit called but GetDesignAtCommitFunc is not set")
 	}
 	return f.GetDesignAtCommitFunc(ctx, orgID, projectID, commitSHA)
+}
+
+func (f *FakeArtifactService) StatusSnapshot(ctx context.Context, orgID, projectID string) (*artifacts.StatusSnapshot, error) {
+	if f.StatusSnapshotFunc == nil {
+		panic("artifactstest: StatusSnapshot called but StatusSnapshotFunc is not set")
+	}
+	return f.StatusSnapshotFunc(ctx, orgID, projectID)
+}
+
+func (f *FakeArtifactService) ComponentCountAtTag(ctx context.Context, orgID, projectID, tag string) (int, error) {
+	if f.ComponentCountAtTagFunc == nil {
+		panic("artifactstest: ComponentCountAtTag called but ComponentCountAtTagFunc is not set")
+	}
+	return f.ComponentCountAtTagFunc(ctx, orgID, projectID, tag)
 }

@@ -20,8 +20,8 @@ import { describe, expect, it } from "vitest";
 import { deriveWireframeScene } from "./deriveWireframe";
 
 const dsl = `screen Home
-  heading "Welcome" 40,40
-  button "Go" 40,100 120x40`;
+  heading "Welcome"
+  button "Go" primary`;
 
 describe("deriveWireframeScene", () => {
   it("compiles a wireframes .dsl into an excalidraw scene with elements", () => {
@@ -38,5 +38,36 @@ describe("deriveWireframeScene", () => {
 
   it("returns null on empty input", () => {
     expect(deriveWireframeScene("x/wireframes.dsl", "")).toBeNull();
+  });
+
+  // Streaming: the collab writer flushes whole lines, so a mid-turn source is
+  // a PREFIX of the final file. Every line-boundary prefix must compile to the
+  // screens written so far — that is what draws the wireframe live.
+  it("compiles every line-boundary prefix of a streaming source", () => {
+    const full = `screen Catalog "Shoppers browse products"
+  navbar "Shop"
+  row
+    heading "Browse products"
+    right
+    button "View cart" primary -> Cart
+  table "Product | Price"
+    row "Mug | $18"
+
+screen Cart "Review and check out"
+  navbar "Shop"
+  heading "Your cart"
+`;
+    const lines = full.split("\n");
+    for (let i = 1; i <= lines.length; i++) {
+      const prefix = lines.slice(0, i).join("\n");
+      if (prefix.trim().length === 0) continue;
+      const json = deriveWireframeScene("x/wireframes.dsl", prefix);
+      expect(json, `prefix of ${i} lines should compile`).not.toBeNull();
+    }
+    // The full source renders both screens.
+    const scene = JSON.parse(deriveWireframeScene("x/wireframes.dsl", full)!);
+    const texts = scene.elements.filter((e: { type: string }) => e.type === "text");
+    expect(texts.some((t: { text?: string }) => t.text === "Catalog")).toBe(true);
+    expect(texts.some((t: { text?: string }) => t.text === "Cart")).toBe(true);
   });
 });

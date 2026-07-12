@@ -27,7 +27,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
-	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
@@ -38,6 +37,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
+	"github.com/wso2/aep/aep-api/internal/feature/rcaagent"
 	"github.com/wso2/aep/aep-api/internal/feature/requirements"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
@@ -53,9 +53,8 @@ type HumaDeps struct {
 	OrgSvc            organization.OrganizationService
 	ComponentSvc      component.ComponentService
 	ConfigSvc         component.ConfigService
-	RequirementsSvc   requirements.RequirementsService
 	CollabRepo        gitrepo.RepoService
-	DesignSvc         design.DesignService
+	IssueSvc          gitrepo.IssueService
 	ProvisioningSvc   *provisioning.Service
 	TaskReads         *task.Reads
 	TaskCommands      *task.Commands
@@ -76,6 +75,8 @@ type HumaDeps struct {
 	ArtifactSvc       artifacts.ArtifactService
 	GenAISvc          genai.GenAIService
 	BuildSvc          *build.Service
+	RcaAgentReportSvc rcaagent.RcaAgentReportService
+	PreflightSvc      *build.PreflightService
 	GitHubAppSlug     string
 	BFFPublicURL      string
 	GitHubAppClientID string
@@ -89,9 +90,8 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	organization.RegisterOrganization(api, d.OrgSvc)
 	component.RegisterComponent(api, d.ComponentSvc)
 	component.RegisterConfig(api, d.ConfigSvc)
-	requirements.RegisterRequirements(api, d.RequirementsSvc)
 	requirements.RegisterCollab(api, d.CollabRepo)
-	design.RegisterDesign(api, d.DesignSvc)
+	gitrepo.RegisterIssue(api, d.IssueSvc)
 	provisioning.RegisterResources(api, d.ProvisioningSvc)
 	task.RegisterTask(api, d.TaskReads, d.TaskCommands, d.TaskPlan)
 	execution.RegisterTaskStream(api, d.TaskStream)
@@ -101,6 +101,8 @@ func RegisterAllHuma(api huma.API, d HumaDeps) {
 	artifacts.RegisterTags(api, d.ArtifactSvc)
 	genai.RegisterGenAI(api, d.GenAISvc)
 	build.RegisterBuild(api, d.BuildSvc)
+	rcaagent.RegisterRcaAgentReports(api, d.RcaAgentReportSvc)
+	build.RegisterPreflight(api, d.PreflightSvc)
 }
 
 // GenerateOpenAPIYAML builds the full OpenAPI document (all migrated features)

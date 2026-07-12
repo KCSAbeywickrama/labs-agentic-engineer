@@ -38,6 +38,10 @@ var (
 	ErrRepoNotFound = errors.New("repository not found")
 	// ErrRepoNotReady is a gitrepo-domain error (repo row not in "ready" state).
 	ErrRepoNotReady = errors.New("repository is not ready")
+	// ErrIssueNotFound is returned by GetIssue when no issue with the given
+	// number exists on the repo (the host answered 404). Callers map it to
+	// their own not-found (e.g. task.ErrTaskNotFound → 404).
+	ErrIssueNotFound = errors.New("issue not found")
 
 	// ErrTagAlreadyExists — Workspace.Tag (taken name / rejected push)
 	// returns it so the save flow recomputes the next tag.

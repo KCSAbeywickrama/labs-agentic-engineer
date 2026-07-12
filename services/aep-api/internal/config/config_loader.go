@@ -32,7 +32,7 @@ import (
 // same tag together. AGENT_RUNNER_IMAGE overrides the whole string when set.
 const (
 	runnerImageRepo    = "docker.io/xlight05/aep-coding-agent-runner"
-	runnerImageVersion = "v7"
+	runnerImageVersion = "v8"
 	defaultRunnerImage = runnerImageRepo + ":" + runnerImageVersion
 )
 
@@ -136,6 +136,13 @@ func Load() (Config, error) {
 		SecretManagerAPIURL:     r.readOptionalString("SECRET_MANAGER_API_URL", ""),
 		SecretManagerAPITimeout: r.readOptionalDuration("SECRET_MANAGER_API_TIMEOUT", 30*time.Second),
 		ClusterGatewayProxyURL:  r.readOptionalString("CLUSTER_GATEWAY_PROXY_URL", ""),
+
+		// Anthropic-key push target (see AnthropicCredentialService.pushExternalSecret).
+		// Both empty (the default) disables the push entirely — no consumer is
+		// assumed by default; set explicitly for the deployment that reads a
+		// live-synced Anthropic key (e.g. the OpenChoreo SRE/RCA agent).
+		RCAAgentAnthropicPushNamespace:  r.readOptionalString("RCA_AGENT_ANTHROPIC_PUSH_NAMESPACE", ""),
+		RCAAgentAnthropicPushSecretName: r.readOptionalString("RCA_AGENT_ANTHROPIC_PUSH_SECRET_NAME", ""),
 
 		// Temporal (devflow workflows). Enabled iff TEMPORAL_HOSTPORT is set.
 		Temporal: TemporalConfig{

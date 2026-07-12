@@ -26,9 +26,11 @@ import {
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { useConfig } from "../../settings/api/queries";
+import { firstEndpointUrl } from "../lib/deploymentUrl";
 import { projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
+type BuildRequest = components["schemas"]["BuildRequest"];
 
 export function useProjectsList(search = "", limit?: number) {
   return useInfiniteQuery({
@@ -73,14 +75,31 @@ export function useProject(projectName: string) {
   });
 }
 
-// The overview watches the pipeline move, so its reads poll (issue #77
-// decision: 10s while visible; SSE deferred).
+// Spec-view reads still poll at a flat interval (tags below).
 const OVERVIEW_POLL_MS = 10_000;
+
+// Status polling is adaptive (#183): fast while any stage is moving, slow
+// when settled — idle polling stays on because spec pushes happen on GitHub
+// and must flip the v1+ chip without a reload.
+const STATUS_ACTIVE_POLL_MS = 5_000;
+const STATUS_IDLE_POLL_MS = 30_000;
+
+type ProjectStatus = components["schemas"]["ProjectStatus"];
+
+function statusIsMoving(status: ProjectStatus): boolean {
+  return (
+    status.build.status === "running" ||
+    status.deploy.status === "deploying" ||
+    status.repoStatus === "pending" ||
+    status.repoStatus === "cloning"
+  );
+}
 
 function useProjectResource<T>(
   queryKey: readonly unknown[],
   fetcher: () => Promise<{ data?: T; error?: unknown }>,
   what: string,
+  refetchInterval?: number | ((data: T | undefined) => number | false),
 ) {
   return useQuery({
     queryKey,
@@ -92,10 +111,18 @@ function useProjectResource<T>(
       }
       return data;
     },
-    refetchInterval: OVERVIEW_POLL_MS,
+    ...(refetchInterval !== undefined && {
+      refetchInterval:
+        typeof refetchInterval === "function"
+          ? (query: { state: { data: T | undefined } }) =>
+              refetchInterval(query.state.data)
+          : refetchInterval,
+    }),
   });
 }
 
+// The page's only poller (#183): the whole pipeline renders from this one
+// aggregate (ADR-0006), so nothing else on the overview needs an interval.
 export function useProjectStatus(projectName: string) {
   return useProjectResource(
     projectKeys.status(projectName),
@@ -104,9 +131,15 @@ export function useProjectStatus(projectName: string) {
         params: { path: { projectName } },
       }),
     "project status",
+    (status) =>
+      !status || statusIsMoving(status)
+        ? STATUS_ACTIVE_POLL_MS
+        : STATUS_IDLE_POLL_MS,
   );
 }
 
+// No standing interval (#183): the overview refetches this when the status
+// poll shows a build/deploy transition (components only change then).
 export function useProjectComponents(projectName: string) {
   return useProjectResource(
     projectKeys.components(projectName),
@@ -118,15 +151,60 @@ export function useProjectComponents(projectName: string) {
   );
 }
 
-export function useProjectTasks(projectName: string) {
-  return useProjectResource(
-    projectKeys.tasks(projectName),
-    () =>
-      client.GET("/projects/{projectName}/tasks", {
-        params: { path: { projectName } },
-      }),
-    "tasks",
-  );
+// A web app's public URL (#196): read from its deployments — the dev
+// binding's resolved endpointUrl rides on list-deployments, while
+// list-components never fills Component.endpointUrl (noted contract drift).
+// Fetched only for web-application rows; refreshes with the components list
+// (same no-standing-interval regime — a deploy transition invalidates both).
+export function useComponentEndpointUrl(
+  projectName: string,
+  componentName: string,
+) {
+  return useQuery({
+    queryKey: projectKeys.componentDeployments(projectName, componentName),
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/components/{componentName}/deployments",
+        { params: { path: { projectName, componentName } } },
+      );
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(e?.detail ?? e?.title ?? "Failed to load deployments");
+      }
+      return data;
+    },
+    select: (data) => firstEndpointUrl(data.items),
+  });
+}
+
+// A service component's OpenAPI contract, for the in-app viewer dialog. Lazy
+// (`enabled`) — only fetched when the user opens the contract, not on every
+// overview render. Goes through the authenticated client so the Bearer token
+// rides along; the old plain <a href> to this JWT-guarded endpoint 401'd
+// because a browser navigation carries no Authorization header.
+export function useComponentOpenApi(
+  projectName: string,
+  componentName: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: projectKeys.componentOpenapi(projectName, componentName),
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/components/{componentName}/openapi",
+        { params: { path: { projectName, componentName } } },
+      );
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(
+          e?.detail ?? e?.title ?? "Failed to load the API contract",
+        );
+      }
+      return data;
+    },
+    staleTime: 30_000,
+  });
 }
 
 // Spec version tags (#117). The BE hasn't implemented /tags yet, so a failed
@@ -186,18 +264,45 @@ export function useDeleteProject() {
   });
 }
 
+// Checks whether a project is ready to build — missing/unresolved dependency
+// inputs surface here so the build drawer (#164) can render them before the
+// user commits to a build. Disabled by default: the drawer triggers it
+// on-demand (refetch) rather than on mount.
+export function useBuildPreflight(projectName: string) {
+  return useQuery({
+    queryKey: projectKeys.buildPreflight(projectName),
+    enabled: false,
+    retry: false,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/build/preflight",
+        {
+          params: { path: { projectName } },
+        },
+      );
+      if (error || data === undefined) {
+        const e = error as { detail?: string; title?: string } | undefined;
+        throw new Error(e?.detail ?? e?.title ?? "Failed to check build readiness");
+      }
+      return data;
+    },
+  });
+}
+
 // Trigger a project build (#162): the single-tag flow — the BFF validates,
 // tags v<N>, and runs the dev workflow, returning the tag. The Spec view
 // commits the room first (collab flush-on-demand) so this tags the current
-// HEAD. Invalidates the project's reads since status/tasks/tags shift once the
+// HEAD. Carries the drawer's resolved dependency inputs (#164); defaults to
+// an empty list for callers that haven't been rewired to the drawer yet.
+// Invalidates the project's reads since status/tasks/tags shift once the
 // build starts.
 export function useBuildProject(projectName: string) {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
+  const mutation = useMutation({
+    mutationFn: async (body: BuildRequest) => {
       const { data, error } = await client.POST("/projects/{projectName}/build", {
         params: { path: { projectName } },
-        body: {},
+        body,
       });
       if (error || data === undefined) {
         const e = error as { detail?: string; title?: string } | undefined;
@@ -211,6 +316,23 @@ export function useBuildProject(projectName: string) {
       });
     },
   });
+  // TanStack infers the mutation's variables type from mutationFn's own
+  // parameter, which stays required even with a default value (a default
+  // only makes a *plain* function's parameter optional, not a generically
+  // inferred one) — so callers that predate the drawer's inputs and still
+  // call mutate()/mutateAsync() with no arguments need the default applied
+  // at this thin wrapper instead.
+  return {
+    ...mutation,
+    mutate: (
+      body: BuildRequest = { inputs: [] },
+      options?: Parameters<typeof mutation.mutate>[1],
+    ) => mutation.mutate(body, options),
+    mutateAsync: (
+      body: BuildRequest = { inputs: [] },
+      options?: Parameters<typeof mutation.mutateAsync>[1],
+    ) => mutation.mutateAsync(body, options),
+  };
 }
 
 // The connected GitHub org, for the repo-URL preview in the create flow.

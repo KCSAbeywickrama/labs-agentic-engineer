@@ -2,22 +2,26 @@ import type { components } from "../../generated/aep-api";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
+type ComponentOpenAPI = components["schemas"]["ComponentOpenAPI"];
 type TaskView = components["schemas"]["TaskView"];
 type TagList = components["schemas"]["TagList"];
+type BuildList = components["schemas"]["BuildList"];
+type DeploymentList = components["schemas"]["DeploymentList"];
 type FileMeta = components["schemas"]["FileMeta"];
 type FileContent = components["schemas"]["FileContent"];
 type ErrorModel = components["schemas"]["ErrorModel"];
 
-// Scenario switch for the project overview (#77) and spec view (#80).
+// Scenario switch for the project overview (#77/#183) and spec view (#80).
 // Toggle in devtools:
 //   localStorage.setItem('aep:mock:project',
-//     'fresh' | 'spec' | 'spec-failed' | 'building' | 'deployed' |
-//     'deploy-failed' | 'repo-error' | 'error')
+//     'fresh' | 'spec' | 'spec-failed' | 'building' | 'deploying' |
+//     'deployed' | 'deploy-failed' | 'repo-error' | 'error')
 export type ProjectScenario =
   | "fresh"
   | "spec"
   | "spec-failed"
   | "building"
+  | "deploying"
   | "deployed"
   | "deploy-failed"
   | "repo-error"
@@ -25,6 +29,24 @@ export type ProjectScenario =
 
 const REPO_URL = "https://github.com/acme-dev/demo-shop";
 const BOARD_URL = "https://github.com/acme-dev/demo-shop/issues";
+
+// Stage-aggregate shorthands (#183/#184). The overview pipeline renders
+// exclusively from these.
+type SpecStage = components["schemas"]["SpecStage"];
+type BuildStage = components["schemas"]["BuildStage"];
+type DeployStage = components["schemas"]["DeployStage"];
+
+const noSpec: SpecStage = { exists: false, version: "", dirty: false, design: false };
+const idleBuild: BuildStage = {
+  version: "",
+  status: "idle",
+  tasks: { total: 0, done: 0, failed: 0, active: 0 },
+};
+const noDeploy: DeployStage = {
+  version: "",
+  status: "none",
+  components: { total: 0, ready: 0 },
+};
 
 export const projectStatuses: Record<
   Exclude<ProjectScenario, "error">,
@@ -40,6 +62,9 @@ export const projectStatuses: Record<
     hasTasks: false,
     specStatus: "pending",
     designStatus: "pending",
+    spec: noSpec,
+    build: idleBuild,
+    deploy: noDeploy,
   },
   // Spec collaboration underway, nothing published.
   spec: {
@@ -51,6 +76,9 @@ export const projectStatuses: Record<
     hasTasks: false,
     specStatus: "draft",
     designStatus: "in_progress",
+    spec: { exists: true, version: "", dirty: false, design: true },
+    build: idleBuild,
+    deploy: noDeploy,
   },
   // Spec derivation hit a problem; the seeded PRD is still there.
   "spec-failed": {
@@ -62,8 +90,12 @@ export const projectStatuses: Record<
     hasTasks: false,
     specStatus: "failed",
     designStatus: "failed",
+    spec: { exists: true, version: "", dirty: false, design: false },
+    build: idleBuild,
+    deploy: noDeploy,
   },
-  // v1 published, agents building, nothing deployed yet.
+  // v1 published, agents building, nothing deployed yet. Task counts mirror
+  // buildingTasks below (1 failed, 3 still moving).
   building: {
     phase: "tasks",
     repoStatus: "ready",
@@ -73,8 +105,37 @@ export const projectStatuses: Record<
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
+    spec: { exists: true, version: "v1", dirty: false, design: true },
+    build: {
+      version: "v1",
+      status: "running",
+      tasks: { total: 4, done: 0, failed: 1, active: 3 },
+    },
+    deploy: noDeploy,
   },
-  // v1 deployed to dev; spec has drifted since (see projectTags).
+  // v1 built, dev rollout in progress (1 of 3 components ready).
+  deploying: {
+    phase: "components",
+    repoStatus: "ready",
+    repoUrl: REPO_URL,
+    hasSpec: true,
+    hasDesign: true,
+    hasTasks: true,
+    specStatus: "approved",
+    designStatus: "approved",
+    spec: { exists: true, version: "v1", dirty: false, design: true },
+    build: {
+      version: "v1",
+      status: "succeeded",
+      tasks: { total: 4, done: 4, failed: 0, active: 0 },
+    },
+    deploy: {
+      version: "v1",
+      status: "deploying",
+      components: { total: 3, ready: 1 },
+    },
+  },
+  // v1 deployed to dev; spec has drifted since (dirty → rendered v1+).
   deployed: {
     phase: "components",
     repoStatus: "ready",
@@ -84,6 +145,17 @@ export const projectStatuses: Record<
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
+    spec: { exists: true, version: "v1", dirty: true, design: true },
+    build: {
+      version: "v1",
+      status: "succeeded",
+      tasks: { total: 4, done: 4, failed: 0, active: 0 },
+    },
+    deploy: {
+      version: "v1",
+      status: "deployed",
+      components: { total: 3, ready: 3 },
+    },
   },
   // v1 build done but the dev deployment failed.
   "deploy-failed": {
@@ -95,6 +167,17 @@ export const projectStatuses: Record<
     hasTasks: true,
     specStatus: "approved",
     designStatus: "approved",
+    spec: { exists: true, version: "v1", dirty: false, design: true },
+    build: {
+      version: "v1",
+      status: "succeeded",
+      tasks: { total: 4, done: 4, failed: 0, active: 0 },
+    },
+    deploy: {
+      version: "v1",
+      status: "failed",
+      components: { total: 3, ready: 1 },
+    },
   },
   // Repo bootstrap went sideways before any spec work.
   "repo-error": {
@@ -107,6 +190,9 @@ export const projectStatuses: Record<
     hasTasks: false,
     specStatus: "pending",
     designStatus: "pending",
+    spec: noSpec,
+    build: idleBuild,
+    deploy: noDeploy,
   },
 };
 
@@ -138,13 +224,65 @@ const builtComponents: ComponentList = {
   ],
 };
 
-const deployedComponents: ComponentList = {
-  items: (builtComponents.items ?? []).map((c) =>
-    c.type === "web-application"
-      ? { ...c, endpointUrl: "https://storefront.dev.acme-aep.io" }
-      : c,
-  ),
-};
+// Note: no endpointUrl on the components themselves — the real backend never
+// fills Component.endpointUrl (noted drift, #196); the console reads a web
+// app's URL from list-deployments (componentDeployments below).
+const deployedComponents: ComponentList = builtComponents;
+
+// Deployments backing list-deployments (#196): the deployed scenario gives
+// the web app its dev binding URL (matching the pre-#196 fixture semantics);
+// earlier scenarios have no resolved URL yet.
+export function componentDeployments(
+  s: Exclude<ProjectScenario, "error">,
+  componentName: string,
+): DeploymentList {
+  if (s === "deployed" && componentName === "storefront") {
+    return {
+      items: [
+        {
+          componentName,
+          environment: "development",
+          status: "Ready",
+          endpointUrl: "https://storefront.dev.acme-aep.io",
+        },
+      ],
+    };
+  }
+  return { items: [] };
+}
+
+// The OpenAPI contract served by GET .../components/:name/openapi — a
+// `{ spec }` envelope carrying a raw document, exactly as aep-api returns it
+// (read off specs/design). The ComponentOpenApiDialog renders `spec` via the
+// shared OpenApiView. Title is keyed off the component so the viewer's hero
+// reflects which row was opened.
+export function componentOpenApi(componentName: string): ComponentOpenAPI {
+  const spec = `openapi: 3.0.0
+info:
+  title: ${componentName}
+  version: 1.0.0
+  description: Mock API contract for ${componentName}.
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /items:
+    get:
+      summary: List items
+      responses:
+        "200":
+          description: A list of items
+    post:
+      summary: Create an item
+      responses:
+        "201":
+          description: Created
+`;
+  return { componentName, componentType: "service", spec };
+}
 
 export const projectComponents: Record<
   Exclude<ProjectScenario, "error">,
@@ -154,13 +292,14 @@ export const projectComponents: Record<
   spec: emptyComponents,
   "spec-failed": emptyComponents,
   building: builtComponents,
+  deploying: builtComponents,
   deployed: deployedComponents,
   "deploy-failed": builtComponents,
   "repo-error": emptyComponents,
 };
 
-// Tasks backing the Build card (list-tasks; the card buckets derivedStatus
-// client-side — see features/projects/api/taskBuckets.ts).
+// Tasks backing list-tasks — the tasks page (#173); the overview no longer
+// reads them (#183: counts ride on ProjectStatus.build.tasks).
 function task(
   issueNumber: number,
   title: string,
@@ -201,9 +340,49 @@ export const projectTasks: Record<
   spec: [],
   "spec-failed": [],
   building: buildingTasks,
+  deploying: doneTasks,
   deployed: doneTasks,
   "deploy-failed": doneTasks,
   "repo-error": [],
+};
+
+// Builds backing list-project-builds — the builds page (#185): one entry per
+// built tag, newest first, tallies mirroring projectStatuses[s].build.
+const noBuilds: BuildList = { builds: [] };
+const runningV1Build: BuildList = {
+  builds: [
+    {
+      tag: "v1",
+      status: "in_progress",
+      tasks: { total: 4, done: 0, failed: 1, active: 3 },
+      startedAt: "2026-07-10T09:12:00Z",
+    },
+  ],
+};
+const completedV1Build: BuildList = {
+  builds: [
+    {
+      tag: "v1",
+      status: "completed",
+      tasks: { total: 4, done: 4, failed: 0, active: 0 },
+      startedAt: "2026-07-10T09:12:00Z",
+      completedAt: "2026-07-10T10:03:00Z",
+    },
+  ],
+};
+
+export const projectBuilds: Record<
+  Exclude<ProjectScenario, "error">,
+  BuildList
+> = {
+  fresh: noBuilds,
+  spec: noBuilds,
+  "spec-failed": noBuilds,
+  building: runningV1Build,
+  deploying: completedV1Build,
+  deployed: completedV1Build,
+  "deploy-failed": completedV1Build,
+  "repo-error": noBuilds,
 };
 
 // Spec version tags (#117): latest = newest user tag; specDirty = specs/
@@ -220,6 +399,7 @@ export const projectTags: Record<
   spec: noTags,
   "spec-failed": noTags,
   building: v1Tags,
+  deploying: v1Tags,
   deployed: { ...v1Tags, specDirty: true },
   "deploy-failed": v1Tags,
   "repo-error": noTags,
@@ -284,17 +464,52 @@ const storefrontDesignJson = `{
   ]
 }`;
 
-const storefrontWireframesDsl = `screen Catalog
-  navbar "Demo Shop | Catalog | Cart | Orders" 0,0
-  heading "Browse products" 40,60
-  input "Search products" 40,110 400x36
-  card "Product grid" 40,160 760x420
+const storefrontWireframesDsl = `screen Catalog "Shoppers browse and search the product catalogue"
+  navbar "Demo Shop | Catalog | Cart | Orders | Account"
+  row
+    heading "Browse products"
+    right
+    search "Search products, brands, SKUs"
+    select "Category: All"
+  tabs "All | New in | On sale | Bestsellers"
+  row
+    card "Wireless Headphones\n$89"
+      badge "In stock" success
+    card "Mechanical Keyboard\n$129"
+      badge "Low stock" warning
+    card "4K Monitor\n$349"
+      badge "In stock" success
+    card "USB-C Hub\n$39"
+      badge "In stock" success
+  row
+    right
+    button "View cart" primary -> Cart
 
-screen Cart
-  navbar "Demo Shop | Catalog | Cart | Orders" 0,0
-  heading "Your cart" 40,60
-  table "Product | Qty | Price" 40,110 760x300
-  button "Checkout" 40,430 160x40
+screen Cart "Shopper reviews items and checks out"
+  navbar "Demo Shop | Catalog | Cart | Orders | Account"
+  heading "Your cart"
+  split 60/40
+    left
+      table "Product | Qty | Price | Subtotal"
+        row "Wireless Headphones | 1 | $89.00 | $89.00"
+        row "USB-C Hub | 2 | $39.00 | $78.00"
+        row "Mechanical Keyboard | 1 | $129.00 | $129.00"
+      button "Continue shopping" -> Catalog
+    right
+      card "Order summary"
+        text "Subtotal: $296.00"
+        text "Shipping: $6.00"
+        text "Total: $302.00"
+        checkbox "Ship to billing address" active
+        button "Checkout" primary -> Orders
+
+screen Orders "Shopper tracks past orders and their status"
+  navbar "Demo Shop | Catalog | Cart | Orders | Account"
+  heading "Your orders"
+  table "Order | Placed | Items | Total | Status"
+    row "#10432 | Jul 8, 2026 | 3 | $302.00 | Shipped"
+    row "#10391 | Jun 27, 2026 | 1 | $89.00 | Delivered"
+    row "#10355 | Jun 15, 2026 | 2 | $168.00 | Delivered"
 `;
 
 const catalogApiDesignJson = `{
@@ -377,6 +592,7 @@ export const projectSpecFiles: Record<
   spec: collaborationFiles,
   "spec-failed": prdOnlyFiles,
   building: fullFiles,
+  deploying: fullFiles,
   deployed: fullFiles,
   "deploy-failed": fullFiles,
   "repo-error": prdOnlyFiles,

@@ -49,8 +49,11 @@ function basename(path: string): string {
 }
 
 const OPENAPI_RE = /\/openapi\.ya?ml$/;
+const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
 function fileLabel(path: string): string {
-  return OPENAPI_RE.test(path) ? "API Spec" : basename(path);
+  if (OPENAPI_RE.test(path)) return "API Spec";
+  if (COMPONENT_DESIGN_RE.test(path)) return "Design Overview";
+  return basename(path);
 }
 
 function fileSel(path: string): SpecSelection {
@@ -216,9 +219,9 @@ export function SpecFileList({
             </Tooltip>
           )}
         </Box>
-        {design.hasComponents || design.overview.length > 0 ? (
+        {design.hasComponents || design.hasCellDsl || design.overview.length > 0 ? (
           <List dense disablePadding>
-            {design.hasComponents &&
+            {(design.hasComponents || design.hasCellDsl) &&
               row({ kind: "cell-diagram" }, "Architecture", <Network size={16} />)}
             {design.overview.map((f) =>
               row(

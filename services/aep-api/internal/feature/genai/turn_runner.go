@@ -130,14 +130,23 @@ func (s *service) runTurn(ctx context.Context, job turnJob) {
 	s.finishTurn(finishCtx, job, term)
 }
 
-// mcpForTurn mints the per-turn MCP discovery block for a design-generation
-// turn (dependency-management Phase 5): a BFF-signed token (aud aep-api-mcp)
-// carrying the org, plus the BFF's internal MCP endpoint the agents service
-// calls back into. Returns nil (no MCP block) when the minter / base URL are
-// not wired, when the use case is not design generation, or when minting fails
-// — a turn without MCP is byte-identical to today, so this is best-effort.
+// mcpForTurn mints the per-turn MCP discovery block for design-generation turns
+// AND collab room-scoped turns (dependency-management Phase 5): a BFF-signed
+// token (aud aep-api-mcp) carrying the org, plus the BFF's internal MCP endpoint
+// the agents service calls back into. Returns nil (no MCP block) when the minter
+// / base URL are not wired, when the turn is neither a design-generate nor a
+// collab room-scoped turn, or when minting fails — a turn without MCP is
+// byte-identical to today, so this is best-effort.
 func (s *service) mcpForTurn(ctx context.Context, job turnJob) *agentsvc.MCPBlock {
-	if s.mcpTokens == nil || s.mcpBaseURL == "" || job.useCase != useCaseDesignGenerate {
+	if s.mcpTokens == nil || s.mcpBaseURL == "" {
+		return nil
+	}
+	// Attach MCP discovery to design-generation turns AND every collab
+	// room-scoped turn: the Spec view authors design.json interactively through
+	// collab (useCase "requirements-chat"), so gating on design-generate alone
+	// starved the collab architect of list_org_endpoints, causing invented
+	// cross-project org-service names that fail exact-name resolution at build.
+	if job.useCase != useCaseDesignGenerate && job.collabRoomID == "" {
 		return nil
 	}
 	token, err := s.mcpTokens.IssueMCPToken(job.orgID)
@@ -297,14 +306,10 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 
 	switch {
 	case foldErr != nil:
-		var ufe *agentfold.UnsupportedFrontmatterError
-		if errors.As(foldErr, &ufe) {
-			// The agents-side bundle applied a write the Go fold cannot
-			// byte-reproduce — a parity failure by construction (loud, D14).
-			slog.ErrorContext(ctx, "genai: fold cannot reproduce frontmatter write — turn rejected, main untouched",
-				"turn", job.turnID, "path", ufe.Path, "reason", ufe.Reason)
-			return failedTerminal(turnReasonFoldParity, foldErr.Error(), nil)
-		}
+		// The fold's add/edit/remove ops are pure byte-deterministic string
+		// mutations; the only error they surface is a base-read infrastructure
+		// failure. Byte-parity against the agents-side bundle is enforced
+		// separately by the D14 Verify gate below.
 		slog.WarnContext(ctx, "genai: fold infrastructure failure", "turn", job.turnID, "error", foldErr)
 		return failedTerminal(turnReasonInternal, foldErr.Error(), nil)
 	case readErr != nil:

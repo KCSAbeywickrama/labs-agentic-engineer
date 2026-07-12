@@ -236,6 +236,12 @@ func (t *planTap) handlePlan(out *taskplan.PlanTaskOk) {
 		return
 	}
 	labels := taskmeta.NewTaskLabels(taskmeta.ClassCoding, origin)
+	// Stamp the build/spec version as a filterable label so Tasks can be listed
+	// server-side by the version they were planned from (aep:spec/<tag>). The
+	// same value is the block's structured specTag; the label is its flat mirror.
+	if l := taskmeta.SpecTagLabel(t.specTag); l != "" {
+		labels = append(labels, l)
+	}
 	issue, err := t.issues.CreateIssue(t.ctx, t.orgID, t.projectID, gitrepo.CreateIssueRequest{
 		Title:  out.Title,
 		Body:   body,

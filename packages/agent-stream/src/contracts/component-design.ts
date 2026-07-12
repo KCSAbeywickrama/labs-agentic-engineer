@@ -22,8 +22,9 @@
  * component-level design.md: the spec agent writes it (whole-file rewrites,
  * schema-validated by the FileBundle on every write), downstream consumers
  * (design projection, coding-agent dispatch, task generation) read it
- * directly. The TOP-LEVEL design.md (prose + skillsApplied frontmatter) is
- * unchanged. The Zod validator (`componentDesignSchema` in
+ * directly. `skillsApplied` is a key HERE (per-component), NOT in design.md
+ * frontmatter; the top-level design.md is prose + an optional `sourceSpec`
+ * frontmatter only. The Zod validator (`componentDesignSchema` in
  * `../component-design-schema.ts`) is drift-guarded against this type.
  */
 
@@ -43,7 +44,12 @@ export interface ComponentDesign {
   version: string;
   /** Implementation language, e.g. "Go", "TypeScript". */
   language: string;
-  /** Always "docker" today. */
+  /**
+   * The build buildpack — always "docker" (the platform's single build path).
+   * The agent write-gate (checkComponentDesign) pins this to "docker" as a
+   * post-parse check, so the type stays `string` and the shared JSON Schema /
+   * BFF save-gate stay permissive.
+   */
   buildpack: string;
   /** Repo-relative source dir — the component name. */
   appPath: string;
@@ -81,6 +87,9 @@ export interface ComponentDesign {
    * downstream coding agent. Passthrough — the design agent must not author it.
    */
   componentAgentInstructions?: string;
+  /** Skill names applied to THIS component (per-component; the coding runner
+   *  materializes exactly these for a build of this component). */
+  skillsApplied?: string[];
 }
 
 /**
@@ -127,8 +136,6 @@ export interface Dependency {
    * the OpenChoreo Resource spec.parameters.
    */
   parameters?: Record<string, string | number | boolean>;
-  /** resolution UI: options attached when the platform marks a dep ambiguous. */
-  candidates?: DependencyCandidate[];
 }
 
 /** One env-var key a component reads at runtime. Mirrors Go `models.ConfigKey`. */
@@ -136,15 +143,10 @@ export interface ConfigKey {
   key: string;
   /** Secret keys route through the secret path. Default: false. */
   secret?: boolean;
-  /** publishable | secret. */
-  credentialClass?: string;
-}
-
-/** One option attached to an ambiguous dependency. Mirrors Go `models.DependencyCandidate`. */
-export interface DependencyCandidate {
-  label: string;
+  /** Optional human-readable note on what this value is for; the Build dependency drawer renders it under the field. */
   description?: string;
-  url?: string;
+  /** Optional suggested initial value for a NON-secret key (a region, a base URL); the Build dependency drawer pre-fills the field with it. Never set for a secret. */
+  defaultValue?: string;
 }
 
 /** Managed-API exposure policy (platform-owned). Mirrors Go `models.ExposesAPI`. */

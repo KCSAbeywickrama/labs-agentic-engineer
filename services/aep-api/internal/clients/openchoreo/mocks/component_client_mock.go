@@ -39,6 +39,9 @@ var _ openchoreo.ComponentClient = &ComponentClientMock{}
 //			ListDeploymentsFunc: func(ctx context.Context, orgName string, projectName string, componentName string) (*models.DeploymentList, error) {
 //				panic("mock out the ListDeployments method")
 //			},
+//			ListProjectReleaseBindingsFunc: func(ctx context.Context, orgName string, projectName string) ([]models.ReleaseBindingSummary, error) {
+//				panic("mock out the ListProjectReleaseBindings method")
+//			},
 //			ListWorkflowRunsFunc: func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error) {
 //				panic("mock out the ListWorkflowRuns method")
 //			},
@@ -87,6 +90,9 @@ type ComponentClientMock struct {
 
 	// ListDeploymentsFunc mocks the ListDeployments method.
 	ListDeploymentsFunc func(ctx context.Context, orgName string, projectName string, componentName string) (*models.DeploymentList, error)
+
+	// ListProjectReleaseBindingsFunc mocks the ListProjectReleaseBindings method.
+	ListProjectReleaseBindingsFunc func(ctx context.Context, orgName string, projectName string) ([]models.ReleaseBindingSummary, error)
 
 	// ListWorkflowRunsFunc mocks the ListWorkflowRuns method.
 	ListWorkflowRunsFunc func(ctx context.Context, orgName string, projectName string, componentName string, limit int, cursor string) (*models.WorkflowRunList, error)
@@ -179,6 +185,15 @@ type ComponentClientMock struct {
 			ProjectName string
 			// ComponentName is the componentName argument value.
 			ComponentName string
+		}
+		// ListProjectReleaseBindings holds details about calls to the ListProjectReleaseBindings method.
+		ListProjectReleaseBindings []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// OrgName is the orgName argument value.
+			OrgName string
+			// ProjectName is the projectName argument value.
+			ProjectName string
 		}
 		// ListWorkflowRuns holds details about calls to the ListWorkflowRuns method.
 		ListWorkflowRuns []struct {
@@ -293,6 +308,7 @@ type ComponentClientMock struct {
 	lockGetWorkflowRun                         sync.RWMutex
 	lockListComponents                         sync.RWMutex
 	lockListDeployments                        sync.RWMutex
+	lockListProjectReleaseBindings             sync.RWMutex
 	lockListWorkflowRuns                       sync.RWMutex
 	lockTriggerBuild                           sync.RWMutex
 	lockTriggerBuildAtCommit                   sync.RWMutex
@@ -564,6 +580,46 @@ func (mock *ComponentClientMock) ListDeploymentsCalls() []struct {
 	mock.lockListDeployments.RLock()
 	calls = mock.calls.ListDeployments
 	mock.lockListDeployments.RUnlock()
+	return calls
+}
+
+// ListProjectReleaseBindings calls ListProjectReleaseBindingsFunc.
+func (mock *ComponentClientMock) ListProjectReleaseBindings(ctx context.Context, orgName string, projectName string) ([]models.ReleaseBindingSummary, error) {
+	if mock.ListProjectReleaseBindingsFunc == nil {
+		panic("ComponentClientMock.ListProjectReleaseBindingsFunc: method is nil but ComponentClient.ListProjectReleaseBindings was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		OrgName     string
+		ProjectName string
+	}{
+		Ctx:         ctx,
+		OrgName:     orgName,
+		ProjectName: projectName,
+	}
+	mock.lockListProjectReleaseBindings.Lock()
+	mock.calls.ListProjectReleaseBindings = append(mock.calls.ListProjectReleaseBindings, callInfo)
+	mock.lockListProjectReleaseBindings.Unlock()
+	return mock.ListProjectReleaseBindingsFunc(ctx, orgName, projectName)
+}
+
+// ListProjectReleaseBindingsCalls gets all the calls that were made to ListProjectReleaseBindings.
+// Check the length with:
+//
+//	len(mockedComponentClient.ListProjectReleaseBindingsCalls())
+func (mock *ComponentClientMock) ListProjectReleaseBindingsCalls() []struct {
+	Ctx         context.Context
+	OrgName     string
+	ProjectName string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		OrgName     string
+		ProjectName string
+	}
+	mock.lockListProjectReleaseBindings.RLock()
+	calls = mock.calls.ListProjectReleaseBindings
+	mock.lockListProjectReleaseBindings.RUnlock()
 	return calls
 }
 

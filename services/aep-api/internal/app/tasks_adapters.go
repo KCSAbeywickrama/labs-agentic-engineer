@@ -143,6 +143,26 @@ func (d designComponents) ProvisionDepNames(ctx context.Context, orgID, projectI
 	return out, nil
 }
 
+// OrgServiceDepNames exposes each component's cross-project org-service
+// dependencies for the funnel's conditional org-service gate (issue #164, Task 4).
+// Satisfies execution.DesignReader.
+func (d designComponents) OrgServiceDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error) {
+	design, err := d.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if design == nil {
+		return nil, nil
+	}
+	out := make(map[string][]string, len(design.Components))
+	for _, c := range design.Components {
+		if deps := c.OrgServiceDependsOn(); len(deps) > 0 {
+			out[strings.ToLower(c.Name)] = deps
+		}
+	}
+	return out, nil
+}
+
 // runnerSecretResolver adapts provisioning.Service.ResolveComponentRunnerSecrets
 // onto the codingagent.RunnerSecretResolver port, mapping the resources DTO to
 // the codingagent input type (so codingagent holds no provisioning/resources

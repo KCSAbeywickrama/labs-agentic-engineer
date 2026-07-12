@@ -100,7 +100,7 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 
 	fail := func(msg string) (TaskFlowResult, error) {
 		status.Phase, status.Error = TaskPhaseFailed, msg
-		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusFailed)
+		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusFailed, msg)
 		return TaskFlowResult{Issue: in.Issue, Outcome: OutcomeFailed, Error: msg}, nil
 	}
 
@@ -272,7 +272,7 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 	}
 
 	status.Phase = TaskPhaseDone
-	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted)
+	markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted, "")
 	return TaskFlowResult{Issue: in.Issue, Outcome: OutcomeSucceeded}, nil
 }
 
@@ -295,15 +295,18 @@ func awaitRunStatus(ctx workflow.Context, ch workflow.ReceiveChannel, timeout ti
 // markRunStatus best-effort records the run's terminal status in the lookup
 // index (the workflow's own truth is Temporal; this keeps the DB index fresh
 // for signalers and the list endpoint).
-func markRunStatus(ctx workflow.Context, workflowID, statusStr string) {
+func markRunStatus(ctx workflow.Context, workflowID, statusStr, reason string) {
 	_ = workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).SetWorkflowRunStatus, SetWorkflowRunStatusInput{
 		WorkflowID: workflowID,
 		Status:     statusStr,
+		Reason:     reason,
 	}).Get(ctx, nil)
 }
 
 // withDefaultActivityOpts returns a context carrying the default activity
-// options for short adapter activities (2m start-to-close, 3 retries).
+// options for short adapter activities (2m start-to-close per attempt; no
+// explicit RetryPolicy, so the Temporal SERVER default applies — unlimited
+// attempts with backoff).
 func withDefaultActivityOpts(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 2 * time.Minute,
