@@ -54,7 +54,7 @@ export type ErrCode =
   | "INVALID_YAML"
   | "INVALID_JSON"
   | "SCHEMA_VIOLATION"
-  | "LAYOUT_VIOLATION"
+  | "INVALID_DSL"
   | "PROTECTED_PATH";
 
 /** A candidate line echoed back for NOT_UNIQUE / NOT_FOUND re-anchoring. */

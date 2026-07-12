@@ -80,7 +80,7 @@ describe("WireframePanel streaming", () => {
 
     // More lines arrive: the scene grows in place.
     act(() => {
-      ytext.insert(ytext.length, '  heading "Browse products" 40,84\n  button "View cart" 1050,84 150x40 primary\n');
+      ytext.insert(ytext.length, '  heading "Browse products"\n  button "View cart" primary\n');
     });
     const grown = Number(screen.getByTestId("excalidraw").dataset.elements);
     expect(grown).toBeGreaterThan(first);
@@ -93,7 +93,7 @@ describe("WireframePanel streaming", () => {
     renderPanel(makeCollab(ytext));
 
     act(() => {
-      ytext.insert(0, 'screen Catalog "Shop"\n  heading "Browse" 40,84\n');
+      ytext.insert(0, 'screen Catalog "Shop"\n  heading "Browse"\n');
     });
     const good = Number(screen.getByTestId("excalidraw").dataset.elements);
     expect(good).toBeGreaterThan(0);

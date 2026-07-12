@@ -90,6 +90,10 @@ that's a stalled feature — investigate, don't ignore.
   (no contract change;
   [#217](https://github.com/wso2/labs-agentic-engineer/issues/217) withdrawn) —
   [#216](https://github.com/wso2/labs-agentic-engineer/issues/216)
+- Spec view — formatting toolbar for the markdown editor: StarterKit
+  control set (marks, H1–H3 buttons, lists, quote/code, Yjs undo/redo)
+  docked as the header of a self-scrolling editor frame, for all md spec
+  files — [#206](https://github.com/wso2/labs-agentic-engineer/issues/206)
 - Alerts — top-nav notification bell for RCA-agent alert reports
   (org-wide, read-only, client-tracked unread state) —
   [#154](https://github.com/wso2/labs-agentic-engineer/issues/154)

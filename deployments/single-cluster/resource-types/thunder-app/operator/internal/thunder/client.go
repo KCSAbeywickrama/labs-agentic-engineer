@@ -417,12 +417,20 @@ var (
 	allowedUserTypes = []string{"Person"}
 )
 
-// tokenClaimConfig returns the oauth2 `token` block (per-token userAttributes).
-// A fresh map per call so each app payload owns its copy.
+// tokenValiditySeconds is the access/id token lifetime (24h). Thunder's default
+// is short; a SPA whose token expires quickly is forced back through a full
+// sign-in redirect (or a silent renew) far too often, so pin a long-lived token
+// — the same 86400 the seeded Console app uses. The SPA still refreshes via the
+// refresh_token grant; this just keeps a returning user signed in across a
+// refresh/new tab without a round-trip.
+const tokenValiditySeconds = 86400
+
+// tokenClaimConfig returns the oauth2 `token` block (per-token validity +
+// userAttributes). A fresh map per call so each app payload owns its copy.
 func tokenClaimConfig() map[string]any {
 	return map[string]any{
-		"accessToken": map[string]any{"userAttributes": identityUserAttributes},
-		"idToken":     map[string]any{"userAttributes": identityUserAttributes},
+		"accessToken": map[string]any{"validityPeriod": tokenValiditySeconds, "userAttributes": identityUserAttributes},
+		"idToken":     map[string]any{"validityPeriod": tokenValiditySeconds, "userAttributes": identityUserAttributes},
 	}
 }
 

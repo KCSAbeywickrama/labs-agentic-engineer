@@ -36,6 +36,7 @@ import {
   rejectAll,
   rejectRange,
 } from "./agentReview";
+import { SpecMdToolbar } from "./SpecMdToolbar";
 
 // Collaborative WYSIWYG editor for markdown spec files (#86 phase 6).
 // The shared source of truth is the file's Y.XmlFragment (seeded server-side
@@ -46,12 +47,10 @@ import {
 // out of interim flushes until reviewed.
 export function SpecMdEditor({
   fragment,
-  path,
   provider,
   self,
 }: {
   fragment: Y.XmlFragment;
-  path: string;
   provider: HocuspocusProvider;
   self: { name: string; color: string };
 }) {
@@ -81,55 +80,70 @@ export function SpecMdEditor({
   }, [editor]);
 
   return (
-    <Box>
-      {pending > 0 && (
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={1}
-          sx={{
-            // Floats over the doc while scrolling (the spec content pane is
-            // the scrollport) so Accept/Reject stays reachable mid-review.
-            position: "sticky",
-            top: 0,
-            zIndex: 2,
-            mb: 1,
-            px: 1.5,
-            py: 0.75,
-            borderRadius: 1,
-            boxShadow: 1,
-            // The Oxygen paper color is translucent (acrylic); the blur keeps
-            // the floating bar readable over the document text behind it.
-            bgcolor: "background.paper",
-            backdropFilter: "blur(8px)",
-            backgroundImage: (theme) =>
-              `linear-gradient(${alpha(theme.palette.primary.main, 0.08)}, ${alpha(
-                theme.palette.primary.main,
-                0.08,
-              )})`,
-          }}
-        >
-          <Sparkles size={16} />
-          <Typography variant="body2" sx={{ flexGrow: 1 }}>
-            {pending} agent suggestion{pending === 1 ? "" : "s"} pending review
-          </Typography>
-          <Button
-            size="small"
-            color="inherit"
-            startIcon={<X size={14} />}
-            onClick={() => editor && rejectAll(editor)}
-          >
-            Reject all
-          </Button>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<Check size={14} />}
-            onClick={() => editor && acceptAll(editor)}
-          >
-            Accept all
-          </Button>
-        </Stack>
+    <Box
+      sx={{
+        // The editor is a single framed card that fills the pane: toolbar
+        // (and review bar) docked as header rows, only the document area
+        // below them scrolls — text can never pass the toolbar (#206 rework).
+        flexGrow: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        border: 1,
+        borderColor: "divider",
+        borderRadius: 1,
+        overflow: "hidden",
+        // Plain paper token, same as AgentChatPanel — it re-resolves per
+        // color scheme (a JS-resolved gradient froze the light paper into
+        // dark mode and rendered gray; #206 D10 revision, 2026-07-12).
+        bgcolor: "background.paper",
+        "&:focus-within": { borderColor: "primary.main" },
+      }}
+    >
+      {editor && (
+        <>
+          <SpecMdToolbar editor={editor} />
+          {pending > 0 && (
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{
+                flexShrink: 0,
+                px: 1.5,
+                py: 0.75,
+                borderBottom: 1,
+                borderColor: "divider",
+                backgroundImage: (theme) =>
+                  `linear-gradient(${alpha(theme.palette.primary.main, 0.08)}, ${alpha(
+                    theme.palette.primary.main,
+                    0.08,
+                  )})`,
+              }}
+            >
+              <Sparkles size={16} />
+              <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                {pending} agent suggestion{pending === 1 ? "" : "s"} pending review
+              </Typography>
+              <Button
+                size="small"
+                color="inherit"
+                startIcon={<X size={14} />}
+                onClick={() => rejectAll(editor)}
+              >
+                Reject all
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<Check size={14} />}
+                onClick={() => acceptAll(editor)}
+              >
+                Accept all
+              </Button>
+            </Stack>
+          )}
+        </>
       )}
       {editor && (
         <BubbleMenu
@@ -171,16 +185,13 @@ export function SpecMdEditor({
       )}
       <Box
         sx={{
-          border: 1,
-          borderColor: "divider",
-          borderRadius: 1,
+          flexGrow: 1,
+          minHeight: 0,
+          overflow: "auto",
           px: 2,
           py: 1,
-          minHeight: 480,
           cursor: "text",
-          "&:focus-within": { borderColor: "primary.main" },
-          // Tiptap emits a plain contenteditable; give it breathing room.
-          "& .tiptap": { outline: "none", minHeight: 460 },
+          "& .tiptap": { outline: "none" },
           "& .tiptap p": { my: 1 },
           "& .tiptap h1, & .tiptap h2, & .tiptap h3": { mt: 2, mb: 1 },
           "& .tiptap ul, & .tiptap ol": { pl: 3 },
@@ -225,10 +236,6 @@ export function SpecMdEditor({
       >
         <EditorContent editor={editor} />
       </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ px: 1.75 }}>
-        {path} — live collaborative document; commits to GitHub arrive with
-        the committer (#86 phase 3).
-      </Typography>
     </Box>
   );
 }
