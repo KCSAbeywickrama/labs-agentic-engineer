@@ -464,17 +464,52 @@ const storefrontDesignJson = `{
   ]
 }`;
 
-const storefrontWireframesDsl = `screen Catalog
-  navbar "Demo Shop | Catalog | Cart | Orders" 0,0
-  heading "Browse products" 40,60
-  input "Search products" 40,110 400x36
-  card "Product grid" 40,160 760x420
+const storefrontWireframesDsl = `screen Catalog "Shoppers browse and search the product catalogue"
+  navbar "Demo Shop | Catalog | Cart | Orders | Account"
+  row
+    heading "Browse products"
+    right
+    search "Search products, brands, SKUs"
+    select "Category: All"
+  tabs "All | New in | On sale | Bestsellers"
+  row
+    card "Wireless Headphones\n$89"
+      badge "In stock" success
+    card "Mechanical Keyboard\n$129"
+      badge "Low stock" warning
+    card "4K Monitor\n$349"
+      badge "In stock" success
+    card "USB-C Hub\n$39"
+      badge "In stock" success
+  row
+    right
+    button "View cart" primary -> Cart
 
-screen Cart
-  navbar "Demo Shop | Catalog | Cart | Orders" 0,0
-  heading "Your cart" 40,60
-  table "Product | Qty | Price" 40,110 760x300
-  button "Checkout" 40,430 160x40
+screen Cart "Shopper reviews items and checks out"
+  navbar "Demo Shop | Catalog | Cart | Orders | Account"
+  heading "Your cart"
+  split 60/40
+    left
+      table "Product | Qty | Price | Subtotal"
+        row "Wireless Headphones | 1 | $89.00 | $89.00"
+        row "USB-C Hub | 2 | $39.00 | $78.00"
+        row "Mechanical Keyboard | 1 | $129.00 | $129.00"
+      button "Continue shopping" -> Catalog
+    right
+      card "Order summary"
+        text "Subtotal: $296.00"
+        text "Shipping: $6.00"
+        text "Total: $302.00"
+        checkbox "Ship to billing address" active
+        button "Checkout" primary -> Orders
+
+screen Orders "Shopper tracks past orders and their status"
+  navbar "Demo Shop | Catalog | Cart | Orders | Account"
+  heading "Your orders"
+  table "Order | Placed | Items | Total | Status"
+    row "#10432 | Jul 8, 2026 | 3 | $302.00 | Shipped"
+    row "#10391 | Jun 27, 2026 | 1 | $89.00 | Delivered"
+    row "#10355 | Jun 15, 2026 | 2 | $168.00 | Delivered"
 `;
 
 const catalogApiDesignJson = `{

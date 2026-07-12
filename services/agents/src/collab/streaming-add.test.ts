@@ -127,7 +127,7 @@ test("streams a .cell addFile incrementally, line-by-line, converging to full co
 
 const DSL_PATH = "specs/design/components/shop-webapp/wireframes.dsl";
 const DSL =
-  'screen Catalog "Shoppers browse products"\n  navbar "Shop"\n  heading "Browse" 40,84\n  button "View cart" 1050,84 150x40 primary -> Cart\n\nscreen Cart "Review and check out"\n  heading "Your cart" 40,84\n';
+  'screen Catalog "Shoppers browse products"\n  navbar "Shop"\n  heading "Browse"\n  button "View cart" primary -> Cart\n\nscreen Cart "Review and check out"\n  heading "Your cart"\n';
 
 test("streams a wireframes .dsl addFile incrementally, line-by-line, converging to full content", async () => {
   const peer = new FakePeer();

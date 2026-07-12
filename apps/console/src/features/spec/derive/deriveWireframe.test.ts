@@ -20,8 +20,8 @@ import { describe, expect, it } from "vitest";
 import { deriveWireframeScene } from "./deriveWireframe";
 
 const dsl = `screen Home
-  heading "Welcome" 40,40
-  button "Go" 40,100 120x40`;
+  heading "Welcome"
+  button "Go" primary`;
 
 describe("deriveWireframeScene", () => {
   it("compiles a wireframes .dsl into an excalidraw scene with elements", () => {
@@ -46,14 +46,16 @@ describe("deriveWireframeScene", () => {
   it("compiles every line-boundary prefix of a streaming source", () => {
     const full = `screen Catalog "Shoppers browse products"
   navbar "Shop"
-  heading "Browse products" 40,84
-  table "Product | Price" 40,152 600x200
+  row
+    heading "Browse products"
+    right
+    button "View cart" primary -> Cart
+  table "Product | Price"
     row "Mug | $18"
-  button "View cart" 1050,84 150x40 primary -> Cart
 
 screen Cart "Review and check out"
   navbar "Shop"
-  heading "Your cart" 40,84
+  heading "Your cart"
 `;
     const lines = full.split("\n");
     for (let i = 1; i <= lines.length; i++) {
