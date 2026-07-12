@@ -359,8 +359,8 @@ const LEGACY_COORDS = /(?:^|\s)\d+\s*,\s*\d+(?:\s|$)/;
 interface ElNode {
   type: 'el';
   el: WireframeElement;
-  /** Nested children — only a `card` container carries them. */
-  children: ElNode[];
+  /** Nested children — only a `card` container carries them (elements or rows). */
+  children: Array<ElNode | RowNode>;
 }
 interface RowNode {
   type: 'row';
@@ -491,12 +491,17 @@ function buildWireframes(
     // --- layout row --------------------------------------------------------
     if (/^row\s*$/i.test(trimmed)) {
       const target = stackTarget();
-      if (!target) {
-        err(no, 'a layout `row` can only sit in a screen or split-column stack');
+      const rowNode: RowNode = { type: 'row', children: [], rightFrom: -1 };
+      if (target) {
+        target.push(rowNode);
+      } else if (parent.kind === 'card' && parent.card) {
+        // Side-by-side content INSIDE a card (two stats, label+value) — a
+        // natural entity-card shape, laid out within the card's inner width.
+        parent.card.children.push(rowNode);
+      } else {
+        err(no, 'a layout `row` can only sit in a screen stack, a split column, or inside a `card`');
         continue;
       }
-      const rowNode: RowNode = { type: 'row', children: [], rightFrom: -1 };
-      target.push(rowNode);
       stack.push({ level, kind: 'row', row: rowNode });
       continue;
     }
@@ -727,12 +732,18 @@ function layoutCard(node: ElNode, x: number, y: number, w: number, out: Wirefram
   el.y = y;
   el.width = w;
   out.push(el);
-  const badges = node.children.filter((c) => c.el.kind === 'badge');
-  const rest = node.children.filter((c) => c.el.kind !== 'badge');
+  const badges = node.children.filter(
+    (c): c is ElNode => c.type === 'el' && c.el.kind === 'badge',
+  );
+  const rest = node.children.filter((c) => !(c.type === 'el' && c.el.kind === 'badge'));
   const innerX = x + CARD_PAD;
   const innerW = w - 2 * CARD_PAD;
   let cy = y + (el.label ? 44 : CARD_PAD);
   for (const c of rest) {
+    if (c.type === 'row') {
+      cy += layoutRow(c, innerX, innerW, cy, out) + CARD_CHILD_GAP;
+      continue;
+    }
     resolveStackSize(c.el, innerW);
     c.el.x = innerX;
     c.el.y = cy;

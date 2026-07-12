@@ -127,10 +127,10 @@ func checkWireframeDslGuard(path, content string) (ErrCode, string) {
 				report("a quoted `row \"…\"` is table data and must nest under a `table`")
 			}
 		case dslLayoutRow.MatchString(trimmed):
-			if !inStack {
-				report("a layout `row` can only sit in a screen or split-column stack")
-			} else {
+			if inStack || parent.kind == "card" {
 				stack = append(stack, dslCtx{level: level, kind: "row"})
+			} else {
+				report("a layout `row` can only sit in a screen stack, a split column, or inside a `card`")
 			}
 		case dslSplitRe.MatchString(trimmed):
 			if !inStack {
