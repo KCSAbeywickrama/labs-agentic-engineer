@@ -20,6 +20,7 @@ import { useEffect, useRef } from "react";
 import {
   Alert,
   Avatar,
+  Box,
   Button,
   Link as MuiLink,
   Skeleton,
@@ -29,6 +30,7 @@ import {
 import { Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
+import { StatusChip } from "../../../components/StatusChip";
 import { useProject, useProjectComponents, useProjectStatus } from "../api/queries";
 import { phaseChip } from "../lib/phaseChip";
 import { ComponentsList } from "./ComponentsList";
@@ -78,44 +80,58 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
 
   return (
     <>
-      {/* The project identity — avatar leads the title, the GitHub repo link
-          sits tight beneath — so the icon, title, and link read as one header
-          unit (Overview-only per Task 5; other sub-pages drop it as redundant
-          with the project switcher). No description subtitle here — that
-          belongs on the project cards, not beside the title. */}
+      {/* The project identity (Overview-only per Task 5; other sub-pages drop
+          it as redundant with the project switcher): a rounded-square avatar
+          leads a two-line column — title + phase chip on top, the GitHub repo
+          link indented directly beneath the title. No description subtitle —
+          that belongs on the project cards. */}
       <PageHeader
         title={
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+          <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
             <Avatar
-              sx={{ bgcolor: "primary.main", color: "primary.contrastText" }}
+              variant="rounded"
+              sx={{
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+                width: 52,
+                height: 52,
+                fontSize: "1.5rem",
+              }}
             >
               {initial}
             </Avatar>
-            <span>{displayName}</span>
+            <Box>
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+                <Typography variant="h4" component="span">
+                  {displayName}
+                </Typography>
+                {status.data && (
+                  <StatusChip {...phaseChip(status.data)} appearance="soft" dot />
+                )}
+              </Stack>
+              {status.data?.repoUrl && (
+                <MuiLink
+                  href={status.data.repoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  variant="body2"
+                  sx={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 0.5,
+                    mt: 0.5,
+                  }}
+                >
+                  <LinkIcon size={14} />
+                  {status.data.repoUrl.replace(/^https?:\/\/(www\.)?/, "")}
+                </MuiLink>
+              )}
+            </Box>
           </Stack>
         }
-        {...(status.data && { status: phaseChip(status.data) })}
         backTo={{ link: <Link to="/" />, label: "Back to Projects" }}
       />
-      {status.data?.repoUrl && (
-        <MuiLink
-          href={status.data.repoUrl}
-          target="_blank"
-          rel="noreferrer"
-          variant="body2"
-          sx={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 0.5,
-            mt: 0.5,
-            mb: 4,
-          }}
-        >
-          <LinkIcon size={14} />
-          {status.data.repoUrl.replace(/^https?:\/\/(www\.)?/, "")}
-        </MuiLink>
-      )}
-      <Stack spacing={4}>
+      <Stack spacing={4} sx={{ mt: 3 }}>
         {status.isError ? (
           <SectionError
             what="project status"
