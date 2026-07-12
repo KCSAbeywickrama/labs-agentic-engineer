@@ -47,12 +47,14 @@ vi.mock("@wso2/oxygen-ui", async () => {
   };
 });
 
-// --- Collab room: solo/offline-shaped stub; flush is the only call
-// SpecView awaits, so it's the only piece a test ever needs to configure. --
+// --- Collab room: solo/offline-shaped stub (status "offline" exercises the
+// header's "solo session" metadata text — see the metadata-line test below);
+// flush is the only call SpecView awaits, so it's the only piece most tests
+// need to configure. --
 const mockFlush = vi.fn().mockResolvedValue(undefined);
 vi.mock("../collab/useCollabSpec", () => ({
   useCollabSpec: () => ({
-    status: "connected",
+    status: "offline",
     peers: [],
     getFileText: () => null,
     getFileFragment: () => null,
@@ -80,7 +82,7 @@ const mockPreflightRefetch = vi.fn();
 vi.mock("../../projects/api/queries", () => ({
   useProject: () => ({ data: { displayName: "Test Project" } }),
   useProjectStatus: () => ({ data: { specStatus: "approved" } }),
-  useProjectTags: () => ({ data: null }),
+  useProjectTags: () => ({ data: { latest: "v1", specDirty: false } }),
   useBuildProject: () => ({ mutateAsync: mockMutateAsync }),
   useBuildPreflight: () => ({ refetch: mockPreflightRefetch }),
 }));
@@ -242,5 +244,30 @@ describe("SpecView onBuild routing (#164)", () => {
     );
     expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("SpecView header metadata (de-buttoned chips)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFlush.mockResolvedValue(undefined);
+  });
+
+  it("renders session/version info as a plain muted text line, not chips, and drops 'Approved'", () => {
+    render(<SpecView projectName="proj1" />);
+
+    // "solo" (offline collab) + "v1 published" (tags.latest) collapse into
+    // one caption-style line — no separate pill per fact.
+    expect(screen.getByText("solo session · v1 published")).toBeInTheDocument();
+
+    // The old "Approved" status chip is gone entirely (specStatus is
+    // "approved" in this test's project-status mock).
+    expect(screen.queryByText("Approved")).not.toBeInTheDocument();
+
+    // Build remains the header's only button-like control.
+    expect(screen.getByRole("button", { name: "Build" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /solo|published/i }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -23,7 +23,6 @@ import {
   AvatarGroup,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Divider,
   IconButton,
@@ -60,29 +59,8 @@ import type { SpecSelection } from "../api/designTree";
 import { DESIGN_CELL_PATH } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
-type ProjectStatus = components["schemas"]["ProjectStatus"];
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
-
-// specStatus → header chip, same language as the overview's spec card.
-function specChip(status: ProjectStatus): {
-  label: string;
-  color: "default" | "info" | "success" | "warning" | "error";
-} | null {
-  switch (status.specStatus) {
-    case "draft":
-    case "in_progress":
-      return { label: "In collaboration", color: "info" };
-    case "ready":
-      return { label: "Awaiting your review", color: "warning" };
-    case "approved":
-      return { label: "Approved", color: "success" };
-    case "failed":
-      return { label: "Derivation failed", color: "error" };
-    default:
-      return null;
-  }
-}
 
 // Full-screen spec workspace (#80), per the oxygen-ui sample's
 // LoginEditorView pattern: fullWidth/noPadding page, own header bar,
@@ -246,7 +224,6 @@ export function SpecView({ projectName }: { projectName: string }) {
     specStatus === "draft" ||
     specStatus === "in_progress";
   const failed = specStatus === "failed";
-  const chip = status.data ? specChip(status.data) : null;
   // The design gate: Build arms once design files are generated (#80).
   const hasDesignFiles = files.some((f) => f.group === "designs");
   // #159: design is derived FROM requirements, so its CTA needs them first.
@@ -343,6 +320,14 @@ export function SpecView({ projectName }: { projectName: string }) {
   };
 
   const displayName = project.data?.displayName ?? projectName;
+  // Header metadata: plain caption text, not chips — a chip reads as
+  // clickable, and none of these are. "solo session" mirrors the offline
+  // tooltip below; "vN published" keeps the #117 wording.
+  const metadataParts: string[] = [];
+  if (collab.status === "offline") metadataParts.push("solo session");
+  if (tags.data?.latest) metadataParts.push(`${tags.data.latest} published`);
+  if (tags.data?.specDirty) metadataParts.push("draft changes");
+  const metadataLine = metadataParts.join(" · ");
 
   return (
     // oxygen-ui's PageContentInner (the direct parent of these children) has
@@ -420,26 +405,21 @@ export function SpecView({ projectName }: { projectName: string }) {
               ))}
             </AvatarGroup>
           )}
-          {collab.status === "offline" && (
-            <Tooltip title="Collaboration server unreachable — editing solo; edits aren't shared or saved.">
-              <Chip size="small" variant="outlined" label="solo" />
-            </Tooltip>
-          )}
-
-          {/* Version chips from the tag resource (#117): latest user tag +
-              whether specs/ moved on GitHub since. */}
-          {tags.data?.latest && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color="success"
-              label={`${tags.data.latest} published`}
-            />
-          )}
-          {tags.data?.specDirty && (
-            <Chip size="small" color="warning" label="draft changes" />
-          )}
-          {chip && <Chip size="small" color={chip.color} label={chip.label} />}
+          {/* Session/version metadata (#117, de-buttoned): plain muted text,
+              not chips — Build below is the header's only clickable-looking
+              control. */}
+          {metadataLine &&
+            (collab.status === "offline" ? (
+              <Tooltip title="Collaboration server unreachable — editing solo; edits aren't shared or saved.">
+                <Typography variant="body2" color="text.secondary" noWrap>
+                  {metadataLine}
+                </Typography>
+              </Tooltip>
+            ) : (
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {metadataLine}
+              </Typography>
+            ))}
 
           <Divider orientation="vertical" flexItem />
 
