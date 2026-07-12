@@ -94,7 +94,9 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 
 	// Labels: marker + validation class + spec-plan origin. No aep:execute —
 	// dispatch is driven by the dev workflow's validating phase, not the sweep.
-	wantLabels := []string{"aep:task", "aep:validation", "aep:origin/spec-plan"}
+	// Carries the aep:spec/<tag> label (flat mirror of block.SpecTag) so the
+	// validation Task is filterable by version like coding Tasks.
+	wantLabels := []string{"aep:task", "aep:validation", "aep:origin/spec-plan", "aep:spec/design-v3"}
 	if !reflect.DeepEqual(got.Labels, wantLabels) {
 		t.Errorf("labels = %v; want %v", got.Labels, wantLabels)
 	}
@@ -116,6 +118,9 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 	}
 	if block.DesignTag != "design-v3" {
 		t.Errorf("designTag = %q; want design-v3", block.DesignTag)
+	}
+	if block.SpecTag != "design-v3" {
+		t.Errorf("specTag = %q; want design-v3", block.SpecTag)
 	}
 	if block.Key == "" {
 		t.Error("block Key must be set for dedup")

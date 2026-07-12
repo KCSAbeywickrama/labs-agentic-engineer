@@ -101,6 +101,11 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID, d
 		Operation: validationOperation,
 		DependsOn: deps,
 		Origin:    taskmeta.OriginSpecPlan,
+		// One tag family post-build (plan.go): the spec tag `v<N>` is both the
+		// lineage stamp and the idempotency baseline. Stamp SpecTag too (mirrors
+		// coding Tasks) so the validation Task carries a version and shows in the
+		// build's version-scoped task list instead of being filtered out.
+		SpecTag:   designTag,
 		DesignTag: designTag,
 	}
 	block.Key = taskmeta.Key(projectID, designTag, block.Target(), validationTitle)
@@ -114,10 +119,16 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID, d
 	// Without Temporal, a human clicks Execute on the issue (same as a coding
 	// task); either way the funnel's deps-gate holds the run until all
 	// components deploy.
+	labels := taskmeta.NewTaskLabels(taskmeta.ClassValidation, taskmeta.OriginSpecPlan)
+	// Flat mirror of block.SpecTag so the Task is filterable by version like
+	// coding Tasks (the aep:spec/<tag> label).
+	if l := taskmeta.SpecTagLabel(designTag); l != "" {
+		labels = append(labels, l)
+	}
 	req := gitrepo.CreateIssueRequest{
 		Title:  validationTitle,
 		Body:   body,
-		Labels: taskmeta.NewTaskLabels(taskmeta.ClassValidation, taskmeta.OriginSpecPlan),
+		Labels: labels,
 	}
 	if _, cerr := s.issues.CreateIssue(ctx, orgID, projectID, req); cerr != nil {
 		return fmt.Errorf("validation: create issue: %w", cerr)
