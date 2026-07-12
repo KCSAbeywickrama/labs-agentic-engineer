@@ -118,6 +118,11 @@ export function BuildsPage({
     );
   }
 
+  // Header status reflects the SELECTED build's state (Running / Succeeded /
+  // Failed) — the most relevant status on the builds page — matching the
+  // summary card's chip below.
+  const headerStatus = buildStatusChip(selected.status);
+
   // The version picker lives up in the header row (same level as the title),
   // so it reads as a page-level control and the summary card can span full
   // width below it.
@@ -148,7 +153,7 @@ export function BuildsPage({
         {...(project.data && {
           subtitle: project.data.displayName ?? project.data.name,
         })}
-        {...(status.data && { status: phaseChip(status.data) })}
+        status={headerStatus}
         backTo={{
           link: <Link to="/projects/$projectName" params={{ projectName }} />,
           label: "Back to Overview",
@@ -163,9 +168,39 @@ export function BuildsPage({
   );
 }
 
+// Segmented progress: done (success) then failed (error) fill from the left
+// over a neutral track — a glanceable read of how far the build has gotten.
+function BuildProgressBar({
+  done,
+  failed,
+  total,
+}: {
+  done: number;
+  failed: number;
+  total: number;
+}) {
+  if (total <= 0) return null;
+  const pct = (n: number) => `${Math.min(100, (n / total) * 100)}%`;
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        width: 200,
+        height: 6,
+        borderRadius: 3,
+        overflow: "hidden",
+        bgcolor: "action.hover",
+      }}
+    >
+      <Box sx={{ width: pct(done), bgcolor: "success.main" }} />
+      <Box sx={{ width: pct(failed), bgcolor: "error.main" }} />
+    </Box>
+  );
+}
+
 // Status chip vocabulary mirrors the overview's build stage (#183); a list
 // read has no live query, so "started" barely occurs (treated as running).
-function statusChip(status: BuildSummary["status"]): {
+function buildStatusChip(status: BuildSummary["status"]): {
   label: string;
   tone: StatusTone;
 } {
@@ -180,26 +215,28 @@ function statusChip(status: BuildSummary["status"]): {
 }
 
 function BuildSummaryCard({ build }: { build: BuildSummary }) {
-  const chip = statusChip(build.status);
+  const chip = buildStatusChip(build.status);
   const { total, done, failed } = build.tasks;
   // total is written once the plan step finishes, so a running build with no
   // tasks is still planning — say so instead of "0/0 tasks done".
   const planning = chip.label === "Running" && total === 0;
-  const started = new Date(build.startedAt).toLocaleString();
-  const completed = build.completedAt
-    ? new Date(build.completedAt).toLocaleString()
-    : null;
+  const started = new Date(build.startedAt).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
-    <Card variant="outlined" sx={{ flex: 1, minWidth: 0 }}>
-      <CardContent>
-        <Stack
-          direction="row"
-          spacing={1.5}
-          sx={{ alignItems: "center", mb: 1 }}
-        >
+    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <CardContent sx={{ "&:last-child": { pb: 2.5 } }}>
+        <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
           <Typography variant="h6">{build.tag}</Typography>
-          <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
+          <StatusChip label={chip.label} tone={chip.tone} appearance="soft" dot />
+          <Typography variant="body2" color="text.secondary">
+            Started {started}
+          </Typography>
           <Box sx={{ flexGrow: 1 }} />
           {planning ? (
             // Subtle "planning" signal for the selected tag: the run has started
@@ -219,14 +256,22 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
               </Typography>
             </Stack>
           ) : (
-            <Typography variant="body2" color="text.secondary">
-              {`${done}/${total} tasks done`}
-            </Typography>
-          )}
-          {failed > 0 && (
-            <Typography variant="body2" color="error.main">
-              {failed} failed
-            </Typography>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+              <BuildProgressBar done={done} failed={failed} total={total} />
+              <Typography variant="body2" color="text.secondary">
+                <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
+                  {done}/{total} done
+                </Box>
+                {failed > 0 && (
+                  <>
+                    {" · "}
+                    <Box component="span" sx={{ color: "error.main", fontWeight: 600 }}>
+                      {failed} failed
+                    </Box>
+                  </>
+                )}
+              </Typography>
+            </Stack>
           )}
         </Stack>
         {build.status === "failed" && build.reason && (
@@ -235,15 +280,11 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
           <Typography
             variant="caption"
             color="error.main"
-            sx={{ display: "block", mb: 0.5, whiteSpace: "pre-wrap" }}
+            sx={{ display: "block", mt: 1, whiteSpace: "pre-wrap" }}
           >
             {build.reason}
           </Typography>
         )}
-        <Typography variant="caption" color="text.secondary">
-          Started {started}
-          {completed ? ` · Finished ${completed}` : ""}
-        </Typography>
       </CardContent>
     </Card>
   );

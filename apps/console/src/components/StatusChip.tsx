@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Chip, alpha } from "@wso2/oxygen-ui";
+import { Box, Chip, alpha } from "@wso2/oxygen-ui";
 
 // Console-wide status/kind chip (Task 4): every domain (task status, alert
 // classification, skill origin, project phase, ...) maps its own vocabulary
@@ -61,25 +61,47 @@ const TONE_PALETTE: Record<
 // `soft`: a low-emphasis status pill — a faint tinted background with the
 // tone's own text colour and no border — for spots where a solid filled chip
 // reads as a button (a status beside a page title, a build's live state).
-// Solid stays the default so dense table rows are unaffected.
+// `dot` prefixes a small tone-coloured dot so the pill reads as a live status
+// indicator ("● Running"). Solid stays the default so dense rows are
+// unaffected.
 export function StatusChip({
   label,
   tone,
   variant,
   appearance = "solid",
+  dot = false,
 }: {
   label: string;
   tone: StatusTone;
   variant?: "filled" | "outlined";
   appearance?: "solid" | "soft";
+  dot?: boolean;
 }) {
   if (appearance === "soft") {
+    const isNeutral = tone === "neutral";
+    const labelNode = dot ? (
+      <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+        <Box
+          sx={(theme) => ({
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            bgcolor: isNeutral
+              ? theme.palette.text.secondary
+              : theme.palette[TONE_PALETTE[tone]].main,
+          })}
+        />
+        <span>{label}</span>
+      </Box>
+    ) : (
+      label
+    );
     return (
       <Chip
         size="small"
-        label={label}
+        label={labelNode}
         sx={(theme) =>
-          tone === "neutral"
+          isNeutral
             ? {
                 bgcolor: theme.palette.action.hover,
                 color: "text.secondary",
