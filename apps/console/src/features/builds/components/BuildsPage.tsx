@@ -69,7 +69,7 @@ export function BuildsPage({
       {...(status.data && { status: phaseChip(status.data) })}
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
-        label: "Back to overview",
+        label: "Back to Overview",
       }}
     />
   );
