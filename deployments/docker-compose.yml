@@ -205,10 +205,12 @@ services:
       SECRET_MANAGER_API_URL: "http://secret-manager-api:8082"
       CLUSTER_GATEWAY_PROXY_URL: "http://local-cluster-gateway-proxy:8085"
       # Validation-runner image (Dockerfile.validation: Debian + Playwright
-      # browsers). Empty ⇒ validation dispatch fails loudly — the alpine
-      # coding image cannot run chromium, so there is no fallback. Build +
-      # k3d-import it like the coding runner (e.g. aep-validation-runner:dev).
-      VALIDATION_RUNNER_IMAGE: "${VALIDATION_RUNNER_IMAGE:-}"
+      # browsers). Defaults to the locally-built aep-validation-runner:dev, which
+      # setup-aep.sh builds + k3d-imports (it has no published counterpart; the
+      # alpine coding image cannot run chromium, so there is no fallback — an
+      # unset/absent image makes validation dispatch fail loudly). Override to a
+      # published tag in cloud release bindings.
+      VALIDATION_RUNNER_IMAGE: "${VALIDATION_RUNNER_IMAGE:-aep-validation-runner:dev}"
       # Push target for AnthropicCredentialService.pushExternalSecret: on every
       # successful Connect (first-time connect AND rotation), aep-api applies
       # an ExternalSecret here via the proxy above, pointed at the freshly
