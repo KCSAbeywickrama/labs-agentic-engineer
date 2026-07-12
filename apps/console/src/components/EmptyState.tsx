@@ -24,13 +24,17 @@ import { Box, Typography } from "@wso2/oxygen-ui";
 // look (the canonical style). `icon`/`title` are optional and `compact`
 // tightens the padding for the handful of inline placeholders (a
 // deployments board column, a page with no components yet) that only need
-// a themed sentence, not the full icon+title moment.
+// a themed sentence, not the full icon+title moment. `bordered` frames it in
+// a subtle dashed box for inline section placeholders (the overview's Agent
+// Activity / Components columns) that need to hold their space without a
+// solid card.
 export interface EmptyStateProps {
   icon?: ReactNode;
   title?: string;
   description: string;
   action?: ReactNode;
   compact?: boolean;
+  bordered?: boolean;
 }
 
 export function EmptyState({
@@ -39,9 +43,22 @@ export function EmptyState({
   description,
   action,
   compact = false,
+  bordered = false,
 }: EmptyStateProps) {
   return (
-    <Box sx={{ textAlign: "center", py: compact ? 3 : 8 }}>
+    <Box
+      sx={{
+        textAlign: "center",
+        py: compact ? 3 : 8,
+        px: 2,
+        ...(bordered && {
+          border: 1,
+          borderStyle: "dashed",
+          borderColor: "divider",
+          borderRadius: 2,
+        }),
+      }}
+    >
       {icon && (
         <Box
           sx={{
