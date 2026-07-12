@@ -40,6 +40,7 @@
 
 import { parse as parseYaml } from "yaml";
 import { checkComponentDesign } from "./component-design-schema.js";
+import { checkWireframeLayout } from "./wireframe-layout.js";
 import type {
   Op,
   ErrCode,
@@ -211,6 +212,13 @@ export class FileBundle {
     const jsonProblem = checkComponentDesign(path, content);
     if (jsonProblem) {
       return err(path, op, jsonProblem.code, jsonProblem.message);
+    }
+    // Wireframes .dsl is layout-gated the same way: out-of-frame or
+    // partially-overlapping elements abort the write with the coordinates the
+    // model needs to fix them (the compiler would render them verbatim).
+    const layoutProblem = checkWireframeLayout(path, content);
+    if (layoutProblem) {
+      return err(path, op, layoutProblem.code, layoutProblem.message);
     }
     this.files.set(path, content);
     this.touchedPaths.add(path);

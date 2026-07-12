@@ -556,6 +556,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                   projectName={projectName}
                   dslPath={effectiveSelection.dslPath}
                   files={files}
+                  collab={collab}
                 />
               ) : selectedFile ? (
                 // Per-type renderers (WYSIWYG for markdown, dedicated components
