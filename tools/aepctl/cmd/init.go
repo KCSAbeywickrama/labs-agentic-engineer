@@ -319,7 +319,8 @@ func printOpenBaoCredentials(unsealKeys []string) {
 	for i, k := range unsealKeys {
 		fmt.Fprintf(os.Stdout, "  Key %d: %s\n", i+1, k)
 	}
-	fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+\n")
+	fmt.Fprintln(os.Stdout, "+------------------------------------------------------------------+")
+	fmt.Fprintln(os.Stdout)
 }
 
 // readMaskedInput prompts on stderr and reads hidden input from the terminal.
