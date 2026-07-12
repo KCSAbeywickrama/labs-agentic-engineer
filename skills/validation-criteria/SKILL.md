@@ -1,6 +1,6 @@
 ---
 name: validation-criteria
-description: Generate specs/validation/validation-criteria.json — the machine-readable acceptance oracle for the VALIDATION phase — from the requirement prose alone. Load when asked to produce or update validation criteria / acceptance criteria for a project.
+description: Use when generating the validation criteria — write specs/validation/validation-criteria.json, the machine-readable acceptance oracle for the VALIDATION phase, from the requirement prose alone.
 metadata:
   aep:
     kind: platform

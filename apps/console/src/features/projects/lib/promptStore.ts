@@ -86,11 +86,7 @@ export function buildDesignGenerationInstruction(): string {
   return (
     "Generate the complete component design for this project based on the " +
     "current requirements. If a design already exists, regenerate it to match " +
-    "the current requirements. " +
-    "Then, as the final step, generate the validation acceptance criteria at " +
-    "specs/validation/validation-criteria.json using the validation-criteria " +
-    "skill — derived from the requirements prose only, not from the design you " +
-    "just wrote. If that file already exists, keep each unchanged criterion's " +
-    "id stable so previously-authored e2e specs still map."
+    "the current requirements. Then, as the final step, generate the validation " +
+    "criteria."
   );
 }
