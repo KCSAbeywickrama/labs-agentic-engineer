@@ -62,11 +62,16 @@ function phaseChip(status: ProjectStatus): {
 export function ProjectLayout({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
   const status = useProjectStatus(projectName);
-  // The builds section inverts the title (#185 decision): "Builds" as the
-  // header, the project name as the subheader. Every other section keeps
-  // the shared project-name-first header.
+  // Builds and Deployments invert the title (#185 decision, extended to
+  // Deployments in #216): the section name as the header, the project name
+  // as the subheader. Every other section keeps the shared
+  // project-name-first header.
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isBuilds = pathname.split("/")[3] === "builds";
+  const sectionTitles: Record<string, string> = {
+    builds: "Builds",
+    deployments: "Deployments",
+  };
+  const sectionTitle = sectionTitles[pathname.split("/")[3] ?? ""];
 
   if (project.isPending) {
     return (
@@ -112,13 +117,13 @@ export function ProjectLayout({ projectName }: { projectName: string }) {
           </PageTitle.Avatar>
           <PageTitle.Header>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-              <span>{isBuilds ? "Builds" : displayName}</span>
+              <span>{sectionTitle ?? displayName}</span>
               {chip && (
                 <Chip size="small" label={chip.label} color={chip.color} />
               )}
             </Stack>
           </PageTitle.Header>
-          {isBuilds ? (
+          {sectionTitle ? (
             <PageTitle.SubHeader>{displayName}</PageTitle.SubHeader>
           ) : (
             project.data.description && (

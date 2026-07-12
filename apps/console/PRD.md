@@ -83,6 +83,15 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Deployments page — two-column board (Development / Production): one card
+  per component × binding with status chip, release, endpoint URL,
+  deployed-at; unbound components show greyed "Not deployed" cards in dev;
+  dev column carries the live spec-version chip (status poll's deploy
+  aggregate); section header inverts like Builds (#185 convention);
+  adaptive 5s/30s poll; reuses components + per-component list-deployments
+  (no contract change;
+  [#217](https://github.com/wso2/labs-agentic-engineer/issues/217) withdrawn) —
+  [#216](https://github.com/wso2/labs-agentic-engineer/issues/216)
 - Spec view — formatting toolbar for the markdown editor: StarterKit
   control set (marks, H1–H3 buttons, lists, quote/code, Yjs undo/redo)
   docked as the header of a self-scrolling editor frame, for all md spec
