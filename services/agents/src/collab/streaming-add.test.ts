@@ -150,7 +150,33 @@ test("streams a wireframes .dsl addFile incrementally, line-by-line, converging 
   assert.deepEqual(writer.rollbackDangling(), []);
 });
 
+const OA_PATH = "specs/design/components/shop-api/openapi.yaml";
+const OA =
+  'openapi: 3.0.3\ninfo:\n  title: Shop API\n  version: 1.0.0\npaths:\n  /products:\n    get:\n      summary: List products\n      responses:\n        "200":\n          description: OK\n';
+
+test("streams an openapi.yaml addFile incrementally, line-by-line, converging to full content", async () => {
+  const peer = new FakePeer();
+  const writer = new StreamingDocWriter(peer, new FileBundle({}));
+
+  await feed(writer, addFileParts("c1", OA_PATH, OA));
+  writer.observe(toolResult("c1", true, OA_PATH));
+  await writer.drain();
+
+  assert.ok(peer.sets.length >= 2, `expected incremental writes, got ${peer.sets.length}`);
+  assert.ok(peer.sets.every((s) => s.path === OA_PATH), "all writes target openapi.yaml");
+  for (let i = 1; i < peer.sets.length; i++) {
+    assert.ok(
+      peer.sets[i]!.content.startsWith(peer.sets[i - 1]!.content),
+      `write ${i} must extend write ${i - 1}`,
+    );
+  }
+  assert.equal(peer.sets.at(-1)!.content, OA, "final write is the whole YAML body");
+  assert.deepEqual(peer.deletes, []);
+  assert.deepEqual(writer.rollbackDangling(), []);
+});
+
 test("rolls back a truncated .cell stream", async () => {
+
   const peer = new FakePeer();
   const writer = new StreamingDocWriter(peer, new FileBundle({}));
   const parts = addFileParts("c1", CELL_PATH, CELL);
@@ -169,11 +195,11 @@ test("path resolves before any content is written", async () => {
   assert.equal(peer.sets[0]!.path, MD_PATH);
 });
 
-test("skips non-markdown addFile (execute owns yaml/json — no preview)", async () => {
+test("skips non-streamable addFile (execute owns design.json — no preview)", async () => {
   const peer = new FakePeer();
   const writer = new StreamingDocWriter(peer, new FileBundle({}));
-  await feed(writer, addFileParts("c1", "specs/design/components/x/openapi.yaml", "openapi: 3.0.0\ninfo: {}\n"));
-  writer.observe(toolResult("c1", true, "specs/design/components/x/openapi.yaml"));
+  await feed(writer, addFileParts("c1", "specs/design/components/x/design.json", '{"name":"x"}\n'));
+  writer.observe(toolResult("c1", true, "specs/design/components/x/design.json"));
   await writer.drain();
   assert.deepEqual(peer.sets, []);
   assert.deepEqual(peer.deletes, []);

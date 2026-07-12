@@ -196,9 +196,12 @@ func Build(in JobInputs) (map[string]any, error) {
 		})
 	}
 
-	envFrom := []map[string]any{
-		{"secretRef": map[string]any{"name": in.AnthropicSecretName}},
-		{"secretRef": map[string]any{"name": in.GitHubSecretName}},
+	var envFrom []map[string]any
+	if in.AnthropicSecretName != "" {
+		envFrom = append(envFrom, map[string]any{"secretRef": map[string]any{"name": in.AnthropicSecretName}})
+	}
+	if in.GitHubSecretName != "" {
+		envFrom = append(envFrom, map[string]any{"secretRef": map[string]any{"name": in.GitHubSecretName}})
 	}
 	for _, n := range in.ExternalResourceSecretNames {
 		if n != "" {
@@ -281,8 +284,8 @@ func validate(in JobInputs) error {
 	check("ComponentName", in.ComponentName)
 	check("RunnerImage", in.RunnerImage)
 	check("ServiceAccountName", in.ServiceAccountName)
-	check("AnthropicSecretName", in.AnthropicSecretName)
-	check("GitHubSecretName", in.GitHubSecretName)
+	// AnthropicSecretName and GitHubSecretName are optional: when empty the
+	// corresponding envFrom entry is omitted from the Job spec.
 	check("RepoURL", in.RepoURL)
 	check("Prompt", in.Prompt)
 	check("IdentityName", in.IdentityName)

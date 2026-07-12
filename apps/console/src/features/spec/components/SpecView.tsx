@@ -48,6 +48,7 @@ import { toSpecEntry } from "../api/mapping";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
+import { useYTextString } from "../collab/useYTextString";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
@@ -206,9 +207,35 @@ export function SpecView({ projectName }: { projectName: string }) {
       ? collab.getFileText(selectedFile.path)
       : null;
   const usesCollab = Boolean((fragment && collab.provider) || ytext);
+  // The md editor owns its scrolling (toolbar docked as the frame's header,
+  // document area scrolls inside — #206 rework), so its pane must be the
+  // same flex-column/overflow-hidden shape the canvas views need.
+  const isMdEditorView = Boolean(fragment && collab.provider);
+  // The collab doc is the SOURCE for the structured views while collab is up
+  // (the design.md rule): rooms are seeded with every committed specs/ file
+  // (non-md as Y.Text) and the agents service mirrors each applied write, so
+  // the doc always holds the freshest complete, gate-validated content — the
+  // committed file between turns, a new file before its commit lands, an
+  // EDITED file while the committed copy is stale. The committed fetch below
+  // stays for the collab-less base path only.
+  const structuredLiveText = useYTextString(
+    selectedFile && (isOpenApiFile || isComponentDesignFile)
+      ? collab.getFileText(selectedFile.path)
+      : null,
+  );
+  const structuredLive =
+    typeof structuredLiveText === "string" && structuredLiveText.trim().length > 0
+      ? structuredLiveText
+      : null;
   const content = useSpecFileContent(
     projectName,
-    selectedFile && (!usesCollab || isOpenApiFile || isComponentDesignFile)
+    selectedFile &&
+      (isOpenApiFile || isComponentDesignFile
+        ? // Doc has it → no fetch (mirrors usesCollab for md). An agent in
+          // the room also suppresses it: the doc WILL deliver the file, and
+          // probing git for a not-yet-committed path just sprays 404s.
+          !structuredLive && !agentInRoom
+        : !usesCollab)
       ? selectedFile
       : null,
   );
@@ -537,7 +564,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             </Box>
             <Box
               sx={
-                isDiagramView
+                isDiagramView || isMdEditorView
                   ? {
                       flexGrow: 1,
                       minWidth: 0,
@@ -545,6 +572,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                       display: "flex",
                       flexDirection: "column",
                       overflow: "hidden",
+                      ...(isMdEditorView && { p: 2 }),
                     }
                   : { flexGrow: 1, minWidth: 0, overflow: "auto", p: 2 }
               }
@@ -564,7 +592,15 @@ export function SpecView({ projectName }: { projectName: string }) {
                 // is reachable (#86 phase 5); solo-and-unsaved otherwise
                 // (#86 decision 10).
                 isOpenApiFile || isComponentDesignFile ? (
-                  content.data ? (
+                  structuredLive ? (
+                    // Fresh from the live collab doc — ahead of (or newer
+                    // than) the committed copy.
+                    isOpenApiFile ? (
+                      <OpenApiView spec={structuredLive} />
+                    ) : (
+                      <DesignView design={structuredLive} />
+                    )
+                  ) : content.data ? (
                     isOpenApiFile ? (
                       <OpenApiView
                         key={content.data.sha}
@@ -576,6 +612,22 @@ export function SpecView({ projectName }: { projectName: string }) {
                         design={content.data.content}
                       />
                     )
+                  ) : agentBusy ? (
+                    // Mid-generation the committed fetch is suppressed (the
+                    // doc will deliver the file) — "about to appear",
+                    // not a failure.
+                    <Box
+                      sx={{
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Typography variant="body2" color="text.secondary">
+                        Waiting for the agent to write {selectedFile.path.split("/").at(-1)}…
+                      </Typography>
+                    </Box>
                   ) : content.isError ? (
                     <Alert
                       severity="error"
@@ -603,7 +655,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                   <SpecMdEditor
                     key={`${selectedFile.path}:md`}
                     fragment={fragment}
-                    path={selectedFile.path}
                     provider={collab.provider}
                     self={collab.self}
                   />

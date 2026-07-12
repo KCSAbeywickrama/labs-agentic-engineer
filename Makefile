@@ -39,9 +39,12 @@ GO_TOOLCHAIN := go1.26.0
 # file type. Idempotent. Generated Go and vendored/build output are excluded.
 ADDLICENSE := go run github.com/google/addlicense@v1.2.0
 LICENSE_HEADER := .github/license-header.txt
-LICENSE_FILES = $(shell git ls-files | \
-	grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
-	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/')
+# Filter git-tracked files to the in-scope source types. Kept as a pipeline (not
+# a $(shell)-expanded arg list) so filenames with shell metacharacters — e.g.
+# TanStack route files like projects.$projectName.tsx — reach addlicense verbatim
+# via NUL-delimited xargs instead of being word-split / $-expanded by the shell.
+LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
+	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
 .PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-validation-runner
 
@@ -90,10 +93,10 @@ typecheck: gen
 	@for d in $(GO_MODULE_DIRS); do echo ">> go vet $$d"; ( cd "$$d" && go vet ./... ); done
 
 license:
-	$(ADDLICENSE) -f $(LICENSE_HEADER) $(LICENSE_FILES)
+	@git ls-files | $(LICENSE_MATCH) | tr '\n' '\0' | xargs -0 $(ADDLICENSE) -f $(LICENSE_HEADER)
 
 license-check:
-	$(ADDLICENSE) -check -f $(LICENSE_HEADER) $(LICENSE_FILES)
+	@git ls-files | $(LICENSE_MATCH) | tr '\n' '\0' | xargs -0 $(ADDLICENSE) -check -f $(LICENSE_HEADER)
 
 tools:
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)

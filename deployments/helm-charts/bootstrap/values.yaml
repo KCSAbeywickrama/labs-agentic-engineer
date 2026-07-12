@@ -1,0 +1,23 @@
+aep-openbao:
+  injector:
+    enabled: false
+  server:
+    standalone:
+      enabled: true
+    ha:
+      enabled: false
+
+aepServer:
+  image:
+    repository: ghcr.io/wso2/aep/aep-server
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 9091
+  esoNamespace: external-secrets
+  esoServiceAccount: external-secrets
+  thunderNamespace: thunder
+  thunderRelease: thunder
+  host: "aep-server.openchoreo.localhost"
+
+console:
+  publicURL: "http://console.openchoreo.localhost:8080"

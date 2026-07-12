@@ -40,12 +40,12 @@ import (
 // merge SHA), then StartWithRun records the run on the row. The job/exec
 // watcher (and, for coding, the PR-opened webhook) Finish the row.
 //
-// Two coding-dispatch paths, mirroring the legacy dispatch service:
+// Two coding-dispatch paths:
 //   - the cluster-gateway-proxy path (per-org NS + per-run ExternalSecrets + a
 //     K8s Job), used when the proxy dispatcher + the org's SM-API triplets are
-//     configured — this is what the local plane exercises (`ca-…` jobs);
-//   - the ClusterWorkflow fallback (ocClient.TriggerCodingAgent) when the proxy
-//     path is not fully configured.
+//     configured — this is what the cloud / local-proxy plane exercises (`ca-…` jobs);
+//   - the direct K8s Job fallback (K8sJobDispatcher) when the proxy path is not
+//     configured — the aep-init local-install path.
 type CodingExecutor struct {
 	oc            openchoreo.ComponentClient
 	repos         ProjectRepos
@@ -56,9 +56,14 @@ type CodingExecutor struct {
 	gitServiceURL string
 	platformURL   string
 
-	// Proxy dispatch (nil → ClusterWorkflow only).
-	proxy              *Dispatcher
-	db                 *gorm.DB
+	// Proxy dispatch (nil → fall through to the direct k8sJob path).
+	proxy *Dispatcher
+	db    *gorm.DB
+
+	// k8sJob is the direct K8s Job dispatch path — the sole fallback when the
+	// proxy path is not configured (nil → no fallback; dispatch errors out).
+	// Requires db to be set (for org UUID lookup).
+	k8sJob             *K8sJobDispatcher
 	idp                OrgPublisherProvisioner
 	runnerImage        string
 	clusterSecretStore string
@@ -105,8 +110,8 @@ type CodingExecutor struct {
 // closure the genai + task-plan turns use, so this feature grows no skills edge.
 type SkillsRepoResolver func(ctx context.Context, orgID string) (*models.GitRepository, error)
 
-// NewCodingExecutor wires the ClusterWorkflow-path executor. anthropic may be
-// nil. Call WithProxy to enable the cluster-gateway-proxy dispatch path.
+// NewCodingExecutor wires the base coding executor. anthropic may be nil. Call
+// WithProxy and/or WithK8sJobDispatch to enable a dispatch path.
 func NewCodingExecutor(
 	oc openchoreo.ComponentClient,
 	repos ProjectRepos,
@@ -140,6 +145,17 @@ func (e *CodingExecutor) WithProxy(proxy *Dispatcher, db *gorm.DB, idp OrgPublis
 // component-ensure/wiring pre-flight). Returns the receiver for chaining.
 func (e *CodingExecutor) WithValidationImage(image string) *CodingExecutor {
 	e.validationImage = image
+	return e
+}
+
+// WithK8sJobDispatch enables the direct K8s Job dispatch path. db is used to
+// look up the org UUID (needed to derive the data-plane namespace) and is set on
+// the executor if not already populated by WithProxy.
+func (e *CodingExecutor) WithK8sJobDispatch(d *K8sJobDispatcher, db *gorm.DB) *CodingExecutor {
+	e.k8sJob = d
+	if e.db == nil {
+		e.db = db
+	}
 	return e
 }
 
@@ -318,8 +334,9 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 		}
 	}
 
-	// Proxy path first (what local uses). Falls back to ClusterWorkflow when the
-	// proxy dispatcher / SM-API triplets are not fully configured.
+	// Proxy path (cloud / local-proxy plane): per-org NS + per-run ExternalSecrets
+	// + K8s Job via the cluster-gateway-proxy. Falls back to the direct K8s Job
+	// path below when the proxy / SM-API is not configured.
 	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, name, email, login, bearer, disp, mcpToken, skillsRepoURL)
 	if perr != nil {
 		return perr
@@ -329,49 +346,45 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req execution.DispatchRe
 		return nil
 	}
 
-	// Validation has no ClusterWorkflow fallback — it requires the proxy path
+	// Validation has no non-proxy fallback — it requires the proxy path
 	// (Playwright image + AEP_TASK_KIND). Fail loudly rather than launch a
-	// browserless coding agent.
+	// browserless coding agent via the K8s Job path.
 	if isValidation {
-		return fmt.Errorf("validation dispatch requires the cluster-gateway-proxy path and a VALIDATION_RUNNER_IMAGE; ClusterWorkflow fallback is not supported for validation")
+		return fmt.Errorf("validation dispatch requires the cluster-gateway-proxy path and a VALIDATION_RUNNER_IMAGE; the direct K8s Job fallback does not support validation")
 	}
 
-	// ClusterWorkflow fallback.
-	var anthropicRef string
-	if e.anthropic != nil {
-		if ref, aerr := e.anthropic.ApplyWPSecret(ctx, t.OrgID); aerr != nil {
-			slog.WarnContext(ctx, "coding executor: apply anthropic secret failed — dispatching without", "org", t.OrgID, "error", aerr)
-		} else {
-			anthropicRef = ref
+	// Direct K8s Job path: creates the org's data-plane namespace, SA, Anthropic
+	// secret, and Job directly via the in-cluster client. No cluster-gateway-proxy
+	// or SM-API needed — the sole fallback for aep-init local installs.
+	if e.k8sJob != nil {
+		orgUUID, uuidErr := e.lookupOrgUUID(ctx, t.OrgID)
+		if uuidErr != nil {
+			return fmt.Errorf("k8s-job dispatch: lookup org UUID for %q: %w", t.OrgID, uuidErr)
 		}
+		k8sRunName := codingAgentRunNameFor(req.Execution.ID)
+		rn, k8serr := e.k8sJob.Dispatch(ctx, K8sJobInput{
+			RunName:       k8sRunName,
+			OrgID:         t.OrgID,
+			OrgUUID:       orgUUID,
+			ProjectID:     t.ProjectID,
+			Component:     t.Component,
+			ExecutionID:   req.Execution.ID,
+			RepoURL:       repo.RepoURL,
+			Prompt:        disp.prompt,
+			IdentityName:  name,
+			IdentityEmail: email,
+			IdentityLogin: login,
+			Bearer:        bearer,
+			SkillsRepoURL: skillsRepoURL,
+		})
+		if k8serr != nil {
+			return k8serr
+		}
+		e.startRun(ctx, req.Execution.ID, rn)
+		return nil
 	}
-	run, err := e.oc.TriggerCodingAgent(ctx, openchoreo.CodingAgentParams{
-		OrgName:       t.OrgID,
-		ProjectName:   t.ProjectID,
-		ComponentName: t.Component,
-		// NAMING DEBT (residual): the OC param `TaskID` (and the runner env
-		// AEP_TASK_ID it maps to) CARRIES the EXECUTION id, not a task id. Left
-		// un-renamed — the ClusterWorkflow definition on the cluster and the
-		// runner both bind these names; rename with the cluster workflow +
-		// runner in a coordinated pass. The S2S routes the runner calls with
-		// this id (skills + credentials refresh) are already execution-keyed.
-		TaskID:             req.Execution.ID,
-		Prompt:             disp.prompt,
-		RepoURL:            repo.RepoURL,
-		IdentityName:       name,
-		IdentityEmail:      email,
-		IdentityLogin:      login,
-		Bearer:             bearer,
-		SkillsRepoURL:      skillsRepoURL,
-		GitServiceURL:      e.gitServiceURL,
-		PlatformURL:        e.platformURL,
-		AnthropicSecretRef: anthropicRef,
-	})
-	if err != nil {
-		return fmt.Errorf("trigger coding-agent: %w", err)
-	}
-	e.startRun(ctx, req.Execution.ID, run.Name)
-	return nil
+
+	return fmt.Errorf("no coding-agent dispatch path configured: set CLUSTER_GATEWAY_PROXY_URL or ensure in-cluster client + AGENT_RUNNER_IMAGE + AGENT_PLATFORM_URL are set")
 }
 
 // dispatchViaProxy runs the cluster-gateway-proxy apply-chain for one coding

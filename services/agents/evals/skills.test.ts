@@ -60,7 +60,8 @@ test("loadRepoSkills reads the committed repo-root skill library", () => {
   const oas = skills.find((s) => s.name === "openapi-conventions")!;
   assert.ok(oas.references?.["references/wso2-rest-api-design-guidelines.md"]);
   const wf = skills.find((s) => s.name === "excalidraw-wireframes")!;
-  assert.ok(wf.references?.["references/wireframes-dsl-example.md"]);
+  // The worked example is inlined in the body (read-before-write is load-bearing).
+  assert.match(wf.content, /Worked example — risk register/);
 });
 
 test("readSkillRaw returns the untouched file bytes, frontmatter included", () => {

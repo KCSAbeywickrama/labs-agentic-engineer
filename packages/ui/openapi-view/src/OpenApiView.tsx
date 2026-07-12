@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Accordion,
   AccordionDetails,
@@ -41,6 +41,7 @@ import { ChevronDown, ChevronRight, Search, X } from "@wso2/oxygen-ui-icons-reac
 import {
   parseOpenApi,
   type Method,
+  type ParsedOpenApi,
   type Operation,
   type Param,
   type Response,
@@ -473,7 +474,14 @@ export interface OpenApiViewProps {
 }
 
 export function OpenApiView({ spec }: OpenApiViewProps) {
-  const parsed = useMemo(() => parseOpenApi(spec), [spec]);
+  // A STREAMED spec grows line by line; YAML's line-boundary prefixes almost
+  // always parse, but the odd one doesn't (e.g. cut inside a quoted scalar).
+  // Hold the last GOOD parse so a bad intermediate never flashes the error
+  // alert over already-rendered endpoints — the next flush repairs it.
+  const attempt = useMemo(() => parseOpenApi(spec), [spec]);
+  const lastGood = useRef<ParsedOpenApi | null>(null);
+  if (!("kind" in attempt)) lastGood.current = attempt;
+  const parsed = "kind" in attempt ? (lastGood.current ?? attempt) : attempt;
   const [query, setQuery] = useState("");
 
   if ("kind" in parsed) {
