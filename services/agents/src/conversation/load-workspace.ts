@@ -48,14 +48,16 @@ import type { SkillCatalogEntry, SkillSource, LoadedSkillBody } from "../agents/
 
 /**
  * The turn-snapshot filter — mirrors aep-api `agentfold.KeepInTurnSnapshot`:
- * keep agent-authored sources (`*.md`, `*.dsl`, component `design.json`, the
- * acceptance oracle `validation-criteria.json`) and drop everything else
- * (derived `.excalidraw`/`*.gen.json` projections, code, …).
- * validation-criteria.json is kept so a design regeneration can see the
- * existing oracle and preserve its covered flags instead of resetting them.
+ * keep agent-authored sources (`*.md`, `*.dsl`, `*.cell`, component
+ * `design.json`, the acceptance oracle `validation-criteria.json`) and drop
+ * everything else (derived `.excalidraw`/`*.gen.json` projections, code, …).
+ * `*.cell` is the project-level cell-diagram DSL (design.cell) that drives the
+ * live architecture diagram. validation-criteria.json is kept so a design
+ * regeneration can see the existing oracle and preserve its covered flags
+ * instead of resetting them.
  */
 export function keepInTurnSnapshot(path: string): boolean {
-  if (path.endsWith(".md") || path.endsWith(".dsl")) return true;
+  if (path.endsWith(".md") || path.endsWith(".dsl") || path.endsWith(".cell")) return true;
   const base = basename(path);
   return base === "design.json" || base === "validation-criteria.json";
 }

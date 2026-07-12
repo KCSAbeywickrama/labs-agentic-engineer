@@ -35,15 +35,20 @@ COPY apps/console ./apps/console
 RUN pnpm install --frozen-lockfile --filter @aep/console...
 
 # Workspace deps whose exports resolve to ./dist must be compiled first
-# (@aep/agent-stream — the agent-chat panel's SSE contracts, #130;
-# @aep/collab-doc — the AgentInsertion mark shared with the editor, #86 ph6;
-# @aep/design-projection + @aep/excalidraw-dsl — the rich design view's
-# projection + wireframe DSL, #149). The @aep/ui-* view packages resolve to
-# their src/ (types: src/index.ts) so tsc reads them directly — no pre-build.
+# (@aep/excalidraw-dsl — the wireframe DSL + layout gate, built FIRST because
+# @aep/agent-stream imports it; @aep/agent-stream — the agent-chat panel's SSE
+# contracts, #130; @aep/collab-doc — the AgentInsertion mark shared with the
+# editor, #86 ph6; @aep/design-projection — the rich design view's projection,
+# #149; @aep/ui-cell-diagram-react — the vendored xyflow renderer, which ships
+# types: dist/index.d.ts so consumers read its pre-built declarations instead
+# of re-typechecking its source). The @aep/ui-cell-diagram-view package
+# resolves to its src/ (types: src/index.ts) so tsc reads it directly — no
+# pre-build.
+RUN pnpm --filter @aep/excalidraw-dsl build
 RUN pnpm --filter @aep/agent-stream build
 RUN pnpm --filter @aep/collab-doc build
 RUN pnpm --filter @aep/design-projection build
-RUN pnpm --filter @aep/excalidraw-dsl build
+RUN pnpm --filter @aep/ui-cell-diagram-react build
 RUN pnpm --filter @aep/console gen
 RUN pnpm --filter @aep/console build
 

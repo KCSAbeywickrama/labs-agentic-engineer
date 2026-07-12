@@ -77,6 +77,12 @@ func (s *Service) EnsureProvisionIssues(ctx context.Context, orgID, projectID, d
 			Component: dep.name,
 			GateKind:  dep.gateKind,
 			Origin:    taskmeta.OriginSpecPlan,
+			// SpecTag mirrors DesignTag: the planner stamps a coding task's SpecTag
+			// and DesignTag to the SAME version tag (plan.go), so a gate carrying the
+			// same tag lets the tag-scoped Builds view (which filters on SpecTag) show
+			// its provision/config gates alongside the coding tasks they gate — and
+			// lets the on_hold reconciler see the gate for that build (issue #164).
+			SpecTag:   designTag,
 			DesignTag: designTag,
 			Key:       taskmeta.Key(projectID, designTag, dep.name, title),
 		}

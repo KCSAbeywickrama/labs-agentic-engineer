@@ -293,7 +293,13 @@ func codingNotStarted(v *TaskView) bool {
 	return e.Status == string(taskmeta.ExecQueued)
 }
 
-// Get returns one Task with its full Execution history.
+// Get returns one Task with its full Execution history. It derives the target's
+// status through the SAME whole-project reconcile the list uses (buildView over
+// every sibling → reconcileBlocked), not a lone buildView — otherwise a
+// dependency-gated coding Task shows the misleading raw status (pending /
+// in_progress) on its detail page while the list correctly shows on_hold (issue
+// #164 follow-up). The gating overlay needs every sibling's derived status and
+// the project's provision gates, so the whole set is built before picking one.
 func (r *Reads) Get(ctx context.Context, orgID, projectID string, issueNumber int) (*TaskDetail, error) {
 	repoFullName, err := resolveRepoFullName(ctx, r.repos, orgID, projectID)
 	if err != nil {
@@ -303,26 +309,40 @@ func (r *Reads) Get(ctx context.Context, orgID, projectID string, issueNumber in
 	if err != nil {
 		return nil, err
 	}
-	var found *gitrepo.IssueInfo
-	for i := range issues {
-		if issues[i].Number == issueNumber {
-			found = &issues[i]
-			break
-		}
-	}
-	if found == nil {
+	if !containsIssue(issues, issueNumber) {
 		return nil, ErrTaskNotFound
 	}
 	latestSpecTag := r.latestSpecTag(ctx, orgID, projectID)
-	execs, err := r.execs.LatestPerKindScoped(ctx, orgID, repoFullName, issueNumber)
+
+	// One batch query for the whole repo's latest-per-kind rows (mirrors
+	// ListByTag); a load failure degrades to empty executions.
+	execsByIssue, err := r.execs.LatestPerKindForRepoScoped(ctx, orgID, repoFullName)
 	if err != nil {
-		slog.WarnContext(ctx, "reads: load executions failed", "issue", issueNumber, "error", err)
-		execs = map[string]*models.Execution{}
+		slog.WarnContext(ctx, "reads: load executions failed", "repo", repoFullName, "error", err)
+		execsByIssue = map[int]map[string]*models.Execution{}
 	}
-	view, ok := buildView(*found, latestSpecTag, execs)
-	if !ok {
+
+	views := make([]TaskView, 0, len(issues))
+	for _, issue := range issues {
+		if view, ok := buildView(issue, latestSpecTag, execsByIssue[issue.Number]); ok {
+			views = append(views, view)
+		}
+	}
+	// Same on_hold + BlockedBy reconcile as the list — the detail page must not
+	// disagree with the list on a gated Task's status.
+	r.reconcileBlocked(ctx, orgID, projectID, views)
+
+	var view *TaskView
+	for i := range views {
+		if views[i].IssueNumber == issueNumber {
+			view = &views[i]
+			break
+		}
+	}
+	if view == nil {
 		return nil, ErrTaskNotFound
 	}
+
 	history, err := r.execs.ListByIssueScoped(ctx, orgID, repoFullName, issueNumber)
 	if err != nil {
 		return nil, err
@@ -331,7 +351,17 @@ func (r *Reads) Get(ctx context.Context, orgID, projectID string, issueNumber in
 	for i := range history {
 		hv = append(hv, executionView(&history[i]))
 	}
-	return &TaskDetail{TaskView: view, ExecutionHistory: hv}, nil
+	return &TaskDetail{TaskView: *view, ExecutionHistory: hv}, nil
+}
+
+// containsIssue reports whether the task-marker issue set includes issueNumber.
+func containsIssue(issues []gitrepo.IssueInfo, issueNumber int) bool {
+	for i := range issues {
+		if issues[i].Number == issueNumber {
+			return true
+		}
+	}
+	return false
 }
 
 // buildView fuses one live issue with its latest-per-kind executions into a

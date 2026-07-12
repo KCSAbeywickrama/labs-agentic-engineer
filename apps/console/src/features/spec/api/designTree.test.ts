@@ -78,7 +78,25 @@ describe("buildDesignSection", () => {
   it("returns empty section when there are no design files", () => {
     const section = buildDesignSection([e("specs/requirements/prd.md")]);
     expect(section.hasComponents).toBe(false);
+    expect(section.hasCellDsl).toBe(false);
     expect(section.components).toEqual([]);
+    expect(section.overview).toEqual([]);
+  });
+
+  it("keeps design.cell out of the overview and flags hasCellDsl", () => {
+    const section = buildDesignSection([
+      e("specs/design/design.cell"),
+      e("specs/design/design.md"),
+    ]);
+    // design.cell is rendered via the Architecture tab, never as a file row.
+    expect(section.overview.map((f) => f.path)).toEqual(["specs/design/design.md"]);
+    expect(section.hasCellDsl).toBe(true);
+  });
+
+  it("flags hasCellDsl even before any component folders exist", () => {
+    const section = buildDesignSection([e("specs/design/design.cell")]);
+    expect(section.hasCellDsl).toBe(true);
+    expect(section.hasComponents).toBe(false);
     expect(section.overview).toEqual([]);
   });
 });

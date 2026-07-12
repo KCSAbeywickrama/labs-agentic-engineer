@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
 import { Box, CircularProgress } from "@wso2/oxygen-ui";
 
 // Large bundle + separate CSS export; load lazily only when a diagram opens.
@@ -72,8 +72,29 @@ function fitContentToViewport(api: any, elements: any) {
 }
 
 function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
-  // Remount on scene change via `key` upstream keeps this uncontrolled + simple.
+  // Committed scenes remount via `key` upstream (uncontrolled + simple). A
+  // STREAMED scene instead keeps one mounted canvas and pushes each new
+  // compile through `updateScene` — remounting this (lazy, canvas-heavy)
+  // component per line-flush would flicker and drop the viewport. The DSL
+  // compiler emits stable element ids/seeds, so successive scenes diff
+  // cleanly: existing elements keep their identity, new ones appear.
   const initialData = useMemo(() => parseScene(scene), [scene]);
+  const apiRef = useRef<any>(null);
+  const mountedScene = useRef(scene);
+
+  useEffect(() => {
+    if (scene === mountedScene.current) return; // initial mount already has it
+    mountedScene.current = scene;
+    const api = apiRef.current;
+    const next = parseScene(scene);
+    if (!api || !next?.elements) return; // unparseable → keep the last frame
+    try {
+      api.updateScene({ elements: next.elements });
+      fitContentToViewport(api, next.elements);
+    } catch {
+      /* api torn down */
+    }
+  }, [scene]);
 
   return (
     <Box
@@ -98,6 +119,7 @@ function ExcalidrawViewImpl({ scene, fillHeight }: ExcalidrawViewProps) {
           initialData={initialData as any}
           viewModeEnabled
           excalidrawAPI={(api: any) => {
+            apiRef.current = api;
             if (initialData?.elements?.length) fitContentToViewport(api, initialData.elements);
           }}
         />

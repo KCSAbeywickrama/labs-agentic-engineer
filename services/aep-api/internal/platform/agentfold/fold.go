@@ -90,6 +90,7 @@ const (
 	ErrInvalidYAML     ErrCode = "INVALID_YAML"
 	ErrInvalidJSON     ErrCode = "INVALID_JSON"
 	ErrSchemaViolation ErrCode = "SCHEMA_VIOLATION"
+	ErrLayoutViolation ErrCode = "LAYOUT_VIOLATION"
 	ErrProtectedPath   ErrCode = "PROTECTED_PATH"
 )
 

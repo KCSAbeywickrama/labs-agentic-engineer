@@ -26,17 +26,30 @@ const (
 	// cnpgMaxClusterName is CloudNativePG's hard cap on a Cluster metadata.name
 	// (kubectl-verified: "the maximum length of a cluster name is 50 characters").
 	// It is the strictest length limit any platform-resource backing store
-	// imposes, so it governs the bound for every OC binding name.
+	// imposes, so it governs the bound for the OC Resource name below.
 	cnpgMaxClusterName = 50
-	// ocRenderDecoration is the fixed overhead OpenChoreo adds when it renders a
-	// ResourceReleaseBinding into a backing object: it names that object
-	// r-<bindingName>-<hash>, i.e. "r-" (2) + "-" (1) + an 8-char content hash =
-	// 11 chars (observed on OC 1.1.1). One extra char guards against a wider hash.
-	ocRenderDecoration = 11 + 1
-	// maxOCBindingName is the longest a binding metadata.name may be so its
-	// OC-rendered backing object stays within cnpgMaxClusterName. Longer names
-	// are hash-truncated by boundName.
-	maxOCBindingName = cnpgMaxClusterName - ocRenderDecoration // 38
+	// maxEnvNameLen is the longest environment slug AEP embeds in a render name.
+	// "development" (models.DevEnvironmentName, 11 chars) is the only — and longest
+	// — environment v1 provisions into; "production"/"staging" are shorter.
+	maxEnvNameLen = 11
+	// ocRenderDecoration is the overhead OpenChoreo adds when it renders a Resource
+	// into a per-env backing object. LIVE-VERIFIED on OC 1.1.1: the rendered object
+	// (e.g. the CloudNativePG Cluster) is named off the RESOURCE name, not the
+	// binding — r-<resourceName>-<env>-<hash8> — so the decoration is
+	// "r-" (2) + "-" + env + "-" + an 8-char hash, plus one guard char for a wider
+	// hash. (The earlier #165 bound assumed r-<bindingName>-<hash> and bounded the
+	// binding name; that never governed the Cluster name, which overflowed at 52.)
+	ocRenderDecoration = 2 + 1 + maxEnvNameLen + 1 + 8 + 1 // 24
+	// maxOCResourceName is the longest a Resource metadata.name may be so its
+	// OC-rendered r-<name>-<env>-<hash> backing object stays within
+	// cnpgMaxClusterName. The render root is the RESOURCE name, so this bound lives
+	// on ExternalResourceName. Longer names are hash-truncated by boundName.
+	maxOCResourceName = cnpgMaxClusterName - ocRenderDecoration // 26
+	// maxOCBindingName keeps a binding metadata.name a sane, legal DNS-1035 label.
+	// A binding is not a render root, and since the Resource name it derives from
+	// is already bounded to maxOCResourceName, a binding stays within this by
+	// construction; the bound is a defensive guard, not the CNPG-governing one.
+	maxOCBindingName = maxOCResourceName + 1 + maxEnvNameLen // 38
 )
 
 // boundName returns natural unchanged when it already fits max; otherwise it
@@ -81,21 +94,28 @@ func EnvVarName(depName, outName string) string {
 }
 
 // ExternalResourceName is the per-project OC Resource name (== the Workload
-// dependency `ref`) for a project's external resource. metadata.name is
-// namespace-unique — owner.projectName does NOT scope it — so the project
-// prefixes the name. Exported: the dispatch-time consumer-dependency renderer
-// derives the same name through this single source of truth.
-func ExternalResourceName(project, name string) string { return project + "-" + name }
+// dependency `ref`) for a project's external OR platform resource. metadata.name
+// is namespace-unique — owner.projectName does NOT scope it — so the project
+// prefixes the name. It is the render root: OC names a platform resource's
+// backing object r-<thisName>-<env>-<hash>, so the name is bounded to
+// maxOCResourceName to keep a CloudNativePG Cluster within its 50-char cap.
+// boundName leaves already-short names byte-for-byte, so only overflowing names
+// change (and an overflowing CNPG name never provisioned, so nothing to migrate).
+// Exported: the Resource author, the binding owner ref, the consumer-dependency
+// renderer, and deprovision all derive the same name through this single source
+// of truth, so the bound stays consistent across every use.
+func ExternalResourceName(project, name string) string {
+	return boundName(project+"-"+name, maxOCResourceName)
+}
 
 // ExternalResourceBindingName is the per-env ResourceReleaseBinding name an
-// external resource's outputs are read from — and, since external and
-// platform-resource bindings share one naming form, the name OC renders a
-// platform-resource (e.g. a CloudNativePG Cluster) from. It is bounded to
-// maxOCBindingName so that after OC's r-<name>-<hash> render decoration the
-// backing object's name stays within CloudNativePG's 50-char Cluster-name cap
-// (#165). Every read/write of a binding name routes through here, so the bound
-// is applied consistently across provision, deprovision, status, and consumer
-// wiring.
+// external OR platform resource's outputs are read from. It composes on the
+// already-bounded ExternalResourceName, so it stays a legal, sane DNS-1035 label
+// (maxOCBindingName) by construction. NOTE: the binding is NOT the CNPG render
+// root — OC names the backing Cluster off the RESOURCE name (see
+// ExternalResourceName), which is where the 50-char bound is enforced. Every
+// read/write of a binding name routes through here, so provision, deprovision,
+// status, and consumer wiring stay consistent.
 func ExternalResourceBindingName(project, name, env string) string {
 	return boundName(ExternalResourceName(project, name)+"-"+env, maxOCBindingName)
 }

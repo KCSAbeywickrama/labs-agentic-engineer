@@ -85,10 +85,8 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
 export function buildDesignGenerationInstruction(): string {
   return (
     "Generate the complete component design for this project based on the " +
-    "current requirements: the overall architecture in specs/design/design.md, " +
-    "and for each component specs/design/components/<name>/design.json (plus " +
-    "openapi.yaml for services). If a design already exists, regenerate it to " +
-    "match the current requirements. " +
+    "current requirements. If a design already exists, regenerate it to match " +
+    "the current requirements. " +
     "Then, as the final step, generate the validation acceptance criteria at " +
     "specs/validation/validation-criteria.json using the validation-criteria " +
     "skill — derived from the requirements prose only, not from the design you " +

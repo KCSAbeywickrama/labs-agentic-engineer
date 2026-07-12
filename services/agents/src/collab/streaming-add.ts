@@ -36,9 +36,14 @@
  *    ProseMirror fragment (~30× the Yjs traffic + rewrites earlier text); line
  *    boundaries are clean.
  *
- * Scope (v1): room-mode, MARKDOWN addFile only (no content-gate ⇒ no deferred
- * -validation risk). Non-md / already-existing paths are skipped (execute owns
- * them). Non-finalized streams (truncation / reject) are rolled back.
+ * Scope (v1): room-mode, MARKDOWN, `.cell`, and `.dsl` addFile only. `.cell`
+ * is the project-level architecture DSL and `.dsl` a component's wireframes;
+ * streaming either line-by-line draws its diagram live as the model writes
+ * it. Markdown and `.cell` have no content-gate; `.dsl` has the layout gate
+ * (LAYOUT_VIOLATION) — when execute() rejects it, the tool-result handler
+ * below rolls the optimistic preview back, same as any rejected op. Other /
+ * already-existing paths are skipped (execute owns them). Non-finalized
+ * streams (truncation / reject) are rolled back.
  */
 
 import { parsePartialJson } from "ai";
@@ -46,6 +51,11 @@ import { isMarkdownPath } from "@aep/collab-doc";
 import type { FileBundle, StreamPart } from "@aep/agent-stream";
 import type { RoomPeer } from "./room-peer.js";
 import { ADD_FILE } from "../agents/main/tools/files.js";
+
+/** Paths safe to optimistically stream: markdown (Y.XmlFragment) or a DSL (Y.Text) — `.cell` architecture, `.dsl` wireframes. */
+function isStreamablePath(path: string): boolean {
+  return isMarkdownPath(path) || path.endsWith(".cell") || path.endsWith(".dsl");
+}
 
 interface CallState {
   /** Accumulated tool-input args text (JSON) for this tool call. */
@@ -123,7 +133,7 @@ export class StreamingDocWriter {
         // Gate exactly once: content having started means `path` is final.
         if (!s.streaming) {
           const path = await this.decodePath(s.buf);
-          if (path && isMarkdownPath(path) && !this.bundle.has(path)) {
+          if (path && isStreamablePath(path) && !this.bundle.has(path)) {
             s.streaming = true;
             s.path = path;
           } else {

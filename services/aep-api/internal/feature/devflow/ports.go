@@ -29,7 +29,7 @@ import (
 // (and tests can fake it).
 type WorkflowRunStore interface {
 	Record(ctx context.Context, row *models.DevflowRun) error
-	SetStatus(ctx context.Context, workflowID, status string) error
+	SetStatus(ctx context.Context, workflowID, status, reason string) error
 	// SetTaskCounts writes the dev run's task tally as absolute values
 	// (idempotent under activity retry — never an increment), scoped to one
 	// execution so a same-tag rebuild cannot rewrite a prior run's frozen

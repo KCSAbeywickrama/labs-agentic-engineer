@@ -40,7 +40,40 @@ type WireframeKind =
   | 'image'
   | 'table'
   | 'navbar'
-  | 'sidebar';
+  | 'sidebar'
+  // richer webapp primitives
+  | 'tabs'
+  | 'list'
+  | 'select'
+  | 'search'
+  | 'textarea'
+  | 'checkbox'
+  | 'radio'
+  | 'toggle'
+  | 'badge'
+  | 'avatar'
+  | 'progress'
+  | 'divider'
+  | 'breadcrumb'
+  | 'chart'
+  | 'icon'
+  | 'link';
+
+/**
+ * Semantic emphasis. Wireframes stay grayscale by default; a variant opts a
+ * single element into meaningful color (a primary CTA, a destructive action,
+ * a status badge, an AI step). Kept rare so color always *means* something.
+ */
+type WireframeVariant =
+  | 'primary'
+  | 'secondary'
+  | 'danger'
+  | 'success'
+  | 'warning'
+  | 'info'
+  | 'ai'
+  | 'active'
+  | 'muted';
 
 interface WireframeElement {
   kind: WireframeKind;
@@ -49,10 +82,17 @@ interface WireframeElement {
   y: number;
   width: number;
   height: number;
+  variant?: WireframeVariant;
+  /** Body rows for a `table`, collected from nested `row "a | b"` lines. */
+  rows?: string[][];
+  /** Screen this element navigates to, from a trailing `-> ScreenName`. */
+  navTo?: string;
 }
 
 interface WireframeScreen {
   name: string;
+  /** Optional subtitle explaining what the view is for / which role it serves. */
+  description?: string;
   width: number;
   height: number;
   elements: WireframeElement[];
@@ -216,6 +256,91 @@ export function tryDslToExcalidraw(
   }
 }
 
+// ---------- Wireframes layout validation ----------
+
+/**
+ * Element kinds with a meaningful box (explicit or defaulted W×H). Free text
+ * (`text`/`heading`/`link`/`breadcrumb`) is EXCLUDED from overlap checks — its
+ * width is an estimate of the rendered glyphs, so checking it would flag
+ * perfectly fine layouts. Chrome (`navbar`/`sidebar`) is compiler-placed and
+ * covered by the dedicated chrome rules instead.
+ */
+const BOX_KINDS = new Set<WireframeKind>([
+  'rect', 'ellipse', 'button', 'input', 'card', 'image', 'table', 'tabs',
+  'list', 'select', 'search', 'textarea', 'checkbox', 'radio', 'toggle',
+  'badge', 'avatar', 'progress', 'chart', 'icon',
+]);
+
+/**
+ * Check a wireframes DSL source for layout mistakes the compiler would render
+ * verbatim: elements outside the screen frame, under the navbar/sidebar
+ * chrome, or PARTIALLY overlapping each other. Full containment is layering
+ * (a badge inside a card) and allowed; a partial overlap is always a
+ * collision. Returns one human/model-readable issue per problem — empty when
+ * the layout is clean. Unparseable DSL returns [] (syntax is the compile
+ * gate's job, not this one's).
+ */
+export function validateWireframeLayout(dsl: string): string[] {
+  let ast: WireframeAst;
+  try {
+    ast = parseWireframesDsl(dsl);
+  } catch {
+    return [];
+  }
+  const issues: string[] = [];
+  const box = (el: WireframeElement) =>
+    `(x${el.x}..${el.x + el.width}, y${el.y}..${el.y + el.height})`;
+
+  for (const screen of ast.screens) {
+    const hasNavbar = screen.elements.some((e) => e.kind === 'navbar');
+    const hasSidebar = screen.elements.some((e) => e.kind === 'sidebar');
+    const content = screen.elements.filter(
+      (e) => e.kind !== 'navbar' && e.kind !== 'sidebar',
+    );
+
+    for (const el of content) {
+      // Frame bounds — the compiler draws exactly here, so past-the-edge
+      // coordinates render outside the screen outline.
+      if (el.x < 0 || el.y < 0 || el.x + el.width > screen.width || el.y + el.height > screen.height) {
+        issues.push(
+          `screen ${screen.name}: ${el.kind} "${el.label}" ${box(el)} extends past the ${screen.width}x${screen.height} frame — keep x+width <= ${screen.width} and y+height <= ${screen.height}.`,
+        );
+        continue; // out-of-frame already explains itself; skip chrome noise
+      }
+      // Chrome bands: the navbar fills y 0..56 and the sidebar x 0..240.
+      if (hasNavbar && el.y < NAVBAR_H) {
+        issues.push(
+          `screen ${screen.name}: ${el.kind} "${el.label}" ${box(el)} sits under the navbar (y 0..${NAVBAR_H}) — start content at y >= 72.`,
+        );
+      }
+      if (hasSidebar && el.x < SIDEBAR_W) {
+        issues.push(
+          `screen ${screen.name}: ${el.kind} "${el.label}" ${box(el)} sits under the sidebar rail (x 0..${SIDEBAR_W}) — start content at x >= 264.`,
+        );
+      }
+    }
+
+    // Pairwise partial overlaps between box-like elements.
+    const boxes = content.filter((e) => BOX_KINDS.has(e.kind));
+    for (let a = 0; a < boxes.length; a++) {
+      for (let b = a + 1; b < boxes.length; b++) {
+        const A = boxes[a]!;
+        const B = boxes[b]!;
+        const ix = Math.min(A.x + A.width, B.x + B.width) - Math.max(A.x, B.x);
+        const iy = Math.min(A.y + A.height, B.y + B.height) - Math.max(A.y, B.y);
+        if (ix <= 0 || iy <= 0) continue; // disjoint or edge-sharing
+        const aInB = A.x >= B.x && A.y >= B.y && A.x + A.width <= B.x + B.width && A.y + A.height <= B.y + B.height;
+        const bInA = B.x >= A.x && B.y >= A.y && B.x + B.width <= A.x + A.width && B.y + B.height <= A.y + A.height;
+        if (aInB || bInA) continue; // full containment = intentional layering
+        issues.push(
+          `screen ${screen.name}: ${A.kind} "${A.label}" ${box(A)} partially overlaps ${B.kind} "${B.label}" ${box(B)} — move or resize so they either nest fully (layering inside a card) or don't touch.`,
+        );
+      }
+    }
+  }
+  return issues;
+}
+
 // ---------- Wireframes parser ----------
 
 const QUOTED = /"((?:[^"\\]|\\.)*)"/;
@@ -236,15 +361,19 @@ function parseWireframesDsl(dsl: string): WireframeAst {
     const trimmed = line.trim();
 
     if (!indented) {
-      // Top-level: screen / flow
-      const screenMatch = /^screen\s+(.+?)(?:\s+(\d+)\s*x\s*(\d+))?$/i.exec(trimmed);
+      // Top-level: screen / flow.
+      // `screen <Name> ["what this view is for"] [WxH]` — the quoted
+      // description (optional) renders as a subtitle under the screen title.
+      const screenMatch =
+        /^screen\s+([\w-]+)(?:\s+"((?:[^"\\]|\\.)*)")?(?:\s+(\d+)\s*x\s*(\d+))?\s*$/i.exec(trimmed);
       if (screenMatch) {
         currentScreen = {
           name: screenMatch[1]!.trim(),
-          width: screenMatch[2] ? parseInt(screenMatch[2], 10) : DEFAULT_SCREEN_W,
-          height: screenMatch[3] ? parseInt(screenMatch[3], 10) : DEFAULT_SCREEN_H,
+          width: screenMatch[3] ? parseInt(screenMatch[3], 10) : DEFAULT_SCREEN_W,
+          height: screenMatch[4] ? parseInt(screenMatch[4], 10) : DEFAULT_SCREEN_H,
           elements: [],
         };
+        if (screenMatch[2]) currentScreen.description = unescapeQuoted(screenMatch[2]);
         ast.screens.push(currentScreen);
         inFlow = false;
         continue;
@@ -269,6 +398,17 @@ function parseWireframesDsl(dsl: string): WireframeAst {
     }
 
     if (currentScreen) {
+      // `row "a | b | c"` attaches a body row to the screen's most recent
+      // table, so tables can show realistic data instead of empty rules.
+      const rowMatch = /^row\b/i.exec(trimmed);
+      if (rowMatch) {
+        const lastTable = [...currentScreen.elements].reverse().find((e) => e.kind === 'table');
+        if (lastTable) {
+          const q = QUOTED.exec(trimmed.slice(rowMatch[0].length));
+          if (q) (lastTable.rows ??= []).push(splitItems(unescapeQuoted(q[1]!)));
+        }
+        continue;
+      }
       const el = parseWireframeElement(trimmed);
       if (el) currentScreen.elements.push(el);
     }
@@ -281,11 +421,18 @@ function parseWireframesDsl(dsl: string): WireframeAst {
 function defaultSize(kind: WireframeKind, label: string): { width: number; height: number } {
   switch (kind) {
     case 'text':
+    case 'link':
       return { width: Math.max(60, label.length * 9), height: 24 };
     case 'heading':
       return { width: Math.max(80, label.length * 12), height: 30 };
+    case 'breadcrumb':
+      return { width: Math.max(120, label.length * 8), height: 20 };
     case 'input':
+    case 'select':
+    case 'search':
       return { width: 320, height: 36 };
+    case 'textarea':
+      return { width: 320, height: 96 };
     case 'button':
       return { width: 140, height: 40 };
     case 'table':
@@ -294,16 +441,50 @@ function defaultSize(kind: WireframeKind, label: string): { width: number; heigh
       return { width: 300, height: 160 };
     case 'image':
       return { width: 240, height: 140 };
+    case 'chart':
+      return { width: 320, height: 180 };
+    case 'tabs':
+      return { width: 480, height: 40 };
+    case 'list':
+      // one row per item (`|`-separated); fall back to a single row.
+      return { width: 320, height: Math.max(1, splitItems(label).length) * 40 };
+    case 'badge':
+      return { width: Math.max(56, label.length * 8 + 20), height: 24 };
+    case 'avatar':
+      return { width: 40, height: 40 };
+    case 'progress':
+      return { width: 240, height: 10 };
+    case 'toggle':
+      return { width: 44, height: 24 };
+    case 'checkbox':
+    case 'radio':
+      return { width: Math.max(120, label.length * 8 + 28), height: 20 };
+    case 'icon':
+      return { width: 24, height: 24 };
+    case 'divider':
+      return { width: 320, height: 1 };
     default:
       return { width: 160, height: 32 };
   }
 }
 
+const KIND_RE =
+  /^(rect|ellipse|button|text|heading|input|card|image|table|navbar|sidebar|tabs|list|select|search|textarea|checkbox|radio|toggle|badge|avatar|progress|divider|breadcrumb|chart|icon|link)\b/i;
+const VARIANT_RE = /\b(primary|secondary|danger|success|warning|info|ai|active|muted)\b/i;
+
+const NAV_RE = /\s*->\s*([\w-]+)\s*$/;
+
 function parseWireframeElement(line: string): WireframeElement | null {
-  const kindMatch = /^(rect|ellipse|button|text|heading|input|card|image|table|navbar|sidebar)\b/i.exec(line);
+  const kindMatch = KIND_RE.exec(line);
   if (!kindMatch) return null;
   const kind = kindMatch[1]!.toLowerCase() as WireframeKind;
-  const rest = line.slice(kindMatch[0].length).trim();
+  const afterKind = line.slice(kindMatch[0].length).trim();
+
+  // Pull off an optional trailing `-> ScreenName` (element-level navigation)
+  // before parsing the rest, so the target can't be mistaken for a variant.
+  const navMatch = NAV_RE.exec(afterKind);
+  const navTo = navMatch ? navMatch[1] : undefined;
+  const rest = navMatch ? afterKind.slice(0, navMatch.index).trim() : afterKind;
 
   const labelMatch = QUOTED.exec(rest);
   const label = labelMatch ? unescapeQuoted(labelMatch[1]!) : '';
@@ -326,11 +507,21 @@ function parseWireframeElement(line: string): WireframeElement | null {
     height = parseInt(sizeMatch[2]!, 10);
   }
 
-  return { kind, label, x, y, width, height };
+  // An optional trailing bareword opts the element into semantic color.
+  const variantMatch = VARIANT_RE.exec(afterCoords);
+  const el: WireframeElement = { kind, label, x, y, width, height };
+  if (variantMatch) el.variant = variantMatch[1]!.toLowerCase() as WireframeVariant;
+  if (navTo) el.navTo = navTo;
+  return el;
 }
 
 function unescapeQuoted(s: string): string {
-  return s.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  // Single left-to-right pass so each `\X` is consumed once: `\\`→`\`, `\"`→`"`,
+  // and `\n`/`\t` become real line breaks / tabs (agents write `\n` in a label
+  // to get a title + subtitle, e.g. `card "Name\n$28 · In stock"`).
+  return s.replace(/\\([\\"nt])/g, (_m, c: string) =>
+    c === 'n' ? '\n' : c === 't' ? '\t' : c,
+  );
 }
 
 // ---------- Wireframes renderer ----------
@@ -340,20 +531,27 @@ const DEFAULT_SCREEN_H = 800;
 const SCREEN_GAP_X = 120;
 const SCREEN_GAP_Y = 120;
 const COLUMNS = 2;
-const TITLE_H = 28; // screen-name row drawn ABOVE the outline
+const TITLE_H = 32; // screen-name row drawn ABOVE the outline
+const DESC_H = 22; // extra headroom for a screen description subtitle
 const NAVBAR_H = 56;
 const SIDEBAR_W = 240;
 const TABLE_HEADER_H = 36;
 const TABLE_ROW_H = 36;
 
-// Gray structural palette — wireframes deliberately avoid color so review
-// stays about layout, not styling. The flow accent is the one exception.
-const STROKE = '#495057';
-const SCREEN_STROKE = '#343a40';
-const FILL_CHROME = '#e9ecef'; // navbar, sidebar, table header
-const FILL_SOFT = '#f1f3f5'; // generic rect / ellipse
-const FILL_CARD = '#f8f9fa';
-const FILL_BUTTON = '#dee2e6';
+// Oxygen UI-derived palette — light surfaces, neutral borders, and the WSO2
+// brand orange for primary actions / active navigation, so a wireframe reads
+// like the real product instead of a wall of gray. Structure is still low-fi
+// (hand-drawn boxes); only the colors follow Oxygen.
+const BRAND = '#fa7b3f'; // Oxygen primary.main (WSO2 orange)
+const BRAND_DARK = '#e74420'; // gradient dark end
+const BRAND_TINT = '#fff0e8'; // pale orange for active/hover surfaces
+const STROKE = '#c4c9d2'; // element borders (neutral)
+const SCREEN_STROKE = '#b3b9c4'; // screen frame border
+const FILL_NAV = '#ffffff'; // top bar surface
+const FILL_CHROME = '#f5f4f2'; // sidebar, table header (warm near-white)
+const FILL_SOFT = '#f4f5f7'; // generic rect / ellipse
+const FILL_CARD = '#ffffff'; // cards/panels are white with a border
+const FILL_BUTTON = '#f4f5f7'; // secondary (non-primary) button
 
 /** Split a pipe-separated label ("Home | Risks | Reports") into items. */
 function splitItems(label: string): string[] {
@@ -363,29 +561,66 @@ function splitItems(label: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * Read a progress fraction from a label — accepts "60%", "0.6", or "3/4".
+ * Falls back to 0.5 so a bare `progress` still draws something sensible.
+ */
+function parseFraction(label: string): number {
+  const pct = /(\d+(?:\.\d+)?)\s*%/.exec(label);
+  if (pct) return clamp01(parseFloat(pct[1]!) / 100);
+  const frac = /(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/.exec(label);
+  if (frac) {
+    const d = parseFloat(frac[2]!);
+    return d ? clamp01(parseFloat(frac[1]!) / d) : 0.5;
+  }
+  const dec = /^\s*(0?\.\d+|1(?:\.0+)?)\s*$/.exec(label);
+  if (dec) return clamp01(parseFloat(dec[1]!));
+  return 0.5;
+}
+
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n));
+}
+
 // Accent color for flow markers + screen number badges. Picked to read
 // against the standard wireframe palette without competing with element
 // fills.
 const FLOW_ACCENT = '#1971c2';
 
-interface ButtonAnchor {
-  /** Last button rect's right edge X (absolute canvas coords). */
-  rightX: number;
-  /** Button's vertical midpoint Y. */
-  midY: number;
-}
+// Semantic accents — used ONLY when an element opts in via a variant. The
+// stroke/text color carries the meaning; the fill is a pale tint of it so a
+// badge or primary button reads as colored without shouting. Everything
+// unvarianted stays on the grayscale palette above.
+const ACCENT_STROKE: Record<WireframeVariant, string> = {
+  primary: BRAND,
+  secondary: '#5f6b7a',
+  danger: '#d92d20',
+  success: '#2e7d32',
+  warning: '#ed6c02',
+  info: '#0288d1',
+  ai: '#7048e8',
+  active: BRAND,
+  muted: '#6c757d',
+};
+const ACCENT_FILL: Record<WireframeVariant, string> = {
+  primary: BRAND_TINT,
+  secondary: FILL_SOFT,
+  danger: '#fdecea',
+  success: '#e8f5e9',
+  warning: '#fff4e5',
+  info: '#e5f6fd',
+  ai: '#f3f0ff',
+  active: BRAND_TINT,
+  muted: '#f1f3f5',
+};
 
 function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
   const out: ExcalidrawElement[] = [];
-  // Screen-name → 1-based number for `→(N)` flow markers.
+  // Screen-name → 1-based number, shown as "Screen N" in the corner and in
+  // each element's `→ Screen N · Name` navigation marker. Precomputed so an
+  // element can point at a screen that appears later in the file.
   const screenNumber = new Map<string, number>();
-  // Screen-name → last-button anchor (right edge of the screen's final
-  // button). Used as the attach point for `→(N)` markers; if absent the
-  // marker falls back to the screen header row.
-  const screenAnchor = new Map<string, ButtonAnchor>();
-  // Screen-name → header anchor (always present), so flows from screens
-  // with no button still surface as a marker beside the screen title.
-  const screenHeaderAnchor = new Map<string, ButtonAnchor>();
+  ast.screens.forEach((s, i) => screenNumber.set(s.name.toLowerCase(), i + 1));
 
   // Variable-size screens flow left-to-right, COLUMNS per row; each row is as
   // tall as its tallest screen.
@@ -402,7 +637,11 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
     const sx = curX;
     const sy = curY;
     curX += screen.width + SCREEN_GAP_X;
-    rowMaxH = Math.max(rowMaxH, screen.height + TITLE_H);
+    // Title block above the frame: a prominent screen name, plus an optional
+    // description subtitle explaining what the view is for (or which role it
+    // serves). Taller when a description is present.
+    const titleH = TITLE_H + (screen.description ? DESC_H : 0);
+    rowMaxH = Math.max(rowMaxH, screen.height + titleH);
     const screenId = stableId(`screen:${screen.name}:${idx}`);
 
     // Screen name + number badge sit ABOVE the outline so chrome (navbar)
@@ -413,9 +652,9 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
         sx,
         sy,
         screen.width - 60,
-        20,
+        24,
         screen.name,
-        16,
+        20,
         'left',
       ),
     );
@@ -423,49 +662,114 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
       withColor(
         makeText(
           stableId(`screen-num:${screen.name}:${idx}`),
-          sx + screen.width - 44,
+          sx + screen.width - 120,
           sy,
-          32,
+          108,
           18,
-          `(${number})`,
+          `Screen ${number}`,
           14,
           'right',
         ),
         FLOW_ACCENT,
       ),
     );
-    const frameY = sy + TITLE_H;
+    if (screen.description) {
+      out.push(
+        withColor(
+          makeText(
+            stableId(`screen-desc:${screen.name}:${idx}`),
+            sx,
+            sy + 26,
+            screen.width - 20,
+            18,
+            screen.description,
+            14,
+            'left',
+          ),
+          '#868e96',
+        ),
+      );
+    }
+    const frameY = sy + titleH;
     out.push(makeRect(screenId, sx, frameY, screen.width, screen.height, SCREEN_STROKE, '#ffffff', null));
-    screenNumber.set(screen.name.toLowerCase(), number);
-    screenHeaderAnchor.set(screen.name.toLowerCase(), {
-      rightX: sx + screen.width - 56,
-      midY: sy + 2,
-    });
 
     for (const el of screen.elements) {
       // Coordinates are screen-local from the outline's top-left corner —
       // what the author writes is where it lands, no hidden padding.
       const ex = sx + el.x;
       const ey = frameY + el.y;
+      // Left-aligned text auto-sizes to its content and never wraps, so a long
+      // line (e.g. a rail comment) would bleed past the screen's right edge.
+      // Clip it to the frame's inner right edge with an ellipsis — the same
+      // treatment table cells get — so nothing renders outside the screen.
+      const clipText = (label: string, fontSize: number): string =>
+        truncateLabel(label, fitChars(sx + screen.width - 16 - ex, fontSize));
       const eid = stableId(`el:${screen.name}:${el.kind}:${el.label}:${ex}:${ey}`);
-      switch (el.kind) {
-        case 'navbar': {
-          out.push(makeRect(eid, sx, frameY, screen.width, NAVBAR_H, STROKE, FILL_CHROME, null));
-          const items = splitItems(el.label);
-          items.forEach((item, i) => {
-            out.push(
+      // A `-> ScreenName` on this element draws a navigation marker right
+      // beside it, so the reader sees exactly which control goes where.
+      if (el.navTo) {
+        const num = screenNumber.get(el.navTo.toLowerCase());
+        if (num !== undefined) {
+          const label = `→ Screen ${num} · ${el.navTo}`;
+          out.push(
+            withColor(
               makeText(
-                stableId(`${eid}:item:${item}:${i}`),
-                sx + 24 + i * ((screen.width - 48) / Math.max(1, items.length)),
-                frameY + (NAVBAR_H - 18) / 2,
-                Math.max(60, item.length * 9),
-                18,
-                item,
-                14,
+                stableId(`nav:${screen.name}:${el.label}:${el.navTo}:${ex}:${ey}`),
+                ex + el.width + 10,
+                ey + Math.max(0, (el.height - 16) / 2),
+                Math.max(120, label.length * 8),
+                16,
+                label,
+                13,
                 'left',
               ),
+              FLOW_ACCENT,
+            ),
+          );
+        }
+      }
+      switch (el.kind) {
+        case 'navbar': {
+          // White top bar laid out like a real webapp header: the first item
+          // (the app/brand name) sits on the LEFT in the brand color; the
+          // remaining nav links are grouped on the RIGHT, ending at a
+          // notification bell + account avatar in the top-right corner.
+          out.push(makeRect(eid, sx, frameY, screen.width, NAVBAR_H, STROKE, FILL_NAV, null));
+          const items = splitItems(el.label);
+          const textY = frameY + (NAVBAR_H - 18) / 2;
+          if (items[0]) {
+            out.push(
+              withColor(
+                makeText(stableId(`${eid}:brand`), sx + 24, textY, Math.max(60, items[0].length * 9), 18, items[0], 14, 'left'),
+                BRAND,
+              ),
             );
-          });
+          }
+          const AV = 30; // avatar diameter
+          const avx = sx + screen.width - 24 - AV;
+          const avy = frameY + (NAVBAR_H - AV) / 2;
+          // Notification button: a plain circle with a small brand "unread"
+          // badge at its top-right, set a clear gap left of the avatar.
+          const BELL = 24;
+          const bx = avx - 16 - BELL;
+          const by = frameY + (NAVBAR_H - BELL) / 2;
+          // Nav links right-to-left, ending well left of the bell.
+          let cursor = bx - 28;
+          for (let i = items.length - 1; i >= 1; i--) {
+            const item = items[i]!;
+            const w = Math.max(40, item.length * 8.5);
+            cursor -= w;
+            out.push(
+              makeText(stableId(`${eid}:item:${item}:${i}`), cursor, textY, w, 18, item, 14, 'left'),
+            );
+            cursor -= 32;
+          }
+          out.push({ ...makeRect(stableId(`${eid}:bell`), bx, by, BELL, BELL, STROKE, FILL_NAV, { type: 3 }), type: 'ellipse' });
+          out.push({ ...makeRect(stableId(`${eid}:bell:dot`), bx + BELL - 7, by + 1, 6, 6, BRAND, BRAND, { type: 3 }), type: 'ellipse' });
+          // Account avatar: head + shoulders inside a circle — the signed-in user.
+          out.push({ ...makeRect(stableId(`${eid}:user`), avx, avy, AV, AV, STROKE, FILL_SOFT, { type: 3 }), type: 'ellipse' });
+          out.push({ ...makeRect(stableId(`${eid}:user:head`), avx + AV / 2 - 5, avy + 6, 10, 10, STROKE, '#ffffff', { type: 3 }), type: 'ellipse' });
+          out.push({ ...makeRect(stableId(`${eid}:user:body`), avx + AV / 2 - 8, avy + AV - 8, 16, 12, STROKE, '#ffffff', { type: 3 }), type: 'ellipse' });
           break;
         }
         case 'sidebar': {
@@ -473,16 +777,25 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
             makeRect(eid, sx, frameY + NAVBAR_H, SIDEBAR_W, screen.height - NAVBAR_H, STROKE, FILL_CHROME, null),
           );
           splitItems(el.label).forEach((item, i) => {
+            const iy = frameY + NAVBAR_H + 12 + i * 40;
+            const active = i === 0; // first item shown selected
+            if (active) {
+              // A brand-tinted pill behind the active item, Oxygen-style.
+              out.push(makeRect(stableId(`${eid}:active:${i}`), sx + 8, iy - 4, SIDEBAR_W - 16, 32, BRAND_TINT, BRAND_TINT, { type: 3 }));
+            }
             out.push(
-              makeText(
-                stableId(`${eid}:item:${item}:${i}`),
-                sx + 16,
-                frameY + NAVBAR_H + 20 + i * 40,
-                SIDEBAR_W - 32,
-                18,
-                item,
-                14,
-                'left',
+              withColor(
+                makeText(
+                  stableId(`${eid}:item:${item}:${i}`),
+                  sx + 20,
+                  iy + 4,
+                  SIDEBAR_W - 40,
+                  18,
+                  item,
+                  14,
+                  'left',
+                ),
+                active ? BRAND_DARK : '#1e1e1e',
               ),
             );
           });
@@ -501,7 +814,7 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
                 ey + (TABLE_HEADER_H - 18) / 2,
                 Math.max(60, col.length * 9),
                 18,
-                col,
+                truncateLabel(col, fitChars(colW - 16, 14)),
                 14,
                 'left',
               ),
@@ -510,8 +823,40 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
               out.push(makeLine(stableId(`${eid}:vline:${i}`), ex + i * colW, ey, 0, el.height));
             }
           });
-          for (let ry = ey + TABLE_HEADER_H + TABLE_ROW_H; ry < ey + el.height; ry += TABLE_ROW_H) {
-            out.push(makeLine(stableId(`${eid}:hline:${ry}`), ex, ry, el.width, 0));
+          // Body: draw a divider under the header, then either the supplied
+          // `row` data (realistic content) or empty ruled lines as a
+          // placeholder. Cells are clipped to their column width.
+          const rows = el.rows ?? [];
+          const bodyTop = ey + TABLE_HEADER_H;
+          const maxRows = Math.floor((el.height - TABLE_HEADER_H) / TABLE_ROW_H);
+          const shown = rows.slice(0, Math.max(0, maxRows));
+          shown.forEach((row, r) => {
+            const ry = bodyTop + r * TABLE_ROW_H;
+            if (r > 0) out.push(makeLine(stableId(`${eid}:hline:${r}`), ex, ry, el.width, 0));
+            row.slice(0, cols.length).forEach((cell, c) => {
+              if (!cell) return;
+              out.push(
+                makeText(
+                  stableId(`${eid}:cell:${r}:${c}`),
+                  ex + 12 + c * colW,
+                  ry + (TABLE_ROW_H - 16) / 2,
+                  Math.max(40, colW - 20),
+                  16,
+                  truncateLabel(cell, fitChars(colW - 20, 13)),
+                  13,
+                  'left',
+                ),
+              );
+            });
+          });
+          // Ruled placeholder lines for the remaining empty rows.
+          for (
+            let r = Math.max(1, shown.length);
+            r < maxRows;
+            r++
+          ) {
+            const ry = bodyTop + r * TABLE_ROW_H;
+            out.push(makeLine(stableId(`${eid}:rule:${r}`), ex, ry, el.width, 0));
           }
           break;
         }
@@ -549,24 +894,45 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
             ),
           );
           break;
-        case 'card':
+        case 'card': {
           out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_CARD));
-          out.push(
-            makeText(
-              stableId(`${eid}:label`),
-              ex + 12,
-              ey + 12,
-              el.width - 24,
-              18,
-              el.label,
-              14,
-              'left',
-            ),
-          );
+          // A `|`-split label renders as a stat tile — small muted metric
+          // label, BIG value, small caption ("Open items | 47 | across 5
+          // audits"). A plain one-part label stays a simple panel title, so
+          // container-style cards are unaffected.
+          const parts = splitItems(el.label);
+          if (parts.length >= 2) {
+            out.push(
+              withColor(
+                makeText(stableId(`${eid}:metric`), ex + 14, ey + 14, el.width - 28, 16, parts[0]!, 12, 'left'),
+                '#868e96',
+              ),
+            );
+            out.push(makeText(stableId(`${eid}:value`), ex + 14, ey + 38, el.width - 28, 30, parts[1]!, 26, 'left'));
+            if (parts[2]) {
+              const capColor = el.variant ? ACCENT_STROKE[el.variant] : '#868e96';
+              out.push(
+                withColor(
+                  makeText(stableId(`${eid}:cap`), ex + 14, ey + el.height - 28, el.width - 28, 16, parts[2]!, 12, 'left'),
+                  capColor,
+                ),
+              );
+            }
+          } else {
+            out.push(
+              makeText(stableId(`${eid}:label`), ex + 12, ey + 12, el.width - 24, 18, el.label, 14, 'left'),
+            );
+          }
           break;
-        case 'heading':
-          out.push(makeText(eid, ex, ey, el.width, el.height, el.label, 18, 'left'));
+        }
+        case 'heading': {
+          // Section headings should read as headings — larger type, plus a
+          // short brand rule under them so the eye finds the structure.
+          out.push(makeText(eid, ex, ey, el.width, Math.max(el.height, 28), el.label, 22, 'left'));
+          const ruleW = Math.min(el.width || 9999, Math.max(40, el.label.length * 12));
+          out.push(withColor(makeLine(stableId(`${eid}:rule`), ex, ey + 30, ruleW, 0), BRAND));
           break;
+        }
         case 'rect':
           out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT));
           out.push(
@@ -582,27 +948,41 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
             ),
           );
           break;
-        case 'button':
-          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_BUTTON, { type: 3 }));
+        case 'button': {
+          // Default: gray outline button. A variant paints it: `primary`
+          // fills solid ink with white text (the one dominant CTA); the
+          // semantic variants (danger/success/…) tint the fill + border +
+          // text so the action's intent reads at a glance.
+          let bStroke = STROKE;
+          let bFill = FILL_BUTTON;
+          let bText = '#1e1e1e';
+          if (el.variant === 'primary') {
+            bStroke = BRAND;
+            bFill = BRAND;
+            bText = '#ffffff';
+          } else if (el.variant && el.variant !== 'secondary') {
+            bStroke = ACCENT_STROKE[el.variant];
+            bFill = ACCENT_FILL[el.variant];
+            bText = ACCENT_STROKE[el.variant];
+          }
+          out.push(makeRect(eid, ex, ey, el.width, el.height, bStroke, bFill, { type: 3 }));
           out.push(
-            makeText(
-              stableId(`${eid}:label`),
-              ex,
-              ey + Math.max(0, (el.height - 14) / 2),
-              el.width,
-              14,
-              el.label,
-              14,
-              'center',
+            withColor(
+              makeText(
+                stableId(`${eid}:label`),
+                ex,
+                ey + Math.max(0, (el.height - 14) / 2),
+                el.width,
+                14,
+                el.label,
+                14,
+                'center',
+              ),
+              bText,
             ),
           );
-          // Each button updates the anchor; the last one wins, which
-          // matches the heuristic "the bottom-most CTA drives the flow".
-          screenAnchor.set(screen.name.toLowerCase(), {
-            rightX: ex + el.width,
-            midY: ey + el.height / 2 - 8,
-          });
           break;
+        }
         case 'ellipse':
           out.push({
             ...makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT),
@@ -623,39 +1003,141 @@ function renderWireframes(ast: WireframeAst): ExcalidrawElement[] {
           break;
         case 'text':
           out.push(
-            makeText(eid, ex, ey, el.width, el.height, el.label, 14, 'left'),
+            makeText(eid, ex, ey, el.width, el.height, clipText(el.label, 14), 14, 'left'),
           );
           break;
+        case 'divider':
+          // Horizontal rule by default; a taller-than-wide divider draws a
+          // VERTICAL rule — use one to separate the two columns of a detail
+          // screen (`divider "" 760,180 1x420`).
+          if (el.height > el.width) out.push(makeLine(eid, ex, ey, 0, el.height));
+          else out.push(makeLine(eid, ex, ey, el.width, 0));
+          break;
+        case 'breadcrumb':
+          out.push(withColor(makeText(eid, ex, ey, el.width, el.height, clipText(el.label, 13), 13, 'left'), '#868e96'));
+          break;
+        case 'link':
+          out.push(withColor(makeText(eid, ex, ey, el.width, el.height, clipText(el.label, 14), 14, 'left'), ACCENT_STROKE.info));
+          break;
+        case 'icon':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT, { type: 3 }));
+          if (el.label) {
+            out.push(makeText(stableId(`${eid}:g`), ex, ey + Math.max(0, (el.height - 12) / 2), el.width, 12, el.label.slice(0, 2), 12, 'center'));
+          }
+          break;
+        case 'select':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, '#ffffff'));
+          out.push(makeText(stableId(`${eid}:lb`), ex + 10, ey + Math.max(0, (el.height - 16) / 2), el.width - 40, 16, el.label, 14, 'left'));
+          out.push(withColor(makeText(stableId(`${eid}:ca`), ex + el.width - 24, ey + Math.max(0, (el.height - 16) / 2), 16, 16, '▾', 14, 'center'), '#868e96'));
+          break;
+        case 'search':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, '#ffffff'));
+          out.push(withColor(makeText(stableId(`${eid}:ic`), ex + 10, ey + Math.max(0, (el.height - 16) / 2), 16, 16, '⌕', 15, 'left'), '#868e96'));
+          out.push(makeText(stableId(`${eid}:lb`), ex + 30, ey + Math.max(0, (el.height - 16) / 2), el.width - 40, 16, el.label, 14, 'left'));
+          break;
+        case 'textarea':
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, '#ffffff'));
+          out.push(makeText(stableId(`${eid}:lb`), ex + 10, ey + 8, el.width - 20, 16, el.label, 14, 'left'));
+          break;
+        case 'tabs': {
+          const items = splitItems(el.label);
+          out.push(makeLine(stableId(`${eid}:base`), ex, ey + el.height - 1, el.width, 0));
+          const tabW = el.width / Math.max(1, items.length);
+          items.forEach((item, i) => {
+            const active = i === 0; // first tab shown selected
+            out.push(
+              withColor(
+                makeText(stableId(`${eid}:t:${i}`), ex + i * tabW, ey + Math.max(0, (el.height - 16) / 2) - 2, tabW, 16, item, 14, 'center'),
+                active ? '#1e1e1e' : '#868e96',
+              ),
+            );
+            if (active) {
+              out.push(withColor(makeLine(stableId(`${eid}:u:${i}`), ex + i * tabW + 8, ey + el.height - 1, tabW - 16, 0), '#1e1e1e'));
+            }
+          });
+          break;
+        }
+        case 'list': {
+          const items = splitItems(el.label);
+          const rowH = el.height / Math.max(1, items.length);
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, '#ffffff', { type: 3 }));
+          items.forEach((item, i) => {
+            const ry = ey + i * rowH;
+            if (i > 0) out.push(makeLine(stableId(`${eid}:d:${i}`), ex, ry, el.width, 0));
+            out.push(makeText(stableId(`${eid}:i:${i}`), ex + 12, ry + Math.max(0, (rowH - 16) / 2), el.width - 24, 16, item, 14, 'left'));
+          });
+          break;
+        }
+        case 'badge': {
+          const v = el.variant ?? 'muted';
+          out.push(makeRect(eid, ex, ey, el.width, el.height, ACCENT_STROKE[v], ACCENT_FILL[v], { type: 3 }));
+          out.push(withColor(makeText(stableId(`${eid}:t`), ex, ey + Math.max(0, (el.height - 12) / 2), el.width, 12, el.label, 12, 'center'), ACCENT_STROKE[v]));
+          break;
+        }
+        case 'avatar': {
+          const stroke = el.variant ? ACCENT_STROKE[el.variant] : STROKE;
+          const fill = el.variant ? ACCENT_FILL[el.variant] : FILL_SOFT;
+          out.push({ ...makeRect(eid, ex, ey, el.width, el.height, stroke, fill, { type: 3 }), type: 'ellipse' });
+          const initials = el.label.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+          if (initials) {
+            out.push(withColor(makeText(stableId(`${eid}:in`), ex, ey + Math.max(0, (el.height - 13) / 2), el.width, 13, initials, 13, 'center'), stroke));
+          }
+          break;
+        }
+        case 'progress': {
+          const frac = parseFraction(el.label);
+          const barFill = el.variant ? ACCENT_STROKE[el.variant] : ACCENT_STROKE.muted;
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT, { type: 3 }));
+          out.push(makeRect(stableId(`${eid}:fill`), ex, ey, Math.max(2, Math.round(el.width * frac)), el.height, barFill, barFill, { type: 3 }));
+          break;
+        }
+        case 'toggle': {
+          const on = el.variant === 'active';
+          const trackStroke = on ? ACCENT_STROKE.active : STROKE;
+          const trackFill = on ? ACCENT_STROKE.active : FILL_BUTTON;
+          out.push(makeRect(eid, ex, ey, el.width, el.height, trackStroke, trackFill, { type: 3 }));
+          const knob = el.height - 6;
+          const kx = on ? ex + el.width - knob - 3 : ex + 3;
+          out.push({ ...makeRect(stableId(`${eid}:knob`), kx, ey + 3, knob, knob, trackStroke, '#ffffff', { type: 3 }), type: 'ellipse' });
+          break;
+        }
+        case 'checkbox': {
+          const on = el.variant === 'active';
+          const box = 18;
+          const by = ey + Math.max(0, (el.height - box) / 2);
+          out.push(makeRect(eid, ex, by, box, box, on ? ACCENT_STROKE.active : STROKE, on ? ACCENT_STROKE.active : '#ffffff', null));
+          if (on) out.push(withColor(makeText(stableId(`${eid}:ck`), ex, by + 1, box, 14, '✓', 13, 'center'), '#ffffff'));
+          if (el.label) out.push(makeText(stableId(`${eid}:lb`), ex + box + 8, ey + Math.max(0, (el.height - 16) / 2), el.width - box - 8, 16, el.label, 14, 'left'));
+          break;
+        }
+        case 'radio': {
+          const on = el.variant === 'active';
+          const d = 18;
+          const by = ey + Math.max(0, (el.height - d) / 2);
+          out.push({ ...makeRect(eid, ex, by, d, d, on ? ACCENT_STROKE.active : STROKE, '#ffffff', { type: 3 }), type: 'ellipse' });
+          if (on) out.push({ ...makeRect(stableId(`${eid}:dot`), ex + 5, by + 5, d - 10, d - 10, ACCENT_STROKE.active, ACCENT_STROKE.active, { type: 3 }), type: 'ellipse' });
+          if (el.label) out.push(makeText(stableId(`${eid}:lb`), ex + d + 8, ey + Math.max(0, (el.height - 16) / 2), el.width - d - 8, 16, el.label, 14, 'left'));
+          break;
+        }
+        case 'chart': {
+          out.push(makeRect(eid, ex, ey, el.width, el.height, STROKE, FILL_SOFT, { type: 3 }));
+          out.push(makeLine(stableId(`${eid}:ax`), ex + 30, ey + 12, 0, el.height - 42));
+          out.push(makeLine(stableId(`${eid}:ay`), ex + 30, ey + el.height - 30, el.width - 50, 0));
+          const bars = 4;
+          const slot = (el.width - 70) / bars;
+          const bw = slot * 0.55;
+          const span = Math.max(20, el.height - 70);
+          for (let i = 0; i < bars; i++) {
+            const bh = 24 + ((i * 41) % span);
+            const bxp = ex + 40 + i * slot;
+            out.push(makeRect(stableId(`${eid}:b:${i}`), bxp, ey + el.height - 30 - bh, bw, bh, STROKE, '#ced4da', { type: 3 }));
+          }
+          out.push(withColor(makeText(stableId(`${eid}:lb`), ex, ey + el.height - 16, el.width, 14, el.label || 'chart', 12, 'center'), '#868e96'));
+          break;
+        }
       }
     }
   });
-
-  // Flow markers: render `→(N)` next to the source screen's last button
-  // (or the screen header if no button exists). No arrow lines — keeps
-  // the canvas free of cross-screen overlap.
-  for (const [i, flow] of ast.flows.entries()) {
-    const targetNum = screenNumber.get(flow.to.toLowerCase());
-    if (targetNum === undefined) continue;
-    const anchor =
-      screenAnchor.get(flow.from.toLowerCase()) ??
-      screenHeaderAnchor.get(flow.from.toLowerCase());
-    if (!anchor) continue;
-    out.push(
-      withColor(
-        makeText(
-          stableId(`flow-marker:${flow.from}->${flow.to}:${i}`),
-          anchor.rightX + 8,
-          anchor.midY,
-          56,
-          18,
-          `→(${targetNum})`,
-          13,
-          'left',
-        ),
-        FLOW_ACCENT,
-      ),
-    );
-  }
 
   return out;
 }
@@ -1188,6 +1670,16 @@ function relationLabel(rel: DomainRelation): string {
 
 function truncateLabel(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * How many characters of the hand-drawn font fit in `widthPx` at `fontSize`.
+ * Used to clip table cells to their column so long content ("Client dinner —
+ * Acme pitch") truncates with an ellipsis instead of bleeding into the next
+ * column. The 0.52 factor is an average glyph-width ratio for Excalifont.
+ */
+function fitChars(widthPx: number, fontSize: number): number {
+  return Math.max(3, Math.floor(widthPx / (fontSize * 0.52)));
 }
 
 // ---------- Element factories ----------
