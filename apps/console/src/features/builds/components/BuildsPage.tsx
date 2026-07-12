@@ -30,7 +30,11 @@ import {
   Typography,
   type TextFieldProps,
 } from "@wso2/oxygen-ui";
+import { Link } from "@tanstack/react-router";
+import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
+import { useProject, useProjectStatus } from "../../projects/api/queries";
+import { phaseChip } from "../../projects/lib/phaseChip";
 import { TasksList } from "../../tasks/components/TasksList";
 import { useBuilds } from "../api/queries";
 
@@ -48,27 +52,53 @@ export function BuildsPage({
   tag: string | undefined;
   onTagChange: (tag: string | undefined) => void;
 }) {
+  const project = useProject(projectName);
+  const status = useProjectStatus(projectName);
   const builds = useBuilds(projectName);
+
+  // The header is unconditional (it renders through every state below) so
+  // the back link and project status stay reachable even while builds are
+  // loading or failed to load — matching the pattern every other adopted
+  // page uses (render the header, then branch on the body).
+  const header = (
+    <PageHeader
+      title="Builds"
+      {...(project.data && {
+        subtitle: project.data.displayName ?? project.data.name,
+      })}
+      {...(status.data && { status: phaseChip(status.data) })}
+      backTo={{
+        link: <Link to="/projects/$projectName" params={{ projectName }} />,
+        label: "Back to overview",
+      }}
+    />
+  );
 
   if (builds.isPending) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-        <CircularProgress aria-label="Loading builds" />
-      </Box>
+      <>
+        {header}
+        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
+          <CircularProgress aria-label="Loading builds" />
+        </Box>
+      </>
     );
   }
 
   if (builds.isError) {
     return (
-      <Alert
-        severity="error"
-        action={<Button onClick={() => void builds.refetch()}>Retry</Button>}
-      >
-        Failed to load builds
-        {builds.error instanceof Error && builds.error.message
-          ? `: ${builds.error.message}`
-          : ""}
-      </Alert>
+      <>
+        {header}
+        <Alert
+          severity="error"
+          action={<Button onClick={() => void builds.refetch()}>Retry</Button>}
+        >
+          Failed to load builds
+          {builds.error instanceof Error && builds.error.message
+            ? `: ${builds.error.message}`
+            : ""}
+        </Alert>
+      </>
     );
   }
 
@@ -78,15 +108,19 @@ export function BuildsPage({
   const selected = builds.data.find((b) => b.tag === tag) ?? newest;
   if (!newest || !selected) {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
-        No builds yet — publish your spec and click Build in the spec view to
-        start the first one.
-      </Typography>
+      <>
+        {header}
+        <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
+          No builds yet — publish your spec and click Build in the spec view to
+          start the first one.
+        </Typography>
+      </>
     );
   }
 
   return (
     <>
+      {header}
       <Stack
         direction="row"
         spacing={2}

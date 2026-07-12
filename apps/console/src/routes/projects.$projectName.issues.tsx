@@ -16,37 +16,14 @@
  * under the License.
  */
 
-import { Button } from "@wso2/oxygen-ui";
-import { createFileRoute, createLink } from "@tanstack/react-router";
-import { ArrowLeft, CircleAlert } from "@wso2/oxygen-ui-icons-react";
-import { EmptyState } from "../components/EmptyState";
-
-// Router-aware Button: renders an anchor with proper href + SPA navigation.
-const LinkButton = createLink(Button);
+import { createFileRoute } from "@tanstack/react-router";
+import { IssuesPage } from "../features/projects/components/IssuesPage";
 
 export const Route = createFileRoute("/projects/$projectName/issues")({
-  component: IssuesPlaceholderRoute,
+  component: IssuesRoute,
 });
 
-// Placeholder by decision (#173): Issues is the future surface for issues
-// the SRE agent raises against the running project; its own feature will
-// land the content.
-function IssuesPlaceholderRoute() {
+function IssuesRoute() {
   const { projectName } = Route.useParams();
-  return (
-    <EmptyState
-      icon={<CircleAlert size={48} />}
-      title="Issues is on its way"
-      description="Issues the SRE agent raises against the running project will land here — triage them and follow their fixes."
-      action={
-        <LinkButton
-          startIcon={<ArrowLeft size={18} />}
-          to="/projects/$projectName"
-          params={{ projectName }}
-        >
-          Back to overview
-        </LinkButton>
-      }
-    />
-  );
+  return <IssuesPage projectName={projectName} />;
 }

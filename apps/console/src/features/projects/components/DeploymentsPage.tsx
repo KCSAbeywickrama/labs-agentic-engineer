@@ -30,10 +30,13 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
+import { Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
+import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import {
   useComponentsDeployments,
+  useProject,
   useProjectComponents,
   useProjectStatus,
 } from "../api/queries";
@@ -41,6 +44,7 @@ import {
   groupDeploymentCards,
   type DeploymentCard,
 } from "../lib/deploymentRows";
+import { phaseChip } from "../lib/phaseChip";
 
 // Chip vocabulary for a card's state (#216): the label keeps the backend's
 // raw condition reason (it's the vocabulary operators see in OpenChoreo),
@@ -235,6 +239,7 @@ function BoardColumn({
 // uses — no bespoke aggregate), so a single component's failed read
 // degrades to a warning instead of blanking the board.
 export function DeploymentsPage({ projectName }: { projectName: string }) {
+  const project = useProject(projectName);
   const components = useProjectComponents(projectName);
   const componentNames = (components.data?.items ?? []).map((c) => c.name);
   const deployments = useComponentsDeployments(projectName, componentNames);
@@ -243,36 +248,61 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const status = useProjectStatus(projectName);
   const devVersion = status.data?.deploy.version || undefined;
 
+  // Unconditional, like Builds (Task 5): the back link and project status
+  // stay reachable through every state below, not just the loaded board.
+  const header = (
+    <PageHeader
+      title="Deployments"
+      {...(project.data && {
+        subtitle: project.data.displayName ?? project.data.name,
+      })}
+      {...(status.data && { status: phaseChip(status.data) })}
+      backTo={{
+        link: <Link to="/projects/$projectName" params={{ projectName }} />,
+        label: "Back to overview",
+      }}
+    />
+  );
+
   if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-        <CircularProgress aria-label="Loading deployments" />
-      </Box>
+      <>
+        {header}
+        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
+          <CircularProgress aria-label="Loading deployments" />
+        </Box>
+      </>
     );
   }
 
   if (components.isError) {
     return (
-      <Alert
-        severity="error"
-        action={
-          <Button onClick={() => void components.refetch()}>Retry</Button>
-        }
-      >
-        Failed to load deployments
-        {components.error instanceof Error && components.error.message
-          ? `: ${components.error.message}`
-          : ""}
-      </Alert>
+      <>
+        {header}
+        <Alert
+          severity="error"
+          action={
+            <Button onClick={() => void components.refetch()}>Retry</Button>
+          }
+        >
+          Failed to load deployments
+          {components.error instanceof Error && components.error.message
+            ? `: ${components.error.message}`
+            : ""}
+        </Alert>
+      </>
     );
   }
 
   if (componentNames.length === 0) {
     return (
-      <EmptyState
-        compact
-        description="Nothing to deploy yet — components appear here once the published design produces them, and agents deploy to dev on merge."
-      />
+      <>
+        {header}
+        <EmptyState
+          compact
+          description="Nothing to deploy yet — components appear here once the published design produces them, and agents deploy to dev on merge."
+        />
+      </>
     );
   }
 
@@ -283,6 +313,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
 
   return (
     <>
+      {header}
       {deployments.failedCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Deployments for {deployments.failedCount} component
