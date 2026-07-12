@@ -1,0 +1,80 @@
+{{- if .Values.temporal.enabled }}
+# Temporal server that drives the aep-api devflow workflows
+# (services/aep-api/internal/feature/devflow). aep-api runs the Temporal WORKER
+# in-process and dials this frontend via TEMPORAL_HOSTPORT (see the aep-api
+# Deployment). Unlike the setup.sh path (an in-memory `temporal server
+# start-dev`), this uses the temporalio/auto-setup image backed by the chart's
+# existing postgres StatefulSet, so workflow state is durable and survives a
+# Temporal pod restart. auto-setup creates the schema, creates the temporal +
+# temporal_visibility databases (SKIP_DB_CREATE=false), and registers the
+# `default` namespace on startup — all idempotently.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: temporal-frontend
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: wso2-aep
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-frontend
+  template:
+    metadata:
+      labels:
+        app: temporal-frontend
+        app.kubernetes.io/part-of: wso2-aep
+    spec:
+      containers:
+        - name: temporal
+          image: "{{ .Values.temporal.image }}"
+          imagePullPolicy: {{ .Values.temporal.imagePullPolicy }}
+          ports:
+            - containerPort: 7233
+              name: grpc
+          env:
+            # PostgreSQL persistence, reusing the chart's postgres StatefulSet.
+            # DB=postgres12 selects the pgx (PG 12+) driver — it is the driver
+            # name, not the server version (the chart runs postgres 16).
+            - name: DB
+              value: "postgres12"
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_SEEDS
+              value: "postgres.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            # POSTGRES_PWD reuses the same secret aep-api/postgres already use.
+            # auto-setup issues CREATE DATABASE, which needs a role with
+            # `createdb`; the official postgres image creates POSTGRES_USER as a
+            # superuser, so this works as-is. If a hardened postgres without
+            # createdb is ever substituted, pre-create the two databases and set
+            # SKIP_DB_CREATE=true.
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DBNAME
+              value: {{ .Values.temporal.db.name | quote }}
+            - name: VISIBILITY_DBNAME
+              value: {{ .Values.temporal.db.visibilityName | quote }}
+            # SQL-backed visibility (no Elasticsearch).
+            - name: ENABLE_ES
+              value: "false"
+            - name: SKIP_DB_CREATE
+              value: "false"
+            # Namespace aep-api connects to (TEMPORAL_NAMESPACE). Must match the
+            # namespace value wired into the aep-api Deployment.
+            - name: DEFAULT_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+          readinessProbe:
+            tcpSocket:
+              port: 7233
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources: {{ toYaml .Values.temporal.resources | nindent 12 }}
+{{- end }}

@@ -56,7 +56,8 @@ export const projectHandlers = [
     "*/api/v1/projects/:projectName/components/:componentName/openapi",
     ({ params }) => respond(() => componentOpenApi(String(params.componentName))),
   ),
-  // A web app's dev deployment URL for the overview's "Open app" link (#196).
+  // Per-component release bindings — the overview's "Open app" link (#196)
+  // and the Deployments board's fan-out (#216).
   http.get(
     "*/api/v1/projects/:projectName/components/:componentName/deployments",
     ({ params }) =>

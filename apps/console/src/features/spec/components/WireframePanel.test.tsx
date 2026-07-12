@@ -106,13 +106,37 @@ describe("WireframePanel streaming", () => {
     expect(Number(screen.getByTestId("excalidraw").dataset.elements)).toBe(good);
   });
 
-  it("prefers the committed scene once it resolves (no streaming chip)", () => {
+  it("prefers the LIVE doc over a committed scene (an edit-turn's committed copy is stale)", () => {
     const committed = JSON.stringify({ elements: [{ type: "rectangle" }] });
     mockDerived.mockReturnValue({ scene: committed, isPending: false, isError: false });
     const doc = new Y.Doc();
     const ytext = doc.getText(DSL_PATH);
-    ytext.insert(0, 'screen Old "stale live text"\n');
+    ytext.insert(0, 'screen Fresh "the agent just rewrote this"\n  heading "New"\n');
+    renderPanel(makeCollab(ytext));
+
+    expect(screen.getByText("Drawing…")).toBeInTheDocument();
+    // renders the compiled live DSL (many elements), not the 1-element committed scene
+    expect(Number(screen.getByTestId("excalidraw").dataset.elements)).toBeGreaterThan(1);
+  });
+
+  it("renders the seeded doc content WITHOUT the chip when no agent is around", () => {
+    // Rooms are seeded with committed files, so browsing between turns reads
+    // the doc — the "Drawing…" chip must mean "agent generating", not that.
+    mockDerived.mockReturnValue({ scene: null, isPending: false, isError: true });
+    const doc = new Y.Doc();
+    const ytext = doc.getText(DSL_PATH);
+    ytext.insert(0, 'screen Catalog "Seeded committed content"\n  heading "Browse"\n');
     renderPanel(makeCollab(ytext, false));
+
+    expect(screen.queryByText("Drawing…")).not.toBeInTheDocument();
+    expect(Number(screen.getByTestId("excalidraw").dataset.elements)).toBeGreaterThan(0);
+  });
+
+  it("renders the committed scene when the live doc is empty (collab-less base path)", () => {
+    const committed = JSON.stringify({ elements: [{ type: "rectangle" }] });
+    mockDerived.mockReturnValue({ scene: committed, isPending: false, isError: false });
+    const doc = new Y.Doc();
+    renderPanel(makeCollab(doc.getText(DSL_PATH), false));
 
     expect(screen.queryByText("Drawing…")).not.toBeInTheDocument();
     expect(screen.getByTestId("excalidraw").dataset.elements).toBe("1");
