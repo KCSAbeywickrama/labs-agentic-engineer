@@ -17,10 +17,10 @@
  */
 
 /**
- * Write-gate behavior for wireframes `.dsl` layout: the compiler renders
- * coordinates verbatim, so out-of-frame and partially-overlapping elements are
- * rejected at write time with coordinates the model can self-correct from —
- * the same seam as the design.json schema gate.
+ * Write-gate behavior for wireframes `.dsl` syntax: the flow dialect computes
+ * geometry from structure, so the gate polices STRUCTURE — invalid lines would
+ * be silently dropped by the tolerant compile, which is how content quietly
+ * goes missing. Same seam as the design.json schema gate.
  */
 
 import { test } from "node:test";
@@ -34,55 +34,56 @@ const PATH = "specs/design/components/shop-webapp/wireframes.dsl";
 const CLEAN = `screen Dashboard "Admin overview"
   navbar "Hub"
   sidebar "Home | Reports"
-  heading "Overview" 280,84
-  card "Open items | 47 | across 5 projects" 280,160 280x160
-  card "Overdue | 12 | needs escalation" 576,160 280x160
+  row
+    heading "Good morning"
+    right
+    button "New audit" primary
+  row
+    card "Open items | 47 | across 5 projects"
+    card "Overdue | 12 | needs escalation"
+  table "A | B"
+    row "1 | 2"
 `;
 
-const OVERLAPPING = `screen Dashboard "Admin overview"
+const LEGACY = `screen Dashboard "Admin overview"
   navbar "Hub"
-  card "Overdue | 12 | needs escalation" 780,160 280x160
-  card "Open findings | 5 | 2 high severity" 1020,160 280x160
+  heading "Overview" 280,84
+  card "Open | 47 | stuff" 280,160 280x160
 `;
 
-test("accepts a clean wireframe layout", () => {
+const TYPO = `screen Dashboard
+  navbar "Hub"
+  crd "Open items | 47 | across 5 projects"
+`;
+
+test("accepts a clean flow-dialect wireframe", () => {
   assert.equal(checkWireframeLayout(PATH, CLEAN), null);
 });
 
-test("rejects partially overlapping elements with coordinates in the message", () => {
-  const problem = checkWireframeLayout(PATH, OVERLAPPING);
-  assert.equal(problem?.code, "LAYOUT_VIOLATION");
-  assert.match(problem!.message, /Overdue/);
-  assert.match(problem!.message, /Open findings/);
-  assert.match(problem!.message, /x1020/);
+test("rejects the retired coordinate dialect with line numbers", () => {
+  const problem = checkWireframeLayout(PATH, LEGACY);
+  assert.equal(problem?.code, "INVALID_DSL");
+  assert.match(problem!.message, /line 3/);
+  assert.match(problem!.message, /coordinates/);
 });
 
-test("rejects an element extending past the frame", () => {
-  const problem = checkWireframeLayout(
-    PATH,
-    `screen S\n  select "All frameworks" 1230,104 168x36\n`,
-  );
-  assert.equal(problem?.code, "LAYOUT_VIOLATION");
-  assert.match(problem!.message, /frame/);
+test("rejects an unknown element kind (a typo would silently vanish)", () => {
+  const problem = checkWireframeLayout(PATH, TYPO);
+  assert.equal(problem?.code, "INVALID_DSL");
+  assert.match(problem!.message, /line 3/);
+  assert.match(problem!.message, /crd/);
 });
 
 test("ignores non-wireframe paths and non-dsl files", () => {
-  assert.equal(checkWireframeLayout("specs/requirements/requirements.md", OVERLAPPING), null);
-  assert.equal(
-    checkWireframeLayout("specs/design/components/api/erd.dsl", OVERLAPPING),
-    null,
-  );
+  assert.equal(checkWireframeLayout("specs/requirements/requirements.md", LEGACY), null);
+  assert.equal(checkWireframeLayout("specs/design/components/api/erd.dsl", LEGACY), null);
 });
 
-test("does not gate syntax — an unparseable .dsl passes this gate", () => {
-  assert.equal(checkWireframeLayout(PATH, "garbage {{{"), null);
-});
-
-test("FileBundle.addFile rejects an overlapping wireframe and stays unchanged", () => {
+test("FileBundle.addFile rejects a bad wireframe and stays unchanged", () => {
   const bundle = new FileBundle({});
-  const res = bundle.addFile(PATH, OVERLAPPING);
+  const res = bundle.addFile(PATH, TYPO);
   assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "LAYOUT_VIOLATION");
+  if (!res.ok) assert.equal(res.code, "INVALID_DSL");
   assert.equal(bundle.has(PATH), false);
 });
 
@@ -93,14 +94,14 @@ test("FileBundle.addFile applies a clean wireframe", () => {
   assert.equal(bundle.has(PATH), true);
 });
 
-test("FileBundle.editFile that introduces an overlap is rejected, file unchanged", () => {
+test("FileBundle.editFile that introduces bad syntax is rejected, file unchanged", () => {
   const bundle = new FileBundle({ [PATH]: CLEAN });
   const res = bundle.editFile(
     PATH,
-    'card "Overdue | 12 | needs escalation" 576,160 280x160',
-    'card "Overdue | 12 | needs escalation" 500,160 280x160',
+    '    card "Overdue | 12 | needs escalation"',
+    '    crd "Overdue | 12 | needs escalation"',
   );
   assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "LAYOUT_VIOLATION");
-  assert.match(bundle.read(PATH) ?? "", /576,160/);
+  if (!res.ok) assert.equal(res.code, "INVALID_DSL");
+  assert.match(bundle.read(PATH) ?? "", /card "Overdue/);
 });

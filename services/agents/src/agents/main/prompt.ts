@@ -44,6 +44,10 @@ Reacting to tool results (each result tells you the next move):
   schema problem, listed in the message); re-emit the WHOLE corrected file with removeFile + addFile.
   skillsApplied (the skills that component's build needs) is a per-component key inside its design.json,
   not project-level frontmatter.
+- INVALID_DSL — a wireframes .dsl write was rejected (bad lines listed with line numbers: an unknown
+  keyword, a misplaced left/right/table-row, or retired x,y coordinates). Fix EVERY listed line and
+  re-emit the WHOLE corrected file with removeFile + addFile — layout comes from structure, never
+  from coordinates.
 
 Keep prose outside tool calls to a single short sentence. When the instruction is fully applied, stop.`;
 

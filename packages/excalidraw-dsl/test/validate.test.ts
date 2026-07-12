@@ -16,111 +16,73 @@
  * under the License.
  */
 
+/**
+ * validateWireframeLayout is the ORACLE for the flow layout engine: overlap
+ * and out-of-frame are inexpressible in the dialect, so the oracle must come
+ * back clean for anything the engine lays out (asserted here and in
+ * layout.test.ts). validateWireframeSyntax is the write-gate's strict check.
+ */
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateWireframeLayout } from "../src/index.js";
+import { validateWireframeLayout, validateWireframeSyntax } from "../src/index.js";
 
-test("a clean screen produces no issues", () => {
+test("the oracle is clean for a dense flow screen (rows, split, card nesting)", () => {
   const issues = validateWireframeLayout(`screen Dashboard "Admin overview"
   navbar "Hub"
-  sidebar "Home | Reports"
-  heading "Overview" 280,84
-  card "Open items | 47 | across 5 projects" 280,160 280x160
-  card "Overdue | 12 | needs escalation" 576,160 280x160
-  table "A | B" 280,360 940x200
-  button "New" 1080,84 140x40 primary
+  sidebar "Home | Audits | Reports"
+  row
+    heading "Good morning"
+    right
+    search "Search"
+    select "All frameworks"
+  row
+    card "Open | 128 | across audits"
+    card "Overdue | 14 | escalate"
+    card "Review | 32 | awaiting"
+  split 60/40
+    left
+      table "A | B"
+        row "1 | 2"
+    right
+      card "Discussion"
+        text "hello"
+        badge "Open" info
 `);
   assert.deepEqual(issues, []);
 });
 
-test("two partially overlapping cards are flagged with coordinates", () => {
-  // Mirrors the real failure: "Overdue" 1180..1460 vs "Open findings" 1420..1700.
-  const issues = validateWireframeLayout(`screen S
-  card "Overdue | 12 | needs escalation" 1180,240 280x160
-  card "Open findings | 5 | 2 high severity" 1420,240 280x160
-`);
-  assert.ok(issues.some((i) => /Overdue/.test(i) && /Open findings/.test(i) && /overlap/i.test(i)),
-    `expected an overlap issue, got: ${JSON.stringify(issues)}`);
-});
-
-test("a badge fully inside a card is layering, not an overlap", () => {
-  const issues = validateWireframeLayout(`screen S
-  card "SOC 2 · EXTERNAL" 60,120 400x180
-  badge "On track" 354,132 90x28 success
-  text "68 of 92 controls" 76,260
-`);
-  assert.deepEqual(issues, []);
-});
-
-test("a badge straddling its card's border is a partial overlap", () => {
-  const issues = validateWireframeLayout(`screen S
-  card "SOC 2" 60,120 400x180
-  badge "On track" 420,132 90x28 success
-`);
-  assert.ok(issues.some((i) => /badge/.test(i) && /overlap/i.test(i)),
-    `expected the straddling badge flagged, got: ${JSON.stringify(issues)}`);
-});
-
-test("an element extending past the frame's right edge is flagged", () => {
-  // Mirrors the real failure: a select whose right edge passes 1280.
-  const issues = validateWireframeLayout(`screen S
-  select "All frameworks" 1230,104 168x36
-`);
-  assert.ok(issues.some((i) => /All frameworks/.test(i) && /frame/i.test(i)),
-    `expected an out-of-frame issue, got: ${JSON.stringify(issues)}`);
-});
-
-test("an element below the frame's bottom edge is flagged", () => {
-  const issues = validateWireframeLayout(`screen S
-  button "Save" 280,780 140x40
-`);
-  assert.ok(issues.some((i) => /Save/.test(i) && /frame/i.test(i)));
-});
-
-test("content under the sidebar rail is flagged only when a sidebar exists", () => {
-  const withRail = validateWireframeLayout(`screen S
-  sidebar "Home | Reports"
-  heading "Overview" 40,84
-`);
-  assert.ok(withRail.some((i) => /sidebar/i.test(i)),
-    `expected an under-sidebar issue, got: ${JSON.stringify(withRail)}`);
-
-  const noRail = validateWireframeLayout(`screen S
-  heading "Overview" 40,84
-`);
-  assert.deepEqual(noRail, []);
-});
-
-test("content under the navbar band is flagged only when a navbar exists", () => {
-  const withBar = validateWireframeLayout(`screen S
-  navbar "Hub"
-  text "EYEBROW" 280,40
-`);
-  assert.ok(withBar.some((i) => /navbar/i.test(i)),
-    `expected an under-navbar issue, got: ${JSON.stringify(withBar)}`);
-
-  const noBar = validateWireframeLayout(`screen S
-  text "EYEBROW" 280,40
-`);
-  assert.deepEqual(noBar, []);
-});
-
-test("free text is never overlap-checked (estimated widths would false-positive)", () => {
-  const issues = validateWireframeLayout(`screen S
-  heading "A very long heading that stretches far to the right side" 280,84
-  text "another long line of copy sitting near the heading row" 600,84
-`);
-  assert.deepEqual(issues, []);
-});
-
-test("unparseable DSL yields no layout issues (the compile gate owns syntax)", () => {
+test("the oracle returns no issues for unparseable or legacy sources (syntax owns those)", () => {
   assert.deepEqual(validateWireframeLayout("garbage {{{"), []);
+  assert.deepEqual(validateWireframeLayout('screen S\n  heading "Hi" 280,84\n'), []);
 });
 
-test("side-by-side elements sharing an edge do not overlap", () => {
-  const issues = validateWireframeLayout(`screen S
-  button "Cancel" 600,584 140x40
-  button "Create" 740,584 160x40 primary
+test("syntax: the retired coordinate dialect is reported with the line number", () => {
+  const errs = validateWireframeSyntax('screen S\n  heading "Overview" 280,84\n');
+  assert.ok(errs.some((e) => /line 2/.test(e) && /coordinates/.test(e)), `got: ${errs}`);
+});
+
+test("syntax: a quoted row outside a table is reported", () => {
+  const errs = validateWireframeSyntax('screen S\n  row "a | b"\n');
+  assert.ok(errs.some((e) => /line 2/.test(e) && /table/.test(e)), `got: ${errs}`);
+});
+
+test("syntax: split percentages parse and misplaced groups are reported", () => {
+  const ok = validateWireframeSyntax(`screen S
+  split 60/40
+    left
+      text "a"
+    right
+      text "b"
 `);
-  assert.deepEqual(issues, []);
+  assert.deepEqual(ok, []);
+  const bad = validateWireframeSyntax('screen S\n  right\n');
+  assert.ok(bad.some((e) => /line 2/.test(e)), `got: ${bad}`);
+});
+
+test("syntax: an explicit WxH is still legal anywhere", () => {
+  assert.deepEqual(
+    validateWireframeSyntax('screen S\n  chart "Trend" 600x220\n'),
+    [],
+  );
 });

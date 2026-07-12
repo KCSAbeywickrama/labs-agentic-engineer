@@ -87,6 +87,9 @@ interface WireframeElement {
   rows?: string[][];
   /** Screen this element navigates to, from a trailing `-> ScreenName`. */
   navTo?: string;
+  /** True when the author gave an explicit `WxH` (layout keeps it). */
+  wSet?: boolean;
+  hSet?: boolean;
 }
 
 interface WireframeScreen {
@@ -344,77 +347,406 @@ export function validateWireframeLayout(dsl: string): string[] {
 // ---------- Wireframes parser ----------
 
 const QUOTED = /"((?:[^"\\]|\\.)*)"/;
-const COORDS = /(\d+)\s*,\s*(\d+)/;
 const SIZE = /(\d+)\s*x\s*(\d+)/;
+/** The retired coordinate dialect's `x,y` token — its presence means "regenerate". */
+const LEGACY_COORDS = /(?:^|\s)\d+\s*,\s*\d+(?:\s|$)/;
+
+// ---------- Flow tree (parse output, pre-layout) ----------
+//
+// The DSL carries STRUCTURE (stack / row / split / card nesting); the layout
+// pass below computes every pixel. Overlap and out-of-frame are inexpressible.
+
+interface ElNode {
+  type: 'el';
+  el: WireframeElement;
+  /** Nested children — only a `card` container carries them. */
+  children: ElNode[];
+}
+interface RowNode {
+  type: 'row';
+  children: ElNode[];
+  /** Index in `children` where right-edge packing starts; -1 = none. */
+  rightFrom: number;
+}
+interface SplitNode {
+  type: 'split';
+  leftPct: number;
+  left: FlowNode[];
+  right: FlowNode[];
+}
+type FlowNode = ElNode | RowNode | SplitNode;
+
+interface FlowScreen extends WireframeScreen {
+  chrome: WireframeElement[];
+  tree: FlowNode[];
+  /** True when the screen declared an explicit height (it stays a minimum). */
+  hDeclared: boolean;
+}
 
 function parseWireframesDsl(dsl: string): WireframeAst {
+  const { ast, legacy } = buildWireframes(dsl, null);
+  if (legacy) {
+    throw new Error(
+      'this file uses the retired coordinate dialect (absolute x,y positions) — regenerate the wireframes to get the flow dialect',
+    );
+  }
+  return ast;
+}
+
+/**
+ * Strict-syntax check for the write-gate: unknown keywords, misplaced
+ * `left`/`right`/table-`row` lines, and retired-dialect coordinates are
+ * reported with line numbers. The compile path stays tolerant (bad lines are
+ * skipped) so streamed prefixes keep previewing.
+ */
+export function validateWireframeSyntax(dsl: string): string[] {
+  const errors: string[] = [];
+  buildWireframes(dsl, errors);
+  return errors;
+}
+
+interface Ctx {
+  level: number;
+  kind: 'root' | 'row' | 'split' | 'col' | 'card' | 'table';
+  nodes?: FlowNode[]; // root / col
+  row?: RowNode;
+  split?: SplitNode;
+  card?: ElNode;
+  table?: WireframeElement;
+}
+
+function buildWireframes(
+  dsl: string,
+  errors: string[] | null,
+): { ast: WireframeAst; legacy: boolean } {
   const ast: WireframeAst = { screens: [], flows: [] };
-  let currentScreen: WireframeScreen | null = null;
+  let screen: FlowScreen | null = null;
+  let stack: Ctx[] = [];
   let inFlow = false;
+  let legacy = false;
+  const err = (no: number, msg: string) => errors?.push(`line ${no}: ${msg}`);
 
-  for (const rawLine of dsl.split(/\r?\n/)) {
-    const line = rawLine.replace(/\s+$/, '');
-    if (line.trim().length === 0) continue;
-    if (line.trim().startsWith('//') || line.trim().startsWith('#')) continue;
+  const lines = dsl.split(/\r?\n/);
+  for (let no = 1; no <= lines.length; no++) {
+    const raw = lines[no - 1]!.replace(/\s+$/, '');
+    const trimmed = raw.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('//') || trimmed.startsWith('#')) continue;
+    const level = Math.floor((raw.length - raw.replace(/^[ \t]+/, '').length + 1) / 2);
 
-    const indented = /^\s+/.test(line);
-    const trimmed = line.trim();
-
-    if (!indented) {
-      // Top-level: screen / flow.
-      // `screen <Name> ["what this view is for"] [WxH]` — the quoted
-      // description (optional) renders as a subtitle under the screen title.
+    if (level === 0) {
       const screenMatch =
         /^screen\s+([\w-]+)(?:\s+"((?:[^"\\]|\\.)*)")?(?:\s+(\d+)\s*x\s*(\d+))?\s*$/i.exec(trimmed);
       if (screenMatch) {
-        currentScreen = {
+        screen = {
           name: screenMatch[1]!.trim(),
           width: screenMatch[3] ? parseInt(screenMatch[3], 10) : DEFAULT_SCREEN_W,
           height: screenMatch[4] ? parseInt(screenMatch[4], 10) : DEFAULT_SCREEN_H,
+          hDeclared: Boolean(screenMatch[4]),
           elements: [],
+          chrome: [],
+          tree: [],
         };
-        if (screenMatch[2]) currentScreen.description = unescapeQuoted(screenMatch[2]);
-        ast.screens.push(currentScreen);
+        if (screenMatch[2]) screen.description = unescapeQuoted(screenMatch[2]);
+        ast.screens.push(screen);
+        stack = [{ level: 0, kind: 'root', nodes: screen.tree }];
         inFlow = false;
         continue;
       }
       if (/^flow\b/i.test(trimmed)) {
-        currentScreen = null;
+        screen = null;
         inFlow = true;
         continue;
       }
-      // Unknown top-level — bail out of any nesting.
-      currentScreen = null;
+      screen = null;
       inFlow = false;
+      err(no, `unknown top-level line ${JSON.stringify(trimmed.slice(0, 40))} — expected \`screen <Name>\``);
       continue;
     }
 
     if (inFlow) {
       const flowMatch = /^([\w-]+)\s*->\s*([\w-]+)$/.exec(trimmed);
-      if (flowMatch) {
-        ast.flows.push({ from: flowMatch[1]!, to: flowMatch[2]! });
+      if (flowMatch) ast.flows.push({ from: flowMatch[1]!, to: flowMatch[2]! });
+      continue;
+    }
+    if (!screen) continue;
+
+    // Find the container this line nests under.
+    while (stack.length > 1 && stack[stack.length - 1]!.level >= level) stack.pop();
+    const parent = stack[stack.length - 1]!;
+
+    // Where a plain stacked node would land in this context.
+    const stackTarget = (): FlowNode[] | null =>
+      parent.kind === 'root' || parent.kind === 'col' ? parent.nodes! : null;
+
+    // --- table body row: `row "cell | cell"` ------------------------------
+    if (/^row\s+"/i.test(trimmed)) {
+      if (parent.kind === 'table' && parent.table) {
+        const q = QUOTED.exec(trimmed);
+        if (q) (parent.table.rows ??= []).push(splitItems(unescapeQuoted(q[1]!)));
+      } else {
+        err(no, 'a quoted `row "…"` is table data and must nest under a `table`');
       }
       continue;
     }
-
-    if (currentScreen) {
-      // `row "a | b | c"` attaches a body row to the screen's most recent
-      // table, so tables can show realistic data instead of empty rules.
-      const rowMatch = /^row\b/i.exec(trimmed);
-      if (rowMatch) {
-        const lastTable = [...currentScreen.elements].reverse().find((e) => e.kind === 'table');
-        if (lastTable) {
-          const q = QUOTED.exec(trimmed.slice(rowMatch[0].length));
-          if (q) (lastTable.rows ??= []).push(splitItems(unescapeQuoted(q[1]!)));
-        }
+    // --- layout row --------------------------------------------------------
+    if (/^row\s*$/i.test(trimmed)) {
+      const target = stackTarget();
+      if (!target) {
+        err(no, 'a layout `row` can only sit in a screen or split-column stack');
         continue;
       }
-      const el = parseWireframeElement(trimmed);
-      if (el) currentScreen.elements.push(el);
+      const rowNode: RowNode = { type: 'row', children: [], rightFrom: -1 };
+      target.push(rowNode);
+      stack.push({ level, kind: 'row', row: rowNode });
+      continue;
     }
+    // --- split + its columns ----------------------------------------------
+    const splitMatch = /^split\s+(\d+)\s*\/\s*(\d+)\s*$/i.exec(trimmed);
+    if (splitMatch) {
+      const target = stackTarget();
+      if (!target) {
+        err(no, '`split` can only sit in a screen stack');
+        continue;
+      }
+      const node: SplitNode = {
+        type: 'split',
+        leftPct: parseInt(splitMatch[1]!, 10),
+        left: [],
+        right: [],
+      };
+      target.push(node);
+      stack.push({ level, kind: 'split', split: node });
+      continue;
+    }
+    if (/^(left|right)\s*$/i.test(trimmed)) {
+      const word = trimmed.toLowerCase() as 'left' | 'right';
+      if (parent.kind === 'split' && parent.split) {
+        stack.push({
+          level,
+          kind: 'col',
+          nodes: word === 'left' ? parent.split.left : parent.split.right,
+        });
+      } else if (word === 'right' && parent.kind === 'row' && parent.row) {
+        parent.row.rightFrom = parent.row.children.length;
+      } else {
+        err(no, `\`${word}\` only makes sense under a \`split\` (column group) or inside a \`row\` (right-packing marker)`);
+      }
+      continue;
+    }
+    // --- element ------------------------------------------------------------
+    const parsed = parseWireframeElement(trimmed);
+    if (!parsed) {
+      err(no, `unknown element ${JSON.stringify(trimmed.split(/\s/)[0])} — not a DSL keyword or element kind`);
+      continue;
+    }
+    if (parsed.legacy) {
+      legacy = true;
+      err(no, 'absolute x,y coordinates are retired — the layout is computed from structure (stack / row / split); remove the coordinates');
+      continue;
+    }
+    const el = parsed.el;
+    if (el.kind === 'navbar' || el.kind === 'sidebar') {
+      screen.chrome.push(el);
+      continue;
+    }
+    const elNode: ElNode = { type: 'el', el, children: [] };
+    if (parent.kind === 'row' && parent.row) {
+      parent.row.children.push(elNode);
+    } else if (parent.kind === 'card' && parent.card) {
+      parent.card.children.push(elNode);
+    } else {
+      const target = stackTarget();
+      if (!target) {
+        err(no, `an element cannot nest under a \`${parent.kind}\` here`);
+        continue;
+      }
+      target.push(elNode);
+    }
+    // Containers accept children: a card layers its children inside itself;
+    // a table takes `row "…"` data lines.
+    if (el.kind === 'card') stack.push({ level, kind: 'card', card: elNode });
+    else if (el.kind === 'table') stack.push({ level, kind: 'table', table: el });
   }
 
-  return ast;
+  for (const s of ast.screens) layoutScreen(s as FlowScreen);
+  return { ast, legacy };
+}
+
+// ---------- Flow layout engine ----------
+//
+// Pure geometry: walks the flow tree computing every {x,y,w,h} in
+// screen-local coordinates. Deterministic; unit-tested via the rendered
+// scene and the validateWireframeLayout oracle.
+
+const STACK_GAP = 24;
+const ROW_GAP = 16;
+const CARD_PAD = 16;
+const CARD_CHILD_GAP = 12;
+const SPLIT_GUTTER = 40;
+const MARGIN = 40;
+const CONTENT_TOP = 76; // below the 56px navbar band
+
+/** Kinds that share a row's remaining width (everything else keeps intrinsic). */
+const FLEX_KINDS = new Set<WireframeKind>([
+  'card', 'input', 'select', 'search', 'textarea', 'chart', 'image', 'list',
+  'tabs', 'progress', 'table', 'rect',
+]);
+/** Kinds that take the full container width when stacked. */
+const FILL_KINDS = new Set<WireframeKind>(['table', 'chart', 'divider']);
+
+function resolveStackSize(el: WireframeElement, containerW: number): void {
+  if (!el.wSet && FILL_KINDS.has(el.kind)) el.width = containerW;
+  if (el.kind === 'table' && !el.hSet) {
+    el.height = 42 + Math.max(1, el.rows?.length ?? 1) * 38;
+  }
+  el.width = Math.min(el.width, containerW);
+}
+
+function layoutScreen(screen: FlowScreen): void {
+  const hasNavbar = screen.chrome.some((c) => c.kind === 'navbar');
+  const hasSidebar = screen.chrome.some((c) => c.kind === 'sidebar');
+  const x0 = hasSidebar ? 264 : MARGIN;
+  const w = screen.width - MARGIN - x0;
+  const y0 = hasNavbar ? CONTENT_TOP : MARGIN;
+  const out: WireframeElement[] = [];
+  const nextY = layoutStack(screen.tree, x0, w, y0, out);
+  const bottom = nextY - STACK_GAP; // drop the trailing gap
+  if (!screen.hDeclared || bottom + MARGIN > screen.height) {
+    screen.height = Math.max(screen.height, bottom + MARGIN);
+  }
+  screen.elements = [...screen.chrome, ...out];
+}
+
+/** Stack `nodes` top-to-bottom at x within width w; returns the next y cursor. */
+function layoutStack(
+  nodes: FlowNode[],
+  x: number,
+  w: number,
+  y: number,
+  out: WireframeElement[],
+): number {
+  for (const node of nodes) {
+    if (node.type === 'el') {
+      if (node.el.kind === 'card' && node.children.length > 0) {
+        resolveStackSize(node.el, w);
+        y += layoutCard(node, x, y, node.el.wSet ? node.el.width : w, out) + STACK_GAP;
+      } else {
+        resolveStackSize(node.el, w);
+        node.el.x = x;
+        node.el.y = y;
+        out.push(node.el);
+        y += node.el.height + STACK_GAP;
+      }
+    } else if (node.type === 'row') {
+      y += layoutRow(node, x, w, y, out) + STACK_GAP;
+    } else {
+      y += layoutSplit(node, x, w, y, out) + STACK_GAP;
+    }
+  }
+  return y;
+}
+
+/** Lay a row's children side by side within w; returns the row height. */
+function layoutRow(row: RowNode, x: number, w: number, y: number, out: WireframeElement[]): number {
+  const kids = row.children;
+  if (kids.length === 0) return 0;
+  const gaps = ROW_GAP * (kids.length - 1);
+
+  // Width distribution: explicit → keep; auto kinds → intrinsic; flexible
+  // kinds share the remainder equally; everything scales down if it can't fit.
+  const isFlex = (n: ElNode) => !n.el.wSet && FLEX_KINDS.has(n.el.kind);
+  const fixedSum = kids.filter((k) => !isFlex(k)).reduce((s, k) => s + k.el.width, 0);
+  const flexKids = kids.filter(isFlex);
+  if (flexKids.length > 0) {
+    const share = Math.max(60, Math.floor((w - gaps - fixedSum) / flexKids.length));
+    for (const k of flexKids) k.el.width = share;
+  }
+  const total = kids.reduce((s, k) => s + k.el.width, 0) + gaps;
+  if (total > w) {
+    const scale = (w - gaps) / (total - gaps);
+    for (const k of kids) k.el.width = Math.max(24, Math.floor(k.el.width * scale));
+  }
+
+  // Place: left group flows from x; the right group packs against x+w.
+  const rightFrom = row.rightFrom < 0 ? kids.length : row.rightFrom;
+  const heights: number[] = [];
+  const place = (k: ElNode, kx: number): void => {
+    if (k.el.kind === 'card' && k.children.length > 0) {
+      heights.push(layoutCard(k, kx, y, k.el.width, out));
+    } else {
+      if (k.el.kind === 'table' && !k.el.hSet) {
+        k.el.height = 42 + Math.max(1, k.el.rows?.length ?? 1) * 38;
+      }
+      k.el.x = kx;
+      k.el.y = y;
+      out.push(k.el);
+      heights.push(k.el.height);
+    }
+  };
+  let cx = x;
+  for (let i = 0; i < rightFrom; i++) {
+    place(kids[i]!, cx);
+    cx += kids[i]!.el.width + ROW_GAP;
+  }
+  let rx = x + w;
+  for (let i = kids.length - 1; i >= rightFrom; i--) {
+    rx -= kids[i]!.el.width;
+    place(kids[i]!, rx);
+    rx -= ROW_GAP;
+  }
+  return Math.max(...heights);
+}
+
+/** Two independent column stacks + the vertical divider; returns the height. */
+function layoutSplit(node: SplitNode, x: number, w: number, y: number, out: WireframeElement[]): number {
+  const pct = Math.min(90, Math.max(10, node.leftPct));
+  const leftW = Math.round(((w - SPLIT_GUTTER) * pct) / 100);
+  const rightW = w - SPLIT_GUTTER - leftW;
+  const leftBottom = layoutStack(node.left, x, leftW, y, out) - STACK_GAP;
+  const rightBottom = layoutStack(node.right, x + leftW + SPLIT_GUTTER, rightW, y, out) - STACK_GAP;
+  const h = Math.max(leftBottom, rightBottom, y + 40) - y;
+  out.push({
+    kind: 'divider',
+    label: '',
+    x: x + leftW + SPLIT_GUTTER / 2,
+    y,
+    width: 1,
+    height: h,
+  });
+  return h;
+}
+
+/**
+ * A card with nested children: the children stack inside the card's padding
+ * (below its title), `badge` children dock to the top-right corner, and the
+ * card grows around its content. Returns the card's height.
+ */
+function layoutCard(node: ElNode, x: number, y: number, w: number, out: WireframeElement[]): number {
+  const el = node.el;
+  el.x = x;
+  el.y = y;
+  el.width = w;
+  out.push(el);
+  const badges = node.children.filter((c) => c.el.kind === 'badge');
+  const rest = node.children.filter((c) => c.el.kind !== 'badge');
+  const innerX = x + CARD_PAD;
+  const innerW = w - 2 * CARD_PAD;
+  let cy = y + (el.label ? 44 : CARD_PAD);
+  for (const c of rest) {
+    resolveStackSize(c.el, innerW);
+    c.el.x = innerX;
+    c.el.y = cy;
+    out.push(c.el);
+    cy += c.el.height + CARD_CHILD_GAP;
+  }
+  const contentBottom = rest.length > 0 ? cy - CARD_CHILD_GAP : cy;
+  el.height = Math.max(el.hSet ? el.height : 0, contentBottom + CARD_PAD - y, 72);
+  for (const b of badges) {
+    b.el.x = x + w - CARD_PAD - b.el.width;
+    b.el.y = y + 12;
+    out.push(b.el);
+  }
+  return el.height;
 }
 
 /** Per-kind default sizes when no `WxH` is given. Texts auto-size to label. */
@@ -474,7 +806,9 @@ const VARIANT_RE = /\b(primary|secondary|danger|success|warning|info|ai|active|m
 
 const NAV_RE = /\s*->\s*([\w-]+)\s*$/;
 
-function parseWireframeElement(line: string): WireframeElement | null {
+function parseWireframeElement(
+  line: string,
+): { el: WireframeElement; legacy: boolean } | null {
   const kindMatch = KIND_RE.exec(line);
   if (!kindMatch) return null;
   const kind = kindMatch[1]!.toLowerCase() as WireframeKind;
@@ -490,29 +824,30 @@ function parseWireframeElement(line: string): WireframeElement | null {
   const label = labelMatch ? unescapeQuoted(labelMatch[1]!) : '';
   const afterLabel = labelMatch ? rest.slice(labelMatch.index + labelMatch[0].length).trim() : rest;
 
-  // navbar/sidebar are positioned by the renderer — coordinates are ignored
-  // and may be omitted entirely.
-  const coordsMatch = COORDS.exec(afterLabel);
-  if (!coordsMatch && kind !== 'navbar' && kind !== 'sidebar') return null;
-  const x = coordsMatch ? parseInt(coordsMatch[1]!, 10) : 0;
-  const y = coordsMatch ? parseInt(coordsMatch[2]!, 10) : 0;
+  // Positions come from the layout pass, never from the line. A bare `x,y`
+  // after the label is the retired coordinate dialect — flag it so the caller
+  // can steer regeneration instead of silently mis-rendering an old file.
+  const legacy = LEGACY_COORDS.test(` ${afterLabel} `);
 
   let { width, height } = defaultSize(kind, label);
-  const afterCoords = coordsMatch
-    ? afterLabel.slice(coordsMatch.index + coordsMatch[0].length)
-    : afterLabel;
-  const sizeMatch = SIZE.exec(afterCoords);
+  let wSet = false;
+  let hSet = false;
+  const sizeMatch = SIZE.exec(afterLabel);
   if (sizeMatch) {
     width = parseInt(sizeMatch[1]!, 10);
     height = parseInt(sizeMatch[2]!, 10);
+    wSet = true;
+    hSet = true;
   }
 
   // An optional trailing bareword opts the element into semantic color.
-  const variantMatch = VARIANT_RE.exec(afterCoords);
-  const el: WireframeElement = { kind, label, x, y, width, height };
+  const variantMatch = VARIANT_RE.exec(afterLabel);
+  const el: WireframeElement = { kind, label, x: 0, y: 0, width, height };
+  if (wSet) el.wSet = true;
+  if (hSet) el.hSet = true;
   if (variantMatch) el.variant = variantMatch[1]!.toLowerCase() as WireframeVariant;
   if (navTo) el.navTo = navTo;
-  return el;
+  return { el, legacy };
 }
 
 function unescapeQuoted(s: string): string {
