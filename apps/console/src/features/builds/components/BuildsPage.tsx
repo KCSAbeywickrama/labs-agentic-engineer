@@ -33,7 +33,7 @@ import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
-import { useProject, useProjectStatus } from "../../projects/api/queries";
+import { useProjectStatus } from "../../projects/api/queries";
 import { phaseChip } from "../../projects/lib/phaseChip";
 import { TasksList } from "../../tasks/components/TasksList";
 import { useBuilds } from "../api/queries";
@@ -52,7 +52,6 @@ export function BuildsPage({
   tag: string | undefined;
   onTagChange: (tag: string | undefined) => void;
 }) {
-  const project = useProject(projectName);
   const status = useProjectStatus(projectName);
   const builds = useBuilds(projectName);
 
@@ -63,9 +62,6 @@ export function BuildsPage({
   const header = (
     <PageHeader
       title="Builds"
-      {...(project.data && {
-        subtitle: project.data.displayName ?? project.data.name,
-      })}
       {...(status.data && { status: phaseChip(status.data) })}
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
@@ -150,9 +146,6 @@ export function BuildsPage({
     <>
       <PageHeader
         title="Builds"
-        {...(project.data && {
-          subtitle: project.data.displayName ?? project.data.name,
-        })}
         status={headerStatus}
         backTo={{
           link: <Link to="/projects/$projectName" params={{ projectName }} />,

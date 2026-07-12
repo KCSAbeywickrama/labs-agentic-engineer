@@ -40,7 +40,6 @@ import type { components } from "../../../generated/aep-api";
 import {
   useBuildPreflight,
   useBuildProject,
-  useProject,
   useProjectStatus,
   useProjectTags,
 } from "../../projects/api/queries";
@@ -70,7 +69,6 @@ type BuildInputItem = components["schemas"]["BuildInputItem"];
 export function SpecView({ projectName }: { projectName: string }) {
   const navigate = useNavigate();
   const { actions } = useAppShell();
-  const project = useProject(projectName);
   const status = useProjectStatus(projectName);
   const tags = useProjectTags(projectName);
   const spec = useSpecFiles(projectName);
@@ -321,17 +319,15 @@ export function SpecView({ projectName }: { projectName: string }) {
     }
   };
 
-  const displayName = project.data?.displayName ?? projectName;
   // Version state rendered as SOFT status chips beside the title (like the
   // builds/deployments headers), so the spec page reads as part of the same
   // family instead of its own bespoke layout. Soft chips don't read as
   // buttons, so this doesn't reintroduce the #117 "looks clickable" problem.
+  // No project-name subtitle: the top-bar project switcher already names the
+  // project, so repeating it here is redundant.
   const publishedTag = tags.data?.latest;
   const hasDraftChanges = Boolean(tags.data?.specDirty);
   const isOffline = collab.status === "offline";
-  const subtitle = hasDraftChanges
-    ? `${displayName} · unpublished changes`
-    : displayName;
 
   return (
     // oxygen-ui's PageContentInner (the direct parent of these children) has
@@ -405,9 +401,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                 </Tooltip>
               )}
             </Stack>
-            <Typography variant="body2" color="text.secondary" noWrap>
-              {subtitle}
-            </Typography>
           </Box>
 
           {collab.peers.length > 0 && (

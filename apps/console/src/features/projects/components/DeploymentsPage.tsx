@@ -36,7 +36,6 @@ import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import {
   useComponentsDeployments,
-  useProject,
   useProjectComponents,
   useProjectStatus,
 } from "../api/queries";
@@ -239,7 +238,6 @@ function BoardColumn({
 // uses — no bespoke aggregate), so a single component's failed read
 // degrades to a warning instead of blanking the board.
 export function DeploymentsPage({ projectName }: { projectName: string }) {
-  const project = useProject(projectName);
   const components = useProjectComponents(projectName);
   const componentNames = (components.data?.items ?? []).map((c) => c.name);
   const deployments = useComponentsDeployments(projectName, componentNames);
@@ -253,9 +251,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const header = (
     <PageHeader
       title="Deployments"
-      {...(project.data && {
-        subtitle: project.data.displayName ?? project.data.name,
-      })}
       {...(status.data && { status: phaseChip(status.data) })}
       backTo={{
         link: <Link to="/projects/$projectName" params={{ projectName }} />,
