@@ -48,7 +48,8 @@ type TaskFlowInput struct {
 // TaskClassValidation is the TaskFlowInput.Class value for the project's
 // validation task. It dispatches like a coding task (the funnel resolves the
 // Playwright runner from the issue's aep:validation label) but ends at merge.
-const TaskClassValidation = "validation"
+// Canonical value lives in models (shared with the workflow_runs row's Class).
+const TaskClassValidation = models.TaskClassValidation
 
 // TaskFlowStatus is the QueryStatus result for a task workflow.
 type TaskFlowStatus struct {
@@ -118,6 +119,7 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 		WorkflowID:       info.WorkflowExecution.ID,
 		RunID:            info.WorkflowExecution.RunID,
 		Kind:             models.WorkflowKindTask,
+		Class:            in.Class,
 		OrgID:            in.OrgID,
 		ProjectID:        in.ProjectID,
 		Tag:              in.Tag,

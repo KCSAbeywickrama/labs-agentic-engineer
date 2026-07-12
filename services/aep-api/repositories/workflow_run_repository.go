@@ -61,6 +61,11 @@ type WorkflowRunRepository interface {
 	// start endpoint enforces it via this lookup).
 	RunningDevByProject(ctx context.Context, orgID, projectID string) (*models.DevflowRun, error)
 
+	// ValidationRunByParent returns the newest validation task-kind row spawned
+	// by a dev run (matched on parent_workflow_id), or (nil, nil) when none —
+	// the status builder's cheap read of the project's validation run state.
+	ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*models.DevflowRun, error)
+
 	// ListByProject returns a project's rows, newest first, optionally
 	// filtered to one kind ("" = all).
 	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error)
@@ -89,7 +94,7 @@ func (r *workflowRunRepository) Record(ctx context.Context, row *models.DevflowR
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "workflow_id"}, {Name: "run_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"kind", "org_id", "project_id", "tag", "repo", "issue_number",
+			"kind", "class", "org_id", "project_id", "tag", "repo", "issue_number",
 			"parent_workflow_id", "status", "updated_at",
 		}),
 	}).Create(row).Error
@@ -137,6 +142,22 @@ func (r *workflowRunRepository) RunningDevByProject(ctx context.Context, orgID, 
 	err := r.db.WithContext(ctx).
 		Where("kind = ? AND org_id = ? AND project_id = ? AND status = ?",
 			models.WorkflowKindDev, orgID, projectID, models.WorkflowStatusRunning).
+		Order("created_at DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *workflowRunRepository) ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*models.DevflowRun, error) {
+	var row models.DevflowRun
+	err := r.db.WithContext(ctx).
+		Where("kind = ? AND class = ? AND org_id = ? AND project_id = ? AND parent_workflow_id = ?",
+			models.WorkflowKindTask, models.TaskClassValidation, orgID, projectID, parentWorkflowID).
 		Order("created_at DESC").
 		First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

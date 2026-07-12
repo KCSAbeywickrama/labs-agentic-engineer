@@ -24,8 +24,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 func devBinding(name, readyStatus, readyReason string) models.ReleaseBindingSummary {
@@ -260,6 +262,84 @@ func TestDeployStage_VersionlessSkipsDenominator(t *testing.T) {
 	}
 	if st.Deploy.Components.Total != 0 || st.Deploy.Components.Ready != 0 {
 		t.Errorf("components = %+v, want 0/0", st.Deploy.Components)
+	}
+}
+
+// TestDeployStage_ValidationDerivation pins deploy.validation + validationUrl:
+// the coarse run state of the newest build's validation child, and the PR link
+// (the validation issue as a fallback before a PR exists) — all from cheap DB
+// reads (no GitHub in the poll path).
+func TestDeployStage_ValidationDerivation(t *testing.T) {
+	t.Parallel()
+
+	// A dev run must exist for the builder to look up its validation child; keep
+	// it running (no completed run) so this test stays about validation, not the
+	// deploy denominator.
+	devRuns := []models.DevflowRun{{Tag: "v1", WorkflowID: "wf-dev", Status: models.WorkflowStatusRunning}}
+	child := func(status string) *models.DevflowRun {
+		return &models.DevflowRun{
+			Kind: models.WorkflowKindTask, Class: models.TaskClassValidation,
+			Repo: "o/r", IssueNumber: 9, ParentWorkflowID: "wf-dev", Status: status,
+		}
+	}
+	// A succeeded coding execution stamped with the open PR number (pr#42) is how
+	// the PR link is recovered without a live PR query.
+	prExecs := &fakeExecs{
+		LatestPerKindScopedFunc: func(context.Context, string, string, int) (map[string]*models.Execution, error) {
+			return map[string]*models.Execution{
+				string(taskmeta.KindCoding): {
+					Kind:   string(taskmeta.KindCoding),
+					Status: string(taskmeta.ExecSucceeded),
+					Reason: taskmeta.ReasonPROpenPrefix + "42",
+				},
+			}, nil
+		},
+	}
+
+	cases := []struct {
+		name       string
+		child      *models.DevflowRun
+		execs      repositories.ExecutionRepository
+		wantStatus string
+		wantURL    string
+	}{
+		{name: "no child → none, no link", wantStatus: "none", wantURL: ""},
+		{
+			name:       "running before a PR → running, issue link",
+			child:      child(models.WorkflowStatusRunning),
+			wantStatus: "running",
+			wantURL:    "https://github.com/o/r/issues/9",
+		},
+		{
+			name:       "completed with an open PR → completed, PR link",
+			child:      child(models.WorkflowStatusCompleted),
+			execs:      prExecs,
+			wantStatus: "completed",
+			wantURL:    "https://github.com/o/r/pull/42",
+		},
+		{
+			name:       "failed → failed, issue link (no succeeded coding row)",
+			child:      child(models.WorkflowStatusFailed),
+			wantStatus: "failed",
+			wantURL:    "https://github.com/o/r/issues/9",
+		},
+		{
+			name:       "canceled → failed",
+			child:      child(models.WorkflowStatusCanceled),
+			wantStatus: "failed",
+			wantURL:    "https://github.com/o/r/issues/9",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := mustStatus(t, statusFixture{runs: devRuns, validationRun: tc.child, execs: tc.execs})
+			if st.Deploy.Validation != tc.wantStatus {
+				t.Errorf("validation = %q, want %q", st.Deploy.Validation, tc.wantStatus)
+			}
+			if st.Deploy.ValidationUrl != tc.wantURL {
+				t.Errorf("validationUrl = %q, want %q", st.Deploy.ValidationUrl, tc.wantURL)
+			}
+		})
 	}
 }
 

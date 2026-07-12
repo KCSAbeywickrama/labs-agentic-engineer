@@ -114,6 +114,60 @@ func TestWorkflowRunRepository_TaskCounts(t *testing.T) {
 	}
 }
 
+// TestWorkflowRunRepository_ValidationRunByParent pins the status builder's
+// validation read: the Class discriminator is persisted, and the lookup returns
+// only the validation child of a given dev run (not its coding-task siblings).
+func TestWorkflowRunRepository_ValidationRunByParent(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := repositories.NewWorkflowRunRepository(db)
+	ctx := context.Background()
+
+	dev := devRun("orga", "proj", "devflow-orga-proj-v1", "v1")
+	if err := repo.Record(ctx, dev); err != nil {
+		t.Fatalf("Record dev: %v", err)
+	}
+	// A coding-task child (Class "") and the validation child (Class validation),
+	// both parented to the dev run.
+	coding := &models.DevflowRun{
+		WorkflowID: "taskflow-orga-proj-5", RunID: "r-coding",
+		Kind: models.WorkflowKindTask, OrgID: "orga", ProjectID: "proj",
+		Repo: "acme/proj", IssueNumber: 5, ParentWorkflowID: dev.WorkflowID,
+	}
+	validation := &models.DevflowRun{
+		WorkflowID: "taskflow-orga-proj-9", RunID: "r-validation",
+		Kind: models.WorkflowKindTask, Class: models.TaskClassValidation,
+		OrgID: "orga", ProjectID: "proj", Repo: "acme/proj", IssueNumber: 9,
+		ParentWorkflowID: dev.WorkflowID,
+	}
+	if err := repo.Record(ctx, coding); err != nil {
+		t.Fatalf("Record coding: %v", err)
+	}
+	if err := repo.Record(ctx, validation); err != nil {
+		t.Fatalf("Record validation: %v", err)
+	}
+
+	// Class must survive the Record upsert.
+	if got, err := repo.GetByWorkflowID(ctx, "orga", validation.WorkflowID); err != nil || got == nil {
+		t.Fatalf("GetByWorkflowID validation: (%+v, %v)", got, err)
+	} else if got.Class != models.TaskClassValidation {
+		t.Fatalf("class not persisted, got %q", got.Class)
+	}
+
+	got, err := repo.ValidationRunByParent(ctx, "orga", "proj", dev.WorkflowID)
+	if err != nil {
+		t.Fatalf("ValidationRunByParent: %v", err)
+	}
+	if got == nil || got.IssueNumber != 9 || got.Class != models.TaskClassValidation {
+		t.Fatalf("ValidationRunByParent = %+v, want the validation child (issue 9)", got)
+	}
+
+	// A parent with no validation child misses cleanly (nil, nil).
+	if got, err := repo.ValidationRunByParent(ctx, "orga", "proj", "some-other-wf"); err != nil || got != nil {
+		t.Fatalf("ValidationRunByParent(no match) = (%+v, %v), want (nil, nil)", got, err)
+	}
+}
+
 // TestWorkflowRunRepository_ListByProject pins the status read path: newest
 // first, kind-filtered — the overview's build stage reads rows[0] of the dev
 // kind and the deploy version scans for the newest completed one.

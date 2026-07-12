@@ -38,6 +38,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // --- port fakes --------------------------------------------------------------
@@ -98,9 +99,10 @@ func (f *fakeWebhookSvc) Register(ctx context.Context, orgID, projectID string) 
 // feature drives: DeleteByProject (the orphan purge). Every other verb is
 // unreachable from the project feature and returns zero.
 type fakeExecs struct {
-	DeleteByProjectFunc func(ctx context.Context, orgID, projectID string) error
-	deleteArgs          [2]string
-	deleteCalls         int
+	DeleteByProjectFunc     func(ctx context.Context, orgID, projectID string) error
+	LatestPerKindScopedFunc func(ctx context.Context, orgID, repo string, issue int) (map[string]*models.Execution, error)
+	deleteArgs              [2]string
+	deleteCalls             int
 }
 
 func (f *fakeExecs) DeleteByProject(ctx context.Context, orgID, projectID string) error {
@@ -129,7 +131,10 @@ func (f *fakeExecs) GetByIDScoped(context.Context, string, string) (*models.Exec
 func (f *fakeExecs) LatestPerKind(context.Context, string, int) (map[string]*models.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) LatestPerKindScoped(context.Context, string, string, int) (map[string]*models.Execution, error) {
+func (f *fakeExecs) LatestPerKindScoped(ctx context.Context, orgID, repo string, issue int) (map[string]*models.Execution, error) {
+	if f.LatestPerKindScopedFunc != nil {
+		return f.LatestPerKindScopedFunc(ctx, orgID, repo, issue)
+	}
 	return nil, nil
 }
 func (f *fakeExecs) LatestPerKindForRepo(context.Context, string) (map[int]map[string]*models.Execution, error) {
@@ -572,12 +577,18 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 // fakeRunReader / fakeBindingsReader fake the stage-source ports
 // (status_stages.go) — the build/deploy inputs of the status poll.
 type fakeRunReader struct {
-	rows []models.DevflowRun
-	err  error
+	rows          []models.DevflowRun
+	err           error
+	validationRun *models.DevflowRun
+	validationErr error
 }
 
 func (f fakeRunReader) ListByProject(context.Context, string, string, string) ([]models.DevflowRun, error) {
 	return f.rows, f.err
+}
+
+func (f fakeRunReader) ValidationRunByParent(context.Context, string, string, string) (*models.DevflowRun, error) {
+	return f.validationRun, f.validationErr
 }
 
 func (f fakeRunReader) DeleteByProject(context.Context, string, string) error { return nil }
@@ -595,14 +606,17 @@ func (f fakeBindingsReader) ListProjectReleaseBindings(context.Context, string, 
 // ready repo row + the three poll sources (git snapshot, dev run rows, dev
 // bindings) as fakes.
 type statusFixture struct {
-	snap        artifacts.StatusSnapshot
-	snapErr     error
-	counts      map[string]int // ComponentCountAtTag fixture, keyed by tag
-	countErr    error
-	runs        []models.DevflowRun
-	runsErr     error
-	bindings    []models.ReleaseBindingSummary
-	bindingsErr error
+	snap          artifacts.StatusSnapshot
+	snapErr       error
+	counts        map[string]int // ComponentCountAtTag fixture, keyed by tag
+	countErr      error
+	runs          []models.DevflowRun
+	runsErr       error
+	bindings      []models.ReleaseBindingSummary
+	bindingsErr   error
+	validationRun *models.DevflowRun            // validation child of the newest dev run (nil = none)
+	validationErr error                         // ValidationRunByParent error
+	execs         repositories.ExecutionRepository // nil = no PR lookup (validationUrl falls back to the issue)
 }
 
 func (fx statusFixture) service() *projectService {
@@ -630,8 +644,9 @@ func (fx statusFixture) service() *projectService {
 			return &models.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
 		},
 	}
-	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, nil)
-	svc.SetStageSources(fakeRunReader{rows: fx.runs, err: fx.runsErr},
+	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, fx.execs)
+	svc.SetStageSources(
+		fakeRunReader{rows: fx.runs, err: fx.runsErr, validationRun: fx.validationRun, validationErr: fx.validationErr},
 		fakeBindingsReader{items: fx.bindings, err: fx.bindingsErr})
 	return svc
 }

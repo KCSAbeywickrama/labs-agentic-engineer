@@ -46,6 +46,7 @@ const noDeploy: DeployStage = {
   version: "",
   status: "none",
   components: { total: 0, ready: 0 },
+  validation: "none",
 };
 
 export const projectStatuses: Record<
@@ -133,6 +134,7 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deploying",
       components: { total: 3, ready: 1 },
+      validation: "none",
     },
   },
   // v1 deployed to dev; spec has drifted since (dirty → rendered v1+).
@@ -155,6 +157,8 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deployed",
       components: { total: 3, ready: 3 },
+      validation: "completed",
+      validationUrl: `${REPO_URL}/pull/42`,
     },
   },
   // v1 build done but the dev deployment failed.
@@ -177,6 +181,7 @@ export const projectStatuses: Record<
       version: "v1",
       status: "failed",
       components: { total: 3, ready: 1 },
+      validation: "none",
     },
   },
   // Repo bootstrap went sideways before any spec work.
@@ -422,11 +427,29 @@ function task(
   };
 }
 
+// The project's validation task — created alongside the coding tasks but NOT
+// shown in the builds list (its status rides deploy.validation on the
+// deployments board). Kept here so the list filter is exercised.
+const validationTask: TaskView = {
+  issueNumber: 20,
+  title: "Validate acceptance criteria",
+  derivedStatus: "in_progress",
+  executorClass: "validation",
+  operation: "validate",
+  issueUrl: `${BOARD_URL}/20`,
+  attention: null,
+  dependsOn: null,
+  executions: {},
+  hold: false,
+  lineage: { specTag: "v1" },
+};
+
 const buildingTasks: TaskView[] = [
   task(12, "Checkout flow with cart persistence", "pending", "storefront"),
   task(10, "Product catalog CRUD endpoints", "in_progress", "catalog-api"),
   task(9, "Scaffold storefront app shell", "merged", "storefront"),
   task(11, "Orders service payment integration", "failed", "orders-api"),
+  validationTask,
 ];
 
 const doneTasks: TaskView[] = buildingTasks.map((t) => ({

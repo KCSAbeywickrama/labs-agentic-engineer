@@ -78,7 +78,8 @@ func NewActivities(d Deps) *Activities {
 type RecordWorkflowRunInput struct {
 	WorkflowID       string `json:"workflowId"`
 	RunID            string `json:"runId"`
-	Kind             string `json:"kind"` // dev | task
+	Kind             string `json:"kind"`            // dev | task
+	Class            string `json:"class,omitempty"` // task class ("validation" for the project's validation task; "" otherwise)
 	OrgID            string `json:"orgId"`
 	ProjectID        string `json:"projectId"`
 	Tag              string `json:"tag,omitempty"`
@@ -94,6 +95,7 @@ func (a *Activities) RecordWorkflowRun(ctx context.Context, in RecordWorkflowRun
 		WorkflowID:       in.WorkflowID,
 		RunID:            in.RunID,
 		Kind:             in.Kind,
+		Class:            in.Class,
 		OrgID:            in.OrgID,
 		ProjectID:        in.ProjectID,
 		Tag:              in.Tag,
