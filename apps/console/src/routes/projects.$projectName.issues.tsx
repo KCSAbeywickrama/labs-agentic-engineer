@@ -16,9 +16,13 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { CircleAlert } from "@wso2/oxygen-ui-icons-react";
-import { SectionPlaceholder } from "../features/projects/components/SectionPlaceholder";
+import { Button } from "@wso2/oxygen-ui";
+import { createFileRoute, createLink } from "@tanstack/react-router";
+import { ArrowLeft, CircleAlert } from "@wso2/oxygen-ui-icons-react";
+import { EmptyState } from "../components/EmptyState";
+
+// Router-aware Button: renders an anchor with proper href + SPA navigation.
+const LinkButton = createLink(Button);
 
 export const Route = createFileRoute("/projects/$projectName/issues")({
   component: IssuesPlaceholderRoute,
@@ -30,11 +34,19 @@ export const Route = createFileRoute("/projects/$projectName/issues")({
 function IssuesPlaceholderRoute() {
   const { projectName } = Route.useParams();
   return (
-    <SectionPlaceholder
+    <EmptyState
       icon={<CircleAlert size={48} />}
       title="Issues is on its way"
       description="Issues the SRE agent raises against the running project will land here — triage them and follow their fixes."
-      projectName={projectName}
+      action={
+        <LinkButton
+          startIcon={<ArrowLeft size={18} />}
+          to="/projects/$projectName"
+          params={{ projectName }}
+        >
+          Back to overview
+        </LinkButton>
+      }
     />
   );
 }

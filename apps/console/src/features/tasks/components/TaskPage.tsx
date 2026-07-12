@@ -29,10 +29,11 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, GitHub } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
+import { StatusChip } from "../../../components/StatusChip";
 import { useTask } from "../api/queries";
+import { taskChip } from "../api/status";
 import { useTaskLog } from "../hooks/useTaskLog";
 import { TaskLogView } from "./TaskLogView";
-import { TaskStatusChip } from "./TaskStatusChip";
 
 const LinkIconButton = createLink(IconButton);
 
@@ -107,6 +108,7 @@ export function TaskPage({
   // The stream's view of the task is fresher than the initial fetch.
   const derivedStatus =
     log.settledStatus ?? log.task?.derivedStatus ?? detail.data.derivedStatus;
+  const chip = taskChip(derivedStatus);
   const title = log.task?.title ?? detail.data.title;
   const issueUrl = log.task?.issueUrl ?? detail.data.issueUrl;
   // TaskDetail (the get-task response) doesn't carry blockedBy — only the
@@ -172,11 +174,11 @@ export function TaskPage({
           <Tooltip title={`Waiting for ${blockedBy.join(", ")}`}>
             {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
             <Box sx={{ display: "inline-flex" }}>
-              <TaskStatusChip derivedStatus={derivedStatus} />
+              <StatusChip label={chip.label} tone={chip.tone} />
             </Box>
           </Tooltip>
         ) : (
-          <TaskStatusChip derivedStatus={derivedStatus} />
+          <StatusChip label={chip.label} tone={chip.tone} />
         )}
         <Box sx={{ flexGrow: 1 }} />
         <Tooltip title="Open the GitHub issue">

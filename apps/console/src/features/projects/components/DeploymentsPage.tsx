@@ -30,6 +30,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
+import { EmptyState } from "../../../components/EmptyState";
 import {
   useComponentsDeployments,
   useProjectComponents,
@@ -210,13 +211,7 @@ function BoardColumn({
         )}
       </Stack>
       {cards.length === 0 ? (
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ py: 3, textAlign: "center" }}
-        >
-          {emptyText}
-        </Typography>
+        <EmptyState compact description={emptyText} />
       ) : (
         <Stack spacing={1.5}>
           {cards.map((card) => (
@@ -272,10 +267,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
 
   if (componentNames.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
-        Nothing to deploy yet — components appear here once the published
-        design produces them, and agents deploy to dev on merge.
-      </Typography>
+      <EmptyState
+        compact
+        description="Nothing to deploy yet — components appear here once the published design produces them, and agents deploy to dev on merge."
+      />
     );
   }
 

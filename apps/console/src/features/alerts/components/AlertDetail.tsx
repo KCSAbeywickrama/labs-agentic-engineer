@@ -35,11 +35,12 @@ import {
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router";
 import { useAlertReport } from "../api/queries";
-import { ClassificationChip } from "./ClassificationChip";
+import { classificationLabel, classificationTone } from "../classification";
 // The diagnosis is Markdown (headings / lists / code / timeline); render it as
 // a preview rather than raw text. MarkdownView is the console's shared
 // theme-token-styled react-markdown renderer.
 import { MarkdownView } from "../../../components/MarkdownView";
+import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 
 type RcaAgentReport = components["schemas"]["RcaAgentReport"];
@@ -66,7 +67,13 @@ function AlertReceivedContent({ report }: { report: RcaAgentReport }) {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-        <ClassificationChip classification={report.classification} />
+        {report.classification && (
+          <StatusChip
+            label={classificationLabel(report.classification)}
+            tone={classificationTone(report.classification)}
+            variant="outlined"
+          />
+        )}
         {report.component && (
           <Chip label={report.component} size="small" variant="outlined" />
         )}

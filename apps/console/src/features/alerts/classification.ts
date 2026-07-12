@@ -16,10 +16,11 @@
  * under the License.
  */
 
-import { Chip } from "@wso2/oxygen-ui";
-import type { components } from "../../../generated/aep-api";
+import type { StatusTone } from "../../components/StatusChip";
+import type { components } from "../../generated/aep-api";
 
 type RcaAgentReport = components["schemas"]["RcaAgentReport"];
+type Classification = RcaAgentReport["classification"];
 
 const LABEL: Record<string, string> = {
   "code-level": "Code-level",
@@ -28,34 +29,21 @@ const LABEL: Record<string, string> = {
   none: "No action",
 };
 
-const COLOR: Record<string, "warning" | "success" | "default"> = {
+const TONE: Record<string, StatusTone> = {
   "code-level": "warning",
   "config-level": "success",
   mixed: "warning",
-  none: "default",
+  none: "neutral",
 };
 
 // Plain-text label — for contexts where a Chip (a <div>) can't be nested,
 // e.g. inside NotificationPanel.ItemMessage, which MUI renders as a <p>.
-export function classificationLabel(
-  classification?: RcaAgentReport["classification"],
-): string {
+export function classificationLabel(classification?: Classification): string {
   if (!classification) return "";
   return LABEL[classification] ?? classification;
 }
 
-export function ClassificationChip({
-  classification,
-}: {
-  classification?: RcaAgentReport["classification"];
-}) {
-  if (!classification) return null;
-  return (
-    <Chip
-      label={LABEL[classification] ?? classification}
-      color={COLOR[classification] ?? "default"}
-      size="small"
-      variant="outlined"
-    />
-  );
+export function classificationTone(classification?: Classification): StatusTone {
+  if (!classification) return "neutral";
+  return TONE[classification] ?? "neutral";
 }

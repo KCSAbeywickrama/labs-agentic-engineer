@@ -29,8 +29,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { StatusChip } from "../../../components/StatusChip";
 import { useAllTasks } from "../api/queries";
-import { TaskStatusChip } from "./TaskStatusChip";
+import { taskChip } from "../api/status";
 
 // The flat task list (#173): one row per task, status chip inline — the user
 // watches chips go green. Card-variant listing per the components list /
@@ -143,11 +144,11 @@ export function TasksList({
                   <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
                     {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
                     <Box sx={{ display: "inline-flex" }}>
-                      <TaskStatusChip derivedStatus={t.derivedStatus} />
+                      <StatusChip {...taskChip(t.derivedStatus)} />
                     </Box>
                   </Tooltip>
                 ) : (
-                  <TaskStatusChip derivedStatus={t.derivedStatus} />
+                  <StatusChip {...taskChip(t.derivedStatus)} />
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 64 }}>

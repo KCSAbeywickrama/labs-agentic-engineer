@@ -20,7 +20,6 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Divider,
   PageContent,
@@ -29,33 +28,31 @@ import {
 } from "@wso2/oxygen-ui";
 import { Link as LinkIcon } from "@wso2/oxygen-ui-icons-react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { useProject, useProjectStatus } from "../api/queries";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 
 // Phase → header chip. Values from aep-api's project_service.go.
-function phaseChip(status: ProjectStatus): {
-  label: string;
-  color: "default" | "info" | "success" | "warning" | "error";
-} {
+function phaseChip(status: ProjectStatus): { label: string; tone: StatusTone } {
   switch (status.phase) {
     case "no-repo":
-      return { label: "No repository", color: "warning" };
+      return { label: "No repository", tone: "warning" };
     case "repo-cloning":
-      return { label: "Preparing repository", color: "info" };
+      return { label: "Preparing repository", tone: "info" };
     case "repo-error":
-      return { label: "Repository error", color: "error" };
+      return { label: "Repository error", tone: "error" };
     case "prompt":
-      return { label: "Starting", color: "info" };
+      return { label: "Starting", tone: "info" };
     case "spec":
-      return { label: "Spec in progress", color: "info" };
+      return { label: "Spec in progress", tone: "info" };
     case "tasks":
-      return { label: "Building", color: "info" };
+      return { label: "Building", tone: "info" };
     case "components":
-      return { label: "Active", color: "success" };
+      return { label: "Active", tone: "success" };
     default:
-      return { label: status.phase, color: "default" };
+      return { label: status.phase, tone: "neutral" };
   }
 }
 
@@ -118,9 +115,7 @@ export function ProjectLayout({ projectName }: { projectName: string }) {
           <PageTitle.Header>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
               <span>{sectionTitle ?? displayName}</span>
-              {chip && (
-                <Chip size="small" label={chip.label} color={chip.color} />
-              )}
+              {chip && <StatusChip label={chip.label} tone={chip.tone} />}
             </Stack>
           </PageTitle.Header>
           {sectionTitle ? (

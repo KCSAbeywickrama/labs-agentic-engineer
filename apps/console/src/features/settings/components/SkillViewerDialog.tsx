@@ -30,8 +30,9 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { MarkdownView } from "../../../components/MarkdownView";
+import { StatusChip } from "../../../components/StatusChip";
 import { useSkill } from "../api/queries";
-import { kindChipColor, kindLabel, normalizeKind } from "../skillKind";
+import { kindChipTone, kindLabel, normalizeKind } from "../skillKind";
 import { splitFrontmatter } from "../skillMd";
 
 // Read-only inspection of any skill, of any kind — the only way to see what an
@@ -59,11 +60,10 @@ export function SkillViewerDialog({
             {name}
           </Typography>
           {kind && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color={kindChipColor(kind)}
+            <StatusChip
               label={kindLabel(kind)}
+              tone={kindChipTone(kind)}
+              variant="outlined"
             />
           )}
           {skill && !skill.editable && (
