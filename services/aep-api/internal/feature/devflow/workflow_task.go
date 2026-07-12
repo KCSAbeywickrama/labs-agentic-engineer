@@ -269,7 +269,7 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 	// build/deploy signals will ever arrive. Report success to the parent.
 	if in.Class == TaskClassValidation {
 		status.Phase = TaskPhaseDone
-		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted)
+		markRunStatus(ctx, info.WorkflowExecution.ID, models.WorkflowStatusCompleted, "")
 		return TaskFlowResult{Issue: in.Issue, Outcome: OutcomeSucceeded}, nil
 	}
 
