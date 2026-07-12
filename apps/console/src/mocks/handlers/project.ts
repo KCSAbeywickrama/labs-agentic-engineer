@@ -4,6 +4,7 @@ import {
   componentOpenApi,
   projectBuilds,
   projectComponents,
+  projectDeployments,
   projectSectionError,
   projectSpecFiles,
   projectStatuses,
@@ -61,6 +62,10 @@ export const projectHandlers = [
     "*/api/v1/projects/:projectName/components/:componentName/deployments",
     ({ params }) =>
       respond((s) => componentDeployments(s, String(params.componentName))),
+  ),
+  // Deployments page (#216): all of the project's release bindings in one call.
+  http.get("*/api/v1/projects/:projectName/deployments", () =>
+    respond((s) => projectDeployments(s)),
   ),
   http.get("*/api/v1/projects/:projectName/tasks", ({ request }) => {
     // ?tag=vN scopes to one build's lineage, mirroring the aep:spec/<tag>

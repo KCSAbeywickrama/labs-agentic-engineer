@@ -868,6 +868,7 @@ components:
         releaseName:
           type: string
         status:
+          description: 'Latest Ready-condition reason; the distinguished value "Undeployed" means the binding is intentionally undeployed (spec.state == Undeploy).'
           type: string
       type: object
     DeploymentList:
@@ -3452,6 +3453,35 @@ paths:
       summary: Collect an external dependency's values and provision it
       tags:
         - Dependencies
+  /projects/{projectName}/deployments:
+    get:
+      operationId: list-project-deployments
+      parameters:
+        - description: Project name (DNS-label slug)
+          in: path
+          name: projectName
+          required: true
+          schema:
+            description: Project name (DNS-label slug)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - userJWT: []
+      summary: List all deployments in a project (one entry per component × environment release binding)
+      tags:
+        - Components
   /projects/{projectName}/files:
     get:
       operationId: list-files

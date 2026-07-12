@@ -251,6 +251,104 @@ export function componentDeployments(
   return { items: [] };
 }
 
+// Project-level deployments backing list-project-deployments (#216) — the
+// Deployments page. One entry per component × environment release binding;
+// components absent from the list render as "Not deployed" (client-side
+// join), and the distinguished status "Undeployed" marks an intentional
+// spec.state == Undeploy binding.
+export function projectDeployments(
+  s: Exclude<ProjectScenario, "error">,
+): DeploymentList {
+  switch (s) {
+    case "deploying":
+      return {
+        items: [
+          {
+            name: "demo-shop-storefront-development",
+            componentName: "storefront",
+            environment: "development",
+            status: "Progressing",
+            releaseName: "demo-shop-storefront-a1b2c3",
+            createdAt: "2026-07-12T05:04:00Z",
+          },
+          {
+            name: "demo-shop-catalog-api-development",
+            componentName: "catalog-api",
+            environment: "development",
+            status: "Ready",
+            releaseName: "demo-shop-catalog-api-d4e5f6",
+            endpointUrl: "https://catalog-api.dev.acme-aep.io",
+            createdAt: "2026-07-12T04:58:00Z",
+          },
+        ],
+      };
+    case "deployed":
+      return {
+        items: [
+          {
+            name: "demo-shop-storefront-development",
+            componentName: "storefront",
+            environment: "development",
+            status: "Ready",
+            releaseName: "demo-shop-storefront-a1b2c3",
+            endpointUrl: "https://storefront.dev.acme-aep.io",
+            createdAt: "2026-07-12T05:04:00Z",
+          },
+          {
+            name: "demo-shop-catalog-api-development",
+            componentName: "catalog-api",
+            environment: "development",
+            status: "Ready",
+            releaseName: "demo-shop-catalog-api-d4e5f6",
+            endpointUrl: "https://catalog-api.dev.acme-aep.io",
+            createdAt: "2026-07-12T04:58:00Z",
+          },
+          {
+            name: "demo-shop-orders-api-development",
+            componentName: "orders-api",
+            environment: "development",
+            status: "Ready",
+            releaseName: "demo-shop-orders-api-g7h8i9",
+            createdAt: "2026-07-12T05:01:00Z",
+          },
+        ],
+      };
+    case "deploy-failed":
+      return {
+        items: [
+          {
+            name: "demo-shop-storefront-development",
+            componentName: "storefront",
+            environment: "development",
+            status: "ReleaseFailed",
+            releaseName: "demo-shop-storefront-a1b2c3",
+            createdAt: "2026-07-12T05:04:00Z",
+          },
+          {
+            name: "demo-shop-catalog-api-development",
+            componentName: "catalog-api",
+            environment: "development",
+            status: "Ready",
+            releaseName: "demo-shop-catalog-api-d4e5f6",
+            endpointUrl: "https://catalog-api.dev.acme-aep.io",
+            createdAt: "2026-07-12T04:58:00Z",
+          },
+          {
+            name: "demo-shop-orders-api-development",
+            componentName: "orders-api",
+            environment: "development",
+            status: "Undeployed",
+            createdAt: "2026-07-12T05:01:00Z",
+          },
+        ],
+      };
+    // fresh/spec/spec-failed have no components; building has components but
+    // nothing deployed yet — every row joins to "Not deployed".
+    default:
+      return { items: [] };
+  }
+}
+
 // The OpenAPI contract served by GET .../components/:name/openapi — a
 // `{ spec }` envelope carrying a raw document, exactly as aep-api returns it
 // (read off specs/design). The ComponentOpenApiDialog renders `spec` via the

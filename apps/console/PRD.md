@@ -83,6 +83,11 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Deployments page — flat per-component × environment table (environment,
+  status, release, endpoint URL, deployed-at; "Not deployed"/"Undeployed"
+  rows via client-side join; adaptive 5s/30s poll) —
+  [#216](https://github.com/wso2/labs-agentic-engineer/issues/216)
+  (BE handshake: [#217](https://github.com/wso2/labs-agentic-engineer/issues/217))
 - Alerts — top-nav notification bell for RCA-agent alert reports
   (org-wide, read-only, client-tracked unread state) —
   [#154](https://github.com/wso2/labs-agentic-engineer/issues/154)

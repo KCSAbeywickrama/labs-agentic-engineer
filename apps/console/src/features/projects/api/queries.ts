@@ -27,6 +27,7 @@ import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { useConfig } from "../../settings/api/queries";
 import { firstEndpointUrl } from "../lib/deploymentUrl";
+import { deploymentsAreMoving } from "../lib/deploymentRows";
 import { projectKeys } from "./keys";
 
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
@@ -148,6 +149,24 @@ export function useProjectComponents(projectName: string) {
         params: { path: { projectName } },
       }),
     "components",
+  );
+}
+
+// The Deployments page's poller (#216): the whole table renders from this
+// one project-level read, on the same adaptive regime as the status poll —
+// fast while any binding converges, slow once everything settles.
+export function useProjectDeployments(projectName: string) {
+  return useProjectResource(
+    projectKeys.deployments(projectName),
+    () =>
+      client.GET("/projects/{projectName}/deployments", {
+        params: { path: { projectName } },
+      }),
+    "deployments",
+    (list) =>
+      !list || deploymentsAreMoving(list.items)
+        ? STATUS_ACTIVE_POLL_MS
+        : STATUS_IDLE_POLL_MS,
   );
 }
 
