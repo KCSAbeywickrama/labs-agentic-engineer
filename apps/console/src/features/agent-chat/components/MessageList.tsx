@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Avatar, Box, Divider, Stack, Typography, alpha } from "@wso2/oxygen-ui";
+import { Avatar, Box, Stack, Typography, alpha } from "@wso2/oxygen-ui";
 import type { FeedBlock } from "../feed";
 import { TurnBlock } from "./TurnBlock";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -124,8 +124,11 @@ export function MessageList({
    *  produced any content (and so has no running turn block of its own yet). */
   showWorkingTail: boolean;
 }) {
+    // No dividers between blocks: each block's author header ("You" / "✦
+    // Agent") plus the spacing already separates turns; hard rules made the
+    // feed read like a table rather than a chat.
   return (
-    <Stack divider={<Divider flexItem />} spacing={2}>
+    <Stack spacing={3}>
       {feed.map((block) =>
         block.kind === "user" ? (
           <UserBlock key={block.id} block={block} />
