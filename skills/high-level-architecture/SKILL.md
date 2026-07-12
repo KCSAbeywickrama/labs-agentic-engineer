@@ -16,8 +16,8 @@ Derive the design tree from `requirements.md`. The design lives under
 specs/design/design.cell                      # project-level architecture diagram DSL (this skill) — emit FIRST
 specs/design/design.md                        # the top-level design (this skill)
 specs/design/components/<name>/design.json    # one per component (structured facts)
-specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill)
 specs/design/components/<name>/wireframes.dsl  # web-applications only (excalidraw-wireframes skill)
+specs/design/components/<name>/openapi.yaml   # services only (openapi-conventions skill) — emit LAST
 ```
 
 ## The architecture diagram — design.cell
@@ -274,8 +274,8 @@ provider's discovered contract — or that no contract was resolvable, never a
 guess; for a `platform-resource`, what it stores). The console shows it in the
 dependency drawer and the coding agent relies on it to integrate correctly.
 
-One component per directory. Every `service` gets an `openapi.yaml`
-(load `openapi-conventions` before writing it); every `web-application` gets a
-`wireframes.dsl` (load `excalidraw-wireframes` before writing it). Other
+One component per directory. Every `web-application` gets a `wireframes.dsl`
+(load `excalidraw-wireframes` before writing it); every `service` gets an
+`openapi.yaml` (load `openapi-conventions` before writing it), emitted LAST. Other
 kinds (scheduled tasks, workers, ...) carry no extra artifact yet — capture
 their behavior fully in `description` and `dependencies`.

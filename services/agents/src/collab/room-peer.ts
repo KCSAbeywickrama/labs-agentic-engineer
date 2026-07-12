@@ -35,6 +35,7 @@ import WebSocket from "ws";
 import type * as Y from "yjs";
 import {
   deleteDocFile,
+  setDocFile,
   setDocFileAsAgent,
   snapshotDoc,
 } from "@aep/collab-doc";
@@ -47,8 +48,15 @@ const SYNC_TIMEOUT_MS = 10_000;
 export interface RoomPeer {
   /** The synced doc's files (path → content) — the turn's initial bundle. */
   files(): Record<string, string>;
-  /** Write one file into the live doc (agent-origin transaction). */
-  set(path: string, content: string): void;
+  /**
+   * Write one file into the live doc (agent-origin transaction). `mark=true`
+   * records the change as reviewable agent insertions (an edit to committed
+   * content); `mark=false` writes it plainly — a brand-new file the agent is
+   * creating is accept-by-default, so it carries no review highlights (and,
+   * load-bearing for streaming: an unmarked write does not re-render a
+   * highlighted tail on every line flush → no flicker).
+   */
+  set(path: string, content: string, mark: boolean): void;
   /** Remove one file from the live doc. */
   delete(path: string): void;
   /** Detach presence and close the connection. Safe to call twice. */
@@ -116,7 +124,15 @@ export async function joinRoom(input: JoinRoomInput): Promise<RoomPeer> {
   let left = false;
   return {
     files: () => snapshotDoc(doc),
-    set: (path, content) => {
+    set: (path, content, mark) => {
+      if (!mark) {
+        // A brand-new file (addFile) is accept-by-default — there is nothing to
+        // review on content the agent is creating. Write it PLAINLY so chunked
+        // streaming doesn't paint it as reviewable edits, which would re-render
+        // the highlighted tail on every line flush (visible flicker).
+        setDocFile(doc, path, content, AGENT_ORIGIN);
+        return;
+      }
       // Reviewable, character-exact write (#86 phase 6): inserted ranges get
       // the agentInsertion mark; the caret rides awareness so every browser
       // renders the agent's cursor at its last insertion.

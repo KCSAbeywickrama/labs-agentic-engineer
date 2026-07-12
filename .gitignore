@@ -43,3 +43,7 @@ learning/
 
 # Git worktrees for isolated agent/dev work
 .worktrees/
+
+# Vitest browser-mode run artifacts (failure screenshots + attachments)
+**/__screenshots__/
+**/.vitest-attachments/

@@ -35,7 +35,7 @@ export async function startCollabTurn(
     "/projects/{projectName}/agents/{conversationId}/messages",
     {
       params: { path: { projectName, conversationId } },
-      body: { useCase: "requirements-chat", instruction, collab: true },
+      body: { instruction, collab: true },
     },
   );
   if (error || data === undefined) {

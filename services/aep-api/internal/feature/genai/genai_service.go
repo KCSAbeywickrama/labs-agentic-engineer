@@ -479,9 +479,10 @@ func (s *service) Rehydrate(ctx context.Context, orgID, projectID, conversationI
 	if err != nil {
 		return nil, err
 	}
-	// Rehydrate is chat-only (single-turn generate flows never rehydrate), so
-	// the namespaced id is reconstructed under the requirements-chat use case.
-	convID := namespacedID(repo, useCaseRequirementsChat, conversationID)
+	// Rehydrate is chat-only (single-turn generate flows never rehydrate). The
+	// console omits "useCase", so its turns are namespaced under useCaseGeneral;
+	// reconstruct the id under the same use case the write path stored it with.
+	convID := namespacedID(repo, useCaseGeneral, conversationID)
 	raw, err := s.client.GetConversation(ctx, convID, orgID)
 	if err != nil {
 		var ue *agentsvc.UpstreamError

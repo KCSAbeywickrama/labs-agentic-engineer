@@ -241,8 +241,13 @@ function ToolGroup({
       </Box>
     ) : null;
   }
-  const anyStreaming = tools.some((t) => t.status === "streaming");
-  const anyFailed = tools.some((t) => t.status === "done" && !t.ok);
+  // The header mirrors the LAST op's state, not an aggregate: a burst of edits
+  // to one file is judged by where the file ended up, so an intermediate
+  // failure that a later op corrects (delete → recreate) doesn't mark the whole
+  // group failed. `tools` always holds ≥2 here (a lone call returned early).
+  const last = tools[tools.length - 1];
+  const streaming = last?.status === "streaming";
+  const failed = last?.status === "done" && !last.ok;
   return (
     <Box sx={{ ml: 4 }}>
       <Stack
@@ -258,15 +263,15 @@ function ToolGroup({
           py: 0.75,
           borderRadius: 1.5,
           border: 1,
-          borderColor: anyFailed ? "error.main" : "divider",
+          borderColor: failed ? "error.main" : "divider",
           bgcolor: "background.paper",
           cursor: "pointer",
           "&:hover": { bgcolor: "action.hover" },
         }}
       >
-        {anyStreaming ? (
+        {streaming ? (
           <Spinner />
-        ) : anyFailed ? (
+        ) : failed ? (
           <XIcon size={14} color="var(--oxygen-palette-error-main, red)" />
         ) : (
           <Check size={14} color="var(--oxygen-palette-success-main, green)" />

@@ -162,7 +162,7 @@ export class StreamingDocWriter {
         const content = await this.decodeContent(s.buf);
         // Final flush: the whole body (incl. the trailing partial line).
         if (content !== undefined && content.length > s.flushedLen) {
-          this.peer.set(s.path, content);
+          this.peer.set(s.path, content, false); // addFile preview → unmarked
           s.flushedLen = content.length;
         }
         return;
@@ -188,7 +188,9 @@ export class StreamingDocWriter {
     const lastNl = content.lastIndexOf("\n");
     const boundary = lastNl + 1; // include the newline; 0 when there is none yet
     if (boundary > s.flushedLen) {
-      this.peer.set(s.path!, content.slice(0, boundary));
+      // Streaming only ever previews addFile bodies (a new file) → unmarked, so
+      // the growing tail isn't re-highlighted (and re-rendered) each flush.
+      this.peer.set(s.path!, content.slice(0, boundary), false);
       s.flushedLen = boundary;
     }
   }

@@ -25,6 +25,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import { useStickToBottom } from "use-stick-to-bottom";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type * as Y from "yjs";
 import { AgentInsertion } from "@aep/collab-doc";
@@ -49,10 +50,14 @@ export function SpecMdEditor({
   fragment,
   provider,
   self,
+  agentStreaming,
 }: {
   fragment: Y.XmlFragment;
   provider: HocuspocusProvider;
   self: { name: string; color: string };
+  // True while an agent peer is writing into the room. Drives tail-following:
+  // the document area follows the streamed text only while this is set.
+  agentStreaming: boolean;
 }) {
   const editor = useEditor(
     {
@@ -78,6 +83,21 @@ export function SpecMdEditor({
       editor.off("transaction", update);
     };
   }, [editor]);
+
+  // Follow the tail while an agent streams markdown into this doc. The content
+  // grows via Yjs/ProseMirror (outside React's render), so a `useEffect` on
+  // React state can't see it — use-stick-to-bottom drives the scroll from a
+  // ResizeObserver on the content element instead. The content ref is only
+  // attached while `agentStreaming`, so ordinary human editing never triggers
+  // auto-scroll; scrolling up mid-stream breaks the lock (the library tells
+  // user scroll apart from its own animation). `initial: false` keeps an
+  // already-written file scrolled to its top when opened.
+  const { scrollRef, contentRef, scrollToBottom } = useStickToBottom({
+    initial: false,
+  });
+  useEffect(() => {
+    if (agentStreaming) void scrollToBottom();
+  }, [agentStreaming, scrollToBottom]);
 
   return (
     <Box
@@ -184,6 +204,7 @@ export function SpecMdEditor({
         </BubbleMenu>
       )}
       <Box
+        ref={scrollRef}
         sx={{
           flexGrow: 1,
           minHeight: 0,
@@ -234,7 +255,13 @@ export function SpecMdEditor({
         }}
         onClick={() => editor?.commands.focus()}
       >
-        <EditorContent editor={editor} />
+        {/* The content wrapper is what use-stick-to-bottom measures. It is
+            only attached to the ResizeObserver while an agent is streaming, so
+            the tail-follow engages for agent writes and stays out of the way
+            of normal editing. */}
+        <Box ref={agentStreaming ? contentRef : undefined}>
+          <EditorContent editor={editor} />
+        </Box>
       </Box>
     </Box>
   );
