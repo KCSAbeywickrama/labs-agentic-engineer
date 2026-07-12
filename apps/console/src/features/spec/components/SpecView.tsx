@@ -27,6 +27,7 @@ import {
   Divider,
   IconButton,
   PageContent,
+  Stack,
   TextField,
   Tooltip,
   Typography,
@@ -34,6 +35,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import {
   useBuildPreflight,
@@ -320,14 +322,16 @@ export function SpecView({ projectName }: { projectName: string }) {
   };
 
   const displayName = project.data?.displayName ?? projectName;
-  // Header metadata: plain caption text, not chips — a chip reads as
-  // clickable, and none of these are. "solo session" mirrors the offline
-  // tooltip below; "vN published" keeps the #117 wording.
-  const metadataParts: string[] = [];
-  if (collab.status === "offline") metadataParts.push("solo session");
-  if (tags.data?.latest) metadataParts.push(`${tags.data.latest} published`);
-  if (tags.data?.specDirty) metadataParts.push("draft changes");
-  const metadataLine = metadataParts.join(" · ");
+  // Version state rendered as SOFT status chips beside the title (like the
+  // builds/deployments headers), so the spec page reads as part of the same
+  // family instead of its own bespoke layout. Soft chips don't read as
+  // buttons, so this doesn't reintroduce the #117 "looks clickable" problem.
+  const publishedTag = tags.data?.latest;
+  const hasDraftChanges = Boolean(tags.data?.specDirty);
+  const isOffline = collab.status === "offline";
+  const subtitle = hasDraftChanges
+    ? `${displayName} · unpublished changes`
+    : displayName;
 
   return (
     // oxygen-ui's PageContentInner (the direct parent of these children) has
@@ -373,11 +377,36 @@ export function SpecView({ projectName }: { projectName: string }) {
             <ArrowLeft size={20} />
           </IconButton>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography variant="h4" noWrap>
-              Spec
-            </Typography>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+              <Typography variant="h4" noWrap>
+                Spec
+              </Typography>
+              {publishedTag && (
+                <StatusChip
+                  label={`${publishedTag} · published`}
+                  tone="success"
+                  appearance="soft"
+                  dot
+                />
+              )}
+              {hasDraftChanges && (
+                <StatusChip
+                  label="draft changes"
+                  tone="warning"
+                  appearance="soft"
+                  dot
+                />
+              )}
+              {isOffline && (
+                <Tooltip title="Collaboration server unreachable — editing solo; edits aren't shared or saved.">
+                  <Box sx={{ display: "inline-flex" }}>
+                    <StatusChip label="solo session" tone="neutral" appearance="soft" />
+                  </Box>
+                </Tooltip>
+              )}
+            </Stack>
             <Typography variant="body2" color="text.secondary" noWrap>
-              {displayName}
+              {subtitle}
             </Typography>
           </Box>
 
@@ -405,22 +434,6 @@ export function SpecView({ projectName }: { projectName: string }) {
               ))}
             </AvatarGroup>
           )}
-          {/* Session/version metadata (#117, de-buttoned): plain muted text,
-              not chips — Build below is the header's only clickable-looking
-              control. */}
-          {metadataLine &&
-            (collab.status === "offline" ? (
-              <Tooltip title="Collaboration server unreachable — editing solo; edits aren't shared or saved.">
-                <Typography variant="body2" color="text.secondary" noWrap>
-                  {metadataLine}
-                </Typography>
-              </Tooltip>
-            ) : (
-              <Typography variant="body2" color="text.secondary" noWrap>
-                {metadataLine}
-              </Typography>
-            ))}
-
           <Divider orientation="vertical" flexItem />
 
           {/* Phase-aware primary CTA (#159): the prominent action is always the

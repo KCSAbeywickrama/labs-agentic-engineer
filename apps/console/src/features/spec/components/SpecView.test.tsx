@@ -247,24 +247,27 @@ describe("SpecView onBuild routing (#164)", () => {
   });
 });
 
-describe("SpecView header metadata (de-buttoned chips)", () => {
+describe("SpecView header metadata (soft version chips)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFlush.mockResolvedValue(undefined);
   });
 
-  it("renders session/version info as a plain muted text line, not chips, and drops 'Approved'", () => {
+  it("renders session/version info as soft status chips (not buttons) and drops 'Approved'", () => {
     render(<SpecView projectName="proj1" />);
 
-    // "solo" (offline collab) + "v1 published" (tags.latest) collapse into
-    // one caption-style line — no separate pill per fact.
-    expect(screen.getByText("solo session · v1 published")).toBeInTheDocument();
+    // Version + session state render as soft status chips beside the title
+    // (consistent with the builds/deployments headers): "v1 · published"
+    // (tags.latest) and "solo session" (offline collab).
+    expect(screen.getByText("v1 · published")).toBeInTheDocument();
+    expect(screen.getByText("solo session")).toBeInTheDocument();
 
     // The old "Approved" status chip is gone entirely (specStatus is
     // "approved" in this test's project-status mock).
     expect(screen.queryByText("Approved")).not.toBeInTheDocument();
 
-    // Build remains the header's only button-like control.
+    // Build remains the header's only button-like control — the soft chips
+    // are Chips, not buttons.
     expect(screen.getByRole("button", { name: "Build" })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /solo|published/i }),
