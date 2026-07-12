@@ -29,6 +29,12 @@ export type ChatMessage =
       content: string;
       turnId?: string;
       status: "in_flight" | "completed" | "failed";
+      /**
+       * Who sent this turn. Optional so logs persisted before multi-user
+       * attribution (#130 follow-up) still parse — an absent author means
+       * "the signed-in user" for display purposes.
+       */
+      author?: { id: string; displayName: string };
     }
   | { id: string; role: "assistant"; turnId: string; content: string }
   | {

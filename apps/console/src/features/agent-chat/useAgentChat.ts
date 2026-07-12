@@ -34,6 +34,8 @@ import {
   startCollabTurn,
 } from "./api/turns.js";
 import { attachAndFoldTurn } from "./runTurn.js";
+import { projectableHistory } from "./history.js";
+import { useCurrentAuthor } from "./currentUser.js";
 
 // The panel's behavior hook (#130): per-project message log, send → collab
 // turn → stream fold, mount-time rehydrate + running-turn re-attach. The
@@ -54,6 +56,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
   );
   const [isSending, setIsSending] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const author = useCurrentAuthor();
 
   // Mount / project switch: rehydrate an empty log from the server history,
   // then re-attach to a still-running chat turn (replay from 0).
@@ -99,7 +102,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         try {
           turnId = await startCollabTurn(projectName, convId, text);
         } catch (err) {
-          addMessage(chatKey, { role: "user", content: text, status: "failed" });
+          addMessage(chatKey, { role: "user", content: text, status: "failed", author });
           addMessage(chatKey, {
             role: "error",
             content: err instanceof Error ? err.message : "Failed to reach the agent.",
@@ -112,6 +115,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
           content: text,
           turnId,
           status: "in_flight",
+          author,
         });
         const signal = abortRef.current?.signal ?? new AbortController().signal;
         try {
@@ -129,40 +133,8 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         }
       })();
     },
-    [chatKey, org, projectName, isSending],
+    [chatKey, org, projectName, isSending, author],
   );
 
   return { messages, isSending, send };
-}
-
-// Server history → display log: user/assistant text only (tool/system parts
-// don't reconstruct into cards — the doc already reflects them).
-function projectableHistory(
-  history: { role: string; content: unknown }[],
-): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  for (const m of history) {
-    const text = contentText(m.content);
-    if (!text) continue;
-    if (m.role === "user") {
-      out.push({ id: "", role: "user", content: text, status: "completed" });
-    } else if (m.role === "assistant") {
-      out.push({ id: "", role: "assistant", turnId: "history", content: text });
-    }
-  }
-  return out;
-}
-
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((p) =>
-        typeof p === "object" && p !== null && (p as { type?: string }).type === "text"
-          ? ((p as { text?: string }).text ?? "")
-          : "",
-      )
-      .join("");
-  }
-  return "";
 }
