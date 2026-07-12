@@ -48,6 +48,14 @@ export function ChatInput({
             variant="outlined"
             icon={<FolderOpen size={14} />}
             label={contextLabel}
+            sx={{
+              maxWidth: "100%",
+              // The lucide-style icon doesn't inherit the Chip's icon margins,
+              // so it sits flush against the border — space it explicitly and
+              // align it with the label.
+              "& .MuiChip-icon": { ml: 0.75, mr: -0.25, flexShrink: 0 },
+              "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" },
+            }}
           />
         </Stack>
         {hint && (

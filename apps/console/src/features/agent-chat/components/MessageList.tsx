@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Avatar, Box, Divider, Stack, Typography } from "@wso2/oxygen-ui";
+import { Avatar, Box, Divider, Stack, Typography, alpha } from "@wso2/oxygen-ui";
 import type { FeedBlock } from "../feed";
 import { TurnBlock } from "./TurnBlock";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -63,16 +63,33 @@ function UserBlock({ block }: { block: Extract<FeedBlock, { kind: "user" }> }) {
           </Typography>
         )}
       </Stack>
-      <Typography
+      {/* Human messages get a subtle bubble so a person's words read as
+          distinct turns in the thread (own vs teammate tinted differently);
+          agent turns stay bubble-less as a flat activity stream. */}
+      <Box
         sx={{
-          whiteSpace: "pre-wrap",
-          fontSize: "0.875rem",
-          color: "text.primary",
-          opacity: failed ? 0.6 : 1,
+          display: "inline-block",
+          maxWidth: "100%",
+          px: 1.5,
+          py: 1,
+          borderRadius: 2,
+          bgcolor: (theme) =>
+            attribution.isOwn
+              ? alpha(theme.palette.primary.main, 0.08)
+              : theme.palette.action.hover,
         }}
       >
-        {message.content}
-      </Typography>
+        <Typography
+          sx={{
+            whiteSpace: "pre-wrap",
+            fontSize: "0.875rem",
+            color: "text.primary",
+            opacity: failed ? 0.6 : 1,
+          }}
+        >
+          {message.content}
+        </Typography>
+      </Box>
     </Box>
   );
 }

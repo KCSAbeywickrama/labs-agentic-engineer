@@ -77,10 +77,14 @@ export const projectsHandlers = [
         headers: { "Content-Type": "application/problem+json" },
       });
     }
+    // The build prompt is the project's description when none is given
+    // explicitly — it's what the card and overview show, so a project created
+    // from the "what do you want to build" flow isn't left blank.
+    const description = body.description ?? body.prompt;
     const project: Project = {
       name: body.name,
       displayName: body.displayName ?? body.name,
-      ...(body.description !== undefined && { description: body.description }),
+      ...(description !== undefined && { description }),
       status: "active",
       createdAt: new Date().toISOString(),
     };

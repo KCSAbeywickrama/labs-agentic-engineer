@@ -70,9 +70,12 @@ export function PageHeader({
         {status ? (
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
             <span>{title}</span>
+            {/* Soft appearance: a status beside a large title should read as a
+                label, not a solid button-like pill (design feedback). */}
             <StatusChip
               label={status.label}
               tone={status.tone}
+              appearance="soft"
               {...(status.variant ? { variant: status.variant } : {})}
             />
           </Stack>

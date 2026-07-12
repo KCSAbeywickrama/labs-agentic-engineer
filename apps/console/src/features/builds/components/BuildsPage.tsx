@@ -23,7 +23,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Stack,
   TextField,
@@ -32,6 +31,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
+import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { useProject, useProjectStatus } from "../../projects/api/queries";
 import { phaseChip } from "../../projects/lib/phaseChip";
@@ -118,33 +118,46 @@ export function BuildsPage({
     );
   }
 
+  // The version picker lives up in the header row (same level as the title),
+  // so it reads as a page-level control and the summary card can span full
+  // width below it.
+  const versionSelector = (
+    <Autocomplete
+      options={builds.data.map((b) => b.tag)}
+      value={selected.tag}
+      onChange={(_, value) =>
+        // Selecting the newest build clears ?tag — the default view.
+        onTagChange(value && value !== newest.tag ? value : undefined)
+      }
+      disableClearable
+      size="small"
+      sx={{ width: 180, flexShrink: 0 }}
+      renderInput={(params) => (
+        // MUI's render params don't declare `| undefined` on their
+        // optional props, which exactOptionalPropertyTypes rejects — the
+        // cast is the documented escape hatch for this spread.
+        <TextField {...(params as TextFieldProps)} label="Version" />
+      )}
+    />
+  );
+
   return (
     <>
-      {header}
-      <Stack
-        direction="row"
-        spacing={2}
-        sx={{ alignItems: "flex-start", mb: 2 }}
-      >
+      <PageHeader
+        title="Builds"
+        {...(project.data && {
+          subtitle: project.data.displayName ?? project.data.name,
+        })}
+        {...(status.data && { status: phaseChip(status.data) })}
+        backTo={{
+          link: <Link to="/projects/$projectName" params={{ projectName }} />,
+          label: "Back to Overview",
+        }}
+        actions={versionSelector}
+      />
+      <Box sx={{ mb: 2 }}>
         <BuildSummaryCard build={selected} />
-        <Autocomplete
-          options={builds.data.map((b) => b.tag)}
-          value={selected.tag}
-          onChange={(_, value) =>
-            // Selecting the newest build clears ?tag — the default view.
-            onTagChange(value && value !== newest.tag ? value : undefined)
-          }
-          disableClearable
-          size="small"
-          sx={{ width: 180, flexShrink: 0 }}
-          renderInput={(params) => (
-            // MUI's render params don't declare `| undefined` on their
-            // optional props, which exactOptionalPropertyTypes rejects — the
-            // cast is the documented escape hatch for this spread.
-            <TextField {...(params as TextFieldProps)} label="Version" />
-          )}
-        />
-      </Stack>
+      </Box>
       <TasksList projectName={projectName} tag={selected.tag} />
     </>
   );
@@ -154,15 +167,15 @@ export function BuildsPage({
 // read has no live query, so "started" barely occurs (treated as running).
 function statusChip(status: BuildSummary["status"]): {
   label: string;
-  color: "info" | "success" | "error";
+  tone: StatusTone;
 } {
   switch (status) {
     case "completed":
-      return { label: "Succeeded", color: "success" };
+      return { label: "Succeeded", tone: "success" };
     case "failed":
-      return { label: "Failed", color: "error" };
+      return { label: "Failed", tone: "error" };
     default: // started / in_progress
-      return { label: "Running", color: "info" };
+      return { label: "Running", tone: "info" };
   }
 }
 
@@ -186,7 +199,7 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
           sx={{ alignItems: "center", mb: 1 }}
         >
           <Typography variant="h6">{build.tag}</Typography>
-          <Chip size="small" label={chip.label} color={chip.color} />
+          <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
           <Box sx={{ flexGrow: 1 }} />
           {planning ? (
             // Subtle "planning" signal for the selected tag: the run has started

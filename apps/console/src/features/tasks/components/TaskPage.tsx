@@ -22,18 +22,17 @@ import {
   Box,
   Button,
   CircularProgress,
-  IconButton,
   Stack,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip } from "../../../components/StatusChip";
 import { useTask } from "../api/queries";
 import { taskChip } from "../api/status";
 import { useTaskLog } from "../hooks/useTaskLog";
+import { GitHubIssueLink } from "./GitHubIssueLink";
 import { TaskLogView } from "./TaskLogView";
 
 // Seconds elapsed since resetKey last changed, while `active`. Used to age the
@@ -168,27 +167,17 @@ export function TaskPage({
                 {/* Box holds the ref Tooltip needs; hovering the pill shows
                     the reason. */}
                 <Box sx={{ display: "inline-flex" }}>
-                  <StatusChip label={chip.label} tone={chip.tone} />
+                  <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
                 </Box>
               </Tooltip>
             ) : (
-              <StatusChip label={chip.label} tone={chip.tone} />
+              <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
             )}
           </Stack>
         }
         backTo={backTo}
         actions={
-          <Tooltip title="Open the GitHub issue">
-            <IconButton
-              component="a"
-              href={issueUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`GitHub issue #${issueNumber}`}
-            >
-              <GitHub size={18} />
-            </IconButton>
-          </Tooltip>
+          <GitHubIssueLink issueNumber={issueNumber} issueUrl={issueUrl} />
         }
       />
       <Box

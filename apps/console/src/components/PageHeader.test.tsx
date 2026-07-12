@@ -50,9 +50,10 @@ describe("PageHeader", () => {
       />,
     );
     expect(screen.getByText("Building")).toBeInTheDocument();
-    expect(screen.getByText("Building").closest(".MuiChip-root")).toHaveClass(
-      "MuiChip-colorInfo",
-    );
+    // The header status is rendered with the low-emphasis "soft" appearance —
+    // a tinted sx background rather than the solid MuiChip color class — so a
+    // status beside the title reads as a label, not a button.
+    expect(screen.getByText("Building").closest(".MuiChip-root")).toBeInTheDocument();
   });
 
   it("omits the status chip when not given", () => {

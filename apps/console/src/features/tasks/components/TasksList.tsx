@@ -22,16 +22,15 @@ import {
   Button,
   Chip,
   CircularProgress,
-  IconButton,
   ListingTable,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import { useAllTasks } from "../api/queries";
 import { taskChip } from "../api/status";
+import { GitHubIssueLink } from "./GitHubIssueLink";
 
 // The flat task list (#173): one row per task, status chip inline — the user
 // watches chips go green. Card-variant listing per the components list /
@@ -89,7 +88,7 @@ export function TasksList({
               Component
             </ListingTable.Cell>
             <ListingTable.Cell sx={{ maxWidth: 120 }}>Status</ListingTable.Cell>
-            <ListingTable.Cell sx={{ maxWidth: 64 }} aria-label="Links" />
+            <ListingTable.Cell sx={{ maxWidth: 80 }} aria-label="Links" />
           </ListingTable.Row>
         </ListingTable.Head>
         <ListingTable.Body>
@@ -151,19 +150,12 @@ export function TasksList({
                   <StatusChip {...taskChip(t.derivedStatus)} />
                 )}
               </ListingTable.Cell>
-              <ListingTable.Cell sx={{ maxWidth: 64 }}>
-                <Tooltip title="Open the GitHub issue">
-                  <IconButton
-                    component="a"
-                    href={t.issueUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`GitHub issue #${t.issueNumber}`}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <GitHub size={16} />
-                  </IconButton>
-                </Tooltip>
+              <ListingTable.Cell sx={{ maxWidth: 80 }}>
+                <GitHubIssueLink
+                  issueNumber={t.issueNumber}
+                  issueUrl={t.issueUrl}
+                  onClick={(e) => e.stopPropagation()}
+                />
               </ListingTable.Cell>
             </ListingTable.Row>
             );

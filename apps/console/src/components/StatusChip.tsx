@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Chip } from "@wso2/oxygen-ui";
+import { Chip, alpha } from "@wso2/oxygen-ui";
 
 // Console-wide status/kind chip (Task 4): every domain (task status, alert
 // classification, skill origin, project phase, ...) maps its own vocabulary
@@ -45,15 +45,56 @@ const TONE_COLOR: Record<
   primary: "primary",
 };
 
+// The palette family each tone reads its soft tint from. `neutral` has no
+// palette family, so its soft look is derived from text/action tokens below.
+const TONE_PALETTE: Record<
+  Exclude<StatusTone, "neutral">,
+  "primary" | "success" | "info" | "warning" | "error"
+> = {
+  success: "success",
+  info: "info",
+  warning: "warning",
+  error: "error",
+  primary: "primary",
+};
+
+// `soft`: a low-emphasis status pill — a faint tinted background with the
+// tone's own text colour and no border — for spots where a solid filled chip
+// reads as a button (a status beside a page title, a build's live state).
+// Solid stays the default so dense table rows are unaffected.
 export function StatusChip({
   label,
   tone,
   variant,
+  appearance = "solid",
 }: {
   label: string;
   tone: StatusTone;
   variant?: "filled" | "outlined";
+  appearance?: "solid" | "soft";
 }) {
+  if (appearance === "soft") {
+    return (
+      <Chip
+        size="small"
+        label={label}
+        sx={(theme) =>
+          tone === "neutral"
+            ? {
+                bgcolor: theme.palette.action.hover,
+                color: "text.secondary",
+                fontWeight: 500,
+              }
+            : {
+                bgcolor: alpha(theme.palette[TONE_PALETTE[tone]].main, 0.14),
+                color: theme.palette[TONE_PALETTE[tone]].main,
+                fontWeight: 500,
+              }
+        }
+      />
+    );
+  }
+
   return (
     <Chip
       size="small"
