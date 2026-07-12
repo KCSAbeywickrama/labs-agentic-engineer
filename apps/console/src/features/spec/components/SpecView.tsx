@@ -206,6 +206,10 @@ export function SpecView({ projectName }: { projectName: string }) {
       ? collab.getFileText(selectedFile.path)
       : null;
   const usesCollab = Boolean((fragment && collab.provider) || ytext);
+  // The md editor owns its scrolling (toolbar docked as the frame's header,
+  // document area scrolls inside — #206 rework), so its pane must be the
+  // same flex-column/overflow-hidden shape the canvas views need.
+  const isMdEditorView = Boolean(fragment && collab.provider);
   const content = useSpecFileContent(
     projectName,
     selectedFile && (!usesCollab || isOpenApiFile || isComponentDesignFile)
@@ -537,7 +541,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             </Box>
             <Box
               sx={
-                isDiagramView
+                isDiagramView || isMdEditorView
                   ? {
                       flexGrow: 1,
                       minWidth: 0,
@@ -545,6 +549,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                       display: "flex",
                       flexDirection: "column",
                       overflow: "hidden",
+                      ...(isMdEditorView && { p: 2 }),
                     }
                   : { flexGrow: 1, minWidth: 0, overflow: "auto", p: 2 }
               }
@@ -603,7 +608,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                   <SpecMdEditor
                     key={`${selectedFile.path}:md`}
                     fragment={fragment}
-                    path={selectedFile.path}
                     provider={collab.provider}
                     self={collab.self}
                   />
