@@ -37,11 +37,13 @@ export class DocFileBundle extends FileBundle {
   }
 
   override addFile(path: string, content: string): OpResult {
-    return this.mirror(super.addFile(path, content), path);
+    // A newly-created file is accept-by-default — mirror it UNMARKED.
+    return this.mirror(super.addFile(path, content), path, false);
   }
 
   override editFile(path: string, oldString: string, newString: string): OpResult {
-    return this.mirror(super.editFile(path, oldString, newString), path);
+    // An edit to already-committed content is reviewable — mirror it MARKED.
+    return this.mirror(super.editFile(path, oldString, newString), path, true);
   }
 
   override removeFile(path: string): OpResult {
@@ -50,10 +52,10 @@ export class DocFileBundle extends FileBundle {
     return res;
   }
 
-  private mirror(res: OpResult, path: string): OpResult {
+  private mirror(res: OpResult, path: string, mark: boolean): OpResult {
     if (res.ok && res.status === "applied") {
       const content = this.read(path);
-      if (content !== undefined) this.peer.set(path, content);
+      if (content !== undefined) this.peer.set(path, content, mark);
     }
     return res;
   }
