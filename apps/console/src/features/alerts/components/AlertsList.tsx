@@ -23,13 +23,13 @@ import {
   CircularProgress,
   ListingTable,
   PageContent,
-  PageTitle,
   Typography,
   formatRelativeTime,
 } from "@wso2/oxygen-ui";
 import { BellOff } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
+import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip } from "../../../components/StatusChip";
 import { useAlertsInfinite } from "../api/queries";
 import { classificationLabel, classificationTone } from "../classification";
@@ -51,13 +51,10 @@ export function AlertsList() {
 
   return (
     <PageContent>
-      <PageTitle>
-        <PageTitle.Header>Alerts</PageTitle.Header>
-        <PageTitle.SubHeader>
-          RCA reports from the OpenChoreo SRE-agent handoff, across every
-          project.
-        </PageTitle.SubHeader>
-      </PageTitle>
+      <PageHeader
+        title="Alerts"
+        subtitle="RCA reports from the OpenChoreo SRE-agent handoff, across every project."
+      />
 
       {isPending ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>

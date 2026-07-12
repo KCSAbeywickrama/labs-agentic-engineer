@@ -24,7 +24,6 @@ import {
   CircularProgress,
   Link,
   PageContent,
-  PageTitle,
   Step,
   StepContent,
   StepLabel,
@@ -40,6 +39,7 @@ import { classificationLabel, classificationTone } from "../classification";
 // a preview rather than raw text. MarkdownView is the console's shared
 // theme-token-styled react-markdown renderer.
 import { MarkdownView } from "../../../components/MarkdownView";
+import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 
@@ -203,15 +203,11 @@ export function AlertDetail({ alertId }: { alertId: string }) {
 
   return (
     <PageContent>
-      <Box sx={{ mb: 3 }}>
-        <PageTitle>
-          <PageTitle.BackButton component={<RouterLink to="/alerts" />} />
-          <PageTitle.Header>{report?.title ?? "Alert"}</PageTitle.Header>
-          {report?.project && (
-            <PageTitle.SubHeader>{report.project}</PageTitle.SubHeader>
-          )}
-        </PageTitle>
-      </Box>
+      <PageHeader
+        title={report?.title ?? "Alert"}
+        {...(report?.project && { subtitle: report.project })}
+        backTo={{ link: <RouterLink to="/alerts" />, label: "Back to Alerts" }}
+      />
 
       {isPending ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>

@@ -32,7 +32,6 @@ import {
   Menu,
   MenuItem,
   PageContent,
-  PageTitle,
   SearchBar,
   Typography,
   useMediaQuery,
@@ -46,6 +45,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
+import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
 import { useProjectsList } from "../api/queries";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -183,13 +183,11 @@ export function ProjectsList() {
 
   return (
     <PageContent>
-      <PageTitle>
-        <PageTitle.Header>Projects</PageTitle.Header>
-        <PageTitle.SubHeader>
-          Everything AEP is building for you, one project per app.
-        </PageTitle.SubHeader>
-        {!isTrueEmpty && (
-          <PageTitle.Actions>
+      <PageHeader
+        title="Projects"
+        subtitle="Everything AEP is building for you, one project per app."
+        {...(!isTrueEmpty && {
+          actions: (
             <Button
               variant="contained"
               startIcon={<Plus size={20} />}
@@ -198,9 +196,9 @@ export function ProjectsList() {
             >
               Create project
             </Button>
-          </PageTitle.Actions>
-        )}
-      </PageTitle>
+          ),
+        })}
+      />
 
       {isPending ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
