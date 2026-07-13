@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -44,6 +45,8 @@ var (
 	initConsoleURL           string
 	initAPIURL               string
 	initWorkspacesAccessMode string
+	initBuildPlaneNamespace  string
+	initRegistryService      string
 )
 
 var initCmd = &cobra.Command{
@@ -71,6 +74,8 @@ func init() {
 	initCmd.Flags().StringVar(&initAPIURL, "api-url", "http://api.openchoreo.localhost:8080", "Public URL of the AEP API")
 	initCmd.Flags().StringVar(&initWorkspacesAccessMode, "workspaces-access-mode", "", "PVC access mode for the shared workspaces volume (e.g. ReadWriteOnce for local k3d, ReadWriteMany for production)")
 	_ = viper.BindPFlag("platform.workspaces.access_mode", initCmd.Flags().Lookup("workspaces-access-mode"))
+	initCmd.Flags().StringVar(&initBuildPlaneNamespace, "build-plane-namespace", "openchoreo-workflow-plane", "Namespace of the OpenChoreo build/workflow plane (must already exist, incl. its image registry)")
+	initCmd.Flags().StringVar(&initRegistryService, "registry-service", "registry", "Name of the build-plane image registry Service (the coding-agent build pushes/pulls here)")
 	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API (overrides config file)")
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
 	initCmd.Flags().String("server", "", "AEP server gRPC URL (overrides config file)")
@@ -88,6 +93,16 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	k8sClient, err := k8s.NewClient("")
 	if err != nil {
 		return fmt.Errorf("connect to cluster: %w", err)
+	}
+
+	// 0. Prerequisite guard — verify the OpenChoreo build plane + image registry
+	// exist BEFORE installing anything. The coding-agent build/deploy chain
+	// pushes built images to, and pulls them from, this registry; without it,
+	// builds fail deep in the pipeline with an opaque publish/pull error. aepctl
+	// does not provision it (that is the OpenChoreo cluster's responsibility) —
+	// so fail fast here with an actionable message rather than half-installing.
+	if err := checkBuildRegistry(ctx, k8sClient, initBuildPlaneNamespace, initRegistryService); err != nil {
+		return err
 	}
 
 	// 1. Wait for OpenBao pod.
@@ -224,6 +239,32 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 
 	_, _ = fmt.Fprintln(os.Stdout, "\nAEP is ready. Open the console to get started.")
+	return nil
+}
+
+// checkBuildRegistry fails fast (before any install) when the OpenChoreo build
+// plane or its image registry Service is absent. The coding-agent build →
+// publish → deploy chain depends on this registry; aepctl assumes a
+// pre-provisioned OpenChoreo cluster and does not create it.
+func checkBuildRegistry(ctx context.Context, client *kubernetes.Clientset, namespace, service string) error {
+	if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("OpenChoreo build plane namespace %q not found.\n"+
+				"AEP requires a pre-provisioned OpenChoreo build/workflow plane (with its image registry) — "+
+				"the coding-agent build pipeline pushes and pulls images there.\n"+
+				"Provision it first, or pass --build-plane-namespace if yours differs.", namespace)
+		}
+		return fmt.Errorf("check build plane namespace %q: %w", namespace, err)
+	}
+	if _, err := client.CoreV1().Services(namespace).Get(ctx, service, metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("build image registry Service %q not found in namespace %q.\n"+
+				"The coding-agent build pipeline needs an in-cluster image registry (publish + deploy-time pull). "+
+				"Provision the OpenChoreo build plane's registry before running `aep init`, "+
+				"or pass --registry-service if yours is named differently.", service, namespace)
+		}
+		return fmt.Errorf("check registry Service %q/%q: %w", namespace, service, err)
+	}
 	return nil
 }
 
