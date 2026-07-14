@@ -80,7 +80,7 @@ export function buildSpecGenerationInstruction(prompt: string | null): string {
  * server-side design-generate steering that would author
  * `validation-criteria.json` never fires. Asking for it here scopes the oracle
  * to exactly the Generate-design action rather than every chat turn. See
- * docs/design/validation-phase-draft-plan.md (Addendum, Option 1).
+ * docs/design/validation.md ("The acceptance oracle").
  */
 export function buildDesignGenerationInstruction(): string {
   return (

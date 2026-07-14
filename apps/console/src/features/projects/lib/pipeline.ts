@@ -119,7 +119,9 @@ export function validationView(
     case "running":
       return { label: "validating", tone: "info" };
     case "completed":
-      return { label: "validated", tone: "success" };
+      // "completed" means the run finished — the pass/fail verdict lives in
+      // the report (behind the PR), so the label must not claim success.
+      return { label: "validation complete", tone: "info" };
     case "failed":
       return { label: "validation failed", tone: "error" };
     default: // "none" | "" | unknown

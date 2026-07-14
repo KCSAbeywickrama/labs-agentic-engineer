@@ -930,7 +930,6 @@ components:
           description: >-
             Link to the associated validation PR (the validation issue as a
             fallback before a PR exists); "" when there is no validation.
-          format: uri
           type: string
         version:
           description: Spec tag live in dev; "" if nothing deployed.

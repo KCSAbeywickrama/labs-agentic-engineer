@@ -16,8 +16,8 @@
  * under the License.
  */
 
-// Interim VALIDATION-phase task creator (see
-// docs/design/validation-phase-draft-plan.md, section A3).
+// Interim VALIDATION-phase task creator for the LOCAL harness (see
+// docs/design/validation.md — in production the platform mints the issue).
 //
 // Reads `specs/validation/validation-criteria.json` from a project repo
 // (authored there by the spec agent's `validation-criteria` skill) and
@@ -27,20 +27,35 @@
 // later).
 //
 // Usage:
-//   node scripts/create-validation-issue.mjs            # create the issue
-//   node scripts/create-validation-issue.mjs --dry-run  # print body only
+//   node scripts/create-validation-issue.mjs --repo <owner/repo>            # create the issue
+//   node scripts/create-validation-issue.mjs --repo <owner/repo> --dry-run  # print body only
 //
 // Requires an authenticated `gh` CLI.
 
 import { execFileSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
-// Constants — replace with the real project repo (expected structure:
+// Target repo — the deployed project's repo (expected structure:
 // specs/validation/validation-criteria.json committed, specs/design/** for
-// component design docs).
+// component design docs). Required via --repo (or the REPO env var) so the
+// issue is never created against a stale hardcoded default.
 // ---------------------------------------------------------------------------
 
-const REPO = "ChamodOrg/hello-ui";
+const REPO = resolveRepo();
+
+function resolveRepo() {
+  const i = process.argv.indexOf("--repo");
+  const fromArg = i !== -1 ? process.argv[i + 1] : undefined;
+  const repo = fromArg ?? process.env.REPO;
+  if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+    console.error(
+      "create-validation-issue: pass --repo <owner/repo> (or set REPO) — " +
+        "the project repo holding specs/validation/validation-criteria.json",
+    );
+    process.exit(1);
+  }
+  return repo;
+}
 const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 const LABELS = ["aep", "validation"];
 

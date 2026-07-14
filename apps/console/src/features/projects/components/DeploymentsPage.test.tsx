@@ -90,7 +90,7 @@ describe("DeploymentsPage — validation chip", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const chip = screen.getByRole("link", { name: /Validated/ });
+    const chip = screen.getByRole("link", { name: /Validation complete/ });
     expect(chip).toHaveAttribute("href", "https://github.com/acme/demo/pull/42");
     expect(chip).toHaveAttribute("target", "_blank");
   });

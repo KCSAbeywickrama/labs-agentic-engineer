@@ -147,6 +147,12 @@ func TestRunCoding_RuntimeConfigEmitError_DoesNotFailDispatch(t *testing.T) {
 	if strings.Contains(err.Error(), "OC transient") {
 		t.Fatalf("emit error must be swallowed (best-effort), got %v", err)
 	}
+	// The emission must have been ATTEMPTED — otherwise this test also passes
+	// when EmitForComponent is skipped entirely, proving nothing about the
+	// swallow-after-attempt behavior.
+	if got := rc.calls(); len(got) != 1 || got[0] != [3]string{"acme", "widgets", "order-service"} {
+		t.Fatalf("EmitForComponent must be attempted once with (org,project,component), got %v", got)
+	}
 }
 
 func TestRunBuild_ComponentMissing_ActionableError(t *testing.T) {

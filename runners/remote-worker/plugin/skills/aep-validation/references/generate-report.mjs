@@ -202,14 +202,31 @@ function main() {
     process.exit(2);
   }
 
-  // Heal-log entries must join to criteria — reject free-form shapes
-  // (an entry the report can't attribute is an invisible heal).
+  // Heal-log entries must join to criteria AND carry full provenance — reject
+  // free-form shapes (an entry the report can't attribute, or a heal without
+  // spec/classification/change/commit, is an invisible heal).
+  const HEAL_FIELDS = ["criterionId", "spec", "classification", "change", "commit"];
   const healByAc = new Map();
   for (const [i, h] of healEntries.entries()) {
+    if (h === null || typeof h !== "object" || Array.isArray(h)) {
+      fail(
+        `heal-log entry ${i} is not an object — ` +
+          `each entry must be {criterionId, spec, classification, change, commit}`,
+      );
+    }
     if (!h.criterionId || !criteriaById.has(h.criterionId)) {
       fail(
         `heal-log entry ${i} has ${h.criterionId ? `unknown criterionId "${h.criterionId}"` : "no criterionId"} — ` +
           `each entry must be {criterionId, spec, classification, change, commit} with a criterionId from the criteria file`,
+      );
+    }
+    const missing = HEAL_FIELDS.filter(
+      (f) => typeof h[f] !== "string" || h[f].trim() === "",
+    );
+    if (missing.length > 0) {
+      fail(
+        `heal-log entry ${i} (${h.criterionId}) is missing required field(s): ${missing.join(", ")} — ` +
+          `each entry must be {criterionId, spec, classification, change, commit}, all non-empty strings`,
       );
     }
     const list = healByAc.get(h.criterionId) ?? [];

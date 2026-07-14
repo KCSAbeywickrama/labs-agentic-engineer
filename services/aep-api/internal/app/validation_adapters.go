@@ -80,7 +80,8 @@ type componentDeployLister interface {
 // validationEndpointResolver adapts the design read + ComponentService to
 // validation's EndpointResolver port: the deployed external URL (first HTTP
 // external endpoint from the OpenChoreo ReleaseBinding) per design component. A
-// component with no resolved URL yet is skipped (best-effort).
+// component with no resolved URL yet is skipped; a ListDeployments ERROR is
+// propagated (it is an infra failure, not "undeployed" — see ResolveEndpoints).
 type validationEndpointResolver struct {
 	store *artifacts.ArtifactStore
 	comp  componentDeployLister
@@ -101,10 +102,15 @@ func (r validationEndpointResolver) ResolveEndpoints(ctx context.Context, orgHan
 	var out []validation.ComponentEndpoint
 	for i := range df.Components {
 		name := df.Components[i].Name
+		// A never-deployed component is an EMPTY 200 list (ListReleaseBindings
+		// filters by component), so an error here is genuinely exceptional
+		// (auth/network/OC down) — propagate it instead of silently resolving
+		// fewer endpoints than the deployed system actually has.
 		list, lerr := r.comp.ListDeployments(ctx, orgHandle, projectID, name)
 		if lerr != nil {
-			continue // not deployed / not resolvable yet — skip
+			return nil, fmt.Errorf("list deployments for %s: %w", name, lerr)
 		}
+		// No resolved URL yet (empty list / no external endpoint) — skip.
 		if url := firstDeploymentURL(list); url != "" {
 			out = append(out, validation.ComponentEndpoint{Component: name, URL: url})
 		}
@@ -147,7 +153,14 @@ func (v devflowValidator) Validate(ctx context.Context, orgID, projectID, _ stri
 	for i := range df.Components {
 		name := df.Components[i].Name
 		list, lerr := v.comp.ListDeployments(ctx, orgID, projectID, name)
-		if lerr != nil || firstDeploymentURL(list) == "" {
+		if lerr != nil {
+			// A never-deployed component is an empty 200 list, so an error is a
+			// transient/infra failure, not "undeployed" — return it and let the
+			// Temporal activity retry instead of failing the gate with a false
+			// negative.
+			return fmt.Errorf("validate: list deployments for %s: %w", name, lerr)
+		}
+		if firstDeploymentURL(list) == "" {
 			undeployed = append(undeployed, name)
 		}
 	}
