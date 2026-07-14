@@ -278,7 +278,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 	devRuns := []models.DevflowRun{{Tag: "v1", WorkflowID: "wf-dev", Status: models.WorkflowStatusRunning}}
 	child := func(status string) *models.DevflowRun {
 		return &models.DevflowRun{
-			Kind: models.WorkflowKindTask, Class: models.TaskClassValidation,
+			Kind: models.WorkflowKindValidation,
 			Repo: "o/r", IssueNumber: 9, ParentWorkflowID: "wf-dev", Status: status,
 		}
 	}

@@ -35,22 +35,30 @@ pass/fail. Nothing in the validation run writes under `specs/`.
    (`Validate`) asserting each component has a Ready deployment. The execution
    funnel independently holds the task until all its component deps derive
    `deployed`.
-3. **Resolve + run.** `ResolveValidationTask` (idempotent re-ensure + find the
-   open issue) returns the issue number; the validating phase runs it as a child
-   `TaskFlowWorkflow` with `Class = validation`. Zero criteria ⇒ skipped
-   ("no acceptance criteria").
-4. **Dispatch.** The shared coding executor dispatches it, swapping to the
-   Playwright runner image (`VALIDATION_RUNNER_IMAGE`), a project-scoped sentinel
-   component, `AEP_TASK_KIND=validation`, and a longer deadline; the coding-only
-   component pre-flight is skipped.
+3. **Orchestrate.** The validating phase spawns ONE `ValidationFlowWorkflow`
+   child (`validationflow-<org>-<project>-<tag>`). It resolves the validation
+   issue via `ResolveValidationTask` (idempotent re-ensure + find; zero criteria
+   ⇒ skipped, "no acceptance criteria"), records the phase's run row
+   (`kind=validation`, parented to the dev run — the issue's webhook-signal
+   owner), then fans out one `ValidationTaskWorkflow` lane child per automated
+   lane, in parallel (e2e only today). One issue, one PR, N lanes: the
+   orchestrator pumps the issue's signals to the lanes (`lane-status`,
+   correlated by execution id) and merges the single PR only after every lane
+   finished.
+4. **Dispatch.** The orchestrator dispatches each lane through the shared coding
+   executor, which swaps to the Playwright runner image
+   (`VALIDATION_RUNNER_IMAGE`), a project-scoped sentinel component,
+   `AEP_TASK_KIND=validation`, and a longer deadline; the coding-only component
+   pre-flight is skipped.
 5. **Runner.** The `aep-validation` skill reads the issue, fetches the deployed
    endpoints (and, on demand, test credentials) from the platform, authors and
    runs Playwright e2e specs against the deployed app, heals brittleness
    (bounded), generates a report, and opens ONE PR (`Closes #N`) — ready for
    review even when criteria fail (a failing criterion is report content, not a
-   task failure).
-6. **Merge = done.** A validation task ends at merge: no build, no deploy. Its
-   resting state is `merged`, surfaced as "Done".
+   task failure). The PR opening doubles as the e2e lane's completion signal.
+6. **Merge = done.** Once every lane succeeded, the orchestrator merges the
+   single validation PR: no build, no deploy. The issue's resting state is
+   `merged`, surfaced as "Done".
 
 ## Platform side (`services/aep-api`)
 
@@ -79,6 +87,12 @@ OpenChoreo rejects the forwarded token (401) and zero endpoints resolve. (This w
 the root cause of "the deployed endpoint didn't resolve".)
 
 **Lifecycle.** No new task states. Validation runs coding → PR → merge:
+- The phase's tracking row is the ORCHESTRATOR's `workflow_runs` row
+  (`kind=validation`, the issue number, `parent_workflow_id` = the dev run):
+  the signaler's `RunningTaskByIssue` (kind IN task, validation) routes the
+  issue's webhooks to it, and the status builder's `ValidationRunByParent`
+  reads it as the deploy board's validation state. Lane children record no
+  rows. There is no `class` column — `Kind` discriminates.
 - A merged validation PR spawns **no build** (`execution/events.go`) — the task is
   project-scoped, with no component to build.
 - The derived-status view maps a completed validation (issue closed with a
@@ -139,7 +153,12 @@ calls live in the skill markdown, not runner code.
   model, no public `GET /projects/{p}/validation` status API, and no console
   validation UI** yet.
 - No scenario-lane (agentic-judgment) automation and no automated fix-task loop on
-  failures.
+  failures. The workflow side is lane-ready (`ValidationFlowWorkflow` fans out
+  `ValidationTaskWorkflow` children; a lane = an entry in its lane slice), but a
+  second lane still needs: a job-succeeded watcher signal (today success == the
+  PR opening, and only the e2e lane opens the PR), lane-qualified funnel
+  admission (`TryAdmit` allows one active execution per issue), and a finalize
+  step that combines lane branches + per-lane reports into the single PR.
 - `scripts/create-validation-issue.mjs` is an interim, repo-root issue generator
   kept only for the local harness; the platform mints the issue itself in
   production.
@@ -151,7 +170,7 @@ calls live in the skill markdown, not runner code.
 | Issue minting + endpoints/credentials | `services/aep-api/internal/feature/validation/` |
 | Composition-root adapters (endpoints, `Validate`, creds, service identity) | `services/aep-api/internal/app/validation_adapters.go` |
 | Mint call site (planning) | `services/aep-api/internal/feature/task/plan.go` |
-| Devflow validating phase | `services/aep-api/internal/feature/devflow/workflow_dev.go`, `workflow_task.go` |
+| Devflow validating phase (orchestrator + lane children) | `services/aep-api/internal/feature/devflow/workflow_dev.go`, `workflow_validation.go` |
 | Dispatch (Playwright image swap) | `services/aep-api/internal/feature/codingagent/coding_executor.go` |
 | Merge-skips-build + derived status | `services/aep-api/internal/feature/execution/events.go`, `internal/feature/task/reads.go` |
 | Oracle authoring skill | `skills/validation-criteria/` (vendored into `services/aep-api/skills/embedded/`) |

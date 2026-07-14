@@ -23,15 +23,17 @@ import "time"
 const (
 	WorkflowKindDev  = "dev"
 	WorkflowKindTask = "task"
+	// WorkflowKindValidation is the dev run's validation-phase orchestrator
+	// (ValidationFlowWorkflow): one row per validating phase, carrying the
+	// project's validation issue and parented to the dev run. It owns the
+	// issue's webhook signals (see RunningTaskByIssue) and its status is the
+	// phase status the deployments board surfaces.
+	WorkflowKindValidation = "validation"
 
 	WorkflowStatusRunning   = "running"
 	WorkflowStatusCompleted = "completed"
 	WorkflowStatusFailed    = "failed"
 	WorkflowStatusCanceled  = "canceled"
-
-	// TaskClassValidation is the DevflowRun.Class value for the project's
-	// validation task (a task-kind row); coding tasks and dev rows leave Class "".
-	TaskClassValidation = "validation"
 )
 
 // WorkflowRun is the lookup index for Temporal devflow workflows — NOT the
@@ -53,13 +55,7 @@ type DevflowRun struct {
 	WorkflowID string `gorm:"index;uniqueIndex:ux_workflow_runs_wf_run;not null" json:"workflowId"`
 	RunID      string `gorm:"uniqueIndex:ux_workflow_runs_wf_run;not null" json:"runId"`
 
-	Kind string `gorm:"not null;index" json:"kind"` // dev | task
-
-	// Class discriminates task-kind rows by their TaskFlowInput.Class
-	// ("validation" for the project's validation task, "" for coding tasks and
-	// all dev rows). The status builder uses it to pick the validation child run
-	// out of a project's task rows without a GitHub call.
-	Class string `gorm:"index" json:"class,omitempty"`
+	Kind string `gorm:"not null;index" json:"kind"` // dev | task | validation
 
 	OrgID     string `gorm:"index;not null" json:"-"`
 	ProjectID string `gorm:"index;not null" json:"projectId"`

@@ -38,7 +38,7 @@ func TestGateConfig_IsAuto(t *testing.T) {
 func TestDevFlowWorkflow_ManualPlanGate_Reject(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
 
 	env.RegisterDelayedCallback(func() {
 		env.SignalWorkflow(SigGateDecision, GateDecisionSignal{Gate: GatePlan, Approve: false, Note: "not yet"})
@@ -60,7 +60,7 @@ func TestDevFlowWorkflow_ManualPlanGate_Reject(t *testing.T) {
 func TestDevFlowWorkflow_ManualGate_ApprovalTimeout(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
 
 	// plan gate is manual with a 60s approval timeout; send no decision so the
 	// timeout fires (the test env auto-advances time while idle) → rejection.
@@ -80,9 +80,10 @@ func TestDevFlowWorkflow_ManualGate_ApprovalTimeout(t *testing.T) {
 func TestDevFlowWorkflow_PendingGate_VisibleInQuery(t *testing.T) {
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}}, 0)
+	registerDevActivities(env, []PlannedTask{{Issue: 1, Key: "api"}})
 	env.RegisterWorkflow(TaskFlowWorkflow)
 	env.OnWorkflow(TaskFlowWorkflow, mock.Anything, mock.Anything).Return(TaskFlowResult{Outcome: OutcomeSucceeded}, nil)
+	mockValidationFlow(env, validationSkipped(), nil)
 
 	// While paused at the manual plan gate, the status query must surface it.
 	env.RegisterDelayedCallback(func() {
