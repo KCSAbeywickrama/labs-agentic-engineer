@@ -192,7 +192,7 @@ describe("deployStageView", () => {
         },
       }),
     );
-    expect(v.line).toBe("live in dev · validation complete");
+    expect(v.line).toBe("live in dev · validation report");
   });
   it("failed → error", () => {
     const v = deployStageView(
@@ -219,7 +219,7 @@ describe("deployStageView", () => {
         },
       }),
     );
-    expect(v.line).toBe("live in dev · validation complete");
+    expect(v.line).toBe("live in dev · validation report");
     expect(v.tone).toBe("info");
   });
   it("status none and no validation → nothing deployed", () => {
@@ -241,9 +241,9 @@ describe("validationView", () => {
       tone: "info",
     });
   });
-  it("completed → validation complete (neutral — the verdict lives in the report)", () => {
+  it("completed → validation report (neutral — the verdict lives in the report)", () => {
     expect(validationView("completed")).toEqual({
-      label: "validation complete",
+      label: "validation report",
       tone: "info",
     });
   });
