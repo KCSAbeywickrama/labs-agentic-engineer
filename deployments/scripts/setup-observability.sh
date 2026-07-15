@@ -594,6 +594,9 @@ echo "✅ AEP observer-reader role + binding applied"
 # ── 5. ClusterObservabilityPlane CR (registers plane with the CP) ────────
 echo ""
 echo "5️⃣  ClusterObservabilityPlane CR"
+# The cluster-agent needs the CA of the local obs-plane to verify the
+# Observer's TLS cert. The chart creates a cluster-agent TLS secret (cluster-agent-tls) with the CA, but does not expose it as a value. Grab it from the secret and inject it into the CR.
+local_obs_ca=$(kubectl --context "$CLUSTER_CONTEXT" get secret cluster-agent-tls -n "$NS" -o jsonpath='{.data.ca\.crt}' | base64 -d)
 kubectl --context "$CLUSTER_CONTEXT" apply -f - <<EOF
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterObservabilityPlane
@@ -603,10 +606,8 @@ spec:
   planeID: default
   clusterAgent:
     clientCA:
-      secretKeyRef:
-        key: ca.crt
-        name: cluster-agent-tls
-        namespace: $NS
+      value: |
+$(echo "$local_obs_ca" | sed 's/^/        /')
   observerURL: http://observer.openchoreo.localhost:11080
   # Lets the portal fetch RCA reports from the SRE agent (rca.enabled above).
   rcaAgentURL: http://rca-agent.openchoreo.localhost:11080

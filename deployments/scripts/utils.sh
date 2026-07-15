@@ -165,6 +165,9 @@ spec:
   planeID: "$plane_id"
   secretStoreRef:
     name: "$secret_store"
+  observabilityPlaneRef:
+    kind: ClusterObservabilityPlane
+    name: default
   clusterAgent:
     clientCA:
       value: |

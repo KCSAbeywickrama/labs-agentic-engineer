@@ -199,6 +199,24 @@ func (s *TraitSyncService) SyncComponentTraits(ctx context.Context, orgID, proje
 
 	traits, configs := DesiredAPIConfigurationTraitWithIssuers(componentName, match.EndpointName(), desiredEnabled, issuers, allowedOrigins)
 
+	// Auto-provision the default "error → RCA" observability-alert-rule trait
+	// for service components (opt out per component via design.json
+	// `disableAutoRca`). Appended to the SAME slice/map because
+	// UpdateComponentTraits REPLACES spec.traits — emitting it in a separate
+	// call would clobber the api-configuration trait above. OC's trait
+	// controller renders each instance into an ObservabilityAlertRule scoped to
+	// this component (component/project/env UIDs resolved from ${metadata.*}).
+	if models.ResolveAutoRCAEnabled(*match) {
+		rcaTraits, rcaConfigs := DesiredObservabilityAlertRuleTraits(componentName)
+		traits = append(traits, rcaTraits...)
+		if configs == nil {
+			configs = map[string]map[string]interface{}{}
+		}
+		for inst, cfg := range rcaConfigs {
+			configs[inst] = cfg
+		}
+	}
+
 	// Patch the Component CR's spec.traits. Skip when there's nothing to
 	// change — but the OC client's GET-then-PUT is harmless so we always
 	// fire to avoid bookkeeping drift between in-process state and OC.
@@ -272,12 +290,15 @@ func (s *TraitSyncService) DeleteComponentCascade(ctx context.Context, orgID, pr
 	return nil
 }
 
-// SyncProjectAPITraits re-emits `api-configuration` trait state on every
-// service component in the project whose design has `exposesAPI.auth: end-user-required`.
-// Called from the dispatch path so that when ANY component lands `deployed`
-// (and especially a freshly-added SPA), every protected API in the project
-// picks up the new sibling origin in its `cors.allowedOrigins`. Without
-// this, stale CORS silently breaks preflight for newly added SPAs.
+// SyncProjectAPITraits re-emits trait state on every service component in the
+// project that needs it, from the dispatch path (when any component lands
+// `deployed`). It covers two cases:
+//   - API-exposing components (`exposesAPI.auth` set): so every protected API
+//     picks up a freshly-added SPA's sibling origin in `cors.allowedOrigins`
+//     (stale CORS otherwise silently breaks the new SPA's preflight).
+//   - Auto-RCA-eligible components (all service components, unless opted out):
+//     so a fresh deploy provisions the default error→RCA alert-rule trait
+//     immediately, instead of waiting for the next reconcile-watcher sweep.
 //
 // Idempotent + best-effort: a failure on one component logs and continues
 // to the next. Returns nil unless reading design itself fails (no design ⇒
@@ -303,7 +324,13 @@ func (s *TraitSyncService) SyncProjectAPITraits(ctx context.Context, orgID, proj
 		if c.ComponentType != models.ComponentTypeService {
 			continue
 		}
-		if !models.ResolveAPISecurityEnabled(c) {
+		// Reconcile a service component when it needs EITHER trait: a managed
+		// API (api-configuration) or the default error→RCA alert rule
+		// (observability-alert-rule). Including auto-RCA-eligible components
+		// here — not just API-exposing ones — makes a fresh deploy provision
+		// the alert rule immediately via the dispatch path, instead of waiting
+		// for the next reconcile-watcher sweep.
+		if !models.ResolveAPISecurityEnabled(c) && !models.ResolveAutoRCAEnabled(c) {
 			continue
 		}
 		k8sName := k8sname.ToK8sName(c.Name)

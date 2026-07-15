@@ -168,10 +168,14 @@ spec:
       name: dockerfile-builder
   # api-configuration lets a component opt into the WSO2 API Platform
   # gateway path (RestApi + kgateway Backend pointing at the AP router).
-  # The trait's CRD is applied below via apply_with_retry.
+  # observability-alert-rule is auto-provisioned on every component for
+  # error-log detection and AI RCA triggering.
+  # Both traits' CRDs are applied below via apply_with_retry.
   allowedTraits:
     - kind: ClusterTrait
       name: api-configuration
+    - kind: ClusterTrait
+      name: observability-alert-rule
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -381,6 +385,11 @@ echo "✅ ClusterComponentType 'deployment/service' created"
 apply_with_retry "${SCRIPT_DIR}/../manifests/api-platform/api-configuration-trait.yaml" "api-configuration-trait"
 echo "✅ ClusterTrait 'api-configuration' installed"
 
+# ClusterTrait: observability-alert-rule — auto-provisioned on components to detect error-log patterns and trigger AI RCA incidents. The trait's CRD is applied here so the OC API can accept it in a Workload; the trait's controller is part of the control-plane chart, so it doesn't need to be installed separately. The trait's spec defines a log pattern to match and an incident template to create when the pattern is detected. The control-plane chart's rca-agent role grants the controller permission to create incidents, and the BFF's aep-api-client service account has permission to create Workload CRs with this trait. The trait is used by the coding-agent
+# component to detect error-log patterns and trigger AI RCA incidents.
+apply_with_retry "${SCRIPT_DIR}/../manifests/api-platform/observability-alert-rule-trait.yaml" "observability-alert-rule-trait"
+echo "✅ ClusterTrait 'observability-alert-rule' installed"
+
 # ClusterComponentType: deployment/web-application — frontends with subdomain routing
 # Web-apps get their own subdomain via oc_dns_label so SPAs work correctly
 # (no subpath issues with asset references).
@@ -394,6 +403,9 @@ spec:
   allowedWorkflows:
     - kind: ClusterWorkflow
       name: dockerfile-builder
+  allowedTraits:
+    - kind: ClusterTrait
+      name: observability-alert-rule
   environmentConfigs:
     openAPIV3Schema:
       type: object

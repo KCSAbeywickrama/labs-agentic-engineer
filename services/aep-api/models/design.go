@@ -59,6 +59,11 @@ type DesignComponent struct {
 	// — the coding runner materializes exactly these when building it). Sourced
 	// from the component design.json `skillsApplied` key.
 	SkillsApplied []string `json:"skillsApplied,omitempty"`
+	// DisableAutoRca opts this component out of the platform's default
+	// "error → RCA" observability-alert-rule trait (auto-provisioned for
+	// service components). Default false ⇒ auto-RCA on. Sourced from the
+	// design.json `disableAutoRca` key. See ResolveAutoRCAEnabled.
+	DisableAutoRca bool `json:"disableAutoRca,omitempty"`
 }
 
 // DefaultEndpointName is the conventional workload endpoint name the platform's
