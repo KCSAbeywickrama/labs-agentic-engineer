@@ -106,4 +106,12 @@ type DeployStage struct {
 		Total int64 `json:"total"`
 		Ready int64 `json:"ready"`
 	} `json:"components" doc:"Component rollout progress for the current deploy."`
+	// Validation is the coarse validation-task run state for the latest build:
+	// none (not reached, or no acceptance criteria authored → no child run),
+	// running, completed (ran to completion — the pass/fail verdict lives in the
+	// report, behind GitHub), failed (the validation run failed mechanically).
+	Validation string `json:"validation" enum:"none,running,completed,failed" doc:"Coarse validation-task run state for the latest build."`
+	// ValidationUrl links to the associated validation PR (the validation issue
+	// as a fallback before a PR exists); "" when there is no validation.
+	ValidationUrl string `json:"validationUrl,omitempty" doc:"Link to the associated validation PR (issue as fallback); \"\" when no validation."`
 }

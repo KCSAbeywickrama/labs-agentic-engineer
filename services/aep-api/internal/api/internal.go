@@ -23,6 +23,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/validation"
 )
 
 // newInternalAPI creates the Huma API for the internal service-to-service
@@ -53,7 +54,9 @@ func newInternalAPI(internalMux *http.ServeMux) huma.API {
 // fills it with real services; GenerateInternalOpenAPIYAML passes the zero
 // value (nil deps — registration never invokes them).
 type InternalDeps struct {
-	CredsRefresh orgcreds.CredentialsRefreshService
+	CredsRefresh          orgcreds.CredentialsRefreshService
+	ValidationContext     validation.ContextProvider
+	ValidationCredentials validation.CredentialRequester
 }
 
 // RegisterAllInternal registers every internal S2S operation on the Huma API.
@@ -61,6 +64,7 @@ type InternalDeps struct {
 // spec generator (zero deps).
 func RegisterAllInternal(api huma.API, d InternalDeps) {
 	orgcreds.RegisterInternalCredentials(api, d.CredsRefresh)
+	validation.RegisterInternalValidation(api, d.ValidationContext, d.ValidationCredentials)
 }
 
 // GenerateInternalOpenAPIYAML builds the internal S2S OpenAPI document and
