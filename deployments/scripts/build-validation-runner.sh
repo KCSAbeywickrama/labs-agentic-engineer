@@ -17,10 +17,14 @@
 
 # Builds the validation-task runner image (Debian + Playwright + baked chromium,
 # runners/remote-worker/Dockerfile.validation) and imports it into the local k3d
-# cluster. Unlike the coding runner (published to Docker Hub), this image is not
-# published, so every machine builds it locally once — self-contained, no shared
-# registry needed. Validation dispatch (proxy path only) reads it via the compose
-# VALIDATION_RUNNER_IMAGE env, which defaults to the same tag built here.
+# cluster. This is the LOCAL/DEV path: every machine builds the :dev tag once —
+# self-contained, no shared registry needed. Validation dispatch (proxy path
+# only) reads it via the compose VALIDATION_RUNNER_IMAGE env, which defaults to
+# the same tag built here.
+#
+# For released platforms the image is published to GHCR as
+# ghcr.io/wso2/aep/remote-worker-validation:<version> by .github/workflows/release.yml
+# and wired into aep-api via the platform Helm chart's validationRunner.image.
 #
 # Idempotent: the (multi-minute, downloads chromium) build is skipped when the
 # image already exists. FORCE=1 rebuilds — use it after changing Dockerfile.validation
