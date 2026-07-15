@@ -65,6 +65,7 @@ Key wiring:
 | `scripts/setup-openchoreo.sh` | Control Plane + Data Plane + Workflow Plane + Thunder |
 | `scripts/setup-aep.sh` | ClusterWorkflows + ClusterComponentTypes + Environment + AuthzRoleBindings + `.env` |
 | `scripts/start.sh` | Refresh DNS, seed kubeconfig, `docker compose up` |
+| `scripts/update.sh` | Run-after-pull driver: diff vs last run → run only the changed steps → `start.sh` (see `docs/developer-guide/run-after-pull.md`) |
 | `scripts/stop.sh` | `docker compose down` (cluster stays) |
 | `manifests/docker-build-workflow.yaml` | `dockerfile-builder` ClusterWorkflow (Argo CWTs) |
 | `manifests/aep-coding-agent.yaml` | Coding-agent one-shot pod template (mirrors v2 exactly) |
