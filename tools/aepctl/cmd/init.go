@@ -267,8 +267,8 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 func checkOCVersion(ctx context.Context, client *kubernetes.Clientset, namespace, minVersion string) error {
 	if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("OpenChoreo namespace %q not found.\n"+
-				"AEP requires OpenChoreo >= %s. Provision it first, or pass --oc-namespace if yours differs.",
+			return fmt.Errorf("OpenChoreo namespace %q not found: "+
+				"AEP requires OpenChoreo >= %s; provision it first, or pass --oc-namespace if yours differs",
 				namespace, minVersion)
 		}
 		return fmt.Errorf("check OpenChoreo namespace %q: %w", namespace, err)
@@ -293,15 +293,15 @@ func checkOCVersion(ctx context.Context, client *kubernetes.Clientset, namespace
 			return fmt.Errorf("parse OpenChoreo version %q: %w", ver, err)
 		}
 		if !ok {
-			return fmt.Errorf("OpenChoreo version %s is below the minimum required version %s.\n"+
-				"Upgrade OpenChoreo to %s or later before running `aep init`.",
+			return fmt.Errorf("OpenChoreo version %s is below the minimum required version %s: "+
+				"upgrade OpenChoreo to %s or later before running `aep init`",
 				ver, minVersion, minVersion)
 		}
 		return nil
 	}
 
-	return fmt.Errorf("could not determine the OpenChoreo version from deployments in namespace %q.\n"+
-		"Ensure OpenChoreo >= %s is installed, or pass --skip-oc-version-check to bypass this check.",
+	return fmt.Errorf("could not determine OpenChoreo version from deployments in namespace %q: "+
+		"ensure OpenChoreo >= %s is installed, or pass --skip-oc-version-check to bypass this check",
 		namespace, minVersion)
 }
 
@@ -350,19 +350,19 @@ func splitVersion(v string) ([3]int, error) {
 func checkBuildRegistry(ctx context.Context, client *kubernetes.Clientset, namespace, service string) error {
 	if _, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("OpenChoreo build plane namespace %q not found.\n"+
-				"AEP requires a pre-provisioned OpenChoreo build/workflow plane (with its image registry) — "+
-				"the coding-agent build pipeline pushes and pulls images there.\n"+
-				"Provision it first, or pass --build-plane-namespace if yours differs.", namespace)
+			return fmt.Errorf("OpenChoreo build plane namespace %q not found: "+
+				"AEP requires a pre-provisioned OpenChoreo build/workflow plane with its image registry "+
+				"(the coding-agent build pipeline pushes and pulls images there); "+
+				"provision it first, or pass --build-plane-namespace if yours differs", namespace)
 		}
 		return fmt.Errorf("check build plane namespace %q: %w", namespace, err)
 	}
 	if _, err := client.CoreV1().Services(namespace).Get(ctx, service, metav1.GetOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("build image registry Service %q not found in namespace %q.\n"+
-				"The coding-agent build pipeline needs an in-cluster image registry (publish + deploy-time pull). "+
-				"Provision the OpenChoreo build plane's registry before running `aep init`, "+
-				"or pass --registry-service if yours is named differently.", service, namespace)
+			return fmt.Errorf("build image registry Service %q not found in namespace %q: "+
+				"the coding-agent build pipeline needs an in-cluster image registry (publish + deploy-time pull); "+
+				"provision the OpenChoreo build plane's registry before running `aep init`, "+
+				"or pass --registry-service if yours is named differently", service, namespace)
 		}
 		return fmt.Errorf("check registry Service %q/%q: %w", namespace, service, err)
 	}
