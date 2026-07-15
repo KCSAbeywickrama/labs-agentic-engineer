@@ -19,9 +19,10 @@ package models
 // ResolveAutoRCAEnabled reports whether the platform should auto-provision the
 // default "error → RCA" observability-alert-rule trait for this component.
 //
-// Sensible defaults: enabled components only (an error-log alert
-// on a web-app / library is meaningless), and opt-out per component via the
-// design.json `disableAutoRca: true` key.
+// Sensible defaults: service components only (an error-log alert on a
+// web-app / library is meaningless — their container logs are a static
+// file server, not the application code that would log an error), and
+// opt-out per component via the design.json `disableAutoRca: true` key.
 func ResolveAutoRCAEnabled(comp DesignComponent) bool {
-	return !comp.DisableAutoRca
+	return comp.ComponentType == ComponentTypeService && !comp.DisableAutoRca
 }
