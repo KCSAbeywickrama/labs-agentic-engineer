@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
@@ -159,7 +160,7 @@ func TestRunBuild_ComponentMissing_ActionableError(t *testing.T) {
 	// The build path does NOT upsert; a missing Component surfaces a clear,
 	// actionable error wrapping openchoreo.ErrNotFound.
 	oc := &ocmocks.ComponentClientMock{
-		TriggerBuildAtCommitFunc: func(_ context.Context, _, _, _, _, _, _ string) (*models.WorkflowRun, error) {
+		TriggerBuildAtCommitFunc: func(_ context.Context, _, _, _, _, _, _ string) (*apigen.WorkflowRun, error) {
 			return nil, openchoreo.ErrNotFound
 		},
 	}

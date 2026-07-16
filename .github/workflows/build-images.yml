@@ -42,7 +42,7 @@ jobs:
         run: |
           ALL='{
             "aep-server":   {"dockerfile":"tools/aepctl/Dockerfile.server","context":"tools/aepctl"},
-            "aep-api":      {"dockerfile":"services/aep-api/Dockerfile","context":"services/aep-api"},
+            "aep-api":      {"dockerfile":"services/aep-api/Dockerfile","context":"services/aep-api","buildContexts":"skills=skills"},
             "agents":       {"dockerfile":"services/agents/Dockerfile","context":"."},
             "remote-worker":{"dockerfile":"runners/remote-worker/Dockerfile","context":"runners/remote-worker"},
             "console":      {"dockerfile":"apps/console/Dockerfile","context":"."},
@@ -50,7 +50,7 @@ jobs:
           }'
           CHANGES='${{ steps.filter.outputs.changes }}'
           matrix=$(echo "$CHANGES" | jq -c --argjson all "$ALL" \
-            '[.[] | {name: ., dockerfile: $all[.].dockerfile, context: $all[.].context}]')
+            '[.[] | {name: ., dockerfile: $all[.].dockerfile, context: $all[.].context, buildContexts: ($all[.].buildContexts // "")}]')
           echo "matrix={\"include\":$matrix}" >> "$GITHUB_OUTPUT"
           if [ "$CHANGES" = "[]" ]; then
             echo "has-images=false" >> "$GITHUB_OUTPUT"
@@ -78,6 +78,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          # aep-api pulls repo-root skills/ in as a named context (empty for
+          # every other image); see services/aep-api/Dockerfile COPY --from=skills.
+          build-contexts: ${{ matrix.buildContexts }}
           push: false
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha,scope=${{ matrix.name }}

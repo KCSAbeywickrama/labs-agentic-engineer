@@ -53,3 +53,16 @@ type DesignReader interface {
 type CriteriaReader interface {
 	ReadValidationCriteria(ctx context.Context, orgID, projectID string) (raw []byte, found bool, err error)
 }
+
+// ContextProvider is the internal validation-context endpoint's view of the
+// context service (*ContextService satisfies it). The org is the verified
+// caller's, bound into ctx by the internal runner-auth gate.
+type ContextProvider interface {
+	ValidationContext(ctx context.Context, executionID, orgHandle string) (*ValidationContextResponse, error)
+}
+
+// CredentialRequester is the internal test-credentials endpoint's view of the
+// credential service (*CredentialService satisfies it).
+type CredentialRequester interface {
+	RequestCredentials(ctx context.Context, executionID, orgHandle string, req CredentialRequest) (*TestCredential, error)
+}

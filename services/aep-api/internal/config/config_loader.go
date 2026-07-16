@@ -67,6 +67,7 @@ func Load() (Config, error) {
 		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
 		BFFPublicURL:              r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
 		BuildAuthRetryBudget:      r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
+		SkillsDir:                 r.readOptionalString("SKILLS_DIR", "/app/skills"),
 		ThunderAdmin: ThunderAdminConfig{
 			BaseURL:      r.readOptionalString("THUNDER_ADMIN_URL", ""),
 			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "aep-system-client"),
