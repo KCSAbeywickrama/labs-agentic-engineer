@@ -131,10 +131,14 @@ a matching heal-log entry is a hard error (exit 2); newly added specs are not
 gated. The agent never hand-writes the report.
 
 **Image — `Dockerfile.validation`.** `node:22-bookworm-slim` (glibc, for chromium)
-with baked chromium + `playwright-cli` + `gh` + Go. `AEP_PLAYWRIGHT_VERSION` pins
-`tests/e2e/package.json` to the baked browser version. The alpine coding image
+with baked chromium + `playwright-cli` + `gh` + Go, plus the plugin skills baked
+in at build time (`COPY . .`, same convention as the coding runner). `AEP_PLAYWRIGHT_VERSION`
+pins `tests/e2e/package.json` to the baked browser version. The alpine coding image
 cannot run chromium, so there is no fallback — an empty `VALIDATION_RUNNER_IMAGE`
-disables validation dispatch (fails loudly).
+disables validation dispatch (fails loudly). Released to GHCR as
+`ghcr.io/wso2/aep/remote-worker-validation:<version>` by `.github/workflows/release.yml`
+and wired into aep-api via the platform Helm chart's `validationRunner.image`; the
+local `aep-validation-runner:dev` tag (`build-validation-runner.sh`) is the dev path.
 
 **Runner plumbing (`src/`).** The only validation-specific change is the
 `AEP_TASK_KIND` switch (`implementation` | `validation`) that preloads
