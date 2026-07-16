@@ -27,8 +27,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
@@ -75,7 +78,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/seed"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
-	"gorm.io/gorm"
 )
 
 // Watcher is a long-running background loop. Every watcher blocks on its
@@ -402,7 +404,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// commit to main through the Workspace port (shared-volume-clone
 	// architecture, Phase 1). Built-ins + flow skills seed/reconcile from the
 	// embedded files on demand. docs/design/skills-repo-storage.md.
-	skillSvc := skills.NewSkillService(gitOpsService, repoService)
+	skillSvc := skills.NewSkillService(gitOpsService, repoService, os.DirFS(cfg.SkillsDir))
 	skillMutationSvc := skills.NewSkillMutationService(skillSvc)
 	skillImportSvc := skills.NewSkillImportService(skillSvc)
 
