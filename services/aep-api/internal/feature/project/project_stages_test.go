@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
 )
@@ -37,7 +39,7 @@ func devBinding(name, readyStatus, readyReason string) models.ReleaseBindingSumm
 	}
 }
 
-func mustStatus(t *testing.T, fx statusFixture) *models.ProjectStatus {
+func mustStatus(t *testing.T, fx statusFixture) *apigen.ProjectStatus {
 	t.Helper()
 	st, err := fx.service().GetProjectStatus(context.Background(), "acme", "web")
 	if err != nil {
@@ -70,7 +72,7 @@ func TestStageDerivation_FullPipeline(t *testing.T) {
 	}
 	st := mustStatus(t, fx)
 
-	if want := (models.SpecStage{Exists: true, Version: "v2", Dirty: true, Design: true}); st.Spec != want {
+	if want := (apigen.SpecStage{Exists: true, Version: "v2", Dirty: true, Design: true}); st.Spec != want {
 		t.Errorf("spec = %+v, want %+v", st.Spec, want)
 	}
 
@@ -282,7 +284,7 @@ func TestRepoNotReady_ZeroValueStages(t *testing.T) {
 	if st.Phase != "repo-cloning" {
 		t.Fatalf("phase = %q, want repo-cloning", st.Phase)
 	}
-	if st.Spec != (models.SpecStage{}) {
+	if st.Spec != (apigen.SpecStage{}) {
 		t.Errorf("spec = %+v, want zero-valued", st.Spec)
 	}
 	if st.Build.Status != "idle" || st.Build.Version != "" || st.Build.Tasks.Total != 0 {

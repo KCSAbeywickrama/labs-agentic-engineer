@@ -1,27 +1,7 @@
-.PHONY: build test test-db cover check-no-legacy-creds gen-oc-client gen-oc-client-check gen-mocks openapi openapi-check vendor-skills vendor-skills-check
+.PHONY: build test test-db cover check-no-legacy-creds gen-api gen-api-check gen-oc-client gen-oc-client-check gen-mocks vendor-skills vendor-skills-check
 
 build:
 	go build ./...
-
-# The committed spec (packages/contracts/api/v1/openapi.yaml) is the SOURCE OF
-# TRUTH; the Go code follows it. This target exports what the code currently
-# serves — a comparison aid only, deliberately NOT wired into `make gen`, and
-# it NEVER writes the contract file (that clobbered curated entries once —
-# see 4032e96). Compare build/public-openapi.yaml against the contract by hand
-# when aligning handlers; the fix direction is code → spec, never the reverse.
-#   public   → build/public-openapi.yaml    (gitignored tooling artifact)
-#   internal → build/internal-openapi.yaml  (gitignored tooling artifact)
-openapi:
-	go run ./cmd/openapigen
-
-# Drift aid: export what the code serves, then show where it differs from the
-# committed contract. Informational — the contract is intentionally narrower
-# than the served surface while legacy (Deprecated-tagged) ops remain, so this
-# does not fail the build on any difference; it exists to eyeball alignment.
-openapi-check: openapi
-	@diff -u ../../packages/contracts/api/v1/openapi.yaml build/public-openapi.yaml \
-		&& echo "code serves exactly the committed contract" \
-		|| echo "(differences above: contract on the left, served API on the right)"
 
 # Fast lane: -short skips the DB tier (dbtest.New self-skips under -short), so
 # plain unit/component runs need no Docker.
@@ -55,6 +35,34 @@ test-db:
 	@DOCKER_HOST="$${DOCKER_HOST:-$$(docker context inspect -f '{{.Endpoints.docker.Host}}' 2>/dev/null)}" \
 	  TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="$${TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE:-/var/run/docker.sock}" \
 	  go test ./...
+
+# ── Contract-first public API codegen ────────────────────────────────────────
+# The committed contract (packages/contracts/api/v1/openapi.yaml — schemas and
+# paths in ONE document) is the SOURCE OF TRUTH; gen-api regenerates what serves
+# it into internal/api/apigen (package apigen): the schema types + operation Params
+# (models_gen.go) and the strict server that references them, plus the contract
+# baked in as GetSpec() for the request validator (server_gen.go, embedded-spec
+# — no vendored YAML copy needed). Generated files are committed; gen-api-check
+# is the CI freshness gate.
+CONTRACT_DIR          = ../../packages/contracts/api/v1
+INTERNAL_CONTRACT_DIR = ../../packages/contracts/api/internal/v1
+gen-api:
+	@$(OAPI_CODEGEN) -config internal/api/apigen/oapi-codegen-models.yaml $(CONTRACT_DIR)/openapi.yaml
+	@$(OAPI_CODEGEN) -config internal/api/apigen/oapi-codegen-server.yaml $(CONTRACT_DIR)/openapi.yaml
+	@$(OAPI_CODEGEN) -config internal/api/igen/oapi-codegen.yaml $(INTERNAL_CONTRACT_DIR)/openapi.yaml
+	@gofmt -w internal/api/apigen/models_gen.go internal/api/apigen/server_gen.go internal/api/igen/igen_gen.go
+	@echo "API types + strict server (with embedded spec) regenerated"
+
+# CI freshness gate: regenerate, then fail if anything tracked drifted — a
+# contract edit without `make gen-api`, or a hand-edit of generated output.
+gen-api-check: gen-api
+	@if ! git diff --exit-code --quiet -- internal/api/apigen/ internal/api/igen/; then \
+		git diff --stat -- internal/api/apigen/ internal/api/igen/ | cat; \
+		echo ""; \
+		echo "Generated API code is stale w.r.t. packages/contracts/api/v1."; \
+		echo "Run 'make gen-api' in services/aep-api and commit the changes."; \
+		exit 1; \
+	fi
 
 # Pinned spec version — bump this and re-run `make gen-oc-client` when the
 # upstream OC API changes. Keep aligned with the OC build deployed by the

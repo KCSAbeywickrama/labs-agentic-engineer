@@ -28,6 +28,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
@@ -73,7 +75,7 @@ func (s *projectService) SetStageSources(runs devRunRows, bindings bindingsReade
 // fields from three concurrently-read sources — strict join: any source
 // failing fails the whole read (the console's poller keeps last-good data
 // and retries; the endpoint never fabricates emptiness).
-func (s *projectService) populateStages(ctx context.Context, orgName, projectName string, status *models.ProjectStatus) error {
+func (s *projectService) populateStages(ctx context.Context, orgName, projectName string, status *apigen.ProjectStatus) error {
 	if s.artifactSvc == nil || s.runReader == nil || s.bindingsReader == nil {
 		return fmt.Errorf("project status: stage sources not wired")
 	}
@@ -139,7 +141,7 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 
 	// Spec stage + flat artifact fields: one snapshot, same semantics as the
 	// retired per-call reads — minus their per-poll origin fetches.
-	status.Spec = models.SpecStage{
+	status.Spec = apigen.SpecStage{
 		Exists:  snap.HasSpec,
 		Version: snap.SpecVersion,
 		Dirty:   snap.SpecDirty,
@@ -193,7 +195,7 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 // present here, where the old ReadDesign failed the whole status read — see
 // artifacts.StatusSnapshot.HasDesign. HasTasks stays false — tasks are
 // counted live from GitHub, never here.
-func applyFlatArtifactFields(status *models.ProjectStatus, snap *artifacts.StatusSnapshot) {
+func applyFlatArtifactFields(status *apigen.ProjectStatus, snap *artifacts.StatusSnapshot) {
 	status.HasSpec = snap.HasSpec
 	switch {
 	case snap.SpecVersion != "":

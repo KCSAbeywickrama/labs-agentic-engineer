@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
@@ -59,9 +61,9 @@ func TestRunCoding_PreflightEnsuresComponent_BeforeDispatch(t *testing.T) {
 	ensurer := &fakeEnsurer{}
 	triggered := false
 	oc := &ocmocks.ComponentClientMock{
-		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
+		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
 			triggered = true
-			return &models.WorkflowRun{Name: "ca-1"}, nil
+			return &apigen.WorkflowRun{Name: "ca-1"}, nil
 		},
 	}
 	row := codingRow("c1")
@@ -82,9 +84,9 @@ func TestRunCoding_PreflightFailure_BlocksDispatch(t *testing.T) {
 	ensurer := &fakeEnsurer{err: errors.New("design missing")}
 	triggered := false
 	oc := &ocmocks.ComponentClientMock{
-		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
+		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
 			triggered = true
-			return &models.WorkflowRun{Name: "ca-1"}, nil
+			return &apigen.WorkflowRun{Name: "ca-1"}, nil
 		},
 	}
 	row := codingRow("c1")
@@ -104,8 +106,8 @@ func TestRunCoding_ReDispatch_PreflightRunsEachTime(t *testing.T) {
 	// so a re-dispatch simply calls it again and succeeds — no error, no duplicate.
 	ensurer := &fakeEnsurer{}
 	oc := &ocmocks.ComponentClientMock{
-		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
-			return &models.WorkflowRun{Name: "ca-1"}, nil
+		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
+			return &apigen.WorkflowRun{Name: "ca-1"}, nil
 		},
 	}
 	e := codingExecutorFor(t, ensurer, oc, codingRow("c1"))
@@ -126,8 +128,8 @@ func TestRunCoding_EmitsRuntimeConfig_AtEnsurePreflight(t *testing.T) {
 	ensurer := &fakeEnsurer{}
 	rc := &fakeRuntimeConfig{}
 	oc := &ocmocks.ComponentClientMock{
-		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
-			return &models.WorkflowRun{Name: "ca-1"}, nil
+		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
+			return &apigen.WorkflowRun{Name: "ca-1"}, nil
 		},
 	}
 	row := codingRow("c1")
@@ -148,9 +150,9 @@ func TestRunCoding_RuntimeConfigEmitError_DoesNotFailDispatch(t *testing.T) {
 	rc := &fakeRuntimeConfig{err: errors.New("OC transient")}
 	triggered := false
 	oc := &ocmocks.ComponentClientMock{
-		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*models.WorkflowRun, error) {
+		TriggerCodingAgentFunc: func(_ context.Context, _ openchoreo.CodingAgentParams) (*apigen.WorkflowRun, error) {
 			triggered = true
-			return &models.WorkflowRun{Name: "ca-1"}, nil
+			return &apigen.WorkflowRun{Name: "ca-1"}, nil
 		},
 	}
 	row := codingRow("c1")
@@ -168,7 +170,7 @@ func TestRunBuild_ComponentMissing_ActionableError(t *testing.T) {
 	// The build path does NOT upsert; a missing Component surfaces a clear,
 	// actionable error wrapping openchoreo.ErrNotFound.
 	oc := &ocmocks.ComponentClientMock{
-		TriggerBuildAtCommitFunc: func(_ context.Context, _, _, _, _, _, _ string) (*models.WorkflowRun, error) {
+		TriggerBuildAtCommitFunc: func(_ context.Context, _, _, _, _, _, _ string) (*apigen.WorkflowRun, error) {
 			return nil, openchoreo.ErrNotFound
 		},
 	}
