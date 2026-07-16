@@ -2819,6 +2819,23 @@ components:
           - failed
           type: string
           x-go-type: string
+        validation:
+          description: >-
+            Coarse validation-task run state for the latest build: none (not
+            reached, or no acceptance criteria), running, completed (ran to
+            completion; the pass/fail verdict lives in the report), failed
+            (the validation run failed mechanically).
+          enum:
+          - none
+          - running
+          - completed
+          - failed
+          type: string
+        validationUrl:
+          description: >-
+            Link to the associated validation PR (the validation issue as a
+            fallback before a PR exists); "" when there is no validation.
+          type: string
         version:
           description: Spec tag live in dev; "" if nothing deployed.
           type: string
@@ -2826,6 +2843,7 @@ components:
       - version
       - status
       - components
+      - validation
       type: object
     Deployment:
       additionalProperties: false

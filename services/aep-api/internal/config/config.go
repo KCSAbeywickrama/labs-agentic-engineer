@@ -209,6 +209,13 @@ type Config struct {
 	// functional with the workflow endpoints answering 503.
 	Temporal TemporalConfig
 
+	// AgentValidationRunnerImage is the docker image a VALIDATION Job uses:
+	// the Playwright-capable runner variant (Dockerfile.validation — Debian
+	// base + baked chromium + playwright-cli). Empty disables validation
+	// dispatch (the validation executor fails loudly), since the alpine coding
+	// image cannot run chromium.
+	AgentValidationRunnerImage string
+
 	// AgentClusterSecretStore is the ESO ClusterSecretStore that backs
 	// per-run ExternalSecret reads in the remote-worker NS on DP.
 	// On cloud-dp-oc-dp this MUST be `application-secrets-read` (Vault

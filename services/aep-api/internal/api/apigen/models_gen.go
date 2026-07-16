@@ -87,6 +87,30 @@ func (e BuildSummaryStatus) Valid() bool {
 	}
 }
 
+// Defines values for DeployStageValidation.
+const (
+	Completed DeployStageValidation = "completed"
+	Failed    DeployStageValidation = "failed"
+	None      DeployStageValidation = "none"
+	Running   DeployStageValidation = "running"
+)
+
+// Valid indicates whether the value is a known member of the DeployStageValidation enum.
+func (e DeployStageValidation) Valid() bool {
+	switch e {
+	case Completed:
+		return true
+	case Failed:
+		return true
+	case None:
+		return true
+	case Running:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PreflightItemKind.
 const (
 	PreflightItemKindExternalConfig   PreflightItemKind = "external-config"
@@ -499,9 +523,18 @@ type DeployStage struct {
 	} `json:"components"`
 	Status string `json:"status"`
 
+	// Validation Coarse validation-task run state for the latest build: none (not reached, or no acceptance criteria), running, completed (ran to completion; the pass/fail verdict lives in the report), failed (the validation run failed mechanically).
+	Validation DeployStageValidation `json:"validation"`
+
+	// ValidationURL Link to the associated validation PR (the validation issue as a fallback before a PR exists); "" when there is no validation.
+	ValidationURL string `json:"validationUrl,omitempty"`
+
 	// Version Spec tag live in dev; "" if nothing deployed.
 	Version string `json:"version"`
 }
+
+// DeployStageValidation Coarse validation-task run state for the latest build: none (not reached, or no acceptance criteria), running, completed (ran to completion; the pass/fail verdict lives in the report), failed (the validation run failed mechanically).
+type DeployStageValidation string
 
 // Deployment defines model for Deployment.
 type Deployment struct {

@@ -9,17 +9,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/oapi-codegen/runtime"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/validation"
 )
 
 const (
 	PublisherCCScopes publisherCCContextKey = "publisherCC.Scopes"
 	TaskJWTScopes     taskJWTContextKey     = "taskJWT.Scopes"
 )
+
+// ComponentEndpoint defines model for ComponentEndpoint.
+type ComponentEndpoint = validation.ComponentEndpoint
 
 // Error Flat error envelope returned by every non-2xx response.
 type Error struct {
@@ -49,17 +55,39 @@ type Identity struct {
 // RefreshResponse Fresh GitHub token + commit identity for the execution.
 type RefreshResponse = orgcreds.RefreshResponse
 
+// TestCredential Test login credentials for a validation run. Served as the validation service's own struct (no mapping layer).
+type TestCredential = validation.TestCredential
+
+// TestCredentialRequest Optional hints for a runner test-credential request.
+type TestCredentialRequest struct {
+	Purpose  string `json:"purpose,omitempty"`
+	Role     string `json:"role,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
+// ValidationContextResponse Deployed endpoints + criteria path for a validation run. Served as the validation service's own struct (no mapping layer).
+type ValidationContextResponse = validation.ValidationContextResponse
+
 // publisherCCContextKey is the context key for publisherCC security scheme
 type publisherCCContextKey string
 
 // taskJWTContextKey is the context key for taskJWT security scheme
 type taskJWTContextKey string
 
+// RunnerValidationCredentialsJSONRequestBody defines body for RunnerValidationCredentials for application/json ContentType.
+type RunnerValidationCredentialsJSONRequestBody = TestCredentialRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Refresh an execution's git credentials (runner callback)
 	// (POST /executions/{executionId}/credentials/refresh)
 	RunnerRefreshCredentials(w http.ResponseWriter, r *http.Request, executionID string)
+	// Request test credentials for a validation run (runner callback)
+	// (POST /executions/{executionId}/test-credentials)
+	RunnerValidationCredentials(w http.ResponseWriter, r *http.Request, executionID string)
+	// Fetch a validation run's deployed endpoints (runner callback)
+	// (GET /executions/{executionId}/validation-context)
+	RunnerValidationContext(w http.ResponseWriter, r *http.Request, executionID string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -96,6 +124,74 @@ func (siw *ServerInterfaceWrapper) RunnerRefreshCredentials(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunnerRefreshCredentials(w, r, executionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunnerValidationCredentials operation middleware
+func (siw *ServerInterfaceWrapper) RunnerValidationCredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "executionId" -------------
+	var executionID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "executionId", r.PathValue("executionId"), &executionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "executionId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, TaskJWTScopes, []string{})
+
+	ctx = context.WithValue(ctx, PublisherCCScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunnerValidationCredentials(w, r, executionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunnerValidationContext operation middleware
+func (siw *ServerInterfaceWrapper) RunnerValidationContext(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "executionId" -------------
+	var executionID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "executionId", r.PathValue("executionId"), &executionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "executionId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, TaskJWTScopes, []string{})
+
+	ctx = context.WithValue(ctx, PublisherCCScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunnerValidationContext(w, r, executionID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -226,6 +322,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/executions/{executionId}/credentials/refresh", wrapper.RunnerRefreshCredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/executions/{executionId}/test-credentials", wrapper.RunnerValidationCredentials)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/executions/{executionId}/validation-context", wrapper.RunnerValidationContext)
 
 	return m
 }
@@ -269,11 +367,96 @@ func (response RunnerRefreshCredentialsdefaultJSONResponse) VisitRunnerRefreshCr
 	return err
 }
 
+type RunnerValidationCredentialsRequestObject struct {
+	ExecutionID string `json:"executionId"`
+	Body        *RunnerValidationCredentialsJSONRequestBody
+}
+
+type RunnerValidationCredentialsResponseObject interface {
+	VisitRunnerValidationCredentialsResponse(w http.ResponseWriter) error
+}
+
+type RunnerValidationCredentials200JSONResponse TestCredential
+
+func (response RunnerValidationCredentials200JSONResponse) VisitRunnerValidationCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunnerValidationCredentialsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RunnerValidationCredentialsdefaultJSONResponse) VisitRunnerValidationCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunnerValidationContextRequestObject struct {
+	ExecutionID string `json:"executionId"`
+}
+
+type RunnerValidationContextResponseObject interface {
+	VisitRunnerValidationContextResponse(w http.ResponseWriter) error
+}
+
+type RunnerValidationContext200JSONResponse ValidationContextResponse
+
+func (response RunnerValidationContext200JSONResponse) VisitRunnerValidationContextResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunnerValidationContextdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RunnerValidationContextdefaultJSONResponse) VisitRunnerValidationContextResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Refresh an execution's git credentials (runner callback)
 	// (POST /executions/{executionId}/credentials/refresh)
 	RunnerRefreshCredentials(ctx context.Context, request RunnerRefreshCredentialsRequestObject) (RunnerRefreshCredentialsResponseObject, error)
+	// Request test credentials for a validation run (runner callback)
+	// (POST /executions/{executionId}/test-credentials)
+	RunnerValidationCredentials(ctx context.Context, request RunnerValidationCredentialsRequestObject) (RunnerValidationCredentialsResponseObject, error)
+	// Fetch a validation run's deployed endpoints (runner callback)
+	// (GET /executions/{executionId}/validation-context)
+	RunnerValidationContext(ctx context.Context, request RunnerValidationContextRequestObject) (RunnerValidationContextResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -324,6 +507,68 @@ func (sh *strictHandler) RunnerRefreshCredentials(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RunnerRefreshCredentialsResponseObject); ok {
 		if err := validResponse.VisitRunnerRefreshCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunnerValidationCredentials operation middleware
+func (sh *strictHandler) RunnerValidationCredentials(w http.ResponseWriter, r *http.Request, executionID string) {
+	var request RunnerValidationCredentialsRequestObject
+
+	request.ExecutionID = executionID
+
+	var body RunnerValidationCredentialsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunnerValidationCredentials(ctx, request.(RunnerValidationCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunnerValidationCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunnerValidationCredentialsResponseObject); ok {
+		if err := validResponse.VisitRunnerValidationCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunnerValidationContext operation middleware
+func (sh *strictHandler) RunnerValidationContext(w http.ResponseWriter, r *http.Request, executionID string) {
+	var request RunnerValidationContextRequestObject
+
+	request.ExecutionID = executionID
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunnerValidationContext(ctx, request.(RunnerValidationContextRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunnerValidationContext")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunnerValidationContextResponseObject); ok {
+		if err := validResponse.VisitRunnerValidationContextResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

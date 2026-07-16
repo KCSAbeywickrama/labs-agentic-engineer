@@ -23,6 +23,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/api/igen"
 	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
+	"github.com/wso2/aep/aep-api/internal/feature/validation"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
@@ -46,6 +47,11 @@ type InternalDeps struct {
 	// RunnerAuth verifies runner bearers (Task-JWT / publisher-cc) against the
 	// path execution id. nil fails closed: every internal op answers 503.
 	RunnerAuth *auth.RunnerAuthorizer
+	// ValidationContext + ValidationCredentials back the two validation runner
+	// callbacks (validation-context GET, test-credentials POST); a nil provider
+	// answers 503 for its op.
+	ValidationContext     validation.ContextProvider
+	ValidationCredentials validation.CredentialRequester
 }
 
 // internalServer implements igen.StrictServerInterface.
@@ -91,6 +97,10 @@ func runnerAuthGate(authorizer *auth.RunnerAuthorizer) igen.StrictMiddlewareFunc
 			switch req := request.(type) {
 			case igen.RunnerRefreshCredentialsRequestObject:
 				executionID = req.ExecutionID
+			case igen.RunnerValidationContextRequestObject:
+				executionID = req.ExecutionID
+			case igen.RunnerValidationCredentialsRequestObject:
+				executionID = req.ExecutionID
 			default:
 				return nil, errUnauthorized("unauthenticated internal operation: " + operationID)
 			}
@@ -128,4 +138,42 @@ func (s *internalServer) RunnerRefreshCredentials(ctx context.Context, request i
 		return nil, errInternal("failed to refresh credentials")
 	}
 	return igen.RunnerRefreshCredentials200JSONResponse(*resp), nil
+}
+
+func (s *internalServer) RunnerValidationContext(ctx context.Context, request igen.RunnerValidationContextRequestObject) (igen.RunnerValidationContextResponseObject, error) {
+	if s.deps.ValidationContext == nil {
+		return nil, errServiceUnavailable("validation context not configured")
+	}
+	org := tenant.BoundOrgFromContext(ctx)
+	resp, err := s.deps.ValidationContext.ValidationContext(ctx, request.ExecutionID, org)
+	if err != nil {
+		if errors.Is(err, validation.ErrExecutionNotFound) {
+			return nil, errNotFound("no validation task for this execution")
+		}
+		return nil, errInternal("failed to resolve validation context")
+	}
+	return igen.RunnerValidationContext200JSONResponse(*resp), nil
+}
+
+func (s *internalServer) RunnerValidationCredentials(ctx context.Context, request igen.RunnerValidationCredentialsRequestObject) (igen.RunnerValidationCredentialsResponseObject, error) {
+	if s.deps.ValidationCredentials == nil {
+		return nil, errServiceUnavailable("validation credentials not configured")
+	}
+	org := tenant.BoundOrgFromContext(ctx)
+	var req validation.CredentialRequest
+	if request.Body != nil {
+		req = validation.CredentialRequest{
+			Role:     request.Body.Role,
+			Purpose:  request.Body.Purpose,
+			Username: request.Body.Username,
+		}
+	}
+	resp, err := s.deps.ValidationCredentials.RequestCredentials(ctx, request.ExecutionID, org, req)
+	if err != nil {
+		if errors.Is(err, validation.ErrExecutionNotFound) {
+			return nil, errNotFound("no validation task for this execution")
+		}
+		return nil, errInternal("failed to request test credentials")
+	}
+	return igen.RunnerValidationCredentials200JSONResponse(*resp), nil
 }

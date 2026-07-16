@@ -38,6 +38,12 @@ func TestInternalContract(t *testing.T) {
 		// Runner S2S re-keyed from task to execution (tasks-github-native §9.2);
 		// the version root lives in `servers`, the path is server-relative.
 		"/executions/{executionId}/credentials/refresh",
+		// Validation runner callbacks: deployed-endpoint fetch + on-demand
+		// test-credential request.
+		"runner-validation-context",
+		"/executions/{executionId}/validation-context",
+		"runner-validation-credentials",
+		"/executions/{executionId}/test-credentials",
 		"taskJWT",
 		"publisherCC",
 	} {

@@ -70,6 +70,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/feature/validation"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
@@ -684,7 +685,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// to build (else "Component not found"). Ported from the legacy dispatch
 	// service's ensureOCComponent; componentService reads the design facts.
 	codingExecutor.WithComponentEnsurer(componentService)
+	codingExecutor.WithValidationImage(cfg.AgentValidationRunnerImage)
 	registry.Register(taskmeta.ClassCoding, codingExecutor)
+	// The same executor serves ClassValidation: its runCoding branch swaps the
+	// Playwright image + AEP_TASK_KIND=validation and skips the coding-only
+	// component-ensure/wiring pre-flight (validation-phase).
+	registry.Register(taskmeta.ClassValidation, codingExecutor)
 
 	// Command surface calls into the funnel; webhook handling splits across the
 	// two package halves: issues.* (task birth / block repair / command labels)
@@ -761,6 +767,21 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	publisherVerifier := authn.NewPublisherTokenVerifier(thunderJWKS, cfg.PlatformIDP.Issuer, "aep-publisher-")
 	runnerAuth := authn.NewRunnerAuthorizer(taskTokens, publisherVerifier, executionOrgLookup(db))
 
+	// Validation-context runner callback: resolves the run's deployed endpoint
+	// URLs so they never enter the public issue.
+	validationContextSvc := validation.NewContextService(
+		validationExecLocator{repo: executionRepo},
+		validationEndpointResolver{store: artifactStore, comp: componentService},
+	)
+	// Test-credentials runner callback: the runner requests a login on demand
+	// (only when a criterion needs one). v1 returns a shared mock account; the
+	// execution→project fence + request contract are what real per-project user
+	// provisioning slots into later.
+	validationCredentialsSvc := validation.NewCredentialService(
+		validationExecLocator{repo: executionRepo},
+		mockValidationCredentials{},
+	)
+
 	// Controllers
 	params := api.AppParams{
 		Config: cfg,
@@ -768,8 +789,10 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		// only the connect-callback + webhook controllers remain raw handlers.
 		// Every other feature is served by the strict handlers via params.Deps.
 		InternalDeps: api.InternalDeps{
-			CredsRefresh: credRefreshService,
-			RunnerAuth:   runnerAuth,
+			CredsRefresh:          credRefreshService,
+			RunnerAuth:            runnerAuth,
+			ValidationContext:     validationContextSvc,
+			ValidationCredentials: validationCredentialsSvc,
 		},
 		WebhookController:   webhookCtrl,
 		OrgGitHubController: orgGitHubCtrl,
@@ -927,6 +950,17 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Mint aep:provision gate issues on design approval (before planning gates any
 	// consumer coding task on them).
 	designService.SetProvisionIssueMinter(provisioningSvc)
+	// Mint the project's single aep:validation Task in the PLANNING pass: the
+	// plan session mints it right after the plan tap creates the implementation
+	// issues, so it is born in the same phase as them (and never pollutes the
+	// plan turn's existing-task context). It dependsOn every component, so the
+	// funnel holds it until they all deploy (validation-phase).
+	validationSvc := validation.NewService(validation.Deps{
+		Issues:   issueService,
+		Design:   designComponents{store: artifactStore},
+		Criteria: validationCriteria{files: filesSvc},
+	})
+	taskPlan.SetValidationIssueMinter(validationSvc)
 	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
 	// external dependency's OpenAPI contract and atomically commits the spec file
 	// + the design.json specPath edit (clearing the external-needs-spec gate) via
@@ -1059,13 +1093,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// thin adapters over the funnel (dispatch) + issue service (merge).
 	if cfg.Temporal.Enabled() {
 		devflowActs := devflow.NewActivities(devflow.Deps{
-			Runs:        workflowRunRepo,
-			Dispatcher:  codingDispatcher{funnel: funnel, execs: executionRepo},
-			Merger:      prMerger{issues: issueService},
-			Spec:        devflowSpecValidator{art: artifactSvcGit},
-			Planner:     devflowPlanner{plan: taskPlan, reads: taskReads},
-			Validator:   devflowValidator{},
-			Provisioner: buildProvisioner{design: designService, prov: provisioningSvc},
+			Runs:               workflowRunRepo,
+			Dispatcher:         codingDispatcher{funnel: funnel, execs: executionRepo},
+			Merger:             prMerger{issues: issueService},
+			Spec:               devflowSpecValidator{art: artifactSvcGit},
+			Planner:            devflowPlanner{plan: taskPlan, reads: taskReads},
+			Validator:          devflowValidator{store: artifactStore, comp: componentService},
+			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},
+			Provisioner:        buildProvisioner{design: designService, prov: provisioningSvc},
 		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)
