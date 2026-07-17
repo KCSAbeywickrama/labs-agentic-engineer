@@ -47,6 +47,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/credentials"
+	"github.com/wso2/aep/aep-api/internal/feature/activity"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
@@ -115,6 +116,9 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	configRepo := repositories.NewConfigRepository(db)
 	repoRepo := repositories.NewRepoRepository(db)
 	workflowRunRepo := repositories.NewWorkflowRunRepository(db)
+	activityRepo := repositories.NewActivityEventRepository(db)
+	activityHub := activity.NewHub()
+	activitySvc := activity.NewService(activityRepo, activityHub)
 
 	// Temporal devflow runtime. Constructed always, but connects lazily in the
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
@@ -832,6 +836,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskStream:       taskStreamSvc,
+		ActivitySvc:      activitySvc,
 		OrgConfigSvc:     orgConfigSvc,
 		TaskTokens:       taskTokens,
 		SkillSvc:         skillSvc,

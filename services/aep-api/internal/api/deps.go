@@ -19,6 +19,7 @@ package api
 import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 
+	"github.com/wso2/aep/aep-api/internal/feature/activity"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
@@ -54,6 +55,7 @@ type Deps struct {
 	TaskReads           *task.Reads
 	TaskCommands        *task.Commands
 	TaskStream          *execution.TaskStreamService
+	ActivitySvc         *activity.Service
 	OrgConfigSvc        *orgconfig.Service
 	TaskTokens          *auth.TaskTokenManager
 	SkillSvc            *skills.SkillService
