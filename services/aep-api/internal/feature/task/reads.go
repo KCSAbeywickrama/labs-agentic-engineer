@@ -95,8 +95,9 @@ func NewReads(issues IssueClient, repos RepoResolver, execs ExecutionReader, ver
 	return &Reads{issues: issues, repos: repos, execs: execs, versions: versions, design: design}
 }
 
-// List returns the project's Tasks filtered by state ("open" | "closed" |
-// "all"; default "open"). FE groups by derivedStatus client-side (§8).
+// List returns the project's implementation Tasks filtered by state ("open" |
+// "closed" | "all"; default "open"). FE groups by derivedStatus client-side
+// (§8). The aep:validation Task is excluded (see ListByTag).
 func (r *Reads) List(ctx context.Context, orgID, projectID, state string) ([]TaskView, error) {
 	return r.ListByTag(ctx, orgID, projectID, state, "")
 }
@@ -109,6 +110,14 @@ func (r *Reads) List(ctx context.Context, orgID, projectID, state string) ([]Tas
 // Same single marker-scoped fetch either way. An empty tag returns every Task
 // (== List). This is the read behind GET /tasks?tag=v3 and the build's
 // per-version task list.
+//
+// List reads return implementation Tasks ONLY: the project's aep:validation
+// Task is a phase of the dev run, not an implementation task — its state is
+// surfaced via /status deploy.validation (+ validationUrl), and it stays
+// reachable via Get by issue number. Excluding it here (the read-model
+// boundary) keeps every list consumer consistent: the console tasks page, the
+// build's per-version task list (whose tally already excludes it), and the
+// devflow's planned-task graph.
 func (r *Reads) ListByTag(ctx context.Context, orgID, projectID, state, tag string) ([]TaskView, error) {
 	repoFullName, err := resolveRepoFullName(ctx, r.repos, orgID, projectID)
 	if err != nil {
@@ -135,6 +144,10 @@ func (r *Reads) ListByTag(ctx context.Context, orgID, projectID, state, tag stri
 		}
 		view, ok := buildView(issue, latestSpecTag, execsByIssue[issue.Number])
 		if !ok {
+			continue
+		}
+		// Phase, not implementation task (see the doc comment above).
+		if view.ExecutorClass == string(taskmeta.ClassValidation) {
 			continue
 		}
 		if tag != "" && view.Lineage.SpecTag != tag {

@@ -1513,8 +1513,10 @@ paths:
           description: Error
       security:
       - userJWT: []
-      summary: List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to
-        one spec/build version tag
+      summary: List a project's implementation Tasks (live GitHub ⋈ executions → derived status),
+        optionally scoped to one spec/build version tag. The aep:validation Task is excluded — it is
+        a phase of the run, surfaced via the project status's deploy.validation; get-task still
+        serves it by number.
       tags:
       - Tasks
   /projects/{projectName}/tasks/{issueNumber}:

@@ -427,29 +427,14 @@ function task(
   };
 }
 
-// The project's validation task — created alongside the coding tasks but NOT
-// shown in the builds list (its status rides deploy.validation on the
-// deployments board). Kept here so the list filter is exercised.
-const validationTask: TaskView = {
-  issueNumber: 20,
-  title: "Validate acceptance criteria",
-  derivedStatus: "in_progress",
-  executorClass: "validation",
-  operation: "validate",
-  issueUrl: `${BOARD_URL}/20`,
-  attention: null,
-  dependsOn: null,
-  executions: {},
-  hold: false,
-  lineage: { specTag: "v1" },
-};
-
+// No validation task here: list-tasks returns implementation tasks only (the
+// backend excludes the aep:validation Task — its status rides
+// deploy.validation on the deployments board).
 const buildingTasks: TaskView[] = [
   task(12, "Checkout flow with cart persistence", "pending", "storefront"),
   task(10, "Product catalog CRUD endpoints", "in_progress", "catalog-api"),
   task(9, "Scaffold storefront app shell", "merged", "storefront"),
   task(11, "Orders service payment integration", "failed", "orders-api"),
-  validationTask,
 ];
 
 const doneTasks: TaskView[] = buildingTasks.map((t) => ({

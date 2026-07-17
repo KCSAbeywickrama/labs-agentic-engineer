@@ -100,6 +100,19 @@ the root cause of "the deployed endpoint didn't resolve".)
   failed coding run stays "Failed".
 - The planner excludes the validation class from the implementation graph; the
   funnel deps-gate holds it until every component deploys.
+- **Task LIST reads exclude the validation task** (`task/reads.go` `ListByTag`,
+  the read-model boundary): it is a phase of the run, not an implementation
+  task, so the console tasks page and the build's per-version task list never
+  show it — `deploy.validation` (+ `validationUrl`) is its only surface.
+  `get-task` by issue number still serves it.
+- **The overview attributes a validation-phase failure to validation, not the
+  build**: when the dev run failed but its tally is fully green and the
+  validation child row failed, the Build stage reports `succeeded` and the
+  failure rides `deploy.validation = failed`
+  (`project/status_stages.go` `validationAttributedFailure` — the green-tally
+  guard plus a recency guard (child recorded after the dev row) defeat stale
+  validation rows from same-tag rebuilds). Other failures (coding,
+  provisioning, canceled) keep the Build card as catch-all.
 
 ## Runner side (`runners/remote-worker`)
 

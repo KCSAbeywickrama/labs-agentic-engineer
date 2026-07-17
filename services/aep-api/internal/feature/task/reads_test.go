@@ -50,6 +50,55 @@ func TestComputeAttention_CleanTaskIsEmptyNonNilSlice(t *testing.T) {
 	}
 }
 
+// TestListReads_ValidationTaskExcluded pins the list read-model boundary: the
+// project's aep:validation Task is a phase of the run (surfaced via /status
+// deploy.validation + validationUrl), NOT an implementation task, so
+// List/ListByTag never return it — the console tasks page and the build's
+// per-version task list get implementation tasks only. Get by issue number
+// still serves it (the deployments chip links straight to the issue/PR).
+func TestListReads_ValidationTaskExcluded(t *testing.T) {
+	issues := newFakeIssues()
+	issues.seed(taggedIssue(10, "order-service", "v1"))
+	issues.seed(validationIssue(30, "v1"))
+
+	reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil)
+
+	views, err := reads.List(context.Background(), "org1", "proj1", "open")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byNum := viewsByNumber(t, views)
+	if _, ok := byNum[30]; ok {
+		t.Error("List returned the validation task; list reads must exclude it")
+	}
+	if _, ok := byNum[10]; !ok {
+		t.Error("List dropped the sibling coding task")
+	}
+
+	// The version-scoped list (the build's per-version task read) excludes it
+	// too — the validation issue carries the same spec tag as the coding tasks.
+	views, err = reads.ListByTag(context.Background(), "org1", "proj1", "all", "v1")
+	if err != nil {
+		t.Fatalf("ListByTag: %v", err)
+	}
+	byNum = viewsByNumber(t, views)
+	if _, ok := byNum[30]; ok {
+		t.Error("ListByTag returned the validation task; list reads must exclude it")
+	}
+	if _, ok := byNum[10]; !ok {
+		t.Error("ListByTag dropped the sibling coding task")
+	}
+
+	// The exclusion is a LIST rule only: Get still serves the validation task.
+	detail, err := reads.Get(context.Background(), "org1", "proj1", 30)
+	if err != nil {
+		t.Fatalf("Get(validation): %v", err)
+	}
+	if detail.ExecutorClass != string(taskmeta.ClassValidation) {
+		t.Errorf("Get executorClass = %q, want %q", detail.ExecutorClass, taskmeta.ClassValidation)
+	}
+}
+
 // ---- dependency-gated on_hold reconciliation (issue #164 follow-up) ---------
 
 // newReadsWithDesign wires a read path with a DesignReader so the second pass
