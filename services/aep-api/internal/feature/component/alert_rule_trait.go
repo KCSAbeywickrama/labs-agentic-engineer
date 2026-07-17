@@ -22,16 +22,17 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// autoRCALogQueries are the default log phrases the platform watches for on
-// every service component. TWO instances because the logs-adapter compiles a
-// rule's `query` into a case-sensitive `wildcard: *<phrase>*` against the raw
-// log line — so "error" and "ERROR" need separate rules to catch both the
-// lowercase (structured/slog-style) and uppercase (level-prefix-style) forms.
-// Tune here to change coverage (e.g. drop to one for less RCA volume).
-var autoRCALogQueries = []struct{ suffix, query string }{
-	{suffix: "error", query: "error"},
-	{suffix: "error-uc", query: "ERROR"},
-}
+// autoRCALogQuery is the default log phrase the platform watches for on every
+// service component. A SINGLE instance suffices: the logs adapter compiles a
+// rule's `query` into a case-INSENSITIVE `wildcard: *<phrase>*` (it sets
+// case_insensitive: true), so "error" already matches ERROR, Error, etc.
+//
+// This used to file two rules ("error" and "ERROR") to work around a
+// case-SENSITIVE adapter. Now that the adapter is case-insensitive both rules
+// match the identical set and BOTH fire on every error line — two incidents,
+// so two duplicate RCA reports per error. Collapsing to one rule removes that
+// double-trigger while (case-insensitively) still catching every case form.
+const autoRCALogQuery = "error"
 
 // autoRCADefaultChannel is the notification channel stamped on auto-provisioned
 // rules. The trait requires ≥1 channel (incident-only rules are rejected);
@@ -39,9 +40,9 @@ var autoRCALogQueries = []struct{ suffix, query string }{
 const autoRCADefaultChannel = "default"
 
 // DesiredObservabilityAlertRuleTraits returns the default "error → RCA"
-// observability-alert-rule trait instances (+ their per-environment configs)
-// for a component. componentName is the k8s-shaped name; instances are named
-// `<componentName>-auto-rca-<suffix>`.
+// observability-alert-rule trait instance (+ its per-environment config) for a
+// component. componentName is the k8s-shaped name; the instance is named
+// `<componentName>-auto-rca-error`.
 //
 // The split mirrors the api-configuration trait: rule shape (source/query,
 // condition) lives in the component-level trait Parameters; the incident /
@@ -49,31 +50,30 @@ const autoRCADefaultChannel = "default"
 // reads triggerAiRca from environmentConfigs). incident.enabled is set true
 // because the trait validation requires it whenever triggerAiRca is true.
 func DesiredObservabilityAlertRuleTraits(componentName string) (traits []models.ComponentTrait, configs map[string]map[string]interface{}) {
-	configs = map[string]map[string]interface{}{}
-	for _, q := range autoRCALogQueries {
-		inst := componentName + "-auto-rca-" + q.suffix
-		traits = append(traits, models.ComponentTrait{
-			InstanceName: inst,
-			Kind:         "ClusterTrait",
-			Name:         "observability-alert-rule",
-			Parameters: map[string]interface{}{
-				"description": fmt.Sprintf(
-					"Auto-provisioned: trigger RCA when %s logs a %q line.",
-					componentName, q.query),
-				"severity": "critical",
-				"source": map[string]interface{}{
-					"type":  "log",
-					"query": q.query,
-				},
-				"condition": map[string]interface{}{
-					"window":    "5m",
-					"interval":  "1m",
-					"operator":  "gte",
-					"threshold": 1,
-				},
+	inst := componentName + "-auto-rca-error"
+	traits = []models.ComponentTrait{{
+		InstanceName: inst,
+		Kind:         "ClusterTrait",
+		Name:         "observability-alert-rule",
+		Parameters: map[string]interface{}{
+			"description": fmt.Sprintf(
+				"Auto-provisioned: trigger RCA when %s logs a line containing %q (case-insensitive).",
+				componentName, autoRCALogQuery),
+			"severity": "critical",
+			"source": map[string]interface{}{
+				"type":  "log",
+				"query": autoRCALogQuery,
 			},
-		})
-		configs[inst] = map[string]interface{}{
+			"condition": map[string]interface{}{
+				"window":    "5m",
+				"interval":  "1m",
+				"operator":  "gte",
+				"threshold": 1,
+			},
+		},
+	}}
+	configs = map[string]map[string]interface{}{
+		inst: {
 			"enabled": true,
 			"actions": map[string]interface{}{
 				"notifications": map[string]interface{}{
@@ -84,7 +84,7 @@ func DesiredObservabilityAlertRuleTraits(componentName string) (traits []models.
 					"triggerAiRca": true,
 				},
 			},
-		}
+		},
 	}
 	return traits, configs
 }
