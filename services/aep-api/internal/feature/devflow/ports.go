@@ -19,6 +19,7 @@ package devflow
 import (
 	"context"
 
+	"github.com/wso2/aep/aep-api/internal/feature/activity"
 	"github.com/wso2/aep/aep-api/models"
 )
 
@@ -101,4 +102,18 @@ type ProvisionFailure struct {
 	Component  string
 	Dependency string
 	Reason     string
+}
+
+// ActivityRecorder appends a project activity event (best-effort). The devflow
+// activities call it from a real activity ctx (DB-capable), never from workflow
+// code. Satisfied by *activity.Service.
+type ActivityRecorder interface {
+	Record(ctx context.Context, e activity.Event)
+}
+
+// TaskTitleReader resolves a Task's human title for a task-* activity line
+// (the workflow input carries no title). "" when unknown — the line degrades to
+// just "#<issue>". Satisfied by an app-level adapter over the task reads.
+type TaskTitleReader interface {
+	TitleFor(ctx context.Context, orgID, projectID string, issue int) string
 }

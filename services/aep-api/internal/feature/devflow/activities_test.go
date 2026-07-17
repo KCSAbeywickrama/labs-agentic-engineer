@@ -20,6 +20,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/wso2/aep/aep-api/internal/feature/activity"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // fakeBuildProvisioner records the ProvisionForBuild delegation.
@@ -113,4 +116,36 @@ func TestProvisionDependencies_InputsButUnwiredErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("inputs with no provisioner wired must error")
 	}
+}
+
+// TestRecordActivity_mapsAndResolvesTitle: the activity maps the workflow
+// input onto activity.Event and resolves the Task title for a task-scoped
+// event (Issue > 0) through the TaskTitleReader port.
+func TestRecordActivity_mapsAndResolvesTitle(t *testing.T) {
+	rec := &captureRecorder{}
+	acts := NewActivities(Deps{
+		Recorder: rec,
+		Titles:   titleReaderFunc(func(_ context.Context, _, _ string, issue int) string { return "Catalog" }),
+	})
+	err := acts.RecordActivity(context.Background(), RecordActivityInput{
+		Type: models.ActivityTypeTaskDeployed, OrgID: "o", ProjectID: "p", Tag: "v1-1",
+		Issue: 10, ActorKind: models.ActivityActorAgent, ActorID: "build-agent",
+		ActorName: "Build agent", DedupKey: "task:repo#10:v1-1:deployed", OccurredAtUnix: 1_700_000_000,
+	})
+	if err != nil {
+		t.Fatalf("RecordActivity: %v", err)
+	}
+	if len(rec.got) != 1 || rec.got[0].Title != "Catalog" || rec.got[0].Type != models.ActivityTypeTaskDeployed {
+		t.Fatalf("unexpected recorded event: %+v", rec.got)
+	}
+}
+
+type captureRecorder struct{ got []activity.Event }
+
+func (c *captureRecorder) Record(_ context.Context, e activity.Event) { c.got = append(c.got, e) }
+
+type titleReaderFunc func(context.Context, string, string, int) string
+
+func (f titleReaderFunc) TitleFor(ctx context.Context, o, p string, i int) string {
+	return f(ctx, o, p, i)
 }
