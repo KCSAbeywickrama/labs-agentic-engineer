@@ -20,24 +20,23 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   CircularProgress,
-  Stack,
+  IconButton,
+  ListingTable,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
+import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import { useAllTasks } from "../api/queries";
 import { taskChip } from "../api/status";
-import { GitHubIssueLink } from "./GitHubIssueLink";
 
-// The flat task list (#173): one card per task, status chip inline — the user
-// watches chips go green. Each task is its own elevated card (matching the
-// build summary card above) so the page reads as a stack of cards, consistent
-// with the overview/deployments look. `tag` scopes to one build's lineage.
+// The flat task list (#173): one row per task, status chip inline — the user
+// watches chips go green. Card-variant listing per the components list /
+// oxygen-ui sample precedent. `tag` scopes the list to one build's lineage
+// (the builds page, #185); omitted = every version's tasks.
 export function TasksList({
   projectName,
   tag,
@@ -70,7 +69,12 @@ export function TasksList({
     );
   }
 
-  if (tasks.data.length === 0) {
+  // The project's validation task is surfaced on the deployments board (its
+  // status rides deploy.validation), not as a coding-task row here — it targets
+  // the whole project, not a component.
+  const visibleTasks = tasks.data.filter((t) => t.executorClass !== "validation");
+
+  if (visibleTasks.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
         {tag
@@ -81,85 +85,104 @@ export function TasksList({
   }
 
   return (
-    <Stack spacing={1.5}>
-      {tasks.data.map((t) => {
-        // Provision/config gates are platform-driven (approved in the Build
-        // drawer, resolved out-of-band): there is no task page to open, so the
-        // card is non-clickable — you watch its status and open the GitHub
-        // issue. Its component slot shows "—" (a gate names a dependency).
-        const isGate = t.executorClass === "provision";
-        const chip = taskChip(t.derivedStatus);
-        const onHold =
-          t.derivedStatus === "on_hold" && (t.blockedBy?.length ?? 0) > 0;
-
-        const row = (
-          <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-            {/* No leading #issue — the GitHub chip on the right already carries
-                the issue number. Each trailing chip lives in a fixed-width,
-                right-aligned cell so component / status / GitHub line up into
-                clean columns regardless of label length. */}
-            <Typography sx={{ flexGrow: 1, fontWeight: 500, minWidth: 0 }} noWrap>
-              {t.title}
-            </Typography>
-            <Box sx={{ width: 120, display: "flex", justifyContent: "flex-end" }}>
-              {isGate || !t.component ? (
-                <Typography variant="caption" color="text.secondary">
-                  —
-                </Typography>
-              ) : (
-                <Chip
-                  size="small"
-                  label={t.component}
-                  sx={{ bgcolor: "action.hover", color: "text.secondary" }}
+    <ListingTable.Container sx={{ width: "100%" }} disablePaper>
+      <ListingTable variant="card" density="standard">
+        <ListingTable.Head>
+          <ListingTable.Row>
+            <ListingTable.Cell>Task</ListingTable.Cell>
+            <ListingTable.Cell sx={{ maxWidth: 160 }}>
+              Component
+            </ListingTable.Cell>
+            <ListingTable.Cell sx={{ maxWidth: 120 }}>Status</ListingTable.Cell>
+            <ListingTable.Cell sx={{ maxWidth: 64 }} aria-label="Links" />
+          </ListingTable.Row>
+        </ListingTable.Head>
+        <ListingTable.Body>
+          {visibleTasks.map((t) => {
+            // Provision/config gates are platform-driven (approved in the Build
+            // drawer, resolved out-of-band): there is no task page to open, so the
+            // row is non-clickable — you watch its status and open the GitHub issue.
+            // Its Component column shows "—" (a gate names a dependency, not a
+            // component).
+            const isGate = t.executorClass === "provision";
+            return (
+            <ListingTable.Row
+              key={t.issueNumber}
+              variant="card"
+              hover={!isGate}
+              onClick={
+                isGate
+                  ? undefined
+                  : () =>
+                      void navigate({
+                        to: "/projects/$projectName/builds/$issueNumber",
+                        params: { projectName, issueNumber: t.issueNumber },
+                      })
+              }
+              sx={{ cursor: isGate ? "default" : "pointer" }}
+            >
+              <ListingTable.Cell>
+                <ListingTable.CellIcon
+                  icon={
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontVariantNumeric: "tabular-nums" }}
+                    >
+                      #{t.issueNumber}
+                    </Typography>
+                  }
+                  primary={t.title}
                 />
-              )}
-            </Box>
-            <Box sx={{ width: 92, display: "flex", justifyContent: "flex-end" }}>
-              {onHold ? (
-                <Tooltip title={`Waiting for ${t.blockedBy?.join(", ")}`}>
-                  <Box sx={{ display: "inline-flex" }}>
-                    <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
-                  </Box>
+              </ListingTable.Cell>
+              <ListingTable.Cell sx={{ maxWidth: 160 }}>
+                {isGate || !t.component ? (
+                  <Typography variant="caption" color="text.secondary">
+                    —
+                  </Typography>
+                ) : (
+                  <Chip label={t.component} size="small" variant="outlined" />
+                )}
+              </ListingTable.Cell>
+              <ListingTable.Cell sx={{ maxWidth: 120 }}>
+                {(() => {
+                  const chip = taskChip(t.derivedStatus);
+                  const pill = (
+                    <StatusChip
+                      label={chip.label}
+                      tone={chip.tone}
+                      appearance="soft"
+                    />
+                  );
+                  return t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
+                    <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
+                      {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+                      <Box sx={{ display: "inline-flex" }}>{pill}</Box>
+                    </Tooltip>
+                  ) : (
+                    pill
+                  );
+                })()}
+              </ListingTable.Cell>
+              <ListingTable.Cell sx={{ maxWidth: 64 }}>
+                <Tooltip title="Open the GitHub issue">
+                  <IconButton
+                    component="a"
+                    href={t.issueUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`GitHub issue #${t.issueNumber}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <GitHub size={16} />
+                  </IconButton>
                 </Tooltip>
-              ) : (
-                <StatusChip label={chip.label} tone={chip.tone} appearance="soft" />
-              )}
-            </Box>
-            <Box sx={{ width: 72, display: "flex", justifyContent: "flex-end" }}>
-              <GitHubIssueLink
-                issueNumber={t.issueNumber}
-                issueUrl={t.issueUrl}
-                onClick={(e) => e.stopPropagation()}
-              />
-            </Box>
-          </Stack>
-        );
-
-        return (
-          <Card
-            key={t.issueNumber}
-            variant="outlined"
-            {...(isGate
-              ? {}
-              : {
-                  onClick: () =>
-                    void navigate({
-                      to: "/projects/$projectName/builds/$issueNumber",
-                      params: { projectName, issueNumber: t.issueNumber },
-                    }),
-                  sx: {
-                    cursor: "pointer",
-                    transition: "border-color 120ms, box-shadow 120ms",
-                    "&:hover": { borderColor: "primary.main", boxShadow: 1 },
-                  },
-                })}
-          >
-            <CardContent sx={{ "&:last-child": { pb: 2 }, py: 2 }}>
-              {row}
-            </CardContent>
-          </Card>
-        );
-      })}
-    </Stack>
+              </ListingTable.Cell>
+            </ListingTable.Row>
+            );
+          })}
+        </ListingTable.Body>
+      </ListingTable>
+    </ListingTable.Container>
   );
 }

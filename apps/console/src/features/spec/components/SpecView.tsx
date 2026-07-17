@@ -56,6 +56,7 @@ import { CellDiagramPanel } from "./CellDiagramPanel";
 import { WireframePanel } from "./WireframePanel";
 import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
+import { ValidationView } from "@aep/ui-validation-view";
 import type { SpecSelection } from "../api/designTree";
 import { DESIGN_CELL_PATH } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
@@ -167,6 +168,16 @@ export function SpecView({ projectName }: { projectName: string }) {
     /^specs\/design\/components\/[^/]+\/design\.json$/.test(
       selectedFile?.path ?? "",
     );
+  // The validation acceptance oracle renders as a read-only structured view —
+  // like design.json, it never goes through the collab text editor.
+  const isValidationCriteriaFile =
+    /^specs\/validation\/validation-criteria\.json$/.test(
+      selectedFile?.path ?? "",
+    );
+  // The structured files share the read-only render path (no collab editor,
+  // sourced from the live doc or the committed fetch).
+  const isStructuredFile =
+    isOpenApiFile || isComponentDesignFile || isValidationCriteriaFile;
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
   // measured height to stretch into — a plain overflow:auto block (used for
@@ -181,7 +192,7 @@ export function SpecView({ projectName }: { projectName: string }) {
       ? collab.getFileFragment(selectedFile.path)
       : null;
   const ytext =
-    selectedFile && !selectedIsMd && !isOpenApiFile && !isComponentDesignFile
+    selectedFile && !selectedIsMd && !isStructuredFile
       ? collab.getFileText(selectedFile.path)
       : null;
   const usesCollab = Boolean((fragment && collab.provider) || ytext);
@@ -197,7 +208,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // EDITED file while the committed copy is stale. The committed fetch below
   // stays for the collab-less base path only.
   const structuredLiveText = useYTextString(
-    selectedFile && (isOpenApiFile || isComponentDesignFile)
+    selectedFile && isStructuredFile
       ? collab.getFileText(selectedFile.path)
       : null,
   );
@@ -208,7 +219,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   const content = useSpecFileContent(
     projectName,
     selectedFile &&
-      (isOpenApiFile || isComponentDesignFile
+      (isStructuredFile
         ? // Doc has it → no fetch (mirrors usesCollab for md). An agent in
           // the room also suppresses it: the doc WILL deliver the file, and
           // probing git for a not-yet-committed path just sprays 404s.
@@ -577,12 +588,14 @@ export function SpecView({ projectName }: { projectName: string }) {
                 // for structured files). Collaborative when the collab service
                 // is reachable (#86 phase 5); solo-and-unsaved otherwise
                 // (#86 decision 10).
-                isOpenApiFile || isComponentDesignFile ? (
+                isStructuredFile ? (
                   structuredLive ? (
                     // Fresh from the live collab doc — ahead of (or newer
                     // than) the committed copy.
                     isOpenApiFile ? (
                       <OpenApiView spec={structuredLive} />
+                    ) : isValidationCriteriaFile ? (
+                      <ValidationView criteria={structuredLive} />
                     ) : (
                       <DesignView design={structuredLive} />
                     )
@@ -591,6 +604,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <OpenApiView
                         key={content.data.sha}
                         spec={content.data.content}
+                      />
+                    ) : isValidationCriteriaFile ? (
+                      <ValidationView
+                        key={content.data.sha}
+                        criteria={content.data.content}
                       />
                     ) : (
                       <DesignView
