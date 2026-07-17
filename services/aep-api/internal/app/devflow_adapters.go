@@ -111,6 +111,20 @@ func implementationTasks(views []task.TaskView) []devflow.PlannedTask {
 	return out
 }
 
+// devflowTitles resolves a Task's title for activity lines, over task.Reads.
+// Best-effort: the caller (RecordActivity) degrades a task-* line to just
+// "#<issue>" when the title is unavailable, so any error or not-found here
+// returns "" rather than propagating.
+type devflowTitles struct{ reads *task.Reads }
+
+func (t devflowTitles) TitleFor(ctx context.Context, orgID, projectID string, issue int) string {
+	detail, err := t.reads.Get(ctx, orgID, projectID, issue)
+	if err != nil || detail == nil {
+		return ""
+	}
+	return detail.Title
+}
+
 // heartbeatWriter records a Temporal activity heartbeat on each write so a
 // long plan turn does not exceed its heartbeat timeout. It discards the bytes
 // (the plan tap does the real work; the workflow only needs the issue set).

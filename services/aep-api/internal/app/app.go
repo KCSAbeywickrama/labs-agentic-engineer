@@ -1106,6 +1106,8 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			Validator:          devflowValidator{store: artifactStore, comp: componentService},
 			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},
 			Provisioner:        buildProvisioner{design: designService, prov: provisioningSvc},
+			Recorder:           activitySvc,
+			Titles:             devflowTitles{reads: taskReads},
 		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)
