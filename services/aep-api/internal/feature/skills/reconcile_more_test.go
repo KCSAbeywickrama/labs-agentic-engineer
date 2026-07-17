@@ -38,7 +38,7 @@ func goBuiltinStale() string {
 // so a test can assert the repo copy converged to it.
 func embeddedSkill(t *testing.T, name string) Skill {
 	t.Helper()
-	emb, err := loadEmbeddedLibrary()
+	emb, err := loadLibrary(testLibraryFS(t))
 	if err != nil {
 		t.Fatalf("loadEmbeddedLibrary: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestEnsureProvisioned_Guards(t *testing.T) {
 	if err := nilSvc.EnsureProvisioned(ctx, "org1"); err != nil {
 		t.Fatalf("nil service: %v", err)
 	}
-	if err := NewSkillService(nil, nil).EnsureProvisioned(ctx, "org1"); err != nil {
+	if err := NewSkillService(nil, nil, nil).EnsureProvisioned(ctx, "org1"); err != nil {
 		t.Fatalf("nil repos: %v", err)
 	}
 	svc, _ := newTestStore(t)
@@ -218,7 +218,7 @@ func TestEnsureProvisioned_Guards(t *testing.T) {
 // skills (absent → org). One loader, one source tree.
 func TestLoadEmbeddedLibrary(t *testing.T) {
 	t.Parallel()
-	got, err := loadEmbeddedLibrary()
+	got, err := loadLibrary(testLibraryFS(t))
 	if err != nil {
 		t.Fatalf("loadEmbeddedLibrary: %v", err)
 	}

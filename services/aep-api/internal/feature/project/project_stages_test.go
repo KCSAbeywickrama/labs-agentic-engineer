@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/api/apigen"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/models"
@@ -39,7 +40,7 @@ func devBinding(name, readyStatus, readyReason string) models.ReleaseBindingSumm
 	}
 }
 
-func mustStatus(t *testing.T, fx statusFixture) *models.ProjectStatus {
+func mustStatus(t *testing.T, fx statusFixture) *apigen.ProjectStatus {
 	t.Helper()
 	st, err := fx.service().GetProjectStatus(context.Background(), "acme", "web")
 	if err != nil {
@@ -72,7 +73,7 @@ func TestStageDerivation_FullPipeline(t *testing.T) {
 	}
 	st := mustStatus(t, fx)
 
-	if want := (models.SpecStage{Exists: true, Version: "v2", Dirty: true, Design: true}); st.Spec != want {
+	if want := (apigen.SpecStage{Exists: true, Version: "v2", Dirty: true, Design: true}); st.Spec != want {
 		t.Errorf("spec = %+v, want %+v", st.Spec, want)
 	}
 
@@ -333,11 +334,11 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			st := mustStatus(t, statusFixture{runs: devRuns, validationRun: tc.child, execs: tc.execs})
-			if st.Deploy.Validation != tc.wantStatus {
+			if string(st.Deploy.Validation) != tc.wantStatus {
 				t.Errorf("validation = %q, want %q", st.Deploy.Validation, tc.wantStatus)
 			}
-			if st.Deploy.ValidationUrl != tc.wantURL {
-				t.Errorf("validationUrl = %q, want %q", st.Deploy.ValidationUrl, tc.wantURL)
+			if st.Deploy.ValidationURL != tc.wantURL {
+				t.Errorf("validationUrl = %q, want %q", st.Deploy.ValidationURL, tc.wantURL)
 			}
 		})
 	}
@@ -362,7 +363,7 @@ func TestRepoNotReady_ZeroValueStages(t *testing.T) {
 	if st.Phase != "repo-cloning" {
 		t.Fatalf("phase = %q, want repo-cloning", st.Phase)
 	}
-	if st.Spec != (models.SpecStage{}) {
+	if st.Spec != (apigen.SpecStage{}) {
 		t.Errorf("spec = %+v, want zero-valued", st.Spec)
 	}
 	if st.Build.Status != "idle" || st.Build.Version != "" || st.Build.Tasks.Total != 0 {
