@@ -19,13 +19,19 @@ package activity
 import (
 	"context"
 	"errors"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/models"
 )
 
+// fakeRepo is a DB-free Repository double. It guards its state with a mutex
+// because the stream tests drive it from two goroutines at once (the test
+// goroutine inserting/notifying, the OpenStream loop re-reading on tail).
 type fakeRepo struct {
+	mu       sync.Mutex
 	inserted []*models.ActivityEvent
 	insErr   error
 	dup      bool // when true, Insert reports a no-op (inserted=false)
@@ -34,6 +40,8 @@ type fakeRepo struct {
 }
 
 func (f *fakeRepo) Insert(_ context.Context, row *models.ActivityEvent) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.insErr != nil {
 		return false, f.insErr
 	}
@@ -43,9 +51,31 @@ func (f *fakeRepo) Insert(_ context.Context, row *models.ActivityEvent) (bool, e
 	f.inserted = append(f.inserted, row)
 	return true, nil
 }
+
+// ListByProject returns the inserted rows newest-first (matching the real
+// repository's ordering), so stream tests can exercise replay without a DB.
+// gotLimit is still recorded for the existing clamp assertions.
 func (f *fakeRepo) ListByProject(_ context.Context, _ string, _ string, limit int, _ time.Time, _ string) ([]models.ActivityEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.gotLimit = limit
-	return nil, nil
+	if len(f.inserted) == 0 {
+		return nil, nil
+	}
+	rows := make([]models.ActivityEvent, len(f.inserted))
+	for i, r := range f.inserted {
+		rows[i] = *r
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].OccurredAt.After(rows[j].OccurredAt) })
+	return rows, nil
+}
+
+// insert is a test helper for goroutine-safe appends outside of Insert
+// (stream tests seed rows directly, then notify the hub themselves).
+func (f *fakeRepo) insert(row *models.ActivityEvent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inserted = append(f.inserted, row)
 }
 
 func TestService_Record_swallowsErrorAndSkipsNotifyOnFailure(t *testing.T) {

@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 
@@ -77,4 +78,27 @@ func activityFeedResponse(rows []models.ActivityEvent) listActivityJSONResponse 
 
 func (r listActivityJSONResponse) VisitListActivityResponse(w http.ResponseWriter) error {
 	return writeJSONBody(w, http.StatusOK, r)
+}
+
+// StreamActivity serves GET /projects/{projectName}/activity/stream: the
+// project's activity feed as SSE (replay + live tail). The loop runs inside the
+// Visit method after the handler returns (the request ctx stays alive until the
+// client disconnects).
+func (s *apiServer) StreamActivity(ctx context.Context, request apigen.StreamActivityRequestObject) (apigen.StreamActivityResponseObject, error) {
+	if s.deps.ActivitySvc == nil {
+		return nil, errServiceUnavailable("activity not configured")
+	}
+	org := tenant.BoundOrgFromContext(ctx)
+	run := s.deps.ActivitySvc.OpenStream(ctx, org, request.ProjectName, request.Params.LastEventID)
+	return activityStreamResponse{run: run}, nil
+}
+
+// activityStreamResponse adapts the connection loop onto the generated
+// ResponseObject, same pattern as taskLogStreamResponse (handlers_task_stream.go).
+type activityStreamResponse struct {
+	run func(w io.Writer, flush func())
+}
+
+func (r activityStreamResponse) VisitStreamActivityResponse(w http.ResponseWriter) error {
+	return sseStream(w, r.run)
 }
