@@ -20,10 +20,15 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/api/apigen"
+	"github.com/wso2/aep/aep-api/internal/feature/activity"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
+	"github.com/wso2/aep/aep-api/internal/feature/requirements"
+	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // Build feature on the strict interface: build-project / get-project-build /
@@ -51,7 +56,48 @@ func (s *apiServer) BuildProject(ctx context.Context, request apigen.BuildProjec
 	if len(failures) > 0 {
 		return apigen.BuildProject200JSONResponse(apigen.BuildResponse{Failures: toInputFailures(failures)}), nil
 	}
+	// spec_published: the user published a spec version and kicked off the build.
+	// Best-effort; ActivitySvc swallows storage errors. Actor = the signed-in
+	// user (email id → the console renders "You" for the author).
+	if s.deps.ActivitySvc != nil && tag != "" {
+		email, name := userIdentityFromContext(ctx)
+		s.deps.ActivitySvc.Record(ctx, activity.Event{
+			OrgID:      org,
+			ProjectID:  request.ProjectName,
+			Type:       models.ActivityTypeSpecPublished,
+			ActorKind:  models.ActivityActorUser,
+			ActorID:    email,
+			ActorName:  name,
+			Tag:        tag,
+			DedupKey:   "spec:" + request.ProjectName + ":" + tag + ":published",
+			OccurredAt: time.Now().UTC(),
+		})
+	}
 	return apigen.BuildProject200JSONResponse(apigen.BuildResponse{Tag: tag}), nil
+}
+
+// userIdentityFromContext returns (email, displayName) for the signed-in user,
+// for stamping a user-actor activity event. The email doubles as the stable
+// actor id (it is what the console's #130 "You" comparison keys on).
+//
+// The verified claims projection (auth.Claims / jwtassertion.TokenClaims) never
+// carries email or display name — only sub/ouId/ouName/ouHandle/client_id. Those
+// fields only exist on the raw IdP token, so — exactly like the collab handlers
+// (handlers_collab.go) — this re-parses the still-available raw bearer token
+// (jwtassertion stashes it in ctx alongside the verified claims) with
+// requirements.ParseDisplayIdentity, which is a best-effort, unverified read of
+// display fields only; the signature was already verified upstream by the JWT
+// middleware.
+func userIdentityFromContext(ctx context.Context) (email, name string) {
+	tok := jwtassertion.GetJWTFromContext(ctx)
+	if tok == "" {
+		return "", "You"
+	}
+	name, email = requirements.ParseDisplayIdentity("Bearer " + tok)
+	if name == "" {
+		name = "You"
+	}
+	return email, name
 }
 
 func (s *apiServer) GetProjectBuild(ctx context.Context, request apigen.GetProjectBuildRequestObject) (apigen.GetProjectBuildResponseObject, error) {
