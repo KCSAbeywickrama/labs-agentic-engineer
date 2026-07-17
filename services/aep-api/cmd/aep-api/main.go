@@ -59,6 +59,7 @@ func main() {
 		&models.Execution{},
 		&models.AgentTurn{},
 		&models.DevflowRun{},
+		&models.ActivityEvent{},
 	)
 	if err != nil {
 		slog.Error("database init failed", "error", err)

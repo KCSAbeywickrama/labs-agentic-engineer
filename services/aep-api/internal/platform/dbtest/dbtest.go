@@ -214,6 +214,7 @@ var baseModels = []any{
 	&models.Execution{},
 	&models.AgentTurn{},
 	&models.DevflowRun{},
+	&models.ActivityEvent{},
 }
 
 // Migrate provisions the template exactly as the app provisions a fresh DB at
