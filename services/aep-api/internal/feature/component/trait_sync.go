@@ -213,6 +213,15 @@ func (s *TraitSyncService) SyncComponentTraits(ctx context.Context, orgID, proje
 			configs = map[string]map[string]interface{}{}
 		}
 		for inst, cfg := range rcaConfigs {
+			if _, exists := configs[inst]; exists {
+				// Instance-name collision: the auto-RCA instance name
+				// (<componentName>-auto-rca-error) matches an already-desired
+				// config from another trait source. Overwriting silently would
+				// swallow that other trait's config, so log loudly instead of
+				// clobbering without a trace.
+				slog.WarnContext(ctx, "trait_sync: auto-RCA instance name collides with an existing trait config; overwriting",
+					"componentName", componentName, "instanceName", inst)
+			}
 			configs[inst] = cfg
 		}
 	}

@@ -596,7 +596,20 @@ echo ""
 echo "5️⃣  ClusterObservabilityPlane CR"
 # The cluster-agent needs the CA of the local obs-plane to verify the
 # Observer's TLS cert. The chart creates a cluster-agent TLS secret (cluster-agent-tls) with the CA, but does not expose it as a value. Grab it from the secret and inject it into the CR.
-local_obs_ca=$(kubectl --context "$CLUSTER_CONTEXT" get secret cluster-agent-tls -n "$NS" -o jsonpath='{.data.ca\.crt}' | base64 -d)
+# Checked in two steps (not a single piped command) because `set -e` alone
+# doesn't catch a failing left side of a pipe — a missing secret or empty
+# ca.crt would otherwise silently apply a ClusterObservabilityPlane with a
+# blank clientCA, breaking cluster-agent's TLS verification with no error.
+local_obs_ca_b64=$(kubectl --context "$CLUSTER_CONTEXT" get secret cluster-agent-tls -n "$NS" -o jsonpath='{.data.ca\.crt}')
+if [ -z "$local_obs_ca_b64" ]; then
+  echo "❌ cluster-agent-tls secret has no ca.crt data (or doesn't exist) in namespace $NS" >&2
+  exit 1
+fi
+local_obs_ca=$(printf '%s' "$local_obs_ca_b64" | base64 -d)
+if [ -z "$local_obs_ca" ]; then
+  echo "❌ failed to base64-decode ca.crt from the cluster-agent-tls secret" >&2
+  exit 1
+fi
 kubectl --context "$CLUSTER_CONTEXT" apply -f - <<EOF
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterObservabilityPlane
@@ -607,7 +620,7 @@ spec:
   clusterAgent:
     clientCA:
       value: |
-$(echo "$local_obs_ca" | sed 's/^/        /')
+$(printf '%s' "$local_obs_ca" | sed 's/^/        /')
   observerURL: http://observer.openchoreo.localhost:11080
   # Lets the portal fetch RCA reports from the SRE agent (rca.enabled above).
   rcaAgentURL: http://rca-agent.openchoreo.localhost:11080

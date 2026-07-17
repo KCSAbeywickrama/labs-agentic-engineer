@@ -154,7 +154,12 @@ create_plane_cert_resources() {
 }
 
 register_data_plane() {
-    local ca_cert="$1" plane_id="$2" secret_store="$3"
+    # obs_plane_name defaults to "default" for callers that don't pass one —
+    # today there's only ever one ClusterObservabilityPlane (also named
+    # "default", see setup-observability.sh), but this keeps that assumption
+    # an explicit, overridable parameter rather than baked in, for future
+    # multi-plane setups.
+    local ca_cert="$1" plane_id="$2" secret_store="$3" obs_plane_name="${4:-default}"
     cat <<EOF | kubectl apply -f -
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterDataPlane
@@ -167,7 +172,7 @@ spec:
     name: "$secret_store"
   observabilityPlaneRef:
     kind: ClusterObservabilityPlane
-    name: default
+    name: "$obs_plane_name"
   clusterAgent:
     clientCA:
       value: |

@@ -168,8 +168,10 @@ spec:
       name: dockerfile-builder
   # api-configuration lets a component opt into the WSO2 API Platform
   # gateway path (RestApi + kgateway Backend pointing at the AP router).
-  # observability-alert-rule is auto-provisioned on every component for
-  # error-log detection and AI RCA triggering.
+  # observability-alert-rule is auto-provisioned for service components
+  # (gated by ResolveAutoRCAEnabled: ComponentType == service, opt-out via
+  # design.json `disableAutoRca`) for error-log detection and AI RCA
+  # triggering — not every component.
   # Both traits' CRDs are applied below via apply_with_retry.
   allowedTraits:
     - kind: ClusterTrait

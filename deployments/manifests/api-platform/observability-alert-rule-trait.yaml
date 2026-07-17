@@ -29,7 +29,7 @@ spec:
                 - log
                 - metric
                 - budget
-              description: "The data source type for the alert rule."
+              description: "The data source type for the alert rule. 'budget' has no additional parameters defined yet — reserved for future use."
             query:
               type: string
               default: ""
@@ -107,6 +107,12 @@ spec:
       message: "A notification channel is mandatory for alert rules (incident-only rules are not supported). Provide environmentConfigs.actions.notifications.channels or set environment.defaultNotificationChannel."
     - rule: "${!has(environmentConfigs.actions) || !has(environmentConfigs.actions.incident) || environmentConfigs.actions.incident.triggerAiRca == false || environmentConfigs.actions.incident.enabled == true}"
       message: "incident.enabled must be true when triggerAiRca is true. AI-powered root cause analysis requires incident creation to be enabled."
+    - rule: "${parameters.source.type != 'log' || parameters.source.query != ''}"
+      message: "parameters.source.query is required when parameters.source.type is 'log'."
+    - rule: "${parameters.source.type != 'metric' || parameters.source.metric != ''}"
+      message: "parameters.source.metric is required when parameters.source.type is 'metric'."
+    - rule: "${parameters.source.type != 'metric' || parameters.source.metric in ['cpu_usage', 'memory_usage']}"
+      message: "parameters.source.metric must be one of: cpu_usage, memory_usage."
 
   creates:
     - targetPlane: observabilityplane
