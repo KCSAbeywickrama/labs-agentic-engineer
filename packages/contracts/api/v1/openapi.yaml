@@ -464,6 +464,40 @@ paths:
       summary: List a project's activity events (newest first, cursor-paginated)
       tags:
       - Projects
+  /projects/{projectName}/activity/stream:
+    get:
+      operationId: stream-activity
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: 'SSE resume cursor: the last frame id seen (occurredAt|id). Replay resumes after it.'
+        in: header
+        name: Last-Event-ID
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ActivityEvent'
+          description: 'SSE stream of the project''s activity feed: an initial replay of recent events (oldest-first on the wire so the client appends in order), then a live tail as new events are recorded. One data: JSON ActivityEvent per frame, id: occurredAt|id. Reconnect-safe: the client dedups by id.'
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Stream a project's activity feed (replay + live tail) as SSE
+      tags:
+      - Projects
   /projects/{projectName}/agents/{conversationId}/messages:
     get:
       operationId: get-conversation

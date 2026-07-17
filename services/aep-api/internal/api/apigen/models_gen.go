@@ -1172,6 +1172,12 @@ type ListActivityParams struct {
 	BeforeID string `form:"beforeId,omitempty" json:"beforeId,omitempty"`
 }
 
+// StreamActivityParams defines parameters for StreamActivity.
+type StreamActivityParams struct {
+	// LastEventID SSE resume cursor: the last frame id seen (occurredAt|id). Replay resumes after it.
+	LastEventID string `json:"Last-Event-ID,omitempty"`
+}
+
 // GetDependencyStatusParams defines parameters for GetDependencyStatus.
 type GetDependencyStatusParams struct {
 	// Environment Environment (default: development)
