@@ -222,6 +222,32 @@ func (e ListTasksParamsState) Valid() bool {
 // AccessRequest defines model for AccessRequest.
 type AccessRequest = models.AccessRequest
 
+// ActivityEvent One project activity event (issue
+type ActivityEvent struct {
+	ActorID     string    `json:"actorId,omitempty"`
+	ActorKind   string    `json:"actorKind"`
+	ActorName   string    `json:"actorName"`
+	Component   string    `json:"component,omitempty"`
+	Environment string    `json:"environment,omitempty"`
+	ID          string    `json:"id"`
+	Issue       int64     `json:"issue,omitempty"`
+	OccurredAt  time.Time `json:"occurredAt"`
+	Tag         string    `json:"tag,omitempty"`
+	Title       string    `json:"title,omitempty"`
+	Type        string    `json:"type"`
+}
+
+// ActivityFeed A page of activity events plus the cursor for the next (older) page.
+type ActivityFeed struct {
+	Items []ActivityEvent `json:"items"`
+
+	// NextBefore occurredAt cursor for the next page; absent when there are no older events.
+	NextBefore string `json:"nextBefore,omitempty"`
+
+	// NextBeforeID id cursor tiebreak for the next page.
+	NextBeforeID string `json:"nextBeforeId,omitempty"`
+}
+
 // ApplyConflict One file whose baseSha no longer matches HEAD.
 type ApplyConflict struct {
 	BaseSha    string `json:"baseSha"`
@@ -1132,6 +1158,18 @@ type ListProjectsParams struct {
 
 	// Limit Maximum number of items to return (server default when absent)
 	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListActivityParams defines parameters for ListActivity.
+type ListActivityParams struct {
+	// Limit Max events to return (default 50, max 200).
+	Limit int64 `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Before Keyset cursor: return events strictly older than this occurredAt (RFC3339); pair with beforeId.
+	Before string `form:"before,omitempty" json:"before,omitempty"`
+
+	// BeforeID Keyset cursor tiebreak: the id of the last event seen (pair with before).
+	BeforeID string `form:"beforeId,omitempty" json:"beforeId,omitempty"`
 }
 
 // GetDependencyStatusParams defines parameters for GetDependencyStatus.
