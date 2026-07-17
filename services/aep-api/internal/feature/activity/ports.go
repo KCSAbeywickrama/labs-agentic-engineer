@@ -37,3 +37,31 @@ type Repository interface {
 	// strictly older than the (beforeTime, beforeID) cursor — the "show more" page.
 	ListByProject(ctx context.Context, orgID, projectID string, limit int, beforeTime time.Time, beforeID string) ([]models.ActivityEvent, error)
 }
+
+// Event is the input to Record — one activity to append. The service stamps it
+// into a models.ActivityEvent row. Producers set OccurredAt from a real clock
+// (in a Temporal workflow: workflow.Now(ctx), passed into the recording activity).
+type Event struct {
+	OrgID     string
+	ProjectID string
+	Type      string
+	ActorKind string
+	ActorID   string
+	ActorName string
+
+	Issue       int
+	Title       string
+	Component   string
+	Environment string
+	Tag         string
+
+	DedupKey   string
+	OccurredAt time.Time
+}
+
+// Recorder is what event producers call to append an activity (best-effort:
+// implementations never return an error — a storage failure is logged and
+// swallowed so it can never fail the SDLC operation that produced it).
+type Recorder interface {
+	Record(ctx context.Context, e Event)
+}
