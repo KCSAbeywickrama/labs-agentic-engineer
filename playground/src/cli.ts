@@ -36,6 +36,7 @@ import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "@aep/agents/evals-kit";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
+  chatTurn,
   codeCommand,
   designCommand,
   requirementsCommand,
@@ -102,6 +103,21 @@ async function runHeadless(
     case "undo":
       outcome = undoCommand(projectDir, opts);
       break;
+    case "chat": {
+      // Headless one-shot chat turn: `play <dir> chat "message"` — same
+      // general conversation as the TUI chat screen (scriptable follow-ups).
+      if (!commandArg) {
+        output.write('usage: play <dir> chat "<message>"\n');
+        return 1;
+      }
+      const session = await openSession(projectDir, opts);
+      try {
+        outcome = await chatTurn(session, commandArg, opts);
+      } finally {
+        await session.close();
+      }
+      break;
+    }
     case "check":
       return printCheckFindings(projectDir) ? 0 : 1;
     default:
