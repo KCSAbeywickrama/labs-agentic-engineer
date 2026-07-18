@@ -68,7 +68,13 @@ export async function phaseMenu(projectDir: string, slug: string, skillCount: nu
     : issues.length > 0
       ? `3 Tasks          ✓ ${issues.length} issue(s)${issueCounts}`
       : "3 Tasks          — not planned yet";
-  const codeLabel = issues.length > 0 ? "4 Code           run an issue →" : "4 Code           — needs issues";
+  const pending = issues.filter((i) => i.derivedStatus !== "deployed").length;
+  const codeLabel =
+    issues.length === 0
+      ? "4 Code           — needs issues"
+      : pending > 0
+        ? `4 Code           run the plan (${pending} pending, dependency order) →`
+        : "4 Code           ✓ all issues deployed";
 
   const choice = await clack.select<MenuAction>({
     message: `AEP playground — ${slug} (${projectDir}) · skills: ${skillCount} (working tree)`,

@@ -255,11 +255,16 @@ plus the `general` steer, plus `collabDepsSteer`, plus `\n\n(target: X)` when
 ### Phase 4 — code (also the standalone requirement-2 entry)
 
 ```
-pnpm play <project> code issues/3.md     # headless; or picked from the TUI task list
+pnpm play <project> code                 # the WHOLE plan, one go, dependency order
+pnpm play <project> code issues/3.md     # one independent run (the honing loop)
 ```
 
 Works on **any** directory containing `specs/` + `issues/` — no playground state, no
-prior phases, no engineering-agent process.
+prior phases, no engineering-agent process. Plain `code` executes every
+non-deployed issue topologically by `dependsOn` (status re-read between runs,
+so a dependent sees the dep its predecessor just deployed; an issue whose dep
+is still not deployed at its turn is skipped, never a hard error). The
+per-issue form exists for honing a single task, not for driving the plan.
 
 1. **Gate:** the issue file parses (frontmatter `component`, `title`). If `dependsOn`
    components have issues not yet `derivedStatus: deployed`, warn — an ordering *hint*,
@@ -363,12 +368,14 @@ specs/design/design.cell …" → "✓ created"); on `[DONE]` → change summary
 generate instruction (console parity); later entries are free chat in the same
 `general` conversation, exactly like the console's chat panel.
 
-**Review screen.** Changed files this turn: `(d)iff` against the pre-turn snapshot,
-`(o)pen in $EDITOR`, `(v)alidate` (design.json schema + openapi parse), back.
+**No review screen.** The playground is used with an editor (VS Code) open —
+file browsing, diffing, and hand-edits are the editor's job, and hand-edits
+between turns are first-class (D20). Turns auto-write the project; validation
+survives as the headless `check` verb.
 
 **Tasks screen.** Table of `issues/*.md` (number, component, title, dependsOn,
-derivedStatus) → `(p)lan/replan`, `(e)dit issue`, `(x) run coding agent`,
-`(n)ew issue` (template).
+derivedStatus) → `(p)lan/replan`, run the plan (one go). No per-issue picking,
+no file affordances — hand-authoring/editing an issue is a direct file edit.
 
 **Coding-run screen.** Live timeline from the unchanged NDJSON contract:
 

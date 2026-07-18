@@ -36,6 +36,7 @@ import { loadRepoSkills } from "@aep/agents/evals-kit";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
+  codeAllCommand,
   codeCommand,
   designCommand,
   requirementsCommand,
@@ -45,13 +46,13 @@ import {
   type PhaseOptions,
   type PhaseOutcome,
 } from "./commands.js";
+import { checkProject } from "./engine/check.js";
 import { openSession, SKILLS_DIR } from "./engine/session.js";
 import { expandProjectPath, projectDirError } from "./paths.js";
 import { projectSlug } from "./ports/spec-workspace.js";
 import { pickProject } from "./tui/picker.js";
 import { phaseMenu, type MenuAction } from "./tui/phase-menu.js";
 import { chatLoop } from "./tui/chat.js";
-import { printCheckFindings, reviewScreen } from "./tui/review.js";
 import { tasksScreen } from "./tui/tasks.js";
 
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "menu"]);
@@ -74,11 +75,19 @@ function confirmCodingDir(projectDir: string): () => Promise<boolean> {
   };
 }
 
+function printCheckFindings(projectDir: string): boolean {
+  let allOk = true;
+  for (const f of checkProject(projectDir)) {
+    output.write(f.ok ? `  ✓ ${f.path} — ${f.message}\n` : `  ✗ ${f.path} — ${f.message}\n`);
+    if (!f.ok) allOk = false;
+  }
+  return allOk;
+}
+
 async function runHeadless(
   command: string,
   projectDir: string,
   opts: CodeOptions,
-  interactive = false,
   commandArg?: string,
 ): Promise<number> {
   let outcome: PhaseOutcome;
@@ -93,11 +102,11 @@ async function runHeadless(
       outcome = await tasksCommand(projectDir, opts);
       break;
     case "code": {
-      if (!commandArg) {
-        output.write("usage: play <dir> code issues/<n>.md [--restore] [--yes]\n");
-        return 1;
-      }
-      outcome = await codeCommand(projectDir, commandArg, opts, confirmCodingDir(projectDir));
+      // With an issue file: one independent run (the honing loop). Without:
+      // execute the WHOLE plan in dependency order, one go.
+      outcome = commandArg
+        ? await codeCommand(projectDir, commandArg, opts, confirmCodingDir(projectDir))
+        : await codeAllCommand(projectDir, opts, confirmCodingDir(projectDir));
       break;
     }
     case "undo":
@@ -129,10 +138,6 @@ async function runHeadless(
     return 1;
   }
   output.write(`✓ ${command} done\n`);
-  if (interactive && outcome.changes?.length && outcome.before) {
-    const review = await clack.confirm({ message: `Review the ${outcome.changes.length} changed file(s)?` });
-    if (!clack.isCancel(review) && review) await reviewScreen(projectDir, outcome.changes, outcome.before);
-  }
   return 0;
 }
 
@@ -142,10 +147,16 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
     const skillCount = loadRepoSkills(SKILLS_DIR).length;
     const action: MenuAction = await phaseMenu(projectDir, projectSlug(projectDir), skillCount);
     if (action === "quit") break;
-    if (action === "tasks" || action === "code") {
+    if (action === "code") {
+      // One go: the whole plan in dependency order (VS Code is the file
+      // browser — no per-issue picking, no review detour).
+      await runHeadless("code", projectDir, opts);
+      continue;
+    }
+    if (action === "tasks") {
       const tasksAction = await tasksScreen(projectDir);
-      if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts, true);
-      if (tasksAction.kind === "code") await runHeadless("code", projectDir, opts, true, tasksAction.issueFile);
+      if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts);
+      if (tasksAction.kind === "code-all") await runHeadless("code", projectDir, opts);
       continue;
     }
     if (action === "chat") {
@@ -158,7 +169,7 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
       }
       continue;
     }
-    const code = await runHeadless(action, projectDir, opts, true);
+    const code = await runHeadless(action, projectDir, opts);
     if (code === 2) continue; // unwired action — back to the menu
   }
   clack.outro("bye");
@@ -224,7 +235,7 @@ async function main(): Promise<number> {
     if (!projectDir) return 0;
   }
 
-  if (command && command !== "menu") return runHeadless(command, projectDir, opts, false, commandArg);
+  if (command && command !== "menu") return runHeadless(command, projectDir, opts, commandArg);
   return runMenu(projectDir, opts);
 }
 

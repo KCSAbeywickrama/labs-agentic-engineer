@@ -13,8 +13,13 @@ pnpm play                              # picker → phase menu
 pnpm play <dir>                        # phase menu
 pnpm play <dir> requirements --idea "…"
 pnpm play <dir> design | tasks | check | undo
-pnpm play <dir> code issues/3.md [--restore] [--yes]
+pnpm play <dir> code [--yes]           # the WHOLE plan, one go, dependency order
+pnpm play <dir> code issues/3.md [--restore] [--yes]   # one run (honing loop)
 ```
+
+No review/browse affordances: the playground auto-writes files and the user's
+editor (VS Code) is where browsing, diffs, and hand-edits happen — including
+authoring `issues/<n>.md` by hand (picked up automatically).
 
 Flags: `--idea`, `--target`, `--fresh` (rotate the general conversation),
 `--silent`, `--restore`, `--yes` (headless coding consent). Every verb exits

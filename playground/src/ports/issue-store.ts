@@ -302,6 +302,50 @@ export class FsIssueStore {
   }
 
   /**
+   * The one-go execution order (docs §5 phase 4): topological by component
+   * `dependsOn` (Kahn's), ties broken by issueNumber; edges to components
+   * with no issue are ignored (advisory posture). On a cycle the remainder
+   * falls back to issueNumber order — the server-side accumulator prevents
+   * cycles at plan time, so this only guards hand-edited files.
+   */
+  static executionOrder(issues: Issue[]): Issue[] {
+    const byComponent = new Map<string, Issue[]>();
+    for (const i of issues) {
+      const list = byComponent.get(i.component) ?? [];
+      list.push(i);
+      byComponent.set(i.component, list);
+    }
+    const indegree = new Map<Issue, number>();
+    const dependents = new Map<string, Issue[]>();
+    for (const i of issues) {
+      const deps = i.dependsOn.filter((d) => byComponent.has(d) && d !== i.component);
+      indegree.set(i, deps.length);
+      for (const d of deps) {
+        const list = dependents.get(d) ?? [];
+        list.push(i);
+        dependents.set(d, list);
+      }
+    }
+    const byNumber = (a: Issue, b: Issue) => a.issueNumber - b.issueNumber;
+    const ready = issues.filter((i) => indegree.get(i) === 0).sort(byNumber);
+    const out: Issue[] = [];
+    while (ready.length > 0) {
+      const next = ready.shift()!;
+      out.push(next);
+      for (const dep of dependents.get(next.component) ?? []) {
+        const left = (indegree.get(dep) ?? 1) - 1;
+        indegree.set(dep, left);
+        if (left === 0) {
+          ready.push(dep);
+          ready.sort(byNumber);
+        }
+      }
+    }
+    for (const i of issues.sort(byNumber)) if (!out.includes(i)) out.push(i); // cycle remainder
+    return out;
+  }
+
+  /**
    * Wrap a raw counter allocator so it never hands out a number whose file
    * already exists — a project dir copied WITHOUT its `.aep-playground/`
    * state starts the counter at 1 while `issues/1.md` may exist; clobbering

@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 import { stdout as output } from "node:process";
-import { renderPart, renderSummary, type FileChange } from "@aep/agents/playground-kit";
+import { renderPart, renderSummary } from "@aep/agents/playground-kit";
 import type { StreamPart } from "@aep/agent-stream";
 import {
   composePlanInstruction,
@@ -46,10 +46,6 @@ import { restoreUndoSnapshot, takeUndoSnapshot } from "./state/undo.js";
 export interface PhaseOutcome {
   ok: boolean;
   detail?: string;
-  /** What the turn changed (review screen input). */
-  changes?: FileChange[];
-  /** The pre-turn project files (diff base for review). */
-  before?: Record<string, string>;
 }
 
 export interface PhaseOptions extends OpenOptions {
@@ -65,16 +61,15 @@ function onPartFor(opts: PhaseOptions): ((part: StreamPart) => void) | undefined
   return opts.silent ? undefined : renderPart;
 }
 
-function report(result: SpecTurnResult, opts: PhaseOptions, before?: Record<string, string>): PhaseOutcome {
+function report(result: SpecTurnResult, opts: PhaseOptions): PhaseOutcome {
   if (!opts.silent) {
     output.write("\n");
     renderSummary(result.changes, false);
     for (const n of result.derivedNotes) output.write(n.ok ? `  ⚙ ${n.message}\n` : `  ✗ ${n.message}\n`);
     for (const p of result.manifestMismatches) output.write(`  ⚠ manifest mismatch: ${p} (fold drift — please report)\n`);
   }
-  const extras = { changes: result.changes, ...(before ? { before } : {}) };
-  if (result.error) return { ok: false, detail: result.error, ...extras };
-  return { ok: true, ...extras };
+  if (result.error) return { ok: false, detail: result.error };
+  return { ok: true };
 }
 
 function gateFail(gate: GateResult): PhaseOutcome {
@@ -86,11 +81,10 @@ async function runPhaseTurn(projectDir: string, instructionText: string, opts: P
   const session = await openSession(projectDir, opts);
   try {
     const onPart = onPartFor(opts);
-    const before = session.ws.readSpecFiles();
     const result = await runSpecTurn(session, composeSpecInstruction(instructionText, opts.target), {
       ...(onPart ? { onPart } : {}),
     });
-    return report(result, opts, before);
+    return report(result, opts);
   } finally {
     await session.close();
   }
@@ -237,6 +231,54 @@ export async function codeCommand(
     output.write(`  transcript: ${result.runDir}\n`);
   }
   return result.exitCode === 0 ? { ok: true } : { ok: false, detail: `coding run exited ${result.exitCode}` };
+}
+
+/**
+ * `play code` with no issue argument — execute the WHOLE plan in one go
+ * (§5 phase 4): every non-deployed issue in dependency order. Status is
+ * re-read between runs, so a dependent started later in the same batch sees
+ * the dep its predecessor just deployed. An issue whose dependsOn component
+ * has a non-deployed issue at its turn is SKIPPED (its dep failed earlier in
+ * the batch) — never a hard error, and independent branches still run.
+ */
+export async function codeAllCommand(
+  projectDir: string,
+  opts: CodeOptions,
+  confirmDir?: () => Promise<boolean>,
+): Promise<PhaseOutcome> {
+  const store = new FsIssueStore(projectDir, projectSlug(projectDir));
+  const plan = FsIssueStore.executionOrder(store.list()).filter((i) => i.derivedStatus !== "deployed");
+  if (plan.length === 0) return { ok: false, detail: "nothing to run — no non-deployed issues (plan tasks first?)" };
+  if (!opts.silent) {
+    output.write(`  ▸ executing ${plan.length} task(s) in dependency order: ${plan.map((i) => `#${i.issueNumber}`).join(" → ")}\n`);
+  }
+
+  let failed = 0;
+  let skipped = 0;
+  for (const issue of plan) {
+    // Fresh status: earlier runs in this batch may have deployed our deps.
+    const current = new FsIssueStore(projectDir, projectSlug(projectDir)).list();
+    const blockedBy = issue.dependsOn.filter((dep) =>
+      current.some((i) => i.component === dep && i.derivedStatus !== "deployed"),
+    );
+    if (blockedBy.length > 0) {
+      skipped += 1;
+      if (!opts.silent) output.write(`  ↷ #${issue.issueNumber} ${issue.title} — skipped (dependsOn not deployed: ${blockedBy.join(", ")})\n`);
+      continue;
+    }
+    if (!opts.silent) output.write(`\n  ▶ #${issue.issueNumber} [${issue.component}] ${issue.title}\n`);
+    const outcome = await codeCommand(projectDir, issue.file, opts, confirmDir);
+    if (!outcome.ok) {
+      failed += 1;
+      if (!opts.silent) output.write(`  ✗ #${issue.issueNumber} failed: ${outcome.detail ?? "unknown"}\n`);
+      if (outcome.detail?.includes("not confirmed")) return outcome; // no consent — abort the batch
+    }
+  }
+
+  const ran = plan.length - skipped;
+  const summary = `${ran - failed}/${plan.length} deployed, ${failed} failed, ${skipped} skipped`;
+  if (!opts.silent) output.write(`\n  ■ batch done: ${summary}\n`);
+  return failed + skipped === 0 ? { ok: true } : { ok: false, detail: summary };
 }
 
 /** `play undo` — restore the latest pre-coding-run snapshot. */

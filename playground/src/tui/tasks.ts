@@ -17,21 +17,19 @@
  */
 
 /**
- * The tasks screen (docs/design/playground.md §7): the `issues/*.md` table
- * with dependsOn edges + derivedStatus, plan/replan, edit, new-issue template,
- * and the coding-agent launch hook.
+ * The tasks screen: the `issues/*.md` table (dependsOn edges + derivedStatus)
+ * plus plan/replan and run-the-whole-plan. Deliberately NO file affordances —
+ * viewing, editing, and hand-authoring issue files happen in the user's
+ * editor (the playground is used with VS Code open); execution is one go in
+ * dependency order, never per-issue picking.
  */
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
-import { FsIssueStore, renderTaskContextFile } from "../ports/issue-store.js";
+import { FsIssueStore } from "../ports/issue-store.js";
 import { projectSlug } from "../ports/spec-workspace.js";
-import { loadProjectState, saveProjectState } from "../state/project.js";
 
-export type TasksAction = { kind: "plan" } | { kind: "code"; issueFile: string } | { kind: "back" };
+export type TasksAction = { kind: "plan" } | { kind: "code-all" } | { kind: "back" };
 
 function statusIcon(s: string | undefined): string {
   if (s === "deployed") return "✓";
@@ -40,77 +38,26 @@ function statusIcon(s: string | undefined): string {
   return "·"; // ready
 }
 
-/** Render + drive the tasks table. Returns the action the CLI should run. */
+/** Render the tasks table; returns the action the CLI should run. */
 export async function tasksScreen(projectDir: string): Promise<TasksAction> {
-  for (;;) {
-    const store = new FsIssueStore(projectDir, projectSlug(projectDir));
-    const issues = store.list();
-    if (issues.length === 0) output.write("  (no issues yet — plan first)\n");
-
-    const choice = await clack.select({
-      message: "Tasks",
-      options: [
-        ...issues.map((i) => ({
-          value: i.file,
-          label: `${statusIcon(i.derivedStatus)} #${i.issueNumber} [${i.component}] ${i.title}${i.dependsOn.length ? ` ⇠ ${i.dependsOn.join(", ")}` : ""} (${i.derivedStatus ?? "ready"})`,
-        })),
-        { value: "\0plan", label: issues.length ? "＋ re-plan (adds tasks for uncovered components)" : "＋ plan tasks" },
-        { value: "\0new", label: "＋ new issue (template)" },
-        { value: "\0back", label: "back" },
-      ],
-    });
-    if (clack.isCancel(choice) || choice === "\0back") return { kind: "back" };
-    if (choice === "\0plan") return { kind: "plan" };
-    if (choice === "\0new") {
-      await newIssueTemplate(projectDir);
-      continue;
-    }
-
-    const action = await clack.select({
-      message: choice,
-      options: [
-        { value: "code", label: "run the coding agent on this issue" },
-        { value: "edit", label: `edit in $EDITOR (${process.env.EDITOR ?? "vi"})` },
-        { value: "back", label: "back" },
-      ],
-    });
-    if (clack.isCancel(action) || action === "back") continue;
-    if (action === "edit") {
-      spawnSync(process.env.EDITOR ?? "vi", [join(projectDir, choice)], { stdio: "inherit" });
-      continue;
-    }
-    return { kind: "code", issueFile: choice };
+  const store = new FsIssueStore(projectDir, projectSlug(projectDir));
+  const issues = store.list();
+  if (issues.length === 0) output.write("  (no issues yet — plan first; hand-authored issues/<n>.md files are picked up too)\n");
+  for (const i of issues) {
+    output.write(
+      `  ${statusIcon(i.derivedStatus)} #${i.issueNumber} [${i.component}] ${i.title}${i.dependsOn.length ? ` ⇠ ${i.dependsOn.join(", ")}` : ""} (${i.derivedStatus ?? "ready"})\n`,
+    );
   }
-}
 
-async function newIssueTemplate(projectDir: string): Promise<void> {
-  const title = await clack.text({ message: "Issue title", placeholder: "Implement the user service" });
-  if (clack.isCancel(title) || !title.trim()) return;
-  const component = await clack.text({ message: "Component", placeholder: "user-service" });
-  if (clack.isCancel(component) || !component.trim()) return;
-
-  const slug = projectSlug(projectDir);
-  const state = loadProjectState(projectDir, slug);
-  // Never clobber an existing file (a copied project may have issues the
-  // fresh counter doesn't know about) — skip forward like the plan fold does.
-  let issueNumber = state.nextIssueNumber;
-  while (existsSync(join(projectDir, "issues", `${issueNumber}.md`))) issueNumber += 1;
-  state.nextIssueNumber = issueNumber + 1;
-  const file = join(projectDir, "issues", `${issueNumber}.md`);
-  mkdirSync(join(projectDir, "issues"), { recursive: true });
-  writeFileSync(
-    file,
-    renderTaskContextFile({
-      issueNumber,
-      component: component.trim(),
-      title: title.trim(),
-      dependsOn: [],
-      origin: "manual",
-      derivedStatus: "ready",
-      body: "Describe the scope, acceptance notes, and files to touch.",
-    }),
-    "utf8",
-  );
-  saveProjectState(projectDir, state);
-  output.write(`  ＋ issues/${issueNumber}.md created\n`);
+  const pending = issues.filter((i) => i.derivedStatus !== "deployed").length;
+  const choice = await clack.select<TasksAction["kind"]>({
+    message: "Tasks",
+    options: [
+      { value: "plan", label: issues.length ? "re-plan (adds tasks for uncovered components)" : "plan tasks" },
+      ...(pending > 0 ? [{ value: "code-all" as const, label: `run the plan — ${pending} pending task(s), dependency order` }] : []),
+      { value: "back", label: "back" },
+    ],
+  });
+  if (clack.isCancel(choice)) return { kind: "back" };
+  return { kind: choice };
 }
