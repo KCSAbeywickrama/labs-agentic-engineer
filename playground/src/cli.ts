@@ -39,6 +39,7 @@ import { projectSlug } from "./ports/spec-workspace.js";
 import { pickProject } from "./tui/picker.js";
 import { phaseMenu, type MenuAction } from "./tui/phase-menu.js";
 import { chatLoop } from "./tui/chat.js";
+import { printCheckFindings, reviewScreen } from "./tui/review.js";
 
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "menu"]);
 
@@ -50,7 +51,12 @@ async function askIdea(): Promise<string | null> {
   return clack.isCancel(idea) ? null : idea;
 }
 
-async function runHeadless(command: string, projectDir: string, opts: PhaseOptions): Promise<number> {
+async function runHeadless(
+  command: string,
+  projectDir: string,
+  opts: PhaseOptions,
+  interactive = false,
+): Promise<number> {
   let outcome: PhaseOutcome;
   switch (command) {
     case "requirements":
@@ -59,6 +65,8 @@ async function runHeadless(command: string, projectDir: string, opts: PhaseOptio
     case "design":
       outcome = await designCommand(projectDir, opts);
       break;
+    case "check":
+      return printCheckFindings(projectDir) ? 0 : 1;
     default:
       output.write(`"${command}" is not wired yet (see docs/design/playground.md §13)\n`);
       return 2;
@@ -68,6 +76,10 @@ async function runHeadless(command: string, projectDir: string, opts: PhaseOptio
     return 1;
   }
   output.write(`✓ ${command} done\n`);
+  if (interactive && outcome.changes?.length && outcome.before) {
+    const review = await clack.confirm({ message: `Review the ${outcome.changes.length} changed file(s)?` });
+    if (!clack.isCancel(review) && review) await reviewScreen(projectDir, outcome.changes, outcome.before);
+  }
   return 0;
 }
 
@@ -87,7 +99,7 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
       }
       continue;
     }
-    const code = await runHeadless(action, projectDir, opts);
+    const code = await runHeadless(action, projectDir, opts, true);
     if (code === 2) continue; // unwired action — back to the menu
   }
   clack.outro("bye");

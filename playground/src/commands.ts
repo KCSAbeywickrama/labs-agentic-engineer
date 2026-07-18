@@ -24,7 +24,7 @@
  */
 
 import { stdout as output } from "node:process";
-import { renderPart, renderSummary } from "@aep/agents/playground-kit";
+import { renderPart, renderSummary, type FileChange } from "@aep/agents/playground-kit";
 import type { StreamPart } from "@aep/agent-stream";
 import { composeSpecInstruction, buildSpecGenerationInstruction, buildDesignGenerationInstruction } from "./engine/compose.js";
 import { designGate, requirementsGate, type GateResult } from "./engine/gates.js";
@@ -35,6 +35,10 @@ import { readPrompt, savePrompt } from "./state/project.js";
 export interface PhaseOutcome {
   ok: boolean;
   detail?: string;
+  /** What the turn changed (review screen input). */
+  changes?: FileChange[];
+  /** The pre-turn project files (diff base for review). */
+  before?: Record<string, string>;
 }
 
 export interface PhaseOptions extends OpenOptions {
@@ -50,15 +54,16 @@ function onPartFor(opts: PhaseOptions): ((part: StreamPart) => void) | undefined
   return opts.silent ? undefined : renderPart;
 }
 
-function report(result: SpecTurnResult, opts: PhaseOptions): PhaseOutcome {
+function report(result: SpecTurnResult, opts: PhaseOptions, before?: Record<string, string>): PhaseOutcome {
   if (!opts.silent) {
     output.write("\n");
     renderSummary(result.changes, false);
     for (const n of result.derivedNotes) output.write(n.ok ? `  ⚙ ${n.message}\n` : `  ✗ ${n.message}\n`);
     for (const p of result.manifestMismatches) output.write(`  ⚠ manifest mismatch: ${p} (fold drift — please report)\n`);
   }
-  if (result.error) return { ok: false, detail: result.error };
-  return { ok: true };
+  const extras = { changes: result.changes, ...(before ? { before } : {}) };
+  if (result.error) return { ok: false, detail: result.error, ...extras };
+  return { ok: true, ...extras };
 }
 
 function gateFail(gate: GateResult): PhaseOutcome {
@@ -70,10 +75,11 @@ async function runPhaseTurn(projectDir: string, instructionText: string, opts: P
   const session = await openSession(projectDir, opts);
   try {
     const onPart = onPartFor(opts);
+    const before = session.ws.readSpecFiles();
     const result = await runSpecTurn(session, composeSpecInstruction(instructionText, opts.target), {
       ...(onPart ? { onPart } : {}),
     });
-    return report(result, opts);
+    return report(result, opts, before);
   } finally {
     await session.close();
   }
