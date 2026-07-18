@@ -129,8 +129,11 @@ for you.
 
 ## Do not
 
-- Touch anything outside the current working directory — never `~`, never
-  other projects, never system paths.
+- Touch, read, or even list anything outside the current working directory —
+  never `~`, never other projects or repositories on this machine, never
+  system paths. Do not probe whether such paths exist. Everything you need is
+  inside the cwd (`specs/`, `issues/`, the app source) and your preloaded
+  skills.
 - Add a git remote, `git push`, or run any `gh` command. There is no remote.
 - Install anything outside the project's own package manager (no `brew`,
   no `apt`, no global `npm -g`, no `pip install` outside a project venv).
