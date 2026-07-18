@@ -52,3 +52,6 @@ learning/
 
 # AI SDK DevTools captures (playground runs with AGENT_DEVTOOLS always on)
 .devtools/
+
+# Playground project homes (pnpm play default) — never repo sources
+playground/projects/

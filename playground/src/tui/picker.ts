@@ -18,32 +18,21 @@
 
 /**
  * Project directory picker: recent projects + "open directory…" (§7). The
- * path prompt shows an EXPLICIT default (outside the repo — Enter accepts
- * it); emptiness is checked before expansion (a bare `resolve("")` is the
- * cwd, which once made empty input silently target the playground package);
- * a directory inside the repo checkout is rejected in-picker; a missing
- * directory is offered for creation.
+ * path prompt shows an EXPLICIT editable default (`playground/projects/my-app`
+ * under the invocation dir — Enter accepts it); emptiness is checked before
+ * expansion (a bare `resolve("")` is the cwd, which once made empty input
+ * silently target the playground package); illegal repo-internal paths are
+ * rejected in-picker (paths.ts is the single fence); a missing directory is
+ * offered for creation.
  */
 
 import { existsSync, mkdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import * as clack from "@clack/prompts";
 import { listRecentProjects } from "../state/project.js";
+import { defaultProjectDir, expandProjectPath, projectDirError } from "../paths.js";
 
 const OPEN = "\0open";
 const QUIT = "\0quit";
-
-// playground/src/tui → up 3 = the repo checkout; never a valid project.
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-
-/** The suggested default shown in the prompt — always outside the repo. */
-export const DEFAULT_PROJECT_DIR = join(homedir(), "aep-projects", "my-app");
-
-function insideRepo(p: string): boolean {
-  return p === REPO_ROOT || p.startsWith(REPO_ROOT + sep);
-}
 
 /** Pick a project dir, or null to exit. First run confirms the exact directory (§12). */
 export async function pickProject(): Promise<string | null> {
@@ -63,18 +52,19 @@ export async function pickProject(): Promise<string | null> {
 
   const dir = await clack.text({
     message: "Project directory (created if missing; Enter accepts the default)",
-    initialValue: DEFAULT_PROJECT_DIR,
+    initialValue: defaultProjectDir(),
     validate: (v) => {
       const raw = (v ?? "").trim();
       if (raw === "") return "enter a path"; // BEFORE expand — resolve("") is the cwd
-      const p = expand(raw);
-      if (insideRepo(p)) return "inside the AEP repo checkout — pick a directory outside the repository";
+      const p = expandProjectPath(raw);
+      const fenceError = projectDirError(p);
+      if (fenceError) return fenceError;
       if (existsSync(p) && !statSync(p).isDirectory()) return "exists but is not a directory";
       return undefined;
     },
   });
   if (clack.isCancel(dir)) return null;
-  const path = expand(dir.trim());
+  const path = expandProjectPath(dir.trim());
 
   if (!existsSync(path)) {
     const create = await clack.confirm({ message: `${path} does not exist. Create it?` });
@@ -87,12 +77,4 @@ export async function pickProject(): Promise<string | null> {
   });
   if (clack.isCancel(confirmed) || !confirmed) return null;
   return path;
-}
-
-function expand(p: string): string {
-  const home = process.env.HOME ?? "";
-  // Relative paths resolve against where the user ran `pnpm play` (INIT_CWD),
-  // not the playground package dir pnpm set as cwd.
-  const base = process.env.INIT_CWD ?? process.cwd();
-  return resolve(base, p.startsWith("~/") && home ? home + p.slice(1) : p);
 }
