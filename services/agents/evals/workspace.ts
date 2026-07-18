@@ -57,20 +57,20 @@ function fakeSha(payload: string): string {
 /** One per-sample fixture mount; `cleanup()` removes the whole tree. */
 export class EvalWorkspace {
   readonly root: string;
-  private skillsSha: string | undefined;
 
   constructor() {
     this.root = mkdtempSync(join(tmpdir(), "aep-eval-ws-"));
   }
 
   /**
-   * Materialize the skill library once into the FLAT snapshot layout
+   * Materialize the skill library into the FLAT snapshot layout
    * (`skills/<name>/SKILL.md` — the shape reconcile writes to every
    * org-skills repo). Returns the snapshot "sha". Called lazily by
-   * `workspaceRef`.
+   * `workspaceRef`. Content-addressed per call — an EDITED library yields a
+   * new snapshot on the next turn (the playground's hot-reload loop), while
+   * an unchanged one reuses its existing dir via the `existsSync` dedupe.
    */
   materializeSkills(skills: readonly RepoSkill[]): string {
-    if (this.skillsSha !== undefined) return this.skillsSha;
     const sha = fakeSha(JSON.stringify(skills.map((s) => [s.name, s.description, s.content, s.references ?? {}])));
     const dir = join(this.root, "repos", EVAL_ORG, "_skills", "org-skills", "snapshots", sha);
     if (!existsSync(dir)) {
@@ -84,7 +84,6 @@ export class EvalWorkspace {
         }
       }
     }
-    this.skillsSha = sha;
     return sha;
   }
 
