@@ -89,6 +89,13 @@ export interface CodingRunResult {
   runDir: string;
 }
 
+/** Read the issue file's current frontmatter `derivedStatus`, if any. */
+export function readDerivedStatus(projectDir: string, issueFile: string): string | undefined {
+  const abs = join(projectDir, issueFile);
+  if (!existsSync(abs)) return undefined;
+  return /^derivedStatus: *"?([^"\n]+)"?$/m.exec(readFileSync(abs, "utf8"))?.[1];
+}
+
 /** Set (or insert) the issue file's frontmatter `derivedStatus`. */
 export function writeDerivedStatus(projectDir: string, issueFile: string, status: string): void {
   const abs = join(projectDir, issueFile);
@@ -155,9 +162,14 @@ export function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunResult>
 
     const settle = (exitCode: number): void => {
       progressLog.end();
-      // Single owner of derivedStatus: normalize/repair on success, mark
-      // failed on any nonzero exit or kill (tolerant posture).
-      writeDerivedStatus(opts.projectDir, opts.issueFile, exitCode === 0 ? "deployed" : "failed");
+      // Writer of record for derivedStatus (tolerant repair): any nonzero
+      // exit or kill → failed. Exit 0 normalizes to deployed UNLESS the
+      // agent itself reported failed — the aep-local skill's give-up
+      // protocol sets "failed" and still finishes the session successfully,
+      // and that honest report must survive.
+      const agentSet = readDerivedStatus(opts.projectDir, opts.issueFile);
+      const status = exitCode !== 0 ? "failed" : agentSet === "failed" ? "failed" : "deployed";
+      writeDerivedStatus(opts.projectDir, opts.issueFile, status);
       resolvePromise({ exitCode, runDir });
     };
     child.on("error", (err) => {

@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { renderProgressLine, writeDerivedStatus } from "../src/engine/coding-run.js";
+import { readDerivedStatus, renderProgressLine, writeDerivedStatus } from "../src/engine/coding-run.js";
 import { renderTaskContextFile } from "../src/ports/issue-store.js";
 import { takeUndoSnapshot, restoreUndoSnapshot, listUndoSnapshots } from "../src/state/undo.js";
 import { codeCommand } from "../src/commands.js";
@@ -98,6 +98,20 @@ test("codeCommand gates: unparseable issue fails; unconfirmed headless run fails
     assert.equal(unconfirmed.ok, false);
     assert.match(unconfirmed.detail ?? "", /not confirmed/);
     assert.equal(listUndoSnapshots(dir).length, 0, "no snapshot before consent");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readDerivedStatus reads the frontmatter value (the exit-0 clobber guard's input)", () => {
+  const dir = tempProject();
+  try {
+    assert.equal(readDerivedStatus(dir, "issues/3.md"), "ready");
+    // The agent's give-up protocol sets "failed" and exits 0 — the settle
+    // logic must see this value and NOT normalize it to deployed.
+    writeDerivedStatus(dir, "issues/3.md", "failed");
+    assert.equal(readDerivedStatus(dir, "issues/3.md"), "failed");
+    assert.equal(readDerivedStatus(dir, "issues/404.md"), undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
