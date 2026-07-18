@@ -454,6 +454,9 @@ importers:
       '@aep/agents':
         specifier: workspace:*
         version: link:../services/agents
+      '@aep/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
       '@clack/prompts':
         specifier: ^1.6.0
         version: 1.7.0
