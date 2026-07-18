@@ -1,6 +1,7 @@
 # Playground — local-filesystem harness for both agents
 
-**Status:** design proposal, not built.
+**Status:** BUILT (steps 0a + 1–8 of §13, branch feat/playground); step 0b
+(live-env parity capture) pending a cluster session.
 **Scope:** a root-level `playground/` workspace package (`@aep/playground`) — a TUI/CLI
 that runs the **real** engineering agent and the **real** coding agent against a plain
 local project directory, phase by phase, with skills and prompts loaded from the
@@ -510,7 +511,7 @@ not a banner:
 | 3 | Playground skeleton: cli, picker, phase menu, `FsSpecWorkspace`, `FileConversationStore` (atomic tmp+rename; reset stale `status:"active"` on load), `engine/agents-app` + `engine/turn` with manifest parity check; **requirements + chat end-to-end**; `pnpm-workspace.yaml` + turbo wiring | 1.5d |
 | 4 | Design phase: gate + composed instruction + derived artifacts + review screen + `play check` (Ajv against the published design schema) | 1d |
 | 5 | Tasks phase: TS `renderTaskContextFile` (round-trip tests vs Go fixtures), instruction-carried plan context (verify server-side `updateTask{issueNumber}` resolution; files-map fallback per §5), `FsIssueStore` + plan fold (unit tests against recorded mock-model tool-result frames: ref-by-issueNumber vs ref-by-title, dedupe by key/normalized title, patch semantics, crash-mid-fold writes nothing), tasks screen | 1.5d |
-| 6 | remote-worker ports (**production-touching, additive**): `ports.ts` (WorkspaceProvider, SkillLibrarySource), `basePluginPath` + `basePreload` params (defaults byte-identical to today; unit-pinned), `src/local.ts` entry (imports nothing outside the package — remote-worker stays workspace-dep-free for its standalone image), `plugin-local/` `aep-local` skill (shared sections factored into common `references/*.md` both skills point at + CI identity check; plugin-local path never reachable from the production image) | 1.5d |
+| 6 | remote-worker ports (**production-touching, additive**): `ports.ts` (WorkspaceProvider, SkillLibrarySource), `basePluginPath` + `basePreload` params (defaults byte-identical to today; unit-pinned), `src/local.ts` entry (imports nothing outside the package — remote-worker stays workspace-dep-free for its standalone image), `plugin-local/` `aep-local` skill (shared sections carried VERBATIM + a byte-identity test — factoring into `references/*.md` was rejected during implementation: moving preloaded body content into lazily-loaded references would change production's in-context bytes; plugin-local + local.ts are `.dockerignore`d out of the production image) | 1.5d |
 | 7 | Coding-run flow: undo snapshot + restore, spawn + `NdjsonProgressReader` + timeline, `derivedStatus` write-back on exit codes, re-run loop, standalone `code` on a bare specs+issues dir | 1d |
 | 8 | Hardening + fidelity: mock-model phase tests (no tokens), **prompt-parity fixture test** (composed system+user prompt byte-equals production for a fixture project), docs (`playground/AGENTS.md` incl. §10 divergences), license headers, root make green | 1d |
 
