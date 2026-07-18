@@ -27,6 +27,7 @@
  * Flags: --idea "<text>", --target "<x>", --fresh, --silent.
  */
 
+import "./devtools-default.js"; // MUST be first: sets AGENT_DEVTOOLS before the agents config loads
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";

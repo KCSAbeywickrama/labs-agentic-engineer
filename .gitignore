@@ -49,3 +49,6 @@ learning/
 **/.vitest-attachments/
 .scratch/
 .agents/worktrees/
+
+# AI SDK DevTools captures (playground runs with AGENT_DEVTOOLS always on)
+.devtools/

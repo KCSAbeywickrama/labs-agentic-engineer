@@ -23,6 +23,14 @@ nonzero on failure — the edit-skill → rerun loop is scriptable.
 Requires `ANTHROPIC_API_KEY` (env or `deployments/.env`). Skills load from the
 working-tree `skills/` on EVERY turn — edits apply next run, no rebuild.
 
+**AI SDK DevTools is always on** (`src/devtools-default.ts`): every
+engineering-agent LLM call — the composed prompt, tool calls, usage, timing —
+is captured to `playground/.devtools/generations.json` (gitignored). Inspect
+with `npx @ai-sdk/devtools` (port 4983). Opt out per run with
+`AGENT_DEVTOOLS=false pnpm play …`. The coding agent is an Agent SDK session,
+not an AI SDK model — its full transcript is the run's
+`.aep-playground/runs/<ts>/…/claude.log` instead.
+
 ## Fidelity contract
 
 The bytes reaching the model are production-identical: the same server code
