@@ -34,6 +34,7 @@ import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "@aep/agents/evals-kit";
+import { loadDotenv } from "@aep/agents/shared/env";
 import {
   codeCommand,
   designCommand,
@@ -149,6 +150,9 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
 }
 
 async function main(): Promise<number> {
+  // Load deployments/.env up front: the coding path spawns the runner with
+  // the CLI's env (no openSession), so ANTHROPIC_API_KEY must be resolved here.
+  loadDotenv();
   const { values, positionals } = parseArgs({
     args: process.argv.slice(2),
     options: {
