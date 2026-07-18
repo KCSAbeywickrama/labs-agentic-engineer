@@ -181,6 +181,28 @@ test("plan fold: planTask + updateTask-by-title → issues/<n>.md; replan dedupe
   }
 });
 
+test("safeAllocator never clobbers an existing issue file (copied project, fresh counter)", () => {
+  const projectDir = seedDesignedProject();
+  try {
+    mkdirSync(join(projectDir, "issues"), { recursive: true });
+    writeFileSync(join(projectDir, "issues", "1.md"), "existing\n");
+    writeFileSync(join(projectDir, "issues", "2.md"), "existing\n");
+    const store = new FsIssueStore(projectDir, "todo-app");
+    let counter = 1; // a project copied without .aep-playground state
+    const alloc = store.safeAllocator(
+      () => counter,
+      (advancedTo) => {
+        counter = advancedTo;
+      },
+    );
+    assert.equal(alloc(), 3, "skips past existing files");
+    assert.equal(counter, 4);
+    assert.equal(readFileSync(join(projectDir, "issues", "1.md"), "utf8"), "existing\n");
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("no terminal manifest → the fold writes nothing (D14 do-not-commit)", () => {
   const projectDir = seedDesignedProject();
   try {

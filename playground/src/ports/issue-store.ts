@@ -300,4 +300,20 @@ export class FsIssueStore {
     mkdirSync(this.dir, { recursive: true });
     writeFileSync(join(this.dir, `${data.issueNumber}.md`), renderTaskContextFile(data), "utf8");
   }
+
+  /**
+   * Wrap a raw counter allocator so it never hands out a number whose file
+   * already exists — a project dir copied WITHOUT its `.aep-playground/`
+   * state starts the counter at 1 while `issues/1.md` may exist; clobbering
+   * a planner-authored issue is never acceptable. Advances the caller's
+   * counter past the allocated number via `commit`.
+   */
+  safeAllocator(next: () => number, commit: (advancedTo: number) => void): () => number {
+    return () => {
+      let n = next();
+      while (existsSync(join(this.dir, `${n}.md`))) n += 1;
+      commit(n + 1);
+      return n;
+    };
+  }
 }

@@ -144,7 +144,15 @@ export async function tasksCommand(projectDir: string, opts: PhaseOptions): Prom
       foldToDisk: false,
       ...(onPart ? { onPart } : {}),
     });
-    const fold = store.fold(result.parts, () => session.state.nextIssueNumber++);
+    const fold = store.fold(
+      result.parts,
+      store.safeAllocator(
+        () => session.state.nextIssueNumber,
+        (advancedTo) => {
+          session.state.nextIssueNumber = advancedTo;
+        },
+      ),
+    );
     saveProjectState(projectDir, session.state);
     if (!opts.silent) {
       output.write("\n");

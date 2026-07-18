@@ -91,14 +91,12 @@ async function newIssueTemplate(projectDir: string): Promise<void> {
 
   const slug = projectSlug(projectDir);
   const state = loadProjectState(projectDir, slug);
-  const issueNumber = state.nextIssueNumber;
-  state.nextIssueNumber += 1;
+  // Never clobber an existing file (a copied project may have issues the
+  // fresh counter doesn't know about) — skip forward like the plan fold does.
+  let issueNumber = state.nextIssueNumber;
+  while (existsSync(join(projectDir, "issues", `${issueNumber}.md`))) issueNumber += 1;
+  state.nextIssueNumber = issueNumber + 1;
   const file = join(projectDir, "issues", `${issueNumber}.md`);
-  if (existsSync(file)) {
-    output.write(`  ${file} already exists — counter repaired\n`);
-    saveProjectState(projectDir, state);
-    return;
-  }
   mkdirSync(join(projectDir, "issues"), { recursive: true });
   writeFileSync(
     file,
