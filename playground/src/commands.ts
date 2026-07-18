@@ -23,14 +23,21 @@
  * `PhaseOutcome` the CLI maps to an exit code.
  */
 
+import { randomUUID } from "node:crypto";
 import { stdout as output } from "node:process";
 import { renderPart, renderSummary, type FileChange } from "@aep/agents/playground-kit";
 import type { StreamPart } from "@aep/agent-stream";
-import { composeSpecInstruction, buildSpecGenerationInstruction, buildDesignGenerationInstruction } from "./engine/compose.js";
-import { designGate, requirementsGate, type GateResult } from "./engine/gates.js";
+import {
+  composePlanInstruction,
+  composeSpecInstruction,
+  buildSpecGenerationInstruction,
+  buildDesignGenerationInstruction,
+} from "./engine/compose.js";
+import { designGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
 import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
-import { readPrompt, savePrompt } from "./state/project.js";
+import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
+import { readPrompt, savePrompt, saveProjectState } from "./state/project.js";
 
 export interface PhaseOutcome {
   ok: boolean;
@@ -110,6 +117,43 @@ export async function designCommand(projectDir: string, opts: PhaseOptions): Pro
   const gate = designGate(projectDir);
   if (!gate.ok) return gateFail(gate);
   return runPhaseTurn(projectDir, buildDesignGenerationInstruction(), opts);
+}
+
+/**
+ * Phase 3 — tasks (§5 phase 3): a fresh one-shot `task-plan` conversation on
+ * the task-plan toolset; existing issues ride the INSTRUCTION (production
+ * channel); OK tool-results fold into `issues/<n>.md` only after the terminal
+ * manifest arrived.
+ */
+export async function tasksCommand(projectDir: string, opts: PhaseOptions): Promise<PhaseOutcome & { fold?: FoldOutcome }> {
+  const gate = tasksGate(projectDir);
+  if (!gate.ok) return gateFail(gate);
+
+  const session = await openSession(projectDir, opts);
+  try {
+    const store = new FsIssueStore(projectDir, session.state.slug);
+    const onPart = onPartFor(opts);
+    const result = await runSpecTurn(session, composePlanInstruction(store.planContextFiles()), {
+      useCase: "task-plan",
+      conversationUuid: randomUUID(), // one-shot per plan turn (plan.go:223)
+      toolset: "task-plan",
+      foldToDisk: false,
+      ...(onPart ? { onPart } : {}),
+    });
+    const fold = store.fold(result.parts, () => session.state.nextIssueNumber++);
+    saveProjectState(projectDir, session.state);
+    if (!opts.silent) {
+      output.write("\n");
+      for (const i of fold.created) output.write(`  ＋ ${i.file} — ${i.component}: ${i.title}\n`);
+      for (const i of fold.updated) output.write(`  ± ${i.file} — ${i.component}: ${i.title}\n`);
+      for (const t of fold.skippedDuplicates) output.write(`  ↷ duplicate skipped: ${t}\n`);
+      if (fold.created.length + fold.updated.length === 0) output.write("  (no issues written)\n");
+    }
+    if (result.error) return { ok: false, detail: result.error, fold };
+    return { ok: true, fold };
+  } finally {
+    await session.close();
+  }
 }
 
 /** One free-chat turn in the project's `general` conversation (shared session). */

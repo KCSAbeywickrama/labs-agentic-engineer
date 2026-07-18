@@ -33,13 +33,14 @@ import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "@aep/agents/evals-kit";
-import { requirementsCommand, designCommand, type PhaseOptions, type PhaseOutcome } from "./commands.js";
+import { requirementsCommand, designCommand, tasksCommand, type PhaseOptions, type PhaseOutcome } from "./commands.js";
 import { openSession, SKILLS_DIR } from "./engine/session.js";
 import { projectSlug } from "./ports/spec-workspace.js";
 import { pickProject } from "./tui/picker.js";
 import { phaseMenu, type MenuAction } from "./tui/phase-menu.js";
 import { chatLoop } from "./tui/chat.js";
 import { printCheckFindings, reviewScreen } from "./tui/review.js";
+import { tasksScreen } from "./tui/tasks.js";
 
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "menu"]);
 
@@ -65,6 +66,9 @@ async function runHeadless(
     case "design":
       outcome = await designCommand(projectDir, opts);
       break;
+    case "tasks":
+      outcome = await tasksCommand(projectDir, opts);
+      break;
     case "check":
       return printCheckFindings(projectDir) ? 0 : 1;
     default:
@@ -89,6 +93,14 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
     const skillCount = loadRepoSkills(SKILLS_DIR).length;
     const action: MenuAction = await phaseMenu(projectDir, projectSlug(projectDir), skillCount);
     if (action === "quit") break;
+    if (action === "tasks" || action === "code") {
+      const tasksAction = await tasksScreen(projectDir);
+      if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts, true);
+      if (tasksAction.kind === "code") {
+        output.write(`"code" is not wired yet (see docs/design/playground.md §13 steps 6-7)\n`);
+      }
+      continue;
+    }
     if (action === "chat") {
       const session = await openSession(projectDir, opts);
       try {
