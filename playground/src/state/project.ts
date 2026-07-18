@@ -43,6 +43,8 @@ export interface ProjectState {
   nextIssueNumber: number;
   /** Content hash of the spec files map after the last fold (D20 signal). */
   lastFoldedHash?: string;
+  /** The user confirmed coding runs may write this directory (§12 first-run confirm). */
+  codingConfirmed?: boolean;
 }
 
 export function stateDir(projectDir: string): string {
@@ -71,6 +73,7 @@ export function loadProjectState(projectDir: string, slug: string): ProjectState
       conversationUuid: raw.conversationUuid ?? randomUUID(),
       nextIssueNumber: raw.nextIssueNumber ?? 1,
       ...(raw.lastFoldedHash ? { lastFoldedHash: raw.lastFoldedHash } : {}),
+      ...(raw.codingConfirmed ? { codingConfirmed: true } : {}),
     };
   }
   return { slug, conversationUuid: randomUUID(), nextIssueNumber: 1 };

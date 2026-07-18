@@ -36,8 +36,12 @@ import {
 import { designGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
 import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
+import { runCodingAgent } from "./engine/coding-run.js";
+import { SKILLS_DIR } from "./engine/session.js";
 import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
-import { readPrompt, savePrompt, saveProjectState } from "./state/project.js";
+import { projectSlug } from "./ports/spec-workspace.js";
+import { loadProjectState, readPrompt, savePrompt, saveProjectState } from "./state/project.js";
+import { restoreUndoSnapshot, takeUndoSnapshot } from "./state/undo.js";
 
 export interface PhaseOutcome {
   ok: boolean;
@@ -154,6 +158,85 @@ export async function tasksCommand(projectDir: string, opts: PhaseOptions): Prom
   } finally {
     await session.close();
   }
+}
+
+export interface CodeOptions extends PhaseOptions {
+  /** `--restore`: restore the latest undo snapshot before this run. */
+  restore?: boolean;
+  /** Headless consent to run bypassPermissions on this directory (`--yes`). */
+  yes?: boolean;
+  /** Override the skills library / plugin (tests). */
+  codingSkillsDir?: string;
+  pluginDir?: string;
+}
+
+/**
+ * Phase 4 — code (§5 phase 4; also the standalone requirement-2 entry).
+ * Works on any dir with `specs/` + `issues/`: gate (issue parses), dependsOn
+ * ordering WARNING (never a block), MANDATORY undo snapshot, spawn the
+ * remote-worker local entry, stream its NDJSON, own the derivedStatus
+ * write-back via exit codes.
+ */
+export async function codeCommand(
+  projectDir: string,
+  issueFile: string,
+  opts: CodeOptions,
+  confirmDir?: () => Promise<boolean>,
+): Promise<PhaseOutcome> {
+  const store = new FsIssueStore(projectDir, projectSlug(projectDir));
+  const issue = store.list().find((i) => i.file === issueFile);
+  if (!issue) return { ok: false, detail: `${issueFile} does not parse as a task (component + title frontmatter required)` };
+
+  // First-run consent (§12): bypassPermissions writes THIS directory.
+  const state = loadProjectState(projectDir, projectSlug(projectDir));
+  if (!state.codingConfirmed && !opts.yes) {
+    if (!confirmDir || !(await confirmDir())) {
+      return { ok: false, detail: "coding run not confirmed — re-run with --yes or confirm in the TUI" };
+    }
+  }
+  if (!state.codingConfirmed) {
+    state.codingConfirmed = true;
+    saveProjectState(projectDir, state);
+  }
+
+  // Ordering hint (§5 gate 1): dependsOn components whose issues aren't
+  // deployed yet — warn, never block (the production "deployed" oracle is dropped).
+  const all = store.list();
+  const notDeployed = issue.dependsOn.filter((dep) =>
+    all.some((i) => i.component === dep && i.derivedStatus !== "deployed"),
+  );
+  if (notDeployed.length > 0 && !opts.silent) {
+    output.write(`  ⚠ dependsOn not deployed yet: ${notDeployed.join(", ")} (hint only — continuing)\n`);
+  }
+
+  if (opts.restore) {
+    const restored = restoreUndoSnapshot(projectDir);
+    if (!opts.silent) output.write(restored ? `  ↺ restored ${restored}\n` : "  (no undo snapshot to restore)\n");
+  }
+  const snapshot = takeUndoSnapshot(projectDir); // mandatory (§12)
+  if (!opts.silent) output.write(`  ⛑ undo snapshot: ${snapshot}\n`);
+
+  const result = await runCodingAgent({
+    projectDir,
+    issueFile,
+    componentName: issue.component,
+    skillsDir: opts.codingSkillsDir ?? SKILLS_DIR,
+    ...(opts.pluginDir ? { pluginDir: opts.pluginDir } : {}),
+    ...(opts.silent ? { silent: true } : {}),
+  });
+  if (!opts.silent) {
+    output.write(`\n  issue ${issue.issueNumber} → ${result.exitCode === 0 ? "deployed" : "failed"}\n`);
+    output.write(`  transcript: ${result.runDir}\n`);
+  }
+  return result.exitCode === 0 ? { ok: true } : { ok: false, detail: `coding run exited ${result.exitCode}` };
+}
+
+/** `play undo` — restore the latest pre-coding-run snapshot. */
+export function undoCommand(projectDir: string, opts: PhaseOptions): PhaseOutcome {
+  const restored = restoreUndoSnapshot(projectDir);
+  if (!restored) return { ok: false, detail: "no undo snapshot found" };
+  if (!opts.silent) output.write(`  ↺ restored ${restored}\n`);
+  return { ok: true };
 }
 
 /** One free-chat turn in the project's `general` conversation (shared session). */

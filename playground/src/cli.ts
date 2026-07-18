@@ -33,7 +33,16 @@ import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "@aep/agents/evals-kit";
-import { requirementsCommand, designCommand, tasksCommand, type PhaseOptions, type PhaseOutcome } from "./commands.js";
+import {
+  codeCommand,
+  designCommand,
+  requirementsCommand,
+  tasksCommand,
+  undoCommand,
+  type CodeOptions,
+  type PhaseOptions,
+  type PhaseOutcome,
+} from "./commands.js";
 import { openSession, SKILLS_DIR } from "./engine/session.js";
 import { projectSlug } from "./ports/spec-workspace.js";
 import { pickProject } from "./tui/picker.js";
@@ -52,11 +61,22 @@ async function askIdea(): Promise<string | null> {
   return clack.isCancel(idea) ? null : idea;
 }
 
+function confirmCodingDir(projectDir: string): () => Promise<boolean> {
+  return async () => {
+    if (!process.stdin.isTTY) return false;
+    const ok = await clack.confirm({
+      message: `The coding agent runs with permissions BYPASSED and will write inside ${projectDir}. A restorable undo snapshot is taken first. Continue?`,
+    });
+    return !clack.isCancel(ok) && ok;
+  };
+}
+
 async function runHeadless(
   command: string,
   projectDir: string,
-  opts: PhaseOptions,
+  opts: CodeOptions,
   interactive = false,
+  commandArg?: string,
 ): Promise<number> {
   let outcome: PhaseOutcome;
   switch (command) {
@@ -68,6 +88,17 @@ async function runHeadless(
       break;
     case "tasks":
       outcome = await tasksCommand(projectDir, opts);
+      break;
+    case "code": {
+      if (!commandArg) {
+        output.write("usage: play <dir> code issues/<n>.md [--restore] [--yes]\n");
+        return 1;
+      }
+      outcome = await codeCommand(projectDir, commandArg, opts, confirmCodingDir(projectDir));
+      break;
+    }
+    case "undo":
+      outcome = undoCommand(projectDir, opts);
       break;
     case "check":
       return printCheckFindings(projectDir) ? 0 : 1;
@@ -96,9 +127,7 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
     if (action === "tasks" || action === "code") {
       const tasksAction = await tasksScreen(projectDir);
       if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts, true);
-      if (tasksAction.kind === "code") {
-        output.write(`"code" is not wired yet (see docs/design/playground.md §13 steps 6-7)\n`);
-      }
+      if (tasksAction.kind === "code") await runHeadless("code", projectDir, opts, true, tasksAction.issueFile);
       continue;
     }
     if (action === "chat") {
@@ -126,20 +155,25 @@ async function main(): Promise<number> {
       target: { type: "string" },
       fresh: { type: "boolean" },
       silent: { type: "boolean" },
+      restore: { type: "boolean" },
+      yes: { type: "boolean" },
     },
     allowPositionals: true,
   });
 
-  const opts: PhaseOptions = {
+  const opts: CodeOptions = {
     ...(values.idea ? { idea: values.idea } : {}),
     ...(values.target ? { target: values.target } : {}),
     ...(values.fresh ? { fresh: true } : {}),
     ...(values.silent ? { silent: true } : {}),
+    ...(values.restore ? { restore: true } : {}),
+    ...(values.yes ? { yes: true } : {}),
   };
 
-  let [dirArg, command] = positionals as [string | undefined, string | undefined];
+  let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];
   // `pnpm play requirements` inside a project dir: first positional is a command.
   if (dirArg && COMMANDS.has(dirArg) && !existsSync(dirArg)) {
+    commandArg = command;
     command = dirArg;
     dirArg = undefined;
   }
@@ -158,7 +192,7 @@ async function main(): Promise<number> {
     if (!projectDir) return 0;
   }
 
-  if (command && command !== "menu") return runHeadless(command, projectDir, opts);
+  if (command && command !== "menu") return runHeadless(command, projectDir, opts, false, commandArg);
   return runMenu(projectDir, opts);
 }
 
