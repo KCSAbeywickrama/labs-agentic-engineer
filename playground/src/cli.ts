@@ -29,7 +29,8 @@
 
 import "./devtools-default.js"; // MUST be first: sets AGENT_DEVTOOLS before the agents config loads
 import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
@@ -191,17 +192,30 @@ async function main(): Promise<number> {
     ...(values.yes ? { yes: true } : {}),
   };
 
+  // pnpm runs this script with cwd = the playground PACKAGE dir, so a relative
+  // path must resolve against where the user actually invoked `pnpm play`
+  // (pnpm exposes it as INIT_CWD) — otherwise `pnpm play .` targets the
+  // package itself.
+  const invocationDir = process.env.INIT_CWD ?? process.cwd();
+
   let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];
   // `pnpm play requirements` inside a project dir: first positional is a command.
-  if (dirArg && COMMANDS.has(dirArg) && !existsSync(dirArg)) {
+  if (dirArg && COMMANDS.has(dirArg) && !existsSync(resolve(invocationDir, dirArg))) {
     commandArg = command;
     command = dirArg;
     dirArg = undefined;
   }
 
-  let projectDir = dirArg ? resolve(dirArg) : null;
+  let projectDir = dirArg ? resolve(invocationDir, dirArg) : null;
   if (projectDir && (!existsSync(projectDir) || !statSync(projectDir).isDirectory())) {
     output.write(`not a directory: ${projectDir}\n`);
+    return 1;
+  }
+  // The repo checkout is never a playground project: the agents would write
+  // into the monorepo (specs/, issues/, undo copies, generated app source).
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  if (projectDir && (projectDir === repoRoot || projectDir.startsWith(repoRoot + sep))) {
+    output.write(`refusing to use a directory inside the AEP repo checkout (${projectDir}) — pick a project directory outside the repository, e.g. ~/work/my-app\n`);
     return 1;
   }
   if (!projectDir) {

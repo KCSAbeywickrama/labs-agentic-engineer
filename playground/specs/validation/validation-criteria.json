@@ -1,0 +1,72 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "statement": "A user must sign in to the app, and their todos persist privately across sessions and devices.",
+      "criteria": [
+        { "id": "AC-001-a", "must": "An unauthenticated visitor opening the app is presented a sign-in flow before any todo content is shown", "method": "e2e" },
+        { "id": "AC-001-b", "must": "After a user successfully signs in, the system shows that user's own todos and lists", "method": "e2e" },
+        { "id": "AC-001-c", "must": "When a signed-in user signs out, the system ends their session and returns them to the sign-in flow", "method": "e2e" },
+        { "id": "AC-001-d", "must": "If a user's session has expired, the system requires them to sign in again before performing any todo operation", "method": "e2e" }
+      ]
+    },
+    {
+      "id": "REQ-002",
+      "statement": "A user can create a new todo item with a title, and optionally a description and due date.",
+      "criteria": [
+        { "id": "AC-002-a", "must": "Submitting a new todo with a non-empty title creates the todo and displays it in the user's todo list", "method": "e2e" },
+        { "id": "AC-002-b", "must": "Submitting a new todo with an empty title is rejected and a validation message is displayed", "method": "e2e" },
+        { "id": "AC-002-c", "must": "Creating a todo allows an optional description to be provided at creation time", "method": "e2e" },
+        { "id": "AC-002-d", "must": "Creating a todo allows an optional due date to be provided at creation time", "method": "e2e" },
+        { "id": "AC-002-e", "must": "A newly created todo's initial status is incomplete", "method": "e2e" }
+      ]
+    },
+    {
+      "id": "REQ-003",
+      "statement": "A user can view their todos and organize them into lists.",
+      "criteria": [
+        { "id": "AC-003-a", "must": "Opening the app displays all of the signed-in user's todos, grouped by list", "method": "e2e" },
+        { "id": "AC-003-b", "must": "Creating a new list with a non-empty name adds the list and allows todos to be assigned to it", "method": "e2e" },
+        { "id": "AC-003-c", "must": "Moving a todo from one list to another updates its list association and the change is reflected immediately", "method": "e2e" },
+        { "id": "AC-003-d", "must": "When a user has no todos, an empty-state message is displayed instead of an empty list", "method": "e2e" },
+        { "id": "AC-003-e", "must": "Filtering todos by status (all, active, completed) displays only todos matching the selected filter", "method": "e2e" }
+      ]
+    },
+    {
+      "id": "REQ-004",
+      "statement": "A user can edit an existing todo's details.",
+      "criteria": [
+        { "id": "AC-004-a", "must": "Editing a todo's title, description, or due date and saving persists the changes and displays the updated todo", "method": "e2e" },
+        { "id": "AC-004-b", "must": "Attempting to save a todo with an empty title is rejected and a validation message is displayed", "method": "e2e" },
+        { "id": "AC-004-c", "must": "Cancelling an in-progress edit discards unsaved changes and retains the todo's previous values", "method": "e2e" }
+      ]
+    },
+    {
+      "id": "REQ-005",
+      "statement": "A user can mark a todo complete or reopen it, and see overdue todos indicated.",
+      "criteria": [
+        { "id": "AC-005-a", "must": "Marking an incomplete todo as complete updates its status and visually distinguishes it from incomplete todos", "method": "e2e" },
+        { "id": "AC-005-b", "must": "Marking a completed todo as incomplete reopens it and restores it to the active list", "method": "e2e" },
+        { "id": "AC-005-c", "must": "A todo whose due date has passed and is still incomplete is visually indicated as overdue", "method": "e2e" }
+      ]
+    },
+    {
+      "id": "REQ-006",
+      "statement": "A user can delete todos and lists they no longer need.",
+      "criteria": [
+        { "id": "AC-006-a", "must": "Deleting a todo removes it from the user's todo list permanently", "method": "e2e" },
+        { "id": "AC-006-b", "must": "Requesting to delete a todo prompts for confirmation before it is deleted", "method": "e2e" },
+        { "id": "AC-006-c", "must": "Deleting a list that contains todos moves those todos to a default list or prompts the user for how to handle them, rather than silently deleting the todos", "method": "e2e" }
+      ]
+    },
+    {
+      "id": "REQ-007",
+      "statement": "A user's todos and lists are private and persist durably.",
+      "criteria": [
+        { "id": "AC-007-a", "must": "Requesting todos returns only todos and lists owned by the requesting user", "method": "e2e" },
+        { "id": "AC-007-b", "must": "An attempt to access or modify another user's todo or list is denied", "method": "e2e" },
+        { "id": "AC-007-c", "must": "A todo change (create, edit, complete, delete) persists so it survives sign-out and sign-in on a different session", "method": "e2e" }
+      ]
+    }
+  ]
+}

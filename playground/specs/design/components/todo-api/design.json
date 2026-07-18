@@ -1,0 +1,16 @@
+{
+  "name": "todo-api",
+  "type": "service",
+  "version": "0.1.0",
+  "language": "Go",
+  "buildpack": "docker",
+  "appPath": "todo-api",
+  "entrypoint": "deployment/service",
+  "exposure": "internet",
+  "description": "Go REST API owning todos and lists, backed by an embedded SQLite database. Every operation is scoped to the authenticated caller (X-User-Id). Does not validate JWTs itself and does not implement any /auth/* endpoints — sign-in is delegated to Thunder via the shared user-auth dependency.",
+  "dependencies": [
+    { "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app", "description": "Shared Thunder auth resource; the gateway validates callers' JWTs and injects X-User-Id before requests reach this service." }
+  ],
+  "componentAgentInstructions": "No /auth/* endpoints. The API Platform gateway validates the JWT and the api-configuration trait's jwt-auth policy injects identity headers on every request: X-User-Id (the caller's opaque IdP subject) and X-User-Groups (the caller's role groups, a JSON array — unused here, this system has a single role). Stamp X-User-Id as the owner of this service's own rows (reject 401 when missing). Do NOT validate JWTs yourself; do NOT add CORS middleware (the gateway handles CORS). Use modernc.org/sqlite (pure-Go); driver name is \"sqlite\". Store the DB under /data/todo-api.db.",
+  "skillsApplied": ["openapi-conventions", "go", "api-management", "thunder-authentication"]
+}

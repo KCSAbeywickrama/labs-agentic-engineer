@@ -20,6 +20,10 @@ Flags: `--idea`, `--target`, `--fresh` (rotate the general conversation),
 `--silent`, `--restore`, `--yes` (headless coding consent). Every verb exits
 nonzero on failure — the edit-skill → rerun loop is scriptable.
 
+Relative project paths resolve against where you launched `pnpm play` (pnpm's
+`INIT_CWD`), and a directory inside this repo checkout is refused outright —
+a playground project is always a directory OUTSIDE the repository.
+
 Requires `ANTHROPIC_API_KEY` (env or `deployments/.env`). Skills load from the
 working-tree `skills/` on EVERY turn — edits apply next run, no rebuild.
 

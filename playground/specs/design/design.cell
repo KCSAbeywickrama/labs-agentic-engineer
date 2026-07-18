@@ -1,0 +1,12 @@
+title Todo App
+
+component todo-webapp as "Todo Webapp" web-application
+component todo-api as "Todo API" service
+
+east user-auth as "Thunder Auth" identity-server
+
+north -> todo-webapp
+
+todo-webapp -> todo-api
+todo-webapp -> user-auth
+todo-api -> user-auth

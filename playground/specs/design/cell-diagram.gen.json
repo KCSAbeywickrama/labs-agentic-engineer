@@ -1,0 +1,82 @@
+{
+  "id": "project",
+  "name": "playground",
+  "modelVersion": "0.2.0",
+  "components": [
+    {
+      "id": "todo-api",
+      "label": "todo-api",
+      "version": "0.1.0",
+      "type": "service",
+      "buildPack": "Go",
+      "services": {
+        "todo-api:api": {
+          "id": "todo-api:api",
+          "label": "API",
+          "type": "HTTP",
+          "dependencyIds": [],
+          "deploymentMetadata": {
+            "gateways": {
+              "internet": {
+                "isExposed": true
+              },
+              "intranet": {
+                "isExposed": false
+              }
+            }
+          }
+        }
+      },
+      "connections": [
+        {
+          "id": "default:external-apis:user-auth",
+          "label": "user-auth",
+          "type": "datastore",
+          "onPlatform": true,
+          "tooltip": "datastore"
+        }
+      ]
+    },
+    {
+      "id": "todo-webapp",
+      "label": "todo-webapp",
+      "version": "0.1.0",
+      "type": "service",
+      "buildPack": "TypeScript",
+      "services": {
+        "todo-webapp:api": {
+          "id": "todo-webapp:api",
+          "label": "API",
+          "type": "HTTP",
+          "dependencyIds": [
+            "todo-api:api"
+          ],
+          "deploymentMetadata": {
+            "gateways": {
+              "internet": {
+                "isExposed": false
+              },
+              "intranet": {
+                "isExposed": false
+              }
+            }
+          }
+        }
+      },
+      "connections": [
+        {
+          "id": "default:project:todo-api",
+          "label": "todo-api",
+          "onPlatform": true
+        },
+        {
+          "id": "default:external-apis:user-auth",
+          "label": "user-auth",
+          "type": "datastore",
+          "onPlatform": true,
+          "tooltip": "datastore"
+        }
+      ]
+    }
+  ]
+}

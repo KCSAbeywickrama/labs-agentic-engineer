@@ -64,5 +64,8 @@ export async function pickProject(): Promise<string | null> {
 
 function expand(p: string): string {
   const home = process.env.HOME ?? "";
-  return resolve(p.startsWith("~/") && home ? home + p.slice(1) : p);
+  // Relative paths resolve against where the user ran `pnpm play` (INIT_CWD),
+  // not the playground package dir pnpm set as cwd.
+  const base = process.env.INIT_CWD ?? process.cwd();
+  return resolve(base, p.startsWith("~/") && home ? home + p.slice(1) : p);
 }
