@@ -22,9 +22,9 @@
  *
  *  - Relative paths resolve against where the user launched `pnpm play`
  *    (pnpm's INIT_CWD) — pnpm sets the process cwd to the package dir.
- *  - The default project home is `<invocation dir>/playground/projects/`
- *    (gitignored; excluded from repo lint + license gates), so from the repo
- *    root the default lands under the playground dir as expected.
+ *  - The default project home is `<repo>/playground/.projects/` (a dot-dir:
+ *    gitignored, invisible to the repo's lint/license gates and to project
+ *    walks by construction).
  *  - Anywhere else inside the repo checkout is refused: the agents would
  *    write specs/undo copies/generated app source into the monorepo.
  */
@@ -36,17 +36,17 @@ import { fileURLToPath } from "node:url";
 /** The repo checkout (playground/src → up 2). */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** The gitignored subtree where playground projects may live inside the repo. */
-export const PROJECTS_HOME = join(REPO_ROOT, "playground", "projects");
+/** The gitignored dot-dir where playground projects may live inside the repo. */
+export const PROJECTS_HOME = join(REPO_ROOT, "playground", ".projects");
 
 /** Where the user actually ran `pnpm play` (pnpm rewrites the process cwd). */
 export function invocationDir(): string {
   return process.env.INIT_CWD ?? process.cwd();
 }
 
-/** The suggested default shown in the picker: `<invocation>/playground/projects/my-app`. */
+/** The suggested default shown in the picker: `<repo>/playground/.projects/my-app`. */
 export function defaultProjectDir(): string {
-  return join(invocationDir(), "playground", "projects", "my-app");
+  return join(PROJECTS_HOME, "my-app");
 }
 
 /** Expand `~/` and resolve relative paths against the invocation dir. */

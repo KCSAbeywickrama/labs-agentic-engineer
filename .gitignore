@@ -54,4 +54,7 @@ learning/
 .devtools/
 
 # Playground project homes (pnpm play default) — never repo sources
-playground/projects/
+playground/.projects/
+# Playground per-project state — belt-and-braces: an accidental run anywhere
+# inside the repo must never become committable
+.aep-playground/

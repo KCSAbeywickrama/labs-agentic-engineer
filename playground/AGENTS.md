@@ -26,10 +26,10 @@ Flags: `--idea`, `--target`, `--fresh` (rotate the general conversation),
 nonzero on failure — the edit-skill → rerun loop is scriptable.
 
 Relative project paths resolve against where you launched `pnpm play` (pnpm's
-`INIT_CWD`). The picker's default is `playground/projects/my-app` under your
-invocation dir — from the repo root that lands in `playground/projects/`, the
-ONE gitignored subtree inside the checkout where projects may live (excluded
-from lint + license gates). Anywhere else inside the repo is refused.
+`INIT_CWD`). The picker's default is `<repo>/playground/.projects/my-app` —
+`playground/.projects/` is the ONE place inside the checkout where projects
+may live (a gitignored dot-dir, invisible to lint + license gates). Anywhere
+else inside the repo is refused.
 
 Requires `ANTHROPIC_API_KEY` (env or `deployments/.env`). Skills load from the
 working-tree `skills/` on EVERY turn — edits apply next run, no rebuild.
