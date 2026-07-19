@@ -28,9 +28,10 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { projectDirError } from "../paths.js";
 
 export const STATE_DIR = ".aep-playground";
 
@@ -113,13 +114,20 @@ export function listRecentProjects(): string[] {
   if (!existsSync(file)) return [];
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as unknown;
-    return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string" && existsSync(p)) : [];
+    if (!Array.isArray(raw)) return [];
+    // Prune vanished dirs AND fence-illegal entries (a pre-fence run could
+    // have remembered the repo checkout itself) — the next rememberProject
+    // write persists the pruned list.
+    return raw.filter((p): p is string => typeof p === "string" && existsSync(p) && projectDirError(p) === null);
   } catch {
     return [];
   }
 }
 
 export function rememberProject(projectDir: string): void {
+  // Temp-dir projects (mock-model tests, throwaway probes) are not recents —
+  // and tests must never rewrite the user's real list.
+  if (projectDir.startsWith(tmpdir() + sep)) return;
   const list = [projectDir, ...listRecentProjects().filter((p) => p !== projectDir)].slice(0, RECENTS_LIMIT);
   mkdirSync(join(homedir(), ".aep-playground"), { recursive: true });
   writeFileSync(recentsFile(), JSON.stringify(list, null, 2), "utf8");

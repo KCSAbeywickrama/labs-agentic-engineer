@@ -220,13 +220,6 @@ async function main(): Promise<number> {
     output.write(`not a directory: ${projectDir}\n`);
     return 1;
   }
-  if (projectDir) {
-    const fenceError = projectDirError(projectDir);
-    if (fenceError) {
-      output.write(`${fenceError}\n`);
-      return 1;
-    }
-  }
   if (!projectDir) {
     if (command && !process.stdin.isTTY) {
       output.write("a project directory is required in headless mode\n");
@@ -234,6 +227,13 @@ async function main(): Promise<number> {
     }
     projectDir = await pickProject();
     if (!projectDir) return 0;
+  }
+  // Fence EVERY resolved project dir — CLI argument or picker result (stale
+  // recents could carry a pre-fence path).
+  const fenceError = projectDirError(projectDir);
+  if (fenceError) {
+    output.write(`${fenceError}\n`);
+    return 1;
   }
 
   if (command && command !== "menu") return runHeadless(command, projectDir, opts, commandArg);
