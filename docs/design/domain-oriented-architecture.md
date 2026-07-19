@@ -551,6 +551,68 @@ Delivery's registry and calls the admit/reevaluate port — exactly as codingage
 executor. One physical owner, one write-API, many callers; the funnel invariant (one dispatch path,
 gates unbypassable) is preserved.
 
+### 10.3.1 Delivery's internal structure — kernel-root + feature sub-packages (ADR)
+
+**Problem.** Delivery is the one domain whose absorbed features are densely cross-coupled AND carry a
+load-bearing internal boundary. The arch rules leave exactly one legal intra-domain import direction —
+**slice → root** (`root ⊥ slice`, `slice ⊥ sibling`, only `httpapi` may import slices). But the six
+features cross-reference each other five ways (`build → devflow`, `build → task`, `codingagent →
+execution`, `codingagent → devflow`, `execution → devflow`), and §1's **`task ⊥ execution`** split must
+survive as an *internal* boundary. Two facts collide: (a) if every service sits flat in the root (the
+P3/P4 shape), `task ⊥ execution` dissolves — both live in one package; (b) if `task` and `execution` are
+peer sub-packages, `codingagent → execution` becomes a forbidden sibling import.
+
+**Decision.** Delivery is **not** the flat-root-of-services shape spec/organization use, and **not**
+per-op slices. It is a **shared-kernel ROOT + one cohesive sub-package per feature**, each sub-package
+owning its service *and* its HTTP handlers. The rule that makes it legal: **anything referenced across
+feature boundaries is a TYPE or PORT and lives in the root; the feature logic that references it lives in
+a sub-package that imports only the root.**
+
+- **`internal/delivery/` (root) — the domain kernel** (types + ports + shared infra, no feature logic):
+  - the executions write-API surface: the `Executor` port, `DispatchRequest`, `TaskFacts`, the
+    `Registry` (class→executor), the `ExecutionStore` port, and the `Funnel`'s `admit`/`finish`/
+    `reevaluate` entry types (`Dispatcher`/`Reevaluator` ports);
+  - the task-log stream contract (`TaskStreamHub` + its frame types);
+  - devflow's *shared* infra: the Temporal `Runtime`, the `Signaler` + `SignalLookup`, and the workflow
+    I/O vocabulary (`DevFlowInput`, `TaskFlow{Input,Result,Status}`, `DevWorkflowID`, the status consts);
+  - the shared read DTOs every reader join needs (`TaskView`, `ExecutionView`, `Lineage`) and the
+    `platform/taskmeta` re-exports;
+  - **no gorm** — persistence stays in `repositories.{Execution,WorkflowRun,CodingAgentLog}Repository`
+    (the gorm-into-`delivery/repository.go` move defers to P9, as every domain's did).
+- **Sub-packages (the "slices", each a feature cluster):** `taskflow` (task Commands/Reads/Plan/
+  WebhookEvents + list/get/promote handlers), `execution` (the Funnel/Events/sweep + `TaskStreamService`
+  + stream-task-log handler), `buildpipe` (build Service/Preflight/TemporalRunner + build/preflight
+  handlers), `codingdispatch` (the CodingExecutor + dispatcher + watchers + templates), `validationrun`
+  (validation context/credentials services + the two S2S handlers), `devflowwork` (the Temporal
+  workflows/activities/worker). Each imports **only the root**.
+
+**Why this preserves `task ⊥ execution`.** `taskflow` and `execution` are peer sub-packages; neither
+imports the other. `taskflow` reaches the funnel through the root `Dispatcher` port (the funnel, in the
+`execution` sub-package, satisfies it — wired at the composition root); they otherwise share only
+`taskmeta` + executions rows, exactly as §1 requires. The old `TestTaskExecutionSplit` (a
+`feature/task ⊥ feature/execution` check) is **replaced** by this sub-package relationship, re-asserted
+by a delivery-internal test that `taskflow` imports neither `execution` nor `codingdispatch`.
+
+**Why the cross-edges become legal.** Each former feature→feature edge now targets a root TYPE:
+`codingdispatch → root.Executor/DispatchRequest/TaskStreamHub`, `buildpipe → root.Runtime/DevFlowInput`
++ `root.TaskView`, `execution → root.Signaler`. All are slice→root. The one that was a data join —
+`build → task.TaskView` — is a root DTO plus a `TaskReader` port (satisfied by `taskflow`, wired at the
+root), never a sub-package import.
+
+**codingagent's gorm + setters (the P6 payoff).** codingagent is delivery's only raw-gorm importer, and
+its reads are two kinds: its own `CodingAgentLog` (→ a new `repositories.CodingAgentLogRepository`) and
+raw **org-credential** reads (`Organization`/`OrgCredential`/`OrgAnthropicCredential`/
+`OrganizationIDPProfile`) it does through the `*gorm.DB` its `With*` setters inject. The fold removes the
+gorm: `CodingAgentLog` moves behind the new repository, and the org reads swap onto the **existing P3a
+org repositories** (`repositories.{Organization,OrgCredential,OrgAnthropic,IDP}Repository`) — consumed
+directly, exactly as spec/task consume `repositories.*`, so the row-usage code is untouched and only the
+query mechanism changes. Naming `models.OrgCredential` here is fence-legal (shared kernel); wrapping
+those reads in a codingagent-vocabulary port + moving the org entities into `organization` is the P9
+cleanup (with every domain's entity move), not a P6 gate. Removing the `db` removes the reason the
+`WithProxy(db)`/`WithK8sJobDispatch(db)` setters carry it; the remaining mutable `With*(...)` chain
+collapses into **constructor injection** as a follow-on. Result of P6a: delivery is gorm-free (trim the
+`codingagent` `gormImporters` row).
+
 ### 10.4 Secrets: a platform module
 **Decision: `platform/secrets` consolidates the backend mechanics behind a few purpose-specific ports.**
 Secret storage was spread across OpenBao (git tokens), SM-API (runner mirrors), K8s ExternalSecrets
@@ -1196,6 +1258,41 @@ surprise:
   `platform/secrets` interfaces, so `TestImportFences` holds with no code. genai's gorm extracted to
   `repositories/turn_repository.go` (P4.0) with the turn VOCABULARY re-exported into the domain via type
   aliases — the clean "gorm payoff deferred, vocabulary stays" split.
+
+**P6 (`delivery`) findings** — the one domain with a load-bearing internal boundary (§10.3.1 designed its
+kernel-root + sub-package shape *before* relocating; these are the surprises from executing it):
+
+- **`TestDomainsAreFeatureFree` scans test files too**, so entangled features cannot move one at a time.
+  `task`'s component test imported `feature/execution`, so `task` could not become a domain sub-package
+  while `execution` was still a feature — the four cross-coupled features (execution/task/build/codingagent)
+  had to move as one train after the **kernel was extracted first**. Only `validation` and `devflow` were
+  cleanly isolated enough to move solo. Extract the shared kernel before any entangled feature, not after.
+- **Lifting a workflow's I/O vocabulary is a re-qualification, not surgery — do it with a lexer, not a
+  comment-stripping regex.** Moving the ~25 devflow vocab symbols (DevFlowInput/Status, the DevPhase*/
+  TaskPhase*/Outcome* enums, DevWorkflowID, DevFlowWorkflowName) to the root re-qualified ~180 sites across
+  the Temporal workflow files. A naive `//`-stripping pass wrongly rewrote an identifier **inside a string
+  literal** (a markdown template `# Lineage diff:`), compile-green but behaviour-wrong. A proper Go-token
+  walker (skip strings/raw-strings/runes/line+block comments) is the safe tool. Two real collisions needed
+  care: a moved const in a `switch case X:` must be rewritten (ends in `:`), while a struct FIELD named the
+  same as the moved func (`ValidationFlowInput.DevWorkflowID` vs the `DevWorkflowID()` func) must NOT —
+  rewrite the func only when followed by `(`.
+- **The migration deletes to make its point.** The `opsExecutionBridge` (the P1 "consumer-before-provider"
+  demo) retired exactly as its pragma promised: `execution.OpsExecutionReader` implements `ops.ExecutionReader`
+  directly (a legal `delivery → ops` provider→consumer-port edge, acyclic because `ops` imports no delivery),
+  the app-root bridge is deleted, and **nothing in `internal/ops` changed** — the property the bridge existed
+  to prove. `TestNoShimsSurvivePastTheirPhase` (`<=`, not `<`) forces this the moment `currentPhase` reaches P6.
+- **Delivery's `Deps` cannot live in the domain root.** Every other domain keeps `Deps` in its root (§7's
+  P1 finding #2), but delivery's services live in sub-packages the root may not import (`root ⊥ slice`). The
+  `httpapi` aggregator — the one package allowed to name the siblings — is where `Deps` + `New` sit. This is
+  a structural consequence of the kernel-root shape, not a workaround.
+- **A domain sub-package legitimately imports another whole domain.** `delivery/build` imports `spec`
+  (`SpecSaveResult`/`SpecValidationError`) and `sourcecontrol`; `delivery/execution` imports `ops`. `slice ⊥
+  sibling` bans only *same-domain* sibling slices, and `TestDomainsAreFeatureFree` bans only `feature/*` —
+  cross-*domain* type/port edges are allowed and are how the pipeline composes the authoring + RCA domains.
+- **A `git mv` into a package named `build` hits `.gitignore`.** The root `build/` ignore pattern swallowed
+  `internal/delivery/build/`; the codebase already carried a `!…/internal/feature/build/` negation for the
+  old location, so the fix was repointing that one line — worth knowing before moving any package whose name
+  collides with a build-output convention.
 
 ### 19.6 Cross-cutting risks
 

@@ -53,23 +53,13 @@ const mod = "github.com/wso2/aep/aep-api"
 // decision: extend this list in the same PR and say why, or (usually better)
 // cut the edge with a consumer-side port per the house pattern.
 var featureEdgeAllowlist = map[string][]string{
-	// build is the public single-tag build surface (build-project /
-	// get-project-build). It deliberately composes the machinery it fronts:
-	// the spec domain (SpecSaveResult + SpecValidationError — the 422 detail
-	// must survive errors.As across the port boundary; a feature→domain edge
-	// since P4, no longer allowlisted here), devflow (workflow name/id/
-	// status vocabulary + the Temporal runtime the runner wraps), task
-	// (TaskView for the status title join). Heavy collaborators (SaveSpec,
-	// workflow_runs, repo lookup) stay behind consumer-side ports wired at the
-	// composition root. (Its gitrepo edge became a sourcecontrol DOMAIN edge in P2.)
-	"build": {"devflow", "task"},
-	// codingagent is the funnel's one registered executor: it implements the
-	// execution.Executor port (hence the execution edge) and reaches every other
-	// service — identities, anthropic, repos, OC — through consumer ports wired
-	// at the composition root. It also holds the devflow signaler (nil-safe) so
-	// the coding/build/deploy watchers can signal a waiting TaskFlow workflow.
-	"codingagent": {"execution", "devflow"},
-	"component":   {},
+	// (build MIGRATED to internal/delivery/build in P6 — the public single-tag
+	// build surface is now a delivery-domain sub-package (buildpipe). It composes
+	// the delivery root (the devflow Runtime + the workflow I/O vocab + task's
+	// TaskView), the spec domain (SpecSaveResult/SpecValidationError) and
+	// sourcecontrol — all slice→root or domain→domain edges. Its row is gone
+	// because the feature is gone.)
+	"component": {},
 	// dependencies is the dependency-management feature: the parent package (MCP
 	// discovery server + endpoints catalog) composes its own resources and
 	// endpoints subpackages (external/platform provisioner cores; the org
@@ -81,19 +71,11 @@ var featureEdgeAllowlist = map[string][]string{
 	// external-resource repo, secret writer, design reader) is a consumer-side
 	// port wired at the composition root, keeping the feature edge surface minimal.
 	"dependencies": {"dependencies/resources", "dependencies/endpoints"},
-	// devflow hosts the Temporal dev/task workflows + activities. Its activity
-	// ports are all devflow-local (the funnel/genai/plan/issue adapters live at
-	// the composition root), so it holds NO cross-feature edge — other features
-	// depend on IT (the signaler), never the reverse.
-	"devflow": {},
-	// execution is the platform-owned half of the Task/Execution split: it reads
-	// GitHub Task facts (via the sourcecontrol domain since P2) and, on PR events,
-	// signals a waiting devflow
-	// TaskFlow workflow (devflow, nil-safe). Design at HEAD is read through a
-	// consumer-side port, not a direct artifacts import. It NEVER imports
-	// feature/task — the §1 split is a package boundary.
-	"execution": {"devflow"},
-	"project":   {},
+	// (execution MIGRATED to internal/delivery/execution — the platform-owned
+	// half of the Task/Execution split is now a delivery-domain sub-package, not
+	// a feature. Its row is gone because the feature is gone; the §1 boundary is
+	// re-asserted below as feature/task ⊥ delivery/execution.)
+	"project": {},
 	// provisioning is the dependency-provisioning coordinator (dependency-management
 	// §3.6): it drives the provisioner cores (dependencies/resources); GitHub gate
 	// issues now come from the sourcecontrol domain (P2). Every other collaborator —
@@ -109,16 +91,11 @@ var featureEdgeAllowlist = map[string][]string{
 	// (ExternalResourceBindingName) rather than re-deriving the convention.
 	// (Its artifacts edge became a feature→spec-domain edge in P4.)
 	"runtimeconfig": {"dependencies/resources"},
-	// task is the GitHub-facing half: it never imports feature/execution (the §1
-	// split) — the funnel is reached through the task.Dispatcher consumer port.
-	// (Its artifacts edge became a feature→spec-domain edge in P4.)
-	"task": {},
-	// validation mints the project's aep:validation Task issue on design approval
-	// (validation-phase). It holds NO feature edge: the issue wire types come from
-	// the sourcecontrol domain (P2), and the design-component and criteria-file
-	// reads are consumer-side ports wired at the composition root.
-	"validation": {},
-	"webhook":    {},
+	// (task MIGRATED to internal/delivery/task in P6 — the GitHub-facing half of
+	// the Task/Execution split is now a delivery-domain sub-package. Its row is
+	// gone; the §1 boundary is re-asserted by TestTaskExecutionSplit as
+	// delivery/task ⊥ delivery/execution.)
+	"webhook": {},
 }
 
 // depCache memoizes each package's transitive import set so the boundary
@@ -271,21 +248,22 @@ func TestFeatureEdgeAllowlist(t *testing.T) {
 }
 
 // TestTaskExecutionSplit asserts the §1 Task/Execution split is a package
-// boundary (docs/design/tasks-github-native.md §10): feature/task (the
-// GitHub-facing half) and feature/execution (the platform-owned half) never
+// boundary (docs/design/tasks-github-native.md §10): delivery/task (the
+// GitHub-facing half) and delivery/execution (the platform-owned half) never
 // import each other — they communicate only through the pure taskmeta encoding
 // and the executions rows (the shared kernel). task reaches the funnel through
-// the task.Dispatcher consumer port; execution never needs task at all. This
-// is subsumed by TestFeatureEdgeAllowlist but stated explicitly because the
-// split is the design's load-bearing invariant.
+// the task.Dispatcher consumer port; execution never needs task at all. Now that
+// both are delivery-domain sub-packages this is also enforced by slice⊥sibling,
+// but it is stated explicitly because the split is the design's load-bearing
+// invariant (§10.3.1).
 func TestTaskExecutionSplit(t *testing.T) {
-	const task = mod + "/internal/feature/task"
-	const execution = mod + "/internal/feature/execution"
+	const task = mod + "/internal/delivery/task"
+	const execution = mod + "/internal/delivery/execution"
 	if imports(t, task, execution) {
-		t.Error("feature/task imports feature/execution — the Task/Execution split is a package boundary; reach the funnel through the task.Dispatcher port")
+		t.Error("delivery/task imports delivery/execution — the Task/Execution split is a package boundary; reach the funnel through the task.Dispatcher port")
 	}
 	if imports(t, execution, task) {
-		t.Error("feature/execution imports feature/task — the Task/Execution split is a package boundary")
+		t.Error("delivery/execution imports delivery/task — the Task/Execution split is a package boundary")
 	}
 }
 
@@ -392,7 +370,6 @@ var gormImporters = map[string]bool{
 	"internal/platform/dbtest":        true,
 	"internal/platform/componenttest": true,
 	// Features with raw gorm still to migrate into repositories/ (step 11).
-	"internal/feature/codingagent":   true,
 	"internal/feature/component":     true,
 	"internal/feature/runtimeconfig": true,
 	"internal/feature/webhook":       true,

@@ -44,19 +44,21 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
-	"github.com/wso2/aep/aep-api/internal/feature/build"
-	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
+	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/delivery/build"
+	"github.com/wso2/aep/aep-api/internal/delivery/codingagent"
+	"github.com/wso2/aep/aep-api/internal/delivery/devflow"
+	"github.com/wso2/aep/aep-api/internal/delivery/execution"
+	deliveryhttpapi "github.com/wso2/aep/aep-api/internal/delivery/httpapi"
+	"github.com/wso2/aep/aep-api/internal/delivery/task"
+	"github.com/wso2/aep/aep-api/internal/delivery/validation"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
-	"github.com/wso2/aep/aep-api/internal/feature/devflow"
-	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
-	"github.com/wso2/aep/aep-api/internal/feature/task"
-	"github.com/wso2/aep/aep-api/internal/feature/validation"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
 	"github.com/wso2/aep/aep-api/internal/ops"
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
@@ -123,6 +125,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	orgCredRepo := repositories.NewOrgCredentialRepository(db)
 	orgAnthropicRepo := repositories.NewOrgAnthropicRepository(db)
 	idpRepo := repositories.NewIDPRepository(db)
+	codingAgentLogRepo := repositories.NewCodingAgentLogRepository(db)
 
 	// Temporal devflow runtime. Constructed always, but connects lazily in the
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
@@ -130,8 +133,8 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// appended to the watcher slice below only when Temporal is configured.
 	// The signaler is nil-safe and no-ops while the runtime is not connected,
 	// so webhook handlers/watchers hold it unconditionally.
-	devflowRuntime := devflow.NewRuntime(cfg.Temporal)
-	devflowSignaler := devflow.NewSignaler(devflowRuntime, workflowRunRepo)
+	devflowRuntime := delivery.NewRuntime(cfg.Temporal)
+	devflowSignaler := delivery.NewSignaler(devflowRuntime, workflowRunRepo)
 
 	// Token provider for service-to-service auth. OC authorizes requests by
 	// the service client subject (aep-api-client), so every OC API call
@@ -427,14 +430,14 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// via the direct K8sJobDispatcher but still reads pod logs through the
 	// proxy stub, so streaming works regardless of which dispatcher ran.
 	if cgwClient != nil {
-		execProgressSvc.WithCodingProgress(codingagent.NewAgentProgressReader(cgwClient, db))
+		execProgressSvc.WithCodingProgress(codingagent.NewAgentProgressReader(cgwClient, codingAgentLogRepo, orgRepo))
 	}
 	// The task-log SSE stream: one connection per open task-detail page carries
 	// the Task's whole live state (status + executions + unified timeline across
 	// attempts). The hub is the in-proc change bus the PR webhook + job/exec
 	// watchers ping so an attached stream re-derives instantly; a slow re-derive
 	// tick on each connection is the safety net (no durable event table).
-	taskStreamHub := execution.NewTaskStreamHub()
+	taskStreamHub := delivery.NewTaskStreamHub()
 	taskStreamSvc := execution.NewTaskStreamService(
 		execProgressSvc,
 		taskSnapshotAdapter{reads: taskReads},
@@ -550,7 +553,8 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	codingExecutor := codingagent.NewCodingExecutor(
 		componentClient, repoService, identities{cred: credService},
 		anthropicProvisioner{svc: anthropicCredService}, taskTokens, executionRepo,
-		cfg.AgentPlatformURL, cfg.AgentPlatformURL)
+		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
+		orgRepo, orgAnthropicRepo, orgCredRepo, idpRepo)
 	// Stamp AEP_SKILLS_REPO_URL so the runner clones `org-skills` and resolves
 	// applied skills locally (the same EnsureProvisioned+GetRepo closure the
 	// genai + task-plan turns use for their SkillsRef).
@@ -564,7 +568,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// falls through to the direct K8sJobDispatcher, which writes the Anthropic
 	// Secret straight into the runner namespace (no OpenBao/ESO/sm-api).
 	if cgwClient != nil && cfg.SecretManagerAPIURL != "" {
-		codingExecutor.WithProxy(codingagent.New(cgwClient), db, idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
+		codingExecutor.WithProxy(codingagent.New(cgwClient), idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
 		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled (proxy + sm-api)",
 			"runnerImage", cfg.AgentRunnerImage, "clusterSecretStore", cfg.AgentClusterSecretStore)
 	}
@@ -577,7 +581,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 			cfg.AgentPlatformURL,
 			cfg.AgentRunnerImage,
 		)
-		codingExecutor.WithK8sJobDispatch(k8sJobDispatcher, db)
+		codingExecutor.WithK8sJobDispatch(k8sJobDispatcher)
 		slog.Info("coding executor: direct k8s-job dispatch path enabled", "runnerImage", cfg.AgentRunnerImage)
 	}
 	// Build-secret staging so the post-merge build clones a PRIVATE project repo
@@ -728,13 +732,12 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		ProjectSvc:   projectService,
 		ComponentSvc: componentService,
 		ConfigSvc:    configService,
-		TaskReads:    taskReads,
-		TaskCommands: taskCommands,
-		TaskStream:   taskStreamSvc,
 		TaskTokens:   taskTokens,
-		// BuildSvc is assigned below (params.Deps.BuildSvc), after the
-		// external-resource provisioner exists — its InputsCoordinator stages the
-		// drawer's external-config secrets through that provisioner's SM-API write.
+		// The delivery domain (build + task reads/promote + task-log stream) is
+		// assembled below (params.Deps.Delivery), after the external-resource
+		// provisioner exists — the build service's InputsCoordinator stages the
+		// drawer's external-config secrets through that provisioner's SM-API write,
+		// and its PreflightService reads the provisioning tri-state.
 	}
 
 	// Dependency-management MCP discovery readers (agnostic subset — Phase 4 of
@@ -799,7 +802,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 
 	opsHandlers, err := opshttpapi.New(ops.Deps{
 		Reports: ops.NewRepository(db),
-		Execs:   opsExecutionBridge{execs: executionRepo},
+		Execs:   execution.NewOpsExecutionReader(executionRepo),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble ops domain: %w", err)
@@ -858,7 +861,6 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 			designComponents{store: artifactStore},
 		),
 	})
-	params.Deps.BuildSvc = buildSvc
 	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
 		Issues:    issueService,
@@ -879,10 +881,27 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// and emits a drawer item per dependency that still needs input, filtering out
 	// anything already provisioned OR in-flight (buildProvisionStatus collapses the
 	// provisioning tri-state onto the "already handled" bool).
-	params.Deps.PreflightSvc = build.NewPreflightService(build.PreflightDeps{
+	preflightSvc := build.NewPreflightService(build.PreflightDeps{
 		Design: designComponents{store: artifactStore},
 		Status: buildProvisionStatus{svc: provisioningSvc},
 	})
+	// delivery — the Delivery Pipeline domain (P6): the public single-tag build
+	// surface, the task read + promote-dispatch surface, and the task-log SSE
+	// stream. Its slice handlers embed straight into the edge's composite; the
+	// edge holds no build/task/stream service. Assembled here, after the build +
+	// preflight services (whose ports depend on the external-resource provisioner
+	// constructed just above).
+	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
+		BuildSvc:     buildSvc,
+		PreflightSvc: preflightSvc,
+		TaskReads:    taskReads,
+		TaskCommands: taskCommands,
+		TaskStream:   taskStreamSvc,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("assemble delivery domain: %w", err)
+	}
+	params.Deps.Delivery = deliveryHandlers
 	// Mint the project's single aep:validation Task in the PLANNING pass: the
 	// plan session mints it right after the plan tap creates the implementation
 	// issues, so it is born in the same phase as them (and never pollutes the
@@ -1006,7 +1025,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// (proxy and direct K8sJobDispatcher) emit `ca-…` run names, so the watcher
 	// reads job status + logs through the proxy stub regardless of dispatcher.
 	if cgwClient != nil {
-		jobWatcher := codingagent.NewJobWatcher(db, cgwClient, executionRepo).
+		jobWatcher := codingagent.NewJobWatcher(codingAgentLogRepo, orgRepo, cgwClient, executionRepo).
 			WithWorkflowSignaler(devflowSignaler).
 			WithTaskNotifier(taskStreamHub)
 		// Per-run ExternalSecret teardown applies only to the proxy dispatch
