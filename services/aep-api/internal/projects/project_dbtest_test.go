@@ -25,22 +25,22 @@ import (
 	"context"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/internal/projects"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 func TestDeleteProject_PurgesExecutions_OrgScoped_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
-	execRepo := repositories.NewExecutionRepository(db)
+	execRepo := delivery.NewExecutionRepository(db)
 
 	seed := func(org, proj string, issue int) {
-		if _, _, err := execRepo.TryAdmit(ctx, &models.Execution{
+		if _, _, err := execRepo.TryAdmit(ctx, &delivery.Execution{
 			OrgID: org, ProjectID: proj, Repo: org + "/r", IssueNumber: issue, Kind: string(taskmeta.KindCoding),
 		}); err != nil {
 			t.Fatalf("seed execution (%s/%s#%d): %v", org, proj, issue, err)

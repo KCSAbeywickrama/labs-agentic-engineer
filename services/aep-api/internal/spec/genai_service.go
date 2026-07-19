@@ -39,7 +39,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // Valid use cases (the FE-supplied "useCase" field).
@@ -117,7 +116,7 @@ var requirementsTagPattern = regexp.MustCompile(`^v(\d+)$`)
 // RepoResolver looks up the project's git repo row (its OrgID/ProjectID are the
 // authenticated tenant scope woven into the namespaced conversation id).
 type RepoResolver interface {
-	GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+	GetRepo(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error)
 }
 
 // GitReader is the workspace-backed git surface the turn flow drives: reads +
@@ -138,7 +137,7 @@ type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error
 // with the embedded flow skills) and returns its row — the source of the
 // turn's SkillsRef snapshot. Wired at the composition root from the skills
 // feature (EnsureProvisioned + GetRepo) so genai holds no skills edge.
-type SkillsRepoResolver func(ctx context.Context, orgID string) (*models.GitRepository, error)
+type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error)
 
 // ---- input / views ----------------------------------------------------------
 
@@ -172,7 +171,7 @@ type TurnStatus struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-func turnStatusOf(t *models.AgentTurn) *TurnStatus {
+func turnStatusOf(t *AgentTurn) *TurnStatus {
 	return &TurnStatus{
 		TurnID:         t.ID,
 		ConversationID: t.ConversationID,
@@ -223,7 +222,7 @@ type ServiceDeps struct {
 }
 
 // Service is the typed entry point behind the turn/status/stream/rehydrate
-// endpoints. api.Deps holds it as a concrete *genai.Service — there is one
+// endpoints. edge.Deps holds it as a concrete *genai.Service — there is one
 // implementation and no test fake (the old GenAIService interface had no
 // substitution; the component tier exercises the real service).
 type Service struct {
@@ -366,7 +365,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	}
 
 	// D18 guard: one active turn per project, any use case.
-	row, err := s.turns.TryStart(ctx, &models.AgentTurn{
+	row, err := s.turns.TryStart(ctx, &AgentTurn{
 		OrgID:          orgID,
 		ProjectID:      projectID,
 		ConversationID: in.ConversationID,
@@ -476,7 +475,7 @@ func (s *Service) Rehydrate(ctx context.Context, orgID, projectID, conversationI
 	return raw, nil
 }
 
-func (s *Service) resolveRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error) {
+func (s *Service) resolveRepo(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error) {
 	if s == nil || s.repos == nil {
 		return nil, ErrProjectRepoNotFound
 	}
@@ -601,7 +600,7 @@ func validConversationID(id string) bool {
 // tenant + use case via the shared agentsvc encoding. The FE never sees the
 // namespaced id; validConversationID rejects "--" so the uuid cannot forge
 // extra segments.
-func namespacedID(repo *models.GitRepository, useCase, uuid string) string {
+func namespacedID(repo *sourcecontrol.GitRepository, useCase, uuid string) string {
 	return agentsvc.ConversationID(repo.OrgID, repo.ProjectID, useCase, uuid)
 }
 

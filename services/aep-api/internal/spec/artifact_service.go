@@ -35,8 +35,6 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ----- Errors -----
@@ -189,14 +187,14 @@ type ArtifactService interface {
 }
 
 type artifactService struct {
-	repo repositories.RepoRepository
+	repo sourcecontrol.RepoRepository
 	git  GitGateway
 }
 
 // NewArtifactService builds the workspace-backed ArtifactService. `git` is the
 // git-object surface + credential resolver + save identities (the concrete
 // gitOpsService); `repo` resolves the project's repo row (slug + branch).
-func NewArtifactService(repo repositories.RepoRepository, git GitGateway) ArtifactService {
+func NewArtifactService(repo sourcecontrol.RepoRepository, git GitGateway) ArtifactService {
 	return &artifactService{repo: repo, git: git}
 }
 
@@ -467,7 +465,7 @@ func (s *artifactService) SaveDesign(ctx context.Context, orgID, projectID strin
 
 // ----- Internal helpers -----
 
-func (s *artifactService) requireReadyRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error) {
+func (s *artifactService) requireReadyRepo(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error) {
 	repoRecord, err := s.repo.GetByOrgAndProjectID(ctx, orgID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("get repo: %w", err)
@@ -484,7 +482,7 @@ func (s *artifactService) requireReadyRepo(ctx context.Context, orgID, projectID
 // readyRef resolves the ready repo row + its workspace-mount address in one
 // step — every entrypoint's resolution (reads, saves, discards). orgID is the
 // authenticated org; the mount path is derived from the row alone (design D6).
-func (s *artifactService) readyRef(ctx context.Context, orgID, projectID string) (*models.GitRepository, sourcecontrol.RepoRef, error) {
+func (s *artifactService) readyRef(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, sourcecontrol.RepoRef, error) {
 	repo, err := s.requireReadyRepo(ctx, orgID, projectID)
 	if err != nil {
 		return nil, sourcecontrol.RepoRef{}, err

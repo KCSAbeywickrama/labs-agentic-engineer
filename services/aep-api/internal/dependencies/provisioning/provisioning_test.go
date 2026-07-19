@@ -25,9 +25,10 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // ---- fakes -----------------------------------------------------------------
@@ -99,11 +100,11 @@ func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, number int, bo
 }
 
 type fakeExecStore struct {
-	rows   []*models.Execution
+	rows   []*delivery.Execution
 	nextID int
 }
 
-func (f *fakeExecStore) TryAdmit(_ context.Context, e *models.Execution) (bool, *models.Execution, error) {
+func (f *fakeExecStore) TryAdmit(_ context.Context, e *delivery.Execution) (bool, *delivery.Execution, error) {
 	for _, r := range f.rows {
 		if r.Repo == e.Repo && r.IssueNumber == e.IssueNumber && r.Kind == e.Kind &&
 			taskmeta.ExecutionStatus(r.Status).IsActive() {
@@ -115,7 +116,7 @@ func (f *fakeExecStore) TryAdmit(_ context.Context, e *models.Execution) (bool, 
 	f.rows = append(f.rows, e)
 	return true, e, nil
 }
-func (f *fakeExecStore) StartWithRun(_ context.Context, id, runName string) (*models.Execution, error) {
+func (f *fakeExecStore) StartWithRun(_ context.Context, id, runName string) (*delivery.Execution, error) {
 	for _, r := range f.rows {
 		if r.ID == id {
 			r.Status = string(taskmeta.ExecRunning)
@@ -127,7 +128,7 @@ func (f *fakeExecStore) StartWithRun(_ context.Context, id, runName string) (*mo
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (f *fakeExecStore) Finish(_ context.Context, id, status, reason string) (*models.Execution, error) {
+func (f *fakeExecStore) Finish(_ context.Context, id, status, reason string) (*delivery.Execution, error) {
 	for _, r := range f.rows {
 		if r.ID == id {
 			r.Status = status
@@ -137,8 +138,8 @@ func (f *fakeExecStore) Finish(_ context.Context, id, status, reason string) (*m
 	}
 	return nil, nil
 }
-func (f *fakeExecStore) ListActive(_ context.Context) ([]models.Execution, error) {
-	var out []models.Execution
+func (f *fakeExecStore) ListActive(_ context.Context) ([]delivery.Execution, error) {
+	var out []delivery.Execution
 	for _, r := range f.rows {
 		if taskmeta.ExecutionStatus(r.Status).IsActive() {
 			out = append(out, *r)
@@ -151,9 +152,9 @@ type fakeReeval struct{ calls int }
 
 func (f *fakeReeval) Reevaluate(context.Context) error { f.calls++; return nil }
 
-type fakeDesign struct{ comps []models.DesignComponent }
+type fakeDesign struct{ comps []spec.DesignComponent }
 
-func (f fakeDesign) ReadDesignComponents(context.Context, string, string) ([]models.DesignComponent, error) {
+func (f fakeDesign) ReadDesignComponents(context.Context, string, string) ([]spec.DesignComponent, error) {
 	return f.comps, nil
 }
 
@@ -165,15 +166,15 @@ func (fakeRepos) ByFullName(context.Context, string) (string, string, error) {
 }
 
 type fakeCatalog struct {
-	entries map[string]*models.ExternalResource
+	entries map[string]*dependencies.ExternalResource
 	deleted []string
 }
 
-func (f *fakeCatalog) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
+func (f *fakeCatalog) Get(_ context.Context, _, name string) (*dependencies.ExternalResource, error) {
 	return f.entries[name], nil
 }
-func (f *fakeCatalog) List(_ context.Context, _ string) ([]models.ExternalResource, error) {
-	out := make([]models.ExternalResource, 0, len(f.entries))
+func (f *fakeCatalog) List(_ context.Context, _ string) ([]dependencies.ExternalResource, error) {
+	out := make([]dependencies.ExternalResource, 0, len(f.entries))
 	for _, e := range f.entries {
 		out = append(out, *e)
 	}
@@ -198,7 +199,7 @@ type fakeExtProv struct {
 	authorErr      error
 }
 
-func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.ExternalResource, byEnv map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error) {
+func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *dependencies.ExternalResource, byEnv map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error) {
 	f.calls++
 	f.byEnv = byEnv
 	if f.err != nil {
@@ -209,7 +210,7 @@ func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.Ext
 	}
 	return &dependencies.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
 }
-func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, _ *models.ExternalResource, byEnv map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
+func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, _ *dependencies.ExternalResource, byEnv map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error) {
 	f.authorRefCalls++
 	f.authorByEnv = byEnv
 	if f.authorErr != nil {
@@ -286,18 +287,18 @@ func (f fakeProviders) FindByComponent(_ context.Context, _, name string) (openc
 }
 
 type fakeAccess struct {
-	rows   []*models.AccessRequest
+	rows   []*dependencies.AccessRequest
 	nextID int
 }
 
-func (f *fakeAccess) Create(_ context.Context, ar *models.AccessRequest) error {
+func (f *fakeAccess) Create(_ context.Context, ar *dependencies.AccessRequest) error {
 	f.nextID++
 	ar.ID = fmt.Sprintf("ar-%d", f.nextID)
 	f.rows = append(f.rows, ar)
 	return nil
 }
-func (f *fakeAccess) ListByConsumerProject(_ context.Context, orgID, projectID string) ([]models.AccessRequest, error) {
-	var out []models.AccessRequest
+func (f *fakeAccess) ListByConsumerProject(_ context.Context, orgID, projectID string) ([]dependencies.AccessRequest, error) {
+	var out []dependencies.AccessRequest
 	for _, r := range f.rows {
 		if r.OrgID == orgID && r.ConsumerProjectID == projectID {
 			out = append(out, *r)
@@ -305,10 +306,10 @@ func (f *fakeAccess) ListByConsumerProject(_ context.Context, orgID, projectID s
 	}
 	return out, nil
 }
-func (f *fakeAccess) FindOpenForTarget(_ context.Context, orgID, providerProjectID, providerComponent string) (*models.AccessRequest, error) {
+func (f *fakeAccess) FindOpenForTarget(_ context.Context, orgID, providerProjectID, providerComponent string) (*dependencies.AccessRequest, error) {
 	for _, r := range f.rows {
 		if r.OrgID == orgID && r.ProviderProjectID == providerProjectID && r.ProviderComponentName == providerComponent &&
-			r.Status != models.AccessRequestStatusGranted && r.Status != models.AccessRequestStatusRejected {
+			r.Status != dependencies.AccessRequestStatusGranted && r.Status != dependencies.AccessRequestStatusRejected {
 			return r, nil
 		}
 	}
@@ -322,8 +323,8 @@ func (f *fakeAccess) UpdateStatus(_ context.Context, id, status string) error {
 	}
 	return nil
 }
-func (f *fakeAccess) ListByProviderTask(_ context.Context, providerTaskID string) ([]models.AccessRequest, error) {
-	var out []models.AccessRequest
+func (f *fakeAccess) ListByProviderTask(_ context.Context, providerTaskID string) ([]dependencies.AccessRequest, error) {
+	var out []dependencies.AccessRequest
 	for _, r := range f.rows {
 		if r.ProviderTaskID == providerTaskID {
 			out = append(out, *r)
@@ -337,10 +338,10 @@ func TestOnIssueClosed_RejectsUngrantedRidersOnDecline(t *testing.T) {
 	ctx := context.Background()
 	// Two consumers rode the same warehouse#12 org-publish gate issue: one still
 	// pending, one already granted (an earlier partial grant).
-	_ = access.Create(ctx, &models.AccessRequest{OrgID: "acme", ProviderProjectID: "warehouse",
-		ProviderTaskID: providerTaskKey("warehouse", 12), Status: models.AccessRequestStatusRequested})
-	_ = access.Create(ctx, &models.AccessRequest{OrgID: "acme", ProviderProjectID: "warehouse",
-		ProviderTaskID: providerTaskKey("warehouse", 12), Status: models.AccessRequestStatusGranted})
+	_ = access.Create(ctx, &dependencies.AccessRequest{OrgID: "acme", ProviderProjectID: "warehouse",
+		ProviderTaskID: providerTaskKey("warehouse", 12), Status: dependencies.AccessRequestStatusRequested})
+	_ = access.Create(ctx, &dependencies.AccessRequest{OrgID: "acme", ProviderProjectID: "warehouse",
+		ProviderTaskID: providerTaskKey("warehouse", 12), Status: dependencies.AccessRequestStatusGranted})
 	svc := NewService(Deps{Access: access, Repos: fakeRepos{}})
 
 	// Provider manually closes the gate issue → decline.
@@ -348,10 +349,10 @@ func TestOnIssueClosed_RejectsUngrantedRidersOnDecline(t *testing.T) {
 	if err := svc.OnIssueClosed(ctx, "issues", "closed", payload); err != nil {
 		t.Fatalf("OnIssueClosed: %v", err)
 	}
-	if access.rows[0].Status != models.AccessRequestStatusRejected {
+	if access.rows[0].Status != dependencies.AccessRequestStatusRejected {
 		t.Fatalf("pending rider must flip to rejected, got %q", access.rows[0].Status)
 	}
-	if access.rows[1].Status != models.AccessRequestStatusGranted {
+	if access.rows[1].Status != dependencies.AccessRequestStatusGranted {
 		t.Fatalf("already-granted rider must stay granted, got %q", access.rows[1].Status)
 	}
 }
@@ -378,14 +379,14 @@ func readyBinding(outputs ...string) *openchoreo.ResourceReleaseBinding {
 
 // ---- fixtures --------------------------------------------------------------
 
-func designWithDeps() []models.DesignComponent {
-	return []models.DesignComponent{{
+func designWithDeps() []spec.DesignComponent {
+	return []spec.DesignComponent{{
 		Name: "orders",
-		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe", Config: []models.ConfigKey{
+		Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindExternal, Name: "stripe", Config: []spec.ConfigKey{
 				{Key: "api_key", Secret: true}, {Key: "region"},
 			}},
-			{Kind: models.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg", Parameters: map[string]any{"size": "small"}},
+			{Kind: spec.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg", Parameters: map[string]any{"size": "small"}},
 		},
 	}}
 }
@@ -466,8 +467,8 @@ func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	catalog := &fakeCatalog{entries: map[string]*dependencies.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []spec.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
 	}}
 	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
 
@@ -648,8 +649,8 @@ func TestDeleteExternalResource_InUse409(t *testing.T) {
 }
 
 func TestRequestAccess_CreatesRequestAndProviderIssue(t *testing.T) {
-	consumer := models.DesignComponent{Name: "web", Dependencies: []models.Dependency{
-		{Kind: models.DependencyKindOrgService, Name: "inventory"},
+	consumer := spec.DesignComponent{Name: "web", Dependencies: []spec.Dependency{
+		{Kind: spec.DependencyKindOrgService, Name: "inventory"},
 	}}
 	issues := newFakeIssues(nil)
 	access := &fakeAccess{}
@@ -659,7 +660,7 @@ func TestRequestAccess_CreatesRequestAndProviderIssue(t *testing.T) {
 	svc := NewService(Deps{
 		Issues:    issues,
 		Execs:     &fakeExecStore{},
-		Design:    fakeDesign{comps: []models.DesignComponent{consumer}},
+		Design:    fakeDesign{comps: []spec.DesignComponent{consumer}},
 		Repos:     fakeRepos{},
 		Access:    access,
 		Providers: providers,
@@ -669,7 +670,7 @@ func TestRequestAccess_CreatesRequestAndProviderIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RequestAccess: %v", err)
 	}
-	if ar.Status != models.AccessRequestStatusRequested {
+	if ar.Status != dependencies.AccessRequestStatusRequested {
 		t.Fatalf("new access request must be 'requested', got %q", ar.Status)
 	}
 	if ar.ProviderProjectID != "warehouse" || ar.ProviderComponentName != "inventory" {
@@ -706,15 +707,15 @@ func TestGrant_OnProviderDeploy(t *testing.T) {
 	access := &fakeAccess{}
 	// Two riders on the same provider issue, both pending.
 	pk := providerTaskKey("warehouse", 20)
-	_ = access.Create(context.Background(), &models.AccessRequest{
+	_ = access.Create(context.Background(), &dependencies.AccessRequest{
 		OrgID: "org", ConsumerProjectID: "storefront", ProviderProjectID: "warehouse",
 		ProviderComponentName: "inventory", ProviderTaskID: pk, ProviderIssueNumber: 20,
-		Status: models.AccessRequestStatusRequested,
+		Status: dependencies.AccessRequestStatusRequested,
 	})
-	_ = access.Create(context.Background(), &models.AccessRequest{
+	_ = access.Create(context.Background(), &dependencies.AccessRequest{
 		OrgID: "org", ConsumerProjectID: "another", ProviderProjectID: "warehouse",
 		ProviderComponentName: "inventory", ProviderTaskID: pk, ProviderIssueNumber: 20,
-		Status: models.AccessRequestStatusRequested,
+		Status: dependencies.AccessRequestStatusRequested,
 	})
 	svc := NewService(Deps{Issues: issues, Execs: &fakeExecStore{}, Access: access, Repos: fakeRepos{}})
 
@@ -723,7 +724,7 @@ func TestGrant_OnProviderDeploy(t *testing.T) {
 		t.Fatalf("OnComponentDeployed: %v", err)
 	}
 	for _, r := range access.rows {
-		if r.Status != models.AccessRequestStatusGranted {
+		if r.Status != dependencies.AccessRequestStatusGranted {
 			t.Fatalf("all riders must be granted, got %q", r.Status)
 		}
 	}
@@ -805,8 +806,8 @@ func provisionGateIssue(number int, depName, gateKind string) sourcecontrol.Issu
 	}
 }
 
-func latestProvisionRow(execs *fakeExecStore) *models.Execution {
-	var last *models.Execution
+func latestProvisionRow(execs *fakeExecStore) *delivery.Execution {
+	var last *delivery.Execution
 	for _, r := range execs.rows {
 		if r.Kind == string(taskmeta.KindProvision) {
 			last = r

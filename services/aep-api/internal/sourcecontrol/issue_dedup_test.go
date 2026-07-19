@@ -24,8 +24,6 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // --- minimal fakes (embed the interface; only the methods the dedup path
@@ -45,10 +43,10 @@ func (fakeResolver) Resolve(context.Context, string) (secrets.Credential, error)
 	return fakeCredential{}, nil
 }
 
-type fakeRepoRepo struct{ repositories.RepoRepository }
+type fakeRepoRepo struct{ RepoRepository }
 
-func (fakeRepoRepo) GetByOrgAndProjectID(_ context.Context, org, proj string) (*models.GitRepository, error) {
-	return &models.GitRepository{OrgID: org, ProjectID: proj, RepoURL: "https://github.com/o/r"}, nil
+func (fakeRepoRepo) GetByOrgAndProjectID(_ context.Context, org, proj string) (*GitRepository, error) {
+	return &GitRepository{OrgID: org, ProjectID: proj, RepoURL: "https://github.com/o/r"}, nil
 }
 
 // fakeGitHub records created issues in memory and filters ListIssues by label,

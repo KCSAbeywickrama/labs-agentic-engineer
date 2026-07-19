@@ -33,9 +33,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // Stage status vocabularies (the contract enums).
@@ -61,17 +62,17 @@ const (
 
 // devRunRows is the narrow port over the workflow_runs lookup index: the
 // status read plus the project-delete purge.
-// repositories.WorkflowRunRepository satisfies it.
+// delivery.WorkflowRunRepository satisfies it.
 type devRunRows interface {
-	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]models.DevflowRun, error)
-	ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*models.DevflowRun, error)
+	ListByProject(ctx context.Context, orgID, projectID, kind string) ([]delivery.DevflowRun, error)
+	ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*delivery.DevflowRun, error)
 	DeleteByProject(ctx context.Context, orgID, projectID string) error
 }
 
 // bindingsReader is the narrow status-read port over OpenChoreo release
 // bindings. openchoreo.ComponentClient satisfies it.
 type bindingsReader interface {
-	ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]models.ReleaseBindingSummary, error)
+	ListProjectReleaseBindings(ctx context.Context, orgName, projectName string) ([]openchoreo.ReleaseBindingSummary, error)
 }
 
 // SetStageSources wires the build/deploy stage inputs at the composition
@@ -93,11 +94,11 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 
 	var (
 		snap          *spec.StatusSnapshot
-		runs          []models.DevflowRun
-		bindings      []models.ReleaseBindingSummary
+		runs          []delivery.DevflowRun
+		bindings      []openchoreo.ReleaseBindingSummary
 		deployVer     string
 		deployTotal   int64
-		validationRun *models.DevflowRun
+		validationRun *delivery.DevflowRun
 		validationPR  int
 	)
 	g, gctx := errgroup.WithContext(ctx)
@@ -110,7 +111,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	})
 	g.Go(func() error {
 		var err error
-		if runs, err = s.runReader.ListByProject(gctx, orgName, projectName, models.WorkflowKindDev); err != nil {
+		if runs, err = s.runReader.ListByProject(gctx, orgName, projectName, delivery.WorkflowKindDev); err != nil {
 			return fmt.Errorf("list dev runs: %w", err)
 		}
 		// Validation-run state for the newest dev run — cheap DB reads (no
@@ -142,7 +143,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		// platform last finished building (a running v2 does not unseat a
 		// live v1).
 		for _, r := range runs {
-			if r.Status == models.WorkflowStatusCompleted {
+			if r.Status == delivery.WorkflowStatusCompleted {
 				deployVer = r.Tag
 				break
 			}
@@ -210,9 +211,9 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// counts, deliberately not reconciled.
 	status.Deploy.Version = deployVer
 	status.Deploy.Components.Total = deployTotal
-	var dev []models.ReleaseBindingSummary
+	var dev []openchoreo.ReleaseBindingSummary
 	for _, b := range bindings {
-		if b.Environment == models.DevEnvironmentName && !b.Undeploy {
+		if b.Environment == openchoreo.DevEnvironmentName && !b.Undeploy {
 			dev = append(dev, b)
 		}
 	}
@@ -230,14 +231,14 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 // validationStageStatus maps the validation child run's row status onto the
 // deploy.validation enum. No child row → none (not reached, or no acceptance
 // criteria). An unknown non-terminal status reads as running (in flight).
-func validationStageStatus(run *models.DevflowRun) string {
+func validationStageStatus(run *delivery.DevflowRun) string {
 	if run == nil {
 		return validationNone
 	}
 	switch run.Status {
-	case models.WorkflowStatusCompleted:
+	case delivery.WorkflowStatusCompleted:
 		return validationCompleted
-	case models.WorkflowStatusFailed, models.WorkflowStatusCanceled:
+	case delivery.WorkflowStatusFailed, delivery.WorkflowStatusCanceled:
 		return validationFailed
 	default: // running
 		return validationRunning
@@ -247,7 +248,7 @@ func validationStageStatus(run *models.DevflowRun) string {
 // validationURL builds the validation PR link from the repo's clone URL, or the
 // validation issue as a fallback before the PR opens. Empty when there is no
 // validation run or no repo URL to build from.
-func validationURL(repoURL string, run *models.DevflowRun, prNumber int) string {
+func validationURL(repoURL string, run *delivery.DevflowRun, prNumber int) string {
 	if run == nil || repoURL == "" {
 		return ""
 	}
@@ -294,9 +295,9 @@ func applyFlatArtifactFields(status *gen.ProjectStatus, snap *spec.StatusSnapsho
 // buildStageStatus maps a workflow_runs row status onto the BuildStage enum.
 func buildStageStatus(rowStatus string) string {
 	switch rowStatus {
-	case models.WorkflowStatusCompleted:
+	case delivery.WorkflowStatusCompleted:
 		return buildSucceeded
-	case models.WorkflowStatusFailed, models.WorkflowStatusCanceled:
+	case delivery.WorkflowStatusFailed, delivery.WorkflowStatusCanceled:
 		return buildFailed
 	default: // running
 		return buildRunning
@@ -324,9 +325,9 @@ var bindingFailureReasons = map[string]bool{
 	"ProjectNotFound":             true,
 }
 
-func bindingReady(b models.ReleaseBindingSummary) bool { return b.ReadyStatus == "True" }
+func bindingReady(b openchoreo.ReleaseBindingSummary) bool { return b.ReadyStatus == "True" }
 
-func bindingFailed(b models.ReleaseBindingSummary) bool {
+func bindingFailed(b openchoreo.ReleaseBindingSummary) bool {
 	return !bindingReady(b) && bindingFailureReasons[b.ReadyReason]
 }
 
@@ -334,7 +335,7 @@ func bindingFailed(b models.ReleaseBindingSummary) bool {
 // precedence failed > deploying > deployed; no bindings → none. The design
 // denominator never gates the status (a designed-but-never-built component
 // shows "deployed · 2/3", not forever-"deploying").
-func deployStageStatus(dev []models.ReleaseBindingSummary) string {
+func deployStageStatus(dev []openchoreo.ReleaseBindingSummary) string {
 	if len(dev) == 0 {
 		return deployNone
 	}
@@ -353,7 +354,7 @@ func deployStageStatus(dev []models.ReleaseBindingSummary) string {
 	return deployDeployed
 }
 
-func countReady(dev []models.ReleaseBindingSummary) int {
+func countReady(dev []openchoreo.ReleaseBindingSummary) int {
 	n := 0
 	for _, b := range dev {
 		if bindingReady(b) {

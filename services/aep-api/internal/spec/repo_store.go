@@ -42,7 +42,6 @@ import (
 	"sync"
 
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 const (
@@ -50,7 +49,7 @@ const (
 	SkillsRepoName = "org-skills"
 	// SkillsRepoProject is the sentinel project_id under which the skills repo
 	// row lives in git_repositories (distinguishes it from project repos). §10.1.
-	SkillsRepoProject = models.SkillsRepoSentinelProjectID
+	SkillsRepoProject = SkillsRepoSentinelProjectID
 
 	skillsRootDir = "skills"
 	skillFileName = "SKILL.md"
@@ -64,10 +63,10 @@ const (
 // flat layout (skills/<name>/) a skill's kind lives in its frontmatter
 // (`metadata.aep.kind`; absent → org).
 var legacyKindDirs = map[string]string{
-	"builtin":  models.SkillKindOrg,
-	"flow":     models.SkillKindPlatform,
-	"custom":   models.SkillKindCustom,
-	"imported": models.SkillKindImported,
+	"builtin":  SkillKindOrg,
+	"flow":     SkillKindPlatform,
+	"custom":   SkillKindCustom,
+	"imported": SkillKindImported,
 }
 
 // SkillService is the repo-backed read/reconcile surface for skills. It also
@@ -174,7 +173,7 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 			Kind:        sk.Kind,
 			Description: sk.Description,
 			ContentSHA:  sk.ContentSHA,
-			Editable:    sk.Kind == models.SkillKindCustom || sk.Kind == models.SkillKindImported,
+			Editable:    sk.Kind == SkillKindCustom || sk.Kind == SkillKindImported,
 		})
 	}
 	return out, nil
@@ -225,7 +224,7 @@ func (s *SkillService) catalog(ctx context.Context, orgID string) []Skill {
 // in-memory — with per-entry layout info for the reconciler. Branch-tip reads
 // always revalidate origin, so freshness matches the retired REST walk without
 // any cache.
-func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, repo *models.GitRepository) ([]catalogEntry, error) {
+func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, error) {
 	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
 		return nil, err
@@ -238,7 +237,7 @@ func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, rep
 }
 
 // loadCatalog is loadCatalogEntries projected to the Skill catalog shape.
-func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *models.GitRepository) ([]Skill, error) {
+func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]Skill, error) {
 	entries, err := s.loadCatalogEntries(ctx, orgID, repo)
 	if err != nil {
 		return nil, err
@@ -399,7 +398,7 @@ func parseBundle(ctx context.Context, files map[string]string) []Skill {
 // commitFiles applies a set of blob writes + path/prefix deletes to the skills
 // repo's default branch in a single commit through Workspace.Mutate, which
 // owns the bounded fast-forward CAS retry (design D5). §9.
-func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *models.GitRepository, message string, writes map[string][]byte, deletePrefixes []string) (string, error) {
+func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, message string, writes map[string][]byte, deletePrefixes []string) (string, error) {
 	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
 		return "", err
@@ -480,13 +479,13 @@ func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message 
 // platform-shipped skill (the legacy shadow semantics, "org wins").
 func kindRank(kind string) int {
 	switch kind {
-	case models.SkillKindOrg:
+	case SkillKindOrg:
 		return 0
-	case models.SkillKindPlatform:
+	case SkillKindPlatform:
 		return 1
-	case models.SkillKindCustom:
+	case SkillKindCustom:
 		return 2
-	case models.SkillKindImported:
+	case SkillKindImported:
 		return 3
 	default:
 		return 4

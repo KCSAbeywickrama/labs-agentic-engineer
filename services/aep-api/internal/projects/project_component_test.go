@@ -37,14 +37,13 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
-	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/projects"
 	projectshttpapi "github.com/wso2/aep/aep-api/internal/projects/httpapi"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // mustProjects assembles the projects domain from its Deps or fails the harness
@@ -61,16 +60,16 @@ func mustProjects(h *projectshttpapi.Handlers, err error) *projectshttpapi.Handl
 // reports a name conflict; every other method is unreachable from create.
 type conflictRepoSvc struct{}
 
-func (conflictRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
+func (conflictRepoSvc) CreateRepo(context.Context, string, string, string, string) (*sourcecontrol.GitRepository, error) {
 	return nil, fmt.Errorf("create github repo: %w", sourcecontrol.ErrRepoNameConflict)
 }
-func (conflictRepoSvc) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+func (conflictRepoSvc) ListByOrg(context.Context, string) ([]sourcecontrol.GitRepository, error) {
 	return nil, nil
 }
-func (conflictRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+func (conflictRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("EnsureBareRepo not expected")
 }
-func (conflictRepoSvc) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
+func (conflictRepoSvc) GetRepo(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("GetRepo not expected")
 }
 func (conflictRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
@@ -88,7 +87,7 @@ func newProjectHarness(t *testing.T) (*componenttest.Harness, *ocmocks.ProjectCl
 	t.Helper()
 	oc := &ocmocks.ProjectClientMock{}
 	svc := projects.NewProjectService(oc, nil, nil, nil, nil)
-	return componenttest.New(t, componenttest.Options{Deps: api.Deps{Projects: mustProjects(projectshttpapi.New(projects.Deps{ProjectSvc: svc}))}}), oc
+	return componenttest.New(t, componenttest.Options{Deps: edge.Deps{Projects: mustProjects(projectshttpapi.New(projects.Deps{ProjectSvc: svc}))}}), oc
 }
 
 func TestProjectComponent_ListAuthedReachesRealService(t *testing.T) {
@@ -209,7 +208,7 @@ func TestProjectComponent_CreateExplicitRepoNameConflictIs409(t *testing.T) {
 		DeleteProjectFunc: func(context.Context, string, string) error { return nil },
 	}
 	svc := projects.NewProjectService(oc, conflictRepoSvc{}, nil, nil, nil)
-	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{Projects: mustProjects(projectshttpapi.New(projects.Deps{ProjectSvc: svc}))}})
+	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{Projects: mustProjects(projectshttpapi.New(projects.Deps{ProjectSvc: svc}))}})
 
 	resp := h.AsOrg("acme").Post("/api/v1/projects", `{"name":"gym","repoName":"taken-repo"}`)
 	if resp.Code != 409 {

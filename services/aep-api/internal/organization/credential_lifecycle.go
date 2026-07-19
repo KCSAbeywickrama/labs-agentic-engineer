@@ -23,9 +23,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ----------------------------------------------------------------------------
@@ -53,8 +50,8 @@ func (s *CredentialService) Status(ctx context.Context, ocOrgID string) (*Projec
 //
 // Idempotent: if the row is already 'disconnected' or absent, returns nil.
 func (s *CredentialService) Disconnect(ctx context.Context, ocOrgID string) error {
-	var row *models.OrgCredential
-	err := s.repo.Tx(ctx, func(tx repositories.OrgCredentialTx) error {
+	var row *OrgCredential
+	err := s.repo.Tx(ctx, func(tx OrgCredentialTx) error {
 		if err := tx.AdvisoryLock("org:" + ocOrgID); err != nil {
 			return fmt.Errorf("disconnect: org lock: %w", err)
 		}

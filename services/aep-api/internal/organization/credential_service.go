@@ -38,8 +38,6 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // CredentialService is the orchestration layer behind /internal/credentials/orgs/...
@@ -70,7 +68,7 @@ type AnthropicSecretCleaner interface {
 }
 
 type CredentialService struct {
-	repo      repositories.OrgCredentialRepository
+	repo      OrgCredentialRepository
 	store     secrets.OpenBaoStore
 	minter    *secrets.AppTokenMinter
 	githubAPI string // "https://api.github.com" by default; overridden in tests.
@@ -118,7 +116,7 @@ type CredentialService struct {
 // githubClient is used by the discover-then-bind path (ListAppInstallations,
 // ExchangeOAuthCode, GetUserInstallations); nil disables the bind path.
 func NewCredentialService(
-	repo repositories.OrgCredentialRepository,
+	repo OrgCredentialRepository,
 	store secrets.OpenBaoStore,
 	minter *secrets.AppTokenMinter,
 	envWebhookSecret string,
@@ -213,7 +211,7 @@ type Projection struct {
 	PrevIdentityLogin *string    `json:"prevIdentityLogin,omitempty"`
 }
 
-func projectionFromRow(r *models.OrgCredential) *Projection {
+func projectionFromRow(r *OrgCredential) *Projection {
 	p := &Projection{
 		OcOrgID:           r.OcOrgID,
 		Kind:              r.Kind,
@@ -267,7 +265,7 @@ func (s *CredentialService) WithGitHubAPIBase(base string) *CredentialService {
 // helpers
 // ----------------------------------------------------------------------------
 
-func (s *CredentialService) fetchRow(ctx context.Context, ocOrgID string) (*models.OrgCredential, error) {
+func (s *CredentialService) fetchRow(ctx context.Context, ocOrgID string) (*OrgCredential, error) {
 	row, err := s.repo.GetByOrg(ctx, ocOrgID)
 	if err != nil {
 		return nil, err

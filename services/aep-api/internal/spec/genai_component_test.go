@@ -41,15 +41,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
 	"github.com/wso2/aep/aep-api/internal/platform/gittest"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 const (
@@ -247,10 +246,10 @@ func (f *fakeAgents) turns(t *testing.T) int {
 // tier (the real partial-unique-index guard is covered by dbtest).
 type memTurnRepo struct {
 	mu   sync.Mutex
-	rows []*models.AgentTurn
+	rows []*spec.AgentTurn
 }
 
-func (m *memTurnRepo) TryStart(_ context.Context, t *models.AgentTurn) (*models.AgentTurn, error) {
+func (m *memTurnRepo) TryStart(_ context.Context, t *spec.AgentTurn) (*spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range m.rows {
@@ -300,7 +299,7 @@ func (m *memTurnRepo) Finish(_ context.Context, id string, term spec.TurnTermina
 	return false, nil
 }
 
-func (m *memTurnRepo) Get(_ context.Context, orgID, projectID, turnID string) (*models.AgentTurn, error) {
+func (m *memTurnRepo) Get(_ context.Context, orgID, projectID, turnID string) (*spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range m.rows {
@@ -312,7 +311,7 @@ func (m *memTurnRepo) Get(_ context.Context, orgID, projectID, turnID string) (*
 	return nil, nil
 }
 
-func (m *memTurnRepo) GetActive(_ context.Context, orgID, projectID string) (*models.AgentTurn, error) {
+func (m *memTurnRepo) GetActive(_ context.Context, orgID, projectID string) (*spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range m.rows {
@@ -324,10 +323,10 @@ func (m *memTurnRepo) GetActive(_ context.Context, orgID, projectID string) (*mo
 	return nil, nil
 }
 
-func (m *memTurnRepo) LastTerminal(_ context.Context, orgID, projectID, conversationID string) (*models.AgentTurn, error) {
+func (m *memTurnRepo) LastTerminal(_ context.Context, orgID, projectID, conversationID string) (*spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var last *models.AgentTurn
+	var last *spec.AgentTurn
 	for _, r := range m.rows { // insertion order == creation order
 		if r.OrgID == orgID && r.ProjectID == projectID && r.ConversationID == conversationID &&
 			(r.Status == "completed" || r.Status == "failed") {
@@ -341,10 +340,10 @@ func (m *memTurnRepo) LastTerminal(_ context.Context, orgID, projectID, conversa
 	return &cp, nil
 }
 
-func (m *memTurnRepo) SweepStale(_ context.Context, olderThan time.Time) ([]models.AgentTurn, error) {
+func (m *memTurnRepo) SweepStale(_ context.Context, olderThan time.Time) ([]spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var swept []models.AgentTurn
+	var swept []spec.AgentTurn
 	for _, r := range m.rows {
 		if r.Status == "running" && r.HeartbeatAt.Before(olderThan) {
 			r.Status = "failed"
@@ -356,7 +355,7 @@ func (m *memTurnRepo) SweepStale(_ context.Context, olderThan time.Time) ([]mode
 	return swept, nil
 }
 
-func (m *memTurnRepo) row(t *testing.T, id string) models.AgentTurn {
+func (m *memTurnRepo) row(t *testing.T, id string) spec.AgentTurn {
 	t.Helper()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -366,14 +365,14 @@ func (m *memTurnRepo) row(t *testing.T, id string) models.AgentTurn {
 		}
 	}
 	t.Fatalf("no row %s", id)
-	return models.AgentTurn{}
+	return spec.AgentTurn{}
 }
 
 // ---- faked credential edges ---------------------------------------------------
 
-type stubRepoResolver struct{ rec *models.GitRepository }
+type stubRepoResolver struct{ rec *sourcecontrol.GitRepository }
 
-func (s stubRepoResolver) GetRepo(_ context.Context, _, _ string) (*models.GitRepository, error) {
+func (s stubRepoResolver) GetRepo(_ context.Context, _, _ string) (*sourcecontrol.GitRepository, error) {
 	if s.rec == nil {
 		return nil, sourcecontrol.ErrRepoNotFound
 	}
@@ -468,7 +467,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		"skills/high-level-architecture/SKILL.md": "---\nname: high-level-architecture\ndescription: d\nmetadata:\n  aep:\n    kind: platform\n---\nbody",
 	}, "seed skills"))
 
-	rec := &models.GitRepository{
+	rec := &sourcecontrol.GitRepository{
 		OrgID:         testOrg,
 		ProjectID:     testProj,
 		RepoURL:       fx.Origin.URL(),
@@ -476,9 +475,9 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Status:        "ready",
 		RepoSlug:      workspacetest.DefaultSlug,
 	}
-	skillsRow := &models.GitRepository{
+	skillsRow := &sourcecontrol.GitRepository{
 		OrgID:         testOrg,
-		ProjectID:     models.SkillsRepoSentinelProjectID,
+		ProjectID:     spec.SkillsRepoSentinelProjectID,
 		RepoURL:       skillsOrigin.URL(),
 		DefaultBranch: "main",
 		Status:        "ready",
@@ -494,7 +493,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 	if cfg.client != nil {
 		client = cfg.client
 	}
-	skillsRepo := spec.SkillsRepoResolver(func(context.Context, string) (*models.GitRepository, error) {
+	skillsRepo := spec.SkillsRepoResolver(func(context.Context, string) (*sourcecontrol.GitRepository, error) {
 		return skillsRow, nil
 	})
 	if cfg.skillsRepo != nil {
@@ -512,7 +511,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		MCPTokens:  cfg.mcpTokens,
 		MCPBaseURL: cfg.mcpBaseURL,
 	})
-	rig.h = componenttest.New(t, componenttest.Options{Deps: api.Deps{Spec: mustSpecHandlers(t, spec.Deps{GenAI: svc})}})
+	rig.h = componenttest.New(t, componenttest.Options{Deps: edge.Deps{Spec: mustSpecHandlers(t, spec.Deps{GenAI: svc})}})
 	return rig
 }
 

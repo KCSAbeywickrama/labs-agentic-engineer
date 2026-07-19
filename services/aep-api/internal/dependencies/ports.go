@@ -24,14 +24,14 @@ package dependencies
 import (
 	"context"
 
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // externalResourceLookup is the slice of the org-level external-resource
 // catalog this package reads. *repositories.ExternalResourceRepository
 // satisfies it. Returns (nil, nil) when the name is not registered.
 type externalResourceLookup interface {
-	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
+	Get(ctx context.Context, orgID, name string) (*ExternalResource, error)
 }
 
 // SecretWriter is the slice of the SM-API writer the provisioner needs.
@@ -66,5 +66,5 @@ type SecretWriter interface {
 // a one-line wrapper returning design.Components ((nil, nil) design ⇒ nil
 // components — "no design yet").
 type DesignReader interface {
-	ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error)
+	ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]spec.DesignComponent, error)
 }

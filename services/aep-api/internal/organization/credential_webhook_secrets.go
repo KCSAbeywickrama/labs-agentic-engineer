@@ -23,9 +23,6 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ----------------------------------------------------------------------------
@@ -79,7 +76,7 @@ func (s *CredentialService) AppendWebhookSecret(ctx context.Context, ocOrgID, se
 	if secret == "" {
 		return &ValidationError{Code: "secret_empty", Message: "secret is required"}
 	}
-	return s.repo.Tx(ctx, func(tx repositories.OrgCredentialTx) error {
+	return s.repo.Tx(ctx, func(tx OrgCredentialTx) error {
 		if err := tx.AdvisoryLock("org:" + ocOrgID); err != nil {
 			return err
 		}
@@ -93,14 +90,14 @@ func (s *CredentialService) AppendWebhookSecret(ctx context.Context, ocOrgID, se
 		if row.Kind != "user-pat" {
 			return &ConflictError{Reason: "webhook-secret rotation is PAT-only; App-mode rotation lives in _platform"}
 		}
-		row.WebhookSecrets = append(models.WebhookSecrets{{Secret: secret, AddedAt: time.Now().UTC()}}, row.WebhookSecrets...)
+		row.WebhookSecrets = append(WebhookSecrets{{Secret: secret, AddedAt: time.Now().UTC()}}, row.WebhookSecrets...)
 		return tx.UpdateColumns(ocOrgID, map[string]any{"webhook_secrets": row.WebhookSecrets})
 	})
 }
 
 // RemoveWebhookSecret drops a specific secret from the PAT row's list.
 func (s *CredentialService) RemoveWebhookSecret(ctx context.Context, ocOrgID, secret string) error {
-	return s.repo.Tx(ctx, func(tx repositories.OrgCredentialTx) error {
+	return s.repo.Tx(ctx, func(tx OrgCredentialTx) error {
 		if err := tx.AdvisoryLock("org:" + ocOrgID); err != nil {
 			return err
 		}

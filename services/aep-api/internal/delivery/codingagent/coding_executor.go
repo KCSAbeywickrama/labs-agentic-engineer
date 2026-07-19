@@ -24,14 +24,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+
 	"github.com/google/uuid"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // CodingExecutor is the coding-class executor. Run dispatches the right OC work
@@ -51,7 +52,7 @@ type CodingExecutor struct {
 	identities    Identities
 	anthropic     AnthropicProvisioner
 	tokens        TokenIssuer
-	execRows      repositories.ExecutionRepository
+	execRows      delivery.ExecutionRepository
 	gitServiceURL string
 	platformURL   string
 
@@ -61,10 +62,10 @@ type CodingExecutor struct {
 	// Org-scoped repository reads, always wired at the composition root: the
 	// per-org Anthropic/GitHub SM-API triplets + IDP publisher profile for the
 	// proxy dispatch, and the org lookup for the data-plane UUID.
-	orgs           repositories.OrganizationRepository
-	anthropicCreds repositories.OrgAnthropicRepository
-	githubCreds    repositories.OrgCredentialRepository
-	idpProfiles    repositories.IDPRepository
+	orgs           organization.OrganizationRepository
+	anthropicCreds organization.OrgAnthropicRepository
+	githubCreds    organization.OrgCredentialRepository
+	idpProfiles    organization.IDPRepository
 
 	// k8sJob is the direct K8s Job dispatch path — the sole fallback when the
 	// proxy path is not configured (nil → no fallback; dispatch errors out).
@@ -114,7 +115,7 @@ type CodingExecutor struct {
 // SkillsRepoResolver ensures the org's skills repo exists and returns its row.
 // Satisfied at the composition root by the same EnsureProvisioned+GetRepo
 // closure the genai + task-plan turns use, so this feature grows no skills edge.
-type SkillsRepoResolver func(ctx context.Context, orgID string) (*models.GitRepository, error)
+type SkillsRepoResolver func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error)
 
 // NewCodingExecutor wires the base coding executor. anthropic may be nil. Call
 // WithProxy and/or WithK8sJobDispatch to enable a dispatch path.
@@ -124,12 +125,12 @@ func NewCodingExecutor(
 	identities Identities,
 	anthropic AnthropicProvisioner,
 	tokens TokenIssuer,
-	execRows repositories.ExecutionRepository,
+	execRows delivery.ExecutionRepository,
 	gitServiceURL, platformURL string,
-	orgs repositories.OrganizationRepository,
-	anthropicCreds repositories.OrgAnthropicRepository,
-	githubCreds repositories.OrgCredentialRepository,
-	idpProfiles repositories.IDPRepository,
+	orgs organization.OrganizationRepository,
+	anthropicCreds organization.OrgAnthropicRepository,
+	githubCreds organization.OrgCredentialRepository,
+	idpProfiles organization.IDPRepository,
 ) *CodingExecutor {
 	return &CodingExecutor{
 		oc: oc, repos: repos, identities: identities, anthropic: anthropic,
@@ -400,7 +401,7 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req delivery.DispatchReq
 // configured for the proxy path (fall back). The runner env AEP_TASK_ID carries
 // the EXECUTION id (JobInputs.TaskID) and the bearer's task claim is the
 // execution id — the re-keyed runner contract (§9.2).
-func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.DispatchRequest, repo *models.GitRepository, name, email, login, bearer string, disp dispatchShape, mcpToken, skillsRepoURL string) (bool, string, error) {
+func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.DispatchRequest, repo *sourcecontrol.GitRepository, name, email, login, bearer string, disp dispatchShape, mcpToken, skillsRepoURL string) (bool, string, error) {
 	t := req.Task
 	if e.proxy == nil || disp.image == "" || e.clusterSecretStore == "" {
 		return false, "", nil
@@ -487,7 +488,7 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.Disp
 	// no component-bound external resources).
 	var extResSRs []ExternalResourceSecretInputs
 	if e.runnerSecrets != nil && t.Component != "" {
-		if srs, rerr := e.runnerSecrets.ResolveRunnerSecrets(ctx, t.OrgID, t.ProjectID, t.Component, models.DevEnvironmentName); rerr != nil {
+		if srs, rerr := e.runnerSecrets.ResolveRunnerSecrets(ctx, t.OrgID, t.ProjectID, t.Component, openchoreo.DevEnvironmentName); rerr != nil {
 			slog.WarnContext(ctx, "coding executor: resolve external-resource runner secrets failed — dispatching without", "component", t.Component, "error", rerr)
 		} else {
 			extResSRs = srs
@@ -568,7 +569,7 @@ func (e *CodingExecutor) stageBuildSecret(ctx context.Context, orgID, projectID,
 // git-clone-auth retry the legacy build watcher's RetryAuthFailedBuild provided,
 // re-keyed to the execution row. A staging refusal (org disconnected / repo not
 // in org) aborts the retry — the watcher exhausts the budget instead.
-func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *models.Execution) (string, error) {
+func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery.Execution) (string, error) {
 	if row == nil {
 		return "", fmt.Errorf("retry-auth-failed: nil execution")
 	}

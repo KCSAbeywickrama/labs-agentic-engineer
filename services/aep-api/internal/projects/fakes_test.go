@@ -27,9 +27,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/gen"
 
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // --- observability.Client ----------------------------------------------------
@@ -50,24 +49,24 @@ func (s *stubObservClient) GetBuildLogs(ctx context.Context, orgName, projectNam
 // --- sourcecontrol.RepoService (only GetRepo is consulted by TriggerBuild) ----------
 
 type stubRepoSvc struct {
-	GetRepoFunc func(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+	GetRepoFunc func(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error)
 }
 
 var _ sourcecontrol.RepoService = (*stubRepoSvc)(nil)
 
-func (s *stubRepoSvc) GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error) {
+func (s *stubRepoSvc) GetRepo(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error) {
 	if s.GetRepoFunc == nil {
 		panic("stubRepoSvc: GetRepo not set")
 	}
 	return s.GetRepoFunc(ctx, orgID, projectID)
 }
-func (s *stubRepoSvc) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+func (s *stubRepoSvc) ListByOrg(context.Context, string) ([]sourcecontrol.GitRepository, error) {
 	panic("stubRepoSvc: ListByOrg not expected in component tests")
 }
-func (s *stubRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
+func (s *stubRepoSvc) CreateRepo(context.Context, string, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("stubRepoSvc: CreateRepo not expected")
 }
-func (s *stubRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+func (s *stubRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("stubRepoSvc: EnsureBareRepo not expected")
 }
 func (s *stubRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
@@ -95,12 +94,12 @@ func (s *stubBuildStager) StageBuildSecret(ctx context.Context, ocOrgID, repoSlu
 // --- ComponentService (the config-mirror seam; only UpdateWorkflowEnvVars) ----
 
 type stubComponentSvc struct {
-	UpdateWorkflowEnvVarsFunc func(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error
+	UpdateWorkflowEnvVarsFunc func(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error
 }
 
 var _ ComponentService = (*stubComponentSvc)(nil)
 
-func (s *stubComponentSvc) UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error {
+func (s *stubComponentSvc) UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error {
 	if s.UpdateWorkflowEnvVarsFunc == nil {
 		panic("stubComponentSvc: UpdateWorkflowEnvVars not set")
 	}
@@ -115,7 +114,7 @@ func (s *stubComponentSvc) GetComponent(context.Context, string, string, string)
 func (s *stubComponentSvc) EnsureComponent(context.Context, string, string, string) error {
 	return nil
 }
-func (s *stubComponentSvc) CreateComponent(context.Context, string, string, *models.CreateComponentRequest) (*gen.Component, error) {
+func (s *stubComponentSvc) CreateComponent(context.Context, string, string, *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 	panic("stubComponentSvc: CreateComponent not expected")
 }
 func (s *stubComponentSvc) ListDeployments(context.Context, string, string, string) (*gen.DeploymentList, error) {
@@ -134,22 +133,22 @@ func (s *stubComponentSvc) GetBuildLogs(context.Context, string, string, string,
 	panic("stubComponentSvc: GetBuildLogs not expected")
 }
 
-// --- repositories.ConfigRepository (hand fake for the config unit tier) -------
+// --- ConfigRepository (hand fake for the config unit tier) -------
 
 type stubConfigRepo struct {
-	GetByComponentFunc func(ctx context.Context, orgID, projectName, componentName string) (*models.ComponentConfig, error)
-	UpsertFunc         func(ctx context.Context, config *models.ComponentConfig) error
+	GetByComponentFunc func(ctx context.Context, orgID, projectName, componentName string) (*ComponentConfig, error)
+	UpsertFunc         func(ctx context.Context, config *ComponentConfig) error
 }
 
-var _ repositories.ConfigRepository = (*stubConfigRepo)(nil)
+var _ ConfigRepository = (*stubConfigRepo)(nil)
 
-func (s *stubConfigRepo) GetByComponent(ctx context.Context, orgID, projectName, componentName string) (*models.ComponentConfig, error) {
+func (s *stubConfigRepo) GetByComponent(ctx context.Context, orgID, projectName, componentName string) (*ComponentConfig, error) {
 	if s.GetByComponentFunc == nil {
 		panic("stubConfigRepo: GetByComponent not set")
 	}
 	return s.GetByComponentFunc(ctx, orgID, projectName, componentName)
 }
-func (s *stubConfigRepo) Upsert(ctx context.Context, config *models.ComponentConfig) error {
+func (s *stubConfigRepo) Upsert(ctx context.Context, config *ComponentConfig) error {
 	if s.UpsertFunc == nil {
 		panic("stubConfigRepo: Upsert not set")
 	}

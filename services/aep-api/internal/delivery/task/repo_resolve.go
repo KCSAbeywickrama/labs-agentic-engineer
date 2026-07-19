@@ -20,15 +20,15 @@ import (
 	"context"
 	"errors"
 
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/naming"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // resolveProjectRepo resolves the project's git repo row plus its owner/name,
 // mapping a missing or URL-less repo to ErrProjectRepoNotFound. Shared by the
 // read path, the command surface, and the plan assembler — the one place the
 // project→repo resolution rule lives.
-func resolveProjectRepo(ctx context.Context, repos RepoResolver, orgID, projectID string) (repo *models.GitRepository, owner, name string, err error) {
+func resolveProjectRepo(ctx context.Context, repos RepoResolver, orgID, projectID string) (repo *sourcecontrol.GitRepository, owner, name string, err error) {
 	repo, err = repos.GetRepo(ctx, orgID, projectID)
 	if err != nil {
 		if errors.Is(err, sourcecontrol.ErrRepoNotFound) {
@@ -39,7 +39,7 @@ func resolveProjectRepo(ctx context.Context, repos RepoResolver, orgID, projectI
 	if repo == nil {
 		return nil, "", "", ErrProjectRepoNotFound
 	}
-	owner, name = models.OwnerRepoFromURL(repo.RepoURL)
+	owner, name = naming.OwnerRepoFromURL(repo.RepoURL)
 	if owner == "" || name == "" {
 		return nil, "", "", ErrProjectRepoNotFound
 	}

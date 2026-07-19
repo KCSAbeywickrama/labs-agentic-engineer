@@ -32,12 +32,12 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // --- List / Get / Deployments / Builds (OC passthrough + error propagation) ---
@@ -133,10 +133,10 @@ func TestComponentService_ListBuilds_DelegatesToWorkflowRuns(t *testing.T) {
 
 func TestComponentService_UpdateWorkflowEnvVars_Passthrough(t *testing.T) {
 	t.Parallel()
-	oc := &ocmocks.ComponentClientMock{UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []models.WorkflowEnvVarRef) error {
+	oc := &ocmocks.ComponentClientMock{UpdateComponentWorkflowEnvVarsFunc: func(context.Context, string, string, string, []openchoreo.WorkflowEnvVarRef) error {
 		return nil
 	}}
-	if err := NewComponentService(oc, nil, nil, nil, nil).UpdateWorkflowEnvVars(context.Background(), "acme", "web", "svc", []models.WorkflowEnvVarRef{{Key: "K", Value: "V"}}); err != nil {
+	if err := NewComponentService(oc, nil, nil, nil, nil).UpdateWorkflowEnvVars(context.Background(), "acme", "web", "svc", []openchoreo.WorkflowEnvVarRef{{Key: "K", Value: "V"}}); err != nil {
 		t.Fatalf("update env vars happy: %v", err)
 	}
 	if c := oc.UpdateComponentWorkflowEnvVarsCalls(); len(c) != 1 || len(c[0].EnvVars) != 1 || c[0].EnvVars[0].Key != "K" {
@@ -175,11 +175,11 @@ func TestComponentService_TriggerBuild_StagesSecretWithSameRunName(t *testing.T)
 		ocSecretRef, ocRun = secretRef, runName
 		return &gen.WorkflowRun{Name: runName}, nil
 	}}
-	repo := &stubRepoSvc{GetRepoFunc: func(_ context.Context, orgID, projectID string) (*models.GitRepository, error) {
+	repo := &stubRepoSvc{GetRepoFunc: func(_ context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error) {
 		if orgID != "acme" || projectID != "web" {
 			t.Errorf("GetRepo scope: (%q,%q)", orgID, projectID)
 		}
-		return &models.GitRepository{RepoSlug: "owner-repo"}, nil
+		return &sourcecontrol.GitRepository{RepoSlug: "owner-repo"}, nil
 	}}
 	stager := &stubBuildStager{StageBuildSecretFunc: func(_ context.Context, ocOrgID, repoSlug, runName string) (string, error) {
 		stagerSlug, stagerRun = repoSlug, runName
@@ -209,14 +209,14 @@ func TestComponentService_TriggerBuild_GetRepoFailuresAreBestEffort(t *testing.T
 		name string
 		repo *stubRepoSvc
 	}{
-		{"GetRepo errors", &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
+		{"GetRepo errors", &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 			return nil, errors.New("db down")
 		}}},
-		{"no repo row", &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
+		{"no repo row", &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 			return nil, nil
 		}}},
-		{"empty repoSlug", &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
-			return &models.GitRepository{RepoSlug: ""}, nil
+		{"empty repoSlug", &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
+			return &sourcecontrol.GitRepository{RepoSlug: ""}, nil
 		}}},
 	}
 	for _, tc := range cases {
@@ -250,8 +250,8 @@ func TestComponentService_TriggerBuild_StagerFailureAborts(t *testing.T) {
 		t.Error("build must not fire when the secret staging failed")
 		return nil, nil
 	}}
-	repo := &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
-		return &models.GitRepository{RepoSlug: "owner-repo"}, nil
+	repo := &stubRepoSvc{GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
+		return &sourcecontrol.GitRepository{RepoSlug: "owner-repo"}, nil
 	}}
 	stager := &stubBuildStager{StageBuildSecretFunc: func(context.Context, string, string, string) (string, error) {
 		return "", errors.New("openbao unreachable")
@@ -402,12 +402,12 @@ func TestComponentService_GetComponentOpenAPI_ServiceReturnsSpec(t *testing.T) {
 func TestComponentService_CreateComponent_PassthroughAndError(t *testing.T) {
 	t.Parallel()
 	oc := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(_ context.Context, org, proj string, req *models.CreateComponentRequest) (*gen.Component, error) {
+		CreateComponentFunc: func(_ context.Context, org, proj string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			return &gen.Component{Name: req.Name}, nil
 		},
 	}
 	svc := NewComponentService(oc, nil, nil, nil, nil)
-	comp, err := svc.CreateComponent(context.Background(), "acme", "web", &models.CreateComponentRequest{Name: "svc-a"})
+	comp, err := svc.CreateComponent(context.Background(), "acme", "web", &openchoreo.CreateComponentRequest{Name: "svc-a"})
 	if err != nil || comp == nil || comp.Name != "svc-a" {
 		t.Fatalf("create happy: comp=%+v err=%v", comp, err)
 	}
@@ -416,18 +416,18 @@ func TestComponentService_CreateComponent_PassthroughAndError(t *testing.T) {
 	}
 
 	ocErr := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(context.Context, string, string, *models.CreateComponentRequest) (*gen.Component, error) {
+		CreateComponentFunc: func(context.Context, string, string, *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			return nil, openchoreo.ErrConflict
 		},
 	}
-	if _, err := NewComponentService(ocErr, nil, nil, nil, nil).CreateComponent(context.Background(), "acme", "web", &models.CreateComponentRequest{Name: "svc-a"}); !errors.Is(err, openchoreo.ErrConflict) {
+	if _, err := NewComponentService(ocErr, nil, nil, nil, nil).CreateComponent(context.Background(), "acme", "web", &openchoreo.CreateComponentRequest{Name: "svc-a"}); !errors.Is(err, openchoreo.ErrConflict) {
 		t.Fatalf("create error must propagate the OC sentinel verbatim, got %v", err)
 	}
 }
 
 // TestOcEntrypoint_CanonicalWebAppKind guards against the vocabulary drift
 // bug: the canonical kind is "web-application" — OpenChoreo's own term
-// (models.ComponentTypeWebApplication) — and ocEntrypoint merely re-attaches
+// (spec.ComponentTypeWebApplication) — and ocEntrypoint merely re-attaches
 // OC's `deployment/` prefix. Retired spellings ("webapp", "web-app") are NOT
 // understood anywhere; designs carrying them must be migrated. Unknown kinds
 // keep falling back to deployment/service.

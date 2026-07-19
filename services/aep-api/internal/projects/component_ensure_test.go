@@ -21,27 +21,28 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // ensureRepoSvc is a minimal sourcecontrol.RepoService — only GetRepo is exercised by
 // EnsureComponent; the rest panic if reached.
-type ensureRepoSvc struct{ repo *models.GitRepository }
+type ensureRepoSvc struct{ repo *sourcecontrol.GitRepository }
 
-func (r ensureRepoSvc) ListByOrg(context.Context, string) ([]models.GitRepository, error) {
+func (r ensureRepoSvc) ListByOrg(context.Context, string) ([]sourcecontrol.GitRepository, error) {
 	panic("ensureRepoSvc: ListByOrg not expected")
 }
-func (r ensureRepoSvc) GetRepo(context.Context, string, string) (*models.GitRepository, error) {
+func (r ensureRepoSvc) GetRepo(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 	return r.repo, nil
 }
-func (ensureRepoSvc) CreateRepo(context.Context, string, string, string, string) (*models.GitRepository, error) {
+func (ensureRepoSvc) CreateRepo(context.Context, string, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("CreateRepo not expected")
 }
-func (ensureRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+func (ensureRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("EnsureBareRepo not expected")
 }
 func (ensureRepoSvc) SetWebhookID(context.Context, string, string, int64) error {
@@ -52,9 +53,9 @@ func (ensureRepoSvc) DeleteRepo(context.Context, string, string) error {
 }
 
 func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
-	var captured *models.CreateComponentRequest
+	var captured *openchoreo.CreateComponentRequest
 	oc := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(_ context.Context, _, _ string, req *models.CreateComponentRequest) (*gen.Component, error) {
+		CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			captured = req
 			return &gen.Component{Name: req.Name}, nil
 		},
@@ -74,7 +75,7 @@ func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
 			return files, nil
 		},
 	})
-	repo := &models.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
+	repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
 	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil)
 
 	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "order-service"); err != nil {
@@ -111,14 +112,14 @@ func TestEnsureComponent_ProvisionsOCComponentFromDesign(t *testing.T) {
 // TestEnsureComponent_WebAppKind_UsesWebApplicationEntrypoint is the
 // consumer-level regression for the component-kind vocabulary drift bug: a
 // design.json carrying the canonical "web-application" type (OpenChoreo's own
-// term, models.ComponentTypeWebApplication) must provision an OC Component
+// term, spec.ComponentTypeWebApplication) must provision an OC Component
 // with the deployment/web-application entrypoint, not silently fall back to a
 // plain service (which caused shared-host routing and a missing runtime
 // config for the deployed SPA).
 func TestEnsureComponent_WebAppKind_UsesWebApplicationEntrypoint(t *testing.T) {
-	var captured *models.CreateComponentRequest
+	var captured *openchoreo.CreateComponentRequest
 	oc := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(_ context.Context, _, _ string, req *models.CreateComponentRequest) (*gen.Component, error) {
+		CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			captured = req
 			return &gen.Component{Name: req.Name}, nil
 		},
@@ -137,7 +138,7 @@ func TestEnsureComponent_WebAppKind_UsesWebApplicationEntrypoint(t *testing.T) {
 			return files, nil
 		},
 	})
-	repo := &models.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
+	repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
 	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil)
 
 	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "web-ui"); err != nil {
@@ -153,7 +154,7 @@ func TestEnsureComponent_WebAppKind_UsesWebApplicationEntrypoint(t *testing.T) {
 
 func TestEnsureComponent_DesignMissingComponent_Errors(t *testing.T) {
 	oc := &ocmocks.ComponentClientMock{
-		CreateComponentFunc: func(context.Context, string, string, *models.CreateComponentRequest) (*gen.Component, error) {
+		CreateComponentFunc: func(context.Context, string, string, *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 			t.Error("CreateComponent must not be called when the component is absent from the design")
 			return nil, nil
 		},
@@ -164,7 +165,7 @@ func TestEnsureComponent_DesignMissingComponent_Errors(t *testing.T) {
 			return files, nil
 		},
 	})
-	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: &models.GitRepository{RepoURL: "u"}}, nil)
+	svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: &sourcecontrol.GitRepository{RepoURL: "u"}}, nil)
 
 	if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "ghost"); err == nil {
 		t.Fatal("a component absent from the design must error (no CR to build)")

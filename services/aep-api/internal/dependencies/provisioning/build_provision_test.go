@@ -23,8 +23,9 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // TestProvisionForBuild_ByKind is the Task-3 contract: the workflow's provision
@@ -39,8 +40,8 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
 	plat := &fakePlatProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	catalog := &fakeCatalog{entries: map[string]*dependencies.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []spec.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
 	}}
 	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, &fakeBindings{})
 
@@ -109,8 +110,8 @@ func TestProvisionForBuild_UsesMintedGateDespiteListRace(t *testing.T) {
 	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
 	plat := &fakePlatProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	catalog := &fakeCatalog{entries: map[string]*dependencies.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []spec.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
 	}}
 	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, &fakeBindings{})
 
@@ -146,8 +147,8 @@ func TestProvisionForBuild_ExternalAuthorFailureContinues(t *testing.T) {
 	execs := &fakeExecStore{}
 	ext := &fakeExtProv{authorErr: fmt.Errorf("author boom")}
 	plat := &fakePlatProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}}},
+	catalog := &fakeCatalog{entries: map[string]*dependencies.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []spec.ConfigKey{{Key: "api_key", Secret: true}}},
 	}}
 	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, catalog, ext, plat, &fakeBindings{})
 
@@ -182,7 +183,7 @@ func TestProvisionForBuild_OrgServiceUnapprovedIsNoop(t *testing.T) {
 	ext := &fakeExtProv{}
 	plat := &fakePlatProv{}
 	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{},
-		fakeDesign{comps: []models.DesignComponent{{Name: "web"}}}, &fakeCatalog{}, ext, plat, &fakeBindings{})
+		fakeDesign{comps: []spec.DesignComponent{{Name: "web"}}}, &fakeCatalog{}, ext, plat, &fakeBindings{})
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", []BuildProvisionInput{
 		{Component: "web", Dependency: "inventory", Kind: "org-service", Approved: false},
@@ -206,14 +207,14 @@ func TestProvisionForBuild_OrgServiceApprovedStartsVisibility(t *testing.T) {
 	issues := newFakeIssues(nil)
 	access := &fakeAccess{}
 	build := &fakeProviderBuild{}
-	consumer := models.DesignComponent{Name: "web", Dependencies: []models.Dependency{
-		{Kind: models.DependencyKindOrgService, Name: "inventory"},
+	consumer := spec.DesignComponent{Name: "web", Dependencies: []spec.Dependency{
+		{Kind: spec.DependencyKindOrgService, Name: "inventory"},
 	}}
 	svc := NewService(Deps{
 		Issues: issues,
 		Execs:  &fakeExecStore{},
 		Reeval: &fakeReeval{},
-		Design: fakeDesign{comps: []models.DesignComponent{consumer}},
+		Design: fakeDesign{comps: []spec.DesignComponent{consumer}},
 		Repos:  fakeRepos{},
 		Access: access,
 		Providers: fakeProviders{byName: map[string]openchoreo.WorkloadEndpointInfo{
@@ -263,8 +264,8 @@ func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
 	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
 	plat := &fakePlatProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+	catalog := &fakeCatalog{entries: map[string]*dependencies.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []spec.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
 	}}
 	// orders-db (platform-resource) is already Ready in OC but NOT in the drawer inputs.
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
@@ -309,8 +310,8 @@ func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
 func TestProvisionForBuild_SkipsNotReadyGateNotInInputs(t *testing.T) {
 	issues := newFakeIssues(nil)
 	execs := &fakeExecStore{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}}},
+	catalog := &fakeCatalog{entries: map[string]*dependencies.ExternalResource{
+		"stripe": {Name: "stripe", ConfigKeys: []spec.ConfigKey{{Key: "api_key", Secret: true}}},
 	}}
 	// orders-db has NO binding (never provisioned) → Status reports not-ready.
 	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, catalog, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
@@ -383,7 +384,7 @@ func TestProvisionForBuild_EmptyInputsDoesNotMint(t *testing.T) {
 }
 
 // provisionRowFor returns the first provision Execution row for a dep name.
-func provisionRowFor(execs *fakeExecStore, depName string) *models.Execution {
+func provisionRowFor(execs *fakeExecStore, depName string) *delivery.Execution {
 	for _, r := range execs.rows {
 		if r.Kind == string(taskmeta.KindProvision) && r.Component == depName {
 			return r

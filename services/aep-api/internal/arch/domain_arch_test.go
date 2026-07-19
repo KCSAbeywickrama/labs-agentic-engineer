@@ -56,10 +56,11 @@ var targetDomains = map[string]bool{
 }
 
 // nonDomainPkgs are the internal/ packages that are NOT business domains: the
-// kernel, the edge machinery, and the legacy scaffolding still being migrated.
-// The legacy rows (api, feature) are deleted in P9.
+// kernel + the edge machinery. The legacy rows (api, feature) were deleted in P9
+// once internal/api collapsed into edge/ and every feature moved to its domain.
 var nonDomainPkgs = map[string]bool{
 	"platform":  true, // the kernel
+	"edge":      true, // the surface composer (was internal/api)
 	"gen":       true, // generated wire types — public surface
 	"igen":      true, // generated wire types — S2S surface
 	"migrate":   true, // the ordered migration list
@@ -69,22 +70,20 @@ var nonDomainPkgs = map[string]bool{
 	"config":    true,
 	"contracts": true,
 	"seed":      true,
-	// ── legacy, deleted in P9 ──
-	"api":     true, // the exiled handler layer -> edge/ + domain slices
-	"feature": true, // the 24 feature packages -> the 7 domains
 }
 
 // plannedPkgs are classified names that do not exist YET. They are listed
 // separately so the honesty check below can demand that every OTHER row
 // correspond to something real — the distinction between "planned" and "stale"
-// is exactly what a classification map loses if nobody checks it.
-var plannedPkgs = map[string]bool{
-	"edge": true, // the surface composer; internal/api collapses into it in P9
-}
+// is exactly what a classification map loses if nobody checks it. Empty now:
+// edge/ exists, so nothing is merely planned.
+var plannedPkgs = map[string]bool{}
 
-// domainsOnDisk returns the target domains that actually exist yet. During the
-// migration this grows one entry per phase; the rules apply only to these, which
-// is what makes the ruleset permissive without being toothless.
+// domainsOnDisk returns the target domains that exist on disk. The migration is
+// COMPLETE (all seven landed), so TestAllDomainsLanded pins that this equals the
+// full targetDomains set — a missing domain is now a regression, not a
+// not-yet-migrated phase. The rules below still range over the discovered set so
+// they stay disk-driven, but the set is no longer allowed to be a subset.
 func domainsOnDisk(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string
@@ -95,6 +94,26 @@ func domainsOnDisk(t *testing.T, root string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestAllDomainsLanded is the strict-phase gate: every one of the seven target
+// domains must exist on disk. During the migration domainsOnDisk was
+// deliberately a subset (rules applied only to landed domains); now that P9 has
+// landed, a missing domain means a package was deleted or renamed away from its
+// classification — a regression this catches immediately.
+func TestAllDomainsLanded(t *testing.T) {
+	got := map[string]bool{}
+	for _, d := range domainsOnDisk(t, "..") {
+		got[d] = true
+	}
+	for d := range targetDomains {
+		if !got[d] {
+			t.Errorf("target domain %q is not on disk — every domain must exist post-migration (classification regression?)", d)
+		}
+	}
+	if len(got) != len(targetDomains) {
+		t.Errorf("domains on disk = %d, want %d (the full targetDomains set)", len(got), len(targetDomains))
+	}
 }
 
 // fileImports parses one Go file and returns its import paths. Parsing (rather
@@ -171,8 +190,14 @@ func gormFenceViolations(t *testing.T, root string, domains []string) []string {
 					continue
 				}
 				rel, _ := filepath.Rel(root, path)
-				// The ONE sanctioned home: the domain-root's repository.go.
-				if rel != filepath.Join(d, "repository.go") {
+				// The sanctioned home: the domain ROOT's repository seam —
+				// repository.go, or repository_<name>.go when a domain owns
+				// several tables and one file per table reads better than one
+				// 600-line merge (AGENTS.md: separate by responsibility). Gorm in
+				// a SLICE (a sub-dir) is still banned, however it is named.
+				base := filepath.Base(rel)
+				atRoot := filepath.Dir(rel) == d
+				if !(atRoot && (base == "repository.go" || strings.HasPrefix(base, "repository_"))) {
 					bad = append(bad, rel)
 				}
 			}
@@ -348,19 +373,32 @@ func plantDomain(t *testing.T, root string, files map[string]string) {
 func TestGormFenceFires(t *testing.T) {
 	root := t.TempDir()
 	plantDomain(t, root, map[string]string{
-		// Sanctioned: the domain-root's repository.
-		"ops/repository.go": "package ops\n\nimport _ \"gorm.io/gorm\"\n",
-		// The violation: a slice reaching past its repository straight to the ORM.
+		// Sanctioned: the domain-root's repository seam — the canonical file and
+		// a per-table repository_<name>.go both count.
+		"ops/repository.go":         "package ops\n\nimport _ \"gorm.io/gorm\"\n",
+		"ops/repository_reports.go": "package ops\n\nimport _ \"gorm.io/gorm\"\n",
+		// The violations: a slice reaching past its repository straight to the ORM,
+		// and a non-repository file at the domain root.
 		"ops/listreports/handler.go": "package listreports\n\nimport _ \"gorm.io/gorm\"\n",
+		"ops/model.go":               "package ops\n\nimport _ \"gorm.io/gorm\"\n",
+		// A repository.go inside a SLICE is NOT the root seam — still a violation.
+		"ops/listreports/repository.go": "package listreports\n\nimport _ \"gorm.io/gorm\"\n",
 	})
 	bad := gormFenceViolations(t, root, []string{"ops"})
-	if len(bad) != 1 || bad[0] != filepath.Join("ops", "listreports", "handler.go") {
-		t.Fatalf("gorm fence did not fire on a slice importing gorm: got %v", bad)
+	want := map[string]bool{
+		filepath.Join("ops", "listreports", "handler.go"):    true,
+		filepath.Join("ops", "model.go"):                     true,
+		filepath.Join("ops", "listreports", "repository.go"): true,
 	}
-	// And it must not fire on the sanctioned file.
+	if len(bad) != len(want) {
+		t.Fatalf("gorm fence: got %v, want exactly the 3 non-root-seam files", bad)
+	}
 	for _, b := range bad {
-		if strings.HasSuffix(b, "repository.go") {
-			t.Fatalf("gorm fence wrongly flagged the domain's own repository.go: %v", bad)
+		if !want[b] {
+			t.Fatalf("gorm fence flagged an unexpected file %q (want %v)", b, want)
+		}
+		if b == filepath.Join("ops", "repository.go") || b == filepath.Join("ops", "repository_reports.go") {
+			t.Fatalf("gorm fence wrongly flagged the domain's own repository seam: %v", bad)
 		}
 	}
 }

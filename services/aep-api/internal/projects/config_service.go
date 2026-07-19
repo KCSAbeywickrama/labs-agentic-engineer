@@ -22,18 +22,17 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 )
 
 type ConfigService interface {
-	GetConfig(ctx context.Context, orgID, projectName, componentName string) (*models.ComponentConfig, error)
-	UpdateConfig(ctx context.Context, orgID, projectName, componentName string, envVars models.EnvVarSlice) (*models.ComponentConfig, error)
-	GetEnvVarsForDeploy(ctx context.Context, orgID, projectName, componentName string) (models.EnvVarSlice, error)
+	GetConfig(ctx context.Context, orgID, projectName, componentName string) (*ComponentConfig, error)
+	UpdateConfig(ctx context.Context, orgID, projectName, componentName string, envVars EnvVarSlice) (*ComponentConfig, error)
+	GetEnvVarsForDeploy(ctx context.Context, orgID, projectName, componentName string) (EnvVarSlice, error)
 }
 
 type configService struct {
-	repo         repositories.ConfigRepository
+	repo         ConfigRepository
 	componentSvc ComponentService
 }
 
@@ -41,11 +40,11 @@ type configService struct {
 // for mirroring env-var updates onto the OC Component's workflow params so
 // the next build picks them up. Pass nil for componentSvc to disable that
 // mirror (the env vars still land in the DB; they just won't reach OC).
-func NewConfigService(repo repositories.ConfigRepository, componentSvc ComponentService) ConfigService {
+func NewConfigService(repo ConfigRepository, componentSvc ComponentService) ConfigService {
 	return &configService{repo: repo, componentSvc: componentSvc}
 }
 
-func (s *configService) GetConfig(ctx context.Context, orgID, projectName, componentName string) (*models.ComponentConfig, error) {
+func (s *configService) GetConfig(ctx context.Context, orgID, projectName, componentName string) (*ComponentConfig, error) {
 	config, err := s.repo.GetByComponent(ctx, orgID, projectName, componentName)
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)
@@ -53,7 +52,7 @@ func (s *configService) GetConfig(ctx context.Context, orgID, projectName, compo
 	return config, nil
 }
 
-func (s *configService) UpdateConfig(ctx context.Context, orgID, projectName, componentName string, envVars models.EnvVarSlice) (*models.ComponentConfig, error) {
+func (s *configService) UpdateConfig(ctx context.Context, orgID, projectName, componentName string, envVars EnvVarSlice) (*ComponentConfig, error) {
 	// Validate env vars
 	seen := make(map[string]bool, len(envVars))
 	for _, ev := range envVars {
@@ -67,7 +66,7 @@ func (s *configService) UpdateConfig(ctx context.Context, orgID, projectName, co
 		seen[key] = true
 	}
 
-	config := &models.ComponentConfig{
+	config := &ComponentConfig{
 		OrgID:         orgID,
 		ProjectName:   projectName,
 		ComponentName: componentName,
@@ -88,9 +87,9 @@ func (s *configService) UpdateConfig(ctx context.Context, orgID, projectName, co
 	// that haven't been created yet (pre-first-deploy) will pick up the
 	// values the next time this flow runs.
 	if s.componentSvc != nil {
-		wfEnvVars := make([]models.WorkflowEnvVarRef, 0, len(envVars))
+		wfEnvVars := make([]openchoreo.WorkflowEnvVarRef, 0, len(envVars))
 		for _, ev := range envVars {
-			wfEnvVars = append(wfEnvVars, models.WorkflowEnvVarRef{Key: ev.Key, Value: ev.Value})
+			wfEnvVars = append(wfEnvVars, openchoreo.WorkflowEnvVarRef{Key: ev.Key, Value: ev.Value})
 		}
 		if err := s.componentSvc.UpdateWorkflowEnvVars(ctx, orgID, projectName, componentName, wfEnvVars); err != nil {
 			slog.WarnContext(ctx, "mirror env vars onto OC Component failed; DB is updated, next build may still see stale vars",
@@ -101,7 +100,7 @@ func (s *configService) UpdateConfig(ctx context.Context, orgID, projectName, co
 	return config, nil
 }
 
-func (s *configService) GetEnvVarsForDeploy(ctx context.Context, orgID, projectName, componentName string) (models.EnvVarSlice, error) {
+func (s *configService) GetEnvVarsForDeploy(ctx context.Context, orgID, projectName, componentName string) (EnvVarSlice, error) {
 	config, err := s.repo.GetByComponent(ctx, orgID, projectName, componentName)
 	if err != nil {
 		return nil, fmt.Errorf("get config for deploy: %w", err)

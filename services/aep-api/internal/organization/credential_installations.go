@@ -33,8 +33,6 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ----------------------------------------------------------------------------
@@ -93,7 +91,7 @@ func (s *CredentialService) UnsuspendInstallation(ctx context.Context, installat
 }
 
 func (s *CredentialService) setInstallationStatus(ctx context.Context, installationID int64, status string) error {
-	return s.repo.Tx(ctx, func(tx repositories.OrgCredentialTx) error {
+	return s.repo.Tx(ctx, func(tx OrgCredentialTx) error {
 		if err := tx.AdvisoryLock(fmt.Sprintf("install:%d", installationID)); err != nil {
 			return err
 		}
@@ -108,7 +106,7 @@ func (s *CredentialService) setInstallationStatus(ctx context.Context, installat
 // JSON merge under the org-scoped lock. delta carries lists of full names
 // to add/remove (intersection vs. current state determines the new set).
 func (s *CredentialService) MergeSelectedRepos(ctx context.Context, installationID int64, added, removed []string) error {
-	return s.repo.Tx(ctx, func(tx repositories.OrgCredentialTx) error {
+	return s.repo.Tx(ctx, func(tx OrgCredentialTx) error {
 		// Read the row (by installation_id) BEFORE taking the org lock, exactly
 		// as the inline transaction did — the lock is keyed on the org handle we
 		// learn from that read.
@@ -140,7 +138,7 @@ func (s *CredentialService) MergeSelectedRepos(ctx context.Context, installation
 
 		now := time.Now().UTC()
 		return tx.UpdateColumns(row.OcOrgID, map[string]any{
-			"selected_repos":    models.JSONStringList(merged),
+			"selected_repos":    JSONStringList(merged),
 			"last_validated_at": now,
 		})
 	})

@@ -20,9 +20,10 @@ import (
 	"context"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // The consumer ports the provisioning services + watcher drive. Each is the
@@ -44,12 +45,12 @@ type IssueClient interface {
 // drives: admit the provision row (the (repo, issue, kind) mutex), start it
 // (queued → running, stamping the binding run name), finish it (→ deployed /
 // failed), and list active rows (the readiness watcher's sweep).
-// repositories.ExecutionRepository satisfies it.
+// delivery.ExecutionRepository satisfies it.
 type ExecutionStore interface {
-	TryAdmit(ctx context.Context, e *models.Execution) (admitted bool, row *models.Execution, err error)
-	StartWithRun(ctx context.Context, id, runName string) (*models.Execution, error)
-	Finish(ctx context.Context, id, status, reason string) (*models.Execution, error)
-	ListActive(ctx context.Context) ([]models.Execution, error)
+	TryAdmit(ctx context.Context, e *delivery.Execution) (admitted bool, row *delivery.Execution, err error)
+	StartWithRun(ctx context.Context, id, runName string) (*delivery.Execution, error)
+	Finish(ctx context.Context, id, status, reason string) (*delivery.Execution, error)
+	ListActive(ctx context.Context) ([]delivery.Execution, error)
 }
 
 // Reevaluator releases consumer coding tasks whose provision dependency just
@@ -65,7 +66,7 @@ type Reevaluator interface {
 // approval, so HEAD == the just-tagged content; the gate issue still records its
 // DesignTag for lineage.)
 type DesignReader interface {
-	ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error)
+	ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]spec.DesignComponent, error)
 }
 
 // RepoLocator resolves an org+project to its GitHub repo full name ("owner/name").
@@ -88,8 +89,8 @@ type RepoLocator interface {
 // *repositories.ExternalResourceRepository satisfies it; Get returns (nil, nil)
 // when the name is not registered.
 type ExternalResourceCatalog interface {
-	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
-	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)
+	Get(ctx context.Context, orgID, name string) (*dependencies.ExternalResource, error)
+	List(ctx context.Context, orgID string) ([]dependencies.ExternalResource, error)
 	Delete(ctx context.Context, orgID, name string) error
 }
 
@@ -111,12 +112,12 @@ type ProjectLister interface {
 // SM-API, and resolves the per-run secret bundles for the coding runner.
 // *resources.ExternalResourceProvisioner satisfies it.
 type ExternalProvisioner interface {
-	Provision(ctx context.Context, orgHandle, ocOrgID, projectName string, er *models.ExternalResource, byEnv map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error)
+	Provision(ctx context.Context, orgHandle, ocOrgID, projectName string, er *dependencies.ExternalResource, byEnv map[string]dependencies.EnvValues) (*dependencies.ProvisionResult, error)
 	// AuthorWithSecretRef authors the OC external Resource model from
 	// already-staged secret references (the build path, issue #164) — no SM-API
 	// write. Mirrors Provision's resource/binding authoring using the passed
 	// per-env secretStorePath.
-	AuthorWithSecretRef(ctx context.Context, orgHandle, projectName string, er *models.ExternalResource, byEnv map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error)
+	AuthorWithSecretRef(ctx context.Context, orgHandle, projectName string, er *dependencies.ExternalResource, byEnv map[string]dependencies.PreparedEnvValues) (*dependencies.ProvisionResult, error)
 	Deprovision(ctx context.Context, orgHandle, projectName, name string, envs []string) error
 	// ResolveRunnerSecrets returns the SM-API vault path + secret-key list for
 	// each named external resource, read back off its per-env binding — the
@@ -158,9 +159,9 @@ type ProviderBuildTrigger interface {
 // AccessStore is the cross-project access-request tracking table.
 // *repositories.AccessRequestRepository satisfies it.
 type AccessStore interface {
-	Create(ctx context.Context, ar *models.AccessRequest) error
-	ListByConsumerProject(ctx context.Context, orgID, projectID string) ([]models.AccessRequest, error)
-	FindOpenForTarget(ctx context.Context, orgID, providerProjectID, providerComponentName string) (*models.AccessRequest, error)
+	Create(ctx context.Context, ar *dependencies.AccessRequest) error
+	ListByConsumerProject(ctx context.Context, orgID, projectID string) ([]dependencies.AccessRequest, error)
+	FindOpenForTarget(ctx context.Context, orgID, providerProjectID, providerComponentName string) (*dependencies.AccessRequest, error)
 	UpdateStatus(ctx context.Context, id, status string) error
-	ListByProviderTask(ctx context.Context, providerTaskID string) ([]models.AccessRequest, error)
+	ListByProviderTask(ctx context.Context, providerTaskID string) ([]dependencies.AccessRequest, error)
 }

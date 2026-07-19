@@ -23,6 +23,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/platform/gitfs/naming"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+
 	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/internal/delivery/codingagent"
@@ -32,8 +36,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/dependencies/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // The composition-root adapters that satisfy the tasks/execution/codingagent
@@ -45,7 +47,7 @@ import (
 type repoLocator struct{ db *gorm.DB }
 
 func (r repoLocator) ByFullName(_ context.Context, fullName string) (string, string, error) {
-	return repositories.LookupOrgProjectByRepoURL(r.db, fullName)
+	return sourcecontrol.LookupOrgProjectByRepoURL(r.db, fullName)
 }
 
 // taskSnapshotAdapter reads a Task's current snapshot for the task-log stream's
@@ -78,11 +80,11 @@ func (a taskSnapshotAdapter) TaskSnapshot(ctx context.Context, orgID, projectID 
 // the repo row, then the org-fenced by-issue history. Satisfies
 // execution.ExecutionHistory.
 type executionsByIssueAdapter struct {
-	repos repositories.RepoRepository
-	execs repositories.ExecutionRepository
+	repos sourcecontrol.RepoRepository
+	execs delivery.ExecutionRepository
 }
 
-func (a executionsByIssueAdapter) ByIssue(ctx context.Context, orgID, projectID string, issueNumber int) ([]models.Execution, error) {
+func (a executionsByIssueAdapter) ByIssue(ctx context.Context, orgID, projectID string, issueNumber int) ([]delivery.Execution, error) {
 	full, err := repoFullNameLookup{repos: a.repos}.RepoFullName(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
@@ -111,7 +113,7 @@ func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID s
 
 // ReadDesignComponents exposes the project's authored design components at HEAD.
 // Satisfies provisioning.DesignReader (and dependencies/resources.DesignReader).
-func (d designComponents) ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error) {
+func (d designComponents) ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]spec.DesignComponent, error) {
 	design, err := d.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
@@ -225,7 +227,7 @@ func (o traitDeployObserver) OnComponentDeployed(ctx context.Context, orgID, pro
 // — the provision Execution row's Repo must equal the gate issue's repo full
 // name so the funnel gate resolves the run. Satisfies provisioning.RepoLocator.
 type repoNamer struct {
-	repos repositories.RepoRepository
+	repos sourcecontrol.RepoRepository
 	db    *gorm.DB
 }
 
@@ -239,13 +241,13 @@ func (r repoNamer) RepoFullName(ctx context.Context, orgID, projectID string) (s
 // issues/closed webhook uses to find the provider project of a declined
 // org-publish gate issue. Satisfies provisioning.RepoLocator.
 func (r repoNamer) ByFullName(_ context.Context, fullName string) (string, string, error) {
-	return repositories.LookupOrgProjectByRepoURL(r.db, fullName)
+	return sourcecontrol.LookupOrgProjectByRepoURL(r.db, fullName)
 }
 
 // provisionProjects enumerates an org's ready projects for the provisioning
 // feature's cross-project design scan (external-resource consumers, teardown).
 // Satisfies provisioning.ProjectLister.
-type provisionProjects struct{ repos repositories.RepoRepository }
+type provisionProjects struct{ repos sourcecontrol.RepoRepository }
 
 func (p provisionProjects) ListProjects(ctx context.Context, orgID string) ([]provisioning.ProjectRef, error) {
 	rows, err := p.repos.ListAllReady(ctx)
@@ -264,7 +266,7 @@ func (p provisionProjects) ListProjects(ctx context.Context, orgID string) ([]pr
 
 // repoLister enumerates ready project repos for the reconciliation sweep.
 // Satisfies execution.RepoLister.
-type repoLister struct{ repos repositories.RepoRepository }
+type repoLister struct{ repos sourcecontrol.RepoRepository }
 
 func (l repoLister) ListAll(ctx context.Context) ([]execution.RepoRef, error) {
 	rows, err := l.repos.ListAllReady(ctx)
@@ -273,7 +275,7 @@ func (l repoLister) ListAll(ctx context.Context) ([]execution.RepoRef, error) {
 	}
 	out := make([]execution.RepoRef, 0, len(rows))
 	for i := range rows {
-		owner, name := models.OwnerRepoFromURL(rows[i].RepoURL)
+		owner, name := naming.OwnerRepoFromURL(rows[i].RepoURL)
 		if owner == "" || name == "" {
 			continue
 		}
@@ -349,7 +351,7 @@ func githubBotLogin(appSlug string) string {
 // RunnerAuthorizer's publisher-cc branch (re-keyed from task to execution).
 func executionOrgLookup(db *gorm.DB) func(ctx context.Context, executionID string) (string, error) {
 	return func(ctx context.Context, executionID string) (string, error) {
-		var row models.Execution
+		var row delivery.Execution
 		if err := db.WithContext(ctx).Select("org_id").First(&row, "id = ?", executionID).Error; err != nil {
 			return "", err
 		}

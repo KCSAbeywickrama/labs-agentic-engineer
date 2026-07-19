@@ -63,17 +63,15 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
-	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/projects"
 	projectshttpapi "github.com/wso2/aep/aep-api/internal/projects/httpapi"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 const compProjectPrefix = "/api/v1/projects/web/components"
@@ -84,7 +82,7 @@ type compFakes struct {
 	oc         *ocmocks.ComponentClientMock // component OC client (defaulted when nil)
 	observ     observability.Client         // nil ⇒ build-logs takes the not-configured 503 path
 	store      *spec.ArtifactStore          // for the openapi read; nil is fine unless hit
-	configRepo repositories.ConfigRepository
+	configRepo projects.ConfigRepository
 }
 
 // newHarness assembles the real chain around the REAL component + config
@@ -102,7 +100,7 @@ func newHarness(t *testing.T, f compFakes) *componenttest.Harness {
 		// The env-var mirror onto OC is unit-tested; disable it here (nil).
 		cfgSvc = projects.NewConfigService(f.configRepo, nil)
 	}
-	return componenttest.New(t, componenttest.Options{Deps: api.Deps{
+	return componenttest.New(t, componenttest.Options{Deps: edge.Deps{
 		Projects: mustProjects(projectshttpapi.New(projects.Deps{
 			ComponentSvc: compSvc,
 			ConfigSvc:    cfgSvc,
@@ -439,7 +437,7 @@ func TestComponentComponent_ConfigGet_NullBodyWhenNoRow(t *testing.T) {
 	// The harvested golden get_component_config.json is literal `null`: a 200 with
 	// a JSON-null body when no config row exists (a nil *ComponentConfig marshals
 	// to null). Pin that exact quirk.
-	repo := &extConfigRepo{GetByComponentFunc: func(context.Context, string, string, string) (*models.ComponentConfig, error) {
+	repo := &extConfigRepo{GetByComponentFunc: func(context.Context, string, string, string) (*projects.ComponentConfig, error) {
 		return nil, nil
 	}}
 	h := newHarness(t, compFakes{configRepo: repo})
@@ -458,7 +456,7 @@ func TestComponentComponent_ConfigGet_NullBodyWhenNoRow(t *testing.T) {
 
 func TestComponentComponent_ConfigGet_ErrorIs500(t *testing.T) {
 	t.Parallel()
-	repo := &extConfigRepo{GetByComponentFunc: func(context.Context, string, string, string) (*models.ComponentConfig, error) {
+	repo := &extConfigRepo{GetByComponentFunc: func(context.Context, string, string, string) (*projects.ComponentConfig, error) {
 		return nil, errors.New("pg: connection refused")
 	}}
 	h := newHarness(t, compFakes{configRepo: repo})
@@ -478,8 +476,8 @@ func TestComponentComponent_ConfigGet_ErrorIs500(t *testing.T) {
 
 func TestComponentComponent_ConfigUpdate_Happy(t *testing.T) {
 	t.Parallel()
-	var saved *models.ComponentConfig
-	repo := &extConfigRepo{UpsertFunc: func(_ context.Context, c *models.ComponentConfig) error {
+	var saved *projects.ComponentConfig
+	repo := &extConfigRepo{UpsertFunc: func(_ context.Context, c *projects.ComponentConfig) error {
 		saved = c
 		return nil
 	}}
@@ -501,7 +499,7 @@ func TestComponentComponent_ConfigUpdate_ValidationIs400(t *testing.T) {
 	t.Parallel()
 	// The legacy contract maps any update error (validation or repo) to 400 with
 	// the error string. Upsert must never run on invalid input.
-	repo := &extConfigRepo{UpsertFunc: func(context.Context, *models.ComponentConfig) error {
+	repo := &extConfigRepo{UpsertFunc: func(context.Context, *projects.ComponentConfig) error {
 		t.Error("Upsert must not run on invalid env vars")
 		return nil
 	}}

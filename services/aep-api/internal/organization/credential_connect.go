@@ -27,8 +27,6 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // Connect creates or replaces the credential record for ocOrgID. PAT mode
@@ -46,7 +44,7 @@ func (s *CredentialService) Connect(ctx context.Context, ocOrgID string, req Con
 	// commits and releases the advisory lock — exactly the commit-then-mirror
 	// ordering the inline transaction used.
 	var finalize func() (*Projection, error)
-	err := s.repo.Tx(ctx, func(tx repositories.OrgCredentialTx) error {
+	err := s.repo.Tx(ctx, func(tx OrgCredentialTx) error {
 		// Acquire org-scoped advisory lock for the duration of the txn so the
 		// callback handler and a concurrent webhook (installation.created) can't
 		// race the INSERT/UPDATE.
@@ -94,7 +92,7 @@ func (s *CredentialService) Connect(ctx context.Context, ocOrgID string, req Con
 // returns the finalize closure Connect calls AFTER the commit: the SM-API
 // mirror, the post-commit projection re-fetch (REPLACE), and the success log —
 // preserving the original commit-then-mirror ordering.
-func (s *CredentialService) connectPAT(ctx context.Context, tx repositories.OrgCredentialTx, ocOrgID string, hadRow bool, existing *models.OrgCredential, req ConnectRequest) (func() (*Projection, error), error) {
+func (s *CredentialService) connectPAT(ctx context.Context, tx OrgCredentialTx, ocOrgID string, hadRow bool, existing *OrgCredential, req ConnectRequest) (func() (*Projection, error), error) {
 	identity, err := s.validatePAT(ctx, req.PAT, req.GitHubLogin)
 	if err != nil {
 		return nil, err
@@ -121,7 +119,7 @@ func (s *CredentialService) connectPAT(ctx context.Context, tx repositories.OrgC
 			}
 			secret = gen
 		}
-		row := models.OrgCredential{
+		row := OrgCredential{
 			OcOrgID:         ocOrgID,
 			Kind:            "user-pat",
 			GitHubLogin:     req.GitHubLogin,
@@ -131,7 +129,7 @@ func (s *CredentialService) connectPAT(ctx context.Context, tx repositories.OrgC
 			Status:          "active",
 			ConnectedAt:     now,
 			LastValidatedAt: &now,
-			WebhookSecrets: models.WebhookSecrets{
+			WebhookSecrets: WebhookSecrets{
 				{Secret: secret, AddedAt: now},
 			},
 		}
@@ -185,7 +183,7 @@ func (s *CredentialService) connectPAT(ctx context.Context, tx repositories.OrgC
 			}
 			secret = gen
 		}
-		updates["webhook_secrets"] = models.WebhookSecrets{{Secret: secret, AddedAt: now}}
+		updates["webhook_secrets"] = WebhookSecrets{{Secret: secret, AddedAt: now}}
 	}
 	if err := tx.UpdateColumns(ocOrgID, updates); err != nil {
 		return nil, fmt.Errorf("connect: update: %w", err)
@@ -302,7 +300,7 @@ func (s *CredentialService) PrepareSMAPISeed(ctx context.Context, ocOrgID string
 // held). It takes the install-scoped advisory lock, validates the installation
 // against GitHub, writes the row, and returns the finalize closure Connect
 // calls AFTER the commit (post-commit projection re-fetch + success log).
-func (s *CredentialService) connectApp(ctx context.Context, tx repositories.OrgCredentialTx, ocOrgID string, hadRow bool, existing *models.OrgCredential, req ConnectRequest) (func() (*Projection, error), error) {
+func (s *CredentialService) connectApp(ctx context.Context, tx OrgCredentialTx, ocOrgID string, hadRow bool, existing *OrgCredential, req ConnectRequest) (func() (*Projection, error), error) {
 	if req.InstallationID == 0 {
 		return nil, &ValidationError{Code: "installation_id_missing", Message: "installationId is required"}
 	}
@@ -369,7 +367,7 @@ func (s *CredentialService) connectApp(ctx context.Context, tx repositories.OrgC
 	now := time.Now().UTC()
 	id := req.InstallationID
 	if !hadRow {
-		row := models.OrgCredential{
+		row := OrgCredential{
 			OcOrgID:         ocOrgID,
 			Kind:            "app-installation",
 			GitHubLogin:     accountLogin,
@@ -377,7 +375,7 @@ func (s *CredentialService) connectApp(ctx context.Context, tx repositories.OrgC
 			IdentityEmail:   bot.Email,
 			IdentityLogin:   bot.Login,
 			InstallationID:  &id,
-			SelectedRepos:   models.JSONStringList(selectedRepos),
+			SelectedRepos:   JSONStringList(selectedRepos),
 			Status:          "active",
 			ConnectedAt:     now,
 			LastValidatedAt: &now,
@@ -399,7 +397,7 @@ func (s *CredentialService) connectApp(ctx context.Context, tx repositories.OrgC
 		"identity_email":    bot.Email,
 		"identity_login":    bot.Login,
 		"installation_id":   id,
-		"selected_repos":    models.JSONStringList(selectedRepos),
+		"selected_repos":    JSONStringList(selectedRepos),
 		"status":            "active",
 		"connected_at":      now,
 		"last_validated_at": now,

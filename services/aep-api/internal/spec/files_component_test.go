@@ -40,7 +40,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/api"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
@@ -48,7 +48,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 const (
@@ -63,9 +62,9 @@ const (
 // filesStubRepoResolver hands out the single repo row, keyed by the AUTHENTICATED
 // org — a caller resolved to any other org gets ErrRepoNotFound (the 404),
 // mirroring the production (org_id, project_id) row lookup.
-type filesStubRepoResolver struct{ rec *models.GitRepository }
+type filesStubRepoResolver struct{ rec *sourcecontrol.GitRepository }
 
-func (s filesStubRepoResolver) GetRepo(_ context.Context, orgID, _ string) (*models.GitRepository, error) {
+func (s filesStubRepoResolver) GetRepo(_ context.Context, orgID, _ string) (*sourcecontrol.GitRepository, error) {
 	if s.rec == nil || orgID != s.rec.OrgID {
 		return nil, sourcecontrol.ErrRepoNotFound
 	}
@@ -100,7 +99,7 @@ type filesRig struct {
 func newFilesRig(t *testing.T, seed map[string]string) *filesRig {
 	t.Helper()
 	remote := gittest.NewRemote(t, gittest.WithSeed(seed, "seed"))
-	rec := &models.GitRepository{
+	rec := &sourcecontrol.GitRepository{
 		OrgID:         filesTestOrg,
 		ProjectID:     filesTestProj,
 		RepoURL:       remote.URL(),
@@ -114,7 +113,7 @@ func newFilesRig(t *testing.T, seed map[string]string) *filesRig {
 	engine := workspacetest.NewEngine(t)
 	gitOps := sourcecontrol.NewGitOpsService(filesStubResolver{}, engine)
 	svc := spec.NewFilesService(filesStubRepoResolver{rec: rec}, gitOps)
-	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{Spec: mustSpecHandlers(t, spec.Deps{Files: svc})}})
+	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{Spec: mustSpecHandlers(t, spec.Deps{Files: svc})}})
 	return &filesRig{h: h, remote: remote, engine: engine}
 }
 

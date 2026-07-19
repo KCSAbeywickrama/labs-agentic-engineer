@@ -20,16 +20,15 @@ import (
 	"context"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // WorkflowRunStore is the narrow port the activities use to maintain the
 // workflow_runs lookup index. Satisfied by
-// repositories.WorkflowRunRepository. Kept as a devflow-local interface so
+// delivery.WorkflowRunRepository. Kept as a devflow-local interface so
 // the workflows/activities depend on a capability, not the concrete repo
 // (and tests can fake it).
 type WorkflowRunStore interface {
-	Record(ctx context.Context, row *models.DevflowRun) error
+	Record(ctx context.Context, row *delivery.DevflowRun) error
 	SetStatus(ctx context.Context, workflowID, status, reason string) error
 	// SetTaskCounts writes the dev run's task tally as absolute values
 	// (idempotent under activity retry — never an increment), scoped to one

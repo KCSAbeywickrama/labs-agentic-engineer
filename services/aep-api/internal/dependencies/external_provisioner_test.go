@@ -26,7 +26,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // newFakeRC returns a ResourceClientMock whose GetResource already reports a
@@ -71,9 +71,9 @@ func (s *fakeSecretWriter) WriteExternalResourceSecret(_ context.Context, _, _, 
 }
 
 // fakeLookup serves one registered external resource by name.
-type fakeLookup struct{ er *models.ExternalResource }
+type fakeLookup struct{ er *ExternalResource }
 
-func (f *fakeLookup) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
+func (f *fakeLookup) Get(_ context.Context, _, name string) (*ExternalResource, error) {
 	if f.er != nil && f.er.Name == name {
 		return f.er, nil
 	}
@@ -94,10 +94,10 @@ func TestProvision_OrchestratesResourceModel(t *testing.T) {
 	sw := &fakeSecretWriter{}
 	p := newTestProvisioner(nil, rc, sw)
 
-	er := &models.ExternalResource{
+	er := &ExternalResource{
 		Name:             "openweather",
 		ResourceTypeName: "openweather",
-		ConfigKeys: []models.ConfigKey{
+		ConfigKeys: []spec.ConfigKey{
 			{Key: "OPENWEATHER_BASE_URL", Secret: false},
 			{Key: "OPENWEATHER_API_KEY", Secret: true},
 		},
@@ -176,9 +176,9 @@ func TestProvision_AllPlain_NoSecretWrite(t *testing.T) {
 	rc := newFakeRC("rel-1")
 	sw := &fakeSecretWriter{}
 	p := newTestProvisioner(nil, rc, sw)
-	er := &models.ExternalResource{
+	er := &ExternalResource{
 		Name: "plainsvc", ResourceTypeName: "plainsvc",
-		ConfigKeys: []models.ConfigKey{{Key: "BASE_URL"}},
+		ConfigKeys: []spec.ConfigKey{{Key: "BASE_URL"}},
 	}
 	byEnv := map[string]EnvValues{"development": {Plain: map[string]string{"BASE_URL": "https://x"}}}
 	if _, err := p.Provision(context.Background(), "default", "oc-org-1", "proj", er, byEnv); err != nil {
@@ -194,9 +194,9 @@ func TestProvision_SecretValuesWithoutSMAPI_Fails(t *testing.T) {
 
 	rc := newFakeRC("rel-1")
 	p := newTestProvisioner(nil, rc, &fakeSecretWriter{disabled: true})
-	er := &models.ExternalResource{
+	er := &ExternalResource{
 		Name: "openweather", ResourceTypeName: "openweather",
-		ConfigKeys: []models.ConfigKey{{Key: "OPENWEATHER_API_KEY", Secret: true}},
+		ConfigKeys: []spec.ConfigKey{{Key: "OPENWEATHER_API_KEY", Secret: true}},
 	}
 	byEnv := map[string]EnvValues{"development": {Secret: map[string]string{"OPENWEATHER_API_KEY": "k"}}}
 	if _, err := p.Provision(context.Background(), "default", "oc-org-1", "proj", er, byEnv); err == nil {
@@ -214,9 +214,9 @@ func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
 	sw := &fakeSecretWriter{}
 	p := newTestProvisioner(nil, rc, sw)
 
-	er := &models.ExternalResource{
+	er := &ExternalResource{
 		Name: "openweather", ResourceTypeName: "openweather",
-		ConfigKeys: []models.ConfigKey{
+		ConfigKeys: []spec.ConfigKey{
 			{Key: "OPENWEATHER_BASE_URL", Secret: false},
 			{Key: "OPENWEATHER_API_KEY", Secret: true},
 		},
@@ -270,7 +270,7 @@ func TestProvision_Validation(t *testing.T) {
 	if _, err := p.Provision(context.Background(), "default", "oc-org-1", "proj", nil, nil); err == nil {
 		t.Error("want error on nil external resource")
 	}
-	er := &models.ExternalResource{Name: "x", ResourceTypeName: "x", ConfigKeys: []models.ConfigKey{{Key: "K"}}}
+	er := &ExternalResource{Name: "x", ResourceTypeName: "x", ConfigKeys: []spec.ConfigKey{{Key: "K"}}}
 	if _, err := p.Provision(context.Background(), "", "oc-org-1", "proj", er, nil); err == nil {
 		t.Error("want error on empty orgHandle")
 	}
@@ -287,9 +287,9 @@ func TestStageSecrets_WritesPerEnvReturnsRefs(t *testing.T) {
 	t.Parallel()
 	sw := &fakeSecretWriter{}
 	p := newTestProvisioner(nil, newFakeRC("rel-1"), sw)
-	er := &models.ExternalResource{
+	er := &ExternalResource{
 		Name: "stripe", ResourceTypeName: "stripe",
-		ConfigKeys: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true}},
+		ConfigKeys: []spec.ConfigKey{{Key: "STRIPE_KEY", Secret: true}},
 	}
 	refByEnv, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er, map[string]map[string]string{
 		"development": {"STRIPE_KEY": "sk_live"},
@@ -313,7 +313,7 @@ func TestStageSecrets_WritesPerEnvReturnsRefs(t *testing.T) {
 func TestStageSecrets_SecretsWithoutSMAPIFails(t *testing.T) {
 	t.Parallel()
 	p := newTestProvisioner(nil, newFakeRC("rel-1"), &fakeSecretWriter{disabled: true})
-	er := &models.ExternalResource{Name: "stripe"}
+	er := &ExternalResource{Name: "stripe"}
 	if _, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er,
 		map[string]map[string]string{"development": {"STRIPE_KEY": "k"}}); err == nil {
 		t.Fatal("want error when SM-API disabled but secrets present")
@@ -390,9 +390,9 @@ func TestResolveRunnerSecrets_ReadsBindingStorePath(t *testing.T) {
 			Spec: openchoreo.ResourceReleaseBindingSpec{ResourceTypeEnvironmentConfigs: cfg},
 		}, nil
 	}
-	lookup := &fakeLookup{er: &models.ExternalResource{
+	lookup := &fakeLookup{er: &ExternalResource{
 		Name: "openweather", ResourceTypeName: "openweather",
-		ConfigKeys: []models.ConfigKey{
+		ConfigKeys: []spec.ConfigKey{
 			{Key: "OPENWEATHER_BASE_URL"},
 			{Key: "OPENWEATHER_API_KEY", Secret: true},
 		},
@@ -422,9 +422,9 @@ func TestResolveRunnerSecrets_SkipsAllPlainAndUnprovisioned(t *testing.T) {
 	rc.GetBindingFunc = func(_ context.Context, _, _ string) (*openchoreo.ResourceReleaseBinding, error) {
 		return nil, nil // not yet provisioned
 	}
-	lookup := &fakeLookup{er: &models.ExternalResource{
+	lookup := &fakeLookup{er: &ExternalResource{
 		Name:       "plainsvc",
-		ConfigKeys: []models.ConfigKey{{Key: "BASE_URL"}},
+		ConfigKeys: []spec.ConfigKey{{Key: "BASE_URL"}},
 	}}
 	p := newTestProvisioner(lookup, rc, &fakeSecretWriter{})
 	got, err := p.ResolveRunnerSecrets(context.Background(), "default", "proj", "development", []string{"plainsvc"})

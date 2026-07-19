@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
 const (
@@ -220,7 +220,20 @@ func (e ListTasksParamsState) Valid() bool {
 }
 
 // AccessRequest defines model for AccessRequest.
-type AccessRequest = models.AccessRequest
+type AccessRequest struct {
+	ConsumerComponentName string    `json:"consumerComponentName"`
+	ConsumerProjectID     string    `json:"consumerProjectId"`
+	CreatedAt             time.Time `json:"createdAt"`
+	ID                    string    `json:"id"`
+	OrgServiceName        string    `json:"orgServiceName"`
+	ProviderComponentName string    `json:"providerComponentName,omitempty"`
+	ProviderIssueNumber   int64     `json:"providerIssueNumber,omitempty"`
+	ProviderIssueURL      string    `json:"providerIssueUrl,omitempty"`
+	ProviderProjectID     string    `json:"providerProjectId,omitempty"`
+	ProviderTaskID        string    `json:"providerTaskId,omitempty"`
+	Status                string    `json:"status"`
+	UpdatedAt             time.Time `json:"updatedAt"`
+}
 
 // ApplyConflict One file whose baseSha no longer matches HEAD.
 type ApplyConflict struct {
@@ -404,7 +417,14 @@ type Component struct {
 }
 
 // ComponentConfig defines model for ComponentConfig.
-type ComponentConfig = models.ComponentConfig
+type ComponentConfig struct {
+	ComponentName string    `json:"componentName"`
+	CreatedAt     time.Time `json:"createdAt"`
+	EnvVars       []EnvVar  `json:"envVars"`
+	ID            string    `json:"id"`
+	ProjectName   string    `json:"projectName"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
 
 // ComponentList defines model for ComponentList.
 type ComponentList struct {
@@ -435,10 +455,10 @@ type ConfigKeyView struct {
 }
 
 // ConfigPatch defines model for ConfigPatch.
-type ConfigPatch = models.ConfigPatch
+type ConfigPatch = orgconfig.ConfigPatch
 
 // ConfigProjection defines model for ConfigProjection.
-type ConfigProjection = models.ConfigProjection
+type ConfigProjection = orgconfig.ConfigProjection
 
 // ConfigValue defines model for ConfigValue.
 type ConfigValue struct {
@@ -564,7 +584,10 @@ type DiscoverOutputBody struct {
 }
 
 // EnvVar defines model for EnvVar.
-type EnvVar = models.EnvVar
+type EnvVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
 
 // Error Flat error envelope returned by every non-2xx response.
 type Error struct {
@@ -622,10 +645,10 @@ type FileMeta struct {
 }
 
 // GitProviderProjection defines model for GitProviderProjection.
-type GitProviderProjection = models.GitProviderProjection
+type GitProviderProjection = orgconfig.GitProviderProjection
 
 // IDPProjection defines model for IDPProjection.
-type IDPProjection = models.IDPProjection
+type IDPProjection = orgconfig.IDPProjection
 
 // ImportResult defines model for ImportResult.
 type ImportResult struct {
@@ -663,7 +686,7 @@ type IssueResult struct {
 }
 
 // LLMProjection defines model for LLMProjection.
-type LLMProjection = models.LLMProjection
+type LLMProjection = orgconfig.LLMProjection
 
 // Lineage defines model for Lineage.
 type Lineage struct {

@@ -19,9 +19,9 @@ package execution
 import (
 	"context"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // The consumer ports the funnel / sweep / events drive. Each is the narrow
@@ -90,16 +90,16 @@ type DesignReader interface {
 	OrgServiceDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error)
 }
 
-// ExecutionStore is the executions rows repository (repositories.ExecutionRepository).
+// ExecutionStore is the executions rows repository (delivery.ExecutionRepository).
 // Restated as a local port so the funnel depends on the verbs it drives.
 type ExecutionStore interface {
-	TryAdmit(ctx context.Context, e *models.Execution) (admitted bool, row *models.Execution, err error)
-	Finish(ctx context.Context, id, status, reason string) (*models.Execution, error)
-	LatestPerKind(ctx context.Context, repo string, issueNumber int) (map[string]*models.Execution, error)
-	LatestPerKindForRepo(ctx context.Context, repo string) (map[int]map[string]*models.Execution, error)
-	ListByIssue(ctx context.Context, repo string, issueNumber int) ([]models.Execution, error)
-	ListActive(ctx context.Context) ([]models.Execution, error)
+	TryAdmit(ctx context.Context, e *delivery.Execution) (admitted bool, row *delivery.Execution, err error)
+	Finish(ctx context.Context, id, status, reason string) (*delivery.Execution, error)
+	LatestPerKind(ctx context.Context, repo string, issueNumber int) (map[string]*delivery.Execution, error)
+	LatestPerKindForRepo(ctx context.Context, repo string) (map[int]map[string]*delivery.Execution, error)
+	ListByIssue(ctx context.Context, repo string, issueNumber int) ([]delivery.Execution, error)
+	ListActive(ctx context.Context) ([]delivery.Execution, error)
 }
 
 // Compile-time proof the concrete repository satisfies the port.
-var _ ExecutionStore = (repositories.ExecutionRepository)(nil)
+var _ ExecutionStore = (delivery.ExecutionRepository)(nil)

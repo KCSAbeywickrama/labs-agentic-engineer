@@ -23,8 +23,8 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // Structural compile-time check (dependency-management Phase 5): *Catalog is the
@@ -213,10 +213,10 @@ func TestCatalog_FindByComponent(t *testing.T) {
 
 // fakeRepoLocator resolves an app-factory provider's git repo row by project id.
 type fakeRepoLocator struct {
-	byProject map[string]*models.GitRepository
+	byProject map[string]*sourcecontrol.GitRepository
 }
 
-func (f fakeRepoLocator) GetByOrgAndProjectID(_ context.Context, _, projectID string) (*models.GitRepository, error) {
+func (f fakeRepoLocator) GetByOrgAndProjectID(_ context.Context, _, projectID string) (*sourcecontrol.GitRepository, error) {
 	return f.byProject[projectID], nil
 }
 
@@ -229,8 +229,8 @@ func (f fakeDesignReader) ReadDesign(_ context.Context, _, projectID string) (*s
 	return f.byProject[projectID], nil
 }
 
-func designWith(comp models.DesignComponent) *spec.DesignFile {
-	return &spec.DesignFile{Components: []models.DesignComponent{comp}}
+func designWith(comp spec.DesignComponent) *spec.DesignFile {
+	return &spec.DesignFile{Components: []spec.DesignComponent{comp}}
 }
 
 // (a) An endpoint whose deployed Workload CR already carries an inline schema
@@ -242,7 +242,7 @@ func TestResolve_InlineFromSchema(t *testing.T) {
 		Visibility: []string{"namespace"}, SchemaType: "openapi", SchemaContent: "openapi: 3.0.3\ninfo: {}\n",
 	}
 	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
-		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*sourcecontrol.GitRepository{
 			"hr": {RepoURL: "https://github.com/acme/hr.git", DefaultBranch: "main"},
 		}}),
 	)
@@ -276,9 +276,9 @@ func TestResolve_InlineFromDesignBundle(t *testing.T) {
 	openapiSpec := "openapi: 3.0.3\ninfo:\n  title: Employee API\n"
 	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
 		WithDesignReader(fakeDesignReader{byProject: map[string]*spec.DesignFile{
-			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: openapiSpec}),
+			"hr": designWith(spec.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: openapiSpec}),
 		}}),
-		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*sourcecontrol.GitRepository{
 			"hr": {RepoURL: "https://github.com/acme/hr.git", DefaultBranch: "main"},
 		}}),
 	)
@@ -313,7 +313,7 @@ func TestResolve_InlineFromDesignBundle_ProvenancePathUsesMatchedComponentCasing
 	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
 		WithDesignReader(fakeDesignReader{byProject: map[string]*spec.DesignFile{
 			// Committed folder casing differs from the endpoint's Component field.
-			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: openapiSpec}),
+			"hr": designWith(spec.DesignComponent{Name: "employee-api", AppPath: "svc", OpenAPISpec: openapiSpec}),
 		}}),
 	)
 
@@ -341,7 +341,7 @@ func TestResolve_InlineFromDesignBundle_ProjectPrefixedComponentName(t *testing.
 	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
 		WithDesignReader(fakeDesignReader{byProject: map[string]*spec.DesignFile{
 			// Design bundle stores the component under its UNPREFIXED authored name.
-			"myproj": designWith(models.DesignComponent{Name: "svc", OpenAPISpec: openapiSpec}),
+			"myproj": designWith(spec.DesignComponent{Name: "svc", OpenAPISpec: openapiSpec}),
 		}}),
 	)
 
@@ -368,9 +368,9 @@ func TestResolve_RepoCoords(t *testing.T) {
 	cat := NewCatalog(fakeRC([]openchoreo.WorkloadEndpointInfo{e}),
 		// design bundle present but component has NO openapi.yaml → not inline.
 		WithDesignReader(fakeDesignReader{byProject: map[string]*spec.DesignFile{
-			"hr": designWith(models.DesignComponent{Name: "employee-api", AppPath: "services/employee"}),
+			"hr": designWith(spec.DesignComponent{Name: "employee-api", AppPath: "services/employee"}),
 		}}),
-		WithRepoLocator(fakeRepoLocator{byProject: map[string]*models.GitRepository{
+		WithRepoLocator(fakeRepoLocator{byProject: map[string]*sourcecontrol.GitRepository{
 			"hr": {RepoURL: "https://github.com/acme/hr", DefaultBranch: "main"},
 		}}),
 	)
@@ -473,7 +473,7 @@ func TestListResolved_MemoizesDesignReadPerProject(t *testing.T) {
 		{Project: "hr", Component: "benefits-api", Name: "http", Type: "HTTP", Port: 8082, Visibility: []string{"namespace"}},
 	}
 	reader := &countingDesignReader{byProject: map[string]*spec.DesignFile{
-		"hr": designWith(models.DesignComponent{Name: "employee-api", OpenAPISpec: "openapi: 3.0.3\n"}),
+		"hr": designWith(spec.DesignComponent{Name: "employee-api", OpenAPISpec: "openapi: 3.0.3\n"}),
 	}}
 	cat := NewCatalog(fakeRC(eps), WithDesignReader(reader))
 

@@ -37,27 +37,28 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
-	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/dependencies"
 	dephttpapi "github.com/wso2/aep/aep-api/internal/dependencies/httpapi"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // ----- minimal port fakes ------------------------------------------------------
 
 type cCatalog struct {
-	entries map[string]*models.ExternalResource
+	entries map[string]*dependencies.ExternalResource
 	deleted []string
 }
 
-func (f *cCatalog) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
+func (f *cCatalog) Get(_ context.Context, _, name string) (*dependencies.ExternalResource, error) {
 	return f.entries[name], nil
 }
-func (f *cCatalog) List(_ context.Context, _ string) ([]models.ExternalResource, error) {
-	out := make([]models.ExternalResource, 0, len(f.entries))
+func (f *cCatalog) List(_ context.Context, _ string) ([]dependencies.ExternalResource, error) {
+	out := make([]dependencies.ExternalResource, 0, len(f.entries))
 	for _, e := range f.entries {
 		out = append(out, *e)
 	}
@@ -68,9 +69,9 @@ func (f *cCatalog) Delete(_ context.Context, _, name string) error {
 	return nil
 }
 
-type cDesign struct{ comps []models.DesignComponent }
+type cDesign struct{ comps []spec.DesignComponent }
 
-func (f cDesign) ReadDesignComponents(context.Context, string, string) ([]models.DesignComponent, error) {
+func (f cDesign) ReadDesignComponents(context.Context, string, string) ([]spec.DesignComponent, error) {
 	return f.comps, nil
 }
 
@@ -124,11 +125,11 @@ func readyBindingWith(outputs ...string) *openchoreo.ResourceReleaseBinding {
 
 // stripeConsumerDesign declares an external dep "stripe" on project "proj"'s
 // component "orders" — the consumer the catalog list/delete guard scans for.
-func stripeConsumerDesign() []models.DesignComponent {
-	return []models.DesignComponent{{
+func stripeConsumerDesign() []spec.DesignComponent {
+	return []spec.DesignComponent{{
 		Name: "orders",
-		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe", Config: []models.ConfigKey{
+		Dependencies: []spec.Dependency{
+			{Kind: spec.DependencyKindExternal, Name: "stripe", Config: []spec.ConfigKey{
 				{Key: "api_key", Secret: true}, {Key: "region"},
 			}},
 		},
@@ -141,7 +142,7 @@ func newProvHarness(t *testing.T, svc *provisioning.Service) *componenttest.Harn
 	if err != nil {
 		t.Fatalf("assemble dependencies domain: %v", err)
 	}
-	return componenttest.New(t, componenttest.Options{Deps: api.Deps{Dependencies: deps}})
+	return componenttest.New(t, componenttest.Options{Deps: edge.Deps{Dependencies: deps}})
 }
 
 // ----- tests --------------------------------------------------------------------
@@ -150,7 +151,7 @@ func newProvHarness(t *testing.T, svc *provisioning.Service) *componenttest.Harn
 // the flat envelope, mirroring the retired RegisterResources nil guard.
 func TestProvisioningComponent_Unconfigured503(t *testing.T) {
 	t.Parallel()
-	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{}})
+	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{}})
 
 	resp := h.AsOrg("acme").Get("/api/v1/dependencies/external-resources")
 	if resp.Code != 503 {
@@ -176,8 +177,8 @@ func TestProvisioningComponent_NoClaims401(t *testing.T) {
 func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	t.Parallel()
 	svc := provisioning.NewService(provisioning.Deps{
-		Catalog: &cCatalog{entries: map[string]*models.ExternalResource{
-			"stripe": {Name: "stripe", Description: "payments", ConfigKeys: []models.ConfigKey{
+		Catalog: &cCatalog{entries: map[string]*dependencies.ExternalResource{
+			"stripe": {Name: "stripe", Description: "payments", ConfigKeys: []spec.ConfigKey{
 				{Key: "api_key", Secret: true}, {Key: "region"},
 			}},
 		}},

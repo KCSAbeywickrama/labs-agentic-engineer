@@ -30,8 +30,6 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // ensureCacheTTL bounds how long a successful EnsureForOuHandle result
@@ -87,7 +85,7 @@ type OUValidator interface {
 }
 
 type organizationService struct {
-	repo  repositories.OrganizationRepository
+	repo  OrganizationRepository
 	nsCli openchoreo.NamespaceClient
 
 	// ouValidator (optional) validates a JWT `ouId` against Thunder before the
@@ -104,9 +102,15 @@ type organizationService struct {
 	ensureMu       sync.RWMutex
 	ensureCache    map[string]time.Time
 	ensureInflight singleflight.Group
+
+	// ensureCacheTTLOverride, when non-zero, replaces ensureCacheTTL. Always
+	// zero in production wiring; WithEnsureCacheTTL is a test-only knob so a
+	// black-box test can prove the cache-expiry re-verify behavior through
+	// real time passage instead of reaching into the unexported cache map.
+	ensureCacheTTLOverride time.Duration
 }
 
-func NewOrganizationService(repo repositories.OrganizationRepository, nsCli openchoreo.NamespaceClient) *organizationService {
+func NewOrganizationService(repo OrganizationRepository, nsCli openchoreo.NamespaceClient) *organizationService {
 	return &organizationService{
 		repo:        repo,
 		nsCli:       nsCli,
@@ -117,6 +121,22 @@ func NewOrganizationService(repo repositories.OrganizationRepository, nsCli open
 // SetOUValidator wires the Thunder OU-existence checker (composition root,
 // after the Thunder admin client is constructed).
 func (s *organizationService) SetOUValidator(v OUValidator) { s.ouValidator = v }
+
+// WithEnsureCacheTTL overrides the ensure-cache TTL (default ensureCacheTTL).
+// Test-only: production composition never calls this.
+func (s *organizationService) WithEnsureCacheTTL(d time.Duration) *organizationService {
+	s.ensureCacheTTLOverride = d
+	return s
+}
+
+// cacheTTL returns the effective ensure-cache TTL: the WithEnsureCacheTTL
+// override when set, else the package default.
+func (s *organizationService) cacheTTL() time.Duration {
+	if s.ensureCacheTTLOverride > 0 {
+		return s.ensureCacheTTLOverride
+	}
+	return ensureCacheTTL
+}
 
 // ouIsTrustworthy returns false ONLY when a wired validator positively reports
 // the OU does not exist. Empty id, no validator, or a transient validation
@@ -158,7 +178,7 @@ func (s *organizationService) List(ctx context.Context) (*gen.OrganizationList, 
 	if err != nil {
 		return nil, fmt.Errorf("load organizations: %w", err)
 	}
-	byName := make(map[string]models.Organization, len(rows))
+	byName := make(map[string]Organization, len(rows))
 	for _, r := range rows {
 		byName[r.Name] = r
 	}
@@ -198,7 +218,7 @@ func (s *organizationService) EnsureForOuHandle(ctx context.Context, ouHandle st
 	s.ensureMu.RLock()
 	verifiedAt, ok := s.ensureCache[ouHandle]
 	s.ensureMu.RUnlock()
-	cacheWarm := ok && time.Since(verifiedAt) < ensureCacheTTL
+	cacheWarm := ok && time.Since(verifiedAt) < s.cacheTTL()
 
 	if !cacheWarm {
 		// Coalesce concurrent first-sights of the same handle into one
@@ -209,7 +229,7 @@ func (s *organizationService) EnsureForOuHandle(ctx context.Context, ouHandle st
 			s.ensureMu.RLock()
 			verifiedAt, ok := s.ensureCache[ouHandle]
 			s.ensureMu.RUnlock()
-			if ok && time.Since(verifiedAt) < ensureCacheTTL {
+			if ok && time.Since(verifiedAt) < s.cacheTTL() {
 				return nil, nil
 			}
 			if err := s.verifyForOuHandle(ctx, ouHandle, thunderOrgUUID); err != nil {
@@ -308,8 +328,8 @@ func (s *organizationService) ensureThunderUUID(ctx context.Context, ouHandle, t
 // the org handle (the identifier the BFF puts in OC URLs and every per-org
 // lookup), while List keys by the OC namespace name it enumerated. Returns the
 // resulting (possibly racing) row; on hard failure returns a zero row and logs.
-func (s *organizationService) backfillRow(ctx context.Context, name string, view gen.OrganizationView, thunderOrgUUID string) models.Organization {
-	row := models.Organization{
+func (s *organizationService) backfillRow(ctx context.Context, name string, view gen.OrganizationView, thunderOrgUUID string) Organization {
+	row := Organization{
 		UUID:        uuid.New(),
 		Name:        name,
 		DisplayName: view.DisplayName,
@@ -328,12 +348,12 @@ func (s *organizationService) backfillRow(ctx context.Context, name string, view
 	if err == nil {
 		return row
 	}
-	if repositories.IsUniqueViolation(err) {
+	if IsUniqueViolation(err) {
 		// Lost the race with a concurrent caller; re-read.
 		if existing, rerr := s.repo.GetByName(ctx, name); rerr == nil && existing != nil {
 			return *existing
 		}
 	}
 	slog.WarnContext(ctx, "backfill organization row failed", "name", name, "error", err)
-	return models.Organization{}
+	return Organization{}
 }

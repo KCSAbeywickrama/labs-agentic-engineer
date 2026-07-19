@@ -24,15 +24,17 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
-func devBinding(name, readyStatus, readyReason string) models.ReleaseBindingSummary {
-	return models.ReleaseBindingSummary{
+func devBinding(name, readyStatus, readyReason string) openchoreo.ReleaseBindingSummary {
+	return openchoreo.ReleaseBindingSummary{
 		ComponentName: name,
 		Environment:   "development",
 		ReadyStatus:   readyStatus,
@@ -60,11 +62,11 @@ func TestStageDerivation_FullPipeline(t *testing.T) {
 			SpecVersion: "v2",
 			SpecDirty:   true,
 		},
-		runs: []models.DevflowRun{
-			{Tag: "v2", Status: models.WorkflowStatusRunning, TasksTotal: 5, TasksDone: 2, TasksFailed: 1},
-			{Tag: "v1", Status: models.WorkflowStatusCompleted, TasksTotal: 3, TasksDone: 3},
+		runs: []delivery.DevflowRun{
+			{Tag: "v2", Status: delivery.WorkflowStatusRunning, TasksTotal: 5, TasksDone: 2, TasksFailed: 1},
+			{Tag: "v1", Status: delivery.WorkflowStatusCompleted, TasksTotal: 3, TasksDone: 3},
 		},
-		bindings: []models.ReleaseBindingSummary{
+		bindings: []openchoreo.ReleaseBindingSummary{
 			devBinding("api", "True", "Ready"),
 			devBinding("web", "False", "ResourcesProgressing"),
 			{ComponentName: "api", Environment: "production", ReadyStatus: "True", ReadyReason: "Ready"}, // ignored: not dev
@@ -101,7 +103,7 @@ func TestBuildStage_RowMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
-		runs       []models.DevflowRun
+		runs       []delivery.DevflowRun
 		wantVer    string
 		wantStatus string
 		wantActive int64
@@ -109,25 +111,25 @@ func TestBuildStage_RowMapping(t *testing.T) {
 		{name: "no rows → idle", wantStatus: "idle"},
 		{
 			name:       "completed → succeeded, tally frozen",
-			runs:       []models.DevflowRun{{Tag: "v3", Status: models.WorkflowStatusCompleted, TasksTotal: 4, TasksDone: 4}},
+			runs:       []delivery.DevflowRun{{Tag: "v3", Status: delivery.WorkflowStatusCompleted, TasksTotal: 4, TasksDone: 4}},
 			wantVer:    "v3",
 			wantStatus: "succeeded",
 		},
 		{
 			name:       "failed → failed",
-			runs:       []models.DevflowRun{{Tag: "v3", Status: models.WorkflowStatusFailed, TasksTotal: 2, TasksFailed: 2}},
+			runs:       []delivery.DevflowRun{{Tag: "v3", Status: delivery.WorkflowStatusFailed, TasksTotal: 2, TasksFailed: 2}},
 			wantVer:    "v3",
 			wantStatus: "failed",
 		},
 		{
 			name:       "canceled → failed",
-			runs:       []models.DevflowRun{{Tag: "v3", Status: models.WorkflowStatusCanceled}},
+			runs:       []delivery.DevflowRun{{Tag: "v3", Status: delivery.WorkflowStatusCanceled}},
 			wantVer:    "v3",
 			wantStatus: "failed",
 		},
 		{
 			name:       "active clamps at zero when the total write was lost",
-			runs:       []models.DevflowRun{{Tag: "v3", Status: models.WorkflowStatusRunning, TasksDone: 2}},
+			runs:       []delivery.DevflowRun{{Tag: "v3", Status: delivery.WorkflowStatusRunning, TasksDone: 2}},
 			wantVer:    "v3",
 			wantStatus: "running",
 			wantActive: 0,
@@ -161,14 +163,14 @@ func TestDeployStage_ConditionMatrix(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
-		bindings   []models.ReleaseBindingSummary
+		bindings   []openchoreo.ReleaseBindingSummary
 		wantStatus string
 		wantReady  int64
 	}{
 		{name: "no bindings → none", wantStatus: "none"},
 		{
 			name: "all ready → deployed",
-			bindings: []models.ReleaseBindingSummary{
+			bindings: []openchoreo.ReleaseBindingSummary{
 				devBinding("api", "True", "Ready"),
 				devBinding("web", "True", "Ready"),
 			},
@@ -177,7 +179,7 @@ func TestDeployStage_ConditionMatrix(t *testing.T) {
 		},
 		{
 			name: "any failure reason wins over progress",
-			bindings: []models.ReleaseBindingSummary{
+			bindings: []openchoreo.ReleaseBindingSummary{
 				devBinding("api", "True", "Ready"),
 				devBinding("web", "False", "ResourcesProgressing"),
 				devBinding("db", "False", "ResourceApplyFailed"),
@@ -187,21 +189,21 @@ func TestDeployStage_ConditionMatrix(t *testing.T) {
 		},
 		{
 			name: "unknown not-ready reason → deploying (forgiving default)",
-			bindings: []models.ReleaseBindingSummary{
+			bindings: []openchoreo.ReleaseBindingSummary{
 				devBinding("api", "False", "SomeNewReason"),
 			},
 			wantStatus: "deploying",
 		},
 		{
 			name: "absent Ready condition → deploying",
-			bindings: []models.ReleaseBindingSummary{
+			bindings: []openchoreo.ReleaseBindingSummary{
 				devBinding("api", "", ""),
 			},
 			wantStatus: "deploying",
 		},
 		{
 			name: "undeploy-state binding excluded from status and counts",
-			bindings: []models.ReleaseBindingSummary{
+			bindings: []openchoreo.ReleaseBindingSummary{
 				devBinding("api", "True", "Ready"),
 				{ComponentName: "web", Environment: "development", Undeploy: true, ReadyStatus: "False", ReadyReason: "ResourcesUndeployed"},
 			},
@@ -210,7 +212,7 @@ func TestDeployStage_ConditionMatrix(t *testing.T) {
 		},
 		{
 			name: "only non-dev bindings → none",
-			bindings: []models.ReleaseBindingSummary{
+			bindings: []openchoreo.ReleaseBindingSummary{
 				{ComponentName: "api", Environment: "production", ReadyStatus: "True", ReadyReason: "Ready"},
 			},
 			wantStatus: "none",
@@ -236,9 +238,9 @@ func TestDeployStage_ConditionMatrix(t *testing.T) {
 func TestDeployStage_VanishedTagDegrades(t *testing.T) {
 	t.Parallel()
 	fx := statusFixture{
-		runs:     []models.DevflowRun{{Tag: "v1", Status: models.WorkflowStatusCompleted}},
+		runs:     []delivery.DevflowRun{{Tag: "v1", Status: delivery.WorkflowStatusCompleted}},
 		countErr: fmt.Errorf("wrapped: %w", spec.ErrSpecTagNotFound),
-		bindings: []models.ReleaseBindingSummary{devBinding("api", "True", "Ready")},
+		bindings: []openchoreo.ReleaseBindingSummary{devBinding("api", "True", "Ready")},
 	}
 	st := mustStatus(t, fx)
 	if st.Deploy.Version != "v1" || st.Deploy.Status != "deployed" {
@@ -255,7 +257,7 @@ func TestDeployStage_VanishedTagDegrades(t *testing.T) {
 func TestDeployStage_VersionlessSkipsDenominator(t *testing.T) {
 	t.Parallel()
 	fx := statusFixture{
-		runs: []models.DevflowRun{{Tag: "v1", Status: models.WorkflowStatusRunning}},
+		runs: []delivery.DevflowRun{{Tag: "v1", Status: delivery.WorkflowStatusRunning}},
 	}
 	st := mustStatus(t, fx)
 	if st.Deploy.Version != "" {
@@ -276,18 +278,18 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 	// A dev run must exist for the builder to look up its validation child; keep
 	// it running (no completed run) so this test stays about validation, not the
 	// deploy denominator.
-	devRuns := []models.DevflowRun{{Tag: "v1", WorkflowID: "wf-dev", Status: models.WorkflowStatusRunning}}
-	child := func(status string) *models.DevflowRun {
-		return &models.DevflowRun{
-			Kind: models.WorkflowKindValidation,
+	devRuns := []delivery.DevflowRun{{Tag: "v1", WorkflowID: "wf-dev", Status: delivery.WorkflowStatusRunning}}
+	child := func(status string) *delivery.DevflowRun {
+		return &delivery.DevflowRun{
+			Kind: delivery.WorkflowKindValidation,
 			Repo: "o/r", IssueNumber: 9, ParentWorkflowID: "wf-dev", Status: status,
 		}
 	}
 	// A succeeded coding execution stamped with the open PR number (pr#42) is how
 	// the PR link is recovered without a live PR query.
 	prExecs := &fakeExecs{
-		LatestPerKindScopedFunc: func(context.Context, string, string, int) (map[string]*models.Execution, error) {
-			return map[string]*models.Execution{
+		LatestPerKindScopedFunc: func(context.Context, string, string, int) (map[string]*delivery.Execution, error) {
+			return map[string]*delivery.Execution{
 				string(taskmeta.KindCoding): {
 					Kind:   string(taskmeta.KindCoding),
 					Status: string(taskmeta.ExecSucceeded),
@@ -299,34 +301,34 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		child      *models.DevflowRun
-		execs      repositories.ExecutionRepository
+		child      *delivery.DevflowRun
+		execs      delivery.ExecutionRepository
 		wantStatus string
 		wantURL    string
 	}{
 		{name: "no child → none, no link", wantStatus: "none", wantURL: ""},
 		{
 			name:       "running before a PR → running, issue link",
-			child:      child(models.WorkflowStatusRunning),
+			child:      child(delivery.WorkflowStatusRunning),
 			wantStatus: "running",
 			wantURL:    "https://github.com/o/r/issues/9",
 		},
 		{
 			name:       "completed with an open PR → completed, PR link",
-			child:      child(models.WorkflowStatusCompleted),
+			child:      child(delivery.WorkflowStatusCompleted),
 			execs:      prExecs,
 			wantStatus: "completed",
 			wantURL:    "https://github.com/o/r/pull/42",
 		},
 		{
 			name:       "failed → failed, issue link (no succeeded coding row)",
-			child:      child(models.WorkflowStatusFailed),
+			child:      child(delivery.WorkflowStatusFailed),
 			wantStatus: "failed",
 			wantURL:    "https://github.com/o/r/issues/9",
 		},
 		{
 			name:       "canceled → failed",
-			child:      child(models.WorkflowStatusCanceled),
+			child:      child(delivery.WorkflowStatusCanceled),
 			wantStatus: "failed",
 			wantURL:    "https://github.com/o/r/issues/9",
 		},
@@ -350,8 +352,8 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 func TestRepoNotReady_ZeroValueStages(t *testing.T) {
 	t.Parallel()
 	repoSvc := &fakeRepoSvc{
-		GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
-			return &models.GitRepository{Status: "pending", RepoURL: "https://github.com/o/r.git"}, nil
+		GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
+			return &sourcecontrol.GitRepository{Status: "pending", RepoURL: "https://github.com/o/r.git"}, nil
 		},
 	}
 	// Sources deliberately unwired: the short-circuit must not touch them.

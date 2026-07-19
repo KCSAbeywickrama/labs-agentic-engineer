@@ -22,11 +22,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+
 	"github.com/wso2/aep/aep-api/internal/delivery/validation"
 	"github.com/wso2/aep/aep-api/internal/gen"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // validationCriteriaPath is the acceptance-oracle file the validation minter
@@ -56,7 +57,7 @@ func (a validationCriteria) ReadValidationCriteria(ctx context.Context, orgID, p
 // ExecutionLocator port: it resolves a runner's execution id to its project,
 // org-fenced (GetByIDScoped returns nil for a different org — the tenant fence).
 type validationExecLocator struct {
-	repo repositories.ExecutionRepository
+	repo delivery.ExecutionRepository
 }
 
 func (l validationExecLocator) LookupExecutionProject(ctx context.Context, orgHandle, executionID string) (string, bool, error) {

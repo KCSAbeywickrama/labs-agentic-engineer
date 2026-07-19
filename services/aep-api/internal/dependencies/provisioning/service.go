@@ -22,15 +22,17 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // defaultEnv is the single environment provisioning pins in v1 — the watcher and
 // the declarative-wiring comment both read the `development` binding (upstream
 // parity: the two naming schemes are deliberately identical).
-const defaultEnv = models.DevEnvironmentName
+const defaultEnv = openchoreo.DevEnvironmentName
 
 // Service coordinates dependency provisioning on the aep:provision funnel: it
 // mints gate issues, collects external values, provisions platform resources,
@@ -120,7 +122,7 @@ func NewService(d Deps) *Service {
 // name, not by the consuming component). Returns ErrDepNotFound when no
 // dependency of that name exists and ErrDepWrongKind when it exists as another
 // kind.
-func (s *Service) findDepInProject(ctx context.Context, orgID, projectID, depName, kind string) (*models.Dependency, error) {
+func (s *Service) findDepInProject(ctx context.Context, orgID, projectID, depName, kind string) (*spec.Dependency, error) {
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read design: %w", err)
@@ -177,8 +179,8 @@ func (s *Service) findProvisionIssue(ctx context.Context, orgID, projectID, depN
 // LatestPerKind(repo, issue) resolves it. Returns (nil, false) when a provision
 // run is already active for this gate (the mutex lost the race) — an idempotent
 // re-provision.
-func (s *Service) admitProvisionRow(ctx context.Context, orgID, projectID, repo, depName string, issueNumber int) (row *models.Execution, admitted bool, err error) {
-	admitted, row, err = s.execs.TryAdmit(ctx, &models.Execution{
+func (s *Service) admitProvisionRow(ctx context.Context, orgID, projectID, repo, depName string, issueNumber int) (row *delivery.Execution, admitted bool, err error) {
+	admitted, row, err = s.execs.TryAdmit(ctx, &delivery.Execution{
 		OrgID:       orgID,
 		ProjectID:   projectID,
 		Repo:        repo,

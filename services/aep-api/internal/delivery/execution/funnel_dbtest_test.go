@@ -21,11 +21,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // TestFunnel_AdmissionUnderConcurrency_DB drives the §5 admission invariant end
@@ -37,7 +37,7 @@ import (
 func TestFunnel_AdmissionUnderConcurrency_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t) // self-skips under -short / no Docker
-	repo := repositories.NewExecutionRepository(db)
+	repo := delivery.NewExecutionRepository(db)
 
 	// One open, executable coding Task with no deps.
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
@@ -92,7 +92,7 @@ func TestFunnel_ReAdmittableAfterFinish_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
-	repo := repositories.NewExecutionRepository(db)
+	repo := delivery.NewExecutionRepository(db)
 
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
 	exec := &fakeExecutor{} // records only — the admitted row stays queued (active)
@@ -151,7 +151,7 @@ func TestFunnel_ReevaluateAdmitsWhenDepsSatisfied_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
-	repo := repositories.NewExecutionRepository(db)
+	repo := delivery.NewExecutionRepository(db)
 
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{
 		taskIssue(1, "user-service", nil, nil, "open"),
@@ -176,7 +176,7 @@ func TestFunnel_ReevaluateAdmitsWhenDepsSatisfied_DB(t *testing.T) {
 	}
 
 	// Deploy the dependency: a succeeded build on user-service (#1) derives deployed.
-	_, dep, err := repo.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 1, Kind: string(taskmeta.KindBuild)})
+	_, dep, err := repo.TryAdmit(ctx, &delivery.Execution{Repo: "o/r", IssueNumber: 1, Kind: string(taskmeta.KindBuild)})
 	if err != nil {
 		t.Fatalf("seed dep build: %v", err)
 	}

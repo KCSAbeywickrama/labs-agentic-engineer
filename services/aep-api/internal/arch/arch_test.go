@@ -18,21 +18,18 @@
 // that keeps the vertical-slice layout from regressing. The invariants:
 //
 //   - no flat services/ or controllers/ layer exists or is imported;
-//   - the feature→feature import graph matches an explicit ALLOWLIST (Go's
-//     compiler already forbids cycles, so the value here is catching NEW
-//     coupling: an edge not on the list fails, and a stale allowlist entry
-//     also fails so the list can't rot);
 //   - every internal/platform/* package and internal/contracts is
-//     feature-free (componenttest is the one deliberate exception — it
+//     domain-free (componenttest is the one deliberate exception — it
 //     assembles the real app);
-//   - contracts imports nothing module-internal at all (models re-exports
-//     FROM contracts, never the reverse);
-//   - all Go code lives under internal/ except cmd/, skills/ (go:embed
-//     anchors), and the deliberately-flat models/ + repositories/ kernel.
+//   - contracts imports nothing module-internal at all;
+//   - all Go code lives under internal/ except cmd/ and skills/ (go:embed
+//     anchors). The flat models/ + repositories/ kernels are DISSOLVED, and
+//     internal/feature/ is GONE — every entity/repository/feature now lives in
+//     its owning domain (the domain-boundary rules are in domain_arch_test.go).
 //
-// The feature and platform package lists are discovered from disk
-// (os.ReadDir), so a new package is policed the moment it exists. Runs under
-// plain `go test` — no extra tooling.
+// The platform package list is discovered from disk (os.ReadDir), so a new
+// package is policed the moment it exists. Runs under plain `go test` — no
+// extra tooling.
 package arch
 
 import (
@@ -47,39 +44,6 @@ import (
 )
 
 const mod = "github.com/wso2/aep/aep-api"
-
-// featureEdgeAllowlist is the complete set of permitted DIRECT
-// feature→feature imports. Adding a cross-feature import is a design
-// decision: extend this list in the same PR and say why, or (usually better)
-// cut the edge with a consumer-side port per the house pattern.
-var featureEdgeAllowlist = map[string][]string{
-	// (build MIGRATED to internal/delivery/build in P6 — the public single-tag
-	// build surface is now a delivery-domain sub-package (buildpipe). It composes
-	// the delivery root (the devflow Runtime + the workflow I/O vocab + task's
-	// TaskView), the spec domain (SpecSaveResult/SpecValidationError) and
-	// sourcecontrol — all slice→root or domain→domain edges. Its row is gone
-	// because the feature is gone.)
-	//
-	// (component + project MIGRATED to internal/projects in P7 — the Project &
-	// Components domain is a flat-root merge of the two features. Their rows are
-	// gone because the features are gone; projects consumes spec + sourcecontrol
-	// as domain→domain edges, policed by TestDomainsAreFeatureFree instead.)
-	// (dependencies + provisioning + runtimeconfig MIGRATED to internal/dependencies
-	// in P8 — the Dependencies & Provisioning domain, a kernel-root merge: the two
-	// pure provisioner cores (resources + endpoints) flattened into the domain ROOT,
-	// and provisioning/runtimeconfig/mcpdiscovery became sub-package slices importing
-	// only that root. Their three rows are gone because the features are gone;
-	// runtimeconfig's watcher gorm moved to repositories in P8.0, so the domain is
-	// gorm-free. Policed now by TestDomainsAreFeatureFree + root⊥slice / slice⊥sibling
-	// instead of a feature-edge row.)
-	//
-	// (execution + task MIGRATED to internal/delivery in P6; build to
-	// internal/delivery/build in P6; rcaagent to internal/ops in P1; component +
-	// project to internal/projects in P7 — every row gone with its feature. The §1
-	// Task/Execution boundary is re-asserted by TestTaskExecutionSplit as
-	// delivery/task ⊥ delivery/execution.)
-	"webhook": {},
-}
 
 // depCache memoizes each package's transitive import set so the boundary
 // tests shell out to `go list -deps` once per distinct package.
@@ -147,16 +111,10 @@ func listDir(t *testing.T, rel string) []string {
 // feature, platform leaf, or wiring package imports the deleted services/ or
 // controllers/ packages.
 func TestNoFlatServicesOrControllers(t *testing.T) {
-	for _, f := range listDir(t, "../feature") {
-		pkg := mod + "/internal/feature/" + f
-		if imports(t, pkg, mod+"/services") {
-			t.Errorf("%s imports the flat services package (should be gone)", f)
-		}
-		if imports(t, pkg, mod+"/controllers") {
-			t.Errorf("%s imports the controllers package (forbidden — features own their controllers or use ports)", f)
-		}
-	}
-	for _, p := range []string{"/internal/app", "/cmd/aep-api", "/internal/api"} {
+	// internal/feature/ is GONE (every feature migrated into a domain), so the
+	// only remaining risk is a composition-root regression re-importing the
+	// deleted flat services/controllers packages.
+	for _, p := range []string{"/internal/app", "/cmd/aep-api", "/internal/edge"} {
 		pkg := mod + p
 		if imports(t, pkg, mod+"/controllers") {
 			t.Errorf("%s imports the controllers package — it is deleted; wire features directly", p)
@@ -174,58 +132,6 @@ func TestFlatPackagesDeleted(t *testing.T) {
 	for _, p := range []string{"/services", "/controllers"} {
 		if err := exec.Command("go", "list", mod+p).Run(); err == nil {
 			t.Errorf("package %s%s still resolves — the flat layer must stay deleted", mod, p)
-		}
-	}
-}
-
-// TestFeatureEdgeAllowlist asserts the feature→feature DIRECT import graph is
-// exactly featureEdgeAllowlist — new coupling fails loudly, and a stale
-// allowlist entry fails too so the list stays honest. This subsumes the old
-// 4-edge denylist (task↔codingagent, design→task/component are simply not on
-// the list).
-func TestFeatureEdgeAllowlist(t *testing.T) {
-	features := listDir(t, "../feature")
-
-	// Every on-disk feature must have an allowlist row (even an empty one) —
-	// a brand-new feature gets policed the moment it exists.
-	for _, f := range features {
-		if _, ok := featureEdgeAllowlist[f]; !ok {
-			t.Errorf("feature %q has no allowlist row — add one (empty is fine) and review its edges", f)
-		}
-	}
-	for f := range featureEdgeAllowlist {
-		found := false
-		for _, name := range features {
-			if name == f {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("allowlist names feature %q which no longer exists on disk — remove the row", f)
-		}
-	}
-
-	const featPrefix = mod + "/internal/feature/"
-	for _, f := range features {
-		allowed := map[string]bool{}
-		for _, e := range featureEdgeAllowlist[f] {
-			allowed[e] = true
-		}
-		var actual []string
-		for _, imp := range directImports(t, featPrefix+f) {
-			if strings.HasPrefix(imp, featPrefix) {
-				actual = append(actual, strings.TrimPrefix(imp, featPrefix))
-			}
-		}
-		for _, edge := range actual {
-			if !allowed[edge] {
-				t.Errorf("NEW feature edge %s → %s is not on the allowlist — prefer a consumer-side port; if the concrete edge is a deliberate design decision, add it to featureEdgeAllowlist with rationale in the PR", f, edge)
-			}
-			delete(allowed, edge)
-		}
-		for stale := range allowed {
-			t.Errorf("allowlist edge %s → %s no longer exists — remove it so the list stays honest", f, stale)
 		}
 	}
 }
@@ -339,8 +245,8 @@ func TestTaskmetaIsPure(t *testing.T) {
 // into a rubber stamp (docs/design/domain-oriented-architecture.md §19.6).
 var gormImporters = map[string]bool{
 	// Composition + kernel (structurally hold gorm; not feature slices).
-	"internal/api": true,
-	"internal/app": true,
+	"internal/edge": true,
+	"internal/app":  true,
 	// The secret kernel module (§10.4): its Postgres-backed store is one of the
 	// four backends it exists to own. Was internal/credentials.
 	"internal/platform/secrets": true,
@@ -349,16 +255,12 @@ var gormImporters = map[string]bool{
 	// The ordered migration LIST — names domain-owned steps, so it sits beside
 	// edge rather than in the kernel (§7).
 	"internal/migrate":                true,
-	"repositories":                    true,
 	"internal/platform/dbtest":        true,
 	"internal/platform/componenttest": true,
-	// Features with raw gorm still to migrate into repositories/ (step 11).
-	// (runtimeconfig MIGRATED in P8.0 — its convergence watcher's raw
-	// `SELECT DISTINCT … FROM executions` became
-	// repositories.ExecutionRepository.DistinctDeployedProjects, and the watcher
-	// now takes a narrow DeployedProjectLister port instead of *gorm.DB. Only
-	// webhook remains — it lands with P2d.)
-	"internal/feature/webhook": true,
+	// No feature packages remain: the migration is complete. Every domain's raw
+	// gorm now lives behind its <domain>/repository*.go and is governed by
+	// TestGormFencedToDomainRepository, not this list. This set is the PERMANENT
+	// kernel/edge gorm allowlist — it should stay exactly this size.
 }
 
 // TestGormImportAllowlist asserts the set of packages that DIRECTLY import
@@ -406,14 +308,13 @@ func TestGormImportAllowlist(t *testing.T) {
 }
 
 // TestInternalOnlyLayout asserts no Go source lives outside the sanctioned
-// top-level roots: internal/ (everything), cmd/ (mains), skills/ (go:embed
-// must anchor to the source file), and the deliberately-flat models/ +
-// repositories/ shared kernel (their relocation is an explicitly gated,
-// separate decision).
+// top-level roots: internal/ (everything), cmd/ (mains), and skills/ (go:embed
+// must anchor to the source file). The flat models/ and repositories/ shared
+// kernels are both DISSOLVED — every entity lives in its owning
+// <domain>/entity_*.go and each repository in <domain>/repository_*.go.
 func TestInternalOnlyLayout(t *testing.T) {
 	allowedRoots := map[string]bool{
 		"internal": true, "cmd": true, "skills": true,
-		"models": true, "repositories": true,
 	}
 	root := ".." + string(filepath.Separator) + ".." // module root from internal/arch
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -436,7 +337,7 @@ func TestInternalOnlyLayout(t *testing.T) {
 		}
 		top := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
 		if !allowedRoots[top] {
-			t.Errorf("Go file outside the sanctioned roots: %s (allowed: internal/, cmd/, skills/, models/, repositories/)", rel)
+			t.Errorf("Go file outside the sanctioned roots: %s (allowed: internal/, cmd/, skills/, models/)", rel)
 		}
 		return nil
 	})

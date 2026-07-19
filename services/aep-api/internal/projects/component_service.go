@@ -28,7 +28,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // ComponentService handles business logic for component operations.
@@ -44,14 +43,14 @@ import (
 type ComponentService interface {
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
-	CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*gen.Component, error)
+	CreateComponent(ctx context.Context, orgName, projectName string, req *openchoreo.CreateComponentRequest) (*gen.Component, error)
 	// EnsureComponent idempotently provisions the OpenChoreo Component CR for a
 	// design component (by friendly name), so a merged-PR build has a Component to
 	// build. It is the coding-dispatch pre-flight (tasks-github-native): the CR
 	// must exist by merge/build time or the build fails "Component not found".
 	// Idempotent — CreateComponent is 409-safe, so re-dispatch is a no-op.
 	EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error
-	UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error
+	UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error
 
 	// Deploy (read-only — autoDeploy on the Component drives the chain)
 	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*gen.DeploymentList, error)
@@ -117,7 +116,7 @@ func (s *componentService) GetComponent(ctx context.Context, orgName, projectNam
 	return comp, nil
 }
 
-func (s *componentService) CreateComponent(ctx context.Context, orgName, projectName string, req *models.CreateComponentRequest) (*gen.Component, error) {
+func (s *componentService) CreateComponent(ctx context.Context, orgName, projectName string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
 	comp, err := s.client.CreateComponent(ctx, orgName, projectName, req)
 	if err != nil {
 		return nil, err
@@ -167,30 +166,30 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	}
 	// api-configuration trait derived from design.md's exposesAPI.auth (none →
 	// no trait). Set at create time; per-env reconcile is the trait_sync path's job.
-	apiSecurityEnabled := models.ResolveAPISecurityEnabled(*comp)
+	apiSecurityEnabled := spec.ResolveAPISecurityEnabled(*comp)
 	traits, _ := DesiredAPIConfigurationTrait(k8sName, comp.EndpointName(), apiSecurityEnabled)
 
 	// repository.secretRef stays empty: build credentials are pre-staged per
 	// WorkflowRun (build-credential-injection.md), so the Component's workflow
 	// param carries no SecretReference.
-	if _, err := s.CreateComponent(ctx, orgName, projectName, &models.CreateComponentRequest{
+	if _, err := s.CreateComponent(ctx, orgName, projectName, &openchoreo.CreateComponentRequest{
 		Name:        k8sName,
 		DisplayName: comp.Name,
 		Description: comp.Name,
 		Type:        ocEntrypoint(comp.ComponentType),
 		AutoBuild:   false,
 		AutoDeploy:  true,
-		Workflow: &models.ComponentWorkflowSpec{
+		Workflow: &openchoreo.ComponentWorkflowSpec{
 			Kind: "ClusterWorkflow",
 			Name: "dockerfile-builder",
-			Parameters: &models.ComponentWorkflowParameters{
-				Repository: &models.WorkflowRepository{
+			Parameters: &openchoreo.ComponentWorkflowParameters{
+				Repository: &openchoreo.WorkflowRepository{
 					URL:       repo.RepoURL,
 					SecretRef: "",
 					AppPath:   comp.AppPath,
-					Revision:  &models.WorkflowRevision{Branch: branch},
+					Revision:  &openchoreo.WorkflowRevision{Branch: branch},
 				},
-				Docker: &models.DockerParameters{Context: dockerContext, FilePath: dockerFilePath},
+				Docker: &openchoreo.DockerParameters{Context: dockerContext, FilePath: dockerFilePath},
 			},
 		},
 		Traits: traits,
@@ -203,11 +202,11 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 
 // ocEntrypoint maps a design component type to its OC Component entrypoint
 // type. AEP's component types ARE OpenChoreo's (minus the `deployment/`
-// prefix — see models.ComponentTypeWebApplication), so this is a prefix
+// prefix — see spec.ComponentTypeWebApplication), so this is a prefix
 // re-attachment, not a translation. Unknown kinds deliberately fall back to
 // deployment/service.
 func ocEntrypoint(componentType string) string {
-	if componentType == models.ComponentTypeWebApplication {
+	if componentType == spec.ComponentTypeWebApplication {
 		return "deployment/web-application"
 	}
 	return "deployment/service"
@@ -220,7 +219,7 @@ func ocEntrypoint(componentType string) string {
 // exist yet (the user is editing env vars before first deploy) the
 // underlying client returns nil and the caller is expected to retry
 // after the first build has produced a binding.
-func (s *componentService) UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []models.WorkflowEnvVarRef) error {
+func (s *componentService) UpdateWorkflowEnvVars(ctx context.Context, orgName, projectName, componentName string, envVars []openchoreo.WorkflowEnvVarRef) error {
 	if err := s.client.UpdateComponentWorkflowEnvVars(ctx, orgName, projectName, componentName, envVars); err != nil {
 		return err
 	}
@@ -253,7 +252,7 @@ func (s *componentService) GetComponentOpenAPI(ctx context.Context, orgName, pro
 		if k8sname.ToK8sName(c.Name) != componentName {
 			continue
 		}
-		if c.ComponentType != models.ComponentTypeService {
+		if c.ComponentType != spec.ComponentTypeService {
 			return &gen.ComponentOpenAPI{
 				ComponentName: componentName,
 				ComponentType: c.ComponentType,

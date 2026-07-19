@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/models"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
 // EnvValues are the user-supplied values for one environment, split by the
@@ -78,7 +78,7 @@ type ProvisionResult struct {
 func (p *ExternalResourceProvisioner) Provision(
 	ctx context.Context,
 	orgHandle, ocOrgID, projectName string,
-	er *models.ExternalResource,
+	er *ExternalResource,
 	byEnv map[string]EnvValues,
 ) (*ProvisionResult, error) {
 	if er == nil {
@@ -163,7 +163,7 @@ type PreparedEnvValues struct {
 func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 	ctx context.Context,
 	orgHandle, projectName string,
-	er *models.ExternalResource,
+	er *ExternalResource,
 	byEnv map[string]PreparedEnvValues,
 ) (*ProvisionResult, error) {
 	if er == nil {
@@ -223,7 +223,7 @@ func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 func (p *ExternalResourceProvisioner) StageSecrets(
 	ctx context.Context,
 	ocOrgID, projectName string,
-	er *models.ExternalResource,
+	er *ExternalResource,
 	secretsByEnv map[string]map[string]string,
 ) (map[string]string, error) {
 	if er == nil {
@@ -328,7 +328,7 @@ func externalResourceSecretEntity(name, env string) string { return "extres-" + 
 // buildExternalResource references the version-pinned cluster RT name (rtName),
 // not the logical er.ResourceTypeName, so the Resource binds to the freshly
 // authored RT rather than a stale same-named one.
-func buildExternalResource(projectName string, er *models.ExternalResource, rtName string) *openchoreo.Resource {
+func buildExternalResource(projectName string, er *ExternalResource, rtName string) *openchoreo.Resource {
 	return &openchoreo.Resource{
 		Metadata: openchoreo.OCObjectMeta{Name: ExternalResourceName(projectName, er.Name)},
 		Spec: openchoreo.ResourceSpec{
@@ -362,7 +362,7 @@ func buildExternalResourceBinding(projectName, name, env, latestRelease, secretS
 	}, nil
 }
 
-func toRTConfigKeys(in []models.ConfigKey) []openchoreo.ExternalResourceConfigKey {
+func toRTConfigKeys(in []spec.ConfigKey) []openchoreo.ExternalResourceConfigKey {
 	out := make([]openchoreo.ExternalResourceConfigKey, 0, len(in))
 	for _, k := range in {
 		out = append(out, openchoreo.ExternalResourceConfigKey{Key: k.Key, Secret: k.Secret})

@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // ErrSpecNotApproved is the design-domain sentinel surfaced (as 409 by the
@@ -149,7 +147,18 @@ type resourceMarkerCatalog interface {
 // repositories package concretely. Wired via SetExternalResourceRegistry at the
 // composition root.
 type externalResourceRegistrar interface {
-	Upsert(ctx context.Context, orgID, name, description string, schema []models.ConfigKey) (*models.ExternalResource, error)
+	Upsert(ctx context.Context, orgID, name, description string, schema []ConfigKey) error
+}
+
+// ExternalResourceRegistrarFunc adapts a plain func to externalResourceRegistrar.
+// The concrete catalog repository's Upsert also returns the persisted row, which
+// design ignores (registration is best-effort) — so the composition root wraps it
+// in this adapter, keeping design's consumer port free of a dependencies import
+// (which would cycle: dependencies already reads the design bundle).
+type ExternalResourceRegistrarFunc func(ctx context.Context, orgID, name, description string, schema []ConfigKey) error
+
+func (f ExternalResourceRegistrarFunc) Upsert(ctx context.Context, orgID, name, description string, schema []ConfigKey) error {
+	return f(ctx, orgID, name, description, schema)
 }
 
 func NewDesignService(
@@ -196,14 +205,14 @@ func (s *designService) registerExternalResources(ctx context.Context, orgID str
 	seen := map[string]struct{}{}
 	for _, c := range design.Components {
 		for _, dep := range c.Dependencies {
-			if dep.Kind != models.DependencyKindExternal {
+			if dep.Kind != DependencyKindExternal {
 				continue
 			}
 			if _, ok := seen[dep.Name]; ok {
 				continue
 			}
 			seen[dep.Name] = struct{}{}
-			if _, err := s.externalResourceReg.Upsert(ctx, orgID, dep.Name, dep.Description, dep.Config); err != nil {
+			if err := s.externalResourceReg.Upsert(ctx, orgID, dep.Name, dep.Description, dep.Config); err != nil {
 				slog.WarnContext(ctx, "failed to register external resource",
 					"org", orgID, "resource", dep.Name, "error", err)
 			}
@@ -275,9 +284,9 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 	if depIdx < 0 {
 		return "", fmt.Errorf("%w: dependency %q not found on component %q", ErrDependencyNotFound, depName, component)
 	}
-	if kind := design.Components[compIdx].Dependencies[depIdx].Kind; kind != models.DependencyKindExternal {
+	if kind := design.Components[compIdx].Dependencies[depIdx].Kind; kind != DependencyKindExternal {
 		return "", fmt.Errorf("%w: dependency %q on component %q has kind %q; spec collection applies only to %q",
-			ErrDependencyWrongKind, depName, component, kind, models.DependencyKindExternal)
+			ErrDependencyWrongKind, depName, component, kind, DependencyKindExternal)
 	}
 
 	if hasURL {
@@ -303,7 +312,7 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 	comp := design.Components[compIdx]
 	comp.Dependencies[depIdx].SpecPath = specPath
 	comp.Dependencies[depIdx].SpecUrl = ""
-	rendered, rerr := SplitDesign(&DesignFile{Components: []models.DesignComponent{comp}})
+	rendered, rerr := SplitDesign(&DesignFile{Components: []DesignComponent{comp}})
 	if rerr != nil {
 		return "", fmt.Errorf("render component %q design.json: %w", component, rerr)
 	}
@@ -379,11 +388,11 @@ func (s *designService) MarkOrgPublished(ctx context.Context, orgID, projectID, 
 		return nil // idempotent — already published
 	}
 	if comp.ExposesAPI == nil {
-		comp.ExposesAPI = &models.ExposesAPI{}
+		comp.ExposesAPI = &ExposesAPI{}
 	}
 	comp.ExposesAPI.OrgPublished = true
 
-	rendered, err := SplitDesign(&DesignFile{Components: []models.DesignComponent{comp}})
+	rendered, err := SplitDesign(&DesignFile{Components: []DesignComponent{comp}})
 	if err != nil {
 		return fmt.Errorf("render component %q design.json: %w", component, err)
 	}

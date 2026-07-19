@@ -33,7 +33,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
 	"github.com/wso2/aep/aep-api/internal/clients/oauth"
@@ -57,7 +56,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/dependencies/mcpdiscovery"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/dependencies/runtimeconfig"
-	"github.com/wso2/aep/aep-api/internal/feature/webhook"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/ops"
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
 	"github.com/wso2/aep/aep-api/internal/organization"
@@ -72,10 +71,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	githubclient "github.com/wso2/aep/aep-api/internal/sourcecontrol/githubhost"
 	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	spechttpapi "github.com/wso2/aep/aep-api/internal/spec/httpapi"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // Watcher is a long-running background loop. Every watcher blocks on its
@@ -117,15 +115,15 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// bootstrap: built-ins seed/reconcile into each org's repo on demand.
 
 	// Repositories
-	executionRepo := repositories.NewExecutionRepository(db)
-	configRepo := repositories.NewConfigRepository(db)
-	repoRepo := repositories.NewRepoRepository(db)
-	workflowRunRepo := repositories.NewWorkflowRunRepository(db)
-	orgRepo := repositories.NewOrganizationRepository(db)
-	orgCredRepo := repositories.NewOrgCredentialRepository(db)
-	orgAnthropicRepo := repositories.NewOrgAnthropicRepository(db)
-	idpRepo := repositories.NewIDPRepository(db)
-	codingAgentLogRepo := repositories.NewCodingAgentLogRepository(db)
+	executionRepo := delivery.NewExecutionRepository(db)
+	configRepo := projects.NewConfigRepository(db)
+	repoRepo := sourcecontrol.NewRepoRepository(db)
+	workflowRunRepo := delivery.NewWorkflowRunRepository(db)
+	orgRepo := organization.NewOrganizationRepository(db)
+	orgCredRepo := organization.NewOrgCredentialRepository(db)
+	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
+	idpRepo := organization.NewIDPRepository(db)
+	codingAgentLogRepo := delivery.NewCodingAgentLogRepository(db)
 
 	// Temporal devflow runtime. Constructed always, but connects lazily in the
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
@@ -357,13 +355,13 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// embedded builtin/flow skills on first touch) and hands back its row —
 	// the SkillsRef source for genai + task-plan turns. A closure at the
 	// composition root so neither feature grows a skills edge.
-	skillsRepoForTurns := func(ctx context.Context, orgID string) (*models.GitRepository, error) {
+	skillsRepoForTurns := func(ctx context.Context, orgID string) (*sourcecontrol.GitRepository, error) {
 		if err := skillSvc.EnsureProvisioned(ctx, orgID); err != nil {
 			return nil, err
 		}
-		return repoService.GetRepo(ctx, orgID, models.SkillsRepoSentinelProjectID)
+		return repoService.GetRepo(ctx, orgID, spec.SkillsRepoSentinelProjectID)
 	}
-	turnRepo := repositories.NewTurnRepository(db)
+	turnRepo := spec.NewTurnRepository(db)
 	turnBroker := spec.NewTurnBroker()
 	genaiDeps := spec.ServiceDeps{
 		Repos:      repoService,
@@ -536,7 +534,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	webhookVerifier := webhook.NewVerifier(secretProvider).
 		WithRefetchLimiter(webhook.NewRefetchLimiter(1, 5))
 	routingCache := webhook.NewRoutingCache(60 * time.Second)
-	deliveryStore := webhook.NewDeliveryStore(db)
+	deliveryStore := sourcecontrol.NewDeliveryStore(db)
 	webhookRouter := webhook.NewRouter()
 
 	// The reactive engine (tasks-github-native §5): the executions repository +
@@ -616,7 +614,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		WithWorkflowSignaler(devflowSignaler).
 		WithTaskNotifier(taskStreamHub)
 	execEvents.RegisterHandlers(registerWebhook)
-	webhook.RegisterInstallationHandlers(webhookRouter, db, credService, issueService, trashWorkspaceOrg)
+	webhook.RegisterInstallationHandlers(webhookRouter, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
 
 	// Reconciliation sweep (missed webhooks / requeue gating / PR-state healing /
@@ -689,12 +687,12 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	)
 
 	// Controllers
-	params := api.AppParams{
+	params := edge.AppParams{
 		Config: cfg,
 		// Runner callbacks are the internal contract-first surface (InternalDeps);
 		// only the connect-callback + webhook controllers remain raw handlers.
 		// Every other feature is served by the strict handlers via params.Deps.
-		InternalDeps: api.InternalDeps{
+		InternalDeps: edge.InternalDeps{
 			CredsRefresh:          credRefreshService,
 			RunnerAuth:            runnerAuth,
 			ValidationContext:     validationContextSvc,
@@ -728,7 +726,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
-	params.Deps = api.Deps{
+	params.Deps = edge.Deps{
 		TaskTokens: taskTokens,
 		// The projects domain (project CRUD + component read/build + config) is
 		// assembled below (params.Deps.Projects).
@@ -755,7 +753,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		dependencies.WithRepoLocator(repoRepo),
 		dependencies.WithDesignReader(artifactStore),
 	)
-	externalResourceRepo := repositories.NewExternalResourceRepository(db)
+	externalResourceRepo := dependencies.NewExternalResourceRepository(db)
 	params.MCPExternalResources = externalResourceRepo
 	// ops — the Incident RCA domain (P1, the first landed domain). Alerts
 	// (console issues #154, #155, BE handshake #156): the org-scoped store for
@@ -849,7 +847,11 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Register each tagged design's `external` dependencies into the org's
 	// external-resource catalog on save (best-effort). Consumer-side port —
 	// design never imports repositories concretely.
-	designService.SetExternalResourceRegistry(externalResourceRepo)
+	designService.SetExternalResourceRegistry(spec.ExternalResourceRegistrarFunc(
+		func(ctx context.Context, orgID, name, description string, schema []spec.ConfigKey) error {
+			_, err := externalResourceRepo.Upsert(ctx, orgID, name, description, schema)
+			return err
+		}))
 
 	// Dependency provisioning (dependency-management Phase 6): the value/param
 	// collection surface + the aep:provision gate funnel. The provisioner cores
@@ -887,7 +889,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		PlatProv:  platformProvisioner,
 		Bindings:  resourceClient,
 		Projects:  provisionProjects{repos: repoRepo},
-		Access:    repositories.NewAccessRequestRepository(db),
+		Access:    dependencies.NewAccessRequestRepository(db),
 		Providers: orgEndpointCatalog,
 	})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
@@ -1007,7 +1009,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 
 	slog.Info("OpenChoreo API", "baseURL", cfg.PlatformAPI.BaseURL)
 
-	handler := api.NewHandler(params)
+	handler := edge.NewHandler(params)
 
 	// Background watchers, launched by main under a shared cancellable context.
 	// State lives in Postgres + GitHub, so a plain goroutine per watcher is
@@ -1163,7 +1165,7 @@ func computeDegradations(cfg config.Config, in Infra) []Degradation {
 // the execution package.
 type codingDispatcher struct {
 	funnel *execution.Funnel
-	execs  repositories.ExecutionRepository
+	execs  delivery.ExecutionRepository
 }
 
 func (d codingDispatcher) DispatchCoding(ctx context.Context, orgID, projectID, repo string, issue int) (string, error) {

@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
+
 	"github.com/wso2/aep/aep-api/internal/gen"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -39,36 +41,34 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
-	"github.com/wso2/aep/aep-api/models"
-	"github.com/wso2/aep/aep-api/repositories"
 )
 
 // --- port fakes --------------------------------------------------------------
 
 // fakeRepoSvc fakes sourcecontrol.RepoService. Unset funcs panic loudly.
 type fakeRepoSvc struct {
-	CreateRepoFunc func(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error)
-	GetRepoFunc    func(ctx context.Context, orgID, projectID string) (*models.GitRepository, error)
+	CreateRepoFunc func(ctx context.Context, orgID, projectID, projectName, repoName string) (*sourcecontrol.GitRepository, error)
+	GetRepoFunc    func(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error)
 	DeleteRepoFunc func(ctx context.Context, orgID, projectID string) error
-	ListByOrgFunc  func(ctx context.Context, orgID string) ([]models.GitRepository, error)
+	ListByOrgFunc  func(ctx context.Context, orgID string) ([]sourcecontrol.GitRepository, error)
 }
 
-func (f *fakeRepoSvc) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
+func (f *fakeRepoSvc) CreateRepo(ctx context.Context, orgID, projectID, projectName, repoName string) (*sourcecontrol.GitRepository, error) {
 	if f.CreateRepoFunc == nil {
 		panic("fakeRepoSvc: CreateRepo not set")
 	}
 	return f.CreateRepoFunc(ctx, orgID, projectID, projectName, repoName)
 }
-func (f *fakeRepoSvc) ListByOrg(ctx context.Context, orgID string) ([]models.GitRepository, error) {
+func (f *fakeRepoSvc) ListByOrg(ctx context.Context, orgID string) ([]sourcecontrol.GitRepository, error) {
 	if f.ListByOrgFunc == nil {
 		panic("fakeRepoSvc: ListByOrg not set")
 	}
 	return f.ListByOrgFunc(ctx, orgID)
 }
-func (f *fakeRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*models.GitRepository, error) {
+func (f *fakeRepoSvc) EnsureBareRepo(context.Context, string, string, string) (*sourcecontrol.GitRepository, error) {
 	panic("fakeRepoSvc: EnsureBareRepo not expected in project tests")
 }
-func (f *fakeRepoSvc) GetRepo(ctx context.Context, orgID, projectID string) (*models.GitRepository, error) {
+func (f *fakeRepoSvc) GetRepo(ctx context.Context, orgID, projectID string) (*sourcecontrol.GitRepository, error) {
 	if f.GetRepoFunc == nil {
 		panic("fakeRepoSvc: GetRepo not set")
 	}
@@ -97,17 +97,17 @@ func (f *fakeWebhookSvc) Register(ctx context.Context, orgID, projectID string) 
 	return f.RegisterFunc(ctx, orgID, projectID)
 }
 
-// fakeExecs fakes the slice of repositories.ExecutionRepository the project
+// fakeExecs fakes the slice of delivery.ExecutionRepository the project
 // feature drives: DeleteByProject (the orphan purge). Every other verb is
 // unreachable from the project feature and returns zero.
 type fakeExecs struct {
 	DeleteByProjectFunc     func(ctx context.Context, orgID, projectID string) error
-	LatestPerKindScopedFunc func(ctx context.Context, orgID, repo string, issue int) (map[string]*models.Execution, error)
+	LatestPerKindScopedFunc func(ctx context.Context, orgID, repo string, issue int) (map[string]*delivery.Execution, error)
 	deleteArgs              [2]string
 	deleteCalls             int
 }
 
-func (f *fakeExecs) DistinctDeployedProjects(context.Context) ([]repositories.DeployedProjectRef, error) {
+func (f *fakeExecs) DistinctDeployedProjects(context.Context) ([]delivery.DeployedProjectRef, error) {
 	return nil, nil
 }
 
@@ -119,43 +119,43 @@ func (f *fakeExecs) DeleteByProject(ctx context.Context, orgID, projectID string
 	}
 	return f.DeleteByProjectFunc(ctx, orgID, projectID)
 }
-func (f *fakeExecs) TryAdmit(context.Context, *models.Execution) (bool, *models.Execution, error) {
+func (f *fakeExecs) TryAdmit(context.Context, *delivery.Execution) (bool, *delivery.Execution, error) {
 	return false, nil, nil
 }
-func (f *fakeExecs) StartWithRun(context.Context, string, string) (*models.Execution, error) {
+func (f *fakeExecs) StartWithRun(context.Context, string, string) (*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) Finish(context.Context, string, string, string) (*models.Execution, error) {
+func (f *fakeExecs) Finish(context.Context, string, string, string) (*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) NoteBuildRetry(context.Context, string, string, string) (*models.Execution, error) {
+func (f *fakeExecs) NoteBuildRetry(context.Context, string, string, string) (*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) GetByIDScoped(context.Context, string, string) (*models.Execution, error) {
+func (f *fakeExecs) GetByIDScoped(context.Context, string, string) (*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) LatestPerKind(context.Context, string, int) (map[string]*models.Execution, error) {
+func (f *fakeExecs) LatestPerKind(context.Context, string, int) (map[string]*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) LatestPerKindScoped(ctx context.Context, orgID, repo string, issue int) (map[string]*models.Execution, error) {
+func (f *fakeExecs) LatestPerKindScoped(ctx context.Context, orgID, repo string, issue int) (map[string]*delivery.Execution, error) {
 	if f.LatestPerKindScopedFunc != nil {
 		return f.LatestPerKindScopedFunc(ctx, orgID, repo, issue)
 	}
 	return nil, nil
 }
-func (f *fakeExecs) LatestPerKindForRepo(context.Context, string) (map[int]map[string]*models.Execution, error) {
+func (f *fakeExecs) LatestPerKindForRepo(context.Context, string) (map[int]map[string]*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) LatestPerKindForRepoScoped(context.Context, string, string) (map[int]map[string]*models.Execution, error) {
+func (f *fakeExecs) LatestPerKindForRepoScoped(context.Context, string, string) (map[int]map[string]*delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) ListByIssue(context.Context, string, int) ([]models.Execution, error) {
+func (f *fakeExecs) ListByIssue(context.Context, string, int) ([]delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) ListByIssueScoped(context.Context, string, string, int) ([]models.Execution, error) {
+func (f *fakeExecs) ListByIssueScoped(context.Context, string, string, int) ([]delivery.Execution, error) {
 	return nil, nil
 }
-func (f *fakeExecs) ListActive(context.Context) ([]models.Execution, error) { return nil, nil }
+func (f *fakeExecs) ListActive(context.Context) ([]delivery.Execution, error) { return nil, nil }
 
 type fakeSkillsProvisioner struct{ called chan string }
 
@@ -274,11 +274,11 @@ func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
 		},
 	}
 	repoSvc := &fakeRepoSvc{
-		ListByOrgFunc: func(_ context.Context, orgID string) ([]models.GitRepository, error) {
+		ListByOrgFunc: func(_ context.Context, orgID string) ([]sourcecontrol.GitRepository, error) {
 			if orgID != "acme" {
 				t.Errorf("ListByOrg org = %q, want acme", orgID)
 			}
-			return []models.GitRepository{
+			return []sourcecontrol.GitRepository{
 				{OrgID: "acme", ProjectID: "web", RepoURL: "https://github.com/acme/web.git"},
 			}, nil
 		},
@@ -297,7 +297,7 @@ func TestListProjects_JoinsRepoURLBestEffort(t *testing.T) {
 	}
 
 	// Join failure → list still returns, just unannotated.
-	repoSvc.ListByOrgFunc = func(context.Context, string) ([]models.GitRepository, error) {
+	repoSvc.ListByOrgFunc = func(context.Context, string) ([]sourcecontrol.GitRepository, error) {
 		return nil, errors.New("db down")
 	}
 	list, err = svc.ListProjects(context.Background(), "acme", 100, "", "")
@@ -320,9 +320,9 @@ func TestCreateProject_HappyPath_ProvisionsRepoWebhookAndSkills(t *testing.T) {
 	}
 	var repoOrg, repoProject, repoProjectName, repoOverride string
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(_ context.Context, orgID, projectID, projectName, repoName string) (*models.GitRepository, error) {
+		CreateRepoFunc: func(_ context.Context, orgID, projectID, projectName, repoName string) (*sourcecontrol.GitRepository, error) {
 			repoOrg, repoProject, repoProjectName, repoOverride = orgID, projectID, projectName, repoName
-			return &models.GitRepository{Status: "ready"}, nil
+			return &sourcecontrol.GitRepository{Status: "ready"}, nil
 		},
 	}
 	webhooks := &fakeWebhookSvc{}
@@ -363,9 +363,9 @@ func TestCreateProject_RepoNameOverridesProvisionedRepoName(t *testing.T) {
 	}
 	var repoProject, repoOverride string
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(_ context.Context, _, projectID, _, repoName string) (*models.GitRepository, error) {
+		CreateRepoFunc: func(_ context.Context, _, projectID, _, repoName string) (*sourcecontrol.GitRepository, error) {
 			repoProject, repoOverride = projectID, repoName
-			return &models.GitRepository{Status: "ready"}, nil
+			return &sourcecontrol.GitRepository{Status: "ready"}, nil
 		},
 	}
 	svc := NewProjectService(oc, repoSvc, &fakeWebhookSvc{}, nil, nil)
@@ -407,7 +407,7 @@ func TestCreateProject_RepoNameConflictRollsBackProject(t *testing.T) {
 				},
 			}
 			repoSvc := &fakeRepoSvc{
-				CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
+				CreateRepoFunc: func(context.Context, string, string, string, string) (*sourcecontrol.GitRepository, error) {
 					return nil, fmt.Errorf("create github repo: %w", sourcecontrol.ErrRepoNameConflict)
 				},
 			}
@@ -454,7 +454,7 @@ func TestCreateProject_RepoFailureIsBestEffort(t *testing.T) {
 		},
 	}
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
+		CreateRepoFunc: func(context.Context, string, string, string, string) (*sourcecontrol.GitRepository, error) {
 			return nil, errors.New("github down")
 		},
 	}
@@ -478,8 +478,8 @@ func TestCreateProject_WebhookFailureIsBestEffort(t *testing.T) {
 		},
 	}
 	repoSvc := &fakeRepoSvc{
-		CreateRepoFunc: func(context.Context, string, string, string, string) (*models.GitRepository, error) {
-			return &models.GitRepository{Status: "ready"}, nil
+		CreateRepoFunc: func(context.Context, string, string, string, string) (*sourcecontrol.GitRepository, error) {
+			return &sourcecontrol.GitRepository{Status: "ready"}, nil
 		},
 	}
 	webhooks := &fakeWebhookSvc{RegisterFunc: func(context.Context, string, string) (*int64, error) {
@@ -583,28 +583,28 @@ func TestDeleteProject_RepoCleanupFailureIsSwallowed(t *testing.T) {
 // fakeRunReader / fakeBindingsReader fake the stage-source ports
 // (status_stages.go) — the build/deploy inputs of the status poll.
 type fakeRunReader struct {
-	rows          []models.DevflowRun
+	rows          []delivery.DevflowRun
 	err           error
-	validationRun *models.DevflowRun
+	validationRun *delivery.DevflowRun
 	validationErr error
 }
 
-func (f fakeRunReader) ListByProject(context.Context, string, string, string) ([]models.DevflowRun, error) {
+func (f fakeRunReader) ListByProject(context.Context, string, string, string) ([]delivery.DevflowRun, error) {
 	return f.rows, f.err
 }
 
-func (f fakeRunReader) ValidationRunByParent(context.Context, string, string, string) (*models.DevflowRun, error) {
+func (f fakeRunReader) ValidationRunByParent(context.Context, string, string, string) (*delivery.DevflowRun, error) {
 	return f.validationRun, f.validationErr
 }
 
 func (f fakeRunReader) DeleteByProject(context.Context, string, string) error { return nil }
 
 type fakeBindingsReader struct {
-	items []models.ReleaseBindingSummary
+	items []openchoreo.ReleaseBindingSummary
 	err   error
 }
 
-func (f fakeBindingsReader) ListProjectReleaseBindings(context.Context, string, string) ([]models.ReleaseBindingSummary, error) {
+func (f fakeBindingsReader) ListProjectReleaseBindings(context.Context, string, string) ([]openchoreo.ReleaseBindingSummary, error) {
 	return f.items, f.err
 }
 
@@ -616,13 +616,13 @@ type statusFixture struct {
 	snapErr       error
 	counts        map[string]int // ComponentCountAtTag fixture, keyed by tag
 	countErr      error
-	runs          []models.DevflowRun
+	runs          []delivery.DevflowRun
 	runsErr       error
-	bindings      []models.ReleaseBindingSummary
+	bindings      []openchoreo.ReleaseBindingSummary
 	bindingsErr   error
-	validationRun *models.DevflowRun               // validation child of the newest dev run (nil = none)
-	validationErr error                            // ValidationRunByParent error
-	execs         repositories.ExecutionRepository // nil = no PR lookup (validationUrl falls back to the issue)
+	validationRun *delivery.DevflowRun         // validation child of the newest dev run (nil = none)
+	validationErr error                        // ValidationRunByParent error
+	execs         delivery.ExecutionRepository // nil = no PR lookup (validationUrl falls back to the issue)
 }
 
 func (fx statusFixture) service() *Service {
@@ -646,8 +646,8 @@ func (fx statusFixture) service() *Service {
 		},
 	}
 	repoSvc := &fakeRepoSvc{
-		GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
-			return &models.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
+		GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
+			return &sourcecontrol.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
 		},
 	}
 	svc := NewProjectService(nil, repoSvc, nil, fakeArtifacts, fx.execs)
@@ -665,14 +665,14 @@ func TestGetProjectStatus_NilOrFailingRepoMeansNoRepo(t *testing.T) {
 		t.Fatalf("nil repoSvc: want phase no-repo, got %q (err %v)", st.Phase, err)
 	}
 
-	failing := &fakeRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
+	failing := &fakeRepoSvc{GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 		return nil, errors.New("db down")
 	}}
 	if st, err := NewProjectService(nil, failing, nil, nil, nil).GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
 		t.Fatalf("GetRepo error: want phase no-repo, got %q (err %v)", st.Phase, err)
 	}
 
-	norow := &fakeRepoSvc{GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
+	norow := &fakeRepoSvc{GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
 		return nil, nil
 	}}
 	if st, err := NewProjectService(nil, norow, nil, nil, nil).GetProjectStatus(context.Background(), "acme", "web"); err != nil || st.Phase != "no-repo" {
@@ -707,7 +707,7 @@ func TestGetProjectStatus_StrictSourceFailures(t *testing.T) {
 
 	// The deploy denominator read joins strictly too.
 	cnt := base
-	cnt.runs = []models.DevflowRun{{Tag: "v1", Status: models.WorkflowStatusCompleted}}
+	cnt.runs = []delivery.DevflowRun{{Tag: "v1", Status: delivery.WorkflowStatusCompleted}}
 	cnt.countErr = errors.New("tag missing from mirror")
 	if _, err := cnt.service().GetProjectStatus(context.Background(), "acme", "web"); err == nil {
 		t.Fatal("component-count failure must fail the status read")
@@ -719,8 +719,8 @@ func TestGetProjectStatus_StrictSourceFailures(t *testing.T) {
 func TestGetProjectStatus_SourcesNotWired(t *testing.T) {
 	t.Parallel()
 	repoSvc := &fakeRepoSvc{
-		GetRepoFunc: func(context.Context, string, string) (*models.GitRepository, error) {
-			return &models.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
+		GetRepoFunc: func(context.Context, string, string) (*sourcecontrol.GitRepository, error) {
+			return &sourcecontrol.GitRepository{Status: "ready", RepoURL: "https://github.com/o/r.git"}, nil
 		},
 	}
 	svc := NewProjectService(nil, repoSvc, nil, &artifactstest.FakeArtifactService{}, nil)
