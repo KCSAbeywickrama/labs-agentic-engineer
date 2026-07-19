@@ -29,10 +29,14 @@ import (
 
 // --- proceed-gate (dependency-management Phase 5) ----------------------------
 //
-// SaveAndProceed (the tag-cut = approve) blocks on exactly two dependency
-// conditions and no others: an `org-service` that is not namespace-visible
-// (unresolved/blocked/ambiguous against the live catalog) and an `external`
-// that declares needsSpec but has no collected spec yet. external-values
+// SaveAndProceed (the tag-cut = approve) blocks on exactly one dependency
+// condition for now: an `org-service` that is not namespace-visible
+// (unresolved/blocked/ambiguous against the live catalog). `external`
+// dependencies are NOT proceed-gated here for now — the needsSpec flag that
+// used to drive that check was dropped (dependency-management schema revision
+// — derived-state model); the equivalent check is reborn once the shared
+// resolver (a later task) can derive an external dependency's resolution
+// state from style/specPath/specUrl against the live catalog. external-values
 // (config-only external) and platform-resource deps are NOT proceed-gated —
 // they are dispatch-gated in Phase 6.
 
@@ -116,18 +120,6 @@ func TestSaveAndProceed_GateBlocksProjectOnlyOrgService(t *testing.T) {
 	_, err := svc.SaveAndProceed(context.Background(), "acme", "web", "")
 	if !errors.Is(err, ErrUnresolvedDependency) {
 		t.Fatalf("project-only org-service: want ErrUnresolvedDependency, got %v", err)
-	}
-}
-
-func TestSaveAndProceed_GateBlocksExternalNeedsSpec(t *testing.T) {
-	t.Parallel()
-	// No resolver needed — an external needsSpec dep with no specPath is
-	// unresolved purely from the authored design.json.
-	fake := readsFor(t, designFilesWithDeps(`[{"kind":"external","name":"stripe","needsSpec":true}]`))
-
-	_, err := newService(fake).SaveAndProceed(context.Background(), "acme", "web", "")
-	if !errors.Is(err, ErrUnresolvedDependency) {
-		t.Fatalf("external needs-spec: want ErrUnresolvedDependency, got %v", err)
 	}
 }
 

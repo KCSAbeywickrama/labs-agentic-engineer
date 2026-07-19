@@ -93,15 +93,26 @@ func TestDependency_JSONRoundTrip(t *testing.T) {
 			Status: "blocked",
 			Reason: "access-required",
 		},
-		"external": {
-			Kind:      DependencyKindExternal,
-			Name:      "stripe",
-			NeedsSpec: true,
-			SpecPath:  "dependencies/stripe.openapi.yaml",
-			SpecUrl:   "https://api.example.com/openapi.yaml",
+		"external-rest": {
+			Kind:     DependencyKindExternal,
+			Name:     "stripe",
+			Style:    DependencyStyleRestAPI,
+			SpecPath: "dependencies/stripe.openapi.yaml",
+			SpecUrl:  "https://api.example.com/openapi.yaml",
+			Sources:  []string{"https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"},
 			Config: []ConfigKey{
 				{Key: "STRIPE_API_KEY", Secret: true, Description: "Your Stripe secret API key"},
 				{Key: "STRIPE_REGION", Secret: false, DefaultValue: "us-east-1"},
+			},
+		},
+		"external-ambiguous-candidates": {
+			Kind: DependencyKindExternal,
+			Name: "email-provider",
+			Candidates: []DependencyCandidate{
+				{Name: "sendgrid-rest", Style: DependencyStyleRestAPI, Description: "SendGrid v3 Web API",
+					DocsUrl: "https://docs.sendgrid.com/api-reference", SpecUrl: "https://x/sendgrid.openapi.json"},
+				{Name: "resend-sdk", Style: DependencyStyleSDK, Description: "Resend Node SDK",
+					DocsUrl: "https://resend.com/docs", Package: "npm:resend@^4.0.0"},
 			},
 		},
 		"platform-resource": {

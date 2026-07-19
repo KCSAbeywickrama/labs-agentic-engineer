@@ -73,7 +73,7 @@ test("dependencies: kind=external with spec + config is accepted", () => {
     {
       kind: "external",
       name: "stripe",
-      needsSpec: true,
+      style: "rest-api",
       specPath: "dependencies/stripe.openapi.yaml",
       specUrl: "https://example.com/stripe.yaml",
       config: [
@@ -98,27 +98,113 @@ test("dependencies: kind=platform-resource with resourceType + parameters is acc
   assert.equal(check(doc), null);
 });
 
-test("dependencies: the retired candidates array is now an unknown key -> SCHEMA_VIOLATION", () => {
-  const doc = baseDoc();
-  doc.dependencies = [
-    {
-      kind: "org-service",
-      name: "identity",
-      candidates: [{ label: "identity-api (team-a)" }],
-    },
-  ];
-  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
-});
-
 test("dependencies: all four kinds together validate", () => {
   const doc = baseDoc();
   doc.dependencies = [
     { kind: "component", name: "cart" },
     { kind: "org-service", name: "billing" },
-    { kind: "external", name: "stripe", needsSpec: true, specPath: "dependencies/stripe.openapi.yaml" },
+    { kind: "external", name: "stripe", style: "rest-api", specPath: "dependencies/stripe.openapi.yaml" },
     { kind: "platform-resource", name: "orders-db", resourceType: "postgres" },
   ];
   assert.equal(check(doc), null);
+});
+
+// --- external-only intent fields (style/package/sources/candidates) --------
+
+test("dependencies: needsSpec is retired -> unknown key SCHEMA_VIOLATION", () => {
+  const doc = baseDoc();
+  doc.dependencies = [{ kind: "external", name: "stripe", needsSpec: true }];
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
+});
+
+test("dependencies: style + package + sources accepted on kind=external", () => {
+  const doc = baseDoc();
+  doc.dependencies = [
+    {
+      kind: "external",
+      name: "stripe",
+      style: "sdk",
+      package: "npm:stripe@^14",
+      sources: ["https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"],
+    },
+  ];
+  assert.equal(check(doc), null);
+});
+
+test("dependencies: 2+ candidates accepted on kind=external", () => {
+  const doc = baseDoc();
+  doc.dependencies = [
+    {
+      kind: "external",
+      name: "email-provider",
+      candidates: [
+        { name: "sendgrid-rest", style: "rest-api", docsUrl: "https://docs.sendgrid.com/api-reference" },
+        { name: "resend-sdk", style: "sdk", package: "npm:resend@^4.0.0" },
+      ],
+    },
+  ];
+  assert.equal(check(doc), null);
+});
+
+test("dependencies: candidates with a single item -> SCHEMA_VIOLATION (minItems 2)", () => {
+  const doc = baseDoc();
+  doc.dependencies = [
+    { kind: "external", name: "email-provider", candidates: [{ name: "sendgrid-rest", style: "rest-api" }] },
+  ];
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
+});
+
+test("dependencies: candidates: [] -> SCHEMA_VIOLATION (omit, never empty)", () => {
+  const doc = baseDoc();
+  doc.dependencies = [{ kind: "external", name: "email-provider", candidates: [] }];
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
+});
+
+test("dependencies: sources: [] -> SCHEMA_VIOLATION (minItems 1)", () => {
+  const doc = baseDoc();
+  doc.dependencies = [{ kind: "external", name: "stripe", sources: [] }];
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
+});
+
+test("dependencies: an invalid style value -> SCHEMA_VIOLATION", () => {
+  const doc = baseDoc();
+  doc.dependencies = [{ kind: "external", name: "stripe", style: "graphql" }];
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
+});
+
+// candidates/style/package/specPath/specUrl/sources are external-only —
+// mechanically rejected on any other kind (component-design-schema.ts superRefine).
+for (const [field, value] of [
+  ["style", "sdk"],
+  ["package", "npm:stripe@^14"],
+  ["specPath", "dependencies/stripe.openapi.yaml"],
+  ["specUrl", "https://example.com/stripe.yaml"],
+  ["sources", ["https://example.com/docs"]],
+] as const) {
+  test(`dependencies: ${field} is external-only -> SCHEMA_VIOLATION on kind=org-service`, () => {
+    const doc = baseDoc();
+    doc.dependencies = [{ kind: "org-service", name: "identity", [field]: value }];
+    const r = check(doc);
+    assert.equal(r?.code, "SCHEMA_VIOLATION");
+    assert.match(r!.message, new RegExp(field));
+  });
+}
+
+test("dependencies: candidates is external-only -> SCHEMA_VIOLATION on kind=org-service", () => {
+  const doc = baseDoc();
+  doc.dependencies = [
+    {
+      kind: "org-service",
+      name: "identity",
+      candidates: [
+        { name: "identity-a", style: "rest-api" },
+        { name: "identity-b", style: "sdk" },
+      ],
+    },
+  ];
+  const r = check(doc);
+  assert.equal(r?.code, "SCHEMA_VIOLATION");
+  assert.match(r!.message, /candidates/);
 });
 
 // --- connections is GONE ---------------------------------------------------

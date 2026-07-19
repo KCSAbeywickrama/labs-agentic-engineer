@@ -37,8 +37,12 @@ var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generati
 // controller) when the tag-cut (SaveAndProceed) is attempted while a
 // dependency in the design being tagged is still in a non-actionable state:
 // an `org-service` that is not namespace-visible (unresolved/blocked/ambiguous
-// against the live org catalog — see artifacts.resolveOrgServices), or an
-// `external` dependency that declares needsSpec but has no collected spec yet.
+// against the live org catalog — see artifacts.resolveOrgServices). external
+// dependencies are NOT proceed-gated here for now: the needsSpec flag that
+// used to drive this was dropped (dependency-management schema revision —
+// derived-state model, see design_json.go); the equivalent check is reborn
+// once the shared resolver (a later task) can derive an external dependency's
+// resolution state from style/specPath/specUrl against the live catalog.
 // external-values (config-only) and platform-resource dependencies are NOT
 // proceed-gated here — they are dispatch-gated in Phase 6. The tag-cut is the
 // only path that checks this; committed-truth has no autosave to gate.
@@ -644,34 +648,29 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 
 // firstUnresolvedDependency returns the first dependency (in component then
 // dependency order) that blocks the proceed tag-cut, plus a short status
-// string for the error message. It gates exactly two conditions and no others:
+// string for the error message. It gates exactly one condition for now:
 //
 //   - an `org-service` dependency that is not namespace-visible — its computed
 //     Status (from artifacts.resolveOrgServices) is unresolved, blocked, or
 //     ambiguous. An empty Status (the resolver was never wired → fail-open)
 //     does NOT block, and `resolved` does not block.
-//   - an `external` dependency that declares needsSpec but has no collected
-//     spec yet (SpecPath empty).
 //
-// external-values (config-only external) and platform-resource dependencies
-// are deliberately NOT gated here — they are dispatch-gated in Phase 6. ok is
-// false when every dependency is actionable (the common case).
+// `external` dependencies are NOT gated here for now — see the doc comment on
+// ErrUnresolvedDependency. external-values (config-only external) and
+// platform-resource dependencies are deliberately NOT gated here either — they
+// are dispatch-gated in Phase 6. ok is false when every dependency is
+// actionable (the common case).
 func firstUnresolvedDependency(components []models.DesignComponent) (componentName, depName, status string, ok bool) {
 	for _, c := range components {
 		for _, dep := range c.Dependencies {
-			switch dep.Kind {
-			case models.DependencyKindOrgService:
-				switch dep.Status {
-				case models.DependencyStatusUnresolved, models.DependencyStatusBlocked, models.DependencyStatusAmbiguous:
-					return c.Name, dep.Name, dep.Status, true
-				}
-			case models.DependencyKindExternal:
-				if dep.NeedsSpec && strings.TrimSpace(dep.SpecPath) == "" {
-					return c.Name, dep.Name, "needs-spec", true
-				}
+			if dep.Kind != models.DependencyKindOrgService {
+				continue
+			}
+			switch dep.Status {
+			case models.DependencyStatusUnresolved, models.DependencyStatusBlocked, models.DependencyStatusAmbiguous:
+				return c.Name, dep.Name, dep.Status, true
 			}
 		}
 	}
 	return "", "", "", false
 }
-

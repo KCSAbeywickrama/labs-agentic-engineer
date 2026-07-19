@@ -83,3 +83,52 @@ func TestNameMustEqualDir(t *testing.T) {
 	}
 	wantCode(t, ValidateComponentDesignInDir([]byte(validComponent), "payments"), CodeSchemaViolation)
 }
+
+// --- external-only intent fields (style/package/sources/candidates) --------
+//
+// The published schema declares these as plain properties (no kind-
+// conditioning: that business rule is TS/Go-code-only — the zod superRefine +
+// agentfold/designgate.go — not expressible in JSON Schema, "keep the schema
+// simple"). This validator only needs to prove the fields round-trip and that
+// minItems is enforced.
+
+func designWithDep(depJSON string) string {
+	return `{"name":"x","type":"service","version":"1","language":"go","buildpack":"go","appPath":".","entrypoint":"m","exposure":"intranet","description":"d","dependencies":[` + depJSON + `]}`
+}
+
+func TestExternalIntentFieldsAccepted(t *testing.T) {
+	dep := `{"kind":"external","name":"stripe","style":"sdk","package":"npm:stripe@^14","sources":["https://stripe.com/docs/api"]}`
+	if err := ValidateComponentDesign([]byte(designWithDep(dep))); err != nil {
+		t.Fatalf("style/package/sources rejected: %v", err)
+	}
+}
+
+func TestCandidatesAccepted_TwoOrMore(t *testing.T) {
+	dep := `{"kind":"external","name":"email","candidates":[` +
+		`{"name":"sendgrid-rest","style":"rest-api"},` +
+		`{"name":"resend-sdk","style":"sdk","package":"npm:resend@^4.0.0"}` +
+		`]}`
+	if err := ValidateComponentDesign([]byte(designWithDep(dep))); err != nil {
+		t.Fatalf("2-candidate array rejected: %v", err)
+	}
+}
+
+func TestCandidatesMinItems_RejectsFewerThanTwo(t *testing.T) {
+	for _, candidates := range []string{`[]`, `[{"name":"only-one","style":"rest-api"}]`} {
+		dep := `{"kind":"external","name":"email","candidates":` + candidates + `}`
+		wantCode(t, ValidateComponentDesign([]byte(designWithDep(dep))), CodeSchemaViolation)
+	}
+}
+
+func TestSourcesMinItems_RejectsEmpty(t *testing.T) {
+	dep := `{"kind":"external","name":"stripe","sources":[]}`
+	wantCode(t, ValidateComponentDesign([]byte(designWithDep(dep))), CodeSchemaViolation)
+}
+
+// TestNeedsSpecNoLongerKnown documents the hard-break: needsSpec was removed
+// from the schema entirely, so it is now rejected the same way any other
+// unknown dependency property is (additionalProperties: false).
+func TestNeedsSpecNoLongerKnown(t *testing.T) {
+	dep := `{"kind":"external","name":"stripe","needsSpec":true}`
+	wantCode(t, ValidateComponentDesign([]byte(designWithDep(dep))), CodeSchemaViolation)
+}

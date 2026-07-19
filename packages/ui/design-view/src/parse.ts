@@ -44,7 +44,6 @@ export interface Dependency {
   kind: DependencyKind | string;
   name: string;
   description?: string;
-  needsSpec?: boolean;
   specPath?: string;
   specUrl?: string;
   config?: DesignConfigEntry[];
@@ -116,8 +115,6 @@ function parseDependencies(v: unknown): Dependency[] {
     const dep: Dependency = { kind: str(item.kind) || "unknown", name };
     const description = optStr(item.description);
     if (description) dep.description = description;
-    const needsSpec = optBool(item.needsSpec);
-    if (needsSpec !== undefined) dep.needsSpec = needsSpec;
     const specPath = optStr(item.specPath);
     if (specPath) dep.specPath = specPath;
     const specUrl = optStr(item.specUrl);

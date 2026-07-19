@@ -55,7 +55,7 @@ const fullComponentDesignJSON = `{
       "kind": "external",
       "name": "openweather",
       "description": "weather",
-      "needsSpec": true,
+      "style": "rest-api",
       "specPath": "dependencies/openweather.openapi.yaml",
       "config": [
         {
@@ -124,12 +124,13 @@ func TestParseComponentDesignJSON_AllKinds(t *testing.T) {
 		t.Fatalf("dep[1] drifted: %+v", got[1])
 	}
 	if got[2].Kind != models.DependencyKindExternal || got[2].Name != "openweather" ||
-		!got[2].NeedsSpec || got[2].SpecPath != "dependencies/openweather.openapi.yaml" {
+		got[2].Style != models.DependencyStyleRestAPI || got[2].SpecPath != "dependencies/openweather.openapi.yaml" {
 		t.Fatalf("dep[2] drifted: %+v", got[2])
 	}
-	// This external dep HAS a specPath, so it is NOT auto-unresolved.
+	// The codec is a pure decode: it never computes Status/Reason (no
+	// org/registry context) — that is the shared resolver's job at read time.
 	if got[2].Status != "" || got[2].Reason != "" {
-		t.Fatalf("dep[2] must have no computed status (specPath set): %+v", got[2])
+		t.Fatalf("dep[2] must have no computed status (pure decode): %+v", got[2])
 	}
 	if len(got[2].Config) != 2 || got[2].Config[0].Key != "OPENWEATHER_API_KEY" || !got[2].Config[0].Secret ||
 		got[2].Config[0].Description != "Your OpenWeather API key" || got[2].Config[0].DefaultValue != "" {
@@ -242,18 +243,18 @@ func TestComponentDesignJSON_Endpoint(t *testing.T) {
 }
 
 func TestMarshalComponentDesignJSON_NeverEmitsStatusReason(t *testing.T) {
-	// An external needs-spec dep whose Status/Reason were computed at read time
-	// must never leak into the written file.
+	// A dependency whose Status/Reason were computed (by the shared resolver, at
+	// read time) must never leak into the written file.
 	comp := models.DesignComponent{
 		Name:          "checkout",
 		ComponentType: "service",
 		Dependencies: []models.Dependency{
 			{
-				Kind:      models.DependencyKindExternal,
-				Name:      "openweather",
-				NeedsSpec: true,
-				Status:    "unresolved", // computed — must be dropped
-				Reason:    "needs-spec", // computed — must be dropped
+				Kind:   models.DependencyKindExternal,
+				Name:   "openweather",
+				Style:  models.DependencyStyleRestAPI,
+				Status: "unresolved", // computed — must be dropped
+				Reason: "needs-spec", // computed — must be dropped
 			},
 		},
 	}
@@ -394,29 +395,130 @@ func TestMarshalComponentDesignJSON_NameMustEqualDir(t *testing.T) {
 	}
 }
 
-func TestParseComponentDesignJSON_NeedsSpecComputesUnresolved(t *testing.T) {
-	// external + needsSpec + no specPath ⇒ status=unresolved, reason=needs-spec.
+// TestParseComponentDesignJSON_NeedsSpecNowUnknownFieldRejected documents the
+// hard-break: `needsSpec` was dropped from the schema entirely (no read-path
+// shim, no back-compat — dependency-management schema revision, derived-state
+// model). DisallowUnknownFields now rejects it like any other retired key; the
+// needs-spec resolution STATE is reborn from style/specPath/specUrl via the
+// shared resolver (a later task), computed at read time — never stored.
+func TestParseComponentDesignJSON_NeedsSpecNowUnknownFieldRejected(t *testing.T) {
 	raw := `{"name":"checkout","type":"service","dependencies":[{"kind":"external","name":"weather","needsSpec":true}]}`
+	_, err := parseComponentDesignJSON("checkout", raw)
+	if err == nil {
+		t.Fatalf("expected the retired needsSpec key to be rejected as an unknown field")
+	}
+	if !strings.Contains(err.Error(), "needsSpec") {
+		t.Fatalf("expected error to name the unknown field, got: %v", err)
+	}
+}
+
+// TestComponentDesignJSON_ExternalIntentFields_RoundTrip covers the four
+// external-only intent fields (style, package, sources, candidates) added
+// alongside the needsSpec removal: an SDK-resolved dep (style+package+
+// sources), an ambiguous dep (2+ candidates), and a needs-input dep (no
+// fields at all — the agent could not classify it without the user) all
+// survive a parse → marshal round trip byte-identically.
+func TestComponentDesignJSON_ExternalIntentFields_RoundTrip(t *testing.T) {
+	raw := `{
+  "name": "checkout",
+  "type": "service",
+  "dependencies": [
+    {
+      "kind": "external",
+      "name": "stripe",
+      "description": "Payments via the stripe Node SDK (secret-key auth).",
+      "style": "sdk",
+      "package": "npm:stripe@^14",
+      "sources": [
+        "https://stripe.com/docs/api",
+        "https://www.npmjs.com/package/stripe"
+      ]
+    },
+    {
+      "kind": "external",
+      "name": "email-provider",
+      "description": "Transactional email for signup + reset flows.",
+      "candidates": [
+        {
+          "name": "sendgrid-rest",
+          "style": "rest-api",
+          "description": "SendGrid v3 Web API",
+          "docsUrl": "https://docs.sendgrid.com/api-reference",
+          "specUrl": "https://x/sendgrid.openapi.json"
+        },
+        {
+          "name": "resend-sdk",
+          "style": "sdk",
+          "description": "Resend Node SDK",
+          "docsUrl": "https://resend.com/docs",
+          "package": "npm:resend@^4.0.0"
+        }
+      ]
+    },
+    {
+      "kind": "external",
+      "name": "crm",
+      "description": "Needs a CRM; user must name the system + how to authenticate."
+    }
+  ]
+}
+`
 	comp, err := parseComponentDesignJSON("checkout", raw)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(comp.Dependencies) != 1 {
-		t.Fatalf("want 1 dep, got %d", len(comp.Dependencies))
-	}
-	d := comp.Dependencies[0]
-	if d.Status != "unresolved" || d.Reason != "needs-spec" {
-		t.Fatalf("needs-spec computation drifted: status=%q reason=%q", d.Status, d.Reason)
+	if len(comp.Dependencies) != 3 {
+		t.Fatalf("want 3 deps, got %d", len(comp.Dependencies))
 	}
 
-	// A component-kind dep with needsSpec set is NOT external → no computation.
-	raw2 := `{"name":"checkout","type":"service","dependencies":[{"kind":"component","name":"cart"}]}`
-	comp2, err := parseComponentDesignJSON("checkout", raw2)
+	stripe := comp.Dependencies[0]
+	if stripe.Style != models.DependencyStyleSDK || stripe.Package != "npm:stripe@^14" {
+		t.Fatalf("stripe style/package drifted: %+v", stripe)
+	}
+	if want := []string{"https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"}; !reflect.DeepEqual(stripe.Sources, want) {
+		t.Fatalf("stripe sources drifted: %+v", stripe.Sources)
+	}
+
+	email := comp.Dependencies[1]
+	if len(email.Candidates) != 2 {
+		t.Fatalf("want 2 candidates, got %d: %+v", len(email.Candidates), email.Candidates)
+	}
+	if email.Candidates[0].Name != "sendgrid-rest" || email.Candidates[0].Style != models.DependencyStyleRestAPI ||
+		email.Candidates[0].DocsUrl != "https://docs.sendgrid.com/api-reference" || email.Candidates[0].SpecUrl != "https://x/sendgrid.openapi.json" {
+		t.Fatalf("candidate[0] drifted: %+v", email.Candidates[0])
+	}
+	if email.Candidates[1].Name != "resend-sdk" || email.Candidates[1].Style != models.DependencyStyleSDK ||
+		email.Candidates[1].Package != "npm:resend@^4.0.0" {
+		t.Fatalf("candidate[1] drifted: %+v", email.Candidates[1])
+	}
+
+	crm := comp.Dependencies[2]
+	if crm.Style != "" || crm.Package != "" || len(crm.Sources) != 0 || len(crm.Candidates) != 0 {
+		t.Fatalf("needs-input dep must carry none of the intent fields: %+v", crm)
+	}
+
+	out, err := marshalComponentDesignJSON("checkout", comp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != raw {
+		t.Fatalf("round-trip not byte-identical:\n--- got ---\n%s\n--- want ---\n%s", out, raw)
+	}
+}
+
+// TestParseComponentDesignJSON_CandidatesLenientOnDecode documents that the
+// disk codec stays a lenient, pure decode (like every other kind-specific
+// field): the candidates minItems:2 / kind="external"-only business rules are
+// enforced upstream by the write-gates (zod superRefine, the Go fold
+// validator) BEFORE a file is ever committed, not re-checked here on read.
+func TestParseComponentDesignJSON_CandidatesLenientOnDecode(t *testing.T) {
+	raw := `{"name":"checkout","type":"service","dependencies":[{"kind":"component","name":"cart","candidates":[{"name":"a","style":"rest-api"}]}]}`
+	comp, err := parseComponentDesignJSON("checkout", raw)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if comp2.Dependencies[0].Status != "" || comp2.Dependencies[0].Reason != "" {
-		t.Fatalf("component dep must not get a computed status: %+v", comp2.Dependencies[0])
+	if len(comp.Dependencies[0].Candidates) != 1 || comp.Dependencies[0].Candidates[0].Name != "a" {
+		t.Fatalf("candidates drifted: %+v", comp.Dependencies[0].Candidates)
 	}
 }
 

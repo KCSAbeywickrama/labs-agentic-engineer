@@ -101,17 +101,35 @@ type endpointJSON struct {
 // dependencyJSON is the on-disk shape for one unified dependency entry. It
 // mirrors models.Dependency MINUS Status/Reason (read-time computed, never
 // persisted): omitting them makes DisallowUnknownFields reject any `status` or
-// `reason` key inside a dependency entry.
+// `reason` key inside a dependency entry. `style`/`package`/`sources`/
+// `candidates` are external-only (kind-conditioned validation lives in the
+// write-gates — the zod superRefine + agentfold/designgate.go — not here: this
+// decoder stays lenient about kind-specific fields, matching the rest of the
+// struct).
 type dependencyJSON struct {
 	Kind         string          `json:"kind"`
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
-	NeedsSpec    bool            `json:"needsSpec,omitempty"`
+	Style        string          `json:"style,omitempty"`
+	Package      string          `json:"package,omitempty"`
 	SpecPath     string          `json:"specPath,omitempty"`
 	SpecUrl      string          `json:"specUrl,omitempty"`
+	Sources      []string        `json:"sources,omitempty"`
+	Candidates   []candidateJSON `json:"candidates,omitempty"`
 	Config       []configKeyJSON `json:"config,omitempty"`
 	ResourceType string          `json:"resourceType,omitempty"`
 	Parameters   map[string]any  `json:"parameters,omitempty"`
+}
+
+// candidateJSON is the on-disk shape of one entry in a dependency's
+// `candidates` array. Mirrors models.DependencyCandidate.
+type candidateJSON struct {
+	Name        string `json:"name"`
+	Style       string `json:"style"`
+	Description string `json:"description,omitempty"`
+	DocsUrl     string `json:"docsUrl,omitempty"`
+	SpecUrl     string `json:"specUrl,omitempty"`
+	Package     string `json:"package,omitempty"`
 }
 
 // configKeyJSON mirrors models.ConfigKey.
@@ -207,9 +225,12 @@ func validateExposure(dir, exposure string) error {
 }
 
 // assembleDependencies converts the on-disk dependency entries to the unified
-// model and ports the read-time needs-spec computation: an external dependency
-// that declares needsSpec but has no specPath yet is unresolved at read time
-// (the user must supply the spec before the design can be saved).
+// model. This is a PURE DECODE: no Status/Reason is ever computed here (this
+// codec has no org/registry context to correctly resolve against — that
+// requires the shared resolver, which reads the live catalog). Every
+// resolution state (resolved/ambiguous/unresolved) is derived at READ time by
+// that resolver from the presence/absence of Style/Package/Sources/
+// Candidates/SpecPath/SpecUrl — never stored, never computed here.
 //
 // A dependency entry missing `kind` or `name`, or declaring a `kind` outside
 // the closed set, is a schema ERROR (the entry used to be silently dropped,
@@ -231,25 +252,20 @@ func assembleDependencies(dir string, in []dependencyJSON) ([]models.Dependency,
 			return nil, fmt.Errorf("components/%s/design.json: dependencies[%d] has unknown kind %q — every dependency needs kind (%s) and name",
 				dir, i, d.Kind, validDependencyKinds)
 		}
-		dep := models.Dependency{
+		out = append(out, models.Dependency{
 			Kind:         d.Kind,
 			Name:         d.Name,
 			Description:  d.Description,
-			NeedsSpec:    d.NeedsSpec,
+			Style:        d.Style,
+			Package:      d.Package,
 			SpecPath:     d.SpecPath,
 			SpecUrl:      d.SpecUrl,
+			Sources:      append([]string(nil), d.Sources...),
+			Candidates:   toModelCandidates(d.Candidates),
 			Config:       toModelConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
 			Parameters:   d.Parameters,
-		}
-		// External deps that declare needsSpec but carry no specPath yet are
-		// unresolved at read time. Status/Reason are computed here (never read
-		// from the file).
-		if dep.Kind == models.DependencyKindExternal && dep.NeedsSpec && strings.TrimSpace(dep.SpecPath) == "" {
-			dep.Status = "unresolved"
-			dep.Reason = "needs-spec"
-		}
-		out = append(out, dep)
+		})
 	}
 	return out, nil
 }
@@ -310,12 +326,53 @@ func toJSONDeps(in []models.Dependency) []dependencyJSON {
 			Kind:         d.Kind,
 			Name:         d.Name,
 			Description:  d.Description,
-			NeedsSpec:    d.NeedsSpec,
+			Style:        d.Style,
+			Package:      d.Package,
 			SpecPath:     d.SpecPath,
 			SpecUrl:      d.SpecUrl,
+			Sources:      append([]string(nil), d.Sources...),
+			Candidates:   toJSONCandidates(d.Candidates),
 			Config:       toJSONConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
 			Parameters:   d.Parameters,
+		})
+	}
+	return out
+}
+
+// toModelCandidates/toJSONCandidates mirror toModelConfigKeys/toJSONConfigKeys
+// for the `candidates` array (models.DependencyCandidate ⇄ candidateJSON).
+func toModelCandidates(in []candidateJSON) []models.DependencyCandidate {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]models.DependencyCandidate, 0, len(in))
+	for _, c := range in {
+		out = append(out, models.DependencyCandidate{
+			Name:        c.Name,
+			Style:       c.Style,
+			Description: c.Description,
+			DocsUrl:     c.DocsUrl,
+			SpecUrl:     c.SpecUrl,
+			Package:     c.Package,
+		})
+	}
+	return out
+}
+
+func toJSONCandidates(in []models.DependencyCandidate) []candidateJSON {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]candidateJSON, 0, len(in))
+	for _, c := range in {
+		out = append(out, candidateJSON{
+			Name:        c.Name,
+			Style:       c.Style,
+			Description: c.Description,
+			DocsUrl:     c.DocsUrl,
+			SpecUrl:     c.SpecUrl,
+			Package:     c.Package,
 		})
 	}
 	return out

@@ -106,11 +106,14 @@ func NewPreflightService(d PreflightDeps) *PreflightService {
 // drawer item for each dependency that still needs user input/approval and is
 // not already provisioned or in-flight:
 //
-//   - external: an "external-spec" item when the architect flagged NeedsSpec
-//     and no spec has been supplied yet (SpecPath/SpecUrl both empty), PLUS an
-//     "external-config" item (key/secret views only) when the dependency is
-//     not yet Ready — the two are independent facets of the same dependency,
-//     so both, one, or neither may fire.
+//   - external: an "external-config" item (key/secret views only) when the
+//     dependency is not yet Ready. The "external-spec" item kind still exists
+//     on the wire but is not currently emitted: its trigger was the removed
+//     Dependency.NeedsSpec flag (dependency-management schema revision —
+//     needsSpec dropped for the derived-state model, see design_json.go).
+//     The needs-spec signal is reborn from style/specPath/specUrl via the
+//     shared resolver landing in a later task; this preflight will consume it
+//     then.
 //   - platform-resource: a "platform-resource" item when not yet Ready.
 //   - org-service: an "org-service" item when Status is one of the three
 //     non-resolved resolution states (unresolved | blocked | ambiguous);
@@ -159,30 +162,25 @@ func (s *PreflightService) itemsFor(ctx context.Context, orgID, projectID, compo
 	}
 }
 
+// externalItems computes the external-config item for one external
+// dependency: key/secret views only, emitted when the dependency is not yet
+// Ready. The external-spec item (formerly NeedsSpec-driven) was removed with
+// the needsSpec field — see the doc comment on Preflight above.
 func (s *PreflightService) externalItems(ctx context.Context, orgID, projectID, componentName string, d models.Dependency) ([]PreflightItem, error) {
-	var out []PreflightItem
-	if d.NeedsSpec && d.SpecPath == "" && d.SpecUrl == "" {
-		out = append(out, PreflightItem{
-			Kind:        "external-spec",
-			Component:   componentName,
-			Dependency:  d.Name,
-			Description: d.Description,
-		})
-	}
 	ready, err := s.status.Ready(ctx, orgID, projectID, d.Name)
 	if err != nil {
 		return nil, err
 	}
-	if !ready {
-		out = append(out, PreflightItem{
-			Kind:        "external-config",
-			Component:   componentName,
-			Dependency:  d.Name,
-			Description: d.Description,
-			Config:      toConfigKeyViews(d.Config),
-		})
+	if ready {
+		return nil, nil
 	}
-	return out, nil
+	return []PreflightItem{{
+		Kind:        "external-config",
+		Component:   componentName,
+		Dependency:  d.Name,
+		Description: d.Description,
+		Config:      toConfigKeyViews(d.Config),
+	}}, nil
 }
 
 func (s *PreflightService) platformResourceItems(ctx context.Context, orgID, projectID, componentName string, d models.Dependency) ([]PreflightItem, error) {

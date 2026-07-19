@@ -45,7 +45,6 @@ const FULL = JSON.stringify({
     {
       kind: "external",
       name: "stripe",
-      needsSpec: true,
       specUrl: "https://x/openapi.yaml",
       config: [{ key: "STRIPE_API_KEY", secret: true }],
       description: "Charges customers.",
@@ -68,7 +67,6 @@ describe("parseComponentDesign", () => {
     expect(d.dependencies).toHaveLength(4);
     const stripe = d.dependencies.find((x) => x.name === "stripe")!;
     expect(stripe.kind).toBe("external");
-    expect(stripe.needsSpec).toBe(true);
     expect(stripe.config).toEqual([
       { key: "STRIPE_API_KEY", secret: true },
     ]);

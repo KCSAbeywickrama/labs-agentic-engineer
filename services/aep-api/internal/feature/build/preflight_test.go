@@ -48,8 +48,8 @@ func (f fakeStatus) Ready(context.Context, string, string, string) (bool, error)
 }
 
 // kindsByDep groups the emitted items' kinds by the dependency name they were
-// raised for, so a test can assert "stripe produced exactly {external-spec,
-// external-config}" without caring about item order.
+// raised for, so a test can assert "stripe produced exactly {external-config}"
+// without caring about item order.
 func kindsByDep(items []PreflightItem) map[string][]string {
 	out := make(map[string][]string, len(items))
 	for _, it := range items {
@@ -63,7 +63,7 @@ func kindsByDep(items []PreflightItem) map[string][]string {
 func TestPreflight_ItemsPerKind(t *testing.T) {
 	comps := []models.DesignComponent{{Name: "orders", ComponentType: models.ComponentTypeService,
 		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe", NeedsSpec: true,
+			{Kind: models.DependencyKindExternal, Name: "stripe",
 				Config: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true}, {Key: "STRIPE_ORG", Secret: false}}},
 			{Kind: models.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg", Parameters: map[string]any{"instances": 1}},
 			{Kind: models.DependencyKindOrgService, Name: "billing", Status: models.DependencyStatusUnresolved},
@@ -74,7 +74,7 @@ func TestPreflight_ItemsPerKind(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, pf.NeedsInput)
 	kinds := kindsByDep(pf.Items)
-	require.ElementsMatch(t, []string{"external-spec", "external-config"}, kinds["stripe"])
+	require.Equal(t, []string{"external-config"}, kinds["stripe"])
 	require.Equal(t, []string{"platform-resource"}, kinds["orders-db"])
 	require.Equal(t, []string{"org-service"}, kinds["billing"])
 	_, present := kinds["audit"]
@@ -149,29 +149,13 @@ func TestPreflight_ComponentKindDependency_NeverEmits(t *testing.T) {
 
 // A dependency already Ready (provisioned or in-flight) is not re-asked: the
 // external-config and platform-resource items disappear once Status reports
-// ready, but external-spec still fires independently (it gates the spec, not
-// provisioning).
+// ready. (external-spec is not currently emitted at all — see the doc comment
+// on Preflight; it was NeedsSpec-driven, and that field was dropped.)
 func TestPreflight_ReadyDependency_SkipsConfigAndResourceItems(t *testing.T) {
 	comps := []models.DesignComponent{{Name: "orders", ComponentType: models.ComponentTypeService,
 		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe", NeedsSpec: true},
+			{Kind: models.DependencyKindExternal, Name: "stripe"},
 			{Kind: models.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "postgres-cnpg"},
-		}}}
-	svc := NewPreflightService(PreflightDeps{Design: fakeDesign{comps: comps}, Status: readyStatus{}})
-	pf, err := svc.Preflight(context.Background(), "acme", "shop")
-	require.NoError(t, err)
-	kinds := kindsByDep(pf.Items)
-	require.Equal(t, []string{"external-spec"}, kinds["stripe"])
-	_, present := kinds["orders-db"]
-	require.False(t, present)
-}
-
-// external-spec is skipped once the design already carries a SpecPath or
-// SpecUrl — the spec has already been supplied.
-func TestPreflight_ExternalSpecAlreadySupplied_SkipsSpecItem(t *testing.T) {
-	comps := []models.DesignComponent{{Name: "orders", ComponentType: models.ComponentTypeService,
-		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe", NeedsSpec: true, SpecPath: "dependencies/stripe.openapi.yaml"},
 		}}}
 	svc := NewPreflightService(PreflightDeps{Design: fakeDesign{comps: comps}, Status: readyStatus{}})
 	pf, err := svc.Preflight(context.Background(), "acme", "shop")
@@ -185,7 +169,7 @@ func TestPreflight_ExternalSpecAlreadySupplied_SkipsSpecItem(t *testing.T) {
 func TestPreflight_NonServiceComponent_Skipped(t *testing.T) {
 	comps := []models.DesignComponent{{Name: "web", ComponentType: models.ComponentTypeWebApplication,
 		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe", NeedsSpec: true},
+			{Kind: models.DependencyKindExternal, Name: "stripe"},
 		}}}
 	svc := NewPreflightService(PreflightDeps{Design: fakeDesign{comps: comps}, Status: fakeStatus{}})
 	pf, err := svc.Preflight(context.Background(), "acme", "shop")
