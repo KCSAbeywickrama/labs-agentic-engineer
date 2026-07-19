@@ -44,22 +44,17 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
-	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/codingagent"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
-	"github.com/wso2/aep/aep-api/internal/feature/design"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
-	"github.com/wso2/aep/aep-api/internal/feature/files"
-	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
-	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
 	"github.com/wso2/aep/aep-api/internal/feature/validation"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
@@ -75,6 +70,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	githubclient "github.com/wso2/aep/aep-api/internal/sourcecontrol/githubhost"
 	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
+	"github.com/wso2/aep/aep-api/internal/spec"
+	spechttpapi "github.com/wso2/aep/aep-api/internal/spec/httpapi"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -264,7 +261,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	repoService := sourcecontrol.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility,
 		sourcecontrol.WithWorkspaceTrash(trashWorkspaceRepo))
 	gitOpsService := sourcecontrol.NewGitOpsService(credResolver, workspaceEngine)
-	artifactSvcGit := artifacts.NewArtifactService(repoRepo, gitOpsService)
+	artifactSvcGit := spec.NewArtifactService(repoRepo, gitOpsService)
 	issueService := sourcecontrol.NewIssueService(repoRepo, gitHost, credResolver)
 	webhookRegService := sourcecontrol.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := organization.NewCredentialsRefreshService(credResolver)
@@ -310,16 +307,16 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Artifact store — in-process via artifactSvcGit. Adds the
 	// external-API catalog + the `DesignFile` YAML split/assemble layer
 	// on top of raw file I/O.
-	artifactStore := artifacts.NewArtifactStore(artifactSvcGit)
+	artifactStore := spec.NewArtifactStore(artifactSvcGit)
 
 	// Repo-backed skills store (single source of truth = per-org org-skills
 	// repo). Reads walk the shared-volume mirror at branch tip and writes
 	// commit to main through the Workspace port (shared-volume-clone
 	// architecture, Phase 1). Built-ins + flow skills seed/reconcile from the
 	// embedded files on demand. docs/design/skills-repo-storage.md.
-	skillSvc := skills.NewSkillService(gitOpsService, repoService, os.DirFS(cfg.SkillsDir))
-	skillMutationSvc := skills.NewSkillMutationService(skillSvc)
-	skillImportSvc := skills.NewSkillImportService(skillSvc)
+	skillSvc := spec.NewSkillService(gitOpsService, repoService, os.DirFS(cfg.SkillsDir))
+	skillMutationSvc := spec.NewSkillMutationService(skillSvc)
+	skillImportSvc := spec.NewSkillImportService(skillSvc)
 
 	// File-mutation agents service (services/agents) — the requirements/design/
 	// chat generation and task-planning flows. Plain HS256 M2M bearer; the
@@ -334,7 +331,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 
 	// Files API — generic specs/-scoped, GitHub-at-HEAD reads + atomic apply
 	// (commits straight to main under CAS retry). No local working tree.
-	filesSvc := files.NewService(repoService, gitOpsService)
+	filesSvc := spec.NewFilesService(repoService, gitOpsService)
 
 	// Unified genai committed-truth turn surface (shared-volume-clone §6). It
 	// resolves the org Anthropic key (no platform fallback), snapshots the
@@ -363,9 +360,9 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		}
 		return repoService.GetRepo(ctx, orgID, models.SkillsRepoSentinelProjectID)
 	}
-	turnRepo := genai.NewTurnRepository(db)
-	turnBroker := genai.NewTurnBroker()
-	genaiDeps := genai.ServiceDeps{
+	turnRepo := repositories.NewTurnRepository(db)
+	turnBroker := spec.NewTurnBroker()
+	genaiDeps := spec.ServiceDeps{
 		Repos:      repoService,
 		Git:        gitOpsService,
 		Keys:       anthropicKeyForGenAI,
@@ -385,7 +382,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		genaiDeps.MCPTokens = taskTokens
 		genaiDeps.MCPBaseURL = cfg.AEPInternalBaseURL
 	}
-	genaiSvc := genai.NewService(genaiDeps)
+	genaiSvc := spec.NewService(genaiDeps)
 
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
@@ -405,7 +402,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	buildStager := buildSecretStagerAdapter{svc: buildCredService}
 	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
 	configService := component.NewConfigService(configRepo, componentService)
-	designService := design.NewDesignService(artifactStore, artifactSvcGit)
+	designService := spec.NewDesignService(artifactStore, artifactSvcGit)
 
 	// Tasks are GitHub issues (the Task/Execution split, tasks-github-native):
 	// the read + plan surface reads them live and fuses executions. The dispatch
@@ -728,20 +725,13 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
 	params.Deps = api.Deps{
-		ProjectSvc:       projectService,
-		ComponentSvc:     componentService,
-		ConfigSvc:        configService,
-		CollabRepo:       repoService,
-		TaskReads:        taskReads,
-		TaskCommands:     taskCommands,
-		TaskStream:       taskStreamSvc,
-		TaskTokens:       taskTokens,
-		SkillSvc:         skillSvc,
-		SkillMutationSvc: skillMutationSvc,
-		SkillImportSvc:   skillImportSvc,
-		FilesSvc:         filesSvc,
-		ArtifactSvc:      artifactSvcGit,
-		GenAISvc:         genaiSvc,
+		ProjectSvc:   projectService,
+		ComponentSvc: componentService,
+		ConfigSvc:    configService,
+		TaskReads:    taskReads,
+		TaskCommands: taskCommands,
+		TaskStream:   taskStreamSvc,
+		TaskTokens:   taskTokens,
 		// BuildSvc is assigned below (params.Deps.BuildSvc), after the
 		// external-resource provisioner exists — its InputsCoordinator stages the
 		// drawer's external-config secrets through that provisioner's SM-API write.
@@ -790,6 +780,23 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	}
 	params.Deps.Organization = orgHandlers
 
+	// spec — the Spec Authoring & Versioning domain (P4): genai turns, files,
+	// tag reads, the org skills library, and the collab oracle/descriptor. Its
+	// slice handlers embed straight into the edge's composite.
+	specHandlers, err := spechttpapi.New(spec.Deps{
+		GenAI:       genaiSvc,
+		Files:       filesSvc,
+		Artifacts:   artifactSvcGit,
+		Skills:      skillSvc,
+		SkillMut:    skillMutationSvc,
+		SkillImport: skillImportSvc,
+		CollabRepo:  repoService,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("assemble spec domain: %w", err)
+	}
+	params.Deps.Spec = specHandlers
+
 	opsHandlers, err := opshttpapi.New(ops.Deps{
 		Reports: ops.NewRepository(db),
 		Execs:   opsExecutionBridge{execs: executionRepo},
@@ -812,14 +819,14 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// holds only a narrow MarkersByName port. When the design declares a
 	// platform-resource dependency and this catalog is unreachable, the save
 	// fails closed (ErrResourceCatalogUnavailable → 503).
-	designService.SetResourceCatalog(resourceTypeCatalog)
+	designService.SetResourceCatalog(crtMarkerCatalog{resourceTypeCatalog})
 
 	// Read-time org-service dependency resolution (dependency-management Phase 5):
 	// the same endpoint catalog that backs the MCP list_org_endpoints tool marks
 	// each design's `org-service` dependencies resolved/blocked/unresolved against
 	// the live namespace-visible catalog. Consumer-side wiring — artifacts never
 	// imports the dependencies feature (the *Catalog satisfies
-	// artifacts.OrgServiceResolver structurally).
+	// spec.OrgServiceResolver structurally).
 	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
 
 	// Register each tagged design's `external` dependencies into the org's
@@ -991,7 +998,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		// agent_turns crash-safety sweep (design D17): a stale-heartbeat
 		// running turn is failed and the D18 one-active guard released;
 		// locally-buffered streams get the terminal event.
-		genai.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
+		spec.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
 	}
 	// JobWatcher polls the `ca-…` coding-agent Jobs and Finishes the coding
 	// execution FAILED on Job failure (success rides the PR webhook), capturing

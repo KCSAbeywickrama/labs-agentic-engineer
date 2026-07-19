@@ -21,19 +21,15 @@ import (
 	orghttpapi "github.com/wso2/aep/aep-api/internal/organization/httpapi"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
+	spechttpapi "github.com/wso2/aep/aep-api/internal/spec/httpapi"
 
-	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
 	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
-	"github.com/wso2/aep/aep-api/internal/feature/files"
-	"github.com/wso2/aep/aep-api/internal/feature/genai"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
-	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
-	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // Deps carries every feature service the strict handlers (handlers_*.go)
@@ -46,19 +42,12 @@ type Deps struct {
 	ProjectSvc          *project.Service
 	ComponentSvc        component.ComponentService
 	ConfigSvc           component.ConfigService
-	CollabRepo          sourcecontrol.RepoService
 	ProvisioningSvc     *provisioning.Service
 	ResourceTypeCatalog dependencies.ResourceTypeLister
 	TaskReads           *task.Reads
 	TaskCommands        *task.Commands
 	TaskStream          *execution.TaskStreamService
 	TaskTokens          *auth.TaskTokenManager
-	SkillSvc            *skills.SkillService
-	SkillMutationSvc    *skills.SkillMutationService
-	SkillImportSvc      *skills.SkillImportService
-	FilesSvc            files.FilesService
-	ArtifactSvc         artifacts.ArtifactService
-	GenAISvc            *genai.Service
 	BuildSvc            *build.Service
 	PreflightSvc        *build.PreflightService
 
@@ -69,4 +58,5 @@ type Deps struct {
 	Ops           *opshttpapi.Handlers
 	SourceControl *schttpapi.Handlers
 	Organization  *orghttpapi.Handlers
+	Spec          *spechttpapi.Handlers
 }
