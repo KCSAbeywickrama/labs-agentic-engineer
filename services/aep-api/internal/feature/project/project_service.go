@@ -29,6 +29,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
+	"github.com/wso2/aep/aep-api/internal/platform/async"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -42,16 +43,11 @@ var (
 	ErrForbidden       = errors.New("forbidden")
 )
 
-// ProjectService handles business logic for project operations.
-type ProjectService interface {
-	ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*apigen.ProjectList, error)
-	GetProject(ctx context.Context, orgName, projectName string) (*apigen.Project, error)
-	CreateProject(ctx context.Context, orgName string, req *apigen.CreateProjectRequest) (*apigen.Project, error)
-	DeleteProject(ctx context.Context, orgName, projectName string) error
-	GetProjectStatus(ctx context.Context, orgName, projectName string) (*apigen.ProjectStatus, error)
-}
-
-type projectService struct {
+// Service handles business logic for project operations. api.Deps holds it as a
+// concrete *project.Service (there is one implementation; the old ProjectService
+// interface existed only to be faked, and the component tier fakes at the HTTP
+// edge instead).
+type Service struct {
 	client         openchoreo.ProjectClient
 	repoSvc        gitrepo.RepoService
 	webhookSvc     gitrepo.WebhookService
@@ -79,7 +75,7 @@ type skillsProvisioner interface {
 	EnsureProvisioned(ctx context.Context, orgID string) error
 }
 
-func (s *projectService) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
+func (s *Service) SetSkillsProvisioner(p skillsProvisioner) { s.skillsProv = p }
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -87,8 +83,8 @@ func NewProjectService(
 	webhookSvc gitrepo.WebhookService,
 	artifactSvc artifacts.ArtifactService,
 	execs repositories.ExecutionRepository,
-) *projectService {
-	return &projectService{
+) *Service {
+	return &Service{
 		client:      client,
 		repoSvc:     repoSvc,
 		webhookSvc:  webhookSvc,
@@ -97,7 +93,7 @@ func NewProjectService(
 	}
 }
 
-func (s *projectService) ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*apigen.ProjectList, error) {
+func (s *Service) ListProjects(ctx context.Context, orgName string, limit int, cursor, search string) (*apigen.ProjectList, error) {
 	list, err := s.client.ListProjects(ctx, orgName, limit, cursor)
 	if err != nil {
 		return nil, translateHTTPError(err)
@@ -136,7 +132,7 @@ func (s *projectService) ListProjects(ctx context.Context, orgName string, limit
 	return list, nil
 }
 
-func (s *projectService) GetProject(ctx context.Context, orgName, projectName string) (*apigen.Project, error) {
+func (s *Service) GetProject(ctx context.Context, orgName, projectName string) (*apigen.Project, error) {
 	project, err := s.client.GetProject(ctx, orgName, projectName)
 	if err != nil {
 		return nil, translateHTTPError(err)
@@ -144,7 +140,7 @@ func (s *projectService) GetProject(ctx context.Context, orgName, projectName st
 	return project, nil
 }
 
-func (s *projectService) CreateProject(ctx context.Context, orgName string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
+func (s *Service) CreateProject(ctx context.Context, orgName string, req *apigen.CreateProjectRequest) (*apigen.Project, error) {
 	project, err := s.client.CreateProject(ctx, orgName, req)
 	if err != nil {
 		return nil, translateHTTPError(err)
@@ -154,14 +150,14 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 	// first design run doesn't pay repo-creation latency. Async + best-effort;
 	// reads self-heal via ensureSkillsRepo if this never ran. §6.3/§10.3.
 	if s.skillsProv != nil {
-		go func(orgID string) {
+		async.Go(context.Background(), "skills provisioning", func(context.Context) {
 			bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			if perr := s.skillsProv.EnsureProvisioned(bg, orgID); perr != nil {
+			if perr := s.skillsProv.EnsureProvisioned(bg, orgName); perr != nil {
 				slog.WarnContext(bg, "skills repo provisioning failed (will self-heal on read)",
-					"org", orgID, "error", perr)
+					"org", orgName, "error", perr)
 			}
-		}(orgName)
+		})
 	}
 
 	// Provision + clone the platform-owned git repo (async — polling via GetRepoStatus).
@@ -209,11 +205,11 @@ func (s *projectService) CreateProject(ctx context.Context, orgName string, req 
 // SetResourceDeprovisioner wires the dependency-provisioning teardown so a
 // project delete deprovisions its OC Resource model. A nil deprovisioner is a
 // documented no-op.
-func (s *projectService) SetResourceDeprovisioner(d resourceDeprovisioner) {
+func (s *Service) SetResourceDeprovisioner(d resourceDeprovisioner) {
 	s.deprovisioner = d
 }
 
-func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName string) error {
+func (s *Service) DeleteProject(ctx context.Context, orgName, projectName string) error {
 	// Deprovision the project's OC Resource model FIRST — while its design (the
 	// dependency inventory) is still readable and before the OC Project delete,
 	// which does not cascade the logically-owned Resources/bindings. Best-effort.
@@ -256,7 +252,7 @@ func (s *projectService) DeleteProject(ctx context.Context, orgName, projectName
 	return nil
 }
 
-func (s *projectService) GetProjectStatus(ctx context.Context, orgName, projectName string) (*apigen.ProjectStatus, error) {
+func (s *Service) GetProjectStatus(ctx context.Context, orgName, projectName string) (*apigen.ProjectStatus, error) {
 	// The nested stages are contract-required: always present, zero-valued
 	// (idle build, no deploy) until the repo is ready and the sources read.
 	status := &apigen.ProjectStatus{}

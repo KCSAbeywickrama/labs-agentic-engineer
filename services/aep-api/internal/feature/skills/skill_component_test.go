@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// COMPONENT tier (bff-component-testing.md §4): the REAL skills services behind
+// COMPONENT tier: the REAL skills services behind
 // the REAL production handler chain — global middleware → faked auth at the
 // auth.WithClaims seam → orgensure → contract validation → the deny-by-default
 // tenant gate in ENFORCE → strict handlers → mapSkillError — driven in-process
@@ -210,8 +210,8 @@ func TestSkillsComponent_PlatformSkillsReadOnlySurface(t *testing.T) {
 			}
 		}
 	}
-	if platform != 6 {
-		t.Fatalf("want 6 platform skills in the list, got %d: %s", platform, resp.Body.String())
+	if platform != 7 {
+		t.Fatalf("want 7 platform skills in the list, got %d: %s", platform, resp.Body.String())
 	}
 
 	// Resolvable read-only…
