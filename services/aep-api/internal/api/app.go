@@ -104,6 +104,15 @@ type AppParams struct {
 	// discovery). Nil makes get_remote_git_file_contents/search_remote_git_code
 	// return a tool error; it never affects the other tools.
 	MCPRemoteGit dependencies.RemoteGitReader
+	// MCPSpecValidator/MCPSpecNormalizer/MCPSpecFetcher back the OpenAPI spec
+	// MCP tools (validate_openapi_spec, fetch_openapi_spec). Wired to the
+	// artifacts package's ValidateOpenAPI/NormalizeOpenAPIYAML/FetchSpecFromURL
+	// functions as-is (FetchSpecFromURL is PLATFORM-TOUCHING SSRF hardening —
+	// never wrap it with a looser guard). Nil makes the two spec tools return a
+	// tool error; it never affects the other tools.
+	MCPSpecValidator  dependencies.SpecValidator
+	MCPSpecNormalizer dependencies.SpecNormalizer
+	MCPSpecFetcher    dependencies.SpecFetcher
 }
 
 // NewHandler assembles the full HTTP handler with middleware and routes.

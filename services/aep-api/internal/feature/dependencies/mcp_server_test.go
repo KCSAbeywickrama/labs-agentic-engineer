@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
@@ -197,7 +198,8 @@ func sampleHandler() (http.Handler, *fakeResourceReader, *fakeEndpointLister) {
 	rt := &fakeTypeLister{items: []resources.PlatformResourceType{
 		{Name: "postgres", Description: "A dedicated PostgreSQL database cluster.", Outputs: []string{"host", "port"}},
 	}}
-	return NewMCPHandler(er, ep, rt, &fakeRemoteGit{}), er, ep
+	return NewMCPHandler(er, ep, rt, &fakeRemoteGit{},
+		artifacts.ValidateOpenAPI, artifacts.NormalizeOpenAPIYAML, artifacts.FetchSpecFromURL), er, ep
 }
 
 // fakeRemoteGit is a stub RemoteGitReader for the handler-dispatch tests. It
@@ -284,6 +286,8 @@ func TestMCP_ToolsList_RenamedTools(t *testing.T) {
 		"list_platform_resource_types",
 		"get_remote_git_file_contents",
 		"search_remote_git_code",
+		"validate_openapi_spec",
+		"fetch_openapi_spec",
 	}
 	if len(names) != len(want) {
 		t.Fatalf("tools = %v, want %v", names, want)
@@ -333,7 +337,7 @@ func TestMCP_UnknownTool(t *testing.T) {
 // ---- guards ------------------------------------------------------------------
 
 func TestMCP_NilResourceReader_503(t *testing.T) {
-	h := NewMCPHandler(nil, &fakeEndpointLister{}, &fakeTypeLister{}, &fakeRemoteGit{})
+	h := NewMCPHandler(nil, &fakeEndpointLister{}, &fakeTypeLister{}, &fakeRemoteGit{}, nil, nil, nil)
 	w := postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", w.Code)
@@ -378,7 +382,7 @@ func TestMCP_ListExternalResources(t *testing.T) {
 
 func TestMCP_ListExternalResources_PortError(t *testing.T) {
 	er := &fakeResourceReader{listErr: fmt.Errorf("db down")}
-	h := NewMCPHandler(er, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
 	text := toolText(t, resp, true)
 	if !strings.Contains(text, "db down") {
@@ -460,7 +464,7 @@ func TestMCP_ListOrgEndpoints(t *testing.T) {
 
 func TestMCP_ListOrgEndpoints_NilLister_Empty(t *testing.T) {
 	er := &fakeResourceReader{}
-	h := NewMCPHandler(er, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_endpoints", `{}`)))
 	text := toolText(t, resp, false)
 	if text != `{"endpoints":[]}` {
@@ -509,7 +513,7 @@ func TestMCP_ListOrgComponentEndpoints(t *testing.T) {
 
 func TestMCP_ListOrgComponentEndpoints_NilLister_Empty(t *testing.T) {
 	er := &fakeResourceReader{}
-	h := NewMCPHandler(er, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_component_endpoints", `{}`)))
 	text := toolText(t, resp, false)
 	if text != `{"endpoints":[]}` {
@@ -544,7 +548,7 @@ func TestMCP_ListPlatformResourceTypes(t *testing.T) {
 
 func TestMCP_ListPlatformResourceTypes_NilLister_Empty(t *testing.T) {
 	er := &fakeResourceReader{}
-	h := NewMCPHandler(er, nil, nil, nil)
+	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_platform_resource_types", `{}`)))
 	text := toolText(t, resp, false)
 	if text != `{"resourceTypes":[]}` {
@@ -556,7 +560,7 @@ func TestMCP_ListPlatformResourceTypes_NilLister_Empty(t *testing.T) {
 
 func TestMCP_GetRemoteGitFileContents(t *testing.T) {
 	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: "openapi: 3.0.0\n", SHA: "abc"}}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg)
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml","ref":"main"}`)))
 	text := toolText(t, resp, false)
@@ -581,7 +585,7 @@ func TestMCP_GetRemoteGitFileContents_Directory(t *testing.T) {
 	rg := &fakeRemoteGit{file: &RemoteGitFile{IsDirectory: true, Entries: []RemoteGitEntry{
 		{Path: "specs/openapi.yaml", Type: "file", SHA: "a"},
 	}}}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg)
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs"}`)))
 	text := toolText(t, resp, false)
@@ -598,7 +602,7 @@ func TestMCP_GetRemoteGitFileContents_OwnerMismatch_ToolError(t *testing.T) {
 	// The reader refuses a cross-org owner; the handler must surface it as a
 	// tool-level error (isError=true), not data.
 	rg := &fakeRemoteGit{err: ErrOwnerNotInOrg}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg)
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"evilcorp","repo":"secret","path":"x"}`)))
 	text := toolText(t, resp, true) // wantErr = true
@@ -615,7 +619,7 @@ func TestMCP_GetRemoteGitFileContents_MissingArgs_ToolError(t *testing.T) {
 }
 
 func TestMCP_GetRemoteGitFileContents_NilReader_ToolError(t *testing.T) {
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil)
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"r","path":"x"}`)))
 	toolText(t, resp, true)
@@ -626,7 +630,7 @@ func TestMCP_SearchRemoteGitCode(t *testing.T) {
 		{Path: "specs/openapi.yaml", SHA: "a"},
 		{Path: "api/openapi.yaml", SHA: "b"},
 	}}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg)
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("search_remote_git_code", `{"owner":"acme","repo":"billing-svc","query":"openapi"}`)))
 	text := toolText(t, resp, false)
@@ -667,5 +671,260 @@ func TestMCP_ToolsList_IncludesRemoteGitTools(t *testing.T) {
 		if !names[want] {
 			t.Errorf("tools/list missing %q (got %v)", want, names)
 		}
+	}
+}
+
+// ---- spec tools (validate_openapi_spec, fetch_openapi_spec) -------------------
+
+// specToolSampleSpec is a minimal valid OpenAPI 3.x document with 3 operations
+// (mirrors artifacts' own sampleSpec fixture) used across the spec-tool tests.
+const specToolSampleSpec = `openapi: 3.0.3
+info: { title: Weather, version: "1.0" }
+paths:
+  /weather:
+    get: { responses: { "200": { description: ok } } }
+  /forecast:
+    get: { responses: { "200": { description: ok } } }
+    post: { responses: { "201": { description: created } } }
+`
+
+// toolSchema is the subset of an mcpTool.InputSchema this file's schema-shape
+// assertions read.
+type toolSchema struct {
+	Type       string                    `json:"type"`
+	Properties map[string]map[string]any `json:"properties"`
+	Required   []string                  `json:"required"`
+}
+
+// schemaOf decodes tool's InputSchema into toolSchema.
+func schemaOf(t *testing.T, tool mcpTool) toolSchema {
+	t.Helper()
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal inputSchema: %v", err)
+	}
+	var s toolSchema
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("unmarshal inputSchema: %v", err)
+	}
+	return s
+}
+
+// TestMCP_ToolsList_SpecToolsSchema asserts validate_openapi_spec and
+// fetch_openapi_spec are advertised with the exact schema shape the other
+// tools use: an object with a single required string argument.
+func TestMCP_ToolsList_SpecToolsSchema(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	raw, _ := json.Marshal(resp.Result)
+	var result struct {
+		Tools []mcpTool `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("unmarshal tools: %v", err)
+	}
+	byName := map[string]mcpTool{}
+	for _, tool := range result.Tools {
+		byName[tool.Name] = tool
+	}
+
+	validate, ok := byName["validate_openapi_spec"]
+	if !ok {
+		t.Fatal("validate_openapi_spec missing from tools/list")
+	}
+	if s := schemaOf(t, validate); s.Type != "object" || s.Properties["content"] == nil ||
+		len(s.Required) != 1 || s.Required[0] != "content" {
+		t.Errorf("validate_openapi_spec schema = %+v, want object with required %q", s, "content")
+	}
+
+	fetch, ok := byName["fetch_openapi_spec"]
+	if !ok {
+		t.Fatal("fetch_openapi_spec missing from tools/list")
+	}
+	if s := schemaOf(t, fetch); s.Type != "object" || s.Properties["url"] == nil ||
+		len(s.Required) != 1 || s.Required[0] != "url" {
+		t.Errorf("fetch_openapi_spec schema = %+v, want object with required %q", s, "url")
+	}
+}
+
+func TestMCP_ValidateOpenAPISpec_Good(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", fmt.Sprintf(`{"content":%q}`, specToolSampleSpec))))
+	text := toolText(t, resp, false)
+
+	var payload validateSpecView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !payload.Valid {
+		t.Fatalf("valid = false, want true (errors %v)", payload.Errors)
+	}
+	if payload.Operations != 3 {
+		t.Errorf("operations = %d, want 3", payload.Operations)
+	}
+	if payload.NormalizedContent == "" {
+		t.Errorf("normalizedContent is empty, want the canonical-form doc")
+	}
+	if len(payload.Errors) != 0 {
+		t.Errorf("errors = %v, want empty", payload.Errors)
+	}
+}
+
+// TestMCP_ValidateOpenAPISpec_Bad asserts an invalid document is reported IN
+// the payload (valid=false, errors populated) — the tool call itself succeeds
+// (isError=false); only a missing argument or unconfigured port is a tool
+// error.
+func TestMCP_ValidateOpenAPISpec_Bad(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{"content":"foo: bar"}`)))
+	text := toolText(t, resp, false)
+
+	var payload validateSpecView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Valid {
+		t.Fatalf("valid = true, want false for a non-OpenAPI document")
+	}
+	if len(payload.Errors) == 0 {
+		t.Fatalf("errors is empty, want at least one parse error")
+	}
+	if payload.NormalizedContent != "" {
+		t.Errorf("normalizedContent = %q, want empty when invalid", payload.NormalizedContent)
+	}
+}
+
+func TestMCP_ValidateOpenAPISpec_MissingContent_ToolError(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{}`)))
+	text := toolText(t, resp, true)
+	if !strings.Contains(text, "content") {
+		t.Errorf("tool error text = %q, want it to name the missing argument", text)
+	}
+}
+
+func TestMCP_ValidateOpenAPISpec_NilPort_ToolError(t *testing.T) {
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{"content":"whatever"}`)))
+	toolText(t, resp, true)
+}
+
+// handlerWithFetcher wires a stub SpecFetcher alongside the REAL
+// artifacts.ValidateOpenAPI/NormalizeOpenAPIYAML, isolating fetch_openapi_spec's
+// own logic (size cap, validate+normalize wiring) from the network. SSRF
+// behavior itself is exercised separately, through the real
+// artifacts.FetchSpecFromURL (see TestMCP_FetchOpenAPISpec_SSRFBlocked).
+func handlerWithFetcher(fetch SpecFetcher) http.Handler {
+	return NewMCPHandler(&fakeResourceReader{}, nil, nil, nil,
+		artifacts.ValidateOpenAPI, artifacts.NormalizeOpenAPIYAML, fetch)
+}
+
+func TestMCP_FetchOpenAPISpec_Good(t *testing.T) {
+	var gotURL string
+	h := handlerWithFetcher(func(_ context.Context, url string) ([]byte, error) {
+		gotURL = url
+		return []byte(specToolSampleSpec), nil
+	})
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
+	text := toolText(t, resp, false)
+
+	var payload fetchSpecView
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Operations != 3 {
+		t.Errorf("operations = %d, want 3", payload.Operations)
+	}
+	if payload.Content == "" {
+		t.Errorf("content is empty, want the normalized doc")
+	}
+	if payload.SourceURL != "https://example.com/openapi.yaml" {
+		t.Errorf("sourceUrl = %q, want the requested url echoed back", payload.SourceURL)
+	}
+	if gotURL != "https://example.com/openapi.yaml" {
+		t.Errorf("fetcher saw url %q, want the requested url", gotURL)
+	}
+}
+
+// TestMCP_FetchOpenAPISpec_TooLarge_ToolError asserts the tool-level 256 KiB
+// cap rejects an oversized fetch with the exact "too large" message BEFORE
+// validation runs — a context-safety guard layered on top of (never a
+// substitute for) FetchSpecFromURL's own 5 MiB SSRF-hardened cap.
+func TestMCP_FetchOpenAPISpec_TooLarge_ToolError(t *testing.T) {
+	oversized := make([]byte, maxToolSpecBytes+1)
+	h := handlerWithFetcher(func(context.Context, string) ([]byte, error) { return oversized, nil })
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
+	text := toolText(t, resp, true)
+	if text != "spec too large — ask the user for a trimmed spec" {
+		t.Errorf("tool error text = %q, want the exact too-large message", text)
+	}
+}
+
+func TestMCP_FetchOpenAPISpec_AtCap_OK(t *testing.T) {
+	// Exactly at the cap must NOT be rejected — only strictly over it.
+	atCap := []byte(specToolSampleSpec + strings.Repeat(" ", maxToolSpecBytes-len(specToolSampleSpec)))
+	if len(atCap) != maxToolSpecBytes {
+		t.Fatalf("test fixture len = %d, want exactly %d", len(atCap), maxToolSpecBytes)
+	}
+	h := handlerWithFetcher(func(context.Context, string) ([]byte, error) { return atCap, nil })
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
+	toolText(t, resp, false)
+}
+
+func TestMCP_FetchOpenAPISpec_FailedValidation_ToolError(t *testing.T) {
+	h := handlerWithFetcher(func(context.Context, string) ([]byte, error) { return []byte("foo: bar"), nil })
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
+	text := toolText(t, resp, true)
+	if !strings.Contains(text, "failed validation") {
+		t.Errorf("tool error text = %q, want it to report validation failure", text)
+	}
+}
+
+func TestMCP_FetchOpenAPISpec_FetchError_ToolError(t *testing.T) {
+	h := handlerWithFetcher(func(context.Context, string) ([]byte, error) { return nil, fmt.Errorf("connection refused") })
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
+	text := toolText(t, resp, true)
+	if !strings.Contains(text, "connection refused") {
+		t.Errorf("tool error text = %q, want it to carry the fetch error", text)
+	}
+}
+
+func TestMCP_FetchOpenAPISpec_MissingURL_ToolError(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{}`)))
+	text := toolText(t, resp, true)
+	if !strings.Contains(text, "url") {
+		t.Errorf("tool error text = %q, want it to name the missing argument", text)
+	}
+}
+
+func TestMCP_FetchOpenAPISpec_NilPort_ToolError(t *testing.T) {
+	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil, nil, nil, nil)
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
+	toolText(t, resp, true)
+}
+
+// TestMCP_FetchOpenAPISpec_SSRFBlocked_RealGuardUnweakened proves the MCP tool
+// wiring reuses artifacts.FetchSpecFromURL's SSRF hardening AS-IS: routed
+// through the real function (sampleHandler wires it, not a stub), a loopback
+// URL must still be refused. A regression that wraps/relaxes the guard would
+// make this test pass a real fetch through instead of rejecting it.
+func TestMCP_FetchOpenAPISpec_SSRFBlocked_RealGuardUnweakened(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://127.0.0.1/openapi.yaml"}`)))
+	text := toolText(t, resp, true)
+	if !strings.Contains(text, "non-public address") {
+		t.Errorf("tool error text = %q, want the SSRF guard's refusal message (FetchSpecFromURL weakened?)", text)
+	}
+}
+
+// TestMCP_FetchOpenAPISpec_RejectsNonHTTPS proves the https-only half of the
+// SSRF guard also passes through unchanged.
+func TestMCP_FetchOpenAPISpec_RejectsNonHTTPS(t *testing.T) {
+	h, _, _ := sampleHandler()
+	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"http://example.com/openapi.yaml"}`)))
+	text := toolText(t, resp, true)
+	if !strings.Contains(text, "https") {
+		t.Errorf("tool error text = %q, want it to require https", text)
 	}
 }

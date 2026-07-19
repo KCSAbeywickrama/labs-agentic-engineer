@@ -879,6 +879,14 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// no clone). It resolves the org's credential (token + owner) from
 	// credResolver and refuses any owner that is not the org's GitHub account.
 	params.MCPRemoteGit = dependencies.NewRemoteGitClient(credResolver)
+	// OpenAPI spec MCP tools (validate_openapi_spec, fetch_openapi_spec): wired
+	// straight to the artifacts package's spec functions. FetchSpecFromURL is
+	// PLATFORM-TOUCHING SSRF hardening reused as-is — the MCP tool layer only
+	// adds a tighter context-safety size cap on top (mcp_tools.go), never a
+	// looser network-level guard.
+	params.MCPSpecValidator = artifacts.ValidateOpenAPI
+	params.MCPSpecNormalizer = artifacts.NormalizeOpenAPIYAML
+	params.MCPSpecFetcher = artifacts.FetchSpecFromURL
 	// design-save keys end-user-auth derivation on the CRT role marker read from
 	// this catalog (thunder-app generalization); wired consumer-side so design
 	// holds only a narrow MarkersByName port. When the design declares a

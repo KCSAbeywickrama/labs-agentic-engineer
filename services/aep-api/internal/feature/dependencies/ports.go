@@ -71,3 +71,22 @@ type RemoteGitReader interface {
 	GetFileContents(ctx context.Context, ocOrgID, owner, repo, path, ref string) (*RemoteGitFile, error)
 	SearchCode(ctx context.Context, ocOrgID, owner, repo, query string) ([]RemoteGitSearchHit, error)
 }
+
+// SpecValidator parses an OpenAPI 3.x document and returns its operation
+// count (method entries under paths), or an error when the document does not
+// parse or is not a valid OpenAPI 3.x doc. Backs validate_openapi_spec and the
+// validate half of fetch_openapi_spec. Satisfied by artifacts.ValidateOpenAPI.
+type SpecValidator func(raw []byte) (operations int, err error)
+
+// SpecNormalizer returns the canonical-form encoding of an already-valid
+// OpenAPI document. Backs validate_openapi_spec and fetch_openapi_spec.
+// Satisfied by artifacts.NormalizeOpenAPIYAML.
+type SpecNormalizer func(content string) (normalized string, err error)
+
+// SpecFetcher fetches an OpenAPI spec from a user-supplied https URL. Backs
+// fetch_openapi_spec. Satisfied by artifacts.FetchSpecFromURL — PLATFORM-
+// TOUCHING (SSRF-hardened: https-only, public-IP-only, redirect-guarded, size-
+// and time-capped). This port MUST always be wired to that function as-is; the
+// MCP tool layer only adds a TIGHTER context-safety cap on top, never a looser
+// SSRF posture.
+type SpecFetcher func(ctx context.Context, url string) ([]byte, error)
