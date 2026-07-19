@@ -21,6 +21,27 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
+
+// Router replaced so the internal-link chip renders as a plain anchor whose
+// href is the resolved route path — no RouterProvider needed.
+vi.mock("@tanstack/react-router", () => ({
+  createLink: (Component: React.ElementType) =>
+    function MockLink({
+      to,
+      params,
+      ...rest
+    }: {
+      to: string;
+      params?: Record<string, unknown>;
+    } & Record<string, unknown>) {
+      let href = to;
+      for (const [key, value] of Object.entries(params ?? {})) {
+        href = href.replace(`$${key}`, String(value));
+      }
+      return <Component component="a" href={href} {...rest} />;
+    },
+}));
+
 import { DeploymentsPage } from "./DeploymentsPage";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
@@ -79,6 +100,27 @@ vi.mock("../api/queries", () => ({
 }));
 
 describe("DeploymentsPage — validation chip", () => {
+  it("routes to the internal validation log page when the issue number is present", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "completed",
+      validationIssue: 30,
+      validationUrl: "https://github.com/acme/demo/pull/42",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const chip = screen.getByRole("link", { name: /Validation report/ });
+    expect(chip).toHaveAttribute(
+      "href",
+      "/projects/acme/deployments/validation/30",
+    );
+    // Internal navigation, not a new-tab external link.
+    expect(chip).not.toHaveAttribute("target");
+  });
+
   it("shows a PR-linked chip when validation has run", () => {
     mockDeploy = {
       version: "v1",

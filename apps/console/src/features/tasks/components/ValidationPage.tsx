@@ -16,7 +16,6 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -27,42 +26,26 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, GitHub } from "@wso2/oxygen-ui-icons-react";
+import {
+  ArrowLeft,
+  GitHub,
+  GitPullRequest,
+} from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
 import { useTask } from "../api/queries";
 import { useTaskLog } from "../hooks/useTaskLog";
 import { TaskLogView } from "./TaskLogView";
 import { TaskStatusChip } from "./TaskStatusChip";
+import { EXEC_ACTIVE, useSecondsSince } from "./TaskPage";
 
 const LinkIconButton = createLink(IconButton);
 
-// Seconds elapsed since resetKey last changed, while `active`. Used to age the
-// waiting-state tail so a long, silent runner bootstrap (cold-start image pull
-// can take a minute) reads as "still working" rather than a stall. The clock
-// restarts whenever a new line arrives or the stream (re)connects, and stops
-// ticking (no wasted 1s re-renders) once there is nothing to wait on.
-// Exported for ValidationPage, which shares the same log anatomy.
-export function useSecondsSince(resetKey: string, active: boolean): number {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    setSeconds(0);
-    if (!active) return;
-    const started = Date.now();
-    const id = setInterval(
-      () => setSeconds(Math.floor((Date.now() - started) / 1000)),
-      1000,
-    );
-    return () => clearInterval(id);
-  }, [resetKey, active]);
-  return seconds;
-}
-
-export const EXEC_ACTIVE = new Set(["queued", "running"]);
-
-// The per-task console (#173): slim header (title, status chip, GitHub
-// icon-link) over the flat streaming log. get-task provides the initial
-// state; the SSE stream owns everything after that.
-export function TaskPage({
+// The validation console: the deployments board's validation chip lands here.
+// Same anatomy as TaskPage (get-task seeds the header, the SSE stream owns
+// everything after — the validation task IS a task to those endpoints), but
+// framed as the run's validation phase: back goes to the deployments board,
+// and the header jumps to the validation issue and, once opened, its PR.
+export function ValidationPage({
   projectName,
   issueNumber,
 }: {
@@ -72,12 +55,11 @@ export function TaskPage({
   const detail = useTask(projectName, issueNumber);
   const log = useTaskLog(projectName, issueNumber);
   // An attempt is still queued/running — used to reassure during long, silent
-  // stretches (the runner bootstrap emits synthetic phase lines, but between
-  // them the feed can be quiet for a while on a cold-start image pull).
+  // stretches (a Playwright runner cold start pulls a hefty browser image).
   const anyRunning = log.executions.some((e) => EXEC_ACTIVE.has(e.status));
-  // Restart the idle clock on every new line and on (re)connect; only tick while
-  // something is actually being waited on. Called before the early returns below
-  // so the hook order stays stable (rules of hooks).
+  // Restart the idle clock on every new line and on (re)connect; only tick
+  // while something is actually being waited on. Called before the early
+  // returns below so the hook order stays stable (rules of hooks).
   const idleSeconds = useSecondsSince(
     `${log.phase}:${log.lines.length}`,
     log.phase !== "ended" && (log.lines.length === 0 || anyRunning),
@@ -86,7 +68,7 @@ export function TaskPage({
   if (detail.isPending) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-        <CircularProgress aria-label="Loading task" />
+        <CircularProgress aria-label="Loading validation" />
       </Box>
     );
   }
@@ -97,7 +79,7 @@ export function TaskPage({
         severity="error"
         action={<Button onClick={() => void detail.refetch()}>Retry</Button>}
       >
-        Failed to load the task
+        Failed to load the validation task
         {detail.error instanceof Error && detail.error.message
           ? `: ${detail.error.message}`
           : ""}
@@ -105,29 +87,26 @@ export function TaskPage({
     );
   }
 
-  // The stream's view of the task is fresher than the initial fetch.
+  // The stream's view of the task is fresher than the initial fetch — the PR
+  // button appears live once the validation PR opens.
   const derivedStatus =
     log.settledStatus ?? log.task?.derivedStatus ?? detail.data.derivedStatus;
   const title = log.task?.title ?? detail.data.title;
   const issueUrl = log.task?.issueUrl ?? detail.data.issueUrl;
-  // TaskDetail (the get-task response) doesn't carry blockedBy — only the
-  // stream's TaskView does — so this is populated once the SSE stream has
-  // upserted a task frame, and simply absent before that (fine: the info
-  // icon + tooltip is optional decoration, not load-bearing).
-  const blockedBy = log.task?.blockedBy;
+  const prUrl = log.task?.prUrl ?? detail.data.prUrl;
 
   let tail: string | undefined;
   if (log.phase === "reconnecting") {
     tail = "· connection lost — reconnecting…";
   } else if (log.phase === "connecting") {
-    tail = "· attaching to the task log…";
+    tail = "· attaching to the validation log…";
   } else if (log.phase === "ended") {
-    tail = `· task settled — ${derivedStatus}`;
+    tail = `· validation settled — ${derivedStatus}`;
   } else if (log.lines.length === 0) {
-    // Live, no timeline yet: the coding attempt is being prepared (dispatch /
-    // scheduling) before the runner's first line lands.
+    // Live, no timeline yet: the validation attempt is being prepared
+    // (dispatch / scheduling) before the runner's first line lands.
     tail =
-      `· preparing the coding agent…${idleSeconds >= 20 ? " (a cold start can take up to a minute)" : ""}` +
+      `· preparing the validation agent…${idleSeconds >= 20 ? " (a cold start can take up to a minute)" : ""}` +
       ` · ${idleSeconds}s`;
   } else if (anyRunning && idleSeconds >= 5) {
     // Timeline has content but nothing new for a bit and an attempt is live —
@@ -150,11 +129,11 @@ export function TaskPage({
         spacing={1.5}
         sx={{ alignItems: "center", mb: 2 }}
       >
-        <Tooltip title="Back to the build">
+        <Tooltip title="Back to deployments">
           <LinkIconButton
-            to="/projects/$projectName/builds"
+            to="/projects/$projectName/deployments"
             params={{ projectName }}
-            aria-label="Back to the build"
+            aria-label="Back to deployments"
           >
             <ArrowLeft size={18} />
           </LinkIconButton>
@@ -169,18 +148,22 @@ export function TaskPage({
         <Typography variant="subtitle1" sx={{ fontWeight: 600, minWidth: 0 }}>
           {title}
         </Typography>
-        {derivedStatus === "on_hold" && blockedBy?.length ? (
-          <Tooltip title={`Waiting for ${blockedBy.join(", ")}`}>
-            {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
-            <Box sx={{ display: "inline-flex" }}>
-              <TaskStatusChip derivedStatus={derivedStatus} />
-            </Box>
-          </Tooltip>
-        ) : (
-          <TaskStatusChip derivedStatus={derivedStatus} />
-        )}
+        <TaskStatusChip derivedStatus={derivedStatus} />
         <Box sx={{ flexGrow: 1 }} />
-        <Tooltip title="Open the GitHub issue">
+        {prUrl && (
+          <Tooltip title="Open the validation PR">
+            <IconButton
+              component="a"
+              href={prUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Validation pull request"
+            >
+              <GitPullRequest size={18} />
+            </IconButton>
+          </Tooltip>
+        )}
+        <Tooltip title="Open the validation issue">
           <IconButton
             component="a"
             href={issueUrl}

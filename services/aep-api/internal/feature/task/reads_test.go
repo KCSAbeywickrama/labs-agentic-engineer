@@ -99,6 +99,100 @@ func TestListReads_ValidationTaskExcluded(t *testing.T) {
 	}
 }
 
+// TestReads_PRURLDerivation pins TaskView.prUrl: the task's PR link, recovered
+// from the succeeded coding execution's "pr#N" reason (the same recovery
+// /status uses for validationUrl) — never from a running/failed row's stale
+// reason, and absent (omitempty) before a PR opens.
+func TestReads_PRURLDerivation(t *testing.T) {
+	coding := func(status, reason string) *models.Execution {
+		return &models.Execution{Kind: string(taskmeta.KindCoding), Status: status, Reason: reason}
+	}
+	cases := []struct {
+		name string
+		exec *models.Execution
+		want string
+	}{
+		{
+			name: "succeeded coding run stamped pr#42 → PR link",
+			exec: coding(string(taskmeta.ExecSucceeded), taskmeta.ReasonPROpenPrefix+"42"),
+			want: "https://github.com/o/r/pull/42",
+		},
+		{name: "no coding execution → empty", exec: nil, want: ""},
+		{
+			name: "succeeded without a pr# reason → empty",
+			exec: coding(string(taskmeta.ExecSucceeded), ""),
+			want: "",
+		},
+		{
+			name: "running row with a stale pr# reason → empty",
+			exec: coding(string(taskmeta.ExecRunning), taskmeta.ReasonPROpenPrefix+"42"),
+			want: "",
+		},
+		{
+			name: "failed row with a stale pr# reason → empty",
+			exec: coding(string(taskmeta.ExecFailed), taskmeta.ReasonPROpenPrefix+"42"),
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues := newFakeIssues()
+			issues.seed(taggedIssue(10, "order-service", "v1"))
+			execs := newFakeExecReader()
+			if tc.exec != nil {
+				execs.put(10, *tc.exec)
+			}
+			reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil)
+
+			views, err := reads.List(context.Background(), "org1", "proj1", "open")
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if got := viewsByNumber(t, views)[10].PRURL; got != tc.want {
+				t.Errorf("List prUrl = %q, want %q", got, tc.want)
+			}
+			detail, err := reads.Get(context.Background(), "org1", "proj1", 10)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if detail.PRURL != tc.want {
+				t.Errorf("Get prUrl = %q, want %q", detail.PRURL, tc.want)
+			}
+			if tc.want == "" {
+				b, err := json.Marshal(detail.TaskView)
+				if err != nil {
+					t.Fatalf("marshal view: %v", err)
+				}
+				if strings.Contains(string(b), "prUrl") {
+					t.Errorf("prUrl key present in JSON despite no PR: %s", b)
+				}
+			}
+		})
+	}
+}
+
+// TestReads_PRURLForValidationTask covers the consumer this field was added
+// for: the console's validation log page links to the validation PR via
+// Get(validation issue).prUrl.
+func TestReads_PRURLForValidationTask(t *testing.T) {
+	issues := newFakeIssues()
+	issues.seed(validationIssue(30, "v1"))
+	execs := newFakeExecReader().put(30, models.Execution{
+		Kind:   string(taskmeta.KindCoding),
+		Status: string(taskmeta.ExecSucceeded),
+		Reason: taskmeta.ReasonPROpenPrefix + "7",
+	})
+	reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil)
+
+	detail, err := reads.Get(context.Background(), "org1", "proj1", 30)
+	if err != nil {
+		t.Fatalf("Get(validation): %v", err)
+	}
+	if want := "https://github.com/o/r/pull/7"; detail.PRURL != want {
+		t.Errorf("validation prUrl = %q, want %q", detail.PRURL, want)
+	}
+}
+
 // ---- dependency-gated on_hold reconciliation (issue #164 follow-up) ---------
 
 // newReadsWithDesign wires a read path with a DesignReader so the second pass

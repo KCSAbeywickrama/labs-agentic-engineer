@@ -158,6 +158,7 @@ export const projectStatuses: Record<
       status: "deployed",
       components: { total: 3, ready: 3 },
       validation: "completed",
+      validationIssue: 30,
       validationUrl: `${REPO_URL}/pull/42`,
     },
   },
@@ -441,6 +442,16 @@ const doneTasks: TaskView[] = buildingTasks.map((t) => ({
   ...t,
   derivedStatus: "deployed",
 }));
+
+// The project's ONE validation task (issue 30, deploy.validationIssue in the
+// deployed scenario): kept OUT of projectTasks — list-tasks never returns it —
+// but get-task and the log stream still serve it, which is what the
+// deployments board's validation chip deep-links to.
+export const validationTask: TaskView = {
+  ...task(30, "Validate deployed system against acceptance criteria", "deployed"),
+  executorClass: "validation",
+  prUrl: `${REPO_URL}/pull/42`,
+};
 
 export const projectTasks: Record<
   Exclude<ProjectScenario, "error">,

@@ -396,6 +396,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		execs      repositories.ExecutionRepository
 		wantStatus string
 		wantURL    string
+		wantIssue  int64
 	}{
 		{name: "no child → none, no link", wantStatus: "none", wantURL: ""},
 		{
@@ -403,6 +404,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			child:      child(models.WorkflowStatusRunning),
 			wantStatus: "running",
 			wantURL:    "https://github.com/o/r/issues/9",
+			wantIssue:  9,
 		},
 		{
 			name:       "completed with an open PR → completed, PR link",
@@ -410,18 +412,21 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			execs:      prExecs,
 			wantStatus: "completed",
 			wantURL:    "https://github.com/o/r/pull/42",
+			wantIssue:  9,
 		},
 		{
 			name:       "failed → failed, issue link (no succeeded coding row)",
 			child:      child(models.WorkflowStatusFailed),
 			wantStatus: "failed",
 			wantURL:    "https://github.com/o/r/issues/9",
+			wantIssue:  9,
 		},
 		{
 			name:       "canceled → failed",
 			child:      child(models.WorkflowStatusCanceled),
 			wantStatus: "failed",
 			wantURL:    "https://github.com/o/r/issues/9",
+			wantIssue:  9,
 		},
 	}
 	for _, tc := range cases {
@@ -432,6 +437,9 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			}
 			if st.Deploy.ValidationURL != tc.wantURL {
 				t.Errorf("validationUrl = %q, want %q", st.Deploy.ValidationURL, tc.wantURL)
+			}
+			if st.Deploy.ValidationIssue != tc.wantIssue {
+				t.Errorf("validationIssue = %d, want %d", st.Deploy.ValidationIssue, tc.wantIssue)
 			}
 		})
 	}

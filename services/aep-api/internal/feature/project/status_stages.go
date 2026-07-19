@@ -231,6 +231,11 @@ func (s *projectService) populateStages(ctx context.Context, orgName, projectNam
 	// exists). Both derived from cheap DB reads above — no GitHub in the poll.
 	status.Deploy.Validation = apigen.DeployStageValidation(validationStageStatus(validationRun))
 	status.Deploy.ValidationURL = validationURL(status.RepoURL, validationRun, validationPR)
+	// The issue number lets the console open the internal validation log page
+	// (get-task / stream-task-log serve the validation task by issue number).
+	if validationRun != nil {
+		status.Deploy.ValidationIssue = int64(validationRun.IssueNumber)
+	}
 	return nil
 }
 
