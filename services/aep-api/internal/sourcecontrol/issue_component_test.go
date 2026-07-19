@@ -22,8 +22,8 @@
 // CAPITALIZED keys (Number/Title/…), create's result lowercase — exactly what
 // the MCP client parses.
 //
-// External test package: the harness imports api, which imports gitrepo.
-package gitrepo_test
+// External test package: the harness imports api, which imports sourcecontrol.
+package sourcecontrol_test
 
 import (
 	"context"
@@ -32,38 +32,52 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/api"
-	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
 )
 
-// fakeIssueService is a minimal gitrepo.IssueService: create echoes, list
+// fakeIssueService is a minimal sourcecontrol.IssueService: create echoes, list
 // returns a fixed set for the ranker to filter. The embedded interface panics
 // on any other method — these routes must never reach them.
 type fakeIssueService struct {
-	gitrepo.IssueService
-	created []gitrepo.CreateIssueRequest
+	sourcecontrol.IssueService
+	created []sourcecontrol.CreateIssueRequest
 	gotOrg  string
-	issues  []gitrepo.IssueInfo
+	issues  []sourcecontrol.IssueInfo
 }
 
-func (f *fakeIssueService) CreateIssue(_ context.Context, org, _ string, req gitrepo.CreateIssueRequest) (*gitrepo.IssueResult, error) {
+func (f *fakeIssueService) CreateIssue(_ context.Context, org, _ string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error) {
 	f.gotOrg = org
 	f.created = append(f.created, req)
-	return &gitrepo.IssueResult{Number: 7, URL: "https://github.com/acme/repo/issues/7", NodeID: "n7"}, nil
+	return &sourcecontrol.IssueResult{Number: 7, URL: "https://github.com/acme/repo/issues/7", NodeID: "n7"}, nil
 }
 
-func (f *fakeIssueService) ListIssues(_ context.Context, org, _ string, _ []string) ([]gitrepo.IssueInfo, error) {
+func (f *fakeIssueService) ListIssues(_ context.Context, org, _ string, _ []string) ([]sourcecontrol.IssueInfo, error) {
 	f.gotOrg = org
 	return f.issues, nil
 }
 
+// scWith assembles the real sourcecontrol domain around a faked port — the same
+// New the composition root calls.
+func scWith(t *testing.T, svc sourcecontrol.IssueService) *httpapi.Handlers {
+	t.Helper()
+	h, err := httpapi.New(sourcecontrol.Deps{Issues: svc})
+	if err != nil {
+		t.Fatalf("assemble sourcecontrol: %v", err)
+	}
+	return h
+}
+
 func TestIssueComponent_CreateAndList(t *testing.T) {
 	t.Parallel()
-	svc := &fakeIssueService{issues: []gitrepo.IssueInfo{
+	svc := &fakeIssueService{issues: []sourcecontrol.IssueInfo{
 		{Number: 1, Title: "service1 timeout on checkout", Body: "…", URL: "u1", State: "open", Labels: []string{"sre"}},
 		{Number: 2, Title: "docs typo", Body: "…", URL: "u2", State: "open"},
 	}}
-	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{IssueSvc: svc}})
+	// The harness wires the DOMAIN, not a loose service: the edge embeds
+	// sourcecontrol's handlers, so this assembles the same graph production does.
+	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{SourceControl: scWith(t, svc)}})
 
 	// Create: org from the verified token, result keys lowercase.
 	resp := h.AsOrg("acme").Post("/api/v1/projects/web/issues",

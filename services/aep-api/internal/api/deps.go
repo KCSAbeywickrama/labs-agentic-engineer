@@ -19,6 +19,7 @@ package api
 import (
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
+	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
 
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/build"
@@ -27,13 +28,13 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
-	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
 	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
 	"github.com/wso2/aep/aep-api/internal/feature/task"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // Deps carries every feature service the strict handlers (handlers_*.go)
@@ -47,8 +48,7 @@ type Deps struct {
 	OrgSvc              organization.OrganizationService
 	ComponentSvc        component.ComponentService
 	ConfigSvc           component.ConfigService
-	CollabRepo          gitrepo.RepoService
-	IssueSvc            gitrepo.IssueService
+	CollabRepo          sourcecontrol.RepoService
 	ProvisioningSvc     *provisioning.Service
 	ResourceTypeCatalog dependencies.ResourceTypeLister
 	TaskReads           *task.Reads
@@ -69,5 +69,6 @@ type Deps struct {
 	// into apiServer, so the edge holds no ops service and no ops handler file.
 	// Every later domain arrives the same way, and this bag shrinks to nothing
 	// by P9 — it is the legacy handlers' dependency bag, not the edge's.
-	Ops *opshttpapi.Handlers
+	Ops           *opshttpapi.Handlers
+	SourceControl *schttpapi.Handlers
 }

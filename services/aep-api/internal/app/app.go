@@ -36,7 +36,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/clients/clustergatewayproxy"
-	githubclient "github.com/wso2/aep/aep-api/internal/clients/github"
 	"github.com/wso2/aep/aep-api/internal/clients/oauth"
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -57,7 +56,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
-	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
 	"github.com/wso2/aep/aep-api/internal/feature/idp"
 	"github.com/wso2/aep/aep-api/internal/feature/organization"
 	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
@@ -76,6 +74,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/reaper"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
+	githubclient "github.com/wso2/aep/aep-api/internal/sourcecontrol/githubhost"
+	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
 	"github.com/wso2/aep/aep-api/models"
 	"github.com/wso2/aep/aep-api/repositories"
 )
@@ -258,12 +259,12 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		}
 	}
 
-	repoService := gitrepo.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility,
-		gitrepo.WithWorkspaceTrash(trashWorkspaceRepo))
-	gitOpsService := gitrepo.NewGitOpsService(credResolver, workspaceEngine)
+	repoService := sourcecontrol.NewRepoService(repoRepo, gitHost, credResolver, cfg.GitHubRepoVisibility,
+		sourcecontrol.WithWorkspaceTrash(trashWorkspaceRepo))
+	gitOpsService := sourcecontrol.NewGitOpsService(credResolver, workspaceEngine)
 	artifactSvcGit := artifacts.NewArtifactService(repoRepo, gitOpsService)
-	issueService := gitrepo.NewIssueService(repoRepo, gitHost, credResolver)
-	webhookRegService := gitrepo.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
+	issueService := sourcecontrol.NewIssueService(repoRepo, gitHost, credResolver)
+	webhookRegService := sourcecontrol.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
 	credRefreshService := orgcreds.NewCredentialsRefreshService(credResolver)
 	credService := orgcreds.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
 	buildCredService := orgcreds.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
@@ -730,7 +731,6 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		ComponentSvc:     componentService,
 		ConfigSvc:        configService,
 		CollabRepo:       repoService,
-		IssueSvc:         issueService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskStream:       taskStreamSvc,
@@ -774,6 +774,14 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// This is the whole domain's wiring: its ports in, its handlers out. The
 	// handlers are embedded directly into the edge's composite — the edge holds
 	// no ops service.
+	// sourcecontrol — the git-host substrate (P2). Its handlers are embedded
+	// straight into the edge's composite; the edge holds no issue service.
+	scHandlers, err := schttpapi.New(sourcecontrol.Deps{Issues: issueService})
+	if err != nil {
+		return nil, fmt.Errorf("assemble sourcecontrol domain: %w", err)
+	}
+	params.Deps.SourceControl = scHandlers
+
 	opsHandlers, err := opshttpapi.New(ops.Deps{
 		Reports: ops.NewRepository(db),
 		Execs:   opsExecutionBridge{execs: executionRepo},
@@ -971,7 +979,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		// age-reap, DB↔disk orphan reconciliation, quota/LRU eviction. The
 		// global passes self-elect via a non-blocking flock on the mount, so
 		// running one per replica is correct.
-		reaper.New(workspaceEngine, repoRepo, cfg.Workspace),
+		reaper.New(workspaceEngine, reaperRepoLister{repoRepo}, cfg.Workspace),
 		// agent_turns crash-safety sweep (design D17): a stale-heartbeat
 		// running turn is failed and the D18 one-active guard released;
 		// locally-buffered streams get the terminal event.
@@ -1118,7 +1126,7 @@ func (d codingDispatcher) DispatchCoding(ctx context.Context, orgID, projectID, 
 
 // prMerger adapts the issue service onto the devflow PRMerger port.
 type prMerger struct {
-	issues gitrepo.IssueService
+	issues sourcecontrol.IssueService
 }
 
 func (m prMerger) MergePR(ctx context.Context, orgID, projectID string, prNumber int) error {
@@ -1146,13 +1154,13 @@ func (a buildSecretStagerAdapter) StageBuildSecret(ctx context.Context, ocOrgID,
 }
 
 // buildGitHost selects the git host implementation named by GIT_PROVIDER and
-// returns it as gitrepo.Host. This is the only place a concrete provider client
+// returns it as sourcecontrol.Host. This is the only place a concrete provider client
 // is constructed; every gitrepo domain service narrows Host to its own
 // capability port. Deliberately a plain switch — NOT a registry or capability
 // framework. A GitLab impl later is one new clients/gitlab package + one case.
 // cfg.Validate() already rejects unknown providers at boot; the default arm is
 // defensive.
-func buildGitHost(cfg config.Config) (gitrepo.Host, error) {
+func buildGitHost(cfg config.Config) (sourcecontrol.Host, error) {
 	switch cfg.GitProvider {
 	case "github":
 		return githubclient.NewClient(), nil
