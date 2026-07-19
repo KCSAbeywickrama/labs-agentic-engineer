@@ -1,8 +1,9 @@
 # ops — Incident RCA
 
+> **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
+
 Capture RCA-agent incident reports and correlate them with live Task executions, so the console's
 Alerts bell and stepper show the *current* state rather than the write-time snapshot.
-[Why & boundary decisions →](../../../../docs/design/domain-oriented-architecture.md#37-incident-rca--internalops)
 
 ```mermaid
 flowchart LR
@@ -27,11 +28,11 @@ flowchart LR
 | Port | Dir | Peer · contract |
 |---|---|---|
 | `Repository` | needs | own store — `repository.go` (the only gorm file) |
-| `ExecutionReader` | needs | `delivery` — latest execution per kind for a Task. **Optional**: nil disables correlation. Until P6 the composition root bridges it to the legacy execution repository (`internal/app/ops_adapters.go`) |
+| `ExecutionReader` | needs | `delivery` — latest execution per kind for a Task. **Optional**: nil disables correlation (satisfied by delivery's `execution.OpsExecutionReader`) |
 
 ## Owns
-- `rca_agent_reports` — gorm, single write-authority. Created by `internal/migrate`'s
-  `phase10_rca_agent_reports` step, not AutoMigrate.
+- `rca_agent_reports` — gorm in this domain (`repository.go` over `model.go`), single write-authority.
+  Created by `internal/migrate`'s `phase10_rca_agent_reports` step, not AutoMigrate.
 
 ## Invariants — don't break
 - **Correlation only promotes false→true**, and is best-effort: a lookup failure serves the stored
@@ -39,6 +40,6 @@ flowchart LR
   threshold), not merely a build.
 - **An empty page marshals to `"items":null`**, not `[]` — the contract marks `items` nullable and the
   mapping in `wire.go` preserves nil deliberately.
-- Org is never a request input: slices read `tenant.BoundOrgFromContext` and pass it explicitly.
-- `ExecutionFact` is ops' own vocabulary, not delivery's entity — that is what let this domain land
-  five phases before its provider.
+- `ExecutionFact` is ops' own vocabulary, not delivery's entity — the decoupling that lets ops read
+  delivery through a port it owns.
+- Platform-wide rules (tenant gate, secrets fence) → [../../README.md](../../README.md).

@@ -241,8 +241,8 @@ func TestTaskmetaIsPure(t *testing.T) {
 // by TestGormFencedToDomainRepository, which allows gorm in <domain>/repository.go
 // and nowhere else. Without that carve-out the two rules contradict — a domain
 // adding the sanctioned repository.go would be a "NEW direct gorm importer" and
-// force this shrink-only list to GROW once per domain phase, which would rot it
-// into a rubber stamp (docs/design/domain-oriented-architecture.md §19.6).
+// force this shrink-only list to GROW once per domain, which would rot it
+// into a rubber stamp.
 var gormImporters = map[string]bool{
 	// Composition + kernel (structurally hold gorm; not feature slices).
 	"internal/edge": true,

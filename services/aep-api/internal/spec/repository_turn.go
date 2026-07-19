@@ -30,8 +30,8 @@ import (
 // spec-domain fold (P4): the ORM stays fenced to repositories/ while the turn
 // VOCABULARY (the TurnTerminal shape, ErrTurnActive, the status/reason strings)
 // re-exports back into the domain via type aliases, so the turn engine reads as
-// one package. The gorm-into-<domain>/repository.go move defers to P9, as with
-// organization's stores (docs/design/domain-oriented-architecture.md §19.5.1).
+// one package. The AgentTurn gorm lives here, in the spec domain's own
+// repository, as single write-authority.
 
 // Turn statuses (AgentTurn.Status).
 const (

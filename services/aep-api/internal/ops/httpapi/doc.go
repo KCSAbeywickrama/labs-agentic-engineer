@@ -20,5 +20,5 @@
 // It declares NO methods — a method here sits at depth-1 and silently shadows
 // its slice (TestAggregatorsDeclareNoMethods). The assembly lives here, not in
 // the domain root, because root→httpapi→slices→root would be a cycle.
-// [Why →] docs/design/domain-oriented-architecture.md#8-structural-convention-the-composition-root
+// [Why →] services/aep-api/README.md — the composition-root convention.
 package httpapi

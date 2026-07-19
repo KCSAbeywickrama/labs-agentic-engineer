@@ -26,7 +26,7 @@ import (
 )
 
 // The migration MECHANISM — how a step runs, not which steps exist or in what
-// order (docs/design/domain-oriented-architecture.md §7).
+// order.
 //
 // The split is what keeps this kernel package domain-free: the ordered LIST
 // names domain-owned steps and entities, so it lives in internal/migrate, which

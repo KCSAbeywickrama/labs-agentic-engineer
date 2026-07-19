@@ -1,9 +1,10 @@
 # delivery — Delivery Pipeline
 
+> **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
+
 Take a versioned Spec end-to-end: plan the Tasks, route every Execution through the ONE funnel, dispatch
 coding agents, build/deploy the components, and run validation. **Single write-authority over the
 executions store and the Temporal dev/task/validation workflows.**
-[Why & boundary decisions →](../../../../docs/design/domain-oriented-architecture.md#33-delivery-pipeline--internaldelivery)
 
 ```mermaid
 flowchart LR
@@ -32,7 +33,7 @@ flowchart LR
   EXEC -->|ExecutionReader| OPS[[ops]]
 ```
 
-## Internal shape — kernel-ROOT + feature sub-packages (§10.3.1)
+## Internal shape — kernel-root + feature sub-packages
 
 Delivery is **not** the flat-root-of-services layout spec/organization/ops use, and **not** per-op slices.
 Its absorbed features are densely cross-coupled AND carry the load-bearing `task ⊥ execution` split, which
@@ -70,9 +71,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 ## Owns
 - The **executions** write-API (admit/finish/reevaluate through the funnel) and **workflow_runs**; the
   Temporal `Runtime`, `Signaler`, and the dev/task/validation workflows.
-- **Persistence today**: the executions/workflow_runs/coding_agent_logs gorm lives in `repositories/`
-  (`Execution`/`WorkflowRun`/`CodingAgentLog` repositories) and the entities in `models/` — this domain is
-  **gorm-free** (the gorm-into-`delivery/repository.go` + entity move defer to P9, as every domain's did).
+- **Persistence**: the `executions` / `workflow_runs` / `coding_agent_logs` gorm and their entities live in
+  this domain — `repository_execution.go` · `repository_workflow_run.go` · `repository_coding_agent_log.go`
+  over the `execution.go` / `workflow_run.go` / `coding_agent_log.go` entities — as single write-authority.
 
 ## Invariants — don't break
 - **`task ⊥ execution`.** The GitHub-facing half (`task`) and the platform-owned half (`execution`) are
@@ -84,5 +85,4 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   sub-package (`root ⊥ slice`), and the domain never imports `internal/feature/*`.
 - **`Signaler` stays a nil-safe concrete type**, not an interface — its nil-safety (no-op when Temporal is
   unavailable) is load-bearing for tests and degraded runs.
-- **Deny-by-default tenant gate is upstream.** Handlers read the org from the gate-bound context only; org
-  never travels in a path/query/body, so IDOR across the executions store is unrepresentable.
+- Platform-wide rules (tenant gate, secrets fence, persistence-in-domain) → [../../README.md](../../README.md).

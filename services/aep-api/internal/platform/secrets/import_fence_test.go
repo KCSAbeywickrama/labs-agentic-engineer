@@ -49,8 +49,8 @@ var rules = []fenceRule{
 		allowedPrefix:        filepath.Join("internal", "platform", "secrets") + string(filepath.Separator),
 		bannedImportPrefixes: []string{`"github.com/openbao/`, `"github.com/hashicorp/vault`},
 		reason: "OpenBao/Vault SDK access is confined to internal/platform/secrets/ (the OpenBaoStore " +
-			"wrapper). Per-org isolation in §6.5 rests on no other package being able to talk to OpenBao " +
-			"directly, and domain-oriented-architecture.md §10.4 makes this module the ONE home for every " +
+			"wrapper). Per-org isolation rests on no other package being able to talk to OpenBao " +
+			"directly; this module is the ONE home for every " +
 			"secret backend — the fence is what stops a business domain reaching a backend directly.",
 	},
 	{

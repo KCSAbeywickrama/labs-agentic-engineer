@@ -79,7 +79,7 @@ type TestCredentialRequest struct {
 	Username string `json:"username,omitempty"`
 }
 
-// ValidationContextResponse Deployed endpoints + criteria path for a validation run. Generated as igen.ValidationContextResponse (no x-go-type) — igen must stay a leaf, so the edge's internal handler projects the delivery domain's own struct onto this wire shape (domain-oriented-architecture §7; the same decoupling as RefreshResponse).
+// ValidationContextResponse Deployed endpoints + criteria path for a validation run. Generated as igen.ValidationContextResponse (no x-go-type) — igen must stay a leaf, so the edge's internal handler projects the delivery domain's own struct onto this wire shape (the same decoupling as RefreshResponse).
 type ValidationContextResponse struct {
 	CriteriaPath string              `json:"criteriaPath"`
 	Endpoints    []ComponentEndpoint `json:"endpoints"`

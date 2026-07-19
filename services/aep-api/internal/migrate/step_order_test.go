@@ -33,9 +33,9 @@ import (
 //     tasks_github_native (which cascade-drops the legacy keyed table).
 //
 // A reordering is a schema bug that a green unit suite would otherwise hide and
-// only a fresh database would reveal. As domains take ownership of their steps
-// (P2–P8), move the registration CALL-SITE, never its position: this list must
-// not change, and a diff here is a review stop.
+// only a fresh database would reveal. If a domain moves its migration step's
+// registration CALL-SITE, its POSITION here must not change: this list is frozen,
+// and a diff here is a review stop.
 var goldenStepOrder = []string{
 	"phase2_pra",
 	"phase0",

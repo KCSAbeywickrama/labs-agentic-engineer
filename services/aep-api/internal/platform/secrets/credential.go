@@ -15,8 +15,7 @@
 // under the License.
 
 // Package secrets is the kernel module that owns every secret BACKEND, and the
-// single seam for GitHub authentication (docs/design/domain-oriented-architecture.md
-// §10.4).
+// single seam for GitHub authentication.
 //
 // Secret storage is spread across four genuinely different backends — OpenBao
 // (sealed git tokens), the SM-API (runner mirrors), Kubernetes ExternalSecrets

@@ -1,11 +1,12 @@
 # dependencies — Dependencies & Provisioning
 
+> **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
+
 Discover the platform-resource catalog and resource-type markers, provision the platform + external
 resources a Spec declares, broker cross-project org-service access, coordinate the `aep:provision` gate,
 and wire the resulting runtime config onto deployed apps. **The two halves of OpenChoreo's
 `Workload.spec.dependencies[]` — resources (external / platform-resource) and endpoints (component /
 org-service) — live here; provisioning drives them through the delivery funnel as an ops-class executor.**
-[Why & boundary decisions →](../../../../docs/design/domain-oriented-architecture.md#34-dependencies--provisioning--internaldependencies)
 
 ```mermaid
 flowchart LR
@@ -54,7 +55,7 @@ slices.
 |---|---|---|
 | SecretWriter | needs | `platform/secrets` — SM-API vault writes for external-resource secret values |
 | OC `Resource`/`ResourceReleaseBinding` CRUD · `ClusterResourceType` discovery | needs | `openchoreo` client — OC is the store |
-| ExecutionStore · Reevaluator (admit/finish/reevaluate) | needs | `delivery` — provisioning is the **ops-class executor**; satisfied today by `repositories.ExecutionRepository` + the funnel, formalised as a delivery `FunnelPort` when the store moves internal in P9 |
+| ExecutionStore · Reevaluator (admit/finish/reevaluate) | needs | `delivery` — provisioning is the **ops-class executor**, satisfied through delivery's execution funnel |
 | IssueClient (aep:provision gate) | needs | `sourcecontrol` — gate issues, closed via a no-secrets reference |
 | DesignReader / DesignBundleReader | needs | `spec` — design at HEAD (what to provision) + provider design bundles |
 | the 8 public ops | offers | the edge (`dependenciesHandlers`) |
@@ -62,16 +63,11 @@ slices.
 ## Owns
 - `ExternalResource`, `AccessRequest`, the authored OC external Resource model + provisioned binding values,
   the `aep:provision` gate issues (via `sourcecontrol`), and the resource-type catalog projection.
-- **Persistence today**: `ExternalResource`/`AccessRequest` gorm lives in `repositories.{ExternalResource,
-  AccessRequest}Repository`, the entities (`models.ExternalResource`/`AccessRequest`, `AccessRequest` still
-  `x-go-type: models.X` on the wire) in `models/`. The domain is **gorm-free** — runtimeconfig's watcher gorm
-  moved to `repositories.ExecutionRepository.DistinctDeployedProjects` in P8.0, and the gorm-into-domain +
-  entity move + the `AccessRequest` wire split all defer to P9, as every domain's did.
+- **Persistence**: the `ExternalResource` / `AccessRequest` gorm and entities live in this domain
+  (`repository_external_resource.go` · `repository_access_request.go` over `external_resource.go` /
+  `access_request.go`), single write-authority.
 
 ## Invariants — don't break
-- **Deny-by-default tenant gate is upstream.** Every provisioning op reads the org from the gate-bound
-  context only and passes it explicitly (as both the OC namespace/issues org and the SM-API org id); org
-  never travels in a path/query/body, so cross-org access is unrepresentable.
 - **Secret values never leave the SecretWriter port.** External-resource secret values route through SM-API;
   issue bodies, comments, and API responses carry only names / paths / refs — never secret material. The
   domain imports no secret-backend SDK (the fence holds via `platform/secrets`).
@@ -81,5 +77,4 @@ slices.
 - **The wire quirks the contract-first cutover pinned stay pinned**: wrong-kind → 400, not-found/
   not-registered → 404, in-use → 409, provision-failure → 502; get-dependency-status and list-access-requests
   return their empty-but-present shapes; a nil service 503s (the surface exists with the feature unwired).
-- **dependencies names no feature.** It consumes spec / sourcecontrol / delivery as domain→domain edges,
-  never `internal/feature/*` (`TestDomainsAreFeatureFree`).
+- Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

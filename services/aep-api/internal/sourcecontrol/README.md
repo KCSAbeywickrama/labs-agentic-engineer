@@ -1,8 +1,9 @@
 # sourcecontrol — Source Control & Webhooks
 
+> **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
+
 The git-host integration substrate every other domain builds on: per-project repo/issue/PR/webhook
 lifecycle over a provider-neutral `Host` port, and the bare-mirror workspace behind `platform/gitfs`.
-[Why & boundary decisions →](../../../../docs/design/domain-oriented-architecture.md#36-source-control--webhooks--internalsourcecontrol)
 
 ```mermaid
 flowchart LR
@@ -25,8 +26,8 @@ flowchart LR
 |---|---|---|
 | `issues` | file / search a project's issues | `POST`+`GET /projects/{projectName}/issues` |
 
-*Not yet carved (still in the domain root, P2c): repo lifecycle, workspace, webhook register/receive,
-installation lifecycle. `feature/webhook` folds in with them.*
+*Still in the domain root (not carved into slices): repo lifecycle, workspace, webhook register/receive,
+and installation lifecycle.*
 
 ## Ports
 | Port | Dir | Peer · contract |
@@ -36,8 +37,10 @@ installation lifecycle. `feature/webhook` folds in with them.*
 | `IssueService`, `RepoService` | offers | every domain that needs repos or issues |
 
 ## Owns
-- `git_repositories` — the repo coordinate registry. **Still in the global `models/`+`repositories/`
-  (P2c moves it in);** `GitRepository` is not `x-go-type`-aliased, so it needs no wire split.
+- `git_repositories` (the repo coordinate registry) and `webhook_deliveries` — gorm + entities in this
+  domain (`repository_repo.go` · `repository_webhook_delivery.go` over `repository_entity.go` /
+  `webhook_delivery.go`), single write-authority. `GitRepository` is not `x-go-type`-aliased, so it needs
+  no wire split.
 - The bare-mirror workspace handle, and the GitHub host connection state.
 
 ## Invariants — don't break
@@ -45,5 +48,5 @@ installation lifecycle. `feature/webhook` folds in with them.*
 - Ports here are **nil-tolerant**: an unwired service answers 503, never panics — the component harness
   wires only the feature under test, and `edge`'s `sourceControlOrEmpty` preserves that for an unwired
   domain.
-- Org is never a request input: slices read `tenant.BoundOrgFromContext` and pass it explicitly.
 - `IssueInfo`'s wire keys are **CAPITALIZED** — a historical shape the deployed MCP server parses.
+- Platform-wide rules (tenant gate, secrets fence) → [../../README.md](../../README.md).

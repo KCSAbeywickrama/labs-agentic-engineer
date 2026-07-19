@@ -1,10 +1,11 @@
 # projects — Project & Components
 
+> **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
+
 Manage a project's lifecycle and its components, and render the whole pipeline from a single read: the
 Stage aggregate (spec/build/deploy/validation), live version, components, deployments, env-config, and
 per-component OpenAPI. **The OpenChoreo `Project`/`Component` aggregate roots live in OC; this domain is
 their write-authority + the read projection.**
-[Why & boundary decisions →](../../../../docs/design/domain-oriented-architecture.md#35-project--components--internalprojects)
 
 ```mermaid
 flowchart LR
@@ -51,18 +52,13 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 ## Owns
 - The OC `Project`/`Component` aggregate roots (OC is the store) and `ReleaseBinding` write-authority; the
   `ComponentConfig` env-var rows.
-- **Persistence today**: `ComponentConfig` gorm lives in `repositories.ConfigRepository`, the entity
-  (`models.ComponentConfig`/`EnvVar`, still `x-go-type: models.X` on the wire) in `models/` — the domain is
-  **gorm-free** (the gorm-into-`projects/repository.go` + entity move + the ComponentConfig/EnvVar wire split
-  all defer to P9, as every domain's did).
+- **Persistence**: the `component_config` gorm and its entities live in this domain (`repository_config.go`
+  over `component_config.go`), single write-authority.
 
 ## Invariants — don't break
-- **Deny-by-default tenant gate is upstream.** Every op reads the org from the gate-bound context only and
-  passes it explicitly; org never travels in a path/query/body, so cross-org access is unrepresentable.
 - **Slug guards run before any service touch.** projectName/componentName/buildName path params are validated
   as DNS-label slugs (`RequireSlug`) and 400 on malformed BEFORE the OC client / repo is reached.
 - **The wire quirks the contract-first cutover pinned stay pinned**: get-component-config returns a literal
   JSON `null` 200 when no row exists (not `{}`); get-component-openapi returns 409 *with* the componentType
   body for a non-service component; build-logs 503s when the observability client is unwired.
-- **projects names no feature.** It consumes spec / sourcecontrol / delivery as domain→domain edges (a
-  `delivery` build-status port wired at the root), never `internal/feature/*` (`TestDomainsAreFeatureFree`).
+- Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

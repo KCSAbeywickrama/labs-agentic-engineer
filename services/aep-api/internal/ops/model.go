@@ -15,8 +15,7 @@
 // under the License.
 
 // Package ops is the Incident RCA domain: it captures RCA-agent incident
-// reports and correlates them with live Task executions
-// (docs/design/domain-oriented-architecture.md §3.7).
+// reports and correlates them with live Task executions.
 //
 // It is a pure leaf — no other domain depends on it — and it reads the
 // Execution store only through the ExecutionReader port (ports.go), never by

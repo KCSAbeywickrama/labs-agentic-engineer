@@ -23,5 +23,5 @@
 // sub-package slices and the root may not import its own sub-packages
 // (root ⊥ slice); the httpapi aggregator is the one package allowed to import
 // its sibling slices, which is its entire job.
-// [Why →] docs/design/domain-oriented-architecture.md#8-structural-convention-the-composition-root
+// [Why →] services/aep-api/README.md — the composition-root convention.
 package httpapi

@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package dependencies is the Dependencies & Provisioning domain KERNEL
-// (docs/design/domain-oriented-architecture.md §3.4): the provisioner cores plus
+// Package dependencies is the Dependencies & Provisioning domain KERNEL:
+// the provisioner cores plus
 // the org-service endpoint catalog that every service in this domain is built
 // on. It is a kernel-root domain (like internal/delivery): the shared cores live
 // in this root; the services (provisioning, runtimeconfig, mcpdiscovery) are

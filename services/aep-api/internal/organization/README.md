@@ -1,9 +1,10 @@
 # organization — Organization Onboarding & Settings
 
+> **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
+
 Bring a tenant org onto the platform (JIT onboarding + the phantom-OU trust guard) and own every
 per-org, org-keyed record that configures its integrations — GitHub credential, Anthropic key, IDP
 publisher — all fronted by the consolidated `/config` resource.
-[Why & boundary decisions →](../../../../docs/design/domain-oriented-architecture.md#31-organization-onboarding--settings--internalorganization)
 
 ```mermaid
 flowchart LR
@@ -29,8 +30,8 @@ flowchart LR
 | `rotateidp` `discoveridp` | rotate the publisher client secret / OIDC discovery | `POST .../config:rotate-idp-secret` etc. |
 | `listorgs` | enumerate orgs (tenant-gate carve-out — no org ctx) | `GET /organizations` |
 
-*Not yet carved (still flat in the domain root): the credential/anthropic/idp lifecycle services + the
-raw connect-callback controller + the S2S credentials-refresh — they carve into slices later, as sourcecontrol's did.*
+*Still flat in the domain root (not carved into slices): the credential / anthropic / idp lifecycle
+services, the raw connect-callback controller, and the S2S credentials-refresh.*
 
 ## Ports
 | Port | Dir | Peer · contract |
@@ -43,8 +44,8 @@ raw connect-callback controller + the S2S credentials-refresh — they carve int
 
 ## Owns
 - `organizations` (+ `thunder_org_uuid`), `org_credentials`, `org_anthropic_credentials`,
-  `organization_idp_profiles` + `idp_audit_events` — **still in the global `models/`+`repositories/`**
-  (the entity move + gorm-into-domain defer to P9, alongside sourcecontrol's `GitRepository`).
+  `organization_idp_profiles` + `idp_audit_events` — gorm + entities in this domain (`entity_*.go` over
+  `repository_*.go`), single write-authority.
 
 ## Invariants — don't break
 - **The phantom-OU trust guard** (`ouIsTrustworthy`): reject a JWT `ouId` ONLY when a wired validator
@@ -55,5 +56,5 @@ raw connect-callback controller + the S2S credentials-refresh — they carve int
 - The `/config` PATCH is an **atomic multi-section** apply; sections are three-state `patch.Field`.
 - Org config wire types (`ConfigProjection`/`ConfigPatch`/`*Projection`) are hand-written pure DTOs in
   `models/` (codegen can't express them) — referenced directly, **not** a wire/domain split.
-- Org is never a request input (except the `ListOrganizations` carve-out, which carries none): read
-  `tenant.BoundOrgFromContext`. Secret backends are reached only through `platform/secrets`.
+- The `ListOrganizations` op is the one tenant-gate carve-out (it carries no org context). Platform-wide
+  rules (tenant gate, secrets fence) → [../../README.md](../../README.md).

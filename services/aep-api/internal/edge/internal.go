@@ -143,7 +143,7 @@ func (s *internalServer) RunnerRefreshCredentials(ctx context.Context, request i
 
 // toIgenRefresh projects the org domain's RefreshResponse onto the S2S wire
 // shape. igen must stay a leaf, so it cannot import the domain that owns the
-// value type (domain-oriented-architecture.md §7) — hence a mapping here rather
+// value type — hence a mapping here rather
 // than the former x-go-type alias. The wire keys are byte-identical (the
 // Identity sub-object marshals capitalized either way); only Go field ORDER
 // differs between the two Identity structs, which forbids a whole-struct

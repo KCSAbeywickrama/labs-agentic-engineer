@@ -30,8 +30,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/gen"
 )
 
-// The op→embed ledger + the reflection net guarding the edge
-// (docs/design/domain-oriented-architecture.md §19.1).
+// The op→embed ledger + the reflection net guarding the edge.
 //
 // apiServer declares no methods: it satisfies gen.StrictServerInterface purely
 // by promotion from its embedded domain fields. That makes "which embed serves

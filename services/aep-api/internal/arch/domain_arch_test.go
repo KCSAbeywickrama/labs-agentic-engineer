@@ -28,13 +28,10 @@ import (
 	"testing"
 )
 
-// The domain/slice boundary rules of the target architecture
-// (docs/design/domain-oriented-architecture.md §13).
+// The domain/slice boundary rules of the domain architecture.
 //
-// These land in P0, BEFORE the first domain exists, and are deliberately
-// PERMISSIVE for the duration of the migration: they police the domains that are
-// on disk and say nothing about the legacy layout beside them. They are flipped
-// strict in P9, when the legacy layout is gone.
+// Each rule polices the domains on disk and is strict: the legacy flat layout it
+// once had to coexist with is gone.
 //
 // A rule nobody has seen fail is a rule nobody knows works. Every rule below is
 // therefore written as a pure function over a ROOT PATH, and each has a
@@ -79,10 +76,9 @@ var nonDomainPkgs = map[string]bool{
 // edge/ exists, so nothing is merely planned.
 var plannedPkgs = map[string]bool{}
 
-// domainsOnDisk returns the target domains that exist on disk. The migration is
-// COMPLETE (all seven landed), so TestAllDomainsLanded pins that this equals the
-// full targetDomains set — a missing domain is now a regression, not a
-// not-yet-migrated phase. The rules below still range over the discovered set so
+// domainsOnDisk returns the domains that exist on disk. All seven have landed, so
+// TestAllDomainsLanded pins that this equals the full targetDomains set — a missing
+// domain is a regression. The rules below still range over the discovered set so
 // they stay disk-driven, but the set is no longer allowed to be a subset.
 func domainsOnDisk(t *testing.T, root string) []string {
 	t.Helper()

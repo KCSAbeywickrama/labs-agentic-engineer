@@ -15,7 +15,7 @@
 // under the License.
 
 // Package migrate holds the ONE ordered schema-migration list and the base-model
-// set it presupposes (docs/design/domain-oriented-architecture.md §7).
+// set it presupposes.
 //
 // It sits beside internal/edge as the second package permitted to import every
 // domain: the list NAMES domain-owned steps and entities, which is exactly why

@@ -22,13 +22,11 @@ import (
 )
 
 // The ports ops needs FROM other domains, declared in ops' OWN vocabulary
-// (§4: "all edges are consumer-side ports wired at the root").
+// (all cross-domain edges are consumer-side ports wired at the root).
 //
-// Stating them consumer-side is what lets this domain land in P1, years before
-// its provider: delivery does not exist until P6, so the composition root wires
-// a labelled bridge over the legacy execution repository. When delivery lands it
-// implements this port directly and the bridge is deleted — and because the port
-// is written in ops' terms, that is a change to the bridge alone, not to ops.
+// Because the port is written in ops' terms, ops depends on delivery only through
+// a read contract it owns: delivery implements ExecutionReader directly, and ops
+// names no delivery type.
 
 // ExecutionFact is one execution of a Task, reduced to the three things ops
 // needs to correlate a report. It is deliberately NOT the Execution entity:

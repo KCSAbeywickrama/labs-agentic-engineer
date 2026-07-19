@@ -40,10 +40,8 @@ import (
 //
 // TestMethodOrigin pins WHICH embed each op comes from, so a duplicate (an op
 // served by two domains) fails the build (`ambiguous selector`) and a moved op
-// silently fails the test. The migration's legacyShim — the depth-equalising
-// wrapper that held not-yet-migrated ops through P1–P8 — is gone: P8 landed the
-// last op, so every op now resolves to its domain (docs/design/
-// domain-oriented-architecture.md §19).
+// silently fails the test. There is no legacyShim wrapper: every op resolves
+// directly to its owning domain.
 type apiServer struct {
 	*opsHandlers           // P1 — ops (Incident RCA)
 	*sourcecontrolHandlers // P2 — sourcecontrol (Source Control & Webhooks)
