@@ -52,11 +52,9 @@ import (
 	deliveryhttpapi "github.com/wso2/aep/aep-api/internal/delivery/httpapi"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
 	"github.com/wso2/aep/aep-api/internal/delivery/validation"
-	"github.com/wso2/aep/aep-api/internal/feature/component"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
-	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
@@ -69,6 +67,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/reaper"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
+	"github.com/wso2/aep/aep-api/internal/projects"
+	projectshttpapi "github.com/wso2/aep/aep-api/internal/projects/httpapi"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	githubclient "github.com/wso2/aep/aep-api/internal/sourcecontrol/githubhost"
 	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
@@ -390,7 +390,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Services. componentService is constructed before configService so
 	// configService can call back into it to mirror env-var edits onto
 	// the OC Component's workflow params.
-	projectService := project.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, executionRepo)
+	projectService := projects.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, executionRepo)
 	// Build/deploy stage sources for the status poll (#184): the
 	// workflow_runs index (one row read) + the org-scoped release-binding
 	// list — consumer-side ports wired here so project imports neither.
@@ -403,8 +403,8 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// (NewBuildCredentialsService always returns a value; its gitSecrets are
 	// nil-safe internally), so the stager is always wired.
 	buildStager := buildSecretStagerAdapter{svc: buildCredService}
-	componentService := component.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
-	configService := component.NewConfigService(configRepo, componentService)
+	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
+	configService := projects.NewConfigService(configRepo, componentService)
 	designService := spec.NewDesignService(artifactStore, artifactSvcGit)
 
 	// Tasks are GitHub issues (the Task/Execution split, tasks-github-native):
@@ -452,7 +452,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// CreateComponent) and the design-edit path (after
 	// `components/<name>/design.md` PUT). See
 	// docs/design/api-platform-integration.md §6 Phase 2.
-	traitSyncService := component.NewTraitSyncService(componentClient, artifactStore)
+	traitSyncService := projects.NewTraitSyncService(componentClient, artifactStore)
 
 	// Thunder admin client + IDP service. Reads
 	// aep-system-client credentials from env (THUNDER_*) and exposes
@@ -729,10 +729,9 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
 	params.Deps = api.Deps{
-		ProjectSvc:   projectService,
-		ComponentSvc: componentService,
-		ConfigSvc:    configService,
-		TaskTokens:   taskTokens,
+		TaskTokens: taskTokens,
+		// The projects domain (project CRUD + component read/build + config) is
+		// assembled below (params.Deps.Projects).
 		// The delivery domain (build + task reads/promote + task-log stream) is
 		// assembled below (params.Deps.Delivery), after the external-resource
 		// provisioner exists — the build service's InputsCoordinator stages the
@@ -799,6 +798,20 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		return nil, fmt.Errorf("assemble spec domain: %w", err)
 	}
 	params.Deps.Spec = specHandlers
+
+	// projects — the Projects, Components, Builds & Config domain (P7): project
+	// CRUD + status, the component read + build + deploy surface, and the
+	// component env-var config. Its slice handlers embed straight into the edge's
+	// composite; the edge holds no project/component/config service.
+	projectsHandlers, err := projectshttpapi.New(projects.Deps{
+		ProjectSvc:   projectService,
+		ComponentSvc: componentService,
+		ConfigSvc:    configService,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("assemble projects domain: %w", err)
+	}
+	params.Deps.Projects = projectsHandlers
 
 	opsHandlers, err := opshttpapi.New(ops.Deps{
 		Reports: ops.NewRepository(db),
