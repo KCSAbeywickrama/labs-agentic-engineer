@@ -56,10 +56,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
-	"github.com/wso2/aep/aep-api/internal/feature/idp"
-	"github.com/wso2/aep/aep-api/internal/feature/organization"
-	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
-	"github.com/wso2/aep/aep-api/internal/feature/orgcreds"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/runtimeconfig"
@@ -69,6 +65,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/webhook"
 	"github.com/wso2/aep/aep-api/internal/ops"
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
+	"github.com/wso2/aep/aep-api/internal/organization"
+	orghttpapi "github.com/wso2/aep/aep-api/internal/organization/httpapi"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
@@ -124,6 +122,10 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	configRepo := repositories.NewConfigRepository(db)
 	repoRepo := repositories.NewRepoRepository(db)
 	workflowRunRepo := repositories.NewWorkflowRunRepository(db)
+	orgRepo := repositories.NewOrganizationRepository(db)
+	orgCredRepo := repositories.NewOrgCredentialRepository(db)
+	orgAnthropicRepo := repositories.NewOrgAnthropicRepository(db)
+	idpRepo := repositories.NewIDPRepository(db)
 
 	// Temporal devflow runtime. Constructed always, but connects lazily in the
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
@@ -205,7 +207,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// SM-API mirror writer. Constructed ahead of the credential / IDP service
 	// constructors so all consumers can attach via WithSMAPIWriter (the no-op
 	// case when smClient is nil is fine).
-	smWriter := orgcreds.NewSMAPIWriter(smClient, db)
+	smWriter := organization.NewSMAPIWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
 
 	// cluster-gateway-proxy client. Used for reading coding-agent pod logs +
 	// job status (streaming feed + JobWatcher) and, when sm-api is also
@@ -265,11 +267,11 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	artifactSvcGit := artifacts.NewArtifactService(repoRepo, gitOpsService)
 	issueService := sourcecontrol.NewIssueService(repoRepo, gitHost, credResolver)
 	webhookRegService := sourcecontrol.NewWebhookService(repoRepo, gitHost, repoService, issueService, cfg.WebhookDeliveryURL, cfg.WebhookHMACSecret)
-	credRefreshService := orgcreds.NewCredentialsRefreshService(credResolver)
-	credService := orgcreds.NewCredentialService(db, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
-	buildCredService := orgcreds.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
+	credRefreshService := organization.NewCredentialsRefreshService(credResolver)
+	credService := organization.NewCredentialService(orgCredRepo, credStore, minter, cfg.WebhookHMACSecret, cfg.GitHubAppClientID, appClientSecret, gitHost)
+	buildCredService := organization.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
-	anthropicCredService := orgcreds.NewAnthropicCredentialService(db, credStore, wpClient)
+	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore, wpClient)
 
 	// Task JWT manager — RS256, 24h TTL. The public key is published on the
 	// JWKS endpoint (/auth/external/jwks.json) and verified by both the runner
@@ -302,7 +304,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
 	// unless both env vars are set (no consumer assumed by default).
 	anthropicCredService.WithRCAAgentPush(cgwClient, cfg.RCAAgentAnthropicPushNamespace, cfg.RCAAgentAnthropicPushSecretName)
-	validatorProbes := orgcreds.NewValidatorProbes(credService, gitHost, credResolver, minter)
+	validatorProbes := organization.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := secrets.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
 	// Artifact store — in-process via artifactSvcGit. Adds the
@@ -393,7 +395,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// workflow_runs index (one row read) + the org-scoped release-binding
 	// list — consumer-side ports wired here so project imports neither.
 	projectService.SetStageSources(workflowRunRepo, componentClient)
-	organizationService := organization.NewOrganizationService(db, namespaceClient)
+	organizationService := organization.NewOrganizationService(orgRepo, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
 	// before the WorkflowRun is created (see
@@ -497,7 +499,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// EnsureOrgPublisher / RegenerateClientSecret so the dispatcher's
 	// PUBLISHER_CLIENT_SECRET ExternalSecret can materialise it into runner
 	// pods without the BFF holding the plaintext.
-	idpService := idp.NewIDPService(db, thunderAdminClient, idp.PlatformIDPConfig{
+	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
 	}).WithSMAPIWriter(smWriter)
@@ -508,7 +510,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Connect-state JWT issuer (App-mode OAuth CSRF state). This HS256 signing
 	// key only ever leaves the BFF as a JWT signature inside the GitHub OAuth
 	// `state` query param. (Task JWTs use RS256 via taskTokens below.)
-	bearerSvc := orgcreds.NewBearerService(cfg.OAuthStateSigningKey, 24*time.Hour)
+	bearerSvc := organization.NewBearerService(cfg.OAuthStateSigningKey, 24*time.Hour)
 	if cfg.OAuthStateSigningKey == "" {
 		slog.Warn("OAUTH_STATE_SIGNING_KEY not set — connect-state JWTs will fail to mint")
 	}
@@ -653,9 +655,9 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// Org-scoped GitHub connect/disconnect surface. Tasks are GitHub issues now
 	// (no rows to abandon on disconnect); the disconnect service severs the
 	// credential and the issues become inert to the router (no valid webhook).
-	disconnectSvc := orgcreds.NewOrgDisconnectService(db, credService, issueService).
+	disconnectSvc := organization.NewOrgDisconnectService(credService, issueService).
 		WithWorkspaceTrash(trashWorkspaceOrg)
-	orgGitHubCtrl := orgcreds.NewOrgGitHubController(
+	orgGitHubCtrl := organization.NewOrgGitHubController(
 		credService,
 		disconnectSvc,
 		bearerSvc,
@@ -712,13 +714,13 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// one settings resource over the reused Anthropic/GitHub/IDP services, with the
 	// platform IDP defaults so GET /config can render the default idp section
 	// without persisting a row on read.
-	orgConfigSvc := orgconfig.NewService(
+	orgConfigSvc := organization.NewService(
 		anthropicCredService,
 		credService,
 		disconnectSvc,
 		bearerSvc,
 		idpService,
-		idp.PlatformIDPConfig{Issuer: cfg.PlatformIDP.Issuer, JWKSURL: cfg.PlatformIDP.JWKSURL},
+		organization.PlatformIDPConfig{Issuer: cfg.PlatformIDP.Issuer, JWKSURL: cfg.PlatformIDP.JWKSURL},
 		cfg.BFFPublicURL,
 		cfg.GitHubAppClientID,
 	)
@@ -727,14 +729,12 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// /api/v1 edge serves (internal/api/handlers_*.go).
 	params.Deps = api.Deps{
 		ProjectSvc:       projectService,
-		OrgSvc:           organizationService,
 		ComponentSvc:     componentService,
 		ConfigSvc:        configService,
 		CollabRepo:       repoService,
 		TaskReads:        taskReads,
 		TaskCommands:     taskCommands,
 		TaskStream:       taskStreamSvc,
-		OrgConfigSvc:     orgConfigSvc,
 		TaskTokens:       taskTokens,
 		SkillSvc:         skillSvc,
 		SkillMutationSvc: skillMutationSvc,
@@ -781,6 +781,14 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		return nil, fmt.Errorf("assemble sourcecontrol domain: %w", err)
 	}
 	params.Deps.SourceControl = scHandlers
+
+	// organization — org config + the organizations list (P3). Its handlers are
+	// embedded straight into the edge's composite; the edge holds no org service.
+	orgHandlers, err := orghttpapi.New(organization.Deps{OrgSvc: organizationService, Config: orgConfigSvc})
+	if err != nil {
+		return nil, fmt.Errorf("assemble organization domain: %w", err)
+	}
+	params.Deps.Organization = orgHandlers
 
 	opsHandlers, err := opshttpapi.New(ops.Deps{
 		Reports: ops.NewRepository(db),
@@ -1133,13 +1141,13 @@ func (m prMerger) MergePR(ctx context.Context, orgID, projectID string, prNumber
 	return m.issues.MergePullRequest(ctx, orgID, projectID, prNumber)
 }
 
-// buildSecretStagerAdapter maps the concrete *orgcreds.BuildCredentialsService
+// buildSecretStagerAdapter maps the concrete *organization.BuildCredentialsService
 // (StageBuildSecret → *StageResult) onto the component feature's
 // BuildSecretStager port (→ secretRef string), so the component package need
 // not import the services StageResult type. The adapter satisfies the consumer
 // port at the composition root, not in the feature (§6.8).
 type buildSecretStagerAdapter struct {
-	svc *orgcreds.BuildCredentialsService
+	svc *organization.BuildCredentialsService
 }
 
 func (a buildSecretStagerAdapter) StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (string, error) {

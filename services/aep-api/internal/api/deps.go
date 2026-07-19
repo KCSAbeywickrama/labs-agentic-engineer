@@ -18,6 +18,7 @@ package api
 
 import (
 	opshttpapi "github.com/wso2/aep/aep-api/internal/ops/httpapi"
+	orghttpapi "github.com/wso2/aep/aep-api/internal/organization/httpapi"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	schttpapi "github.com/wso2/aep/aep-api/internal/sourcecontrol/httpapi"
 
@@ -28,8 +29,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/execution"
 	"github.com/wso2/aep/aep-api/internal/feature/files"
 	"github.com/wso2/aep/aep-api/internal/feature/genai"
-	"github.com/wso2/aep/aep-api/internal/feature/organization"
-	"github.com/wso2/aep/aep-api/internal/feature/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/feature/project"
 	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/feature/skills"
@@ -45,7 +44,6 @@ import (
 // (untouched fields nil-guard or 503 in their handlers).
 type Deps struct {
 	ProjectSvc          *project.Service
-	OrgSvc              organization.OrganizationService
 	ComponentSvc        component.ComponentService
 	ConfigSvc           component.ConfigService
 	CollabRepo          sourcecontrol.RepoService
@@ -54,7 +52,6 @@ type Deps struct {
 	TaskReads           *task.Reads
 	TaskCommands        *task.Commands
 	TaskStream          *execution.TaskStreamService
-	OrgConfigSvc        *orgconfig.Service
 	TaskTokens          *auth.TaskTokenManager
 	SkillSvc            *skills.SkillService
 	SkillMutationSvc    *skills.SkillMutationService
@@ -71,4 +68,5 @@ type Deps struct {
 	// by P9 — it is the legacy handlers' dependency bag, not the edge's.
 	Ops           *opshttpapi.Handlers
 	SourceControl *schttpapi.Handlers
+	Organization  *orghttpapi.Handlers
 }
