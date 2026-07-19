@@ -100,7 +100,50 @@ vi.mock("../api/queries", () => ({
 }));
 
 describe("DeploymentsPage — validation chip", () => {
-  it("routes to the internal validation log page when the issue number is present", () => {
+  it("routes a RUNNING validation to the internal log page", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "running",
+      validationIssue: 30,
+      validationUrl: "https://github.com/acme/demo/issues/30",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const chip = screen.getByRole("link", { name: /Validating/ });
+    expect(chip).toHaveAttribute(
+      "href",
+      "/projects/acme/deployments/validation/30",
+    );
+    // Internal navigation, not a new-tab external link.
+    expect(chip).not.toHaveAttribute("target");
+  });
+
+  it("routes a FAILED validation to the internal log page", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "failed",
+      validationIssue: 30,
+      validationUrl: "https://github.com/acme/demo/issues/30",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const chip = screen.getByRole("link", { name: /Validation failed/ });
+    expect(chip).toHaveAttribute(
+      "href",
+      "/projects/acme/deployments/validation/30",
+    );
+    expect(chip).not.toHaveAttribute("target");
+  });
+
+  it("links a COMPLETED validation straight to the PR, not the log page", () => {
+    // The report is ready — the issue number is present but the chip must
+    // still open the PR externally; the log view adds nothing after the run.
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -113,12 +156,8 @@ describe("DeploymentsPage — validation chip", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     const chip = screen.getByRole("link", { name: /Validation report/ });
-    expect(chip).toHaveAttribute(
-      "href",
-      "/projects/acme/deployments/validation/30",
-    );
-    // Internal navigation, not a new-tab external link.
-    expect(chip).not.toHaveAttribute("target");
+    expect(chip).toHaveAttribute("href", "https://github.com/acme/demo/pull/42");
+    expect(chip).toHaveAttribute("target", "_blank");
   });
 
   it("shows a PR-linked chip when validation has run", () => {

@@ -65,7 +65,9 @@ vi.mock("../hooks/useTaskLog", () => ({
 
 import { ValidationPage } from "./ValidationPage";
 
-function detail(overrides?: Partial<TaskDetail>): TaskDetail {
+// One base for both response shapes: the stream's task frame is a TaskView
+// (no executionHistory, non-nullable blockedBy), get-task is a TaskDetail.
+function taskView(overrides?: Partial<TaskView>): TaskView {
   return {
     issueNumber: 30,
     title: "Validate deployed system against acceptance criteria",
@@ -74,7 +76,6 @@ function detail(overrides?: Partial<TaskDetail>): TaskDetail {
     attention: [],
     dependsOn: [],
     executions: {},
-    executionHistory: [],
     hold: false,
     lineage: { specTag: "v1" },
     derivedStatus: "in_progress",
@@ -82,11 +83,8 @@ function detail(overrides?: Partial<TaskDetail>): TaskDetail {
   };
 }
 
-// The stream's task frame is a TaskView: no executionHistory, and its
-// blockedBy is non-nullable — a plain TaskDetail spread doesn't type-fit.
-function taskView(overrides?: Partial<TaskView>): TaskView {
-  const { executionHistory: _history, blockedBy: _blockedBy, ...view } = detail();
-  return { ...view, ...overrides };
+function detail(overrides?: Partial<TaskDetail>): TaskDetail {
+  return { ...taskView(), executionHistory: [], ...overrides };
 }
 
 function logState(overrides?: Partial<TaskLogState>): TaskLogState {

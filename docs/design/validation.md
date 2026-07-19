@@ -167,11 +167,14 @@ calls live in the skill markdown, not runner code.
 - **Test credentials:** mock `admin/admin`; real per-project user provisioning is
   pending.
 - **Results are surfaced via the PR only** (committed report + a summary issue
-  comment). The console has a **validation log page** (the deployments board's
-  validation chip → `/projects/{p}/deployments/validation/{issue}`): the live
-  runner log via `stream-task-log` — validation dispatches through the shared
-  coding executor, so the pod-log plumbing is the task one — plus jumps to the
-  validation issue and PR (`TaskView.prUrl`). There is still deliberately **no
+  comment). The console has a **validation log page**
+  (`/projects/{p}/deployments/validation/{issue}`): the live runner log via
+  `stream-task-log` — validation dispatches through the shared coding executor,
+  so the pod-log plumbing is the task one — plus jumps to the validation issue
+  and PR (`TaskView.prUrl`). The deployments board's chip is state-dependent:
+  **running/failed open the log page** (watch or diagnose); **completed links
+  straight to the validation PR** — the report is the deliverable, the log adds
+  nothing (the page stays reachable by URL). There is still deliberately **no
   platform report-ingest endpoint / read model and no public
   `GET /projects/{p}/validation` status API** beyond `deploy.validation`.
 - No scenario-lane (agentic-judgment) automation and no automated fix-task loop on

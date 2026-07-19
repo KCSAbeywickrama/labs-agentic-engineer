@@ -299,11 +299,16 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const status = useProjectStatus(projectName);
   const devVersion = status.data?.deploy.version || undefined;
   // Whole-project validation runs against dev after components deploy; surface
-  // its coarse state on the Development column header. The issue number routes
-  // the chip to the internal validation log page; the PR/issue URL is only the
-  // fallback for a status payload without it.
-  const devValidation = validationView(status.data?.deploy.validation ?? "");
-  const devValidationIssue = status.data?.deploy.validationIssue || undefined;
+  // its coarse state on the Development column header. Completed = the report
+  // is ready: the chip jumps straight to the PR. The internal log view (routed
+  // via the issue number) is for watching a live run or diagnosing a failed
+  // one, so completed withholds the issue and falls through to the URL chip.
+  const devValidationStatus = status.data?.deploy.validation ?? "";
+  const devValidation = validationView(devValidationStatus);
+  const devValidationIssue =
+    devValidationStatus === "completed"
+      ? undefined
+      : status.data?.deploy.validationIssue || undefined;
   const devValidationUrl = status.data?.deploy.validationUrl || undefined;
 
   if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
