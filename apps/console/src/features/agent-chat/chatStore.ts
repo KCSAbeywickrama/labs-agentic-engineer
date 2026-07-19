@@ -201,3 +201,70 @@ export function conversationIdFor(
     return create ? crypto.randomUUID() : null;
   }
 }
+
+// --- pendingSeed (#252 Task 5: "Resolve via chat") ------------------------
+//
+// The "Resolve via chat" action (dep card / drawer / build drawer — Task 9)
+// and the chat panel (AgentChatPanel, mounted by AppLayout) are SIBLINGS
+// under AppLayout, not ancestor/descendant — there's no shared React state to
+// prop-drill a seed message through. This in-memory slot (never persisted:
+// a one-shot signal, not chat history) is the cross-subtree handoff, mirroring
+// the message-log's own Map+listeners+subscribe shape above. The panel
+// consumes it exactly once (get-and-clear) so a re-render never re-sends it.
+
+const pendingSeeds = new Map<string, string>();
+const seedListeners = new Map<string, Set<() => void>>();
+
+/** Set the one-shot seed message the panel will auto-send next time it looks. */
+export function setPendingSeed(key: string, message: string): void {
+  pendingSeeds.set(key, message);
+  for (const fn of seedListeners.get(key) ?? []) fn();
+}
+
+/** Non-destructive read — for callers (e.g. "should the panel open?") that
+ *  only need to know a seed is waiting, without consuming it. */
+export function peekPendingSeed(key: string): string | null {
+  return pendingSeeds.get(key) ?? null;
+}
+
+/** Get-and-clear: the seed is consumed exactly once. */
+export function consumePendingSeed(key: string): string | null {
+  const msg = pendingSeeds.get(key);
+  if (msg === undefined) return null;
+  pendingSeeds.delete(key);
+  return msg;
+}
+
+export function subscribeSeed(key: string, fn: () => void): () => void {
+  const set = seedListeners.get(key) ?? new Set();
+  set.add(fn);
+  seedListeners.set(key, set);
+  return () => set.delete(fn);
+}
+
+// --- Turn-end bus (#252 Task 5: freshness / turn-end flush) ---------------
+//
+// "A collab turn's terminal frame arrived" (runTurn.ts's `turn-committed` /
+// `turn-failed`, or its severed-stream poll fallback) is broadcast here so
+// BOTH the chat panel's universal refetch-on-turn-done fallback AND the spec
+// view's deterministic room flush (useTurnEndFlush — only available where the
+// collab connection actually lives, i.e. only while SpecView is mounted) can
+// react to the same event without one owning a reference to the other.
+
+export type TurnEndStatus = "completed" | "failed";
+
+const turnEndListeners = new Map<string, Set<(status: TurnEndStatus) => void>>();
+
+export function notifyTurnEnd(key: string, status: TurnEndStatus): void {
+  for (const fn of turnEndListeners.get(key) ?? []) fn(status);
+}
+
+export function subscribeTurnEnd(
+  key: string,
+  fn: (status: TurnEndStatus) => void,
+): () => void {
+  const set = turnEndListeners.get(key) ?? new Set();
+  set.add(fn);
+  turnEndListeners.set(key, set);
+  return () => set.delete(fn);
+}

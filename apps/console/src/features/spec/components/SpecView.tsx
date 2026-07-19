@@ -49,6 +49,8 @@ import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
+import { useTurnEndFlush } from "../collab/useTurnEndFlush";
+import { chatKeyFor } from "../../agent-chat/chatStore";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
@@ -99,6 +101,12 @@ export function SpecView({ projectName }: { projectName: string }) {
   // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
   // back to the collab mock BFF's default org so mock mode keeps working.
   const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
+  // Chat-path turn-end flush (#252 Task 5): the chat panel's chatKey uses a
+  // DIFFERENT fallback ("default", matching AppLayout/AgentChatPanel) than
+  // the collab room's org scoping above ("acme") — these are unrelated
+  // conventions and must not be conflated, or this subscribes to a chat key
+  // nothing is listening on.
+  useTurnEndFlush(chatKeyFor(orgHandle ?? "default", projectName), projectName, collab);
   const [selection, setSelection] = useState<SpecSelection | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
   // Build (#162): commit-then-build. buildPhase drives the button label /

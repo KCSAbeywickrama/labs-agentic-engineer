@@ -35,11 +35,17 @@ import {
   addMessage,
   appendAssistantText,
   chatKeyFor,
+  consumePendingSeed,
   conversationIdFor,
   dropTurnOutput,
   getMessages,
+  notifyTurnEnd,
+  peekPendingSeed,
+  setPendingSeed,
   setTurnStatus,
   subscribe,
+  subscribeSeed,
+  subscribeTurnEnd,
   upsertToolMessage,
 } from "./chatStore";
 
@@ -135,5 +141,79 @@ describe("chatStore", () => {
     expect(id).toBeTruthy();
     expect(conversationIdFor("o", "p", { create: false })).toBe(id);
     expect(conversationIdFor("o", "p2", { create: true })).not.toBe(id);
+  });
+});
+
+// pendingSeed (#252 Task 5): the "Resolve via chat" action writes here from a
+// different subtree than the panel (dep card / drawer vs. AgentChatPanel,
+// siblings under AppLayout) — consumed exactly once, mirroring the ?generate=
+// one-shot-fire shape but sourced from the store since the seeded message is
+// per-click dynamic content, not a fixed enum signal.
+describe("pendingSeed", () => {
+  it("is absent until set, then consumed exactly once", () => {
+    const key = freshKey();
+    expect(peekPendingSeed(key)).toBeNull();
+    expect(consumePendingSeed(key)).toBeNull();
+
+    setPendingSeed(key, "resolve dependency A");
+    expect(peekPendingSeed(key)).toBe("resolve dependency A");
+    expect(peekPendingSeed(key)).toBe("resolve dependency A"); // peek doesn't clear
+
+    expect(consumePendingSeed(key)).toBe("resolve dependency A");
+    expect(peekPendingSeed(key)).toBeNull();
+    expect(consumePendingSeed(key)).toBeNull(); // already consumed
+  });
+
+  it("keeps distinct project keys apart", () => {
+    const key1 = freshKey();
+    const key2 = freshKey();
+    setPendingSeed(key1, "for project 1");
+    expect(peekPendingSeed(key2)).toBeNull();
+    expect(consumePendingSeed(key1)).toBe("for project 1");
+  });
+
+  it("notifies seed subscribers on set, and stops after unsubscribe", () => {
+    const key = freshKey();
+    let notified = 0;
+    const unsubscribe = subscribeSeed(key, () => (notified += 1));
+    setPendingSeed(key, "go");
+    expect(notified).toBe(1);
+    unsubscribe();
+    setPendingSeed(key, "go again");
+    expect(notified).toBe(1);
+  });
+});
+
+// Turn-end bus (#252 Task 5): "a collab turn's terminal frame arrived" is
+// broadcast through this same key-scoped pub/sub (mirroring the message-log
+// subscribe() above) so both the chat panel's universal fallback and the
+// spec view's deterministic flush (different subtrees, only one of which
+// owns the collab connection) can react to the same event.
+describe("turn-end bus", () => {
+  it("notifies subscribers with the terminal status", () => {
+    const key = freshKey();
+    const seen: string[] = [];
+    subscribeTurnEnd(key, (status) => seen.push(status));
+    notifyTurnEnd(key, "completed");
+    notifyTurnEnd(key, "failed");
+    expect(seen).toEqual(["completed", "failed"]);
+  });
+
+  it("keeps distinct project keys apart", () => {
+    const key1 = freshKey();
+    const key2 = freshKey();
+    let key1Fired = false;
+    subscribeTurnEnd(key1, () => (key1Fired = true));
+    notifyTurnEnd(key2, "completed");
+    expect(key1Fired).toBe(false);
+  });
+
+  it("stops notifying after unsubscribe", () => {
+    const key = freshKey();
+    let count = 0;
+    const unsubscribe = subscribeTurnEnd(key, () => (count += 1));
+    unsubscribe();
+    notifyTurnEnd(key, "completed");
+    expect(count).toBe(0);
   });
 });

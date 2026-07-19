@@ -73,6 +73,17 @@ vi.mock("../../../auth/SessionContext", () => ({
   }),
 }));
 
+// --- Turn-end flush (#252 Task 5): its own behavior is covered by
+// useTurnEndFlush.test.tsx — here it's a stub so this file (which mocks every
+// query hook wholesale, needing neither a QueryClientProvider nor MSW)
+// doesn't have to grow a real QueryClient just to satisfy the real hook's
+// useQueryClient() call. A dedicated test below checks SpecView wires it with
+// the right chatKey/projectName/collab.
+const mockUseTurnEndFlush = vi.fn();
+vi.mock("../collab/useTurnEndFlush", () => ({
+  useTurnEndFlush: (...args: unknown[]) => mockUseTurnEndFlush(...args),
+}));
+
 // --- Project/spec queries: replaced wholesale so the test needs neither a
 // QueryClientProvider nor MSW — only the Build routing under test is real. -
 const mockMutateAsync = vi.fn();
@@ -146,6 +157,15 @@ describe("SpecView onBuild routing (#164)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFlush.mockResolvedValue(undefined);
+  });
+
+  it("wires useTurnEndFlush with the chat's key, the project name, and the live collab (#252 Task 5)", () => {
+    render(<SpecView projectName="proj1" />);
+    expect(mockUseTurnEndFlush).toHaveBeenCalledWith(
+      "aep.chat.v1.acme.proj1",
+      "proj1",
+      expect.objectContaining({ status: "connected", flush: mockFlush }),
+    );
   });
 
   it("needsInput:false — builds immediately with empty inputs and navigates, no drawer", async () => {
