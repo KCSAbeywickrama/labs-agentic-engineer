@@ -52,6 +52,19 @@ provenance-pinned verbatim copies of the live Go steer strings —
 the same runner session options (`resolveBaseAgentConfig` defaults are
 unit-pinned in remote-worker).
 
+## Scope ends when the code lands
+
+The playground covers requirements → design → tasks → code, ending at the
+issue's `derivedStatus` flip. There is NO build/deploy half and none should be
+added: no image builds, no `docker build` of the authored Dockerfile, no
+deploy attempt, no validation-task runs. Two things that look build-ish stay
+deliberately — the agent's local toolchain verification (`go build`,
+`tsc --noEmit`; code quality, not a platform build) and `workload.yaml` +
+`Dockerfile` authoring (the component's shape; what you hone here must stay
+platform-ready). Taking a project further is a HANDOFF, not a playground
+feature: the project is a plain directory with production-layout `specs/` —
+push it to a repo and let the platform's normal flow build/deploy it.
+
 ## Documented divergences from production (do not mistake for platform behavior)
 
 | Divergence | Why | Parity path |
