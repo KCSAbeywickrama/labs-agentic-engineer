@@ -38,7 +38,7 @@ import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/
 import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
 import { runCodingAgent } from "./engine/coding-run.js";
 import { SKILLS_DIR } from "./engine/session.js";
-import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
+import { blockedBy, FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
 import { projectSlug } from "./ports/spec-workspace.js";
 import { loadProjectState, readPrompt, savePrompt, saveProjectState } from "./state/project.js";
 import { restoreUndoSnapshot, takeUndoSnapshot } from "./state/undo.js";
@@ -153,6 +153,7 @@ export async function tasksCommand(projectDir: string, opts: PhaseOptions): Prom
       for (const i of fold.created) output.write(`  ＋ ${i.file} — ${i.component}: ${i.title}\n`);
       for (const i of fold.updated) output.write(`  ± ${i.file} — ${i.component}: ${i.title}\n`);
       for (const t of fold.skippedDuplicates) output.write(`  ↷ duplicate skipped: ${t}\n`);
+      for (const t of fold.skippedRenames) output.write(`  ↷ rename skipped (title already taken): ${t}\n`);
       if (fold.created.length + fold.updated.length === 0) output.write("  (no issues written)\n");
     }
     if (result.error) return { ok: false, detail: result.error, fold };
@@ -203,10 +204,7 @@ export async function codeCommand(
 
   // Ordering hint (§5 gate 1): dependsOn components whose issues aren't
   // deployed yet — warn, never block (the production "deployed" oracle is dropped).
-  const all = store.list();
-  const notDeployed = issue.dependsOn.filter((dep) =>
-    all.some((i) => i.component === dep && i.derivedStatus !== "deployed"),
-  );
+  const notDeployed = blockedBy(issue, store.list());
   if (notDeployed.length > 0 && !opts.silent) {
     output.write(`  ⚠ dependsOn not deployed yet: ${notDeployed.join(", ")} (hint only — continuing)\n`);
   }
@@ -253,21 +251,29 @@ export async function codeAllCommand(
     output.write(`  ▸ executing ${plan.length} task(s) in dependency order: ${plan.map((i) => `#${i.issueNumber}`).join(" → ")}\n`);
   }
 
+  // `--restore` applies ONCE, before the batch. Each codeCommand below takes
+  // its own undo snapshot; passing `restore` through would re-restore that
+  // pre-issue snapshot on every iteration, silently wiping the work each
+  // earlier issue just landed.
+  if (opts.restore) {
+    const restored = restoreUndoSnapshot(projectDir);
+    if (!opts.silent) output.write(restored ? `  ↺ restored ${restored}\n` : "  (no undo snapshot to restore)\n");
+  }
+  const perRunOpts: CodeOptions = { ...opts, restore: false };
+
   let failed = 0;
   let skipped = 0;
   for (const issue of plan) {
     // Fresh status: earlier runs in this batch may have deployed our deps.
     const current = new FsIssueStore(projectDir, projectSlug(projectDir)).list();
-    const blockedBy = issue.dependsOn.filter((dep) =>
-      current.some((i) => i.component === dep && i.derivedStatus !== "deployed"),
-    );
-    if (blockedBy.length > 0) {
+    const blocked = blockedBy(issue, current);
+    if (blocked.length > 0) {
       skipped += 1;
-      if (!opts.silent) output.write(`  ↷ #${issue.issueNumber} ${issue.title} — skipped (dependsOn not deployed: ${blockedBy.join(", ")})\n`);
+      if (!opts.silent) output.write(`  ↷ #${issue.issueNumber} ${issue.title} — skipped (dependsOn not deployed: ${blocked.join(", ")})\n`);
       continue;
     }
     if (!opts.silent) output.write(`\n  ▶ #${issue.issueNumber} [${issue.component}] ${issue.title}\n`);
-    const outcome = await codeCommand(projectDir, issue.file, opts, confirmDir);
+    const outcome = await codeCommand(projectDir, issue.file, perRunOpts, confirmDir);
     if (!outcome.ok) {
       failed += 1;
       if (!opts.silent) output.write(`  ✗ #${issue.issueNumber} failed: ${outcome.detail ?? "unknown"}\n`);

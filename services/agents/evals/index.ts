@@ -26,3 +26,4 @@
 export { EvalWorkspace, EVAL_ORG, EVAL_PROJECT, EVAL_REPO_SLUG, evalConversationId } from "./workspace.js";
 export { EVAL_AUTH, signM2mToken, evalTurnHeaders } from "./auth.js";
 export { loadRepoSkills, parseSkill, type RepoSkill } from "./skills.js";
+export { fakeSha, filesSnapshotSha, renderSkillFiles, skillsSnapshotSha } from "./snapshot.js";

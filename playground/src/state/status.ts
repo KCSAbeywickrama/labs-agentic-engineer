@@ -21,9 +21,11 @@
  * Pure reads — the files ARE the state; nothing here caches or writes.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { listComponents } from "../engine/gates.js";
+import { FsIssueStore } from "../ports/issue-store.js";
+import { projectSlug } from "../ports/spec-workspace.js";
 
 export interface RequirementsStatus {
   present: boolean;
@@ -71,31 +73,17 @@ export interface IssueSummary {
   derivedStatus: string;
 }
 
-/** Light frontmatter read of every `issues/<n>.md` (full parse lives in the issue store). */
+/**
+ * Summary view of every parseable `issues/<n>.md` — ONE parser for the format
+ * (the issue store's), so the menu counts and the tasks screen never disagree.
+ */
 export function listIssueSummaries(projectDir: string): IssueSummary[] {
-  const dir = join(projectDir, "issues");
-  if (!existsSync(dir)) return [];
-  const out: IssueSummary[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const m = /^(\d+)\.md$/.exec(e.name);
-    if (!e.isFile() || !m) continue;
-    const text = readFileSync(join(dir, e.name), "utf8");
-    const grab = (key: string): string | undefined => {
-      const match = new RegExp(`^${key}: *"?([^"\\n]*)"?$`, "m").exec(text);
-      return match?.[1]?.trim() || undefined;
-    };
-    const deps = /^dependsOn: *\[([^\]]*)\]$/m.exec(text)?.[1] ?? "";
-    out.push({
-      file: `issues/${e.name}`,
-      issueNumber: Number(m[1]),
-      component: grab("component") ?? "?",
-      title: grab("title") ?? "(untitled)",
-      dependsOn: deps
-        .split(",")
-        .map((s) => s.trim().replace(/^"|"$/g, ""))
-        .filter(Boolean),
-      derivedStatus: grab("derivedStatus") ?? "ready",
-    });
-  }
-  return out.sort((a, b) => a.issueNumber - b.issueNumber);
+  return new FsIssueStore(projectDir, projectSlug(projectDir)).list().map((i) => ({
+    file: i.file,
+    issueNumber: i.issueNumber,
+    component: i.component,
+    title: i.title,
+    dependsOn: i.dependsOn,
+    derivedStatus: i.derivedStatus ?? "ready",
+  }));
 }

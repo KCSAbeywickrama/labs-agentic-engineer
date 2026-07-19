@@ -26,7 +26,7 @@
 
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
-import { FsIssueStore, type Issue } from "../ports/issue-store.js";
+import { blockedBy, FsIssueStore } from "../ports/issue-store.js";
 import { projectSlug } from "../ports/spec-workspace.js";
 
 export type TasksAction = { kind: "plan" } | { kind: "code-all" } | { kind: "code"; issueFile: string } | { kind: "back" };
@@ -36,11 +36,6 @@ function statusIcon(s: string | undefined): string {
   if (s === "failed") return "✗";
   if (s === "running") return "▸";
   return "·"; // ready
-}
-
-/** dependsOn components with a NON-deployed issue (same gate the batch uses). */
-function blockedBy(issue: Issue, all: Issue[]): string[] {
-  return issue.dependsOn.filter((dep) => all.some((i) => i.component === dep && i.derivedStatus !== "deployed"));
 }
 
 /** Render the tasks table; returns the action the CLI should run. */

@@ -256,3 +256,44 @@ test("no terminal manifest → the fold writes nothing (D14 do-not-commit)", () 
     rmSync(projectDir, { recursive: true, force: true });
   }
 });
+
+test("updateTask rename collision: only the rename is skipped (surfaced), dependsOn/body still land", () => {
+  const projectDir = seedDesignedProject();
+  try {
+    const store = new FsIssueStore(projectDir, "todo-app");
+    let n = 1;
+    const plan = (component: string, title: string) => ({
+      type: "tool-result" as const,
+      toolName: "planTask",
+      toolCallId: `p-${title}`,
+      output: { ok: true, op: "plan", component, title, dependsOn: [], origin: "spec-plan", rationale: "r" },
+    });
+    const outcome = store.fold(
+      [
+        plan("user-service", "Task A"),
+        plan("webapp", "Task B"),
+        {
+          type: "tool-result",
+          toolName: "updateTask",
+          toolCallId: "u1",
+          output: {
+            ok: true,
+            op: "update",
+            ref: { title: "Task B" },
+            set: { title: "Task A", dependsOn: ["user-service"], body: "revised scope" },
+          },
+        },
+        { type: "manifest", files: {} },
+      ],
+      () => n++,
+    );
+    assert.deepEqual(outcome.skippedRenames, ['#2 "Task B" → "Task A"']);
+    const issueB = store.list().find((i) => i.issueNumber === 2);
+    assert.ok(issueB, "issue 2 exists");
+    assert.equal(issueB.title, "Task B", "colliding rename did not apply");
+    assert.deepEqual(issueB.dependsOn, ["user-service"], "dependsOn from the same op landed");
+    assert.match(issueB.body, /revised scope/, "body from the same op landed");
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});

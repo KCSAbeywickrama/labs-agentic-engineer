@@ -121,9 +121,19 @@ export interface FoldOutcome {
   updated: Issue[];
   /** planTask ops skipped as duplicates (by key or normalized title). */
   skippedDuplicates: string[];
+  /** updateTask renames skipped because the new title was already taken (other set fields still applied). */
+  skippedRenames: string[];
 }
 
 const normTitle = (t: string): string => t.trim().toLowerCase();
+
+/**
+ * THE dep-gating rule (one definition — TUI table, single-run hint, batch
+ * skip): the issue's dependsOn components that still have a NON-deployed issue.
+ */
+export function blockedBy(issue: Issue, all: Issue[]): string[] {
+  return issue.dependsOn.filter((dep) => all.some((i) => i.component === dep && i.derivedStatus !== "deployed"));
+}
 
 interface PlanTaskOkOutput {
   ok: true;
@@ -204,7 +214,7 @@ export class FsIssueStore {
     parts: StreamPart[],
     allocateIssueNumber: () => number,
   ): FoldOutcome {
-    const outcome: FoldOutcome = { created: [], updated: [], skippedDuplicates: [] };
+    const outcome: FoldOutcome = { created: [], updated: [], skippedDuplicates: [], skippedRenames: [] };
     if (!parts.some((p) => p.type === "manifest")) return outcome; // no manifest → do not commit (D14)
 
     // Frozen preload — the anti-hallucination fence plan_tap enforces.
@@ -266,14 +276,19 @@ export class FsIssueStore {
 
       if (op.set.title !== undefined) {
         const renamed = normTitle(op.set.title);
-        if (renamed !== normTitle(target.title) && takenTitles.has(renamed)) continue; // would collide — skip
-        takenTitles.delete(normTitle(target.title));
-        if ("title" in op.ref) {
-          createdByTitle.delete(normTitle(target.title));
-          createdByTitle.set(renamed, target);
+        if (renamed !== normTitle(target.title) && takenTitles.has(renamed)) {
+          // Colliding rename: skip ONLY the rename (surfaced to the caller);
+          // the op's dependsOn/body changes below must still land.
+          outcome.skippedRenames.push(`#${target.issueNumber} "${target.title}" → "${op.set.title}"`);
+        } else {
+          takenTitles.delete(normTitle(target.title));
+          if ("title" in op.ref) {
+            createdByTitle.delete(normTitle(target.title));
+            createdByTitle.set(renamed, target);
+          }
+          target.title = op.set.title;
+          takenTitles.add(renamed);
         }
-        target.title = op.set.title;
-        takenTitles.add(renamed);
       }
       if (op.set.dependsOn !== undefined) target.dependsOn = [...op.set.dependsOn];
       if (op.set.body !== undefined) {

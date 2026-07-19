@@ -23,18 +23,17 @@
  * working-tree skills dir — behind one open/close pair.
  */
 
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { LanguageModel } from "ai";
 import { loadDotenv, loadAnthropicKey } from "@aep/agents/shared/env";
 import { bootAgentsApp } from "./agents-app.js";
+import { REPO_ROOT } from "../paths.js";
 import { FsSpecWorkspace, playConversationId } from "../ports/spec-workspace.js";
 import { FileConversationStore } from "../ports/conversation-store.js";
 import { conversationsDir, loadProjectState, rememberProject, saveProjectState } from "../state/project.js";
 import type { TurnSession } from "./turn.js";
 
-// Repo root (playground/src/engine → up 3); the working-tree skill library.
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+/** The working-tree skill library (edits apply next turn — no rebuild). */
 export const SKILLS_DIR = join(REPO_ROOT, "skills");
 
 export interface PlaygroundSession extends TurnSession {

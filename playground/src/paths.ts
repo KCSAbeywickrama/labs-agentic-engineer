@@ -49,10 +49,11 @@ export function defaultProjectDir(): string {
   return join(PROJECTS_HOME, "my-app");
 }
 
-/** Expand `~/` and resolve relative paths against the invocation dir. */
+/** Expand `~` / `~/…` and resolve relative paths against the invocation dir. */
 export function expandProjectPath(p: string): string {
   const home = process.env.HOME ?? homedir();
-  return resolve(invocationDir(), p.startsWith("~/") && home ? home + p.slice(1) : p);
+  const expanded = home && (p === "~" || p.startsWith("~/")) ? home + p.slice(1) : p;
+  return resolve(invocationDir(), expanded);
 }
 
 const within = (root: string, p: string): boolean => p === root || p.startsWith(root + sep);

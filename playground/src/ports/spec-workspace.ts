@@ -37,11 +37,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { stringify as stringifyYaml } from "yaml";
 import type { WorkspaceRef } from "@aep/agent-stream";
-import { sha256Hex } from "@aep/agents/shared/hash";
 import { readProjectFiles, resolveWithin } from "@aep/agents/playground-kit";
-import type { RepoSkill } from "@aep/agents/evals-kit";
+import { filesSnapshotSha, renderSkillFiles, skillsSnapshotSha, type RepoSkill } from "@aep/agents/evals-kit";
 
 /** The playground's fixed tenant — fence values only; they never reach the model. */
 export const PLAY_ORG = "play";
@@ -61,14 +59,9 @@ export function playConversationId(slug: string, useCase: string, uuid: string):
   return `org_${PLAY_ORG}--proj_${slug}--${useCase}--${uuid}`;
 }
 
-/** Deterministic fake 40-hex "sha" for a content payload (content-addressed dirs). */
-function fakeSha(payload: string): string {
-  return sha256Hex(payload).slice(0, 40);
-}
-
-/** Stable content hash of a files map (drives D20 `filesChangedExternally`). */
+/** Stable content hash of a files map (drives D20 `filesChangedExternally`) — the snapshot sha itself. */
 export function hashFiles(files: Record<string, string>): string {
-  return fakeSha(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b))));
+  return filesSnapshotSha(files);
 }
 
 export class FsSpecWorkspace {
@@ -99,12 +92,8 @@ export class FsSpecWorkspace {
 
   /** Materialize one turn's files into a fake immutable `snapshots/<sha>/` dir. */
   materializeFiles(files: Record<string, string>): string {
-    const sha = fakeSha(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b))));
-    const dir = join(this.mountRoot, "repos", PLAY_ORG, this.slug, this.slug, "snapshots", sha);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-      for (const [path, content] of Object.entries(files)) this.write(dir, path, content);
-    }
+    const sha = hashFiles(files);
+    this.mirror(join(this.mountRoot, "repos", PLAY_ORG, this.slug, this.slug, "snapshots", sha), files);
     return sha;
   }
 
@@ -115,19 +104,15 @@ export class FsSpecWorkspace {
    * so an empty library still materializes an (empty) snapshot dir.
    */
   materializeSkills(skills: readonly RepoSkill[]): string {
-    const sha = fakeSha(JSON.stringify(skills.map((s) => [s.name, s.description, s.content, s.references ?? {}])));
-    const dir = join(this.mountRoot, "repos", PLAY_ORG, "_skills", "org-skills", "snapshots", sha);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-      for (const skill of skills) {
-        const front = stringifyYaml({ name: skill.name, description: skill.description }).replace(/\n+$/, "");
-        this.write(dir, `skills/${skill.name}/SKILL.md`, `---\n${front}\n---\n\n${skill.content}\n`);
-        for (const [refPath, body] of Object.entries(skill.references ?? {})) {
-          this.write(dir, `skills/${skill.name}/${refPath}`, body);
-        }
-      }
-    }
+    const sha = skillsSnapshotSha(skills);
+    this.mirror(join(this.mountRoot, "repos", PLAY_ORG, "_skills", "org-skills", "snapshots", sha), renderSkillFiles(skills));
     return sha;
+  }
+
+  private mirror(dir: string, files: Record<string, string>): void {
+    if (existsSync(dir)) return;
+    mkdirSync(dir, { recursive: true });
+    for (const [path, content] of Object.entries(files)) this.write(dir, path, content);
   }
 
   /** Build one turn's `WorkspaceRef` (materializing files + skills as needed). */
