@@ -114,6 +114,15 @@ const (
 
 	DependencyReasonAccessRequired = "access-required"
 	DependencyReasonNotFound       = "not-found"
+	// DependencyReasonNeedsSpec pairs with DependencyStatusUnresolved on an
+	// external `style: rest-api` dependency with no specPath yet — the
+	// contract-collection state (see ComputeDependencyStatus rule 4).
+	DependencyReasonNeedsSpec = "needs-spec"
+	// DependencyReasonNeedsInput pairs with DependencyStatusUnresolved on an
+	// external dependency the platform cannot resolve without more from the
+	// architect: no style at all, or an `sdk` style with no package yet (see
+	// ComputeDependencyStatus rules 3 and 5).
+	DependencyReasonNeedsInput = "needs-input"
 )
 
 // DependencyStyle is the closed set of external dependency shapes (mirrors the
@@ -136,10 +145,11 @@ type Dependency struct {
 	Kind        DependencyKind `json:"kind"`
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
-	// Status and Reason are READ-TIME computed fields (recomputed against the
-	// live catalog on every design read by later tasks); they are NOT persisted
-	// and carry NO gorm/yaml tags — plain wire JSON only. The architect never
-	// sets them.
+	// Status and Reason are READ-TIME computed fields, derived by
+	// ComputeDependencyStatus (the single resolution authority) against
+	// freshly-fetched resolver-port lookups on every design read; they are NOT
+	// persisted and carry NO gorm/yaml tags — plain wire JSON only. The
+	// architect never sets them.
 	//   Status: resolved|ambiguous|unresolved|blocked
 	//   Reason: needs-spec|needs-input|not-found|access-required
 	Status string `json:"status,omitempty"`

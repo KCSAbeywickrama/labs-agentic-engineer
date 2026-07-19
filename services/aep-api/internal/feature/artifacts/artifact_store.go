@@ -34,10 +34,12 @@ import (
 // assemble). It is a read + assemble surface — mutations happen via the Files
 // API and are committed straight to `main`.
 //
-// Dependency resolution (the old static ExternalAPICatalog) is gone: dependency
-// status/URLs are computed at READ time against the live org catalog
-// (resolveOrgServices, Phase 5 — dependency-management migration ADR-0003),
-// never from a shipped static table.
+// Dependency resolution (the old static ExternalAPICatalog) is gone: every
+// dependency's Status/Reason is computed at READ time (AssembleDesignFrom) by
+// the single resolution authority, models.ComputeDependencyStatus, fed with
+// freshly-fetched resolver-port lookups (resolveOrgServices for `org-service`,
+// resolveExternalDependencies for everything else) — never from a shipped
+// static table.
 type ArtifactStore struct {
 	artifactSvc ArtifactService
 	// orgServices resolves `org-service` dependencies against the live org
@@ -47,6 +49,14 @@ type ArtifactStore struct {
 	// already carry (always empty: Status/Reason are read-time computed and
 	// never persisted to design.json).
 	orgServices OrgServiceResolver
+	// externalResources resolves the rule-2 (registry reuse) lookup for
+	// `external` dependencies against the org's external-resource registry at
+	// design-read time (see resolveExternalDependencies). Nil until the
+	// composition root wires a concrete provider via
+	// SetExternalResourceResolver — until then, rule 2 never hits and
+	// `external` dependencies resolve on their remaining stored intent fields
+	// alone (rules 1, 3-6 need no resolver).
+	externalResources ExternalResourceResolver
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
@@ -76,6 +86,29 @@ func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
 		return
 	}
 	s.orgServices = r
+}
+
+// ExternalResourceResolver answers whether a dependency name is registered in
+// the org's external-resource registry — the rule-2 (registry reuse) lookup
+// models.ComputeDependencyStatus needs for a kind=external dependency.
+// Declared here (consumer side), mirroring OrgServiceResolver, so artifacts
+// stays free of a repositories-package dependency; the concrete provider
+// (the dependencies feature's *repositories.ExternalResourceRepository) is
+// wired in by the composition root via SetExternalResourceResolver. Get
+// returns (nil, nil) when name is not registered.
+type ExternalResourceResolver interface {
+	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
+}
+
+// SetExternalResourceResolver wires the org external-resource registry used to
+// resolve the rule-2 registry-reuse lookup for `external` dependencies at
+// design-read time. A nil store is a documented no-op (mirrors
+// SetOrgServiceResolver).
+func (s *ArtifactStore) SetExternalResourceResolver(r ExternalResourceResolver) {
+	if s == nil {
+		return
+	}
+	s.externalResources = r
 }
 
 // ---- Design (multi-file directory) --------------------------------------
@@ -142,11 +175,15 @@ func (s *ArtifactStore) ReadDesignAt(ctx context.Context, orgID, projectID, comm
 // design file map — the single-read path for callers that also need the raw
 // map (no second HEAD walk). Returns (nil, nil) when no design root exists.
 //
-// It layers read-time dependency resolution on top of the raw assemble:
-// each `org-service` dependency is marked resolved/blocked/unresolved against
-// the live org endpoint catalog (resolveOrgServices). orgID is the OC
-// namespace the org's Workloads live in. Fail-open: a resolver error leaves
-// the affected dependencies as-authored (empty Status/Reason).
+// It layers read-time dependency resolution on top of the raw assemble, via
+// the single resolution authority models.ComputeDependencyStatus: each
+// `org-service` dependency is resolved against the live org endpoint catalog
+// (resolveOrgServices), and every other dependency — `external` against the
+// precedence table (registry-reuse + the stored intent fields),
+// `component`/`platform-resource` trivially — is resolved by
+// resolveExternalDependencies. orgID is the OC namespace the org's Workloads
+// live in. Fail-open: a resolver error leaves the affected dependency
+// untouched (empty Status/Reason, or whatever it already carried).
 func (s *ArtifactStore) AssembleDesignFrom(ctx context.Context, orgID string, files map[string]string) (*DesignFile, error) {
 	if len(files) == 0 || strings.TrimSpace(files[DesignRootFile]) == "" {
 		return nil, nil
@@ -156,14 +193,16 @@ func (s *ArtifactStore) AssembleDesignFrom(ctx context.Context, orgID string, fi
 		return nil, err
 	}
 	s.resolveOrgServices(ctx, orgID, design)
+	s.resolveExternalDependencies(ctx, orgID, design)
 	return design, nil
 }
 
 // resolveOrgServices marks each `org-service` dependency with a 4-state status
 // at read time: `resolved` (namespace-visible), `blocked` +
 // `access-required` (exists but project-only — consumer must request access),
-// or `unresolved` + `not-found` (absent from the catalog). orgID is the OC
-// namespace (locally, the org handle).
+// or `unresolved` + `not-found` (absent from the catalog) — all via
+// models.ComputeDependencyStatus, the single resolution authority. orgID is
+// the OC namespace (locally, the org handle).
 //
 // A no-op until the composition root wires a resolver via
 // SetOrgServiceResolver — until then org-service dependencies keep the empty
@@ -173,7 +212,10 @@ func (s *ArtifactStore) AssembleDesignFrom(ctx context.Context, orgID string, fi
 //   - An IsNamespaceVisible error leaves the dependency's Status/Reason
 //     completely untouched.
 //   - An ExistsAnyVisibility error leaves Status = unresolved (already set
-//     before the refinement call) with an empty Reason.
+//     before the refinement call) with an empty Reason — this specific
+//     partial state has no ComputeDependencyStatus equivalent (a normal
+//     org-service resolution never pairs unresolved with an empty reason), so
+//     it is set directly rather than routed through the pure function.
 func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d *DesignFile) {
 	if s == nil || d == nil || s.orgServices == nil {
 		return
@@ -191,8 +233,7 @@ func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d 
 				continue
 			}
 			if visible {
-				dep.Status = models.DependencyStatusResolved
-				dep.Reason = ""
+				dep.Status, dep.Reason = models.ComputeDependencyStatus(*dep, false, models.OrgServiceHit{Visible: true})
 				continue
 			}
 			// Not namespace-visible: refine into `blocked` (project-only —
@@ -206,12 +247,45 @@ func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d 
 					"org", orgID, "dependency", dep.Name, "error", err)
 				continue
 			}
-			if exists {
-				dep.Status = models.DependencyStatusBlocked
-				dep.Reason = models.DependencyReasonAccessRequired
-			} else {
-				dep.Reason = models.DependencyReasonNotFound
+			dep.Status, dep.Reason = models.ComputeDependencyStatus(*dep, false, models.OrgServiceHit{Exists: exists})
+		}
+	}
+}
+
+// resolveExternalDependencies computes every NON-org-service dependency's
+// read-time Status/Reason via models.ComputeDependencyStatus: `external`
+// against the precedence table (rule 2's registry-reuse lookup only fires
+// when the composition root has wired an ExternalResourceResolver — every
+// other rule derives purely from the dependency's own stored intent fields,
+// so it still resolves with no resolver wired); `component`/`platform-resource`
+// trivially (no lookup at all). `org-service` dependencies are left
+// untouched — resolveOrgServices owns them (its per-call fail-open error
+// handling doesn't fit this simpler loop).
+//
+// Fail-open: a registry lookup error leaves the dependency's Status/Reason
+// completely untouched, mirroring resolveOrgServices' IsNamespaceVisible
+// fail-open — never fails the design read.
+func (s *ArtifactStore) resolveExternalDependencies(ctx context.Context, orgID string, d *DesignFile) {
+	if s == nil || d == nil {
+		return
+	}
+	for i := range d.Components {
+		for j := range d.Components[i].Dependencies {
+			dep := &d.Components[i].Dependencies[j]
+			if dep.Kind == models.DependencyKindOrgService {
+				continue
 			}
+			var registryHit bool
+			if dep.Kind == models.DependencyKindExternal && s.externalResources != nil {
+				res, err := s.externalResources.Get(ctx, orgID, dep.Name)
+				if err != nil {
+					slog.WarnContext(ctx, "external-resource resolver: registry lookup failed",
+						"org", orgID, "dependency", dep.Name, "error", err)
+					continue
+				}
+				registryHit = res != nil
+			}
+			dep.Status, dep.Reason = models.ComputeDependencyStatus(*dep, registryHit, models.OrgServiceHit{})
 		}
 	}
 }

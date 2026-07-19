@@ -840,6 +840,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		FilesSvc:         filesSvc,
 		ArtifactSvc:      artifactSvcGit,
 		GenAISvc:         genaiSvc,
+		DesignSvc:        designService,
 		// BuildSvc is assigned below (params.Deps.BuildSvc), after the
 		// external-resource provisioner exists — its InputsCoordinator stages the
 		// drawer's external-config secrets through that provisioner's SM-API write.
@@ -892,6 +893,15 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// imports the dependencies feature (the *Catalog satisfies
 	// artifacts.OrgServiceResolver structurally).
 	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
+
+	// Read-time external-dependency registry-reuse resolution (rule 2 of the
+	// `external` precedence table, ComputeDependencyStatus): the same registry
+	// repository the design-save path upserts into (below) also answers the
+	// read-time "is this name already registered?" lookup. Consumer-side wiring
+	// — artifacts never imports the repositories package (the
+	// *ExternalResourceRepository satisfies artifacts.ExternalResourceResolver
+	// structurally).
+	artifactStore.SetExternalResourceResolver(externalResourceRepo)
 
 	// Register each tagged design's `external` dependencies into the org's
 	// external-resource catalog on save (best-effort). Consumer-side port —

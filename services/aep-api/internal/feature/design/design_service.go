@@ -260,6 +260,26 @@ func (s *designService) RegisterExternalResources(ctx context.Context, orgID, pr
 	return nil
 }
 
+// ListDependencies returns every component's dependencies in the design at
+// HEAD, each already carrying its read-time computed Status/Reason —
+// ReadDesign → AssembleDesignFrom runs the full resolution pass (both
+// resolveOrgServices and the external/component/platform-resource pass, both
+// via models.ComputeDependencyStatus, the single resolution authority) before
+// returning, so this is a plain projection, not a second resolution pass. The
+// single read model behind the console's dependency-status surface (GET
+// /projects/{projectName}/design/dependencies). Returns (nil,
+// artifacts.ErrDesignNotFound) when no design exists yet.
+func (s *designService) ListDependencies(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error) {
+	design, err := s.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("read design: %w", err)
+	}
+	if design == nil {
+		return nil, artifacts.ErrDesignNotFound
+	}
+	return design.Components, nil
+}
+
 // CollectSpec resolves the {component, depName} external dependency in the
 // current design, fetches (SSRF-guarded) or accepts its OpenAPI contract,
 // validates + normalizes it, and atomically commits TWO files to main: the

@@ -406,6 +406,12 @@ type Component struct {
 // ComponentConfig defines model for ComponentConfig.
 type ComponentConfig = models.ComponentConfig
 
+// ComponentDependencies One component's dependencies with read-time computed status/reason (list-design-dependencies) — the console's single dependency-status read model.
+type ComponentDependencies struct {
+	ComponentName string       `json:"componentName"`
+	Dependencies  []Dependency `json:"dependencies"`
+}
+
 // ComponentList defines model for ComponentList.
 type ComponentList struct {
 	Items []Component `json:"items"`
@@ -417,6 +423,9 @@ type ComponentOpenAPI struct {
 	ComponentType string `json:"componentType"`
 	Spec          string `json:"spec"`
 }
+
+// ConfigKey defines model for ConfigKey.
+type ConfigKey = models.ConfigKey
 
 // ConfigKeyDTO defines model for ConfigKeyDTO.
 type ConfigKeyDTO struct {
@@ -506,6 +515,12 @@ type DeleteOp struct {
 	BaseSha string `json:"baseSha,omitempty"`
 	Path    string `json:"path"`
 }
+
+// Dependency A component's unified, kind-discriminated dependency entry. status/reason are read-time computed by models.ComputeDependencyStatus — never authored, never persisted (Design.json write-gate rejects them).
+type Dependency = models.Dependency
+
+// DependencyCandidate One option in an ambiguous external dependency's resolution set.
+type DependencyCandidate = models.DependencyCandidate
 
 // DependencyStatus defines model for DependencyStatus.
 type DependencyStatus struct {

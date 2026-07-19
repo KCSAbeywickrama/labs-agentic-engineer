@@ -1178,6 +1178,38 @@ paths:
       summary: Collect an external dependency's values and provision it
       tags:
       - Dependencies
+  /projects/{projectName}/design/dependencies:
+    get:
+      operationId: list-design-dependencies
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ComponentDependencies'
+                type: array
+                nullable: true
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: List every component's dependencies with read-time computed status/reason
+      tags:
+      - Dependencies
   /projects/{projectName}/files:
     get:
       operationId: list-files
@@ -2528,6 +2560,22 @@ components:
       - createdAt
       - updatedAt
       type: object
+    ComponentDependencies:
+      description: One component's dependencies with read-time computed status/reason
+        (list-design-dependencies) — the console's single dependency-status read model.
+      additionalProperties: false
+      properties:
+        componentName:
+          type: string
+        dependencies:
+          items:
+            $ref: '#/components/schemas/Dependency'
+          type: array
+          nullable: true
+      required:
+      - componentName
+      - dependencies
+      type: object
     ComponentList:
       additionalProperties: false
       properties:
@@ -2552,6 +2600,23 @@ components:
       - componentName
       - componentType
       - spec
+      type: object
+    ConfigKey:
+      x-go-type: models.ConfigKey
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/models
+      additionalProperties: false
+      properties:
+        defaultValue:
+          type: string
+        description:
+          type: string
+        key:
+          type: string
+        secret:
+          type: boolean
+      required:
+      - key
       type: object
     ConfigKeyDTO:
       additionalProperties: false
@@ -2775,6 +2840,81 @@ components:
           type: string
       required:
       - path
+      type: object
+    Dependency:
+      description: A component's unified, kind-discriminated dependency entry. status/reason
+        are read-time computed by models.ComputeDependencyStatus — never authored,
+        never persisted (Design.json write-gate rejects them).
+      x-go-type: models.Dependency
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/models
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        reason:
+          type: string
+        style:
+          type: string
+        package:
+          type: string
+        specPath:
+          type: string
+        specUrl:
+          type: string
+        sources:
+          items:
+            type: string
+          type: array
+          nullable: true
+        candidates:
+          items:
+            $ref: '#/components/schemas/DependencyCandidate'
+          type: array
+          nullable: true
+        config:
+          items:
+            $ref: '#/components/schemas/ConfigKey'
+          type: array
+          nullable: true
+        resourceType:
+          type: string
+        parameters:
+          additionalProperties: {}
+          type: object
+          nullable: true
+      required:
+      - kind
+      - name
+      type: object
+    DependencyCandidate:
+      description: One option in an ambiguous external dependency's resolution set.
+      x-go-type: models.DependencyCandidate
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/models
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        style:
+          type: string
+        description:
+          type: string
+        docsUrl:
+          type: string
+        specUrl:
+          type: string
+        package:
+          type: string
+      required:
+      - name
+      - style
       type: object
     DependencyStatus:
       additionalProperties: false

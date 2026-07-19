@@ -65,4 +65,10 @@ type Deps struct {
 	BuildSvc            *build.Service
 	RcaAgentReportSvc   rcaagent.RcaAgentReportService
 	PreflightSvc        *build.PreflightService
+	// DesignSvc is the design feature's read-only dependency-status port
+	// (handlers_design.go). The design feature exports no service interface of
+	// its own (every other caller holds the concrete *design.designService),
+	// so this narrow port is declared consumer-side in handlers_design.go —
+	// design.NewDesignService's return value satisfies it structurally.
+	DesignSvc designDependencyReader
 }
