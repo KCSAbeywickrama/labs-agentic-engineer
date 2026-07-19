@@ -18,6 +18,7 @@ package agentfold
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -179,6 +180,58 @@ func designWithSkills(fragment string) string {
 		`"language":"Go","buildpack":"docker","appPath":"svc",`+
 		`"entrypoint":"deployment/service","exposure":"internet",`+
 		`"description":"x","dependencies":[]%s}`, sa)
+}
+
+// designWithDependency builds a minimal valid component design.json for dir
+// "svc" whose sole dependency is the given raw dependency-object JSON literal.
+func designWithDependency(depFragment string) string {
+	return fmt.Sprintf(`{"name":"svc","type":"service","version":"0.1.0",`+
+		`"language":"Go","buildpack":"docker","appPath":"svc",`+
+		`"entrypoint":"deployment/service","exposure":"internet",`+
+		`"description":"x","dependencies":[%s]}`, depFragment)
+}
+
+// TestDesignGate_ExternalOnlyDependencyFields locks the superRefine
+// kind-conditioning gate (designgate.go's externalOnlyDependencyKeys, the Go
+// mirror of component-design-schema.ts's EXTERNAL_ONLY_DEPENDENCY_FIELDS /
+// dependencySchema.superRefine — see services/agents' component-design.test.ts
+// for the TS-side twin of this table): each of the six external-only fields
+// (candidates, style, package, specPath, specUrl, sources) must reject on a
+// non-"external" kind and accept on kind="external".
+func TestDesignGate_ExternalOnlyDependencyFields(t *testing.T) {
+	fields := []struct {
+		field string
+		value string // raw JSON literal for the field's value
+	}{
+		{"candidates", `[{"name":"sendgrid-rest","style":"rest-api"},{"name":"resend-sdk","style":"sdk"}]`},
+		{"style", `"sdk"`},
+		{"package", `"npm:stripe@^14"`},
+		{"specPath", `"dependencies/stripe.openapi.yaml"`},
+		{"specUrl", `"https://example.com/stripe.yaml"`},
+		{"sources", `["https://stripe.com/docs/api"]`},
+	}
+	for _, f := range fields {
+		t.Run(f.field+"/rejected on kind=org-service", func(t *testing.T) {
+			dep := fmt.Sprintf(`{"kind":"org-service","name":"identity","%s":%s}`, f.field, f.value)
+			p := validateComponentDesign(designWithDependency(dep), "svc")
+			if p == nil {
+				t.Fatalf("want rejected (external-only field %q on kind=org-service), got accepted", f.field)
+			}
+			if p.code != ErrSchemaViolation {
+				t.Fatalf("code = %q, want %q", p.code, ErrSchemaViolation)
+			}
+			if !strings.Contains(p.message, f.field) {
+				t.Fatalf("message %q does not mention field %q", p.message, f.field)
+			}
+		})
+		t.Run(f.field+"/accepted on kind=external", func(t *testing.T) {
+			dep := fmt.Sprintf(`{"kind":"external","name":"stripe","%s":%s}`, f.field, f.value)
+			p := validateComponentDesign(designWithDependency(dep), "svc")
+			if p != nil {
+				t.Fatalf("want accepted (external-only field %q on kind=external), got rejected: %s", f.field, p.message)
+			}
+		})
+	}
 }
 
 func TestDesignGate_SkillsApplied(t *testing.T) {
