@@ -157,6 +157,7 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
       const tasksAction = await tasksScreen(projectDir);
       if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts);
       if (tasksAction.kind === "code-all") await runHeadless("code", projectDir, opts);
+      if (tasksAction.kind === "code") await runHeadless("code", projectDir, opts, tasksAction.issueFile);
       continue;
     }
     if (action === "chat") {

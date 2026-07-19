@@ -374,8 +374,10 @@ between turns are first-class (D20). Turns auto-write the project; validation
 survives as the headless `check` verb.
 
 **Tasks screen.** Table of `issues/*.md` (number, component, title, dependsOn,
-derivedStatus) → `(p)lan/replan`, run the plan (one go). No per-issue picking,
-no file affordances — hand-authoring/editing an issue is a direct file edit.
+derivedStatus, blocked-by) → `(p)lan/replan`, run the plan (one go), or run a
+SINGLE task — offered only when its dependsOn components are deployed (the
+same gate the batch enforces; blocked tasks show why in the table). No file
+affordances — hand-authoring/editing an issue is a direct file edit.
 
 **Coding-run screen.** Live timeline from the unchanged NDJSON contract:
 
