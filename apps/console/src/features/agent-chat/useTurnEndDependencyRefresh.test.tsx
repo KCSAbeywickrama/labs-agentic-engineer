@@ -18,12 +18,13 @@
 
 // @vitest-environment jsdom
 
-import { renderHook } from "@testing-library/react";
+import { render, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { useTurnEndDependencyRefresh } from "./useTurnEndDependencyRefresh";
 import { notifyTurnEnd } from "./chatStore";
+import { useTurnEndFlush } from "../spec/collab/useTurnEndFlush";
 import { specKeys } from "../spec/api/keys";
 import { projectKeys } from "../projects/api/keys";
 import { FRESHNESS_POLL_DELAY_MS } from "../spec/api/dependencyFreshness";
@@ -79,5 +80,57 @@ describe("useTurnEndDependencyRefresh — universal fallback (#252 Task 5)", () 
     unmount();
     notifyTurnEnd(KEY, "completed");
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// Important #1 (fix wave 1): chatStore dispatches turn-end subscribers
+// SYNCHRONOUSLY, but useTurnEndFlush's connected branch invalidates only
+// after an ASYNC collab.flush() resolves. When both hooks are mounted for
+// the same chatKey (chat open on the Spec route — the common case), this
+// hook's immediate invalidate used to fire before the flush landed, briefly
+// showing the freshly-resolved dependency's OLD status. Coordinated via
+// chatStore's registerDeterministicFlush/hasDeterministicFlush.
+describe("coordination with useTurnEndFlush (Important #1 fix, #252 Task 5)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("skips its own immediate invalidate while useTurnEndFlush is mounted for the same key; only the post-flush invalidate lands", async () => {
+    const queryClient = new QueryClient();
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const flush = vi.fn().mockResolvedValue(undefined);
+
+    function BothHooksMounted() {
+      useTurnEndDependencyRefresh(KEY, "proj1");
+      useTurnEndFlush(KEY, "proj1", { status: "connected", flush });
+      return null;
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BothHooksMounted />
+      </QueryClientProvider>,
+    );
+
+    notifyTurnEnd(KEY, "completed");
+    // Pre-flush: neither hook should have invalidated yet.
+    expect(spy).not.toHaveBeenCalled();
+    expect(flush).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(0); // let the flush() microtask resolve
+    // Post-flush: the deterministic path's invalidate has landed.
+    expect(spy).toHaveBeenCalledWith({ queryKey: specKeys.dependencies("proj1") });
+    expect(spy).toHaveBeenCalledWith({ queryKey: projectKeys.buildPreflight("proj1") });
+  });
+
+  it("still invalidates immediately when useTurnEndFlush is NOT mounted for that key", () => {
+    const queryClient = new QueryClient();
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    renderHook(() => useTurnEndDependencyRefresh(KEY, "proj1"), {
+      wrapper: wrapper(queryClient),
+    });
+
+    notifyTurnEnd(KEY, "completed");
+    expect(spy).toHaveBeenCalledWith({ queryKey: specKeys.dependencies("proj1") });
+    expect(spy).toHaveBeenCalledWith({ queryKey: projectKeys.buildPreflight("proj1") });
   });
 });

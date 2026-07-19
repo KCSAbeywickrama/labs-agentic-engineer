@@ -69,4 +69,19 @@ describe("scheduleFreshnessPoll", () => {
     vi.advanceTimersByTime(FRESHNESS_POLL_DELAY_MS);
     expect(qc.invalidateQueries).toHaveBeenCalledTimes(2); // no follow-up fired
   });
+
+  // Fix wave 1 (Important #1): `useTurnEndDependencyRefresh` uses this to
+  // skip the up-front invalidate when a deterministic flush owner is already
+  // handling it, while keeping the delayed backstop armed regardless.
+  it("immediate: false skips the up-front invalidate, keeping only the delayed follow-up", () => {
+    const qc = fakeQueryClient();
+    scheduleFreshnessPoll(qc, "proj1", undefined, { immediate: false });
+    expect(qc.invalidateQueries).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(FRESHNESS_POLL_DELAY_MS - 1);
+    expect(qc.invalidateQueries).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(qc.invalidateQueries).toHaveBeenCalledTimes(2); // only the follow-up fired
+  });
 });

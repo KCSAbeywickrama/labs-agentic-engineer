@@ -24,14 +24,20 @@ import { useHasPendingSeed } from "./useHasPendingSeed";
 import { chatKeyFor, consumePendingSeed, setPendingSeed } from "./chatStore";
 
 describe("useHasPendingSeed — drives AppLayout auto-opening the chat panel (#252 Task 5)", () => {
-  it("is false with no pending seed, true once one is set", () => {
+  it("is false with no pending seed, true once one is set, false again once consumed", () => {
     const { result } = renderHook(() => useHasPendingSeed("acme", "proj-a"));
     expect(result.current).toBe(false);
 
     act(() => setPendingSeed(chatKeyFor("acme", "proj-a"), "resolve dep X"));
     expect(result.current).toBe(true);
 
-    consumePendingSeed(chatKeyFor("acme", "proj-a")); // cleanup for other tests
+    // Minor #2 (fix wave 1): consumePendingSeed now notifies seed
+    // subscribers too, so this useSyncExternalStore snapshot flips back to
+    // false instead of staying stuck true after consumption.
+    act(() => {
+      consumePendingSeed(chatKeyFor("acme", "proj-a"));
+    });
+    expect(result.current).toBe(false);
   });
 
   it("is false without a project (no route to watch)", () => {

@@ -227,11 +227,16 @@ export function peekPendingSeed(key: string): string | null {
   return pendingSeeds.get(key) ?? null;
 }
 
-/** Get-and-clear: the seed is consumed exactly once. */
+/** Get-and-clear: the seed is consumed exactly once. Also notifies seed
+ *  listeners (mirroring `setPendingSeed`) — `useHasPendingSeed`'s
+ *  `useSyncExternalStore` snapshot flips from true back to false only when
+ *  a listener fires; without this, it would stay stuck `true` after the
+ *  panel consumes the seed. */
 export function consumePendingSeed(key: string): string | null {
   const msg = pendingSeeds.get(key);
   if (msg === undefined) return null;
   pendingSeeds.delete(key);
+  for (const fn of seedListeners.get(key) ?? []) fn();
   return msg;
 }
 
@@ -267,4 +272,41 @@ export function subscribeTurnEnd(
   set.add(fn);
   turnEndListeners.set(key, set);
   return () => set.delete(fn);
+}
+
+// --- Deterministic-flush registration (fix wave 1, Important #1) ----------
+//
+// `notifyTurnEnd` above dispatches to its subscribers SYNCHRONOUSLY.
+// `useTurnEndFlush` (SpecView — only place the collab room lives) reacts by
+// force-flushing the room then invalidating, which is necessarily ASYNC.
+// `useTurnEndDependencyRefresh` (AgentChatPanel — mounted on every route) is
+// the universal fallback and used to invalidate immediately and
+// unconditionally. When both hooks are mounted for the same chatKey (chat
+// open on the Spec route — the common case), that immediate invalidate
+// landed BEFORE the deterministic flush did, briefly showing the
+// freshly-resolved dependency's OLD status — defeating the point of the
+// forced flush.
+//
+// This registry lets the fallback hook ask "is a deterministic flush owner
+// live for this key right now?" and skip its own immediate invalidate when
+// so, leaving that to the deterministic path's post-flush invalidate.
+// Ref-counted (not a plain Set) so two overlapping registrations for the
+// same key (e.g. a remount) can't have one's cleanup clear the other's.
+
+const deterministicFlushKeys = new Map<string, number>();
+
+/** Mark a deterministic flush listener as live for `key`. Call the returned
+ *  function on unmount/cleanup. */
+export function registerDeterministicFlush(key: string): () => void {
+  deterministicFlushKeys.set(key, (deterministicFlushKeys.get(key) ?? 0) + 1);
+  return () => {
+    const remaining = (deterministicFlushKeys.get(key) ?? 1) - 1;
+    if (remaining <= 0) deterministicFlushKeys.delete(key);
+    else deterministicFlushKeys.set(key, remaining);
+  };
+}
+
+/** True while at least one deterministic flush listener is registered for `key`. */
+export function hasDeterministicFlush(key: string): boolean {
+  return (deterministicFlushKeys.get(key) ?? 0) > 0;
 }

@@ -18,7 +18,7 @@
 
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { subscribeTurnEnd } from "./chatStore.js";
+import { hasDeterministicFlush, subscribeTurnEnd } from "./chatStore.js";
 import { scheduleFreshnessPoll } from "../spec/api/dependencyFreshness.js";
 
 /**
@@ -30,6 +30,15 @@ import { scheduleFreshnessPoll } from "../spec/api/dependencyFreshness.js";
  * Wherever the chat happens to be, this always runs a light
  * refetch-on-turn-done + a short poll so the dependencies/preflight reads
  * don't sit stale for the whole 60s debounce quiet period.
+ *
+ * Coordination (fix wave 1, Important #1): `notifyTurnEnd` dispatches
+ * synchronously, but `useTurnEndFlush`'s connected branch invalidates only
+ * after an async `collab.flush()` resolves. When both hooks are mounted for
+ * the same chat key (chat open on the Spec route), this hook's immediate
+ * invalidate used to race ahead of that flush and briefly show stale data.
+ * `hasDeterministicFlush` lets this hook skip its own immediate invalidate
+ * when a deterministic flush owner is live for the key — the delayed
+ * backstop poll still runs regardless, in case that flush fails.
  */
 export function useTurnEndDependencyRefresh(
   chatKey: string,
@@ -41,7 +50,12 @@ export function useTurnEndDependencyRefresh(
   useEffect(() => {
     const unsubscribe = subscribeTurnEnd(chatKey, () => {
       cancelPollRef.current?.();
-      cancelPollRef.current = scheduleFreshnessPoll(queryClient, projectName);
+      cancelPollRef.current = scheduleFreshnessPoll(
+        queryClient,
+        projectName,
+        undefined,
+        { immediate: !hasDeterministicFlush(chatKey) },
+      );
     });
     return () => {
       unsubscribe();

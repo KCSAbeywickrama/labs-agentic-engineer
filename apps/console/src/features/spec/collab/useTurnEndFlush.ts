@@ -18,7 +18,10 @@
 
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { subscribeTurnEnd } from "../../agent-chat/chatStore.js";
+import {
+  registerDeterministicFlush,
+  subscribeTurnEnd,
+} from "../../agent-chat/chatStore.js";
 import {
   invalidateDependencyFreshness,
   scheduleFreshnessPoll,
@@ -42,6 +45,14 @@ import type { CollabSpec } from "./useCollabSpec";
  * to the same refetch-on-turn-done + short poll used by
  * `useTurnEndDependencyRefresh` (the accepted residual: the debounced
  * committer recovers within its own quiet period regardless).
+ *
+ * While mounted, registers as a deterministic flush owner for `chatKey`
+ * (`registerDeterministicFlush`) so `useTurnEndDependencyRefresh` — mounted
+ * alongside the chat panel on every route, including this one when the chat
+ * is open on the Spec route — knows to skip its own immediate invalidate and
+ * let this hook's post-flush invalidate be the one that lands (fix wave 1,
+ * Important #1: the two hooks otherwise race, since `notifyTurnEnd` fires
+ * synchronously but the flush below is async).
  */
 export function useTurnEndFlush(
   chatKey: string,
@@ -58,10 +69,18 @@ export function useTurnEndFlush(
   const cancelPollRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    const unregisterDeterministicFlush = registerDeterministicFlush(chatKey);
     const unsubscribe = subscribeTurnEnd(chatKey, () => {
       cancelPollRef.current?.();
       cancelPollRef.current = null;
       const current = collabRef.current;
+      // `current.flush()` itself already resolves immediately when
+      // offline/solo (see useCollabSpec.ts's `flush`), so this status check
+      // duplicates that guard. Kept deliberately (Minor #3, fix wave 1): it
+      // lets the not-connected case skip straight to the
+      // scheduleFreshnessPoll fallback (immediate invalidate + a 65s
+      // backstop) instead of a flush()-then-invalidate that would only
+      // invalidate once, with no backstop.
       if (current.status !== "connected") {
         cancelPollRef.current = scheduleFreshnessPoll(queryClient, projectName);
         return;
@@ -75,6 +94,7 @@ export function useTurnEndFlush(
     });
     return () => {
       unsubscribe();
+      unregisterDeterministicFlush();
       cancelPollRef.current?.();
       cancelPollRef.current = null;
     };

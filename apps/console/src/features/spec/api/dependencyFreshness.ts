@@ -55,13 +55,21 @@ export function invalidateDependencyFreshness(
  * quiet period + slack). Returns a cancel function that clears the pending
  * follow-up — callers should call it on unmount / before scheduling another
  * poll, so timers don't pile up across a long chat session.
+ *
+ * `immediate: false` (fix wave 1, Important #1) skips the up-front
+ * invalidate and only arms the delayed follow-up — for
+ * `useTurnEndDependencyRefresh` when a deterministic flush owner
+ * (`useTurnEndFlush`) is live for the same chat key and will invalidate
+ * itself after its own forced room flush; this hook's delayed backstop still
+ * runs regardless, in case that flush fails.
  */
 export function scheduleFreshnessPoll(
   queryClient: QueryClient,
   projectName: string,
   delayMs: number = FRESHNESS_POLL_DELAY_MS,
+  { immediate = true }: { immediate?: boolean } = {},
 ): () => void {
-  invalidateDependencyFreshness(queryClient, projectName);
+  if (immediate) invalidateDependencyFreshness(queryClient, projectName);
   const timer = setTimeout(
     () => invalidateDependencyFreshness(queryClient, projectName),
     delayMs,

@@ -39,8 +39,10 @@ import {
   conversationIdFor,
   dropTurnOutput,
   getMessages,
+  hasDeterministicFlush,
   notifyTurnEnd,
   peekPendingSeed,
+  registerDeterministicFlush,
   setPendingSeed,
   setTurnStatus,
   subscribe,
@@ -182,6 +184,19 @@ describe("pendingSeed", () => {
     setPendingSeed(key, "go again");
     expect(notified).toBe(1);
   });
+
+  // Minor #2 (fix wave 1): consumePendingSeed used to clear the slot without
+  // notifying, so useHasPendingSeed's useSyncExternalStore snapshot could
+  // stay stuck `true` after the panel consumed the seed.
+  it("also notifies seed subscribers on consume, not just on set", () => {
+    const key = freshKey();
+    let notified = 0;
+    subscribeSeed(key, () => (notified += 1));
+    setPendingSeed(key, "go");
+    expect(notified).toBe(1);
+    consumePendingSeed(key);
+    expect(notified).toBe(2);
+  });
 });
 
 // Turn-end bus (#252 Task 5): "a collab turn's terminal frame arrived" is
@@ -215,5 +230,39 @@ describe("turn-end bus", () => {
     unsubscribe();
     notifyTurnEnd(key, "completed");
     expect(count).toBe(0);
+  });
+});
+
+// Deterministic-flush registration (#252 Task 5 fix wave 1, Important #1):
+// lets useTurnEndDependencyRefresh (the universal fallback, mounted on every
+// route) know whether useTurnEndFlush (the deterministic path, mounted only
+// in SpecView) is currently live for the same chat key, so the fallback can
+// skip its own immediate invalidate and avoid racing ahead of the
+// deterministic post-flush invalidate.
+describe("deterministic-flush registration", () => {
+  it("is false until registered, true while registered, false again after unregister", () => {
+    const key = freshKey();
+    expect(hasDeterministicFlush(key)).toBe(false);
+    const unregister = registerDeterministicFlush(key);
+    expect(hasDeterministicFlush(key)).toBe(true);
+    unregister();
+    expect(hasDeterministicFlush(key)).toBe(false);
+  });
+
+  it("keeps distinct keys apart", () => {
+    const key1 = freshKey();
+    const key2 = freshKey();
+    registerDeterministicFlush(key1);
+    expect(hasDeterministicFlush(key2)).toBe(false);
+  });
+
+  it("ref-counts overlapping registrations for the same key", () => {
+    const key = freshKey();
+    const unregisterA = registerDeterministicFlush(key);
+    const unregisterB = registerDeterministicFlush(key);
+    unregisterA();
+    expect(hasDeterministicFlush(key)).toBe(true); // one registration still live
+    unregisterB();
+    expect(hasDeterministicFlush(key)).toBe(false);
   });
 });
