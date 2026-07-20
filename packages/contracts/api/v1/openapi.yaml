@@ -2069,9 +2069,6 @@ paths:
 components:
   schemas:
     AccessRequest:
-      x-go-type: models.AccessRequest
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       properties:
         consumerComponentName:
@@ -2499,9 +2496,6 @@ components:
       - name
       type: object
     ComponentConfig:
-      x-go-type: models.ComponentConfig
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       nullable: true
       additionalProperties: false
       properties:
@@ -2584,9 +2578,9 @@ components:
       - key
       type: object
     ConfigPatch:
-      x-go-type: models.ConfigPatch
+      x-go-type: orgconfig.ConfigPatch
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         gitProvider:
@@ -2643,9 +2637,9 @@ components:
           nullable: true
       type: object
     ConfigProjection:
-      x-go-type: models.ConfigProjection
+      x-go-type: orgconfig.ConfigProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         gitProvider:
@@ -2905,9 +2899,6 @@ components:
     EnvVar:
       # Hand-written in models/ (the gorm-persisted EnvVarSlice embeds it);
       # gen aliases this type to keep the models↔gen dependency one-way.
-      x-go-type: models.EnvVar
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       properties:
         key:
@@ -3036,9 +3027,9 @@ components:
       - sha
       type: object
     GitProviderProjection:
-      x-go-type: models.GitProviderProjection
+      x-go-type: orgconfig.GitProviderProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         connectedAt:
@@ -3086,9 +3077,9 @@ components:
       - connectedAt
       type: object
     IDPProjection:
-      x-go-type: models.IDPProjection
+      x-go-type: orgconfig.IDPProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         hasClientSecret:
@@ -3218,9 +3209,9 @@ components:
       - Labels
       type: object
     LLMProjection:
-      x-go-type: models.LLMProjection
+      x-go-type: orgconfig.LLMProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         connectedAt:
@@ -3500,9 +3491,6 @@ components:
           type: object
       type: object
     RcaAgentReport:
-      x-go-type: models.RcaAgentReport
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       description: An RCA report from the OpenChoreo SRE/RCA-agent handoff (console issues
       properties:
@@ -3520,6 +3508,7 @@ components:
         deployedAt:
           type: string
           format: date-time
+          x-go-type: '*time.Time'
         diagnosis:
           description: Full RCA diagnosis + remediation content (markdown)
           type: string
@@ -3537,6 +3526,7 @@ components:
             absent when the handoff was config-only
           format: int64
           type: integer
+          x-go-type: '*int64'
         issueTitle:
           type: string
         issueUrl:
@@ -3556,6 +3546,7 @@ components:
       - summary
       - classification
       - diagnosis
+      - dispatched
       - deployed
       type: object
     RcaAgentReportList:
