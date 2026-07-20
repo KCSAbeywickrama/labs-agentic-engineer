@@ -43,8 +43,8 @@ type Skill struct {
 	UpdatedAt     time.Time         `json:"updatedAt"`
 }
 
-// Skill kinds (docs/design/skills-unified-library-migration.md §3.2). A
-// SKILL.md declares its kind in frontmatter `metadata.aep.kind`; absent means
+// Skill kinds. A SKILL.md declares its kind in frontmatter `metadata.aep.kind`;
+// absent means
 // SkillKindOrg. platform + org are platform-shipped and reconciled from the
 // embedded library; custom + imported are user-owned and stamped on write.
 const (

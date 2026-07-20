@@ -98,7 +98,7 @@ type skillAepMetadata struct {
 // `metadata.aep.kind` when it names a known kind, else "org" — an unmarked
 // SKILL.md is an org skill (platform-shipped, page-visible, read-only). The
 // service stamps custom/imported into the files it writes, so only the four
-// known values ever appear. docs/design/skills-unified-library-migration.md §3.2.
+// known values ever appear.
 func frontmatterKind(fm skillFrontmatter) string {
 	switch k := strings.TrimSpace(fm.Metadata.Aep.Kind); k {
 	case SkillKindPlatform, SkillKindOrg, SkillKindCustom, SkillKindImported:

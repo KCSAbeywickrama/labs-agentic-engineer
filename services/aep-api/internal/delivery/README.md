@@ -85,4 +85,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   sub-package (`root ⊥ slice`), and the domain never imports `internal/feature/*`.
 - **`Signaler` stays a nil-safe concrete type**, not an interface — its nil-safety (no-op when Temporal is
   unavailable) is load-bearing for tests and degraded runs.
+- **The task-log stream is one connection, no server cursor.** `stream-task-log`
+  (`GET .../tasks/{issueNumber}/log`, `text/event-stream`) carries a Task's whole live state — `task` /
+  `execution` / `line` / `done` frames, the frame kind in a `type` field inside the `data:` payload so it
+  rides the shared agent-stream parser. The server buffers no history and keeps no cursor; the client
+  dedups and a reconnect re-derives. It settles/closes only on `deployed` — a transient `abandoned` during
+  the merge→build handoff keeps it open.
+- **Validation is the last devflow phase and never builds.** It starts only after every coding task
+  succeeds and an OpenChoreo Ready-deployment check passes, then spawns `ValidationFlowWorkflow` → one
+  `ValidationTaskWorkflow` lane per method (e2e only today). A validation Task is project-scoped, swaps to
+  the Playwright runner image (`VALIDATION_RUNNER_IMAGE`), and its merged PR spawns **no build** — a
+  completed validation derives to `deployed`/"Done". The acceptance oracle
+  `specs/validation/validation-criteria.json` is read-only input authored in the design phase (spec domain).
 - Platform-wide rules (tenant gate, secrets fence, persistence-in-domain) → [../../README.md](../../README.md).

@@ -61,4 +61,10 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 - **The wire quirks the contract-first cutover pinned stay pinned**: get-component-config returns a literal
   JSON `null` 200 when no row exists (not `{}`); get-component-openapi returns 409 *with* the componentType
   body for a non-service component; build-logs 503s when the observability client is unwired.
+- **The Stage aggregate is one cheap poll (5s active / 30s idle), strict-join.** get-project-status runs
+  three sources concurrently — spec from a fetch-free local-mirror snapshot, build from the newest `dev`
+  `workflow_runs` row (task counts denormalized onto it, not a live query), deploy from the project's
+  `development` release bindings — with no GitHub API, Temporal query, or origin fetch. Any source failure
+  fails the whole read (the console keeps last-good); the one carve-out: a deploy tag missing from the
+  local mirror degrades to a 0 denominator, not a 500.
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

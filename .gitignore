@@ -62,3 +62,6 @@ playground/.projects/
 # Playground per-project state — belt-and-braces: an accidental run anywhere
 # inside the repo must never become committable
 .aep-playground/
+
+# Draft design notes (scratch, not part of the committed design record)
+docs/design/draft/

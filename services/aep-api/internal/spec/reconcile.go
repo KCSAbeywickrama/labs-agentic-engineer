@@ -20,9 +20,7 @@ package spec
 // ships in the BFF container as on-disk files (config.SkillsDir, read at
 // runtime; platform + org kinds, kind in frontmatter) and is seeded +
 // reconciled into each org's skills repo (the live store) under the FLAT layout
-// skills/<name>/
-// (docs/design/skills-unified-library-migration.md; skills-repo-storage.md §6
-// reconcile, §10 provisioning). Reconcile is content-hash based: absent →
+// skills/<name>/. Reconcile is content-hash based: absent →
 // seed; embedded content SHA ≠ repo content SHA → overwrite (replacing the
 // whole skill dir, so stale references never linger); else leave. A name owned
 // by a user kind (custom/imported) is SKIPPED — the user copy wins. Retired

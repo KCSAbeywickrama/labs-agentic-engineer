@@ -42,8 +42,7 @@ const maxSkillBytes = 400 * 1024
 
 // reservedSkillNames cannot be used by custom/imported skills — `aep` is the
 // base plugin's name; the kind words keep the flat-vs-legacy repo layout
-// parser unambiguous while legacy trees still exist
-// (docs/design/skills-unified-library-migration.md §3.3).
+// parser unambiguous while legacy trees still exist.
 var reservedSkillNames = map[string]bool{
 	"aep":      true,
 	"platform": true, "org": true, "custom": true, "imported": true,

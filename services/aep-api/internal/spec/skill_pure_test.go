@@ -124,7 +124,7 @@ func TestContentSHA(t *testing.T) {
 
 // frontmatterKind derivation: metadata.aep.kind names the skill's kind; absent,
 // empty, or unparseable metadata defaults to "org" (the platform-shipped,
-// page-visible kind). docs/design/skills-unified-library-migration.md §3.2.
+// page-visible kind).
 func TestFrontmatterKind(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

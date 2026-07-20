@@ -22,10 +22,10 @@
 //     domain-free (componenttest is the one deliberate exception — it
 //     assembles the real app);
 //   - contracts imports nothing module-internal at all;
-//   - all Go code lives under internal/ except cmd/ and skills/ (go:embed
-//     anchors). The flat models/ + repositories/ kernels are DISSOLVED, and
-//     internal/feature/ is GONE — every entity/repository/feature now lives in
-//     its owning domain (the domain-boundary rules are in domain_arch_test.go).
+//   - all Go code lives under internal/ except cmd/ (mains). The flat models/ +
+//     repositories/ kernels are DISSOLVED, and internal/feature/ is GONE — every
+//     entity/repository/feature now lives in its owning domain (the
+//     domain-boundary rules are in domain_arch_test.go).
 //
 // The platform package list is discovered from disk (os.ReadDir), so a new
 // package is policed the moment it exists. Runs under plain `go test` — no
@@ -308,13 +308,12 @@ func TestGormImportAllowlist(t *testing.T) {
 }
 
 // TestInternalOnlyLayout asserts no Go source lives outside the sanctioned
-// top-level roots: internal/ (everything), cmd/ (mains), and skills/ (go:embed
-// must anchor to the source file). The flat models/ and repositories/ shared
-// kernels are both DISSOLVED — every entity lives in its owning
-// <domain>/entity_*.go and each repository in <domain>/repository_*.go.
+// top-level roots: internal/ (everything) and cmd/ (mains). The flat models/
+// and repositories/ shared kernels are both DISSOLVED — every entity lives in
+// its owning <domain>/entity_*.go and each repository in <domain>/repository_*.go.
 func TestInternalOnlyLayout(t *testing.T) {
 	allowedRoots := map[string]bool{
-		"internal": true, "cmd": true, "skills": true,
+		"internal": true, "cmd": true,
 	}
 	root := ".." + string(filepath.Separator) + ".." // module root from internal/arch
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

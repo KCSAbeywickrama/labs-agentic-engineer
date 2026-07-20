@@ -47,6 +47,12 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Owns
 - git spec content (`requirements.md`, `specs/design/**`), the annotated `v<N>` tag (the version store),
   the org-skills repo, `AgentTurn` (turn lifecycle) + the resumable-turn SSE broker (in-memory seam).
+- **The Skill library.** One flat authored library at repo-root `skills/` (`<name>/SKILL.md` +
+  `references/`), COPY'd into the image and read at runtime from `config.SkillsDir` (default `/app/skills`)
+  — not go:embed'd. Kind (`platform | org | custom | imported`) lives in frontmatter `metadata.aep.kind`,
+  absent ⇒ `org`: platform/org are library-shipped + reconcile-managed (read-only), custom/imported are
+  user-owned + editable. Each org's flat `org-skills` repo (kind in frontmatter) is reconciled
+  content-SHA-wise — seed / overwrite / purge platform+org, skip user-owned.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.
@@ -62,3 +68,5 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   gate, secrets fence) → [../../README.md](../../README.md).
 - The genai turn is **committed-truth**: the fold (`platform/agentfold`) verifies hash-parity before the
   commit; a mismatch rejects the turn and leaves `main` untouched.
+- **Skill read-only is enforced by the mutation guards, not by visibility.** `Resolve`/`List` return every
+  kind — platform skills list read-only on the skills page; reserved names/prefixes block name collisions.

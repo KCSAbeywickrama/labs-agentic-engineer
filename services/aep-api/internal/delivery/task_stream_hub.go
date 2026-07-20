@@ -25,10 +25,10 @@ import (
 // notify-only broker keyed by (repo, issue). It carries NO payload and buffers
 // NO history — it only wakes attached stream connections to re-derive the
 // Task's state from the durable sources. This is the deliberate no-schema
-// design (docs/design/task-log-stream.md §Backend): the writers that already
-// know a Task changed (the PR webhook, the job/exec watchers, the funnel) ping
-// the hub; a slow re-derive tick on each connection is the safety net so a
-// missed ping degrades to latency, not wrongness.
+// design: the writers that already know a Task changed (the PR webhook, the
+// job/exec watchers, the funnel) ping the hub; a slow re-derive tick on each
+// connection is the safety net so a missed ping degrades to latency, not
+// wrongness.
 //
 // Single-replica assumption (aep-api runs one replica today): the bus is
 // in-memory. The known evolution when the BFF scales out is LISTEN/NOTIFY (or a

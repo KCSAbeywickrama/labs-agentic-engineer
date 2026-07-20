@@ -20,10 +20,19 @@ SDLC platform built on OpenChoreo.
 - Keep files seperated based on responsibility.
 - Proper Fix alawys, no hacks or workarounds unless explicitly specified.
 
+## PR Guidelines
+- Make sure tests are enough to prove the change works as expected.
+- Make sure to run /code-review before submitting a PR and then run tests again.
+- Include proof of real execution in the PR Description (screenshots, test case from real payload, etc.)
+- See if documentation(such as README, ADR, etc.) needs to be updated and update it accordingly.
+- The documentation(including comments) should fit the overall project scope and should not be biased towards the specific PR. 
+
 ## Design docs
 
 Each package keeps a `design/` folder: concise notes + ADRs written **after** a
 feature ships (final state, not plans). Repo-wide ADRs/overview live in `docs/`.
+
+Implementation plans can go to `docs/design/draft` but they should not be commited, once the feature is implemented, the relavant information should fit into package documentation and the draft should be deleted.
 
 ## More
 

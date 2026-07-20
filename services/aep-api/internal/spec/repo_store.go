@@ -59,9 +59,8 @@ const (
 // legacyKindDirs maps the RETIRED kind path-segments (skills/<kindDir>/<name>/,
 // the pre-flat layout) to the current kind vocabulary. Repos that predate the
 // flat layout still parse through this table until their first reconcile
-// migrates them (docs/design/skills-unified-library-migration.md §4). In the
-// flat layout (skills/<name>/) a skill's kind lives in its frontmatter
-// (`metadata.aep.kind`; absent → org).
+// migrates them. In the flat layout (skills/<name>/) a skill's kind lives in
+// its frontmatter (`metadata.aep.kind`; absent → org).
 var legacyKindDirs = map[string]string{
 	"builtin":  SkillKindOrg,
 	"flow":     SkillKindPlatform,

@@ -14,8 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// The flat repo layout + kind-in-frontmatter contract
-// (docs/design/skills-unified-library-migration.md): skills/<name>/SKILL.md
+// The flat repo layout + kind-in-frontmatter contract: skills/<name>/SKILL.md
 // with `metadata.aep.kind` naming the kind (absent → org), the legacy
 // skills/<kindDir>/<name>/ layout parsed for not-yet-migrated repos, the
 // service-side kind stamping, and the reconcile-driven one-commit migration.

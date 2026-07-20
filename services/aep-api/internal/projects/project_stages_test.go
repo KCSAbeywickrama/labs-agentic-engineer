@@ -14,9 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// The #184 stage-aggregate derivation table
-// (docs/design/project-status-stage-aggregates.md §3), pinned row by row
-// against fake poll sources. The fixture lives in project_service_test.go.
+// The #184 stage-aggregate derivation table, pinned row by row against fake
+// poll sources. The fixture lives in project_service_test.go.
 package projects
 
 import (

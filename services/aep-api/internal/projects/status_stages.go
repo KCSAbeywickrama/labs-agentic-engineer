@@ -21,7 +21,7 @@ package projects
 // API, no Temporal query, no origin git fetch — the git source is the local
 // mirror snapshot (spec.StatusSnapshot), the build source is one
 // workflow_runs row read, the deploy source is one org-scoped OpenChoreo
-// call. See docs/design/project-status-stage-aggregates.md.
+// call. See internal/projects/README.md.
 
 import (
 	"context"
