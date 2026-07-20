@@ -49,9 +49,12 @@ type ExecutionView struct {
 // TaskView is the list-item shape (§9.1): live GitHub facts fused with the
 // latest Execution per kind into a derived status.
 type TaskView struct {
-	IssueNumber   int                      `json:"issueNumber"`
-	Title         string                   `json:"title"`
-	IssueURL      string                   `json:"issueUrl"`
+	IssueNumber int    `json:"issueNumber"`
+	Title       string `json:"title"`
+	IssueURL    string `json:"issueUrl"`
+	// PRURL links the task's pull request, recovered from the succeeded coding
+	// Execution's "pr#N" reason (no live PR query); empty before a PR opens.
+	PRURL         string                   `json:"prUrl,omitempty"`
 	ExecutorClass string                   `json:"executorClass,omitempty"`
 	Origin        string                   `json:"origin,omitempty"`
 	Component     string                   `json:"component,omitempty"`

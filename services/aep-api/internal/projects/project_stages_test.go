@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -150,6 +151,98 @@ func TestBuildStage_RowMapping(t *testing.T) {
 				if st.Build.Tasks.Total != int64(row.TasksTotal) || st.Build.Tasks.Done != int64(row.TasksDone) || st.Build.Tasks.Failed != int64(row.TasksFailed) {
 					t.Errorf("tally = %+v, want the row's %d/%d/%d verbatim", st.Build.Tasks, row.TasksTotal, row.TasksDone, row.TasksFailed)
 				}
+			}
+		})
+	}
+}
+
+// TestBuildStage_ValidationFailureAttribution pins the carve-out: a dev run
+// that failed BECAUSE its validation phase failed (every coding task done,
+// none failed, the validation child row failed) reports build=succeeded — the
+// failure belongs to validation and already rides deploy.validation=failed.
+// Every other failure shape keeps the raw failed mapping, including the
+// stale-row rebuild hazard: a same-tag rebuild reuses the dev workflow ID, so
+// an OLD failed validation row can match ValidationRunByParent while the
+// fresh execution failed in provisioning (tally 0/0/0) or coding
+// (TasksFailed > 0) — the tally guards defeat both.
+func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
+	t.Parallel()
+	base := time.Unix(1700000000, 0)
+	devRun := func(status string, total, done, failed int) []delivery.DevflowRun {
+		return []delivery.DevflowRun{{
+			Tag: "v1", WorkflowID: "wf-dev", Status: status,
+			TasksTotal: total, TasksDone: done, TasksFailed: failed,
+			CreatedAt: base,
+		}}
+	}
+	// child is THIS execution's validation row: recorded after the dev row
+	// (the child spawns mid-run). staleChild predates the dev row — a leftover
+	// from a previous same-tag execution (rebuilds reuse the dev workflow ID).
+	childAt := func(status string, createdAt time.Time) *delivery.DevflowRun {
+		return &delivery.DevflowRun{
+			Kind: delivery.WorkflowKindValidation,
+			Repo: "o/r", IssueNumber: 9, ParentWorkflowID: "wf-dev", Status: status,
+			CreatedAt: createdAt,
+		}
+	}
+	child := func(status string) *delivery.DevflowRun { return childAt(status, base.Add(time.Hour)) }
+	staleChild := func(status string) *delivery.DevflowRun { return childAt(status, base.Add(-time.Hour)) }
+	cases := []struct {
+		name           string
+		runs           []delivery.DevflowRun
+		child          *delivery.DevflowRun
+		wantBuild      string
+		wantValidation string
+	}{
+		{
+			name: "validation-attributed failure → build succeeded",
+			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: child(delivery.WorkflowStatusFailed),
+			wantBuild: "succeeded", wantValidation: "failed",
+		},
+		{
+			name: "coding failure (stale validation row) → build failed",
+			runs: devRun(delivery.WorkflowStatusFailed, 3, 1, 2), child: child(delivery.WorkflowStatusFailed),
+			wantBuild: "failed", wantValidation: "failed",
+		},
+		{
+			name: "provisioning failure (stale validation row, empty tally) → build failed",
+			runs: devRun(delivery.WorkflowStatusFailed, 0, 0, 0), child: child(delivery.WorkflowStatusFailed),
+			wantBuild: "failed", wantValidation: "failed",
+		},
+		{
+			// A rebuild whose tasks all succeeded but which failed BETWEEN the
+			// quality bar and respawning validation (validate-gate rejection /
+			// consistency check): tally is green, but the failed validation row
+			// is the PREVIOUS execution's — only a child recorded after this
+			// dev row may attribute the failure.
+			name: "green tally with a stale validation row → build failed (recency guard)",
+			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: staleChild(delivery.WorkflowStatusFailed),
+			wantBuild: "failed", wantValidation: "failed",
+		},
+		{
+			name: "failed without a validation child → build failed",
+			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: nil,
+			wantBuild: "failed", wantValidation: "none",
+		},
+		{
+			name: "canceled run is not carved out",
+			runs: devRun(delivery.WorkflowStatusCanceled, 3, 3, 0), child: child(delivery.WorkflowStatusFailed),
+			wantBuild: "failed", wantValidation: "failed",
+		},
+		{
+			name: "validation still running → build failed (only a FAILED child attributes)",
+			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: child(delivery.WorkflowStatusRunning),
+			wantBuild: "failed", wantValidation: "running",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := mustStatus(t, statusFixture{runs: tc.runs, validationRun: tc.child})
+			if st.Build.Status != tc.wantBuild {
+				t.Errorf("build status = %q, want %q", st.Build.Status, tc.wantBuild)
+			}
+			if string(st.Deploy.Validation) != tc.wantValidation {
+				t.Errorf("deploy.validation = %q, want %q", st.Deploy.Validation, tc.wantValidation)
 			}
 		})
 	}
@@ -304,6 +397,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		execs      delivery.ExecutionRepository
 		wantStatus string
 		wantURL    string
+		wantIssue  int64
 	}{
 		{name: "no child → none, no link", wantStatus: "none", wantURL: ""},
 		{
@@ -311,6 +405,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			child:      child(delivery.WorkflowStatusRunning),
 			wantStatus: "running",
 			wantURL:    "https://github.com/o/r/issues/9",
+			wantIssue:  9,
 		},
 		{
 			name:       "completed with an open PR → completed, PR link",
@@ -318,18 +413,21 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			execs:      prExecs,
 			wantStatus: "completed",
 			wantURL:    "https://github.com/o/r/pull/42",
+			wantIssue:  9,
 		},
 		{
 			name:       "failed → failed, issue link (no succeeded coding row)",
 			child:      child(delivery.WorkflowStatusFailed),
 			wantStatus: "failed",
 			wantURL:    "https://github.com/o/r/issues/9",
+			wantIssue:  9,
 		},
 		{
 			name:       "canceled → failed",
 			child:      child(delivery.WorkflowStatusCanceled),
 			wantStatus: "failed",
 			wantURL:    "https://github.com/o/r/issues/9",
+			wantIssue:  9,
 		},
 	}
 	for _, tc := range cases {
@@ -340,6 +438,9 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			}
 			if st.Deploy.ValidationURL != tc.wantURL {
 				t.Errorf("validationUrl = %q, want %q", st.Deploy.ValidationURL, tc.wantURL)
+			}
+			if st.Deploy.ValidationIssue != tc.wantIssue {
+				t.Errorf("validationIssue = %d, want %d", st.Deploy.ValidationIssue, tc.wantIssue)
 			}
 		})
 	}

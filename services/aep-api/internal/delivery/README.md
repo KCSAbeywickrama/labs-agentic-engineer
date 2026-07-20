@@ -97,4 +97,10 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the Playwright runner image (`VALIDATION_RUNNER_IMAGE`), and its merged PR spawns **no build** — a
   completed validation derives to `deployed`/"Done". The acceptance oracle
   `specs/validation/validation-criteria.json` is read-only input authored in the design phase (spec domain).
+- **Task LIST reads exclude the validation task** (`task/reads.go` `ListByTag`, the read-model boundary):
+  it is a phase of the run, not an implementation task, so the console tasks page, the build's per-version
+  task list, and the devflow planned-task graph never show it. Its state rides `deploy.validation`
+  (+ `validationIssue`, `validationUrl`); `get-task` and `stream-task-log` still serve it by issue number —
+  the pair the console validation log page consumes. `TaskView.prUrl` (recovered from the succeeded coding
+  Execution's `pr#N` reason, no live PR query) links each Task's PR.
 - Platform-wide rules (tenant gate, secrets fence, persistence-in-domain) → [../../README.md](../../README.md).

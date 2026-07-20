@@ -67,4 +67,11 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   `development` release bindings — with no GitHub API, Temporal query, or origin fetch. Any source failure
   fails the whole read (the console keeps last-good); the one carve-out: a deploy tag missing from the
   local mirror degrades to a 0 denominator, not a 500.
+- **A validation-phase failure is attributed to validation, not the build.** When the newest `dev` run
+  failed but its task tally is fully green and its validation child row failed, the Build stage reports
+  `succeeded` and the failure rides `deploy.validation = failed` (`status_stages.go`
+  `validationAttributedFailure`; a green-tally guard plus a recency guard — the child was recorded after
+  the dev row — defeat stale validation rows from a same-tag rebuild). Other failures (coding,
+  provisioning, canceled) keep the Build card as the catch-all. `deploy.validationIssue` carries the
+  validation Task's issue number so the console can open its log page.
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).
