@@ -18,6 +18,7 @@
 
 // @vitest-environment jsdom
 
+import type { ElementType } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
@@ -28,7 +29,7 @@ type TaskView = components["schemas"]["TaskView"];
 
 // Router replaced so the back LinkIconButton renders as a plain anchor.
 vi.mock("@tanstack/react-router", () => ({
-  createLink: (Component: React.ElementType) =>
+  createLink: (Component: ElementType) =>
     function MockLink({
       to,
       params,

@@ -18,6 +18,7 @@
 
 // @vitest-environment jsdom
 
+import type { ElementType } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
@@ -25,7 +26,7 @@ import type { components } from "../../../generated/aep-api";
 // Router replaced so the internal-link chip renders as a plain anchor whose
 // href is the resolved route path — no RouterProvider needed.
 vi.mock("@tanstack/react-router", () => ({
-  createLink: (Component: React.ElementType) =>
+  createLink: (Component: ElementType) =>
     function MockLink({
       to,
       params,
