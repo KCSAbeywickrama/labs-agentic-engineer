@@ -99,12 +99,14 @@ const (
 
 // Dependency Status/Reason enum values. These are read-time computed (see
 // the Dependency.Status/Reason doc below) — never authored, never persisted.
-// The 4-state org-service resolution model (artifacts.resolveOrgServices)
-// produces DependencyStatusResolved / DependencyStatusBlocked (with
-// DependencyReasonAccessRequired) / DependencyStatusUnresolved (with
-// DependencyReasonNotFound). DependencyStatusAmbiguous is reserved for a
-// dependency the platform cannot resolve to a single target; the design-save
-// proceed-gate (design.ErrUnresolvedDependency) blocks on all three
+// ComputeDependencyStatus (dependency_status.go) is the single authority: for
+// kind=org-service, namespace-visible → Resolved, catalog-visible elsewhere →
+// Blocked/AccessRequired, absent → Unresolved/NotFound. For kind=external,
+// 2+ Candidates → Ambiguous (no reason); a registry-known name → Resolved; no
+// Style → Unresolved/NeedsInput; Style=rest-api with no SpecPath →
+// Unresolved/NeedsSpec; Style=sdk with no Package → Unresolved/NeedsInput;
+// otherwise Resolved. component/platform-resource are always Resolved here.
+// The design-save proceed-gate (design.ErrUnresolvedDependency) blocks on all
 // non-resolved states.
 const (
 	DependencyStatusResolved   = "resolved"
