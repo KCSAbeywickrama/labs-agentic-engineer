@@ -130,6 +130,20 @@ func (s *service) runTurn(ctx context.Context, job turnJob) {
 	s.finishTurn(finishCtx, job, term)
 }
 
+// designOrCollabTurn is the shared gate design-generation turns AND collab
+// room-scoped turns (regardless of useCase) satisfy: the Spec view authors
+// design.json interactively through collab (useCase "requirements-chat"), so
+// gating on design-generate alone starved the collab architect of
+// list_org_endpoints, causing invented cross-project org-service names that
+// fail exact-name resolution at build. mcpForTurn (additionally gated on the
+// MCP token minter being wired) and the dispatched TurnRequest.WebSearch flag
+// (external-dependency-discovery #252 — Anthropic's web_search provider tool,
+// which needs no BFF-minted credential) key off this SAME condition. A plain
+// requirements-chat/general turn with no room does not qualify.
+func designOrCollabTurn(job turnJob) bool {
+	return job.useCase == useCaseDesignGenerate || job.collabRoomID != ""
+}
+
 // mcpForTurn mints the per-turn MCP discovery block for design-generation turns
 // AND collab room-scoped turns (dependency-management Phase 5): a BFF-signed
 // token (aud aep-api-mcp) carrying the org, plus the BFF's internal MCP endpoint
@@ -141,12 +155,7 @@ func (s *service) mcpForTurn(ctx context.Context, job turnJob) *agentsvc.MCPBloc
 	if s.mcpTokens == nil || s.mcpBaseURL == "" {
 		return nil
 	}
-	// Attach MCP discovery to design-generation turns AND every collab
-	// room-scoped turn: the Spec view authors design.json interactively through
-	// collab (useCase "requirements-chat"), so gating on design-generate alone
-	// starved the collab architect of list_org_endpoints, causing invented
-	// cross-project org-service names that fail exact-name resolution at build.
-	if job.useCase != useCaseDesignGenerate && job.collabRoomID == "" {
+	if !designOrCollabTurn(job) {
 		return nil
 	}
 	token, err := s.mcpTokens.IssueMCPToken(job.orgID)
@@ -198,6 +207,7 @@ func (s *service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		},
 		FilesChangedExternally: filesChangedExternally,
 		MCP:                    s.mcpForTurn(ctx, job),
+		WebSearch:              designOrCollabTurn(job),
 		Collab:                 collab,
 	})
 	if err != nil {
