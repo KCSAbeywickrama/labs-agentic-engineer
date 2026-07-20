@@ -335,3 +335,26 @@ request/response shapes or endpoint paths:
    configuration via the injected env-var **names** only; never hardcode
    or echo secret values — the pre-push guard scans for leaked secret
    values.
+
+### Consuming an external dependency's stored spec
+
+The same "Platform-resolved dependencies" comment may also carry a flat
+(non-headed) line like:
+
+> Consumed API contract:
+> `specs/design/components/<component>/dependencies/<dep>.openapi.yaml` —
+> implement the client against these exact operations; do not invent
+> endpoints.
+
+for an `external` dependency whose OpenAPI contract was already collected
+and committed to your own repo at design time. Follow this procedure:
+
+1. The spec is already in your checked-out repo at the given path — no MCP
+   call needed. Read it directly, same as the `(local)` sibling case above.
+2. Generate the client STRICTLY from that spec's operations, parameters,
+   and schemas — never invent endpoints, request/response shapes, or
+   fields the document doesn't declare.
+3. Read this dependency's auth/config via its injected env-var **names**
+   only (see the dependency's `config` keys in the design); never hardcode
+   or echo secret values — the pre-push guard scans for leaked secret
+   values.
