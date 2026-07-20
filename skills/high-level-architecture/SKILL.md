@@ -336,6 +336,25 @@ pre-fills the field with it (e.g. `{ "key": "AWS_REGION", "defaultValue":
 credential like an API key has no default to invent. Keep the keys minimal —
 only what the component reads.
 
+**Secure placement — a secret-bearing `external` dependency belongs on a
+`service`, not a `web-application`.** A web-application ships to the browser,
+so any secret it holds is visible to whoever opens dev tools. The secure
+default: attach the dependency (and its `secret: true` config keys) to a
+backend `service`, and have the web-application reach it through a
+`component` (or `org-service`) dependency on that service instead — the
+service PROXIES the external API, and the web-app never sees the third-party
+credential. A web-application may declare an `external` dependency directly
+only when NONE of its `config` keys need `secret: true` — a genuinely public
+API, or one authenticated by the END USER's own in-browser credentials/OAuth
+(never a shared platform secret riding along as a "public" key). If you're
+about to set `secret: true` on a config key for a dependency declared on a
+`web-application`, that's the signal to move it onto a service instead: add
+(or reuse) a service that calls the external API, redeclare the dependency
+there, and give the web-app a `component` edge to that service. This is a
+design-time judgment call the architect makes — the schema does not reject a
+secret on a web-application — so apply it as the secure default, not a rule
+to route around.
+
 **Resolution is entirely derived — you never author `status`/`reason`, and
 `needsSpec` no longer exists.** The platform computes `status`/`reason` at read
 time from which fields are present, first match wins: `candidates` present

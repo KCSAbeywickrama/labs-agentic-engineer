@@ -83,10 +83,14 @@ func dependencyBlocker(d models.Dependency) (kind, description string, blocked b
 // dependencyGateFailures is the build-time hard gate (dependency-management
 // migration, restoring the gate Task 1 orphaned): a FRESH ReadDesignComponents
 // read (never the client-supplied inputs, never a cached preflight response —
-// "re-run the computation" means invoke, never copy) walks every service
-// component's `external` dependencies and maps each still-blocked one
-// (ambiguous, or unresolved with needs-spec/needs-input) through the exact
-// same dependencyBlocker used by preflight.externalItems, into the existing
+// "re-run the computation" means invoke, never copy) walks every component's
+// `external` dependencies — service AND web-application alike (#252 Task 14:
+// the guard that skipped non-service components here predates this feature
+// and left a gap the drawer already closed for every component kind; a
+// web-application's unresolved external dependency must block the build the
+// same way a service's does) — and maps each still-blocked one (ambiguous, or
+// unresolved with needs-spec/needs-input) through the exact same
+// dependencyBlocker used by preflight.externalItems, into the existing
 // InputFailure shape (handlers_build.go's BuildResponse.failures). A doctored
 // client that skips the drawer (or supplies no/insufficient inputs) cannot
 // bypass this: the gate reads the design's Status/Reason at HEAD AFTER
@@ -109,9 +113,6 @@ func (s *Service) dependencyGateFailures(ctx context.Context, orgID, projectID s
 	}
 	var failures []InputFailure
 	for _, c := range comps {
-		if c.ComponentType != models.ComponentTypeService {
-			continue
-		}
 		for _, d := range c.Dependencies {
 			if kind, desc, blocked := dependencyBlocker(d); blocked {
 				failures = append(failures, InputFailure{

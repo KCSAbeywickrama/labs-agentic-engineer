@@ -708,6 +708,45 @@ func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing
 	}
 }
 
+// A web-application's ambiguous external dependency blocks the build exactly
+// like a service's would (#252 Task 14 — lifting the ComponentType != service
+// guard dependencyGateFailures used to apply here). Task 9 already shows this
+// dependency's status chip and the coding-agent wiring already emits
+// consumed-spec instructions for it regardless of component kind, so the
+// build-time hard gate must not be the one surface that still lets it through.
+func TestBuild_DependencyGate_WebApplication_AmbiguousExternal_Blocks(t *testing.T) {
+	design := &gateDesign{comps: []models.DesignComponent{{Name: "web", ComponentType: models.ComponentTypeWebApplication,
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "salesforce", Status: models.DependencyStatusAmbiguous},
+		}}}}
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := build.NewService(build.Deps{
+		Runner: runner, Store: &fakeStore{}, Repos: fakeRepos{}, Tagger: tagger, Tasks: fakeTasks{}, Design: design,
+	})
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	out := decodeBody[apigen.BuildResponse](t, body)
+	if len(out.Failures) != 1 {
+		t.Fatalf("failures = %+v, want 1", out.Failures)
+	}
+	if f := out.Failures[0]; f.Component != "web" || f.Dependency != "salesforce" || f.Kind != "external-ambiguous" {
+		t.Errorf("failure = %+v, want {web, salesforce, external-ambiguous}", f)
+	}
+	if out.Tag != "" {
+		t.Errorf("tag = %q, want empty — no tag on a gated build", out.Tag)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times, want 0 — the gate must block before the tag-cut", tagger.called)
+	}
+	if len(runner.started) != 0 {
+		t.Errorf("workflow started despite the dependency gate blocking")
+	}
+}
+
 // An unresolved (needs-input) external dependency maps to "external-unresolved".
 func TestBuild_DependencyGate_NeedsInput_Blocks(t *testing.T) {
 	design := &gateDesign{comps: []models.DesignComponent{{Name: "o", ComponentType: models.ComponentTypeService,

@@ -102,9 +102,13 @@ func NewPreflightService(d PreflightDeps) *PreflightService {
 	return &PreflightService{design: d.Design, status: d.Status}
 }
 
-// Preflight walks every service component's dependencies at HEAD and emits a
-// drawer item for each dependency that still needs user input/approval and is
-// not already provisioned or in-flight:
+// Preflight walks every component's dependencies at HEAD — service AND
+// web-application alike (#252 Task 14: a web-application's unresolved
+// dependency needs the same drawer/gate treatment as a service's, since Task 9
+// already surfaces its status chips and the coding-agent wiring already emits
+// consumed-spec instructions for it) — and emits a drawer item for each
+// dependency that still needs user input/approval and is not already
+// provisioned or in-flight:
 //
 //   - external: a blocker item — "external-ambiguous" (2+ candidates),
 //     "external-unresolved" (needs information only the user can supply), or
@@ -120,8 +124,9 @@ func NewPreflightService(d PreflightDeps) *PreflightService {
 //   - component (sibling components): never emitted — not provisioned via
 //     the drawer.
 //
-// Non-service components carry no provisionable dependencies and are
-// skipped entirely.
+// itemsFor switches purely on the dependency's own Kind — never the owning
+// component's ComponentType — so this walk is component-kind-agnostic by
+// construction; there is no per-component-type branch left to skip.
 func (s *PreflightService) Preflight(ctx context.Context, orgID, projectID string) (BuildPreflight, error) {
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
@@ -130,9 +135,6 @@ func (s *PreflightService) Preflight(ctx context.Context, orgID, projectID strin
 
 	items := make([]PreflightItem, 0)
 	for _, c := range comps {
-		if c.ComponentType != models.ComponentTypeService {
-			continue
-		}
 		for _, d := range c.Dependencies {
 			deps, err := s.itemsFor(ctx, orgID, projectID, c.Name, d)
 			if err != nil {
