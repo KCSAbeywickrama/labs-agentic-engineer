@@ -24,6 +24,7 @@ import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 import { emit } from "./progress/emitter.js";
 import { progressFromSdkMessage } from "./progress/from-sdk.js";
+import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
@@ -32,7 +33,13 @@ const PLUGIN_PATH = path.resolve(__dirname, "../../plugin");
 // tools. Endpoint Spec Discovery (B2) re-introduces MCP — but only as an
 // in-process remote HTTP server (see buildMcpOptions below), never the
 // file-based .mcp.json that settingSources: [] deliberately blocks.
-const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+// D9 secure search (Task 12) adds WebSearch — deliberately NOT WebFetch,
+// which stays disabled (no pod egress to arbitrary fetched pages). The
+// server-side WebSearch tool is gated by the PreToolUse DLP hook wired in
+// runClaudeQuery below (see websearch_dlp.ts for why PreToolUse, not
+// canUseTool, and .superpowers/sdd/task-12-report.md for the spike
+// evidence).
+const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch"];
 
 // The server key the BFF MCP endpoint is registered under. The SDK
 // namespaces MCP tools as `mcp__<serverKey>__<toolName>` (confirmed from
@@ -165,6 +172,15 @@ export function runClaudeQuery(
   // runner falls back to the base tool set unchanged.
   const { mcpServers, allowedTools } = buildMcpOptions(req.mcpUrl, req.mcpToken);
 
+  // D9 secure search (Task 12) — DLP gate for the server-side WebSearch
+  // tool. Secret candidates are read from childEnv, the SAME env record
+  // injected into this run (see websearch_dlp.ts's stagedSecretValues doc
+  // comment): staged dependency secrets (Tasks 9-11's per-run K8s Secrets,
+  // mounted via envFrom) and the runner's own credentials both land there
+  // before the query() call below, so this is the single source of truth
+  // for "what's secret in this run" without a second, drift-prone channel.
+  const webSearchDlpHook = createWebSearchDlpHook(stagedSecretValues(childEnv));
+
   // SDK v0.2.126 auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. settingSources: [] ensures no
   // host filesystem settings leak into the container agent.
@@ -183,6 +199,13 @@ export function runClaudeQuery(
       persistSession: false,
       settingSources: [],
       env: childEnv,
+      // NOT canUseTool — the Task 12 spike found canUseTool is never
+      // invoked for the server-executed WebSearch tool (confirmed under
+      // bypassPermissions above too). PreToolUse is the mechanism that
+      // actually gates it pre-dispatch. See websearch_dlp.ts.
+      hooks: {
+        PreToolUse: [{ matcher: "WebSearch", hooks: [webSearchDlpHook] }],
+      },
     },
   });
 

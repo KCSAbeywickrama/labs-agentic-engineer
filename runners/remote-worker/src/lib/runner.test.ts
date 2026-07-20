@@ -20,7 +20,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildMcpOptions } from "./runner.js";
 
-const BASE_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+// D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
+// the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
+// WebFetch is deliberately absent: no pod egress to arbitrary fetched pages.
+const BASE_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch"];
 const MCP_TOOLS = [
   "mcp__aep__list_org_component_endpoints",
   "mcp__aep__get_remote_git_file_contents",
@@ -66,4 +69,11 @@ test("buildMcpOptions: omits mcpServers and MCP tools when both are undefined", 
 
   assert.equal(result.mcpServers, undefined);
   assert.deepEqual(result.allowedTools, BASE_TOOLS);
+});
+
+test("buildMcpOptions: allowedTools includes WebSearch and excludes WebFetch (D9 — Task 12)", () => {
+  const result = buildMcpOptions(undefined, undefined);
+
+  assert.ok(result.allowedTools.includes("WebSearch"));
+  assert.ok(!result.allowedTools.includes("WebFetch"));
 });
