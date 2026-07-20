@@ -113,6 +113,13 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("connect to cluster: %w", err)
 	}
 
+	// 0. Warn if a ConfigMap already exists — re-running install will overwrite it.
+	_, cmErr := k8sClient.CoreV1().ConfigMaps(initPlatformNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
+	if cmErr == nil {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: existing %s found — re-running install will overwrite it.\n", config.ConfigMapName)
+		_, _ = fmt.Fprintf(os.Stderr, "  Export your config first with: aep platform config export\n")
+	}
+
 	// 0a. Prerequisite guard — verify the OpenChoreo version meets the minimum
 	// requirement. Features used by the coding-agent build/deploy chain (e.g.
 	// the workflow plane APIs) are only available from 1.1.1 onward; older
