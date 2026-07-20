@@ -184,14 +184,19 @@ kind by WHAT the target is:
   `{ "kind": "org-service", "name": "<name from list_org_endpoints>" }`. A name
   coined from the role words matches no provider and hard-fails the build.
 - **`external`** — a system OUTSIDE the platform (a SaaS API, a legacy
-  service). Two shapes:
-  - *SDK-style SaaS* (Stripe, SendGrid, ...): no spec needed — the component
-    codes against the vendor SDK. Declare only the `config` keys it reads.
-  - *REST-with-spec*: when the component must call specific endpoints, set
-    `"needsSpec": true`. Point `specPath` at a stored contract
-    (`dependencies/<name>.openapi.yaml`) or give `specUrl` for the platform to
-    fetch. A `needsSpec` external with no spec yet is left UNRESOLVED for the
-    user to supply — that is expected, not an error to fix.
+  service). Classify it into one of two styles — see "Resolving an `external`
+  dependency" below for the full discovery procedure:
+  - **`style: "rest-api"`** — the component calls specific HTTP endpoints.
+    Always needs a STORED OpenAPI contract at `specPath`
+    (`dependencies/<name>.openapi.yaml`) — never just a URL.
+  - **`style: "sdk"`** — the component codes against a vendor SDK/library.
+    Declare `package`, one ecosystem-prefixed identifier
+    (`npm:stripe@^14`, `go:...`, `pypi:...`).
+
+  `style`, `package`, `specPath`, `specUrl`, `sources`, and `candidates` are
+  meaningful ONLY on `kind: "external"` — declaring any of them on a
+  `component`/`org-service`/`platform-resource` dependency is a schema
+  violation (the zod write-gate and the Go fold gate both reject it).
 - **`platform-resource`** — a backing resource the platform provisions (a
   database, cache, object store). Set `resourceType` to a registered type and
   `parameters` for provisioning:
@@ -208,12 +213,19 @@ kind by WHAT the target is:
 "dependencies": [
   { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
-  { "kind": "external", "name": "stripe",
+  { "kind": "external", "name": "stripe", "style": "sdk", "package": "npm:stripe@^14",
+    "sources": ["https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"],
     "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
-  { "kind": "external", "name": "legacy-billing", "needsSpec": true,
-    "specUrl": "https://billing.example.com/openapi.yaml" }
+  { "kind": "external", "name": "github", "style": "rest-api",
+    "description": "GitHub REST API for issues + PRs.",
+    "specUrl": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json" }
 ]
 ```
+
+The `github` entry above is unresolved on purpose: `style: "rest-api"` with no
+`specPath` yet computes `unresolved`/`needs-spec` — expected, not an error to
+fix (see "Resolving an `external` dependency" below for how it gets a
+`specPath`).
 
 **Discover before you invent.** The platform MCP tools are the source of truth
 for every dependency's name and shape — call them before authoring an
@@ -222,7 +234,9 @@ and schema from what they return, not from the requirement's wording:
 
 - `list_external_resources` / `get_external_resource_schema` — reuse an
   already-registered external resource by its EXACT `name` and `config` schema
-  rather than inventing a parallel one.
+  rather than inventing a parallel one. Only when nothing registered fits do
+  you move on to discovering a new one (`web_search`) — see "Resolving an
+  `external` dependency" below.
 - `list_org_endpoints` — the org-service catalog every `org-service` `name` is
   copied from verbatim (see the `org-service` kind above). When no row fills the
   role the requirement describes, leave the dependency unresolved rather than
@@ -243,6 +257,69 @@ and schema from what they return, not from the requirement's wording:
   `description` and pick the type whose description matches the need; when
   none matches, leave the dependency unresolved rather than forcing a fit.
 
+### Resolving an `external` dependency
+
+`external` is the one kind with real-world discovery to do — the SaaS or
+legacy system doesn't live in any catalog you can look up directly. Work it as
+a procedure, in order:
+
+1. **Reuse first.** `list_external_resources` / `get_external_resource_schema`
+   (above) — a dependency whose `name` matches an already-registered external
+   resource resolves from that registry regardless of `style`/`specPath`/
+   `package`. Don't re-discover what the org already has.
+2. **`web_search` for candidates** when nothing registered fits. Stop at the
+   options actually worth presenting — usually one clear winner, occasionally
+   two or three genuine contenders.
+3. **Classify each candidate's style.** `rest-api` when the component talks to
+   specific HTTP endpoints; `sdk` when it codes against a vendor SDK/library —
+   the candidate's own docs make this obvious ("REST API reference" vs.
+   "install our SDK").
+4. **Resolve the contract.**
+   - `rest-api` ALWAYS needs a stored contract — there is no keys-only
+     fallback. If you find a spec URL, call `fetch_openapi_spec` (fetches,
+     validates, and normalizes the document; stores nothing). Once you're
+     confident it's the right, valid contract, write the normalized content to
+     `specs/design/components/<component>/dependencies/<dep-name>.openapi.yaml`
+     (addFile) and set the dependency's `specPath` to
+     `dependencies/<dep-name>.openapi.yaml` — it resolves immediately. If you
+     only have the URL and haven't fetched/verified it in-turn, set `specUrl`
+     alone as a hint: the platform retries the same fetch-validate-store at
+     design save and clears `specUrl` on success, but a failed retry blocks the
+     save gate — prefer fetching and storing it yourself over leaving it to
+     that safety net. If no spec exists anywhere, author a minimal OpenAPI 3.x
+     document yourself from the operations the docs describe (only what the
+     component actually calls, never invented endpoints), validate it with
+     `validate_openapi_spec`, then store it the same way (addFile + `specPath`).
+   - `sdk` needs `package`: one ecosystem-prefixed identifier (`npm:`, `go:`,
+     `pypi:`), version inline but optional (`npm:resend` with no version ⇒ the
+     coding agent picks the latest compatible).
+5. **Derive `config` keys** from the contract: a `rest-api`'s
+   `components.securitySchemes`, or an `sdk`'s auth documentation (API key,
+   client id/secret, ...). See "Config-key conventions" below for the key
+   format.
+6. **Emit the outcome** — never a `status`/`reason`, only the fields the
+   platform derives one from:
+   - One option clearly wins → emit it **resolved**: `style` + (`package` or
+     `specPath`), `config`, and `sources` (the docs link, the spec link, the
+     package-registry link — whatever provenance you used).
+   - 2+ options are genuinely worth the user's call → emit `candidates` (2 or
+     more — never one: one option fully known resolves outright, one option
+     only partially known is a partial dep, not a candidate, so leave `style`
+     and whatever else you know set on the dependency itself and let the
+     missing field compute the specific unresolved reason). Each candidate
+     carries its own `style` and a lean `docsUrl`/`specUrl`/`package`; leave
+     the dependency's own `style`, `package`, and `specPath` unset until one is
+     pinned.
+   - You can't even identify what system fills the need → emit a style-less
+     entry (no `style`, no `candidates`): just `name` + a `description` saying
+     what's missing and what the user needs to supply. The platform computes
+     this as `unresolved`/`needs-input`.
+7. **On pin** (a chat turn collapses `candidates` to one choice): REMOVE the
+   `candidates` field entirely (never leave a one-item array — that's a schema
+   violation), set the chosen option's `style` and `package`/`specPath`, and
+   fold its `docsUrl`/`specUrl`/package-registry link into the dependency's
+   `sources`.
+
 **Config-key conventions.** `config` is the env-var schema the consuming
 component codes against. Use `SCREAMING_SNAKE_CASE` keys. `secret` is opt-in:
 set `"secret": true` ONLY for credentials (they route through the secret path);
@@ -257,15 +334,20 @@ pre-fills the field with it (e.g. `{ "key": "AWS_REGION", "defaultValue":
 credential like an API key has no default to invent. Keep the keys minimal —
 only what the component reads.
 
-**`needsSpec` is opt-in.** Omit `needsSpec` entirely unless the dependency needs
-a collected OpenAPI spec, in which case set it `true` (never write `false`).
-
-**Resolution status is platform-computed.** A dependency's `status` (resolved /
-ambiguous / unresolved / blocked) and its `reason` are computed by the platform
-at read time against the live catalog — you never author those. Declare the
-intent (kind + name + fields above) and let the platform resolve it. An
-`external` dependency should almost always carry at least one `config` key — the
-value-collection gate needs something to collect.
+**Resolution is entirely derived — you never author `status`/`reason`, and
+`needsSpec` no longer exists.** The platform computes `status`/`reason` at read
+time from which fields are present, first match wins: `candidates` present
+(2+) → `ambiguous`; dependency `name` matches a registered external resource →
+`resolved` (registry reuse, regardless of `style`); `style` absent →
+`unresolved`/`needs-input`; `style: "rest-api"` with no `specPath` →
+`unresolved`/`needs-spec` (`specUrl` is a fetch hint, not the contract);
+`style: "sdk"` with no `package` → `unresolved`/`needs-input`; otherwise →
+`resolved`. Declare the intent (kind + name + the fields above) and let the
+platform derive the state — the old `needsSpec` boolean is REMOVED from the
+schema (a draft carrying it now fails the write-gate); migrate
+`needsSpec: true` to `style: "rest-api"`. An `external` dependency should
+almost always carry at least one `config` key — the value-collection gate
+needs something to collect.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;
