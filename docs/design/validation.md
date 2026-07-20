@@ -117,16 +117,16 @@ the root cause of "the deployed endpoint didn't resolve".)
 
 ## Runner side (`runners/remote-worker`)
 
-**Skills (plugin `aep`, v0.6.0).**
+**Skills (plugin `aep`, v0.7.0).**
 - `aep-validation` — orchestrator; replaces the `aep` implementation workflow for
   `aep`+`validation` issues (the `aep` skill points to it; its auth/git/deny rules
-  still apply).
-- `playwright-authoring` — authoring discipline: explore the live app via
-  `playwright-cli`, a spec counts only after passing twice, `// spec:` header,
-  semantic-locator/web-first-assertion rules, `request` fixture for API criteria,
-  env-only credentials.
-- `playwright-healing` — bounded brittleness repair; a heal changes *how* a test
-  drives the app, never *what* it asserts; every heal is logged.
+  still apply). Its phase discipline lives in `references/`:
+  - `references/authoring.md` — authoring discipline: explore the live app via
+    `playwright-cli`, a spec counts only after passing twice, `// spec:` header,
+    semantic-locator/web-first-assertion rules, `request` fixture for API criteria,
+    env-only credentials.
+  - `references/healing.md` — bounded brittleness repair; a heal changes *how* a test
+    drives the app, never *what* it asserts; every heal is logged.
 - `playwright-cli` — vendored (Apache-2.0) browser-automation CLI mechanics.
 
 **File layout (the read-only-`specs/` contract).**
@@ -199,5 +199,5 @@ calls live in the skill markdown, not runner code.
 | Dispatch (Playwright image swap) | `services/aep-api/internal/feature/codingagent/coding_executor.go` |
 | Merge-skips-build + derived status | `services/aep-api/internal/feature/execution/events.go`, `internal/feature/task/reads.go` |
 | Oracle authoring skill | `skills/validation-criteria/` (vendored into `services/aep-api/skills/embedded/`) |
-| Runner skills + report generator | `runners/remote-worker/plugin/skills/{aep-validation,playwright-authoring,playwright-healing,playwright-cli}/` |
+| Runner skills + report generator | `runners/remote-worker/plugin/skills/{aep-validation,playwright-cli}/` (authoring/healing discipline in `aep-validation/references/`) |
 | Validation runner image | `runners/remote-worker/Dockerfile.validation` |
