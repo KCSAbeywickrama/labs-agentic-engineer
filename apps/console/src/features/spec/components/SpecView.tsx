@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Avatar,
@@ -50,7 +50,7 @@ import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
-import { chatKeyFor } from "../../agent-chat/chatStore";
+import { chatKeyFor, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
@@ -134,6 +134,37 @@ export function SpecView({ projectName }: { projectName: string }) {
   const [buildError, setBuildError] = useState<string | null>(null);
   const [dependencyDrawerOpen, setDependencyDrawerOpen] = useState(false);
   const [preflightItems, setPreflightItems] = useState<PreflightItem[]>([]);
+
+  // #252 Task 10: keep an OPEN drawer fresh after "Resolve via chat" ends a
+  // turn. useTurnEndFlush (above) already invalidates the preflight query's
+  // cache entry on turn-end, but useBuildPreflight is a manual `enabled:
+  // false` query (its only observer), so that invalidation alone never
+  // triggers a background refetch — TanStack only auto-refetches invalidated
+  // queries that have at least one ENABLED observer. Explicitly flushing the
+  // room (idempotent alongside useTurnEndFlush's own flush) then refetching
+  // here is what actually lands the resolved item's disappearance in the
+  // still-open drawer's `items`, rather than only on the NEXT Build click.
+  // collab/preflight are read via refs (mirroring useTurnEndFlush.ts's own
+  // collabRef) rather than closed over directly: both are fresh objects most
+  // renders, and the effect must fire on `dependencyDrawerOpen`/chat-key
+  // identity only, not on every such reference change.
+  const collabRef = useRef(collab);
+  collabRef.current = collab;
+  const preflightRef = useRef(preflight);
+  preflightRef.current = preflight;
+  useEffect(() => {
+    if (!dependencyDrawerOpen) return;
+    const chatKey = chatKeyFor(orgHandle ?? "default", projectName);
+    return subscribeTurnEnd(chatKey, () => {
+      void collabRef.current
+        .flush()
+        .catch(() => undefined)
+        .then(() => preflightRef.current.refetch())
+        .then(({ data }) => {
+          if (data) setPreflightItems(data.items ?? []);
+        });
+    });
+  }, [dependencyDrawerOpen, orgHandle, projectName]);
 
   // Collapse the sidebar while focused on the spec, expand when leaving.
   useEffect(() => {
@@ -235,6 +266,21 @@ export function SpecView({ projectName }: { projectName: string }) {
     const dep = componentDependencies.find((d) => d.name === dependencyName);
     if (!dep) return;
     resolveDependencyViaChat(selectedComponentName, dep);
+  };
+
+  // #252 Task 10: the build dependency drawer's "Resolve via chat" — same
+  // seeded-message flow as handleResolveDependency above, but keyed off a
+  // PreflightItem (component/dependency name) rather than the currently
+  // selected component's design.json, since the drawer's items can span
+  // ANY of the project's service components, not just the one selected in
+  // the file tree.
+  const handleResolveDrawerDependency = (item: PreflightItem) => {
+    const dep = (
+      dependencies.data?.find((c) => c.componentName === item.component)
+        ?.dependencies ?? []
+    ).find((d) => d.name === item.dependency);
+    if (!dep) return;
+    resolveDependencyViaChat(item.component, dep);
   };
 
   // Collab supplies live content when connected; the REST read (lazy, per
@@ -815,6 +861,7 @@ export function SpecView({ projectName }: { projectName: string }) {
         submitting={dependencyDrawerOpen && buildPhase === "building"}
         onClose={() => setDependencyDrawerOpen(false)}
         onContinue={(inputs) => void onContinueBuild(inputs)}
+        onResolveDependency={handleResolveDrawerDependency}
       />
     </PageContent>
   );

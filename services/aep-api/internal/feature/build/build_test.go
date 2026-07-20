@@ -630,6 +630,210 @@ func TestGetPreflight_WiredThroughRealService(t *testing.T) {
 	}
 }
 
+// ----- Dependency hard gate (#252 Task 10 — restores the gate Task 1 orphaned) --
+
+// gateDesign is a mutable ReadDesignComponents fake: resolvingSpec.CollectSpec
+// flips a dependency's Status in place, simulating the committed-truth write
+// InputsCoordinator.ApplyPreTag triggers in production — so the gate's fresh
+// re-read AFTER ApplyPreTag sees the resolution a legitimate drawer submission
+// (pasted spec content, THIS build request) just supplied.
+type gateDesign struct{ comps []models.DesignComponent }
+
+func (f *gateDesign) ReadDesignComponents(context.Context, string, string) ([]models.DesignComponent, error) {
+	return f.comps, nil
+}
+
+func (f *gateDesign) resolve(depName string) {
+	for i := range f.comps {
+		for j := range f.comps[i].Dependencies {
+			d := &f.comps[i].Dependencies[j]
+			if d.Name == depName {
+				d.Status = models.DependencyStatusResolved
+				d.Reason = ""
+			}
+		}
+	}
+}
+
+type resolvingSpec struct{ design *gateDesign }
+
+func (r *resolvingSpec) CollectSpec(_ context.Context, _, _, _, dep string, _ []byte, _ string) (string, error) {
+	r.design.resolve(dep)
+	return "specs/design/components/o/dependencies/" + dep + ".openapi.yaml", nil
+}
+
+type noopAuth struct{}
+
+func (noopAuth) DeriveEndUserAuthAtHead(context.Context, string, string) error { return nil }
+
+type noopStager struct{}
+
+func (noopStager) StageExternalSecrets(context.Context, string, string, string, string, map[string]map[string]string) (map[string]string, error) {
+	return nil, nil
+}
+
+// A doctored client (no inputs at all) cannot skip the drawer: an ambiguous
+// external dependency blocks with a failure, no tag is cut, and no workflow
+// starts.
+func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing.T) {
+	design := &gateDesign{comps: []models.DesignComponent{{Name: "o", ComponentType: models.ComponentTypeService,
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "salesforce", Status: models.DependencyStatusAmbiguous},
+		}}}}
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := build.NewService(build.Deps{
+		Runner: runner, Store: &fakeStore{}, Repos: fakeRepos{}, Tagger: tagger, Tasks: fakeTasks{}, Design: design,
+	})
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	out := decodeBody[apigen.BuildResponse](t, body)
+	if len(out.Failures) != 1 {
+		t.Fatalf("failures = %+v, want 1", out.Failures)
+	}
+	if f := out.Failures[0]; f.Dependency != "salesforce" || f.Kind != "external-ambiguous" {
+		t.Errorf("failure = %+v, want {salesforce, external-ambiguous}", f)
+	}
+	if out.Tag != "" {
+		t.Errorf("tag = %q, want empty — no tag on a gated build", out.Tag)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times, want 0 — the gate must block before the tag-cut", tagger.called)
+	}
+	if len(runner.started) != 0 {
+		t.Errorf("workflow started despite the dependency gate blocking")
+	}
+}
+
+// An unresolved (needs-input) external dependency maps to "external-unresolved".
+func TestBuild_DependencyGate_NeedsInput_Blocks(t *testing.T) {
+	design := &gateDesign{comps: []models.DesignComponent{{Name: "o", ComponentType: models.ComponentTypeService,
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "weather-api",
+				Status: models.DependencyStatusUnresolved, Reason: models.DependencyReasonNeedsInput},
+		}}}}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := build.NewService(build.Deps{
+		Runner: &fakeRunner{}, Store: &fakeStore{}, Repos: fakeRepos{}, Tagger: tagger, Tasks: fakeTasks{}, Design: design,
+	})
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	out := decodeBody[apigen.BuildResponse](t, body)
+	if len(out.Failures) != 1 || out.Failures[0].Kind != "external-unresolved" || out.Failures[0].Dependency != "weather-api" {
+		t.Fatalf("failures = %+v, want one {weather-api, external-unresolved}", out.Failures)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called despite the gate blocking")
+	}
+}
+
+// A doctored client sending no external-spec input for a needs-spec dependency
+// still gets gated: kind maps to the pre-existing "external-spec".
+func TestBuild_DependencyGate_NeedsSpec_NoDrawerInput_Blocks(t *testing.T) {
+	design := &gateDesign{comps: []models.DesignComponent{{Name: "o", ComponentType: models.ComponentTypeService,
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "partner-api",
+				Status: models.DependencyStatusUnresolved, Reason: models.DependencyReasonNeedsSpec},
+		}}}}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := build.NewService(build.Deps{
+		Runner: &fakeRunner{}, Store: &fakeStore{}, Repos: fakeRepos{}, Tagger: tagger, Tasks: fakeTasks{}, Design: design,
+	})
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	out := decodeBody[apigen.BuildResponse](t, body)
+	if len(out.Failures) != 1 || out.Failures[0].Kind != "external-spec" || out.Failures[0].Dependency != "partner-api" {
+		t.Fatalf("failures = %+v, want one {partner-api, external-spec}", out.Failures)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called despite the gate blocking")
+	}
+}
+
+// The legitimate flow: the drawer's own external-spec local form submits a
+// pasted spec with THIS build request. ApplyPreTag commits it (CollectSpec)
+// BEFORE the gate re-reads — so the gate sees the now-resolved dependency and
+// the build proceeds. Proves the gate runs AFTER ApplyPreTag, not before.
+func TestBuild_DependencyGate_NeedsSpec_ResolvedByThisRequestsDrawerInput_Proceeds(t *testing.T) {
+	design := &gateDesign{comps: []models.DesignComponent{{Name: "o", ComponentType: models.ComponentTypeService,
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "partner-api",
+				Status: models.DependencyStatusUnresolved, Reason: models.DependencyReasonNeedsSpec},
+		}}}}
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	coord := build.NewInputsCoordinator(&resolvingSpec{design: design}, noopAuth{}, noopStager{}, design)
+	svc := build.NewService(build.Deps{
+		Runner: runner, Store: &fakeStore{}, Repos: fakeRepos{}, Tagger: tagger, Tasks: fakeTasks{}, Coord: coord, Design: design,
+	})
+
+	resp := newHarness(t, svc).AsOrg("acme").Post("/api/v1/projects/shop/build",
+		`{"inputs":[{"component":"o","dependency":"partner-api","kind":"external-spec","specContent":"openapi: 3.0.0"}]}`)
+	if resp.Code != 200 {
+		t.Fatalf("build: got %d body=%s", resp.Code, resp.Body.String())
+	}
+	out := decodeBody[apigen.BuildResponse](t, resp.Body.String())
+	if len(out.Failures) != 0 {
+		t.Fatalf("failures = %+v, want none — the drawer-supplied spec resolved the dependency before the gate ran", out.Failures)
+	}
+	if out.Tag != "v1" {
+		t.Errorf("tag = %q, want v1", out.Tag)
+	}
+	if len(runner.started) != 1 {
+		t.Errorf("workflow not started despite a resolved gate")
+	}
+}
+
+// org-service is NOT re-gated at build time — that dependency kind is already
+// gated at design-save time (design.SaveAndProceed's firstUnresolvedDependency);
+// re-gating it here would double-block the same condition through a different
+// surface.
+func TestBuild_DependencyGate_OrgServiceUnresolved_NotGatedHere(t *testing.T) {
+	design := &gateDesign{comps: []models.DesignComponent{{Name: "o", ComponentType: models.ComponentTypeService,
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindOrgService, Name: "billing", Status: models.DependencyStatusUnresolved},
+		}}}}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := build.NewService(build.Deps{
+		Runner: &fakeRunner{}, Store: &fakeStore{}, Repos: fakeRepos{}, Tagger: tagger, Tasks: fakeTasks{}, Design: design,
+	})
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	out := decodeBody[apigen.BuildResponse](t, body)
+	if out.Tag != "v1" || len(out.Failures) != 0 {
+		t.Errorf("response = %+v, want a clean tag — org-service is gated at design-save time, not here", out)
+	}
+}
+
+// No Design port wired (mirrors every OTHER test in this file, which never set
+// one) — the gate must fail OPEN, not panic or block, so this feature never
+// regresses a build whose composition root hasn't wired it.
+func TestBuild_DependencyGate_NilDesign_FailsOpen(t *testing.T) {
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{res: &artifacts.SpecSaveResult{Tag: "v1"}}
+	svc := newSvc(runner, &fakeStore{}, fakeRepos{}, tagger, fakeTasks{})
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	if out := decodeBody[apigen.BuildResponse](t, body); out.Tag != "v1" {
+		t.Errorf("tag = %q, want v1 — an unwired dependency gate must fail open", out.Tag)
+	}
+}
+
 func TestGetPreflight_Unconfigured503(t *testing.T) {
 	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{}})
 	resp := h.AsOrg("acme").Get("/api/v1/projects/shop/build/preflight")

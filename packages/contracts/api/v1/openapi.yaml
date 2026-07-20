@@ -3460,6 +3460,8 @@ components:
           enum:
           - external-config
           - external-spec
+          - external-ambiguous
+          - external-unresolved
           - platform-resource
           - org-service
           type: string

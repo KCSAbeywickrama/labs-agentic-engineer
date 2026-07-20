@@ -939,6 +939,12 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
 		),
+		// The build-time dependency hard gate's fresh read (dependencyGateFailures) —
+		// the SAME designComponents{store: artifactStore} adapter PreflightSvc.Design
+		// uses below, so both surfaces read the exact same
+		// models.ComputeDependencyStatus-resolved Status/Reason (artifactStore's
+		// SetOrgServiceResolver/SetExternalResourceResolver wiring above).
+		Design: designComponents{store: artifactStore},
 	})
 	params.Deps.BuildSvc = buildSvc
 	platformProvisioner := resources.NewOCNativeProvisioner(resourceClient)

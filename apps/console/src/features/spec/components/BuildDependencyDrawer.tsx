@@ -52,6 +52,20 @@ function itemKey(item: PreflightItem): string {
 }
 
 /**
+ * Kinds computed by the shared resolver (models.ComputeDependencyStatus) that
+ * have NO local form — the drawer can only surface the reason and hand off to
+ * chat; there is nothing to type here that would resolve them (#252 Task 10,
+ * restoring the proceed gate Task 1 orphaned). "external-spec" deliberately
+ * stays OUT of this set: it keeps its own pre-existing local form (paste a
+ * spec URL/content) below, so Continue can still be satisfied without chat.
+ */
+const BLOCKER_KINDS = new Set(["external-ambiguous", "external-unresolved"]);
+
+function isBlockerKind(kind: PreflightItem["kind"]): boolean {
+  return BLOCKER_KINDS.has(kind);
+}
+
+/**
  * Initial typed values for an external-config item: a non-secret key with a
  * `defaultValue` renders pre-filled with it (a suggested region, base URL, …);
  * a secret key — or a key with no `defaultValue` — starts empty. A secret never
@@ -87,6 +101,13 @@ function initialState(items: PreflightItem[]): Record<string, ItemState> {
 
 /** True when this item's required input (if any) has been supplied. */
 function isSatisfied(item: PreflightItem, state: ItemState): boolean {
+  // A blocker item (ambiguous / needs-input) has no local form: it can ONLY
+  // be cleared by resolving it via chat and the parent refetching preflight —
+  // once resolved, it simply stops appearing in `items`. While it's present,
+  // Continue must stay disabled, so this never reports satisfied locally.
+  if (isBlockerKind(item.kind)) {
+    return false;
+  }
   if (item.kind === "external-config") {
     const keys = item.config ?? [];
     return keys.every((k) => (state.values[k.key] ?? "").trim() !== "");
@@ -98,19 +119,22 @@ function isSatisfied(item: PreflightItem, state: ItemState): boolean {
   return true;
 }
 
+// Only called for items the caller has already filtered to the kinds a
+// BuildInputItem can represent (handleContinue drops blocker items first —
+// they have no input to submit). Each branch's `kind` is a hardcoded literal
+// (rather than reusing `item.kind`) so the return type stays exactly
+// BuildInputItem["kind"], which no longer widens to include the
+// PreflightItem-only blocker kinds (#252 Task 10).
 function toBuildInputItem(
   item: PreflightItem,
   state: ItemState,
 ): BuildInputItem {
-  const base = {
-    component: item.component,
-    dependency: item.dependency,
-    kind: item.kind,
-  };
+  const base = { component: item.component, dependency: item.dependency };
 
   if (item.kind === "external-config") {
     return {
       ...base,
+      kind: "external-config",
       values: (item.config ?? []).map((k) => ({
         key: k.key,
         value: state.values[k.key] ?? "",
@@ -120,8 +144,8 @@ function toBuildInputItem(
 
   if (item.kind === "external-spec") {
     return state.specUrl.trim() !== ""
-      ? { ...base, specUrl: state.specUrl }
-      : { ...base, specContent: state.specContent };
+      ? { ...base, kind: "external-spec", specUrl: state.specUrl }
+      : { ...base, kind: "external-spec", specContent: state.specContent };
   }
 
   // platform-resource / org-service are informational — clicking Continue is
@@ -129,13 +153,14 @@ function toBuildInputItem(
   if (item.kind === "platform-resource") {
     return {
       ...base,
+      kind: "platform-resource",
       approved: true,
       ...(item.parameters ? { parameters: item.parameters } : {}),
     };
   }
 
-  // org-service
-  return { ...base, approved: true };
+  // org-service (the only remaining reachable kind here).
+  return { ...base, kind: "org-service", approved: true };
 }
 
 function ExternalConfigPanel({
@@ -174,11 +199,13 @@ function ExternalSpecPanel({
   state,
   onUrlChange,
   onContentChange,
+  onResolveViaChat,
 }: {
   item: PreflightItem;
   state: ItemState;
   onUrlChange: (value: string) => void;
   onContentChange: (value: string) => void;
+  onResolveViaChat?: ((item: PreflightItem) => void) | undefined;
 }) {
   return (
     <Stack spacing={2}>
@@ -205,6 +232,47 @@ function ExternalSpecPanel({
         fullWidth
         size="small"
       />
+      {onResolveViaChat ? (
+        <Button
+          size="small"
+          sx={{ alignSelf: "flex-start" }}
+          onClick={() => onResolveViaChat(item)}
+        >
+          Resolve via chat
+        </Button>
+      ) : null}
+    </Stack>
+  );
+}
+
+/**
+ * A blocker item raised from the shared resolver (ambiguous / needs-input):
+ * no local form can satisfy it — only "Resolve via chat" (which seeds the
+ * dependency-resolution turn; the parent refetches preflight when it ends, so
+ * the item simply disappears from `items` once resolved).
+ */
+function BlockerPanel({
+  item,
+  onResolveViaChat,
+}: {
+  item: PreflightItem;
+  onResolveViaChat?: ((item: PreflightItem) => void) | undefined;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle1">{item.dependency}</Typography>
+      <Typography variant="body2" color="text.secondary">
+        {item.description}
+      </Typography>
+      {onResolveViaChat ? (
+        <Button
+          size="small"
+          sx={{ alignSelf: "flex-start" }}
+          onClick={() => onResolveViaChat(item)}
+        >
+          Resolve via chat
+        </Button>
+      ) : null}
     </Stack>
   );
 }
@@ -283,12 +351,17 @@ export function BuildDependencyDrawer({
   items,
   onClose,
   onContinue,
+  onResolveDependency,
   submitting = false,
 }: {
   open: boolean;
   items: PreflightItem[];
   onClose: () => void;
   onContinue: (inputs: BuildInputItem[]) => void;
+  // "Resolve via chat" (#252 Task 10): fires the Task 5 seeded-message flow
+  // for one item. Optional so a caller that hasn't wired chat resolution yet
+  // (or a test) can omit it — the button simply doesn't render.
+  onResolveDependency?: (item: PreflightItem) => void;
   // True while the parent's build call (POST /build) triggered by Continue is
   // in flight: the Continue button shows a spinner and both buttons disable so
   // the request can't be double-submitted or the drawer dismissed mid-call.
@@ -324,9 +397,17 @@ export function BuildDependencyDrawer({
   }
 
   function handleContinue() {
-    const inputs = items.map((item) =>
-      toBuildInputItem(item, state[itemKey(item)] ?? seedForItem(item)),
-    );
+    // Blocker items (ambiguous / needs-input) are never representable as a
+    // BuildInputItem — there is no input to submit for them, and Continue is
+    // disabled while any are present anyway (isSatisfied always reports them
+    // unsatisfied). Filtering defensively here, rather than trusting the
+    // disabled button alone, keeps toBuildInputItem total over the kinds it
+    // actually knows how to serialize.
+    const inputs = items
+      .filter((item) => !isBlockerKind(item.kind))
+      .map((item) =>
+        toBuildInputItem(item, state[itemKey(item)] ?? seedForItem(item)),
+      );
     onContinue(inputs);
   }
 
@@ -334,6 +415,7 @@ export function BuildDependencyDrawer({
     (i) => i.kind === "external-config",
   );
   const externalSpecItems = items.filter((i) => i.kind === "external-spec");
+  const blockerItems = items.filter((i) => isBlockerKind(i.kind));
   const platformResourceItems = items.filter(
     (i) => i.kind === "platform-resource",
   );
@@ -363,6 +445,21 @@ export function BuildDependencyDrawer({
         <Typography variant="h6" sx={{ mb: 2 }}>
           Dependencies to resolve
         </Typography>
+
+        {blockerItems.length > 0 ? (
+          <>
+            <Stack spacing={3} sx={{ mb: 3 }}>
+              {blockerItems.map((item) => (
+                <BlockerPanel
+                  key={itemKey(item)}
+                  item={item}
+                  onResolveViaChat={onResolveDependency}
+                />
+              ))}
+            </Stack>
+            <Divider sx={{ mb: 3 }} />
+          </>
+        ) : null}
 
         {externalConfigItems.length > 0 ? (
           <>
@@ -399,6 +496,7 @@ export function BuildDependencyDrawer({
                   onContentChange={(value) =>
                     updateState(item, { specContent: value })
                   }
+                  onResolveViaChat={onResolveDependency}
                 />
               ))}
             </Stack>

@@ -21,6 +21,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
+import { chatKeyFor, notifyTurnEnd } from "../../agent-chat/chatStore";
 import { SpecView } from "./SpecView";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
@@ -162,18 +163,26 @@ const STUB_INPUTS: BuildInputItem[] = [
 vi.mock("./BuildDependencyDrawer", () => ({
   BuildDependencyDrawer: ({
     open,
+    items,
     onClose,
     onContinue,
+    onResolveDependency,
   }: {
     open: boolean;
     items: PreflightItem[];
     onClose: () => void;
     onContinue: (inputs: BuildInputItem[]) => void;
+    onResolveDependency?: (item: PreflightItem) => void;
   }) =>
     open ? (
       <div data-testid="dependency-drawer">
         <button onClick={() => onContinue(STUB_INPUTS)}>Drawer Continue</button>
         <button onClick={onClose}>Drawer Cancel</button>
+        {items[0] ? (
+          <button onClick={() => onResolveDependency?.(items[0]!)}>
+            Resolve drawer item
+          </button>
+        ) : null}
       </div>
     ) : null,
 }));
@@ -413,5 +422,84 @@ describe("SpecView dependency wiring (#252 Task 9)", () => {
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
     );
+  });
+});
+
+// --- #252 Task 10: build dependency drawer wiring --------------------------
+describe("SpecView build dependency drawer (#252 Task 10)", () => {
+  const DRAWER_PREFLIGHT_ITEMS: PreflightItem[] = [
+    {
+      component: "checkout-api",
+      dependency: "stripe",
+      kind: "external-unresolved",
+      description: "Needs information only you can provide.",
+    },
+  ];
+
+  beforeEach(() => {
+    mockFlush.mockResolvedValue(undefined);
+    mockUseDesignDependencies.mockReturnValue({
+      data: CHECKOUT_DEPS,
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+  });
+
+  it("resolves a drawer blocker item to its full Dependency entry and fires the seeded chat flow", async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: true, items: DRAWER_PREFLIGHT_ITEMS },
+    });
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+    await waitFor(() =>
+      expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("Resolve drawer item"));
+
+    // Same lookup precedent as "Resolve in chat" above: the FULL endpoint
+    // entry (status/reason included), never a hand-built partial object —
+    // looked up by (item.component, item.dependency), not the currently
+    // selected file's component (the drawer can span any component).
+    expect(mockResolveViaChat).toHaveBeenCalledWith(
+      "checkout-api",
+      CHECKOUT_DEPS[0]!.dependencies![0],
+    );
+  });
+
+  it("refetches preflight and updates the still-open drawer's items when a chat turn ends", async () => {
+    mockPreflightRefetch
+      .mockResolvedValueOnce({
+        data: { needsInput: true, items: DRAWER_PREFLIGHT_ITEMS },
+      })
+      .mockResolvedValueOnce({ data: { needsInput: false, items: [] } });
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+    await waitFor(() =>
+      expect(screen.getByText("Resolve drawer item")).toBeInTheDocument(),
+    );
+
+    // The seeded chat turn ends — same chatKey SpecView computes
+    // (orgHandle "acme" from the useSession mock, matching AppLayout's
+    // "default" fallback convention when there's no claim).
+    notifyTurnEnd(chatKeyFor("acme", "proj1"), "completed");
+
+    await waitFor(() =>
+      expect(screen.queryByText("Resolve drawer item")).not.toBeInTheDocument(),
+    );
+    expect(mockFlush).toHaveBeenCalled();
+    expect(mockPreflightRefetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not touch preflight on a chat turn ending while the drawer is closed", () => {
+    render(<SpecView projectName="proj1" />);
+
+    notifyTurnEnd(chatKeyFor("acme", "proj1"), "completed");
+
+    expect(mockPreflightRefetch).not.toHaveBeenCalled();
+    expect(mockFlush).not.toHaveBeenCalled();
   });
 });

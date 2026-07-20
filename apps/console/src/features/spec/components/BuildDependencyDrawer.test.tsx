@@ -61,6 +61,7 @@ const ITEMS: PreflightItem[] = [
 function setup(items: PreflightItem[] = ITEMS, submitting = false) {
   const onClose = vi.fn();
   const onContinue = vi.fn();
+  const onResolveDependency = vi.fn();
   render(
     <BuildDependencyDrawer
       open
@@ -68,9 +69,10 @@ function setup(items: PreflightItem[] = ITEMS, submitting = false) {
       submitting={submitting}
       onClose={onClose}
       onContinue={onContinue}
+      onResolveDependency={onResolveDependency}
     />,
   );
-  return { onClose, onContinue };
+  return { onClose, onContinue, onResolveDependency };
 }
 
 describe("BuildDependencyDrawer", () => {
@@ -359,5 +361,147 @@ describe("BuildDependencyDrawer", () => {
 
     // The typed external-config value is cleared on reopen.
     expect(screen.getByLabelText(/STRIPE_API_KEY/i)).toHaveValue("");
+  });
+});
+
+// #252 Task 10: the restored external proceed gate's blocker items
+// (external-ambiguous / external-unresolved) — no local form, Continue stays
+// disabled while present, and "Resolve via chat" is the only affordance.
+describe("BuildDependencyDrawer blocker items (#252 Task 10)", () => {
+  const AMBIGUOUS_ITEM: PreflightItem = {
+    component: "checkout-api",
+    dependency: "crm",
+    kind: "external-ambiguous",
+    description: "More than one candidate fits — resolve which one to use.",
+  };
+  const UNRESOLVED_ITEM: PreflightItem = {
+    component: "checkout-api",
+    dependency: "weather-api",
+    kind: "external-unresolved",
+    description: "Needs information only you can provide.",
+  };
+
+  it("renders the blocker's dependency name and plain-language reason", () => {
+    setup([AMBIGUOUS_ITEM, UNRESOLVED_ITEM]);
+
+    expect(screen.getByText("crm")).toBeInTheDocument();
+    expect(
+      screen.getByText(/more than one candidate fits/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("weather-api")).toBeInTheDocument();
+    expect(
+      screen.getByText(/needs information only you can provide/i),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Continue disabled while a blocker item is present, regardless of other items", () => {
+    setup([AMBIGUOUS_ITEM]);
+
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+  });
+
+  it("never renders a local input for a blocker item (no textbox)", () => {
+    setup([AMBIGUOUS_ITEM, UNRESOLVED_ITEM]);
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("fires onResolveDependency with the blocker item when 'Resolve via chat' is clicked", () => {
+    const { onResolveDependency } = setup([AMBIGUOUS_ITEM]);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /resolve via chat/i }),
+    );
+
+    expect(onResolveDependency).toHaveBeenCalledTimes(1);
+    expect(onResolveDependency).toHaveBeenCalledWith(AMBIGUOUS_ITEM);
+  });
+
+  it("re-enables Continue once the blocker item is no longer in items (simulating a resolved refetch)", () => {
+    const onClose = vi.fn();
+    const onContinue = vi.fn();
+    const { rerender } = render(
+      <BuildDependencyDrawer
+        open
+        items={[AMBIGUOUS_ITEM]}
+        onClose={onClose}
+        onContinue={onContinue}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    // The parent refetched preflight after the chat resolved it — the item
+    // is simply gone from the next `items` array.
+    rerender(
+      <BuildDependencyDrawer
+        open
+        items={[]}
+        onClose={onClose}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+  });
+
+  it("submits only the config item once the blocker resolves out of items, never a stray blocker entry", () => {
+    const onClose = vi.fn();
+    const onContinue = vi.fn();
+    const configItem: PreflightItem = {
+      component: "checkout-api",
+      dependency: "stripe-config",
+      kind: "external-config",
+      description: "Stripe API credentials",
+      config: [{ key: "STRIPE_API_KEY", secret: true }],
+    };
+    const { rerender } = render(
+      <BuildDependencyDrawer
+        open
+        items={[AMBIGUOUS_ITEM, configItem]}
+        onClose={onClose}
+        onContinue={onContinue}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    // Chat resolved the blocker; the parent's refetch drops it from items.
+    rerender(
+      <BuildDependencyDrawer
+        open
+        items={[configItem]}
+        onClose={onClose}
+        onContinue={onContinue}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/STRIPE_API_KEY/i), {
+      target: { value: "sk_test_123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+    const inputs = onContinue.mock.calls[0]?.[0] as BuildInputItem[];
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toMatchObject({
+      dependency: "stripe-config",
+      kind: "external-config",
+    });
+  });
+
+  it("renders 'Resolve via chat' for a still-unfed external-spec item too, alongside its existing form", () => {
+    const specItem: PreflightItem = {
+      component: "checkout-api",
+      dependency: "partner-api",
+      kind: "external-spec",
+      description: "No API spec yet — provide one to continue.",
+    };
+    const { onResolveDependency } = setup([specItem]);
+
+    // The pre-existing local form is untouched...
+    expect(screen.getByLabelText(/spec url/i)).toBeInTheDocument();
+    // ...and the new chat affordance sits alongside it.
+    fireEvent.click(
+      screen.getByRole("button", { name: /resolve via chat/i }),
+    );
+    expect(onResolveDependency).toHaveBeenCalledWith(specItem);
   });
 });

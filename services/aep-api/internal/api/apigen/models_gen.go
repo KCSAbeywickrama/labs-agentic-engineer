@@ -113,18 +113,24 @@ func (e DeployStageValidation) Valid() bool {
 
 // Defines values for PreflightItemKind.
 const (
-	PreflightItemKindExternalConfig   PreflightItemKind = "external-config"
-	PreflightItemKindExternalSpec     PreflightItemKind = "external-spec"
-	PreflightItemKindOrgService       PreflightItemKind = "org-service"
-	PreflightItemKindPlatformResource PreflightItemKind = "platform-resource"
+	PreflightItemKindExternalAmbiguous  PreflightItemKind = "external-ambiguous"
+	PreflightItemKindExternalConfig     PreflightItemKind = "external-config"
+	PreflightItemKindExternalSpec       PreflightItemKind = "external-spec"
+	PreflightItemKindExternalUnresolved PreflightItemKind = "external-unresolved"
+	PreflightItemKindOrgService         PreflightItemKind = "org-service"
+	PreflightItemKindPlatformResource   PreflightItemKind = "platform-resource"
 )
 
 // Valid indicates whether the value is a known member of the PreflightItemKind enum.
 func (e PreflightItemKind) Valid() bool {
 	switch e {
+	case PreflightItemKindExternalAmbiguous:
+		return true
 	case PreflightItemKindExternalConfig:
 		return true
 	case PreflightItemKindExternalSpec:
+		return true
+	case PreflightItemKindExternalUnresolved:
 		return true
 	case PreflightItemKindOrgService:
 		return true

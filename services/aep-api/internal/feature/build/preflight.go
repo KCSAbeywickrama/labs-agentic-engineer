@@ -66,7 +66,7 @@ type ConfigKeyView struct {
 type PreflightItem struct {
 	Component   string `json:"component" doc:"Owning component name"`
 	Dependency  string `json:"dependency" doc:"Dependency name"`
-	Kind        string `json:"kind" enum:"external-config,external-spec,platform-resource,org-service"`
+	Kind        string `json:"kind" enum:"external-config,external-spec,external-ambiguous,external-unresolved,platform-resource,org-service"`
 	Description string `json:"description"`
 	// external-config only: key/secret views the drawer collects values for.
 	Config []ConfigKeyView `json:"config,omitempty"`
@@ -106,14 +106,13 @@ func NewPreflightService(d PreflightDeps) *PreflightService {
 // drawer item for each dependency that still needs user input/approval and is
 // not already provisioned or in-flight:
 //
-//   - external: an "external-config" item (key/secret views only) when the
-//     dependency is not yet Ready. The "external-spec" item kind still exists
-//     on the wire but is not currently emitted: its trigger was the removed
-//     Dependency.NeedsSpec flag (dependency-management schema revision —
-//     needsSpec dropped for the derived-state model, see design_json.go).
-//     The needs-spec signal is reborn from style/specPath/specUrl via the
-//     shared resolver landing in a later task; this preflight will consume it
-//     then.
+//   - external: a blocker item — "external-ambiguous" (2+ candidates),
+//     "external-unresolved" (needs information only the user can supply), or
+//     "external-spec" (no API spec yet) — when the dependency's already
+//     computed Status/Reason (models.ComputeDependencyStatus, via
+//     dependencyBlocker) says so; this is the dependency-management proceed
+//     gate Task 1 orphaned, reborn here. Otherwise, an "external-config" item
+//     (key/secret views only) when the dependency is not yet Ready.
 //   - platform-resource: a "platform-resource" item when not yet Ready.
 //   - org-service: an "org-service" item when Status is one of the three
 //     non-resolved resolution states (unresolved | blocked | ambiguous);
@@ -162,11 +161,27 @@ func (s *PreflightService) itemsFor(ctx context.Context, orgID, projectID, compo
 	}
 }
 
-// externalItems computes the external-config item for one external
-// dependency: key/secret views only, emitted when the dependency is not yet
-// Ready. The external-spec item (formerly NeedsSpec-driven) was removed with
-// the needsSpec field — see the doc comment on Preflight above.
+// externalItems computes the drawer item(s) for one external dependency.
+// dependencyBlocker (the single mapping the build hard-gate also uses) checks
+// FIRST: an ambiguous/unresolved dependency raises exactly one blocker item
+// (external-ambiguous / external-unresolved / external-spec) with a
+// plain-language Description, and config collection is skipped — there is
+// nothing meaningful to collect until the dependency itself resolves (a
+// still-ambiguous/unresolved dependency has no derived config keys yet). Once
+// resolved (or when no resolver was ever wired — the fail-open empty Status),
+// the pre-existing external-config item (key/secret views only) is emitted
+// when the dependency is not yet Ready — unchanged: config collection stays a
+// provisioning-readiness concern local to this preflight, not part of
+// ComputeDependencyStatus.
 func (s *PreflightService) externalItems(ctx context.Context, orgID, projectID, componentName string, d models.Dependency) ([]PreflightItem, error) {
+	if kind, desc, blocked := dependencyBlocker(d); blocked {
+		return []PreflightItem{{
+			Kind:        kind,
+			Component:   componentName,
+			Dependency:  d.Name,
+			Description: desc,
+		}}, nil
+	}
 	ready, err := s.status.Ready(ctx, orgID, projectID, d.Name)
 	if err != nil {
 		return nil, err
