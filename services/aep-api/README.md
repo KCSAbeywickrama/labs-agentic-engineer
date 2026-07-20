@@ -126,6 +126,12 @@ point at enforcement, they don't restate it.
 - Secret-backend SDKs are fenced to `platform/secrets` → `TestImportFences`
   (in `platform/secrets`)
 
+**Hygiene — CI-enforced by `make deadcode-check`:**
+
+- No function is unreachable from the `cmd/aep-api` main, with tests *not* counting
+  as callers → `scripts/deadcode.sh` (rationale + marker policy inline). Test seams
+  and unwired infra carry a `//deadcode:keep` marker.
+
 **Runtime — enforced by middleware + component tests:**
 
 - **Deny-by-default tenant gate.** A request's org comes only from a verified JWT claim —

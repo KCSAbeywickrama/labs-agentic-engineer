@@ -60,6 +60,8 @@ type Option func(*Client)
 // WithAPIBase overrides the GitHub REST API base URL. This is a TEST SEAM — it
 // lets the gittest tier point the real client at an httptest fake (see
 // internal/platform/gittest). Not wired in production.
+//
+//deadcode:keep test seam — points the real client at an httptest server; used by internal/sourcecontrol/*_test.go (cross-package).
 func WithAPIBase(base string) Option {
 	return func(c *Client) { c.apiBase = strings.TrimRight(base, "/") }
 }

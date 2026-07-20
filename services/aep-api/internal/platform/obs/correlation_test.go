@@ -83,7 +83,7 @@ func TestContextHandler_StampsCorrelationID(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(NewContextHandler(slog.NewJSONHandler(&buf, nil)))
 
-	ctx := WithCorrelationID(context.Background(), "cid-42")
+	ctx := context.WithValue(context.Background(), correlationIDKey, "cid-42")
 	logger.InfoContext(ctx, "hello")
 
 	var rec map[string]any

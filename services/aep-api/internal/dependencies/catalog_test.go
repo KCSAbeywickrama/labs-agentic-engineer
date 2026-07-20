@@ -484,17 +484,3 @@ func TestListResolved_MemoizesDesignReadPerProject(t *testing.T) {
 		t.Fatalf("ReadDesign(hr): want 1 call across 3 endpoints in one ListResolved pass, got %d", got)
 	}
 }
-
-func TestOrgServiceURLEnv(t *testing.T) {
-	t.Parallel()
-	cases := map[string]string{
-		"employee-api": "EMPLOYEE_API_URL",
-		"todo":         "TODO_URL",
-		"order-svc-2":  "ORDER_SVC_2_URL",
-	}
-	for in, want := range cases {
-		if got := OrgServiceURLEnv(in); got != want {
-			t.Errorf("OrgServiceURLEnv(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

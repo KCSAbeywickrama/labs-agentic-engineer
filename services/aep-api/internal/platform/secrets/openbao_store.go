@@ -88,6 +88,11 @@ type openBaoStore struct {
 // NewOpenBaoStore constructs a real OpenBaoStore against the given address
 // and token. The client is configured with a short request timeout so
 // startup readiness checks can fail fast.
+//
+//deadcode:keep OpenBao/Vault credential backend is retained but not yet wired
+// (the live App-credential path runs against the Postgres dbStore, which never
+// satisfies the *openBaoStore type-assertions in app_token_minter.go). Wire it
+// or remove the credential path — see issue #263.
 func NewOpenBaoStore(addr, token, mount, owner string) (OpenBaoStore, error) {
 	if addr == "" {
 		return nil, errors.New("openbao: addr is required")
@@ -267,6 +272,8 @@ func (s *openBaoStore) Delete(ctx context.Context, ocOrgID, key string) error {
 
 // CheckReachable performs a readiness probe against OpenBao's /v1/sys/health.
 // Used by git-service's startup gate to refuse readiness until OpenBao is up.
+//
+//deadcode:keep Part of the unwired OpenBao backend (see NewOpenBaoStore).
 func CheckReachable(ctx context.Context, store OpenBaoStore) error {
 	s, ok := store.(*openBaoStore)
 	if !ok {

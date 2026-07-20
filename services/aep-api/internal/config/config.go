@@ -51,7 +51,7 @@ type Config struct {
 
 	// PlaygroundTokenEnabled gates POST /internal/v1/mcp/playground-token — a
 	// caller-auth-free endpoint that mints a short-lived MCP token so a human
-	// can drive the services/agents playground CLI against a live aep-api
+	// can drive the @aep/playground CLI against a live aep-api
 	// without a caller-auth story (an open decision this endpoint deliberately
 	// does not prejudge). Defaults false, so the route is ABSENT (404, not
 	// 403) everywhere except deployments/docker-compose.yml, which opts in for

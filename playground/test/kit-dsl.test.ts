@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { compileDslArtifacts } from "./dsl.js";
+import { compileDslArtifacts } from "../src/kit/dsl.js";
 
 const DSL = `screen Login
   input "Email"

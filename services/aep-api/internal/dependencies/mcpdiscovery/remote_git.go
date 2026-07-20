@@ -131,17 +131,6 @@ type RemoteGitClient struct {
 // WithRemoteGitAPIBase/WithRemoteGitMaxContentBytes are test seams.
 type RemoteGitOption func(*RemoteGitClient)
 
-// WithRemoteGitAPIBase overrides the GitHub REST API base URL — a TEST SEAM
-// pointing the client at an httptest fake. Not wired in production.
-func WithRemoteGitAPIBase(base string) RemoteGitOption {
-	return func(c *RemoteGitClient) { c.apiBase = strings.TrimRight(base, "/") }
-}
-
-// WithRemoteGitMaxContentBytes overrides the decoded-content cap (test seam).
-func WithRemoteGitMaxContentBytes(n int64) RemoteGitOption {
-	return func(c *RemoteGitClient) { c.maxContentBytes = n }
-}
-
 // NewRemoteGitClient builds the read-only GitHub client over the org credential
 // resolver. Production wiring passes no options.
 func NewRemoteGitClient(resolver secrets.Resolver, opts ...RemoteGitOption) *RemoteGitClient {

@@ -143,22 +143,6 @@ func New(base BaseReader) *Fold {
 	}
 }
 
-// NewFromSnapshot builds a Fold whose base is an in-memory snapshot — the
-// exact seeding the TS `new FileBundle(files)` performs (goldens, tests).
-func NewFromSnapshot(seed map[string]string) *Fold {
-	files := make(map[string]string, len(seed))
-	for p, c := range seed {
-		files[p] = c
-	}
-	return New(func(_ context.Context, path string) ([]byte, bool, error) {
-		c, ok := files[path]
-		if !ok {
-			return nil, false, nil
-		}
-		return []byte(c), true, nil
-	})
-}
-
 // read returns the current LF-canonical content of path (overlay over base).
 func (f *Fold) read(ctx context.Context, path string) (string, bool, error) {
 	if v, ok := f.overlay[path]; ok {
@@ -312,6 +296,8 @@ func (f *Fold) Touched() map[string]*string {
 // FullState overlays the fold's mutations onto a full seed snapshot —
 // the TS bundle.snapshot() equivalent, for golden comparison. The seed is
 // LF-canonicalized exactly like the FileBundle constructor.
+//
+//deadcode:keep test seam — full-snapshot readback for fold golden tests, incl. delivery/execution component test (cross-package).
 func (f *Fold) FullState(seed map[string]string) map[string]string {
 	out := make(map[string]string, len(seed))
 	for p, c := range seed {
