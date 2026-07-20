@@ -19,6 +19,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -57,6 +58,7 @@ var ConfigMapKeys = []string{
 // called in root's PersistentPreRunE for every command except `aep init`.
 func Init() {
 	viper.SetEnvPrefix("AEP")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	// Platform install defaults.
