@@ -45,7 +45,7 @@ type ExternalResourceProvisioner struct {
 
 	// pollInterval / pollTimeout bound the wait for the controller to cut the
 	// ResourceRelease (Resources have no AutoDeploy — we poll status.latestRelease
-	// via openchoreo.WaitForLatestRelease).
+	// via openchoreo.WaitForReleaseChange).
 	pollInterval time.Duration
 	pollTimeout  time.Duration
 }

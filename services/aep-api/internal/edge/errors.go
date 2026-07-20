@@ -53,13 +53,10 @@ const (
 // the same thing, or one of the two would fall through to a bare 500.
 type apiError = apierr.Error
 
-func errBadRequest(msg string) error         { return apierr.BadRequest(msg) }
 func errUnauthorized(msg string) error       { return apierr.Unauthorized(msg) }
 func errForbidden(msg string) error          { return apierr.Forbidden(msg) }
 func errNotFound(msg string) error           { return apierr.NotFound(msg) }
-func errConflict(msg string) error           { return apierr.Conflict(msg) }
 func errInternal(msg string) error           { return apierr.Internal(msg) }
-func errBadGateway(msg string) error         { return apierr.BadGateway(msg) }
 func errServiceUnavailable(msg string) error { return apierr.ServiceUnavailable(msg) }
 
 // writeErrorEnvelope writes the flat envelope. It is the single place a

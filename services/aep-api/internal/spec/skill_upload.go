@@ -16,6 +16,3 @@
 
 package spec
 
-// importMaxUploadBytes caps the multipart upload the BFF buffers before
-// streaming a skill tarball import — bounds memory on the import path.
-const importMaxUploadBytes = 4 << 20 // 4 MiB

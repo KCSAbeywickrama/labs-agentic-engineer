@@ -382,16 +382,6 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 	return out
 }
 
-// parseBundle is parseBundleEntries projected to the Skill catalog shape.
-func parseBundle(ctx context.Context, files map[string]string) []Skill {
-	entries := parseBundleEntries(ctx, files)
-	out := make([]Skill, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, e.Skill)
-	}
-	return out
-}
-
 // ---- low-level write primitive ---------------------------------------------
 
 // commitFiles applies a set of blob writes + path/prefix deletes to the skills

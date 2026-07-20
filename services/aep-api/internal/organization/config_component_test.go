@@ -205,24 +205,6 @@ func mustNewOrgHandlers(t *testing.T, d organization.Deps) *httpapi.Handlers {
 
 // --- decode helpers ---------------------------------------------------------
 
-type cfgProblem struct {
-	Code   string `json:"code"`
-	Detail string `json:"message"`
-	Errors []struct {
-		Message  string `json:"message"`
-		Location string `json:"field"`
-	} `json:"details"`
-}
-
-func decodeCfgProblem(t *testing.T, body string) cfgProblem {
-	t.Helper()
-	var p cfgProblem
-	if err := json.Unmarshal([]byte(body), &p); err != nil || p.Code == "" {
-		t.Fatalf("not a flat error envelope: %v\n%s", err, body)
-	}
-	return p
-}
-
 func decodeCfg(t *testing.T, body []byte) map[string]any {
 	t.Helper()
 	var m map[string]any

@@ -24,7 +24,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -116,75 +115,6 @@ func TestStampFrontmatterKind(t *testing.T) {
 			t.Fatalf("license lost: %+v", fm)
 		}
 	})
-}
-
-// ---- parseBundle: dual layout -------------------------------------------------
-
-func TestParseBundle_DualLayout(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-
-	files := map[string]string{
-		// Flat layout: kind from frontmatter.
-		"skills/alpha/SKILL.md":           mkSkillMD("alpha", "", "flat-alpha"), // unmarked → org
-		"skills/beta/SKILL.md":            mkSkillMD("beta", "platform", "flat-beta"),
-		"skills/beta/references/notes.md": "beta ref",
-		"skills/gamma/SKILL.md":           mkSkillMD("gamma", "custom", "flat-gamma"),
-		// Legacy layout: kind from the path, mapped to the new vocabulary.
-		"skills/builtin/delta/SKILL.md":         mkSkillMD("delta", "", "legacy-delta"),
-		"skills/flow/epsilon/SKILL.md":          mkSkillMD("epsilon", "", "legacy-epsilon"),
-		"skills/flow/epsilon/references/ref.md": "epsilon ref",
-		"skills/imported/zeta/SKILL.md":         mkSkillMD("zeta", "", "legacy-zeta"),
-		// Shadow: a legacy custom skill vs a flat org skill of the same name —
-		// the user kind must win the catalog regardless of layout.
-		"skills/custom/alpha/SKILL.md": mkSkillMD("alpha", "", "legacy-custom-alpha"),
-		// Same kind in both layouts (transient state): flat wins.
-		"skills/custom/gamma/SKILL.md": mkSkillMD("gamma", "", "legacy-custom-gamma"),
-	}
-
-	got := parseBundle(ctx, files)
-	byName := map[string]Skill{}
-	for _, sk := range got {
-		byName[sk.Name] = sk
-	}
-
-	want := map[string]struct {
-		kind string
-		body string
-	}{
-		"alpha":   {SkillKindCustom, "legacy-custom-alpha"}, // user kind wins the shadow
-		"beta":    {SkillKindPlatform, "flat-beta"},
-		"gamma":   {SkillKindCustom, "flat-gamma"}, // flat wins the same-kind tie
-		"delta":   {SkillKindOrg, "legacy-delta"},
-		"epsilon": {SkillKindPlatform, "legacy-epsilon"},
-		"zeta":    {SkillKindImported, "legacy-zeta"},
-	}
-	if len(got) != len(want) {
-		names := make([]string, 0, len(got))
-		for _, sk := range got {
-			names = append(names, sk.Kind+"/"+sk.Name)
-		}
-		sort.Strings(names)
-		t.Fatalf("catalog size = %d, want %d: %v", len(got), len(want), names)
-	}
-	for name, w := range want {
-		sk, ok := byName[name]
-		if !ok {
-			t.Fatalf("skill %q missing from catalog", name)
-		}
-		if sk.Kind != w.kind {
-			t.Fatalf("%q kind = %q, want %q", name, sk.Kind, w.kind)
-		}
-		if !strings.Contains(sk.SkillMD, w.body) {
-			t.Fatalf("%q resolved the wrong copy: %q", name, sk.SkillMD)
-		}
-	}
-	if got := byName["beta"].References["references/notes.md"]; got != "beta ref" {
-		t.Fatalf("flat references not attached: %v", byName["beta"].References)
-	}
-	if got := byName["epsilon"].References["references/ref.md"]; got != "epsilon ref" {
-		t.Fatalf("legacy references not attached: %v", byName["epsilon"].References)
-	}
 }
 
 // ---- provisioning seeds the FLAT layout ---------------------------------------

@@ -25,6 +25,11 @@ import (
 
 func ev(i int) []byte { return []byte(fmt.Sprintf(`{"n":%d}`, i)) }
 
+// newTurnBrokerForTest overrides retention/caps (tests only).
+func newTurnBrokerForTest(retention time.Duration, maxParts, maxBytes int) *TurnBroker {
+	return &TurnBroker{turns: map[string]*turnBuffer{}, retention: retention, maxParts: maxParts, maxBytes: maxBytes}
+}
+
 func TestBroker_ReplayFromIndex(t *testing.T) {
 	b := NewTurnBroker()
 	b.Open("t1")

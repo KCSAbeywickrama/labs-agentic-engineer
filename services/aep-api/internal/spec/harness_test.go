@@ -192,12 +192,13 @@ func (r *rig) workspaceRef() sourcecontrol.RepoRef {
 // — the C8 sha-consistency probe.
 func (r *rig) mirrorRevParse(rev string) string {
 	r.t.Helper()
-	gitDir, err := gitfs.GitDir(r.engine.Root(), gitfs.RepoRef{
+	repoDir, err := gitfs.RepoDir(r.engine.Root(), gitfs.RepoRef{
 		OrgID: r.org, ProjectID: r.proj, RepoSlug: r.rec.RepoSlug,
 	})
 	if err != nil {
 		r.t.Fatalf("mirror git dir: %v", err)
 	}
+	gitDir := gitfs.GitSubdir(repoDir)
 	c := exec.Command("git", "--git-dir", gitDir, "rev-parse", "--verify", rev)
 	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
 	out, err := c.CombinedOutput()
@@ -235,13 +236,3 @@ func (r *rig) tag(name, msg string) {
 
 func (r *rig) tags() []string              { return r.remote.Tags(r.t) }
 func (r *rig) headSHA() string             { return r.remote.HeadSHA(r.t) }
-func (r *rig) fileAt(ref, p string) string { return r.remote.FileAt(r.t, ref, p) }
-
-// blobExistsAt reports whether ref:path resolves to a blob in the bare repo
-// (a non-fatal probe — `cat-file -e` exits non-zero when the path is absent).
-func (r *rig) blobExistsAt(ref, p string) bool {
-	r.t.Helper()
-	c := exec.Command("git", "--git-dir="+r.remote.Dir(), "cat-file", "-e", ref+":"+p)
-	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
-	return c.Run() == nil
-}
