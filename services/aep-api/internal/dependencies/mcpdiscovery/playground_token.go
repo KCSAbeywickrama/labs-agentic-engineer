@@ -38,9 +38,9 @@ type playgroundTokenRequest struct {
 	OrgHandle string `json:"orgHandle"`
 }
 
-// playgroundTokenResponse mirrors what services/agents/playground mints
+// playgroundTokenResponse mirrors what the @aep/playground CLI mints
 // against: a bearer token plus its lifetime, so the caller knows when it must
-// re-mint (it always does, every turn — see playground.ts).
+// re-mint (it always does, every turn).
 type playgroundTokenResponse struct {
 	Token            string `json:"token"`
 	ExpiresInSeconds int    `json:"expiresInSeconds"`
@@ -48,7 +48,7 @@ type playgroundTokenResponse struct {
 
 // NewPlaygroundTokenHandler mints a short-lived BFF-signed MCP token (aud
 // auth.AudienceMCP, scoped to one org) for a human driving the
-// services/agents playground CLI locally against a real aep-api.
+// @aep/playground CLI locally against a real aep-api.
 //
 // LOCAL DEV ONLY. The route this handler backs is mounted ONLY when
 // PLAYGROUND_TOKEN_ENABLED=true (surfaces.go), a flag only

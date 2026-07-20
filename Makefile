@@ -46,7 +46,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-validation-runner
+.PHONY: install gen build dev test lint typecheck license license-check tools clean cover build-validation-runner
 
 install:
 	$(PNPM) install
@@ -66,11 +66,6 @@ dev:
 test: gen
 	$(TURBO) run test
 	@for d in $(GO_MODULE_DIRS); do echo ">> go test $$d"; ( cd "$$d" && go test ./... ); done
-
-# Model eval for @aep/agents (report-not-gate; spends tokens, skips without a key).
-# Not a turbo task — kept out of the CI `test` graph.
-eval:
-	$(PNPM) --filter @aep/agents eval
 
 # Local coverage summary (there is no CI). Go: the aep-api module's fast-lane
 # cover target (-short, no Docker). TS: @aep/agents via node:test's

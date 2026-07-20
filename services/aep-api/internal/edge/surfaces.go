@@ -143,7 +143,7 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 		// ── playground-token mint (POST /internal/v1/mcp/playground-token) ────
 		// LOCAL DEV ONLY, and only when explicitly opted in via
 		// PlaygroundTokenEnabled (docker-compose sets it; nothing else does).
-		// Lets a developer drive the services/agents playground CLI against a
+		// Lets a developer drive the @aep/playground CLI against a
 		// live aep-api without a caller-auth story for this route — production
 		// agent→BFF authentication remains an open decision this endpoint
 		// deliberately does not prejudge. Disabled ⇒ not mounted at all (404 by

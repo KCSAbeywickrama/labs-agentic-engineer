@@ -22,11 +22,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSkill, loadRepoSkills, readSkillRaw } from "./skills.js";
+import { parseSkill, loadRepoSkills } from "../src/kit/skills.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-// services/agents/evals → repo root is three up; skills/ lives there (ADR-0002).
-const repoSkillsDir = join(here, "..", "..", "..", "skills");
+// playground/test → repo root is two up; skills/ lives there (ADR-0002).
+const repoSkillsDir = join(here, "..", "..", "skills");
 
 test("parseSkill takes name+description from frontmatter and the (stripped) body as content", () => {
   const raw = "---\nname: foo\ndescription: does foo\n---\n# Foo\n\nbody text\n";
@@ -62,19 +62,6 @@ test("loadRepoSkills reads the committed repo-root skill library", () => {
   const wf = skills.find((s) => s.name === "excalidraw-wireframes")!;
   // The worked example is inlined in the body (read-before-write is load-bearing).
   assert.match(wf.content, /Worked example — risk register/);
-});
-
-test("readSkillRaw returns the untouched file bytes, frontmatter included", () => {
-  const raw = readSkillRaw(repoSkillsDir, "task-breakdown");
-  assert.ok(raw, "expected the committed task-breakdown skill to be readable");
-  assert.match(raw!, /^---\nname: task-breakdown/);
-  // Untouched — unlike parseSkill's `content`, the frontmatter fence survives.
-  const parsed = parseSkill("task-breakdown", raw!);
-  assert.doesNotMatch(parsed.content, /^---/);
-});
-
-test("readSkillRaw returns undefined for a missing skill dir", () => {
-  assert.equal(readSkillRaw(repoSkillsDir, "no-such-skill"), undefined);
 });
 
 test("loadRepoSkills reads references/*.md into the skill's references map", () => {
