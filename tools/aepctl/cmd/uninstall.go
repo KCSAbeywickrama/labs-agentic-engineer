@@ -106,7 +106,9 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	// 2. Delete PVCs — Helm intentionally never removes PVCs to prevent
 	//    accidental data loss, so we must clean them up explicitly.
 	fmt.Println("Deleting workspaces PVCs...")
-	pvcs, err := client.CoreV1().PersistentVolumeClaims(uninstallNamespace).List(ctx, metav1.ListOptions{})
+	pvcs, err := client.CoreV1().PersistentVolumeClaims(uninstallNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/part-of=wso2-aep",
+	})
 	if err != nil {
 		warn(fmt.Sprintf("list PVCs in %s: %v", uninstallNamespace, err))
 	} else {
