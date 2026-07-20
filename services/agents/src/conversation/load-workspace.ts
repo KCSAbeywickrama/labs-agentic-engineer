@@ -47,17 +47,37 @@ import type { SkillCatalogEntry, SkillSource, LoadedSkillBody } from "../agents/
 // --- The repo snapshot → `files` map -----------------------------------------
 
 /**
+ * The two OpenAPI contract shapes admitted into a turn snapshot alongside the
+ * agent-authored sources below: the produced contract
+ * (`specs/design/components/<c>/openapi.yaml`) and a consumed contract
+ * (`specs/design/components/<c>/dependencies/<dep>.openapi.yaml`). A
+ * resolution/collab turn must be able to read back a spec it (or a prior turn)
+ * just stored, so these two are admitted even though snapshots otherwise drop
+ * `*.yaml` (e.g. `workload.yaml` stays excluded). `[^/]*` mirrors the Go side's
+ * `path.Match` semantics — a `*` matches within one path segment only, never
+ * crossing a `/`.
+ */
+const PRODUCED_SPEC_RE = /^specs\/design\/components\/[^/]*\/openapi\.yaml$/;
+const CONSUMED_SPEC_RE = /^specs\/design\/components\/[^/]*\/dependencies\/[^/]*\.openapi\.yaml$/;
+
+function isAdmittedSpecPath(path: string): boolean {
+  return PRODUCED_SPEC_RE.test(path) || CONSUMED_SPEC_RE.test(path);
+}
+
+/**
  * The turn-snapshot filter — mirrors aep-api `agentfold.KeepInTurnSnapshot`:
  * keep agent-authored sources (`*.md`, `*.dsl`, `*.cell`, component
- * `design.json`, the acceptance oracle `validation-criteria.json`) and drop
- * everything else (derived `.excalidraw`/`*.gen.json` projections, code, …).
- * `*.cell` is the project-level cell-diagram DSL (design.cell) that drives the
- * live architecture diagram. validation-criteria.json is kept so a design
- * regeneration can see the existing oracle and preserve its covered flags
- * instead of resetting them.
+ * `design.json`, the acceptance oracle `validation-criteria.json`, the two
+ * OpenAPI contract shapes above) and drop everything else (derived
+ * `.excalidraw`/`*.gen.json` projections, code, arbitrary `*.yaml` such as
+ * `workload.yaml`, …). `*.cell` is the project-level cell-diagram DSL
+ * (design.cell) that drives the live architecture diagram.
+ * validation-criteria.json is kept so a design regeneration can see the
+ * existing oracle and preserve its covered flags instead of resetting them.
  */
 export function keepInTurnSnapshot(path: string): boolean {
   if (path.endsWith(".md") || path.endsWith(".dsl") || path.endsWith(".cell")) return true;
+  if (isAdmittedSpecPath(path)) return true;
   const base = basename(path);
   return base === "design.json" || base === "validation-criteria.json";
 }
