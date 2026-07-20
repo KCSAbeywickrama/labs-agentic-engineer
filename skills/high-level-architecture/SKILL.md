@@ -284,10 +284,10 @@ a procedure, in order:
      `dependencies/<dep-name>.openapi.yaml` — it resolves immediately. If you
      only have the URL and haven't fetched/verified it in-turn, set `specUrl`
      alone as a hint: the platform retries the same fetch-validate-store at
-     design save and clears `specUrl` on success. A failed retry is currently
-     non-fatal — external dependencies aren't proceed-gated on save yet, so the
-     dep just stays `needs-spec` rather than blocking anything — so prefer
-     fetching and storing it yourself over relying on that safety net. If no
+     design save and clears `specUrl` on success. A failed retry is non-fatal at
+     design save (external deps aren't gated there), but the dep stays
+     `needs-spec` and WILL block the build gate until a spec is stored — so
+     prefer fetching and storing it yourself over relying on that safety net. If no
      spec exists anywhere, author a minimal OpenAPI 3.x
      document yourself from the operations the docs describe (only what the
      component actually calls, never invented endpoints), validate it with
