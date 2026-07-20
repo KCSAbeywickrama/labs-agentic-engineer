@@ -24,8 +24,15 @@
  * componentAgentInstructions) are ignored, and a malformed file degrades to a
  * ParseError the view shows as an alert instead of throwing.
  *
- * Dependency resolution `status`/`reason` are deliberately NOT modelled — they
- * are computed server-side and never present in the raw file.
+ * A dependency's `style`/`package`/`sources`/`candidates` ARE parsed here —
+ * they are authored/derived intent, persisted in the raw file exactly like
+ * `specPath`/`config` (packages/contracts/schemas/component-design.schema.json).
+ * `status`/`reason` are the ONE exception: deliberately NOT modelled, because
+ * they are read-time computed server-side (models.ComputeDependencyStatus,
+ * #252 Task 2's `GET /projects/{p}/design/dependencies`) and never written to
+ * this file — recomputing them from the fields above would drift from that
+ * single resolution authority. DesignView's optional `dependencyStatus` prop
+ * is the only source for them (see DesignView.tsx).
  */
 
 export type DependencyKind =
@@ -39,13 +46,32 @@ export interface DesignConfigEntry {
   secret?: boolean;
 }
 
+/** One option in an ambiguous external dependency's resolution set (2+ when present). */
+export interface DependencyCandidate {
+  name: string;
+  /** "rest-api" | "sdk"; kept as a raw string so an unknown style still renders. */
+  style?: string;
+  description?: string;
+  docsUrl?: string;
+  specUrl?: string;
+  package?: string;
+}
+
 export interface Dependency {
   /** The declared kind; kept as a raw string so an unknown kind still renders. */
   kind: DependencyKind | string;
   name: string;
   description?: string;
+  /** external only: "rest-api" | "sdk", kept as a raw string. */
+  style?: string;
+  /** external (sdk style) only: ecosystem-prefixed package identifier. */
+  package?: string;
   specPath?: string;
   specUrl?: string;
+  /** external only: provenance links for the pinned/declared intent. */
+  sources?: string[];
+  /** external only: 2+ identified-but-not-pinned options (the "ambiguous" state). */
+  candidates?: DependencyCandidate[];
   config?: DesignConfigEntry[];
   resourceType?: string;
   parameters?: Record<string, unknown>;
@@ -105,6 +131,34 @@ function parseConfig(v: unknown): DesignConfigEntry[] {
   return out;
 }
 
+function parseStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((s): s is string => typeof s === "string" && s.length > 0);
+}
+
+function parseCandidates(v: unknown): DependencyCandidate[] {
+  if (!Array.isArray(v)) return [];
+  const out: DependencyCandidate[] = [];
+  for (const item of v) {
+    if (!isObject(item)) continue;
+    const name = str(item.name);
+    if (!name) continue;
+    const candidate: DependencyCandidate = { name };
+    const style = optStr(item.style);
+    if (style) candidate.style = style;
+    const description = optStr(item.description);
+    if (description) candidate.description = description;
+    const docsUrl = optStr(item.docsUrl);
+    if (docsUrl) candidate.docsUrl = docsUrl;
+    const specUrl = optStr(item.specUrl);
+    if (specUrl) candidate.specUrl = specUrl;
+    const pkg = optStr(item.package);
+    if (pkg) candidate.package = pkg;
+    out.push(candidate);
+  }
+  return out;
+}
+
 function parseDependencies(v: unknown): Dependency[] {
   if (!Array.isArray(v)) return [];
   const out: Dependency[] = [];
@@ -115,10 +169,18 @@ function parseDependencies(v: unknown): Dependency[] {
     const dep: Dependency = { kind: str(item.kind) || "unknown", name };
     const description = optStr(item.description);
     if (description) dep.description = description;
+    const style = optStr(item.style);
+    if (style) dep.style = style;
+    const pkg = optStr(item.package);
+    if (pkg) dep.package = pkg;
     const specPath = optStr(item.specPath);
     if (specPath) dep.specPath = specPath;
     const specUrl = optStr(item.specUrl);
     if (specUrl) dep.specUrl = specUrl;
+    const sources = parseStringArray(item.sources);
+    if (sources.length) dep.sources = sources;
+    const candidates = parseCandidates(item.candidates);
+    if (candidates.length) dep.candidates = candidates;
     const resourceType = optStr(item.resourceType);
     if (resourceType) dep.resourceType = resourceType;
     const config = parseConfig(item.config);

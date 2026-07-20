@@ -43,7 +43,7 @@ import {
   useProjectStatus,
   useProjectTags,
 } from "../../projects/api/queries";
-import { useSpecFileContent, useSpecFiles } from "../api/queries";
+import { useDesignDependencies, useSpecFileContent, useSpecFiles } from "../api/queries";
 import { toSpecEntry } from "../api/mapping";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
@@ -51,6 +51,7 @@ import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
 import { chatKeyFor } from "../../agent-chat/chatStore";
+import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
@@ -58,9 +59,10 @@ import { CellDiagramPanel } from "./CellDiagramPanel";
 import { WireframePanel } from "./WireframePanel";
 import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
+import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
 import type { SpecSelection } from "../api/designTree";
-import { DESIGN_CELL_PATH } from "../api/designTree";
+import { DESIGN_CELL_PATH, componentOf } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
@@ -97,6 +99,10 @@ export function SpecView({ projectName }: { projectName: string }) {
   const status = useProjectStatus(projectName);
   const tags = useProjectTags(projectName);
   const spec = useSpecFiles(projectName);
+  // #252 Task 9: every component's read-time dependency status, for the
+  // Architecture/design.json cards below (keyed off specKeys.dependencies —
+  // the same key Task 5's turn-end freshness invalidation targets).
+  const dependencies = useDesignDependencies(projectName);
   const { user, orgHandle } = useSession();
   // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
   // back to the collab mock BFF's default org so mock mode keeps working.
@@ -107,6 +113,12 @@ export function SpecView({ projectName }: { projectName: string }) {
   // conventions and must not be conflated, or this subscribes to a chat key
   // nothing is listening on.
   useTurnEndFlush(chatKeyFor(orgHandle ?? "default", projectName), projectName, collab);
+  // "Resolve in chat" (#252 Task 9 seam, Task 5's plumbing): SAME "default"
+  // org fallback as the chatKey above — not the collab room's "acme" one.
+  const resolveDependencyViaChat = useResolveDependencyViaChat(
+    orgHandle ?? "default",
+    projectName,
+  );
   const [selection, setSelection] = useState<SpecSelection | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
   // Build (#162): commit-then-build. buildPhase drives the button label /
@@ -185,6 +197,45 @@ export function SpecView({ projectName }: { projectName: string }) {
     effectiveSelection.kind === "file"
       ? (files.find((f) => f.path === effectiveSelection.path) ?? null)
       : null;
+
+  // #252 Task 9: dependency-status cards only apply to the component
+  // design.json view. componentOf() pulls the component name straight from
+  // its `specs/design/components/<name>/design.json` path — the same name
+  // ComponentDependencies.componentName carries (the design's own `name`
+  // field, which the coding agent always sets equal to its directory).
+  const selectedComponentName = selectedFile
+    ? componentOf(selectedFile.path)
+    : null;
+  const componentDependencies = useMemo(
+    () =>
+      dependencies.data?.find((c) => c.componentName === selectedComponentName)
+        ?.dependencies ?? [],
+    [dependencies.data, selectedComponentName],
+  );
+  // Keyed by dependency name for DesignView's optional dependencyStatus prop
+  // — status/reason are the ONLY fields this map carries. sources/candidates/
+  // config are already in the raw design.json DesignView parses itself; see
+  // DesignViewProps.dependencyStatus's comment for why status/reason can't
+  // join them.
+  const dependencyStatus = useMemo<Record<string, DependencyStatusInfo>>(
+    () =>
+      Object.fromEntries(
+        componentDependencies.map((d) => [
+          d.name,
+          { status: d.status, reason: d.reason },
+        ]),
+      ),
+    [componentDependencies],
+  );
+  // Fires Task 5's seeded "Resolve via chat" message with the dependency's
+  // FULL endpoint entry (status/reason/sources/candidates/config included) —
+  // never the locally parsed one, which deliberately drops status/reason.
+  const handleResolveDependency = (dependencyName: string) => {
+    if (!selectedComponentName) return;
+    const dep = componentDependencies.find((d) => d.name === dependencyName);
+    if (!dep) return;
+    resolveDependencyViaChat(selectedComponentName, dep);
+  };
 
   // Collab supplies live content when connected; the REST read (lazy, per
   // selected file) is only the solo fallback, so it stays disabled while a
@@ -619,7 +670,11 @@ export function SpecView({ projectName }: { projectName: string }) {
                     ) : isValidationCriteriaFile ? (
                       <ValidationView criteria={structuredLive} />
                     ) : (
-                      <DesignView design={structuredLive} />
+                      <DesignView
+                        design={structuredLive}
+                        dependencyStatus={dependencyStatus}
+                        onResolveDependency={handleResolveDependency}
+                      />
                     )
                   ) : content.data ? (
                     isOpenApiFile ? (
@@ -636,6 +691,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <DesignView
                         key={content.data.sha}
                         design={content.data.content}
+                        dependencyStatus={dependencyStatus}
+                        onResolveDependency={handleResolveDependency}
                       />
                     )
                   ) : agentBusy ? (

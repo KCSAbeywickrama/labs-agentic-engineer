@@ -16,16 +16,4 @@
  * under the License.
  */
 
-export { DesignView } from "./DesignView.js";
-export type { DesignViewProps, DependencyStatusInfo } from "./DesignView.js";
-export { parseComponentDesign } from "./parse.js";
-export type {
-  ComponentDesign,
-  Dependency,
-  DependencyCandidate,
-  DependencyKind,
-  DesignConfigEntry,
-  DesignEndpoint,
-  ParseError,
-  ParseResult,
-} from "./parse.js";
+import "@testing-library/jest-dom/vitest";

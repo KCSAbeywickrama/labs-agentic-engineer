@@ -124,4 +124,92 @@ describe("parseComponentDesign", () => {
     if ("kind" in d) throw new Error("unexpected parse error");
     expect(d.skillsApplied).toEqual(["go", "react"]);
   });
+
+  // #252 Task 9: style/package/sources/candidates are persisted intent
+  // (component-design.schema.json), unlike status/reason which are read-time
+  // computed and never present in the raw file — see the file-header comment.
+  describe("external dependency intent fields (#252 Task 9)", () => {
+    it("parses style, package, sources, and candidates", () => {
+      const d = parseComponentDesign(
+        JSON.stringify({
+          name: "svc",
+          dependencies: [
+            {
+              kind: "external",
+              name: "payments",
+              style: "sdk",
+              package: "npm:stripe@^14",
+              sources: ["https://stripe.com/docs", "https://npmjs.com/stripe"],
+              candidates: [
+                { name: "stripe", style: "sdk", docsUrl: "https://stripe.com/docs" },
+                { name: "adyen", style: "rest-api", specUrl: "https://adyen.com/openapi.yaml" },
+              ],
+            },
+          ],
+        }),
+      );
+      if ("kind" in d) throw new Error("unexpected parse error");
+      const dep = d.dependencies[0]!;
+      expect(dep.style).toBe("sdk");
+      expect(dep.package).toBe("npm:stripe@^14");
+      expect(dep.sources).toEqual([
+        "https://stripe.com/docs",
+        "https://npmjs.com/stripe",
+      ]);
+      expect(dep.candidates).toEqual([
+        { name: "stripe", style: "sdk", docsUrl: "https://stripe.com/docs" },
+        { name: "adyen", style: "rest-api", specUrl: "https://adyen.com/openapi.yaml" },
+      ]);
+    });
+
+    it("omits sources/candidates/style/package when absent, never emitting empty arrays", () => {
+      const d = parseComponentDesign(
+        JSON.stringify({
+          name: "svc",
+          dependencies: [{ kind: "external", name: "payments" }],
+        }),
+      );
+      if ("kind" in d) throw new Error("unexpected parse error");
+      const dep = d.dependencies[0]!;
+      expect(dep.style).toBeUndefined();
+      expect(dep.package).toBeUndefined();
+      expect(dep.sources).toBeUndefined();
+      expect(dep.candidates).toBeUndefined();
+    });
+
+    it("drops non-string sources entries and nameless candidates", () => {
+      const d = parseComponentDesign(
+        JSON.stringify({
+          name: "svc",
+          dependencies: [
+            {
+              kind: "external",
+              name: "payments",
+              sources: ["https://stripe.com/docs", 42, null],
+              candidates: [{ style: "sdk" }, { name: "stripe", style: "sdk" }],
+            },
+          ],
+        }),
+      );
+      if ("kind" in d) throw new Error("unexpected parse error");
+      const dep = d.dependencies[0]!;
+      expect(dep.sources).toEqual(["https://stripe.com/docs"]);
+      expect(dep.candidates).toEqual([{ name: "stripe", style: "sdk" }]);
+    });
+
+    it("never carries status/reason — those are not parsed from the raw file", () => {
+      const d = parseComponentDesign(
+        JSON.stringify({
+          name: "svc",
+          dependencies: [
+            { kind: "external", name: "payments", status: "resolved", reason: "ignored" },
+          ],
+        }),
+      );
+      if ("kind" in d) throw new Error("unexpected parse error");
+      const dep = d.dependencies[0] as unknown as Record<string, unknown>;
+      expect(dep.status).toBeUndefined();
+      expect(dep.reason).toBeUndefined();
+    });
+  });
 });

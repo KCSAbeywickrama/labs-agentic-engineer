@@ -84,6 +84,47 @@ vi.mock("../collab/useTurnEndFlush", () => ({
   useTurnEndFlush: (...args: unknown[]) => mockUseTurnEndFlush(...args),
 }));
 
+// --- "Resolve in chat" (#252 Task 9 seam, Task 5's plumbing): its own
+// behavior is covered by useResolveDependencyViaChat.test.ts — here it's a
+// stub so SpecView's own wiring (which componentName/dep it's called with)
+// can be asserted directly. mockUseResolveDependencyViaChat records the
+// (org, projectName) the hook itself is called with; mockResolveViaChat
+// records the (componentName, dep) the RETURNED callback is invoked with.
+const mockResolveViaChat = vi.fn();
+const mockUseResolveDependencyViaChat = vi.fn();
+mockUseResolveDependencyViaChat.mockReturnValue(mockResolveViaChat);
+vi.mock("../../agent-chat/useResolveDependencyViaChat", () => ({
+  useResolveDependencyViaChat: (...args: unknown[]) =>
+    mockUseResolveDependencyViaChat(...args),
+}));
+
+// --- DesignView (#252 Task 9): its own card rendering is covered by
+// @aep/ui-design-view's own DesignView.test.tsx — here it's a thin stub
+// exposing the props SpecView derives, so this file only asserts SpecView's
+// OWN wiring (componentName lookup, dependencyStatus map, callback), not
+// DesignView's rendering.
+vi.mock("@aep/ui-design-view", () => ({
+  DesignView: ({
+    design,
+    dependencyStatus,
+    onResolveDependency,
+  }: {
+    design: string;
+    dependencyStatus?: Record<string, { status?: string; reason?: string }>;
+    onResolveDependency?: (name: string) => void;
+  }) => (
+    <div data-testid="design-view">
+      <div data-testid="design-view-content">{design}</div>
+      <div data-testid="design-view-status">
+        {JSON.stringify(dependencyStatus ?? {})}
+      </div>
+      <button onClick={() => onResolveDependency?.("stripe")}>
+        Resolve stripe
+      </button>
+    </div>
+  ),
+}));
+
 // --- Project/spec queries: replaced wholesale so the test needs neither a
 // QueryClientProvider nor MSW — only the Build routing under test is real. -
 const mockMutateAsync = vi.fn();
@@ -96,21 +137,19 @@ vi.mock("../../projects/api/queries", () => ({
   useBuildPreflight: () => ({ refetch: mockPreflightRefetch }),
 }));
 
+// --- Spec queries: delegated through vi.fn()s (rather than fixed inline
+// factories) so individual describe blocks can override the fixture — the
+// dependency-wiring tests below need a component design.json file + content,
+// which the base Build-routing tests don't. The top-level beforeEach sets
+// the shared baseline; each describe's own beforeEach layers overrides.
+const mockUseSpecFiles = vi.fn();
+const mockUseSpecFileContent = vi.fn();
+const mockUseDesignDependencies = vi.fn();
 vi.mock("../api/queries", () => ({
-  useSpecFiles: () => ({
-    data: [{ path: "specs/design/overview.md", sha: "abc", group: "designs" }],
-    isPending: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useSpecFileContent: () => ({
-    data: undefined,
-    isPending: true,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
+  useSpecFiles: (...args: unknown[]) => mockUseSpecFiles(...args),
+  useSpecFileContent: (...args: unknown[]) => mockUseSpecFileContent(...args),
+  useDesignDependencies: (...args: unknown[]) =>
+    mockUseDesignDependencies(...args),
 }));
 
 // --- BuildDependencyDrawer: its own behavior is covered by
@@ -152,6 +191,38 @@ const PREFLIGHT_ITEMS: PreflightItem[] = [
 function clickBuild() {
   fireEvent.click(screen.getByRole("button", { name: "Build" }));
 }
+
+// Base fixture shared by every describe block below: a single non-component
+// markdown file, no content loaded yet, no dependency data. Individual
+// blocks override what they need (e.g. the dependency-wiring tests below
+// swap in a component design.json + its loaded content).
+const BASE_FILES = [
+  { path: "specs/design/overview.md", sha: "abc", group: "designs" },
+];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockUseSpecFiles.mockReturnValue({
+    data: BASE_FILES,
+    isPending: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockUseSpecFileContent.mockReturnValue({
+    data: undefined,
+    isPending: true,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockUseDesignDependencies.mockReturnValue({
+    data: [],
+    isPending: false,
+    isError: false,
+    error: null,
+  });
+});
 
 describe("SpecView onBuild routing (#164)", () => {
   beforeEach(() => {
@@ -262,5 +333,85 @@ describe("SpecView onBuild routing (#164)", () => {
     );
     expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+// --- #252 Task 9: dependency-status wiring ---------------------------------
+type ComponentDependencies = components["schemas"]["ComponentDependencies"];
+
+const CHECKOUT_DESIGN_JSON = JSON.stringify({
+  name: "checkout-api",
+  dependencies: [{ kind: "external", name: "stripe" }],
+});
+
+const CHECKOUT_DEPS: ComponentDependencies[] = [
+  {
+    componentName: "checkout-api",
+    dependencies: [
+      { kind: "external", name: "stripe", status: "unresolved", reason: "needs-input" },
+    ],
+  },
+];
+
+describe("SpecView dependency wiring (#252 Task 9)", () => {
+  beforeEach(() => {
+    mockUseSpecFiles.mockReturnValue({
+      data: [
+        {
+          path: "specs/design/components/checkout-api/design.json",
+          sha: "abc",
+          group: "designs",
+        },
+      ],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockReturnValue({
+      data: { sha: "abc", content: CHECKOUT_DESIGN_JSON },
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseDesignDependencies.mockReturnValue({
+      data: CHECKOUT_DEPS,
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+  });
+
+  it("wires useDesignDependencies with the project name", () => {
+    render(<SpecView projectName="proj1" />);
+    expect(mockUseDesignDependencies).toHaveBeenCalledWith("proj1");
+  });
+
+  it("wires useResolveDependencyViaChat with the default-fallback org and the project name", () => {
+    render(<SpecView projectName="proj1" />);
+    // useSession's mock above sets orgHandle: "acme" explicitly, so the
+    // "default" fallback never actually kicks in here — but the call proves
+    // SpecView passes orgHandle through rather than hardcoding a value.
+    expect(mockUseResolveDependencyViaChat).toHaveBeenCalledWith("acme", "proj1");
+  });
+
+  it("passes the selected component's dependency status map to DesignView, keyed by dependency name", () => {
+    render(<SpecView projectName="proj1" />);
+    const status = JSON.parse(
+      screen.getByTestId("design-view-status").textContent ?? "{}",
+    );
+    expect(status).toEqual({
+      stripe: { status: "unresolved", reason: "needs-input" },
+    });
+  });
+
+  it('"Resolve in chat" fires the resolve callback with the component name and the full endpoint dependency entry', () => {
+    render(<SpecView projectName="proj1" />);
+    fireEvent.click(screen.getByText("Resolve stripe"));
+    expect(mockResolveViaChat).toHaveBeenCalledWith(
+      "checkout-api",
+      CHECKOUT_DEPS[0]!.dependencies![0],
+    );
   });
 });

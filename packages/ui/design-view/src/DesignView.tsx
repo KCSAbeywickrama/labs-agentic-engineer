@@ -17,12 +17,47 @@
  */
 
 import { useMemo } from "react";
-import { Alert, Box, Chip, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Button, Chip, Link, Stack, Typography } from "@wso2/oxygen-ui";
+import { Lock } from "@wso2/oxygen-ui-icons-react";
 import {
   parseComponentDesign,
   type ComponentDesign,
   type Dependency,
+  type DependencyCandidate,
+  type DesignConfigEntry,
 } from "./parse.js";
+
+// #252 Task 9: read-time resolution status for ONE dependency, keyed by name
+// in DesignViewProps.dependencyStatus. `status`/`reason` are the two fields
+// parse.ts deliberately never parses from the raw design.json (see its
+// file-header comment) — this is their ONLY source. Kept as raw strings
+// (not a closed union) so an unrecognized value still renders instead of
+// widening this package's dependency on the server's exact enum.
+export interface DependencyStatusInfo {
+  /** "resolved" | "ambiguous" | "unresolved" | "blocked". */
+  status?: string | undefined;
+  /** "needs-spec" | "needs-input" | "not-found" | "access-required". */
+  reason?: string | undefined;
+}
+
+const STATUS_COLOR: Record<string, "success" | "warning" | "error"> = {
+  resolved: "success",
+  ambiguous: "warning",
+  unresolved: "error",
+  blocked: "error",
+};
+const STATUS_LABEL: Record<string, string> = {
+  resolved: "Resolved",
+  ambiguous: "Ambiguous",
+  unresolved: "Unresolved",
+  blocked: "Blocked",
+};
+const REASON_LABEL: Record<string, string> = {
+  "needs-spec": "needs a spec",
+  "needs-input": "needs input",
+  "not-found": "not found",
+  "access-required": "access required",
+};
 
 // Solid background per component type / dependency kind. Text color is
 // computed for contrast (getContrastText), so labels stay readable in both
@@ -104,12 +139,79 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-// A dependency reads as: what kind it is (the badge), its name, and a
-// one-line description. The authored config/resourceType/spec/parameters are
-// deliberately not surfaced here — they are integration detail, not design.
-function DependencyCard({ dep }: { dep: Dependency }) {
+function CandidateRow({ candidate }: { candidate: DependencyCandidate }) {
+  return (
+    <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 1 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+        <Typography component="span" sx={{ ...mono, fontWeight: 600 }}>
+          {candidate.name}
+        </Typography>
+        {candidate.style && (
+          <Chip size="small" variant="outlined" label={candidate.style} />
+        )}
+      </Box>
+      {candidate.description && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          {candidate.description}
+        </Typography>
+      )}
+      {candidate.package && (
+        <Typography component="span" sx={{ ...mono, display: "block", mt: 0.5 }}>
+          {candidate.package}
+        </Typography>
+      )}
+      {(candidate.docsUrl || candidate.specUrl) && (
+        <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
+          {candidate.docsUrl && (
+            <Link href={candidate.docsUrl} target="_blank" rel="noopener noreferrer" variant="body2">
+              Docs
+            </Link>
+          )}
+          {candidate.specUrl && (
+            <Link href={candidate.specUrl} target="_blank" rel="noopener noreferrer" variant="body2">
+              Spec
+            </Link>
+          )}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+function ConfigChip({ entry }: { entry: DesignConfigEntry }) {
+  return (
+    <Chip
+      size="small"
+      variant="outlined"
+      label={entry.key}
+      color={entry.secret ? "warning" : "default"}
+      {...(entry.secret
+        ? { icon: <Lock size={14} data-testid="secret-icon" /> }
+        : {})}
+    />
+  );
+}
+
+// A dependency reads as: what kind it is (the badge), its name, an optional
+// read-time status chip (#252 Task 9 — from DesignViewProps.dependencyStatus,
+// NEVER computed here), and a one-line description, followed by its intent
+// (sources/candidates/config) and, for a non-resolved dependency, the reason
+// plus a "Resolve in chat" button.
+function DependencyCard({
+  dep,
+  status,
+  onResolve,
+}: {
+  dep: Dependency;
+  status?: DependencyStatusInfo | undefined;
+  onResolve?: (() => void) | undefined;
+}) {
   const color = KIND_COLOR[dep.kind] ?? FALLBACK;
   const kindLabel = KIND_LABEL[dep.kind] ?? dep.kind;
+  const resolutionStatus = status?.status;
+  const isResolved = resolutionStatus === "resolved";
+  const showResolution = Boolean(resolutionStatus) && !isResolved;
+
   return (
     <Box
       sx={{
@@ -125,17 +227,95 @@ function DependencyCard({ dep }: { dep: Dependency }) {
         <Typography component="span" sx={{ ...mono, fontWeight: 600 }}>
           {dep.name}
         </Typography>
+        {resolutionStatus && (
+          <Chip
+            size="small"
+            color={STATUS_COLOR[resolutionStatus] ?? "default"}
+            label={STATUS_LABEL[resolutionStatus] ?? resolutionStatus}
+          />
+        )}
       </Box>
       {dep.description && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
           {dep.description}
         </Typography>
       )}
+
+      {dep.sources && dep.sources.length > 0 && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+            Sources
+          </Typography>
+          <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+            {dep.sources.map((src) => (
+              <Link
+                key={src}
+                href={src}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="body2"
+                sx={{ wordBreak: "break-all" }}
+              >
+                {src}
+              </Link>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      {dep.candidates && dep.candidates.length > 0 && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+            Candidates
+          </Typography>
+          <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {dep.candidates.map((candidate) => (
+              <CandidateRow key={candidate.name} candidate={candidate} />
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      {dep.config && dep.config.length > 0 && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+            Config
+          </Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mt: 0.5 }}>
+            {dep.config.map((entry) => (
+              <ConfigChip key={entry.key} entry={entry} />
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {showResolution && (
+        <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+          {status?.reason && (
+            <Typography variant="caption" color="error">
+              {REASON_LABEL[status.reason] ?? status.reason}
+            </Typography>
+          )}
+          {onResolve && (
+            <Button size="small" variant="outlined" onClick={onResolve}>
+              Resolve in chat
+            </Button>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
 
-function DesignBody({ design }: { design: ComponentDesign }) {
+function DesignBody({
+  design,
+  dependencyStatus,
+  onResolveDependency,
+}: {
+  design: ComponentDesign;
+  dependencyStatus?: Record<string, DependencyStatusInfo> | undefined;
+  onResolveDependency?: ((dependencyName: string) => void) | undefined;
+}) {
   const typeColor = TYPE_COLOR[design.type] ?? FALLBACK;
   return (
     <Box sx={{ height: "100%", overflow: "auto", p: 3 }}>
@@ -181,7 +361,14 @@ function DesignBody({ design }: { design: ComponentDesign }) {
           </Typography>
         ) : (
           design.dependencies.map((dep, i) => (
-            <DependencyCard key={`${dep.kind}:${dep.name}:${i}`} dep={dep} />
+            <DependencyCard
+              key={`${dep.kind}:${dep.name}:${i}`}
+              dep={dep}
+              status={dependencyStatus?.[dep.name]}
+              onResolve={
+                onResolveDependency ? () => onResolveDependency(dep.name) : undefined
+              }
+            />
           ))
         )}
       </Box>
@@ -192,9 +379,36 @@ function DesignBody({ design }: { design: ComponentDesign }) {
 export interface DesignViewProps {
   /** Raw component design.json text. */
   design: string;
+  /**
+   * OPTIONAL read-time resolution status per dependency name, from #252
+   * Task 2's `GET /projects/{p}/design/dependencies` endpoint — the ONLY
+   * source of `status`/`reason`. parse.ts deliberately does not parse these
+   * two fields from the raw design.json (see its file-header comment): they
+   * are computed server-side on every read (models.ComputeDependencyStatus)
+   * and never authored/persisted, so recomputing them here — e.g. from
+   * `candidates.length` — would drift from that single resolution authority.
+   * Optional and keyed defensively (a missing entry just renders without a
+   * status chip) so existing callers that don't fetch this endpoint are
+   * unaffected.
+   */
+  dependencyStatus?: Record<string, DependencyStatusInfo> | undefined;
+  /**
+   * Called with a dependency's `name` when the user clicks "Resolve in
+   * chat" on a non-resolved card (only rendered when `dependencyStatus`
+   * marks that dependency non-resolved). This package has no chat/collab
+   * knowledge of its own — the caller (console's SpecView) looks up that
+   * dependency's full endpoint entry and seeds the existing conversation via
+   * #252 Task 5's `useResolveDependencyViaChat`. Optional, like
+   * `dependencyStatus` above.
+   */
+  onResolveDependency?: ((dependencyName: string) => void) | undefined;
 }
 
-export function DesignView({ design }: DesignViewProps) {
+export function DesignView({
+  design,
+  dependencyStatus,
+  onResolveDependency,
+}: DesignViewProps) {
   const parsed = useMemo(() => parseComponentDesign(design), [design]);
   if ("kind" in parsed) {
     return (
@@ -205,5 +419,11 @@ export function DesignView({ design }: DesignViewProps) {
       </Box>
     );
   }
-  return <DesignBody design={parsed} />;
+  return (
+    <DesignBody
+      design={parsed}
+      dependencyStatus={dependencyStatus}
+      onResolveDependency={onResolveDependency}
+    />
+  );
 }
