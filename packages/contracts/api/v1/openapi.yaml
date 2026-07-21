@@ -1513,8 +1513,10 @@ paths:
           description: Error
       security:
       - userJWT: []
-      summary: List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to
-        one spec/build version tag
+      summary: List a project's implementation Tasks (live GitHub ⋈ executions → derived status),
+        optionally scoped to one spec/build version tag. The aep:validation Task is excluded — it is
+        a phase of the run, surfaced via the project status's deploy.validation; get-task still
+        serves it by number.
       tags:
       - Tasks
   /projects/{projectName}/tasks/{issueNumber}:
@@ -2067,9 +2069,6 @@ paths:
 components:
   schemas:
     AccessRequest:
-      x-go-type: models.AccessRequest
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       properties:
         consumerComponentName:
@@ -2497,9 +2496,6 @@ components:
       - name
       type: object
     ComponentConfig:
-      x-go-type: models.ComponentConfig
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       nullable: true
       additionalProperties: false
       properties:
@@ -2582,9 +2578,9 @@ components:
       - key
       type: object
     ConfigPatch:
-      x-go-type: models.ConfigPatch
+      x-go-type: orgconfig.ConfigPatch
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         gitProvider:
@@ -2641,9 +2637,9 @@ components:
           nullable: true
       type: object
     ConfigProjection:
-      x-go-type: models.ConfigProjection
+      x-go-type: orgconfig.ConfigProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         gitProvider:
@@ -2831,6 +2827,13 @@ components:
           - completed
           - failed
           type: string
+        validationIssue:
+          description: >-
+            Issue number of the project's validation task; absent when there is
+            no validation run. The console uses it to open the internal
+            validation log page (get-task / stream-task-log accept it).
+          format: int64
+          type: integer
         validationUrl:
           description: >-
             Link to the associated validation PR (the validation issue as a
@@ -2896,9 +2899,6 @@ components:
     EnvVar:
       # Hand-written in models/ (the gorm-persisted EnvVarSlice embeds it);
       # gen aliases this type to keep the models↔gen dependency one-way.
-      x-go-type: models.EnvVar
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       properties:
         key:
@@ -3027,9 +3027,9 @@ components:
       - sha
       type: object
     GitProviderProjection:
-      x-go-type: models.GitProviderProjection
+      x-go-type: orgconfig.GitProviderProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         connectedAt:
@@ -3077,9 +3077,9 @@ components:
       - connectedAt
       type: object
     IDPProjection:
-      x-go-type: models.IDPProjection
+      x-go-type: orgconfig.IDPProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         hasClientSecret:
@@ -3209,9 +3209,9 @@ components:
       - Labels
       type: object
     LLMProjection:
-      x-go-type: models.LLMProjection
+      x-go-type: orgconfig.LLMProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         connectedAt:
@@ -3491,9 +3491,6 @@ components:
           type: object
       type: object
     RcaAgentReport:
-      x-go-type: models.RcaAgentReport
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       description: An RCA report from the OpenChoreo SRE/RCA-agent handoff (console issues
       properties:
@@ -3511,6 +3508,7 @@ components:
         deployedAt:
           type: string
           format: date-time
+          x-go-type: '*time.Time'
         diagnosis:
           description: Full RCA diagnosis + remediation content (markdown)
           type: string
@@ -3528,6 +3526,7 @@ components:
             absent when the handoff was config-only
           format: int64
           type: integer
+          x-go-type: '*int64'
         issueTitle:
           type: string
         issueUrl:
@@ -3547,6 +3546,7 @@ components:
       - summary
       - classification
       - diagnosis
+      - dispatched
       - deployed
       type: object
     RcaAgentReportList:
@@ -3804,6 +3804,11 @@ components:
           type: string
         origin:
           type: string
+        prUrl:
+          description: >-
+            Link to the task's pull request, recovered from the succeeded coding
+            execution's "pr#N" reason; absent before a PR opens.
+          type: string
         rationale:
           type: string
         title:
@@ -3894,6 +3899,11 @@ components:
         operation:
           type: string
         origin:
+          type: string
+        prUrl:
+          description: >-
+            Link to the task's pull request, recovered from the succeeded coding
+            execution's "pr#N" reason; absent before a PR opens.
           type: string
         rationale:
           type: string

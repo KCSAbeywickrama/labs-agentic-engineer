@@ -44,8 +44,8 @@ import { ChatInput } from "./ChatInput";
 import {
   buildDesignGenerationInstruction,
   buildSpecGenerationInstruction,
-  readCreatePrompt,
-} from "../../projects/lib/promptStore";
+} from "@aep/contracts/prompts";
+import { readCreatePrompt } from "../../projects/lib/promptStore";
 
 // Default a touch wider than the old 380 so the activity rail + narration
 // breathe; the user can drag-resize and the choice persists.
