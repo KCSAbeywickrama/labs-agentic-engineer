@@ -16,12 +16,34 @@
  * under the License.
  */
 
-import { Box, Divider, Drawer, IconButton, Stack, Typography } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
+import { type ReactNode, useState } from "react";
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Divider,
+  Drawer,
+  IconButton,
+  Stack,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { ChevronDown, Lock, X } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
+import { useDeleteExternalResource } from "../api/queries";
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
+type ConfigKeyDTO = components["schemas"]["ConfigKeyDTO"];
+type ConsumerDTO = components["schemas"]["ConsumerDTO"];
 
 // Discriminated on `kind` so the drawer body (Task 4) can narrow `resource`
 // to the right DTO. `kind: null` is the "nothing selected" resting state —
@@ -36,10 +58,263 @@ export type ResourceDrawerProps = {
   | { kind: null; resource: null }
 );
 
-// Shell only: header (name + close) and description. Task 4 adds the
-// resource-specific sections (parameters/outputs/config, consumers, delete)
-// where the placeholder comment below marks the spot.
-export function ResourceDrawer({ resource, open, onClose }: ResourceDrawerProps) {
+// Muted single-line filler for a section with no items — never an empty
+// accordion body.
+function EmptyNote() {
+  return (
+    <Typography variant="body2" color="text.secondary">
+      None
+    </Typography>
+  );
+}
+
+// Collapse rule (Global Constraints): expanded by default when the section
+// holds 5 or fewer items, collapsed above that.
+function CollapsibleSection({
+  title,
+  itemCount,
+  children,
+}: {
+  title: string;
+  itemCount: number;
+  children: ReactNode;
+}) {
+  return (
+    <Accordion
+      disableGutters
+      elevation={0}
+      defaultExpanded={itemCount <= 5}
+      sx={{ "&:before": { display: "none" } }}
+    >
+      <AccordionSummary expandIcon={<ChevronDown size={16} />}>
+        <Typography variant="subtitle2">{title}</Typography>
+      </AccordionSummary>
+      <AccordionDetails>{children}</AccordionDetails>
+    </Accordion>
+  );
+}
+
+// Read-only key chip — mirrors ConfigChip in design-view/DesignView.tsx:
+// secret keys get the warning color + lock icon.
+function ConfigKeyRow({ entry }: { entry: ConfigKeyDTO }) {
+  return (
+    <Box>
+      <Chip
+        size="small"
+        variant="outlined"
+        label={entry.key}
+        color={entry.secret ? "warning" : "default"}
+        {...(entry.secret ? { icon: <Lock size={14} data-testid="secret-icon" /> } : {})}
+      />
+      {entry.description && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+          {entry.description}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
+function ConfigKeysSection({ config }: { config: ConfigKeyDTO[] }) {
+  return (
+    <CollapsibleSection title="Config keys" itemCount={config.length}>
+      {config.length === 0 ? (
+        <EmptyNote />
+      ) : (
+        <Stack spacing={1.5}>
+          {config.map((entry) => (
+            <ConfigKeyRow key={entry.key} entry={entry} />
+          ))}
+        </Stack>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+function ConsumersSection({ consumers }: { consumers: ConsumerDTO[] }) {
+  return (
+    <CollapsibleSection title="Used by" itemCount={consumers.length}>
+      {consumers.length === 0 ? (
+        <EmptyNote />
+      ) : (
+        <Stack spacing={0.5}>
+          {consumers.map((consumer) => (
+            <Typography key={`${consumer.projectId}/${consumer.componentName}`} variant="body2">
+              {consumer.componentName} · {consumer.projectId}
+            </Typography>
+          ))}
+        </Stack>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+// `parameters` values are `unknown` (a raw JSON-Schema-ish object from the
+// platform resource type) — surface `type`/`description` when present,
+// otherwise fall back to just the key name.
+function ParametersSection({ parameters }: { parameters: Record<string, unknown> }) {
+  const keys = Object.keys(parameters);
+  return (
+    <CollapsibleSection title="Parameters (inputs)" itemCount={keys.length}>
+      {keys.length === 0 ? (
+        <EmptyNote />
+      ) : (
+        <Stack spacing={1.5}>
+          {keys.map((key) => {
+            const schema = parameters[key];
+            const info =
+              schema && typeof schema === "object" ? (schema as Record<string, unknown>) : undefined;
+            const type = typeof info?.type === "string" ? info.type : undefined;
+            const description =
+              typeof info?.description === "string" ? info.description : undefined;
+            return (
+              <Box key={key}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography component="code" variant="body2">
+                    {key}
+                  </Typography>
+                  {type && <Chip size="small" variant="outlined" label={type} />}
+                </Stack>
+                {description && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mt: 0.5 }}
+                  >
+                    {description}
+                  </Typography>
+                )}
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+function OutputsSection({ outputs }: { outputs: string[] }) {
+  return (
+    <CollapsibleSection title="Outputs" itemCount={outputs.length}>
+      {outputs.length === 0 ? (
+        <EmptyNote />
+      ) : (
+        <Stack spacing={0.5}>
+          {outputs.map((output) => (
+            <Typography key={output} component="code" variant="body2">
+              {output}
+            </Typography>
+          ))}
+        </Stack>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+// Delete footer (external only) — the in-use guard disables the button and
+// explains why; confirming goes through a DeleteProjectDialog-shaped modal.
+function DeleteResourceSection({
+  resource,
+  consumers,
+  onClose,
+}: {
+  resource: ExternalResourceDTO;
+  consumers: ConsumerDTO[];
+  onClose: () => void;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const deleteResource = useDeleteExternalResource();
+  const busy = deleteResource.isPending;
+  const inUse = consumers.length > 0;
+
+  const closeConfirm = () => {
+    if (busy) return;
+    deleteResource.reset();
+    setConfirmOpen(false);
+  };
+
+  const confirmDelete = () => {
+    deleteResource.mutate(resource.name, { onSuccess: onClose });
+  };
+
+  return (
+    <>
+      <Divider sx={{ my: 2 }} />
+      <Button
+        color="error"
+        variant="outlined"
+        disabled={inUse}
+        onClick={() => setConfirmOpen(true)}
+      >
+        Delete resource
+      </Button>
+      {inUse && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Used by {consumers.length} component(s) — remove those dependencies first
+        </Typography>
+      )}
+      <Dialog open={confirmOpen} onClose={closeConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete {resource.name}?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This permanently deletes the external resource definition. This cannot be undone.
+          </DialogContentText>
+          {deleteResource.isError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {deleteResource.error instanceof Error && deleteResource.error.message
+                ? deleteResource.error.message
+                : "Failed to delete the external resource"}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeConfirm} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={confirmDelete} variant="contained" color="error" loading={busy}>
+            Delete resource
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
+function ExternalResourceBody({
+  resource,
+  onClose,
+}: {
+  resource: ExternalResourceDTO;
+  onClose: () => void;
+}) {
+  const config = resource.config ?? [];
+  const consumers = resource.consumers ?? [];
+  return (
+    <Box sx={{ mt: 2 }}>
+      <ConfigKeysSection config={config} />
+      <ConsumersSection consumers={consumers} />
+      <DeleteResourceSection resource={resource} consumers={consumers} onClose={onClose} />
+    </Box>
+  );
+}
+
+function PlatformResourceBody({ resource }: { resource: PlatformResourceTypeDTO }) {
+  const parameters = resource.parameters ?? {};
+  const outputs = resource.outputs ?? [];
+  const consumers = resource.consumers ?? [];
+  return (
+    <Box sx={{ mt: 2 }}>
+      <ParametersSection parameters={parameters} />
+      <OutputsSection outputs={outputs} />
+      <ConsumersSection consumers={consumers} />
+    </Box>
+  );
+}
+
+// Shell: header (name + close) and description, plus the resource-specific
+// sections (parameters/outputs/config, consumers, delete) added by Task 4.
+export function ResourceDrawer(props: ResourceDrawerProps) {
+  const { resource, open, onClose } = props;
   return (
     <Drawer
       anchor="right"
@@ -72,7 +347,10 @@ export function ResourceDrawer({ resource, open, onClose }: ResourceDrawerProps)
             {resource.description}
           </Typography>
         )}
-        {/* sections + delete: Task 4 */}
+        {props.kind === "external" && (
+          <ExternalResourceBody resource={props.resource} onClose={onClose} />
+        )}
+        {props.kind === "platform" && <PlatformResourceBody resource={props.resource} />}
       </Box>
     </Drawer>
   );
