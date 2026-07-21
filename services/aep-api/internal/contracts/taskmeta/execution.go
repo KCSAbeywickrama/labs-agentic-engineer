@@ -42,15 +42,6 @@ const (
 	KindProvision ExecutionKind = "provision"
 )
 
-// Valid reports whether k is a known execution kind.
-func (k ExecutionKind) Valid() bool {
-	switch k {
-	case KindCoding, KindBuild, KindOps, KindProvision:
-		return true
-	}
-	return false
-}
-
 // ExecutionStatus is the lifecycle of a single Execution row (§7).
 type ExecutionStatus string
 
@@ -61,15 +52,6 @@ const (
 	ExecFailed    ExecutionStatus = "failed"    // terminal
 	ExecCanceled  ExecutionStatus = "canceled"  // terminal
 )
-
-// Valid reports whether s is a known execution status.
-func (s ExecutionStatus) Valid() bool {
-	switch s {
-	case ExecQueued, ExecRunning, ExecSucceeded, ExecFailed, ExecCanceled:
-		return true
-	}
-	return false
-}
 
 // IsTerminal reports whether the status is final (succeeded/failed/canceled) —
 // no further transitions occur and the admission mutex (§5) no longer holds.

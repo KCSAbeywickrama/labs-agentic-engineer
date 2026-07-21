@@ -55,6 +55,9 @@ jobs:
       - name: Contract codegen freshness (aep-api)
         run: make -C services/aep-api gen-api-check
 
+      - name: Dead-code gate (aep-api)
+        run: make -C services/aep-api deadcode-check
+
       - name: Lint
         run: make lint
 

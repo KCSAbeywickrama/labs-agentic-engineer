@@ -24,7 +24,7 @@
 
 import { stdout } from "node:process";
 import type { StreamPart } from "@aep/agent-stream";
-import type { FileChange } from "./threads.js";
+import type { FileChange } from "./project-fs.js";
 
 // Color only on a real terminal — otherwise raw escapes litter piped/redirected output.
 const color = (code: string) => (s: string): string => (stdout.isTTY ? `\x1b[${code}m${s}\x1b[0m` : s);

@@ -72,7 +72,7 @@ type PlatformProvisionResult struct {
 // and so makes no EnsureResourceType call.
 //
 // Flow (async): ApplyResource → poll status.latestRelease (cutting a release
-// is fast; openchoreo.WaitForLatestRelease) → author the per-env binding
+// is fast; openchoreo.WaitForReleaseChange) → author the per-env binding
 // pinned to that release → return. It does NOT wait for the binding's Ready
 // condition: standing up a real DB takes minutes; the resource watcher
 // observes Ready out-of-band.

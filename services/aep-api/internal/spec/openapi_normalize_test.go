@@ -17,7 +17,6 @@
 package spec
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -218,55 +217,5 @@ paths:
 	}
 	if once != twice {
 		t.Errorf("normalization not idempotent:\nFIRST=%s\nSECOND=%s", once, twice)
-	}
-}
-
-func TestNormalizeDesignJSON_Idempotent(t *testing.T) {
-	df := struct {
-		Overview     string            `json:"overview"`
-		Requirements []string          `json:"requirements"`
-		Components   []DesignComponent `json:"components"`
-		SourceSpec   string            `json:"sourceSpec,omitempty"`
-	}{
-		Overview:     "x",
-		Requirements: []string{"r1"},
-		Components: []DesignComponent{
-			{
-				Name:                       "todo-api",
-				ComponentType:              "service",
-				Language:                   "Go",
-				Dependencies:               []Dependency{},
-				Entrypoint:                 "deployment/service",
-				Buildpack:                  "docker",
-				AppPath:                    "/todo-api",
-				ComponentAgentInstructions: "go",
-				OpenAPISpec: `openapi: 3.0.3
-info:
-  title: t
-  version: "1"
-paths:
-  /health:
-    get:
-      responses:
-        "200":
-          description: ok
-`,
-			},
-		},
-	}
-	raw, err := json.MarshalIndent(df, "", "  ")
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	once, err := normalizeDesignJSON(raw)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	twice, err := normalizeDesignJSON(once)
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
-	if string(once) != string(twice) {
-		t.Errorf("normalizeDesignJSON not idempotent:\nFIRST=%s\nSECOND=%s", once, twice)
 	}
 }

@@ -25,7 +25,7 @@
  */
 
 import { stringify as stringifyYaml } from "yaml";
-import { sha256Hex } from "../src/shared/hash.js";
+import { sha256Hex } from "@aep/agents/shared/hash";
 import type { RepoSkill } from "./skills.js";
 
 /** Deterministic fake 40-hex "sha" for a content payload (content-addressed dirs). */

@@ -203,12 +203,6 @@ func (f *fakeRepoRepo) DeleteByOrgAndProjectID(_ context.Context, orgID, project
 	return nil
 }
 
-func (f *fakeRepoRepo) updateCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.updates
-}
-
 // preload seeds a row directly (bypassing Create's semantics) so tests can
 // arrange existing repo state.
 func (f *fakeRepoRepo) preload(rows ...*sourcecontrol.GitRepository) {

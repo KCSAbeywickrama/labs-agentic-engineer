@@ -17,64 +17,11 @@
 package spec
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
-
-// normalizeDesignJSON returns a canonical-form encoding of the design.
-// Goal: byte-stable across LLM regenerations whose only differences are
-// whitespace, key ordering, scalar style, or YAML anchor expansion. With
-// canonical bytes, git-service's strings.TrimSpace equality dedup correctly
-// returns "unchanged" instead of bumping a tag for noise.
-//
-// Per design doc §10:
-//   - Recursive alphabetical key order at every nesting level.
-//   - HTTP status-code keys coerced to string (200 → "200").
-//   - x-* extensions preserved verbatim.
-//   - Empty `required`, `parameters`, `tags`, `security` arrays omitted.
-//   - YAML anchors / aliases dealiased (semantic content compared).
-//   - Block style preserved on multi-line strings (yaml.v3 default does this).
-//
-// Idempotent: re-normalizing canonical content is a no-op.
-func normalizeDesignJSON(raw []byte) ([]byte, error) {
-	// Unmarshal into a flexible structure. We use json.RawMessage on the
-	// outer envelope because we only care about transforming the OpenAPI
-	// strings inside components — the in-memory design shape itself is
-	// already stable (struct-tag-deterministic).
-	var df struct {
-		Overview   string            `json:"overview"`
-		Components []DesignComponent `json:"components"`
-		SourceSpec string            `json:"sourceSpec,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &df); err != nil {
-		return nil, fmt.Errorf("normalize: parse design json: %w", err)
-	}
-
-	for i := range df.Components {
-		if df.Components[i].OpenAPISpec == "" {
-			continue
-		}
-		canonical, err := NormalizeOpenAPIYAML(df.Components[i].OpenAPISpec)
-		if err != nil {
-			// Don't fail the whole save on a single broken spec. The
-			// architect validator already gated on parse-ability before
-			// emitting data-finish, so this should be rare; if it does
-			// happen, leaving the original bytes through is safer than
-			// dropping data.
-			continue
-		}
-		df.Components[i].OpenAPISpec = canonical
-	}
-
-	out, err := json.MarshalIndent(df, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("normalize: encode design json: %w", err)
-	}
-	return out, nil
-}
 
 // NormalizeOpenAPIYAML applies the rules from design doc §10 to a single
 // OpenAPI spec.

@@ -1,4 +1,4 @@
-# Agent loop & eval framework
+# Agent loop
 
 The `@aep/agents` main agent: an interactive, streaming spec editor. Tool-edit
 rationale is [ADR-0001](./ADR-0001-anchored-file-edits.md); tool *semantics* live in
@@ -17,7 +17,7 @@ long-lived connection, no mid-turn client→server channel. A follow-up re-enter
 the *next* turn, so resume is free and "awaiting-human" is just the gap between two
 requests.
 
-**One stream, symmetric consumers.** The Express route is the producer; the eval
+**One stream, symmetric consumers.** The Express route is the producer; the playground
 (and a future browser client) are consumers: `toChange` projects each `tool-result`
 into a reviewable change, and `applyToolCall` folds the streamed calls through the
 canonical `FileBundle` ops to reconstruct file state — no second matcher.
@@ -37,12 +37,4 @@ canonical `FileBundle` ops to reconstruct file state — no second matcher.
 | **`ask_question` Option B** (placeholder `execute()`, disabled) | fully-resolved transcript (no `MissingToolResultsError`), uniform resume |
 | **Tool results carry no file content** (`OpOk` drops `newContent`) | echoing the file makes input scale file×edits (violates ADR-0001), and it is the only stale-able carrier |
 | **Append-only divergence note** (FE `filesChangedExternally`; no `reconcile`) | rewriting history breaks the prompt-cache prefix |
-| **SSE event types in `src/contracts/sse-events.ts`** | one shared definition for producer + eval + playground, owned by the service; `OpResult` / tool-input types re-exported from the domain Zod schemas (no parallel copy) |
-
-## Eval suite (`evals/`, sibling of `src/`)
-
-An **integration test**: boots the real Express app on an ephemeral port with a
-fresh `InMemoryConversationStore`, drives turns over HTTP, reconstructs files from
-the stream, scores `bundle.snapshot()` + harvested `OpResult`s.
-K-sampled, **report-not-gate** (always exit 0; skips without an API key). Captured
-traces pre-seed the store to test resume. Test tiers are in AGENTS.md.
+| **SSE event types in `src/contracts/sse-events.ts`** | one shared definition for producer + playground, owned by the service; `OpResult` / tool-input types re-exported from the domain Zod schemas (no parallel copy) |

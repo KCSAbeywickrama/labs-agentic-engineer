@@ -142,9 +142,9 @@ func mustHead(t *testing.T, fx *workspacetest.Fixture, at string) string {
 // mirrorGitDir derives the fixture repo's mirror path.
 func mirrorGitDir(t *testing.T, fx *workspacetest.Fixture) string {
 	t.Helper()
-	d, err := gitfs.GitDir(fx.Engine.Root(), fx.Ref)
+	repoDir, err := gitfs.RepoDir(fx.Engine.Root(), fx.Ref)
 	if err != nil {
-		t.Fatalf("GitDir: %v", err)
+		t.Fatalf("RepoDir: %v", err)
 	}
-	return d
+	return gitfs.GitSubdir(repoDir)
 }

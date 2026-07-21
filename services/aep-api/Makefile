@@ -1,4 +1,4 @@
-.PHONY: build test test-db cover check-no-legacy-creds gen-api gen-api-check gen-oc-client gen-oc-client-check gen-mocks
+.PHONY: build test test-db cover check-no-legacy-creds gen-api gen-api-check gen-oc-client gen-oc-client-check gen-mocks deadcode deadcode-check
 
 build:
 	go build ./...
@@ -7,6 +7,21 @@ build:
 # plain unit/component runs need no Docker.
 test: check-no-legacy-creds
 	go test -short ./...
+
+# ── Dead-code gate ───────────────────────────────────────────────────────────
+# Whole-program reachability from the cmd/aep-api main via
+# golang.org/x/tools/cmd/deadcode (RTA). Run WITHOUT -test: tests do NOT count
+# as consumers, so a function only a test calls is dead. Generated files are
+# excluded by deadcode; test-support packages and //deadcode:keep-marked seams
+# are excluded by the script. See design/deadcode.md.
+#
+#   make deadcode        human audit (prints findings, never fails)
+#   make deadcode-check  CI gate (fails the build on any surviving finding)
+deadcode:
+	@bash scripts/deadcode.sh report
+
+deadcode-check:
+	@bash scripts/deadcode.sh check
 
 # ── Coverage (local convenience; no CI exists) ───────────────────────────────
 # Fast lane (-short skips the DB tier, so no Docker needed). Writes coverage.out

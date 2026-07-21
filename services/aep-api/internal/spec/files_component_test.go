@@ -121,12 +121,13 @@ func newFilesRig(t *testing.T, seed map[string]string) *filesRig {
 // — the C8 sha-consistency probe.
 func (r *filesRig) mirrorRevParse(t *testing.T, rev string) string {
 	t.Helper()
-	gitDir, err := gitfs.GitDir(r.engine.Root(), gitfs.RepoRef{
+	repoDir, err := gitfs.RepoDir(r.engine.Root(), gitfs.RepoRef{
 		OrgID: filesTestOrg, ProjectID: filesTestProj, RepoSlug: testSlug,
 	})
 	if err != nil {
 		t.Fatalf("mirror git dir: %v", err)
 	}
+	gitDir := gitfs.GitSubdir(repoDir)
 	cmd := exec.Command("git", "--git-dir", gitDir, "rev-parse", "--verify", rev)
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull)
 	out, err := cmd.CombinedOutput()

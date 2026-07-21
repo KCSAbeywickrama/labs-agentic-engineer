@@ -116,7 +116,11 @@ func (h *testGitHost) mirrorGitDir(orgID string) (string, error) {
 	h.mu.Lock()
 	row := h.rows[orgID]
 	h.mu.Unlock()
-	return gitfs.GitDir(h.engine.Root(), sourcecontrol.WorkspaceRefFor(orgID, row, nil))
+	repoDir, err := gitfs.RepoDir(h.engine.Root(), sourcecontrol.WorkspaceRefFor(orgID, row, nil))
+	if err != nil {
+		return "", err
+	}
+	return gitfs.GitSubdir(repoDir), nil
 }
 
 // ---- fake credential + resolver ----------------------------------------------

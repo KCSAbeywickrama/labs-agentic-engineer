@@ -32,7 +32,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { FileChange } from "./threads.js";
+import type { FileChange } from "./project-fs.js";
 import { compileDslArtifacts } from "./dsl.js";
 import { buildProjectDesign, toCellDiagramProject } from "@aep/design-projection";
 

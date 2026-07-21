@@ -106,11 +106,6 @@ func NewTurnBroker() *TurnBroker {
 	}
 }
 
-// newTurnBrokerForTest overrides retention/caps (tests only).
-func newTurnBrokerForTest(retention time.Duration, maxParts, maxBytes int) *TurnBroker {
-	return &TurnBroker{turns: map[string]*turnBuffer{}, retention: retention, maxParts: maxParts, maxBytes: maxBytes}
-}
-
 // Open registers a turn buffer. Called once per started turn, before the
 // first Append. Re-opening an existing id is a no-op.
 func (b *TurnBroker) Open(turnID string) {

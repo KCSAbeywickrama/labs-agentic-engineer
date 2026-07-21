@@ -299,3 +299,14 @@ func TestRemoteGit_SearchCode_EmbeddedOrgQualifierRefused(t *testing.T) {
 		t.Fatalf("GitHub search was called for a query embedding its own org: qualifier — the sanitizer must refuse before any network read")
 	}
 }
+
+// WithRemoteGitAPIBase overrides the GitHub REST API base URL — a TEST SEAM
+// pointing the client at an httptest fake. Not wired in production.
+func WithRemoteGitAPIBase(base string) RemoteGitOption {
+	return func(c *RemoteGitClient) { c.apiBase = strings.TrimRight(base, "/") }
+}
+
+// WithRemoteGitMaxContentBytes overrides the decoded-content cap (test seam).
+func WithRemoteGitMaxContentBytes(n int64) RemoteGitOption {
+	return func(c *RemoteGitClient) { c.maxContentBytes = n }
+}

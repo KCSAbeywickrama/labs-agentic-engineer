@@ -27,5 +27,6 @@
 - Test driven developement is preferred. Write tests first, then implement the feature. Define the contrract first, then write the test case for that contract, then implement the feature. You can tweak along the way.
 - API changes are contract-first: edit `packages/contracts/api/`, run `make gen-api`, and let the strict-server compile errors drive the handler updates.
 - Before making changes, think on the code stucture and where does the change belong. 
+- Dead code is gated (`aep-api`): `make -C aep-api deadcode-check` fails on any function unreachable from the `cmd/aep-api` main — tests do **not** count as callers. Keep an intentional test seam or unwired infra with a `//deadcode:keep <reason>` marker; rationale is inline in `aep-api/scripts/deadcode.sh`.
 
 
