@@ -29,6 +29,9 @@ var _ openchoreo.ResourceClient = &ResourceClientMock{}
 //			DeleteResourceFunc: func(ctx context.Context, namespace string, name string) error {
 //				panic("mock out the DeleteResource method")
 //			},
+//			DeleteResourceTypeFunc: func(ctx context.Context, namespace string, name string) error {
+//				panic("mock out the DeleteResourceType method")
+//			},
 //			EnsureBindingFunc: func(ctx context.Context, namespace string, b *openchoreo.ResourceReleaseBinding) (*openchoreo.ResourceReleaseBinding, error) {
 //				panic("mock out the EnsureBinding method")
 //			},
@@ -71,6 +74,9 @@ type ResourceClientMock struct {
 
 	// DeleteResourceFunc mocks the DeleteResource method.
 	DeleteResourceFunc func(ctx context.Context, namespace string, name string) error
+
+	// DeleteResourceTypeFunc mocks the DeleteResourceType method.
+	DeleteResourceTypeFunc func(ctx context.Context, namespace string, name string) error
 
 	// EnsureBindingFunc mocks the EnsureBinding method.
 	EnsureBindingFunc func(ctx context.Context, namespace string, b *openchoreo.ResourceReleaseBinding) (*openchoreo.ResourceReleaseBinding, error)
@@ -121,6 +127,15 @@ type ResourceClientMock struct {
 		}
 		// DeleteResource holds details about calls to the DeleteResource method.
 		DeleteResource []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Namespace is the namespace argument value.
+			Namespace string
+			// Name is the name argument value.
+			Name string
+		}
+		// DeleteResourceType holds details about calls to the DeleteResourceType method.
+		DeleteResourceType []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Namespace is the namespace argument value.
@@ -207,6 +222,7 @@ type ResourceClientMock struct {
 	lockApplyResource                  sync.RWMutex
 	lockDeleteBinding                  sync.RWMutex
 	lockDeleteResource                 sync.RWMutex
+	lockDeleteResourceType             sync.RWMutex
 	lockEnsureBinding                  sync.RWMutex
 	lockEnsureResourceType             sync.RWMutex
 	lockGetBinding                     sync.RWMutex
@@ -335,6 +351,46 @@ func (mock *ResourceClientMock) DeleteResourceCalls() []struct {
 	mock.lockDeleteResource.RLock()
 	calls = mock.calls.DeleteResource
 	mock.lockDeleteResource.RUnlock()
+	return calls
+}
+
+// DeleteResourceType calls DeleteResourceTypeFunc.
+func (mock *ResourceClientMock) DeleteResourceType(ctx context.Context, namespace string, name string) error {
+	if mock.DeleteResourceTypeFunc == nil {
+		panic("ResourceClientMock.DeleteResourceTypeFunc: method is nil but ResourceClient.DeleteResourceType was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		Namespace string
+		Name      string
+	}{
+		Ctx:       ctx,
+		Namespace: namespace,
+		Name:      name,
+	}
+	mock.lockDeleteResourceType.Lock()
+	mock.calls.DeleteResourceType = append(mock.calls.DeleteResourceType, callInfo)
+	mock.lockDeleteResourceType.Unlock()
+	return mock.DeleteResourceTypeFunc(ctx, namespace, name)
+}
+
+// DeleteResourceTypeCalls gets all the calls that were made to DeleteResourceType.
+// Check the length with:
+//
+//	len(mockedResourceClient.DeleteResourceTypeCalls())
+func (mock *ResourceClientMock) DeleteResourceTypeCalls() []struct {
+	Ctx       context.Context
+	Namespace string
+	Name      string
+} {
+	var calls []struct {
+		Ctx       context.Context
+		Namespace string
+		Name      string
+	}
+	mock.lockDeleteResourceType.RLock()
+	calls = mock.calls.DeleteResourceType
+	mock.lockDeleteResourceType.RUnlock()
 	return calls
 }
 

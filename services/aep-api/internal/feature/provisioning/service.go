@@ -43,6 +43,7 @@ type Service struct {
 	design    DesignReader
 	repos     RepoLocator
 	catalog   ExternalResourceCatalog
+	rtCatalog ExternalRTCatalog
 	extProv   ExternalProvisioner
 	platProv  PlatformProvisioner
 	bindings  BindingReader
@@ -88,6 +89,7 @@ type Deps struct {
 	Design    DesignReader
 	Repos     RepoLocator
 	Catalog   ExternalResourceCatalog
+	RTCatalog ExternalRTCatalog
 	ExtProv   ExternalProvisioner
 	PlatProv  PlatformProvisioner
 	Bindings  BindingReader
@@ -105,6 +107,7 @@ func NewService(d Deps) *Service {
 		design:    d.Design,
 		repos:     d.Repos,
 		catalog:   d.Catalog,
+		rtCatalog: d.RTCatalog,
 		extProv:   d.ExtProv,
 		platProv:  d.PlatProv,
 		bindings:  d.Bindings,

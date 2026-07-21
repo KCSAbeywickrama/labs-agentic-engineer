@@ -187,6 +187,30 @@ func (f *fakeCatalog) Delete(_ context.Context, _, name string) error {
 	return nil
 }
 
+// fakeRTCatalog fakes ExternalRTCatalog — the OC-RT-backed org-settings
+// list+delete surface (Task 5) — with RT fixtures in place of DB rows.
+type fakeRTCatalog struct {
+	defs    []openchoreo.ExternalResourceDefinition
+	deleted []string
+	listErr error
+	delErr  error
+}
+
+func (f *fakeRTCatalog) List(_ context.Context, _ string) ([]openchoreo.ExternalResourceDefinition, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.defs, nil
+}
+
+func (f *fakeRTCatalog) Delete(_ context.Context, _, name string) error {
+	if f.delErr != nil {
+		return f.delErr
+	}
+	f.deleted = append(f.deleted, name)
+	return nil
+}
+
 type fakeExtProv struct {
 	calls         int
 	byEnv         map[string]resources.EnvValues
@@ -631,27 +655,57 @@ func TestStatus_MasksOutputsToNames(t *testing.T) {
 func TestDeleteExternalResource_InUse409(t *testing.T) {
 	// Consumers are scanned from committed designs (component_tasks is gone):
 	// project "proj" component "orders" declares external dep "stripe".
-	catalog := &fakeCatalog{}
+	rtCatalog := &fakeRTCatalog{}
 	svc := NewService(Deps{
-		Issues:   newFakeIssues(nil),
-		Execs:    &fakeExecStore{},
-		Design:   fakeDesign{comps: designWithDeps()},
-		Repos:    fakeRepos{},
-		Catalog:  catalog,
-		Projects: fakeProjects{refs: []ProjectRef{{OrgID: "org", ProjectID: "proj"}}},
+		Issues:    newFakeIssues(nil),
+		Execs:     &fakeExecStore{},
+		Design:    fakeDesign{comps: designWithDeps()},
+		Repos:     fakeRepos{},
+		RTCatalog: rtCatalog,
+		Projects:  fakeProjects{refs: []ProjectRef{{OrgID: "org", ProjectID: "proj"}}},
 	})
 	if err := svc.DeleteExternalResource(context.Background(), "org", "stripe"); err != ErrExternalResourceInUse {
 		t.Fatalf("in-use delete must return ErrExternalResourceInUse, got %v", err)
 	}
-	if len(catalog.deleted) != 0 {
-		t.Fatalf("an in-use resource must not be deleted")
+	if len(rtCatalog.deleted) != 0 {
+		t.Fatalf("an in-use resource must not delete any ResourceType, got %v", rtCatalog.deleted)
 	}
-	// No consumers → delete proceeds.
+	// No consumers → delete proceeds — the OC ResourceType delete is called.
 	if err := svc.DeleteExternalResource(context.Background(), "org", "unused"); err != nil {
 		t.Fatalf("delete of unused resource: %v", err)
 	}
-	if len(catalog.deleted) != 1 || catalog.deleted[0] != "unused" {
-		t.Fatalf("unused resource must be deleted, got %v", catalog.deleted)
+	if len(rtCatalog.deleted) != 1 || rtCatalog.deleted[0] != "unused" {
+		t.Fatalf("unused resource's ResourceType must be deleted, got %v", rtCatalog.deleted)
+	}
+}
+
+// ListExternalResources sources each entry's name/description/config schema
+// from the RT catalog (Task 5's ExternalRTCatalog — RT reconstruction, see
+// resources.ExternalResourceCatalog.List) and merges consumers from the SAME
+// design-sweep DeleteExternalResource's in-use guard uses.
+func TestListExternalResources_FromRT(t *testing.T) {
+	rtCatalog := &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+		{Name: "stripe", Description: "payments", Config: []openchoreo.ExternalResourceConfigKey{
+			{Key: "api_key", Secret: true}, {Key: "region"},
+		}},
+	}}
+	svc := NewService(Deps{
+		Design:    fakeDesign{comps: designWithDeps()},
+		RTCatalog: rtCatalog,
+		Projects:  fakeProjects{refs: []ProjectRef{{OrgID: "org", ProjectID: "proj"}}},
+	})
+	views, err := svc.ListExternalResources(context.Background(), "org")
+	if err != nil {
+		t.Fatalf("ListExternalResources: %v", err)
+	}
+	if len(views) != 1 || views[0].Name != "stripe" || views[0].Description != "payments" {
+		t.Fatalf("views = %+v, want the RT-sourced stripe entry", views)
+	}
+	if len(views[0].Config) != 2 || views[0].Config[0].Key != "api_key" || !views[0].Config[0].Secret {
+		t.Errorf("config schema = %+v, want the RT-reconstructed schema", views[0].Config)
+	}
+	if len(views[0].Consumers) != 1 || views[0].Consumers[0].ProjectID != "proj" || views[0].Consumers[0].ComponentName != "orders" {
+		t.Errorf("consumers = %+v, want the design-scanned orders consumer", views[0].Consumers)
 	}
 }
 

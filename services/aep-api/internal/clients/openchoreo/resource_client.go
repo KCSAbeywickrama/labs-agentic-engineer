@@ -119,6 +119,15 @@ type ResourceClient interface {
 	// ErrNotFound sentinel (via sentinelForStatus) when it does not exist.
 	GetResourceType(ctx context.Context, namespace, name string) (*ResourceType, error)
 
+	// DeleteResourceType removes a namespaced ResourceType. 404-tolerant
+	// (idempotent), mirroring DeleteResource/DeleteBinding below. Used by the
+	// org-settings external-resource delete surface (resources.
+	// ExternalResourceCatalog.Delete) to prune every RT registered under a
+	// logical external-resource name — ResourceTypes are immutable and never
+	// edited in place, so more than one RT can carry the same
+	// aep.openchoreo.dev/external-name annotation (see ExternalResourceRTName).
+	DeleteResourceType(ctx context.Context, namespace, name string) error
+
 	// ListWorkloadEndpoints enumerates every provider-side endpoint declared by
 	// the Workloads in an org's namespace (one row per endpoint, carrying owner +
 	// visibility). This is the dynamic source for the org endpoint catalog: the
@@ -672,6 +681,14 @@ func (c *resourceClient) GetResourceType(ctx context.Context, namespace, name st
 		return nil, fmt.Errorf("get resourcetype %q: %w", name, err)
 	}
 	return out, nil
+}
+
+func (c *resourceClient) DeleteResourceType(ctx context.Context, namespace, name string) error {
+	code, err := c.do(ctx, http.MethodDelete, nsBase(namespace)+"/resourcetypes/"+name, nil, nil)
+	if err != nil && code != http.StatusNotFound {
+		return fmt.Errorf("delete resourcetype %q: %w", name, err)
+	}
+	return nil
 }
 
 // workloadList / workloadItem mirror just the slice of the Workload CR the

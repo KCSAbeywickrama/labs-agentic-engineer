@@ -93,6 +93,23 @@ type ExternalResourceCatalog interface {
 	Delete(ctx context.Context, orgID, name string) error
 }
 
+// ExternalRTCatalog is the org-namespaced OpenChoreo ResourceType-backed
+// external-resource registry the org-settings list+delete surface
+// (ListExternalResources / DeleteExternalResource) reads instead of the
+// external_resources table: List reconstructs each provisioned external's
+// definition off its authored RT (deduped to the newest schema-version RT per
+// name); Delete removes every RT registered under a logical name (more than
+// one schema-version RT can carry the same name — see
+// openchoreo.ExternalResourceRTName). *resources.ExternalResourceCatalog
+// satisfies it. Distinct from ExternalResourceCatalog above (the DB-backed
+// external_resources table), which the provision/value-collection paths still
+// read via .Get (build_provision.go / value_service.go) — only the
+// org-settings list+delete surface re-sources to OC RTs.
+type ExternalRTCatalog interface {
+	List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error)
+	Delete(ctx context.Context, orgID, name string) error
+}
+
 // ProjectRef identifies one project (org + project id) for the cross-project
 // design scan (external-resource consumers, teardown).
 type ProjectRef struct {

@@ -47,22 +47,19 @@ import (
 
 // ----- minimal port fakes ------------------------------------------------------
 
-type cCatalog struct {
-	entries map[string]*models.ExternalResource
+// cRTCatalog fakes provisioning.ExternalRTCatalog — the OC-RT-backed
+// org-settings list+delete surface (Task 5) — with RT fixtures in place of DB
+// rows.
+type cRTCatalog struct {
+	defs    []openchoreo.ExternalResourceDefinition
 	deleted []string
 }
 
-func (f *cCatalog) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
-	return f.entries[name], nil
+func (f *cRTCatalog) List(_ context.Context, _ string) ([]openchoreo.ExternalResourceDefinition, error) {
+	return f.defs, nil
 }
-func (f *cCatalog) List(_ context.Context, _ string) ([]models.ExternalResource, error) {
-	out := make([]models.ExternalResource, 0, len(f.entries))
-	for _, e := range f.entries {
-		out = append(out, *e)
-	}
-	return out, nil
-}
-func (f *cCatalog) Delete(_ context.Context, _, name string) error {
+
+func (f *cRTCatalog) Delete(_ context.Context, _, name string) error {
 	f.deleted = append(f.deleted, name)
 	return nil
 }
@@ -171,8 +168,8 @@ func TestProvisioningComponent_NoClaims401(t *testing.T) {
 func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	t.Parallel()
 	svc := provisioning.NewService(provisioning.Deps{
-		Catalog: &cCatalog{entries: map[string]*models.ExternalResource{
-			"stripe": {Name: "stripe", Description: "payments", ConfigKeys: []models.ConfigKey{
+		RTCatalog: &cRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+			{Name: "stripe", Description: "payments", Config: []openchoreo.ExternalResourceConfigKey{
 				{Key: "api_key", Secret: true}, {Key: "region"},
 			}},
 		}},
@@ -204,11 +201,11 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 // unused → 204 and the catalog entry is gone.
 func TestProvisioningComponent_DeleteExternalResource(t *testing.T) {
 	t.Parallel()
-	catalog := &cCatalog{}
+	rtCatalog := &cRTCatalog{}
 	svc := provisioning.NewService(provisioning.Deps{
-		Catalog:  catalog,
-		Design:   cDesign{comps: stripeConsumerDesign()},
-		Projects: cProjects{refs: []provisioning.ProjectRef{{OrgID: "acme", ProjectID: "proj"}}},
+		RTCatalog: rtCatalog,
+		Design:    cDesign{comps: stripeConsumerDesign()},
+		Projects:  cProjects{refs: []provisioning.ProjectRef{{OrgID: "acme", ProjectID: "proj"}}},
 	})
 	h := newProvHarness(t, svc)
 
@@ -220,16 +217,16 @@ func TestProvisioningComponent_DeleteExternalResource(t *testing.T) {
 	if e.Code != "conflict" || !strings.Contains(e.Message, "in use") {
 		t.Fatalf("409 envelope = %+v", e)
 	}
-	if len(catalog.deleted) != 0 {
-		t.Fatalf("an in-use resource must not be deleted")
+	if len(rtCatalog.deleted) != 0 {
+		t.Fatalf("an in-use resource must not delete any ResourceType")
 	}
 
 	resp = h.AsOrg("acme").Delete("/api/v1/dependencies/external-resources/unused")
 	if resp.Code != 204 {
 		t.Fatalf("unused delete: want 204, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if len(catalog.deleted) != 1 || catalog.deleted[0] != "unused" {
-		t.Fatalf("unused resource must be deleted, got %v", catalog.deleted)
+	if len(rtCatalog.deleted) != 1 || rtCatalog.deleted[0] != "unused" {
+		t.Fatalf("unused resource's ResourceType must be deleted, got %v", rtCatalog.deleted)
 	}
 }
 

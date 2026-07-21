@@ -23,12 +23,16 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 )
 
-// ExternalResourceCatalog is the read-only MCP-facing external-resource
-// registry (dependencies.ExternalResourceReader), sourced from the org's
-// namespaced OpenChoreo ResourceTypes instead of the external_resources
-// table: each entry is reconstructed off an authored RT via
+// ExternalResourceCatalog is the org-level external-resource registry sourced
+// from the org's namespaced OpenChoreo ResourceTypes instead of the
+// external_resources table: each entry is reconstructed off an authored RT via
 // openchoreo.ExternalDefinitionFromRT. Mirrors ResourceTypeCatalog above,
 // scoped to one org namespace instead of the cluster.
+//
+// List/Get back the read-only MCP-facing discovery surface
+// (dependencies.ExternalResourceReader); Delete backs the org-settings prune
+// surface (provisioning.Service.DeleteExternalResource, guarded upstream by
+// its own design-sweep in-use check).
 //
 // Only a PROVISIONED `external` dependency has an authored RT (the
 // provisioner authors it — see resources.NewExternalResourceProvisioner), so
@@ -37,7 +41,7 @@ import (
 // deliberate; no design-sweep is added).
 type ExternalResourceCatalog struct{ rc openchoreo.ResourceClient }
 
-// NewExternalResourceCatalog wires the read-only discovery over the OC client.
+// NewExternalResourceCatalog wires the catalog over the OC client.
 func NewExternalResourceCatalog(rc openchoreo.ResourceClient) *ExternalResourceCatalog {
 	return &ExternalResourceCatalog{rc: rc}
 }
@@ -113,6 +117,37 @@ func (c *ExternalResourceCatalog) Get(ctx context.Context, orgID, name string) (
 		return nil, nil
 	}
 	return &chosenDef, nil
+}
+
+// Delete removes every ResourceType in orgID's namespace registered under the
+// given logical external-resource name (matched via the SAME
+// openchoreo.ExternalDefinitionFromRT reconstruction List/Get use). Because
+// ResourceTypes are immutable and never deleted in place (see
+// ExternalResourceRTName), more than one RT can carry the same
+// aep.openchoreo.dev/external-name annotation — a stale schema-version left
+// behind by an earlier edit — so deleting a logical name removes ALL matching
+// RTs, not just the newest one List/Get would surface. Idempotent: a name with
+// no matching RT is a no-op, mirroring DeleteResourceType's own 404-tolerance.
+//
+// This method does not itself check whether the name is still in use by any
+// project — the caller (provisioning.Service.DeleteExternalResource) already
+// guards on that via its design-sweep before calling Delete.
+func (c *ExternalResourceCatalog) Delete(ctx context.Context, orgID, name string) error {
+	rts, err := c.rc.ListResourceTypes(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	for i := range rts {
+		rt := &rts[i]
+		def, ok := openchoreo.ExternalDefinitionFromRT(rt)
+		if !ok || def.Name != name {
+			continue
+		}
+		if err := c.rc.DeleteResourceType(ctx, orgID, rt.Metadata.Name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // newerExternalRT reports whether rt should be preferred over cur as the

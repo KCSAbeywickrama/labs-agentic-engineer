@@ -869,12 +869,20 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// — none of that is in scope here. Secret-vs-plain CLASSIFICATION (the
 	// provision value split + ResolveRunnerSecrets) reads the project's
 	// committed design.json instead, never this registry (parity with the
-	// build path). Only the MCP list_external_resources/get_external_resource_schema tools
-	// re-source to the org's provisioned ResourceTypes (Task 3): only a
-	// PROVISIONED external has an authored RT, so params.MCPExternalResources
-	// now reflects provisioned externals only (D2), never the table.
+	// build path). The MCP list_external_resources/get_external_resource_schema
+	// tools AND the org-settings external-resources list+delete surface (Task
+	// 5) re-source to the org's provisioned ResourceTypes instead (Task 3):
+	// only a PROVISIONED external has an authored RT, so both surfaces now
+	// reflect provisioned externals only (D2), never this table — it is read
+	// only via externalResourceRepo.Get by the provision/value-collection paths
+	// below.
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
-	params.MCPExternalResources = resources.NewExternalResourceCatalog(resourceClient)
+	// externalResourceRTCatalog is the single OC-RT-backed instance shared by
+	// the MCP discovery surface (List/Get) and the org-settings
+	// list+delete surface wired into provisioningSvc below (List/Delete) — one
+	// reconstruction/dedupe rule (resources.ExternalResourceCatalog) for both.
+	externalResourceRTCatalog := resources.NewExternalResourceCatalog(resourceClient)
+	params.MCPExternalResources = externalResourceRTCatalog
 	// Alerts (console issues #154, #155, BE handshake #156): org-scoped store
 	// for RCA-agent reports the console's notification bell and Alerts
 	// list/stepper read. Write side is a plain userJWT-secured endpoint (no
@@ -970,6 +978,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Design:    designComponents{store: artifactStore},
 		Repos:     repoNamer{repos: repoRepo, db: db},
 		Catalog:   externalResourceRepo,
+		RTCatalog: externalResourceRTCatalog,
 		ExtProv:   externalProvisioner,
 		PlatProv:  platformProvisioner,
 		Bindings:  resourceClient,
