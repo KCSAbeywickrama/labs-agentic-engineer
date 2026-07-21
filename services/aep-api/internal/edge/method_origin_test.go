@@ -84,6 +84,7 @@ var opOwner = map[string]string{
 	"GetProject":                    embedProjects,
 	"GetProjectBuild":               embedDelivery,
 	"GetProjectStatus":              embedProjects,
+	"GetProjectUsage":               embedProjects,
 	"GetRcaAgentReport":             embedOps,
 	"GetSkill":                      embedSpec,
 	"GetSpecCollabSession":          embedSpec,
