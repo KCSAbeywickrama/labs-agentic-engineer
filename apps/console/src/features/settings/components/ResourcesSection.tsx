@@ -192,7 +192,7 @@ function ExternalResourcesTab({
       <ResourceEmptyState
         icon={<Plug size={48} style={{ opacity: 0.3, marginBottom: 16 }} />}
         headline="No external resources"
-        body="External resources appear here as agents resolve third-party dependencies in your designs."
+        body="External resources appear here once a third-party dependency is provisioned in a project."
       />
     );
   }
