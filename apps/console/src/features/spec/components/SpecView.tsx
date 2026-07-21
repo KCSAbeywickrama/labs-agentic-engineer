@@ -53,6 +53,7 @@ import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
 import { chatKeyFor, subscribeTurnEnd } from "../../agent-chat/chatStore";
 import { useResolveDependencyViaChat } from "../../agent-chat/useResolveDependencyViaChat";
+import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
@@ -274,14 +275,20 @@ export function SpecView({ projectName }: { projectName: string }) {
         : {},
     [dependencies.data, selectedComponentName],
   );
-  // Fires Task 5's seeded "Resolve via chat" message with the dependency's
-  // FULL endpoint entry (status/reason/sources/candidates/config included) —
-  // never the locally parsed one, which deliberately drops status/reason.
-  const handleResolveDependency = (dependencyName: string) => {
+  // Fires Task 5's seeded chat message with the dependency's FULL endpoint
+  // entry (status/reason/sources/candidates/config included) — never the
+  // locally parsed one, which deliberately drops status/reason. `intent`
+  // (#252 Task 17) is "resolve" from the design-view card's chat button on a
+  // non-resolved dependency, or "reconsider" from its hamburger's "Discuss in
+  // chat & modify" on an already-resolved one.
+  const handleResolveDependency = (
+    dependencyName: string,
+    intent: DependencyResolutionIntent,
+  ) => {
     if (!selectedComponentName) return;
     const dep = componentDependencies.find((d) => d.name === dependencyName);
     if (!dep) return;
-    resolveDependencyViaChat(selectedComponentName, dep);
+    resolveDependencyViaChat(selectedComponentName, dep, intent);
   };
 
   // #252 Task 10: the build dependency drawer's "Resolve via chat" — same
@@ -289,26 +296,31 @@ export function SpecView({ projectName }: { projectName: string }) {
   // PreflightItem (component/dependency name) rather than the currently
   // selected component's design.json, since the drawer's items can span
   // ANY of the project's service components, not just the one selected in
-  // the file tree.
+  // the file tree. `intent` (#252 Task 17) is "resolve" from a blocker/
+  // external-spec panel's chat button, or "reconsider" from an
+  // external-config/platform-resource/org-service panel's hamburger.
   //
-  // #252 Task 15: also closes the drawer. The drawer is a MUI overlay Drawer
-  // (unlike the side-by-side chat panel AppLayout mounts — see its own
-  // comment above `chatOpen`), so left open it covers the chat panel the
-  // seeded message just opened and the user can't see what they're supposed
-  // to respond to. Closing only happens here, on the explicit click — NOT on
-  // turn-end (the useEffect above deliberately leaves the drawer open and
-  // just refreshes its items; re-opening mid-resolution is out of scope,
+  // #252 Task 15: also closes the drawer, for BOTH intents. The drawer is a
+  // MUI overlay Drawer (unlike the side-by-side chat panel AppLayout mounts —
+  // see its own comment above `chatOpen`), so left open it covers the chat
+  // panel the seeded message just opened and the user can't see what they're
+  // supposed to respond to. Closing only happens here, on the explicit click —
+  // NOT on turn-end (the useEffect above deliberately leaves the drawer open
+  // and just refreshes its items; re-opening mid-resolution is out of scope,
   // matching Task 10's "do not auto-reopen" decision). The design-view
   // "Resolve in chat" cards (handleResolveDependency above) have no
   // equivalent occlusion: they render in the main content pane, which the
   // chat panel opens BESIDE (Collapse in AppLayout), never over.
-  const handleResolveDrawerDependency = (item: PreflightItem) => {
+  const handleResolveDrawerDependency = (
+    item: PreflightItem,
+    intent: DependencyResolutionIntent,
+  ) => {
     const dep = (
       dependencies.data?.find((c) => c.componentName === item.component)
         ?.dependencies ?? []
     ).find((d) => d.name === item.dependency);
     if (!dep) return;
-    resolveDependencyViaChat(item.component, dep);
+    resolveDependencyViaChat(item.component, dep, intent);
     setDependencyDrawerOpen(false);
   };
 

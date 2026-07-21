@@ -19,18 +19,23 @@
 import { useCallback } from "react";
 import type { components } from "../../generated/aep-api";
 import { chatKeyFor, setPendingSeed } from "./chatStore.js";
-import { buildDependencyResolutionMessage } from "../projects/lib/dependencyResolutionMessage.js";
+import {
+  buildDependencyResolutionMessage,
+  type DependencyResolutionIntent,
+} from "../projects/lib/dependencyResolutionMessage.js";
 
 type Dependency = components["schemas"]["Dependency"];
 
 /**
  * The "Resolve via chat" seam for Task 9 (#252): returns a callback that
  * seeds the project's EXISTING collab conversation with a message asking the
- * architect to resolve ONE dependency, and (via the same pendingSeed slot
- * AppLayout watches) opens the chat panel and auto-sends it — no new
- * conversation, no scope badge, no new useCase. Task 9 wires this to the
- * on-card / drawer / build-drawer button's onClick; this task only builds
- * the plumbing.
+ * architect to act on ONE dependency — `intent` distinguishes "resolve" (a
+ * non-resolved dependency, #252 Task 9/10) from "reconsider" (an already
+ * resolved dependency the user wants to revisit, #252 Task 17) — and (via the
+ * same pendingSeed slot AppLayout watches) opens the chat panel and
+ * auto-sends it — no new conversation, no scope badge, no new useCase. Task 9
+ * wires this to the on-card / drawer / build-drawer button's onClick; this
+ * task only builds the plumbing.
  *
  * `org` must be the SAME fallback convention AppLayout uses for the chat
  * panel (`orgHandle ?? "default"`) — NOT SpecView's collab-room fallback
@@ -41,10 +46,14 @@ type Dependency = components["schemas"]["Dependency"];
 export function useResolveDependencyViaChat(
   org: string,
   projectName: string,
-): (componentName: string, dep: Dependency) => void {
+): (
+  componentName: string,
+  dep: Dependency,
+  intent: DependencyResolutionIntent,
+) => void {
   return useCallback(
-    (componentName: string, dep: Dependency) => {
-      const message = buildDependencyResolutionMessage(componentName, dep);
+    (componentName: string, dep: Dependency, intent: DependencyResolutionIntent) => {
+      const message = buildDependencyResolutionMessage(componentName, dep, intent);
       setPendingSeed(chatKeyFor(org, projectName), message);
     },
     [org, projectName],

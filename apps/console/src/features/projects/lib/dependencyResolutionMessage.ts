@@ -16,56 +16,54 @@
  * under the License.
  */
 
-// The "Resolve via chat" seed message (#252 Task 5): seeded into the
-// project's EXISTING collab conversation (no new conversation, no new
-// useCase — turns.ts is unchanged) to ask the architect to resolve ONE
-// external dependency. Lives alongside promptStore.ts (same "instruction the
-// console hands the agent" responsibility) but in its own file since its
-// shape — a dependency's JSON entry + a resolution playbook — is unrelated
-// to the create-prompt storage promptStore.ts owns.
+// The seeded chat message (#252 Task 5, leaned out by Task 17): seeded into
+// the project's EXISTING collab conversation (no new conversation, no new
+// useCase — turns.ts is unchanged) to ask the architect to act on ONE
+// dependency. Lives alongside promptStore.ts (same "instruction the console
+// hands the agent" responsibility) but in its own file since its shape is
+// unrelated to the create-prompt storage promptStore.ts owns.
 //
-// The actual on-card/drawer "Resolve via chat" BUTTON is Task 9's job; this
-// only builds the message it sends (via the pendingSeed plumbing in
-// chatStore.ts + useResolveDependencyViaChat).
+// The actual on-card/drawer BUTTON/HAMBURGER (Task 9/10/15/17's job) is what
+// fires this; this file only builds the message it sends (via the
+// pendingSeed plumbing in chatStore.ts + useResolveDependencyViaChat).
+//
+// #252 Task 17 (Q4): this message used to embed the dependency's full JSON
+// entry + a resolution playbook — every field the agent needed, spelled out
+// here. That duplicated context the agent already has: the chat agent reads
+// the dependency's CURRENT entry straight from design.json in its own turn
+// snapshot, and loads the high-level-architecture skill via collab steering
+// (Task 16 added the resolve/reconsider-a-named-dependency playbook there).
+// So the seed message only needs to NAME the dependency, the component, and
+// the intent — everything else is redundant noise the agent already has a
+// better (live) source for.
 
 import type { components } from "../../../generated/aep-api";
 
 type Dependency = components["schemas"]["Dependency"];
 
 /**
- * Build the seeded chat message for one dependency. Embeds the dependency's
- * CURRENT entry (including its read-time computed `status`/`reason` from
- * `GET /projects/{p}/design/dependencies` — Task 2's single resolution
- * authority; NEVER recomputed here) plus a playbook telling the agent
- * exactly how to resolve it, so the turn has everything it needs without the
- * console guessing at resolution rules that belong to the
- * `high-level-architecture` skill.
+ * Why a dependency's chat turn is being seeded:
+ *  - "resolve": the dependency is unresolved/ambiguous — the "Resolve via/in
+ *    chat" button on a non-resolved dependency (build drawer blocker/spec
+ *    panels, design-view card).
+ *  - "reconsider": the dependency is already resolved — the hamburger's
+ *    "Discuss in chat & modify" menu item, for a user who wants to revisit an
+ *    already-made choice.
+ */
+export type DependencyResolutionIntent = "resolve" | "reconsider";
+
+/**
+ * Build the seeded chat message for one dependency: names the component, the
+ * dependency, and why the turn is being started. Nothing else — see the
+ * file-header comment for why embedding more (the pre-Task-17 shape) is
+ * unnecessary.
  */
 export function buildDependencyResolutionMessage(
   componentName: string,
   dep: Dependency,
+  intent: DependencyResolutionIntent,
 ): string {
-  const specPath = `specs/design/components/${componentName}/dependencies/${dep.name}.openapi.yaml`;
-  const statusLine = dep.status
-    ? `Current status: ${dep.status}${dep.reason ? ` — ${dep.reason}` : ""}`
-    : "Current status: not yet computed.";
-
-  return [
-    `Resolve the "${dep.name}" dependency on the "${componentName}" component.`,
-    "",
-    statusLine,
-    "",
-    "Current entry:",
-    "```json",
-    JSON.stringify(dep, null, 2),
-    "```",
-    "",
-    "Playbook — follow the high-level-architecture skill:",
-    `- Resolve only this dependency ("${dep.name}"); do not edit any other dependency's entry.`,
-    "- Pick or pin one option: set `style` + `package` for an SDK-style dependency, or fetch/validate the contract and set `specPath` for a REST-with-spec dependency.",
-    "- If choosing among `candidates`, fold the chosen candidate's `docsUrl` (and its `specUrl`/package-registry link) into `sources`, then remove `candidates`.",
-    "- Derive the `config` keys the component needs from the chosen option.",
-    `- If you collect an OpenAPI spec, store it at \`${specPath}\` and point \`specPath\` there.`,
-    "- Ask the user when anything is ambiguous or you're unsure which option to pick.",
-  ].join("\n");
+  return intent === "reconsider"
+    ? `Let's reconsider the "${dep.name}" dependency on "${componentName}" — I'd like to look at other options.`
+    : `Let's resolve the "${dep.name}" dependency on "${componentName}".`;
 }

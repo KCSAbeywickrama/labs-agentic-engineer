@@ -46,60 +46,81 @@ const ambiguousDep: Dependency = {
   ],
 };
 
-describe("buildDependencyResolutionMessage", () => {
-  it("embeds the dependency's current entry as JSON, byte-for-byte", () => {
-    const msg = buildDependencyResolutionMessage("checkout-api", ambiguousDep);
-    expect(msg).toContain(JSON.stringify(ambiguousDep, null, 2));
-  });
+const resolvedDep: Dependency = {
+  kind: "external",
+  name: "stripe",
+  status: "resolved",
+  style: "sdk",
+  package: "npm:stripe@^17.0.0",
+};
 
-  it("surfaces the computed status and reason", () => {
-    const msg = buildDependencyResolutionMessage("checkout-api", ambiguousDep);
-    expect(msg).toMatch(/ambiguous/);
-    expect(msg).toContain("2 candidates available");
-  });
-
-  it("degrades gracefully when status/reason aren't present yet", () => {
-    const rest: Dependency = { ...ambiguousDep };
-    delete rest.status;
-    delete rest.reason;
-    const msg = buildDependencyResolutionMessage("checkout-api", rest);
-    expect(msg).not.toContain("undefined");
-  });
-
-  it("includes the resolution playbook: skill, pin/pick, sources, edit-only-this, ask-when-unsure", () => {
-    const msg = buildDependencyResolutionMessage("checkout-api", ambiguousDep);
-    // the high-level-architecture skill is the resolution authority
-    expect(msg).toContain("high-level-architecture");
-    // pick/pin one option: style+package (sdk) OR fetch/validate + specPath (rest)
-    expect(msg).toContain("style");
-    expect(msg).toContain("package");
-    expect(msg).toContain("specPath");
-    // fold the chosen candidate's docsUrl into sources
-    expect(msg).toContain("docsUrl");
-    expect(msg).toContain("sources");
-    // derive config keys
-    expect(msg).toContain("config");
-    // where a freshly-collected spec must be stored
-    expect(msg).toContain(
-      "specs/design/components/checkout-api/dependencies/email-provider.openapi.yaml",
+// #252 Task 17 (Q4): the message dropped the embedded dependency JSON + the
+// resolution playbook — the chat agent gets both from design.json's live
+// snapshot and the high-level-architecture skill (Task 16), so the seed
+// message only needs to name the component + dependency + intent.
+describe("buildDependencyResolutionMessage — lean seed message (#252 Task 17)", () => {
+  it("resolve intent: names the dependency and component, asking to resolve", () => {
+    const msg = buildDependencyResolutionMessage(
+      "checkout-api",
+      ambiguousDep,
+      "resolve",
     );
-    // edit ONLY this dependency's entry
-    expect(msg).toMatch(/only this dependency/i);
-    // ask the user when unsure
-    expect(msg).toMatch(/ask the user/i);
-  });
-
-  it("names the target dependency and component in the instruction", () => {
-    const msg = buildDependencyResolutionMessage("checkout-api", ambiguousDep);
     expect(msg).toContain("email-provider");
     expect(msg).toContain("checkout-api");
+    expect(msg).toMatch(/resolve/i);
+    expect(msg).not.toMatch(/reconsider/i);
   });
 
-  it("derives the spec-storage path from the component + dependency names given", () => {
-    const otherDep: Dependency = { kind: "external", name: "github" };
-    const msg = buildDependencyResolutionMessage("issue-sync", otherDep);
-    expect(msg).toContain(
-      "specs/design/components/issue-sync/dependencies/github.openapi.yaml",
+  it("reconsider intent: names the dependency and component, asking to look at other options", () => {
+    const msg = buildDependencyResolutionMessage(
+      "checkout-api",
+      resolvedDep,
+      "reconsider",
     );
+    expect(msg).toContain("stripe");
+    expect(msg).toContain("checkout-api");
+    expect(msg).toMatch(/reconsider/i);
+    expect(msg).toMatch(/other options/i);
+  });
+
+  it("never embeds the dependency's JSON entry", () => {
+    const resolveMsg = buildDependencyResolutionMessage(
+      "checkout-api",
+      ambiguousDep,
+      "resolve",
+    );
+    const reconsiderMsg = buildDependencyResolutionMessage(
+      "checkout-api",
+      resolvedDep,
+      "reconsider",
+    );
+    // The old shape fenced a JSON block and printed field names verbatim —
+    // none of that survives the lean message.
+    expect(resolveMsg).not.toContain("```");
+    expect(resolveMsg).not.toContain(JSON.stringify(ambiguousDep));
+    expect(resolveMsg).not.toContain("candidates");
+    expect(reconsiderMsg).not.toContain("```");
+    expect(reconsiderMsg).not.toContain("style");
+    expect(reconsiderMsg).not.toContain("package");
+  });
+
+  it("never embeds the resolution playbook", () => {
+    const msg = buildDependencyResolutionMessage(
+      "checkout-api",
+      ambiguousDep,
+      "resolve",
+    );
+    expect(msg).not.toContain("high-level-architecture");
+    expect(msg).not.toContain("specPath");
+    expect(msg).not.toContain("docsUrl");
+    expect(msg).not.toMatch(/only this dependency/i);
+  });
+
+  it("degrades gracefully when the dependency carries no extra fields (status/reason absent)", () => {
+    const bareDep: Dependency = { kind: "external", name: "github" };
+    const msg = buildDependencyResolutionMessage("issue-sync", bareDep, "resolve");
+    expect(msg).not.toContain("undefined");
+    expect(msg).toContain("github");
+    expect(msg).toContain("issue-sync");
   });
 });

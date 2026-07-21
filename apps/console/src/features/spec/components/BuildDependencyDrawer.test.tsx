@@ -406,7 +406,7 @@ describe("BuildDependencyDrawer blocker items (#252 Task 10)", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
-  it("fires onResolveDependency with the blocker item when 'Resolve via chat' is clicked", () => {
+  it("fires onResolveDependency with the blocker item and the RESOLVE intent when 'Resolve via chat' is clicked", () => {
     const { onResolveDependency } = setup([AMBIGUOUS_ITEM]);
 
     fireEvent.click(
@@ -414,7 +414,7 @@ describe("BuildDependencyDrawer blocker items (#252 Task 10)", () => {
     );
 
     expect(onResolveDependency).toHaveBeenCalledTimes(1);
-    expect(onResolveDependency).toHaveBeenCalledWith(AMBIGUOUS_ITEM);
+    expect(onResolveDependency).toHaveBeenCalledWith(AMBIGUOUS_ITEM, "resolve");
   });
 
   it("re-enables Continue once the blocker item is no longer in items (simulating a resolved refetch)", () => {
@@ -502,7 +502,7 @@ describe("BuildDependencyDrawer blocker items (#252 Task 10)", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /resolve via chat/i }),
     );
-    expect(onResolveDependency).toHaveBeenCalledWith(specItem);
+    expect(onResolveDependency).toHaveBeenCalledWith(specItem, "resolve");
   });
 });
 
@@ -715,9 +715,11 @@ describe("BuildDependencyDrawer cross-component 'Used by' rendering (#252 Task 1
 
     expect(onResolveDependency).toHaveBeenCalledTimes(1);
     // Fired with the deterministic representative — proves it's ONE call for
-    // the shared dep, not one per underlying consumer.
+    // the shared dep, not one per underlying consumer — and the RESOLVE
+    // intent (a blocker item is never resolved).
     expect(onResolveDependency).toHaveBeenCalledWith(
       expect.objectContaining({ dependency: "crm", component: "auth-service" }),
+      "resolve",
     );
   });
 
@@ -797,5 +799,92 @@ describe("BuildDependencyDrawer cross-component 'Used by' rendering (#252 Task 1
     expect(inputs.find((i) => i.component === "auth-service")).toMatchObject({
       values: [{ key: "SMTP_ENDPOINT", value: "smtp.auth.example.com" }],
     });
+  });
+});
+
+// #252 Task 17: state-based affordance in the drawer itself — a still
+// non-resolved dependency (blocker / external-spec) keeps its "Resolve via
+// chat" button; an already-resolved one (external-config, platform-resource,
+// org-service) gets a hamburger → "Discuss in chat & modify" instead. Never
+// both for the same dependency.
+describe("BuildDependencyDrawer — resolved-dependency hamburger (#252 Task 17)", () => {
+  it("shows exactly one 'Resolve via chat' button (the external-spec item) and a hamburger for every other panel kind", () => {
+    setup();
+
+    // Only the external-spec item ("partner-openapi-spec") keeps the chat
+    // button — external-config/platform-resource/org-service are resolved.
+    expect(
+      screen.getAllByRole("button", { name: /resolve via chat/i }),
+    ).toHaveLength(1);
+
+    expect(
+      screen.getByRole("button", { name: /more actions for stripe-config/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /more actions for postgres/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /more actions for billing-service/i }),
+    ).toBeInTheDocument();
+    // Never a hamburger for the external-spec item itself.
+    expect(
+      screen.queryByRole("button", {
+        name: /more actions for partner-openapi-spec/i,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never shows a hamburger for a blocker item — only its chat button", () => {
+    const ambiguousItem: PreflightItem = {
+      component: "checkout-api",
+      dependency: "crm",
+      kind: "external-ambiguous",
+      description: "More than one candidate fits.",
+    };
+    setup([ambiguousItem]);
+
+    expect(
+      screen.getByRole("button", { name: /resolve via chat/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /more actions/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hamburger → "Discuss in chat & modify" fires onResolveDependency with the item and the RECONSIDER intent', () => {
+    const { onResolveDependency } = setup();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /more actions for postgres/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /discuss in chat & modify/i }),
+    );
+
+    expect(onResolveDependency).toHaveBeenCalledTimes(1);
+    expect(onResolveDependency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dependency: "postgres",
+        kind: "platform-resource",
+      }),
+      "reconsider",
+    );
+  });
+
+  it("without onResolveDependency wired: no hamburger and no chat button render", () => {
+    render(
+      <BuildDependencyDrawer
+        open
+        items={ITEMS}
+        onClose={vi.fn()}
+        onContinue={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /more actions/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /resolve via chat/i }),
+    ).not.toBeInTheDocument();
   });
 });

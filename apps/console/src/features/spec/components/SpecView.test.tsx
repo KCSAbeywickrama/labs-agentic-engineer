@@ -114,7 +114,7 @@ vi.mock("@aep/ui-design-view", () => ({
     design: string;
     dependencyStatus?: Record<string, { status?: string; reason?: string }>;
     dependencyUsedBy?: Record<string, string[]>;
-    onResolveDependency?: (name: string) => void;
+    onResolveDependency?: (name: string, intent: "resolve" | "reconsider") => void;
   }) => (
     <div data-testid="design-view">
       <div data-testid="design-view-content">{design}</div>
@@ -124,8 +124,11 @@ vi.mock("@aep/ui-design-view", () => ({
       <div data-testid="design-view-usedby">
         {JSON.stringify(dependencyUsedBy ?? {})}
       </div>
-      <button onClick={() => onResolveDependency?.("stripe")}>
+      <button onClick={() => onResolveDependency?.("stripe", "resolve")}>
         Resolve stripe
+      </button>
+      <button onClick={() => onResolveDependency?.("stripe", "reconsider")}>
+        Reconsider stripe
       </button>
     </div>
   ),
@@ -177,15 +180,23 @@ vi.mock("./BuildDependencyDrawer", () => ({
     items: PreflightItem[];
     onClose: () => void;
     onContinue: (inputs: BuildInputItem[]) => void;
-    onResolveDependency?: (item: PreflightItem) => void;
+    onResolveDependency?: (
+      item: PreflightItem,
+      intent: "resolve" | "reconsider",
+    ) => void;
   }) =>
     open ? (
       <div data-testid="dependency-drawer">
         <button onClick={() => onContinue(STUB_INPUTS)}>Drawer Continue</button>
         <button onClick={onClose}>Drawer Cancel</button>
         {items[0] ? (
-          <button onClick={() => onResolveDependency?.(items[0]!)}>
+          <button onClick={() => onResolveDependency?.(items[0]!, "resolve")}>
             Resolve drawer item
+          </button>
+        ) : null}
+        {items[0] ? (
+          <button onClick={() => onResolveDependency?.(items[0]!, "reconsider")}>
+            Reconsider drawer item
           </button>
         ) : null}
       </div>
@@ -420,12 +431,25 @@ describe("SpecView dependency wiring (#252 Task 9)", () => {
     });
   });
 
-  it('"Resolve in chat" fires the resolve callback with the component name and the full endpoint dependency entry', () => {
+  it('"Resolve in chat" fires the resolve callback with the component name, the full endpoint dependency entry, and the RESOLVE intent', () => {
     render(<SpecView projectName="proj1" />);
     fireEvent.click(screen.getByText("Resolve stripe"));
     expect(mockResolveViaChat).toHaveBeenCalledWith(
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
+      "resolve",
+    );
+  });
+
+  // #252 Task 17: the hamburger's "Discuss in chat & modify" — same lookup,
+  // but the RECONSIDER intent.
+  it('"Discuss in chat & modify" fires the resolve callback with the RECONSIDER intent', () => {
+    render(<SpecView projectName="proj1" />);
+    fireEvent.click(screen.getByText("Reconsider stripe"));
+    expect(mockResolveViaChat).toHaveBeenCalledWith(
+      "checkout-api",
+      CHECKOUT_DEPS[0]!.dependencies![0],
+      "reconsider",
     );
   });
 
@@ -504,10 +528,37 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     // Same lookup precedent as "Resolve in chat" above: the FULL endpoint
     // entry (status/reason included), never a hand-built partial object —
     // looked up by (item.component, item.dependency), not the currently
-    // selected file's component (the drawer can span any component).
+    // selected file's component (the drawer can span any component). The
+    // RESOLVE intent, since this is the blocker panel's chat button.
     expect(mockResolveViaChat).toHaveBeenCalledWith(
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
+      "resolve",
+    );
+  });
+
+  // #252 Task 17: the drawer's hamburger ("Discuss in chat & modify") — same
+  // lookup, but the RECONSIDER intent, and it also closes the drawer.
+  it("resolves a drawer hamburger action to its full Dependency entry, fires the RECONSIDER intent, and closes the drawer", async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: true, items: DRAWER_PREFLIGHT_ITEMS },
+    });
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+    await waitFor(() =>
+      expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("Reconsider drawer item"));
+
+    expect(mockResolveViaChat).toHaveBeenCalledWith(
+      "checkout-api",
+      CHECKOUT_DEPS[0]!.dependencies![0],
+      "reconsider",
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument(),
     );
   });
 
@@ -566,6 +617,7 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     expect(mockResolveViaChat).toHaveBeenCalledWith(
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
+      "resolve",
     );
     // ...and the drawer closes so the chat panel it opens is actually visible.
     await waitFor(() =>

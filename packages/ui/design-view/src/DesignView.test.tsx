@@ -42,7 +42,7 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
   });
 
-  it("resolved: shows a Resolved chip and no Resolve in chat button", () => {
+  it("resolved: shows a Resolved chip, no Resolve in chat button, and a hamburger instead", () => {
     render(
       <DesignView
         design={designJson([{ kind: "component", name: "orders-api" }])}
@@ -54,6 +54,9 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     expect(
       screen.queryByRole("button", { name: /resolve in chat/i }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /more actions for orders-api/i }),
+    ).toBeInTheDocument();
   });
 
   it("ambiguous: shows an Ambiguous chip, renders candidates with Docs links, and Resolve in chat fires the callback with the dependency name", () => {
@@ -95,7 +98,7 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /resolve in chat/i }));
     expect(onResolve).toHaveBeenCalledTimes(1);
-    expect(onResolve).toHaveBeenCalledWith("payments");
+    expect(onResolve).toHaveBeenCalledWith("payments", "resolve");
   });
 
   it("unresolved + reason: shows an Unresolved chip, the mapped reason, and the button", () => {
@@ -146,6 +149,9 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     expect(
       screen.queryByRole("button", { name: /resolve in chat/i }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /more actions/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders sources as links to the raw URL", () => {
@@ -187,6 +193,103 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     expect(screen.getByText("STRIPE_API_KEY")).toBeInTheDocument();
     expect(screen.getByText("STRIPE_REGION")).toBeInTheDocument();
     expect(screen.getAllByTestId("secret-icon")).toHaveLength(1);
+  });
+});
+
+// #252 Task 17: state-based affordance — a non-resolved dependency keeps its
+// "Resolve in chat" button; a resolved one gets a hamburger → "Discuss in
+// chat & modify" instead. Never both for the same dependency, uniform across
+// every resolved kind.
+describe("DesignView — resolved-dependency hamburger (#252 Task 17)", () => {
+  it.each(["component", "org-service", "external", "platform-resource"])(
+    "resolved %s dependency: hamburger, not the chat button",
+    (kind) => {
+      render(
+        <DesignView
+          design={designJson([{ kind, name: "thing" }])}
+          dependencyStatus={{ thing: { status: "resolved" } }}
+          onResolveDependency={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: /more actions for thing/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /resolve in chat/i }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    ["ambiguous", undefined],
+    ["unresolved", "needs-input"],
+    ["blocked", "access-required"],
+  ] as const)(
+    "%s dependency: the chat button, not the hamburger",
+    (status, reason) => {
+      render(
+        <DesignView
+          design={designJson([{ kind: "external", name: "thing" }])}
+          dependencyStatus={{ thing: { status, reason } }}
+          onResolveDependency={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: /resolve in chat/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /more actions/i }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('hamburger → "Discuss in chat & modify" fires the RECONSIDER intent', () => {
+    const onResolveDependency = vi.fn();
+    render(
+      <DesignView
+        design={designJson([{ kind: "external", name: "stripe" }])}
+        dependencyStatus={{ stripe: { status: "resolved" } }}
+        onResolveDependency={onResolveDependency}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /more actions for stripe/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /discuss in chat & modify/i }),
+    );
+
+    expect(onResolveDependency).toHaveBeenCalledTimes(1);
+    expect(onResolveDependency).toHaveBeenCalledWith("stripe", "reconsider");
+  });
+
+  it('chat button fires the RESOLVE intent', () => {
+    const onResolveDependency = vi.fn();
+    render(
+      <DesignView
+        design={designJson([{ kind: "external", name: "stripe" }])}
+        dependencyStatus={{ stripe: { status: "unresolved" } }}
+        onResolveDependency={onResolveDependency}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /resolve in chat/i }));
+
+    expect(onResolveDependency).toHaveBeenCalledTimes(1);
+    expect(onResolveDependency).toHaveBeenCalledWith("stripe", "resolve");
+  });
+
+  it("without onResolveDependency: a resolved dependency renders no hamburger", () => {
+    render(
+      <DesignView
+        design={designJson([{ kind: "external", name: "stripe" }])}
+        dependencyStatus={{ stripe: { status: "resolved" } }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /more actions/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

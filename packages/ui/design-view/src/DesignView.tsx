@@ -16,9 +16,20 @@
  * under the License.
  */
 
-import { useMemo } from "react";
-import { Alert, Box, Button, Chip, Link, Stack, Typography } from "@wso2/oxygen-ui";
-import { Lock } from "@wso2/oxygen-ui-icons-react";
+import { useMemo, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  IconButton,
+  Link,
+  Menu,
+  MenuItem,
+  Stack,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { EllipsisVertical, Lock } from "@wso2/oxygen-ui-icons-react";
 import {
   parseComponentDesign,
   type ComponentDesign,
@@ -178,6 +189,52 @@ function CandidateRow({ candidate }: { candidate: DependencyCandidate }) {
   );
 }
 
+// #252 Task 17: why a dependency's resolution chat turn is being seeded —
+// "resolve" from the chat button on a non-resolved dependency (Task 9/10),
+// "reconsider" from the hamburger's "Discuss in chat & modify" menu item on
+// an already-resolved one. Mirrors console's own
+// dependencyResolutionMessage.ts DependencyResolutionIntent (this package
+// has no dependency on console's code, so it declares the same literal union
+// locally rather than importing it).
+export type DependencyResolutionIntent = "resolve" | "reconsider";
+
+// #252 Task 17: the resolved-dependency affordance — a small hamburger that
+// opens a one-item menu ("Discuss in chat & modify", the RECONSIDER intent).
+// Never rendered alongside the non-resolved "Resolve in chat" button (see
+// DependencyCard: exactly one of the two renders, based on `isResolved`).
+function ReconsiderMenu({ dependencyName, onReconsider }: {
+  dependencyName: string;
+  onReconsider: () => void;
+}) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  return (
+    <>
+      <IconButton
+        aria-label={`More actions for ${dependencyName}`}
+        size="small"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+        sx={{ ml: "auto" }}
+      >
+        <EllipsisVertical size={16} />
+      </IconButton>
+      <Menu
+        anchorEl={anchorEl}
+        open={anchorEl !== null}
+        onClose={() => setAnchorEl(null)}
+      >
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            onReconsider();
+          }}
+        >
+          Discuss in chat & modify
+        </MenuItem>
+      </Menu>
+    </>
+  );
+}
+
 function ConfigChip({ entry }: { entry: DesignConfigEntry }) {
   return (
     <Chip
@@ -195,13 +252,16 @@ function ConfigChip({ entry }: { entry: DesignConfigEntry }) {
 // A dependency reads as: what kind it is (the badge), its name, an optional
 // read-time status chip (#252 Task 9 — from DesignViewProps.dependencyStatus,
 // NEVER computed here), and a one-line description, followed by its intent
-// (sources/candidates/config) and, for a non-resolved dependency, the reason
-// plus a "Resolve in chat" button.
+// (sources/candidates/config) and a state-based affordance (#252 Task 17):
+// a non-resolved dependency gets the reason plus a "Resolve in chat" button;
+// a resolved one gets a hamburger → "Discuss in chat & modify" instead. Never
+// both for the same dependency — `isResolved` gates which one renders.
 function DependencyCard({
   dep,
   status,
   usedBy,
   onResolve,
+  onReconsider,
 }: {
   dep: Dependency;
   status?: DependencyStatusInfo | undefined;
@@ -213,7 +273,14 @@ function DependencyCard({
    * case) gets nothing extra.
    */
   usedBy?: string[] | undefined;
+  /** Non-resolved only (#252 Task 9/10) — the "Resolve in chat" button. */
   onResolve?: (() => void) | undefined;
+  /**
+   * Resolved only (#252 Task 17) — the hamburger's "Discuss in chat &
+   * modify" menu item. Uniform across every resolved kind (component /
+   * org-service / external / platform-resource) — never gated by `dep.kind`.
+   */
+  onReconsider?: (() => void) | undefined;
 }) {
   const color = KIND_COLOR[dep.kind] ?? FALLBACK;
   const kindLabel = KIND_LABEL[dep.kind] ?? dep.kind;
@@ -243,6 +310,9 @@ function DependencyCard({
             color={STATUS_COLOR[resolutionStatus] ?? "default"}
             label={STATUS_LABEL[resolutionStatus] ?? resolutionStatus}
           />
+        )}
+        {isResolved && onReconsider && (
+          <ReconsiderMenu dependencyName={dep.name} onReconsider={onReconsider} />
         )}
       </Box>
       {dep.description && (
@@ -337,7 +407,9 @@ function DesignBody({
   design: ComponentDesign;
   dependencyStatus?: Record<string, DependencyStatusInfo> | undefined;
   dependencyUsedBy?: Record<string, string[]> | undefined;
-  onResolveDependency?: ((dependencyName: string) => void) | undefined;
+  onResolveDependency?:
+    | ((dependencyName: string, intent: DependencyResolutionIntent) => void)
+    | undefined;
 }) {
   const typeColor = TYPE_COLOR[design.type] ?? FALLBACK;
   return (
@@ -390,7 +462,14 @@ function DesignBody({
               status={dependencyStatus?.[dep.name]}
               usedBy={dependencyUsedBy?.[dep.name]}
               onResolve={
-                onResolveDependency ? () => onResolveDependency(dep.name) : undefined
+                onResolveDependency
+                  ? () => onResolveDependency(dep.name, "resolve")
+                  : undefined
+              }
+              onReconsider={
+                onResolveDependency
+                  ? () => onResolveDependency(dep.name, "reconsider")
+                  : undefined
               }
             />
           ))
@@ -431,15 +510,23 @@ export interface DesignViewProps {
    */
   dependencyUsedBy?: Record<string, string[]> | undefined;
   /**
-   * Called with a dependency's `name` when the user clicks "Resolve in
-   * chat" on a non-resolved card (only rendered when `dependencyStatus`
-   * marks that dependency non-resolved). This package has no chat/collab
-   * knowledge of its own — the caller (console's SpecView) looks up that
-   * dependency's full endpoint entry and seeds the existing conversation via
-   * #252 Task 5's `useResolveDependencyViaChat`. Optional, like
-   * `dependencyStatus` above.
+   * Called with a dependency's `name` and the reason its chat turn is being
+   * seeded (#252 Task 17) when the user clicks either affordance:
+   *  - "resolve" — the "Resolve in chat" button on a non-resolved card (only
+   *    rendered when `dependencyStatus` marks that dependency non-resolved).
+   *  - "reconsider" — the resolved card's hamburger → "Discuss in chat &
+   *    modify" menu item (only rendered when `dependencyStatus` marks that
+   *    dependency resolved).
+   * Exactly one of the two affordances renders per card, so this is never
+   * called with both intents for the same dependency in the same render.
+   * This package has no chat/collab knowledge of its own — the caller
+   * (console's SpecView) looks up that dependency's full endpoint entry and
+   * seeds the existing conversation via #252 Task 5's
+   * `useResolveDependencyViaChat`. Optional, like `dependencyStatus` above.
    */
-  onResolveDependency?: ((dependencyName: string) => void) | undefined;
+  onResolveDependency?:
+    | ((dependencyName: string, intent: DependencyResolutionIntent) => void)
+    | undefined;
 }
 
 export function DesignView({

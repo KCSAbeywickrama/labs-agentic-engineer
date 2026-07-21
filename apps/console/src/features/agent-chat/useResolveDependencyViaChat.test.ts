@@ -40,17 +40,29 @@ describe("useResolveDependencyViaChat — the Task 9 seam (#252 Task 5)", () => 
     consumePendingSeed(chatKeyFor("acme", "proj1"));
   });
 
-  it("seeds the project's chat with the built resolution message", () => {
+  it("seeds the project's chat with the built resolution message (resolve intent)", () => {
     const { result } = renderHook(() => useResolveDependencyViaChat("acme", "proj1"));
-    result.current("checkout-api", dep);
+    result.current("checkout-api", dep, "resolve");
 
     const seeded = consumePendingSeed(chatKeyFor("acme", "proj1"));
-    expect(seeded).toBe(buildDependencyResolutionMessage("checkout-api", dep));
+    expect(seeded).toBe(
+      buildDependencyResolutionMessage("checkout-api", dep, "resolve"),
+    );
+  });
+
+  it("seeds the project's chat with the reconsider message (reconsider intent)", () => {
+    const { result } = renderHook(() => useResolveDependencyViaChat("acme", "proj1"));
+    result.current("checkout-api", dep, "reconsider");
+
+    const seeded = consumePendingSeed(chatKeyFor("acme", "proj1"));
+    expect(seeded).toBe(
+      buildDependencyResolutionMessage("checkout-api", dep, "reconsider"),
+    );
   });
 
   it("scopes the seed to the given (org, project) — no cross-project leak", () => {
     const { result } = renderHook(() => useResolveDependencyViaChat("acme", "proj1"));
-    result.current("checkout-api", dep);
+    result.current("checkout-api", dep, "resolve");
 
     expect(consumePendingSeed(chatKeyFor("acme", "proj2"))).toBeNull();
     expect(consumePendingSeed(chatKeyFor("other-org", "proj1"))).toBeNull();

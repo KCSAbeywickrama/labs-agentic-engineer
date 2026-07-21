@@ -23,12 +23,17 @@ import {
   Chip,
   Divider,
   Drawer,
+  IconButton,
+  Menu,
+  MenuItem,
   Stack,
   TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
+import { EllipsisVertical } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
+import type { DependencyResolutionIntent } from "../../projects/lib/dependencyResolutionMessage.js";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
@@ -289,20 +294,90 @@ function UsedByLine({ usedBy }: { usedBy: string[] }) {
   );
 }
 
+/**
+ * #252 Task 17 — the resolved-dependency affordance: a small hamburger that
+ * opens a one-item menu ("Discuss in chat & modify", the RECONSIDER intent).
+ * Used by the panels whose dependency is already resolved at design time
+ * (external-config — config values still to collect; platform-resource;
+ * org-service) — the BlockerPanel/ExternalSpecPanel's "Resolve via chat"
+ * button covers the non-resolved case instead. Never rendered alongside that
+ * button for the same dependency.
+ */
+function DiscussInChatMenu({
+  dependencyName,
+  onClick,
+}: {
+  dependencyName: string;
+  onClick: () => void;
+}) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  return (
+    <>
+      <IconButton
+        aria-label={`More actions for ${dependencyName}`}
+        size="small"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+      >
+        <EllipsisVertical size={16} />
+      </IconButton>
+      <Menu
+        anchorEl={anchorEl}
+        open={anchorEl !== null}
+        onClose={() => setAnchorEl(null)}
+      >
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            onClick();
+          }}
+        >
+          Discuss in chat & modify
+        </MenuItem>
+      </Menu>
+    </>
+  );
+}
+
+/** Title row shared by the panels below: the dependency name, and — only
+ * when the caller wired it — the "Discuss in chat & modify" hamburger. */
+function PanelTitle({
+  name,
+  onDiscussInChat,
+}: {
+  name: string;
+  onDiscussInChat?: (() => void) | undefined;
+}) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <Typography variant="subtitle1">{name}</Typography>
+      {onDiscussInChat && (
+        <DiscussInChatMenu dependencyName={name} onClick={onDiscussInChat} />
+      )}
+    </Box>
+  );
+}
+
 function ExternalConfigPanel({
   item,
   usedBy,
   state,
   onChange,
+  onDiscussInChat,
 }: {
   item: PreflightItem;
   usedBy: string[];
   state: ItemState;
   onChange: (key: string, value: string) => void;
+  onDiscussInChat?: ((item: PreflightItem) => void) | undefined;
 }) {
   return (
     <Stack spacing={2}>
-      <Typography variant="subtitle1">{item.dependency}</Typography>
+      <PanelTitle
+        name={item.dependency}
+        onDiscussInChat={
+          onDiscussInChat ? () => onDiscussInChat(item) : undefined
+        }
+      />
       <Typography variant="body2" color="text.secondary">
         {item.description}
       </Typography>
@@ -417,6 +492,7 @@ function InfoPanel({
   usedBy,
   kindLabel,
   detail,
+  onDiscussInChat,
 }: {
   item: PreflightItem;
   usedBy: string[];
@@ -425,10 +501,16 @@ function InfoPanel({
   // The full "what the platform will do" note — shown on hover of the label
   // rather than taking up a line in the drawer.
   detail: string;
+  onDiscussInChat?: ((item: PreflightItem) => void) | undefined;
 }) {
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle1">{item.dependency}</Typography>
+      <PanelTitle
+        name={item.dependency}
+        onDiscussInChat={
+          onDiscussInChat ? () => onDiscussInChat(item) : undefined
+        }
+      />
       <UsedByLine usedBy={usedBy} />
       {/* The kind sits right under the name; the verbose action note is on
           hover (dotted underline hints it's interactive) instead of inline. */}
@@ -496,10 +578,18 @@ export function BuildDependencyDrawer({
   items: PreflightItem[];
   onClose: () => void;
   onContinue: (inputs: BuildInputItem[]) => void;
-  // "Resolve via chat" (#252 Task 10): fires the Task 5 seeded-message flow
-  // for one item. Optional so a caller that hasn't wired chat resolution yet
-  // (or a test) can omit it — the button simply doesn't render.
-  onResolveDependency?: (item: PreflightItem) => void;
+  // Fires the Task 5 seeded-message flow for one item (#252 Task 10/17):
+  // "resolve" from the blocker/external-spec panels' "Resolve via chat"
+  // button (a non-resolved dependency); "reconsider" from the
+  // external-config/platform-resource/org-service panels' hamburger →
+  // "Discuss in chat & modify" (an already-resolved dependency the user
+  // wants to revisit). Optional so a caller that hasn't wired chat
+  // resolution yet (or a test) can omit it — the affordance simply doesn't
+  // render.
+  onResolveDependency?: (
+    item: PreflightItem,
+    intent: DependencyResolutionIntent,
+  ) => void;
   // True while the parent's build call (POST /build) triggered by Continue is
   // in flight: the Continue button shows a spinner and both buttons disable so
   // the request can't be double-submitted or the drawer dismissed mid-call.
@@ -573,6 +663,20 @@ export function BuildDependencyDrawer({
     (g) => g.representative.kind === "org-service",
   );
 
+  // #252 Task 17: the two fixed-intent wrappers each panel binds to its own
+  // affordance — "Resolve via chat" (blocker/external-spec: a non-resolved
+  // dependency) always fires "resolve"; the hamburger's "Discuss in chat &
+  // modify" (external-config/platform-resource/org-service: an already
+  // resolved dependency) always fires "reconsider". Both close through the
+  // SAME onResolveDependency the parent wires (Task 15's close-drawer-then-
+  // open-chat flow) — only the intent differs.
+  const resolveViaChat = onResolveDependency
+    ? (item: PreflightItem) => onResolveDependency(item, "resolve")
+    : undefined;
+  const discussInChat = onResolveDependency
+    ? (item: PreflightItem) => onResolveDependency(item, "reconsider")
+    : undefined;
+
   return (
     <Drawer
       anchor="right"
@@ -606,7 +710,7 @@ export function BuildDependencyDrawer({
                   key={group.key}
                   item={group.representative}
                   usedBy={group.usedBy}
-                  onResolveViaChat={onResolveDependency}
+                  onResolveViaChat={resolveViaChat}
                 />
               ))}
             </Stack>
@@ -632,6 +736,7 @@ export function BuildDependencyDrawer({
                       },
                     })
                   }
+                  onDiscussInChat={discussInChat}
                 />
               ))}
             </Stack>
@@ -652,7 +757,7 @@ export function BuildDependencyDrawer({
                   onContentChange={(value) =>
                     updateState(group, { specContent: value })
                   }
-                  onResolveViaChat={onResolveDependency}
+                  onResolveViaChat={resolveViaChat}
                 />
               ))}
             </Stack>
@@ -670,6 +775,7 @@ export function BuildDependencyDrawer({
                   usedBy={group.usedBy}
                   kindLabel={group.representative.resourceType ?? "Platform resource"}
                   detail={`We'll provision this ${group.representative.resourceType ?? "resource"} for you.`}
+                  onDiscussInChat={discussInChat}
                 />
               ))}
             </Stack>
@@ -686,6 +792,7 @@ export function BuildDependencyDrawer({
                 usedBy={group.usedBy}
                 kindLabel="Cross-project endpoint"
                 detail="We'll publish this cross-project endpoint — it updates and rebuilds the owning project; your build continues, and the consuming task waits until it's published."
+                onDiscussInChat={discussInChat}
               />
             ))}
           </Stack>
