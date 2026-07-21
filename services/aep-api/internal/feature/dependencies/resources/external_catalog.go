@@ -48,17 +48,33 @@ func NewExternalResourceCatalog(rc openchoreo.ResourceClient) *ExternalResourceC
 // (openchoreo.ExternalDefinitionFromRT's ok=false — e.g. it lacks the
 // aep.openchoreo.dev/external-name annotation) is silently skipped: it is not
 // an external-resource RT.
+//
+// ResourceTypes are immutable and never deleted (see ExternalResourceRTName):
+// a schema change mints a brand-new RT while the OLD one persists, and BOTH
+// carry the same aep.openchoreo.dev/external-name annotation. Without
+// deduping, one logical name could surface twice — so results are grouped by
+// the reconstructed logical name first, keeping only the newest RT per name
+// (see newerExternalRT) before sorting.
 func (c *ExternalResourceCatalog) List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error) {
 	rts, err := c.rc.ListResourceTypes(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]openchoreo.ExternalResourceDefinition, 0, len(rts))
+	chosenRT := make(map[string]*openchoreo.ResourceType, len(rts))
+	chosenDef := make(map[string]openchoreo.ExternalResourceDefinition, len(rts))
 	for i := range rts {
-		def, ok := openchoreo.ExternalDefinitionFromRT(&rts[i])
+		rt := &rts[i]
+		def, ok := openchoreo.ExternalDefinitionFromRT(rt)
 		if !ok {
 			continue
 		}
+		if cur, exists := chosenRT[def.Name]; !exists || newerExternalRT(rt, cur) {
+			chosenRT[def.Name] = rt
+			chosenDef[def.Name] = def
+		}
+	}
+	out := make([]openchoreo.ExternalResourceDefinition, 0, len(chosenDef))
+	for _, def := range chosenDef {
 		out = append(out, def)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -71,16 +87,51 @@ func (c *ExternalResourceCatalog) List(ctx context.Context, orgID string) ([]ope
 // openchoreo.ExternalResourceRTName — so it can never be derived from name
 // alone; listing every namespaced RT and matching on the recovered logical
 // name (via ExternalDefinitionFromRT) is the only way to look one up.
+//
+// When more than one RT matches (the same stale-RT-persists hazard List
+// dedupes — see its doc), the newest one wins, via the SAME newerExternalRT
+// tie-break List uses, so the two tools can never disagree on which schema is
+// "current" for a given name.
 func (c *ExternalResourceCatalog) Get(ctx context.Context, orgID, name string) (*openchoreo.ExternalResourceDefinition, error) {
 	rts, err := c.rc.ListResourceTypes(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	var chosenRT *openchoreo.ResourceType
+	var chosenDef openchoreo.ExternalResourceDefinition
 	for i := range rts {
-		def, ok := openchoreo.ExternalDefinitionFromRT(&rts[i])
-		if ok && def.Name == name {
-			return &def, nil
+		rt := &rts[i]
+		def, ok := openchoreo.ExternalDefinitionFromRT(rt)
+		if !ok || def.Name != name {
+			continue
+		}
+		if chosenRT == nil || newerExternalRT(rt, chosenRT) {
+			chosenRT, chosenDef = rt, def
 		}
 	}
-	return nil, nil
+	if chosenRT == nil {
+		return nil, nil
+	}
+	return &chosenDef, nil
+}
+
+// newerExternalRT reports whether rt should be preferred over cur as the
+// current-schema ResourceType for one logical external-resource name (used by
+// both List and Get so they can never disagree). The RT with the NEWER
+// metadata.creationTimestamp wins, reproducing the old DB reader's "last
+// provisioned wins" semantic. When timestamps tie — including both being the
+// zero value, e.g. test fixtures that never set one — the comparison falls
+// back to the lexically GREATER metadata.name (the hashed RT name), a
+// deterministic tie-break that never depends on ListResourceTypes' return
+// order.
+func newerExternalRT(rt, cur *openchoreo.ResourceType) bool {
+	rtTS, curTS := rt.Metadata.CreationTimestamp, cur.Metadata.CreationTimestamp
+	switch {
+	case rtTS.After(curTS):
+		return true
+	case curTS.After(rtTS):
+		return false
+	default:
+		return rt.Metadata.Name > cur.Metadata.Name
+	}
 }

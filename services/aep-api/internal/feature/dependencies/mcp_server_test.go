@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
@@ -64,11 +65,18 @@ func newExternalCatalogFixture(listErr error, rts ...openchoreo.ResourceType) *e
 
 // mustBuildExternalRT builds an external resource's ResourceType fixture via
 // the SAME production builder (openchoreo.BuildExternalResourceType) real
-// provisioning uses — the error return is ignored because these fixed,
-// well-formed inputs (non-empty name, at least one non-empty key) can never
-// trigger it.
-func mustBuildExternalRT(name, description string, keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ResourceType {
-	rt, _ := openchoreo.BuildExternalResourceType(name, description, keys)
+// provisioning uses. Mirrors the sibling helper in mcp_surface_test.go: fails
+// the test loudly on a build error instead of silently dereferencing a
+// possibly-nil *ResourceType (these fixed, well-formed inputs — non-empty
+// name, at least one non-empty key — should never trigger one, but a nil-deref
+// panic on a future regression would be a far worse failure mode than a clear
+// t.Fatalf).
+func mustBuildExternalRT(t *testing.T, name, description string, keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ResourceType {
+	t.Helper()
+	rt, err := openchoreo.BuildExternalResourceType(name, description, keys)
+	if err != nil {
+		t.Fatalf("build external RT fixture %q: %v", name, err)
+	}
 	return *rt
 }
 
@@ -189,9 +197,10 @@ var nonExternalRT = openchoreo.ResourceType{
 	},
 }
 
-func sampleHandler() (http.Handler, *externalCatalogFixture, *fakeEndpointLister) {
+func sampleHandler(t *testing.T) (http.Handler, *externalCatalogFixture, *fakeEndpointLister) {
+	t.Helper()
 	er := newExternalCatalogFixture(nil,
-		mustBuildExternalRT("salesforce", "CRM",
+		mustBuildExternalRT(t, "salesforce", "CRM",
 			openchoreo.ExternalResourceConfigKey{Key: "SALESFORCE_URL", Secret: false},
 			openchoreo.ExternalResourceConfigKey{Key: "SALESFORCE_TOKEN", Secret: true},
 		),
@@ -256,7 +265,7 @@ func (f *fakeRemoteGit) SearchCode(_ context.Context, ocOrgID, owner, _, _ strin
 // ---- protocol ----------------------------------------------------------------
 
 func TestMCP_Initialize(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
@@ -271,7 +280,7 @@ func TestMCP_Initialize(t *testing.T) {
 }
 
 func TestMCP_Ping(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":7,"method":"ping"}`))
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
@@ -282,7 +291,7 @@ func TestMCP_Ping(t *testing.T) {
 }
 
 func TestMCP_ToolsList_RenamedTools(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
@@ -324,7 +333,7 @@ func TestMCP_ToolsList_RenamedTools(t *testing.T) {
 }
 
 func TestMCP_Notification_202NoBody(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	w := postRPC(t, h, "org-1", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", w.Code)
@@ -335,7 +344,7 @@ func TestMCP_Notification_202NoBody(t *testing.T) {
 }
 
 func TestMCP_ParseError(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{not json`))
 	if resp.Error == nil || resp.Error.Code != -32700 {
 		t.Fatalf("error = %+v, want code -32700", resp.Error)
@@ -343,7 +352,7 @@ func TestMCP_ParseError(t *testing.T) {
 }
 
 func TestMCP_MethodNotFound(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"resources/list"}`))
 	if resp.Error == nil || resp.Error.Code != -32601 {
 		t.Fatalf("error = %+v, want code -32601", resp.Error)
@@ -351,7 +360,7 @@ func TestMCP_MethodNotFound(t *testing.T) {
 }
 
 func TestMCP_UnknownTool(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_connections", `{}`)))
 	if resp.Error == nil || resp.Error.Code != -32602 {
 		t.Fatalf("error = %+v, want code -32602 (source tool names must be gone)", resp.Error)
@@ -369,7 +378,7 @@ func TestMCP_NilResourceReader_503(t *testing.T) {
 }
 
 func TestMCP_NoOrgOnContext_401(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	w := postRPC(t, h, "", `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (unwrapped mount must fail closed)", w.Code)
@@ -384,7 +393,7 @@ func TestMCP_NoOrgOnContext_401(t *testing.T) {
 // aep.openchoreo.dev/external-name annotation — yet exactly one entry comes
 // back, so a non-external RT sharing the namespace never leaks into the tool.
 func TestMCP_ListExternalResources(t *testing.T) {
-	h, er, _ := sampleHandler()
+	h, er, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
 	text := toolText(t, resp, false)
 
@@ -427,7 +436,7 @@ func TestMCP_ListExternalResources_PortError(t *testing.T) {
 }
 
 func TestMCP_GetExternalResourceSchema(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 
 	t.Run("found", func(t *testing.T) {
 		resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("get_external_resource_schema", `{"name":"salesforce"}`)))
@@ -468,8 +477,134 @@ func TestMCP_GetExternalResourceSchema(t *testing.T) {
 	})
 }
 
+// TestMCP_ExternalResources_DedupesStaleSchema covers the core OC-RT-registry
+// hazard this task fixes: ResourceTypes are effectively immutable (a changed
+// key/secret schema mints a brand-new RT name — see ExternalResourceRTName)
+// and are never deleted, so an external resource that has gone through a
+// schema change carries TWO namespaced RTs sharing the SAME
+// aep.openchoreo.dev/external-name annotation — a stale one and a current
+// one. Both list_external_resources and get_external_resource_schema must
+// surface the logical name exactly ONCE, picking the RT with the NEWER
+// metadata.creationTimestamp — never the stale schema, never both, and
+// (proven by the reversed-order sub-case) never dependent on
+// ListResourceTypes' return order.
+func TestMCP_ExternalResources_DedupesStaleSchema(t *testing.T) {
+	stale := mustBuildExternalRT(t, "stripe", "Payments",
+		openchoreo.ExternalResourceConfigKey{Key: "STRIPE_KEY", Secret: true})
+	stale.Metadata.CreationTimestamp = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	current := mustBuildExternalRT(t, "stripe", "Payments v2",
+		openchoreo.ExternalResourceConfigKey{Key: "STRIPE_KEY", Secret: true},
+		openchoreo.ExternalResourceConfigKey{Key: "STRIPE_WEBHOOK_SECRET", Secret: true})
+	current.Metadata.CreationTimestamp = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	if stale.Metadata.Name == current.Metadata.Name {
+		t.Fatalf("fixture bug: stale/current must hash to different RT names (different schemas), got %q for both", stale.Metadata.Name)
+	}
+
+	assertNewestWins := func(t *testing.T, rts ...openchoreo.ResourceType) {
+		t.Helper()
+		er := newExternalCatalogFixture(nil, rts...)
+		h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+
+		resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
+		text := toolText(t, resp, false)
+		var listPayload struct {
+			ExternalResources []externalResourceView `json:"externalResources"`
+		}
+		if err := json.Unmarshal([]byte(text), &listPayload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if len(listPayload.ExternalResources) != 1 {
+			t.Fatalf("externalResources = %+v, want exactly 1 entry (stale RT must be deduped away)", listPayload.ExternalResources)
+		}
+		got := listPayload.ExternalResources[0]
+		if got.Name != "stripe" || got.Description != "Payments v2" || len(got.ConfigKeys) != 2 {
+			t.Errorf("list entry = %+v, want the NEWER (2-key, %q) schema", got, "Payments v2")
+		}
+
+		getResp := decodeRPC(t, postRPC(t, h, "org-1", callBody("get_external_resource_schema", `{"name":"stripe"}`)))
+		getText := toolText(t, getResp, false)
+		var getPayload struct {
+			Found            bool                 `json:"found"`
+			ExternalResource externalResourceView `json:"externalResource"`
+		}
+		if err := json.Unmarshal([]byte(getText), &getPayload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if !getPayload.Found || getPayload.ExternalResource.Description != "Payments v2" || len(getPayload.ExternalResource.ConfigKeys) != 2 {
+			t.Errorf("get_external_resource_schema = %+v, want the NEWER schema (must agree with list)", getPayload)
+		}
+	}
+
+	t.Run("stale then current", func(t *testing.T) { assertNewestWins(t, stale, current) })
+	t.Run("current then stale (order must not matter)", func(t *testing.T) { assertNewestWins(t, current, stale) })
+}
+
+// TestMCP_ExternalResources_TieBreakDeterministic covers the fallback when two
+// same-named RTs carry an EQUAL creationTimestamp — including the "absent"
+// case where neither fixture sets one (both zero value), e.g. a test/dev
+// fixture authored without one. Selection must still be deterministic (the
+// lexically GREATER RT metadata.name) rather than flip-flopping with
+// ListResourceTypes' return order — otherwise list_external_resources and
+// get_external_resource_schema could each pick a different schema on
+// different calls.
+func TestMCP_ExternalResources_TieBreakDeterministic(t *testing.T) {
+	a := mustBuildExternalRT(t, "hubspot", "CRM A",
+		openchoreo.ExternalResourceConfigKey{Key: "HUBSPOT_KEY", Secret: true})
+	b := mustBuildExternalRT(t, "hubspot", "CRM B",
+		openchoreo.ExternalResourceConfigKey{Key: "HUBSPOT_KEY", Secret: true},
+		openchoreo.ExternalResourceConfigKey{Key: "HUBSPOT_PORTAL_ID", Secret: false})
+	// Both left at the zero CreationTimestamp (the "absent" case). Different
+	// schemas (1 vs 2 keys) hash to different RT names, so the deterministic
+	// fallback (lexically greater metadata.name) has a real choice to make.
+	if a.Metadata.Name == b.Metadata.Name {
+		t.Fatalf("fixture bug: a/b must hash to different RT names, got %q for both", a.Metadata.Name)
+	}
+
+	wantDescription, wantKeyCount := "CRM A", 1
+	if b.Metadata.Name > a.Metadata.Name {
+		wantDescription, wantKeyCount = "CRM B", 2
+	}
+
+	for _, order := range [][2]openchoreo.ResourceType{{a, b}, {b, a}} {
+		er := newExternalCatalogFixture(nil, order[0], order[1])
+		h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
+
+		resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
+		text := toolText(t, resp, false)
+		var payload struct {
+			ExternalResources []externalResourceView `json:"externalResources"`
+		}
+		if err := json.Unmarshal([]byte(text), &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if len(payload.ExternalResources) != 1 {
+			t.Fatalf("externalResources = %+v, want exactly 1 entry", payload.ExternalResources)
+		}
+		got := payload.ExternalResources[0]
+		if got.Description != wantDescription || len(got.ConfigKeys) != wantKeyCount {
+			t.Errorf("list order %v: got %+v, want the deterministic winner (description=%q, %d config keys) regardless of order",
+				order, got, wantDescription, wantKeyCount)
+		}
+
+		getResp := decodeRPC(t, postRPC(t, h, "org-1", callBody("get_external_resource_schema", `{"name":"hubspot"}`)))
+		getText := toolText(t, getResp, false)
+		var getPayload struct {
+			Found            bool                 `json:"found"`
+			ExternalResource externalResourceView `json:"externalResource"`
+		}
+		if err := json.Unmarshal([]byte(getText), &getPayload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if !getPayload.Found || getPayload.ExternalResource.Description != wantDescription || len(getPayload.ExternalResource.ConfigKeys) != wantKeyCount {
+			t.Errorf("list order %v: get_external_resource_schema = %+v, want the same deterministic winner as list", order, getPayload)
+		}
+	}
+}
+
 func TestMCP_ListOrgEndpoints(t *testing.T) {
-	h, _, ep := sampleHandler()
+	h, _, ep := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_endpoints", `{}`)))
 	text := toolText(t, resp, false)
 
@@ -509,7 +644,7 @@ func TestMCP_ListOrgEndpoints_NilLister_Empty(t *testing.T) {
 }
 
 func TestMCP_ListOrgComponentEndpoints(t *testing.T) {
-	h, _, ep := sampleHandler()
+	h, _, ep := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_component_endpoints", `{}`)))
 	text := toolText(t, resp, false)
 
@@ -558,7 +693,7 @@ func TestMCP_ListOrgComponentEndpoints_NilLister_Empty(t *testing.T) {
 }
 
 func TestMCP_ListPlatformResourceTypes(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_platform_resource_types", `{}`)))
 	text := toolText(t, resp, false)
 
@@ -648,7 +783,7 @@ func TestMCP_GetRemoteGitFileContents_OwnerMismatch_ToolError(t *testing.T) {
 }
 
 func TestMCP_GetRemoteGitFileContents_MissingArgs_ToolError(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"repo":"billing-svc","path":"x"}`))) // no owner
 	toolText(t, resp, true)
@@ -685,7 +820,7 @@ func TestMCP_SearchRemoteGitCode(t *testing.T) {
 }
 
 func TestMCP_SearchRemoteGitCode_MissingQuery_ToolError(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("search_remote_git_code", `{"owner":"acme","repo":"billing-svc"}`)))
 	toolText(t, resp, true)
@@ -693,7 +828,7 @@ func TestMCP_SearchRemoteGitCode_MissingQuery_ToolError(t *testing.T) {
 
 // The two remote-git tools must be advertised by tools/list.
 func TestMCP_ToolsList_IncludesRemoteGitTools(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	result := resp.Result.(map[string]any)
 	tools, _ := result["tools"].([]any)
@@ -750,7 +885,7 @@ func schemaOf(t *testing.T, tool mcpTool) toolSchema {
 // fetch_openapi_spec are advertised with the exact schema shape the other
 // tools use: an object with a single required string argument.
 func TestMCP_ToolsList_SpecToolsSchema(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
 	raw, _ := json.Marshal(resp.Result)
 	var result struct {
@@ -784,7 +919,7 @@ func TestMCP_ToolsList_SpecToolsSchema(t *testing.T) {
 }
 
 func TestMCP_ValidateOpenAPISpec_Good(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", fmt.Sprintf(`{"content":%q}`, specToolSampleSpec))))
 	text := toolText(t, resp, false)
 
@@ -811,7 +946,7 @@ func TestMCP_ValidateOpenAPISpec_Good(t *testing.T) {
 // (isError=false); only a missing argument or unconfigured port is a tool
 // error.
 func TestMCP_ValidateOpenAPISpec_Bad(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{"content":"foo: bar"}`)))
 	text := toolText(t, resp, false)
 
@@ -831,7 +966,7 @@ func TestMCP_ValidateOpenAPISpec_Bad(t *testing.T) {
 }
 
 func TestMCP_ValidateOpenAPISpec_MissingContent_ToolError(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{}`)))
 	text := toolText(t, resp, true)
 	if !strings.Contains(text, "content") {
@@ -926,7 +1061,7 @@ func TestMCP_FetchOpenAPISpec_FetchError_ToolError(t *testing.T) {
 }
 
 func TestMCP_FetchOpenAPISpec_MissingURL_ToolError(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{}`)))
 	text := toolText(t, resp, true)
 	if !strings.Contains(text, "url") {
@@ -946,7 +1081,7 @@ func TestMCP_FetchOpenAPISpec_NilPort_ToolError(t *testing.T) {
 // URL must still be refused. A regression that wraps/relaxes the guard would
 // make this test pass a real fetch through instead of rejecting it.
 func TestMCP_FetchOpenAPISpec_SSRFBlocked_RealGuardUnweakened(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://127.0.0.1/openapi.yaml"}`)))
 	text := toolText(t, resp, true)
 	if !strings.Contains(text, "non-public address") {
@@ -957,7 +1092,7 @@ func TestMCP_FetchOpenAPISpec_SSRFBlocked_RealGuardUnweakened(t *testing.T) {
 // TestMCP_FetchOpenAPISpec_RejectsNonHTTPS proves the https-only half of the
 // SSRF guard also passes through unchanged.
 func TestMCP_FetchOpenAPISpec_RejectsNonHTTPS(t *testing.T) {
-	h, _, _ := sampleHandler()
+	h, _, _ := sampleHandler(t)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"http://example.com/openapi.yaml"}`)))
 	text := toolText(t, resp, true)
 	if !strings.Contains(text, "https") {

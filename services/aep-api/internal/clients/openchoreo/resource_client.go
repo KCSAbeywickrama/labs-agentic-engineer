@@ -180,6 +180,17 @@ type OCObjectMeta struct {
 	Namespace   string            `json:"namespace,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
+	// CreationTimestamp is k8s' own metadata.creationTimestamp (RFC3339,
+	// stamped by OC on every object it creates). It rides along automatically
+	// wherever OCObjectMeta is decoded (ListResourceTypes / GetResourceType /
+	// EnsureResourceType, ListClusterResourceTypes, etc. all decode straight
+	// into this struct via the generic do()/json.Unmarshal path — there is no
+	// separate metadata decode to keep in sync). It exists so callers can
+	// order same-named ResourceTypes by recency: ResourceTypes are immutable
+	// and never deleted, so a schema change mints a brand-new RT (see
+	// ExternalResourceRTName) while the old one persists — without this field
+	// there was no way to tell which of two same-name RTs is current.
+	CreationTimestamp time.Time `json:"creationTimestamp,omitempty"`
 }
 
 // OCKeyRef is a {name,key} reference into a Secret/ConfigMap (both CEL-templatable).
