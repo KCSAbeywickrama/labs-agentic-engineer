@@ -18,58 +18,17 @@ package artifacts
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// fakeExternalResourceResolver is a static ExternalResourceResolver: `hits`
-// names a registered external resource (Get returns it), anything else is
-// absent (Get returns (nil, nil)). `errs` forces a lookup error for a
-// specific name.
-type fakeExternalResourceResolver struct {
-	hits map[string]*models.ExternalResource
-	errs map[string]error
-}
-
-func (f fakeExternalResourceResolver) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
-	if err, ok := f.errs[name]; ok {
-		return nil, err
-	}
-	return f.hits[name], nil
-}
-
-// TestResolveExternalDependencies_RegistryHit_Resolves asserts rule 2: a name
-// registered in the org's external-resource registry resolves, even with no
-// style at all (registry reuse wins ahead of every stored-intent rule).
-func TestResolveExternalDependencies_RegistryHit_Resolves(t *testing.T) {
-	store := &ArtifactStore{}
-	store.SetExternalResourceResolver(fakeExternalResourceResolver{
-		hits: map[string]*models.ExternalResource{"stripe": {Name: "stripe"}},
-	})
-
-	d := &DesignFile{Components: []models.DesignComponent{{
-		Name: "checkout",
-		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe"},
-		},
-	}}}
-
-	store.resolveExternalDependencies(context.Background(), "org", d)
-
-	dep := d.Components[0].Dependencies[0]
-	if dep.Status != models.DependencyStatusResolved || dep.Reason != "" {
-		t.Errorf("registry hit: status/reason = %q/%q, want %q/empty", dep.Status, dep.Reason, models.DependencyStatusResolved)
-	}
-}
-
-// TestResolveExternalDependencies_NoResolverWired_StillAppliesStoredRules
-// asserts rules 3-6 need no resolver at all: with NO ExternalResourceResolver
-// wired, an external dependency still resolves purely from its own stored
-// intent fields (style/specPath/package) — only rule 2 (registry reuse) is
-// unavailable.
-func TestResolveExternalDependencies_NoResolverWired_StillAppliesStoredRules(t *testing.T) {
+// TestResolveExternalDependencies_AppliesStoredRules asserts the `external`
+// precedence rules resolve purely from the dependency's own stored intent
+// fields (style/specPath/package) — the registry-reuse hit (rule 2) was
+// retired with the external_resources table (D6), so registryHit is always
+// false and every rule derives from stored intent alone.
+func TestResolveExternalDependencies_AppliesStoredRules(t *testing.T) {
 	store := &ArtifactStore{}
 
 	d := &DesignFile{Components: []models.DesignComponent{{
@@ -97,35 +56,8 @@ func TestResolveExternalDependencies_NoResolverWired_StillAppliesStoredRules(t *
 	}
 }
 
-// TestResolveExternalDependencies_RegistryError_LeavesUntouched asserts the
-// registry lookup is fail-open, mirroring resolveOrgServices'
-// IsNamespaceVisible fail-open: a lookup error leaves the dependency's
-// Status/Reason completely untouched rather than falling through to the
-// stored-intent rules with registryHit=false.
-func TestResolveExternalDependencies_RegistryError_LeavesUntouched(t *testing.T) {
-	store := &ArtifactStore{}
-	store.SetExternalResourceResolver(fakeExternalResourceResolver{
-		errs: map[string]error{"stripe": errors.New("transient DB error")},
-	})
-
-	d := &DesignFile{Components: []models.DesignComponent{{
-		Name: "checkout",
-		Dependencies: []models.Dependency{
-			{Kind: models.DependencyKindExternal, Name: "stripe"},
-		},
-	}}}
-
-	store.resolveExternalDependencies(context.Background(), "org", d)
-
-	dep := d.Components[0].Dependencies[0]
-	if dep.Status != "" || dep.Reason != "" {
-		t.Errorf("registry lookup error: status/reason = %q/%q, want untouched (empty)", dep.Status, dep.Reason)
-	}
-}
-
 // TestResolveExternalDependencies_ComponentAndPlatformResourceAlwaysResolved
-// asserts the two kinds this layer never blocks on: they resolve regardless
-// of the registry resolver being wired.
+// asserts the two kinds this layer never blocks on: they always resolve.
 func TestResolveExternalDependencies_ComponentAndPlatformResourceAlwaysResolved(t *testing.T) {
 	store := &ArtifactStore{}
 
@@ -150,7 +82,6 @@ func TestResolveExternalDependencies_ComponentAndPlatformResourceAlwaysResolved(
 // dependencies are left completely alone here — resolveOrgServices owns them.
 func TestResolveExternalDependencies_OrgServiceUntouched(t *testing.T) {
 	store := &ArtifactStore{}
-	store.SetExternalResourceResolver(fakeExternalResourceResolver{})
 
 	d := &DesignFile{Components: []models.DesignComponent{{
 		Name: "checkout",
@@ -169,13 +100,12 @@ func TestResolveExternalDependencies_OrgServiceUntouched(t *testing.T) {
 
 // TestAssembleDesignFrom_ResolvesBothOrgServiceAndExternal is the read-path
 // wiring test: a single design mixing an `org-service` and an `external`
-// dependency gets BOTH resolved by one AssembleDesignFrom call.
+// dependency gets BOTH resolved by one AssembleDesignFrom call. The external
+// dependency resolves off its stored intent (an SDK-style dep with a package),
+// since the registry-reuse lookup was retired (D6).
 func TestAssembleDesignFrom_ResolvesBothOrgServiceAndExternal(t *testing.T) {
 	store := &ArtifactStore{}
 	store.SetOrgServiceResolver(fakeOrgServiceResolver{visible: map[string]bool{"billing": true}})
-	store.SetExternalResourceResolver(fakeExternalResourceResolver{
-		hits: map[string]*models.ExternalResource{"stripe": {Name: "stripe"}},
-	})
 
 	files := map[string]string{
 		DesignRootFile: "Overview.\n",
@@ -184,7 +114,7 @@ func TestAssembleDesignFrom_ResolvesBothOrgServiceAndExternal(t *testing.T) {
   "type": "service",
   "dependencies": [
     {"kind": "org-service", "name": "billing"},
-    {"kind": "external", "name": "stripe"}
+    {"kind": "external", "name": "stripe", "style": "sdk", "package": "npm:stripe@^14"}
   ]
 }
 `,
@@ -199,6 +129,6 @@ func TestAssembleDesignFrom_ResolvesBothOrgServiceAndExternal(t *testing.T) {
 		t.Errorf("org-service: status = %q, want %q", deps[0].Status, models.DependencyStatusResolved)
 	}
 	if deps[1].Status != models.DependencyStatusResolved {
-		t.Errorf("external (registry hit): status = %q, want %q", deps[1].Status, models.DependencyStatusResolved)
+		t.Errorf("external (sdk stored intent): status = %q, want %q", deps[1].Status, models.DependencyStatusResolved)
 	}
 }

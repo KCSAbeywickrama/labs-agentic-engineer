@@ -99,7 +99,6 @@ func TestProvision_OrchestratesResourceModel(t *testing.T) {
 
 	er := &models.ExternalResource{
 		Name:             "openweather",
-		ResourceTypeName: "openweather",
 		ConfigKeys: []models.ConfigKey{
 			{Key: "OPENWEATHER_BASE_URL", Secret: false},
 			{Key: "OPENWEATHER_API_KEY", Secret: true},
@@ -181,7 +180,7 @@ func TestProvision_AllPlain_NoSecretWrite(t *testing.T) {
 	sw := &fakeSecretWriter{}
 	p := newTestProvisioner(nil, rc, sw)
 	er := &models.ExternalResource{
-		Name: "plainsvc", ResourceTypeName: "plainsvc",
+		Name: "plainsvc",
 		ConfigKeys: []models.ConfigKey{{Key: "BASE_URL"}},
 	}
 	byEnv := map[string]EnvValues{"development": {Plain: map[string]string{"BASE_URL": "https://x"}}}
@@ -199,7 +198,7 @@ func TestProvision_SecretValuesWithoutSMAPI_Fails(t *testing.T) {
 	rc := newFakeRC("rel-1")
 	p := newTestProvisioner(nil, rc, &fakeSecretWriter{disabled: true})
 	er := &models.ExternalResource{
-		Name: "openweather", ResourceTypeName: "openweather",
+		Name: "openweather",
 		ConfigKeys: []models.ConfigKey{{Key: "OPENWEATHER_API_KEY", Secret: true}},
 	}
 	byEnv := map[string]EnvValues{"development": {Secret: map[string]string{"OPENWEATHER_API_KEY": "k"}}}
@@ -219,7 +218,7 @@ func TestAuthorWithSecretRef_UsesStagedRefNoSMWrite(t *testing.T) {
 	p := newTestProvisioner(nil, rc, sw)
 
 	er := &models.ExternalResource{
-		Name: "openweather", ResourceTypeName: "openweather",
+		Name: "openweather",
 		ConfigKeys: []models.ConfigKey{
 			{Key: "OPENWEATHER_BASE_URL", Secret: false},
 			{Key: "OPENWEATHER_API_KEY", Secret: true},
@@ -274,7 +273,7 @@ func TestProvision_Validation(t *testing.T) {
 	if _, err := p.Provision(context.Background(), "default", "oc-org-1", "proj", nil, nil); err == nil {
 		t.Error("want error on nil external resource")
 	}
-	er := &models.ExternalResource{Name: "x", ResourceTypeName: "x", ConfigKeys: []models.ConfigKey{{Key: "K"}}}
+	er := &models.ExternalResource{Name: "x", ConfigKeys: []models.ConfigKey{{Key: "K"}}}
 	if _, err := p.Provision(context.Background(), "", "oc-org-1", "proj", er, nil); err == nil {
 		t.Error("want error on empty orgHandle")
 	}
@@ -292,7 +291,7 @@ func TestStageSecrets_WritesPerEnvReturnsRefs(t *testing.T) {
 	sw := &fakeSecretWriter{}
 	p := newTestProvisioner(nil, newFakeRC("rel-1"), sw)
 	er := &models.ExternalResource{
-		Name: "stripe", ResourceTypeName: "stripe",
+		Name: "stripe",
 		ConfigKeys: []models.ConfigKey{{Key: "STRIPE_KEY", Secret: true}},
 	}
 	refByEnv, err := p.StageSecrets(context.Background(), "oc-org-1", "shop", er, map[string]map[string]string{

@@ -49,14 +49,6 @@ type ArtifactStore struct {
 	// already carry (always empty: Status/Reason are read-time computed and
 	// never persisted to design.json).
 	orgServices OrgServiceResolver
-	// externalResources resolves the rule-2 (registry reuse) lookup for
-	// `external` dependencies against the org's external-resource registry at
-	// design-read time (see resolveExternalDependencies). Nil until the
-	// composition root wires a concrete provider via
-	// SetExternalResourceResolver — until then, rule 2 never hits and
-	// `external` dependencies resolve on their remaining stored intent fields
-	// alone (rules 1, 3-6 need no resolver).
-	externalResources ExternalResourceResolver
 }
 
 func NewArtifactStore(artifactSvc ArtifactService) *ArtifactStore {
@@ -86,29 +78,6 @@ func (s *ArtifactStore) SetOrgServiceResolver(r OrgServiceResolver) {
 		return
 	}
 	s.orgServices = r
-}
-
-// ExternalResourceResolver answers whether a dependency name is registered in
-// the org's external-resource registry — the rule-2 (registry reuse) lookup
-// models.ComputeDependencyStatus needs for a kind=external dependency.
-// Declared here (consumer side), mirroring OrgServiceResolver, so artifacts
-// stays free of a repositories-package dependency; the concrete provider
-// (the dependencies feature's *repositories.ExternalResourceRepository) is
-// wired in by the composition root via SetExternalResourceResolver. Get
-// returns (nil, nil) when name is not registered.
-type ExternalResourceResolver interface {
-	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
-}
-
-// SetExternalResourceResolver wires the org external-resource registry used to
-// resolve the rule-2 registry-reuse lookup for `external` dependencies at
-// design-read time. A nil store is a documented no-op (mirrors
-// SetOrgServiceResolver).
-func (s *ArtifactStore) SetExternalResourceResolver(r ExternalResourceResolver) {
-	if s == nil {
-		return
-	}
-	s.externalResources = r
 }
 
 // ---- Design (multi-file directory) --------------------------------------
@@ -179,7 +148,7 @@ func (s *ArtifactStore) ReadDesignAt(ctx context.Context, orgID, projectID, comm
 // the single resolution authority models.ComputeDependencyStatus: each
 // `org-service` dependency is resolved against the live org endpoint catalog
 // (resolveOrgServices), and every other dependency — `external` against the
-// precedence table (registry-reuse + the stored intent fields),
+// precedence table (its own stored intent fields),
 // `component`/`platform-resource` trivially — is resolved by
 // resolveExternalDependencies. orgID is the OC namespace the org's Workloads
 // live in. Fail-open: a resolver error leaves the affected dependency
@@ -254,18 +223,14 @@ func (s *ArtifactStore) resolveOrgServices(ctx context.Context, orgID string, d 
 
 // resolveExternalDependencies computes every NON-org-service dependency's
 // read-time Status/Reason via models.ComputeDependencyStatus: `external`
-// against the precedence table (rule 2's registry-reuse lookup only fires
-// when the composition root has wired an ExternalResourceResolver — every
-// other rule derives purely from the dependency's own stored intent fields,
-// so it still resolves with no resolver wired); `component`/`platform-resource`
+// against the precedence table (derived purely from the dependency's own
+// stored intent fields — style/specPath/package — with no registry lookup:
+// the rule-2 registry-reuse hit was retired with the external_resources table,
+// D6, so registryHit is always false); `component`/`platform-resource`
 // trivially (no lookup at all). `org-service` dependencies are left
 // untouched — resolveOrgServices owns them (its per-call fail-open error
 // handling doesn't fit this simpler loop).
-//
-// Fail-open: a registry lookup error leaves the dependency's Status/Reason
-// completely untouched, mirroring resolveOrgServices' IsNamespaceVisible
-// fail-open — never fails the design read.
-func (s *ArtifactStore) resolveExternalDependencies(ctx context.Context, orgID string, d *DesignFile) {
+func (s *ArtifactStore) resolveExternalDependencies(_ context.Context, _ string, d *DesignFile) {
 	if s == nil || d == nil {
 		return
 	}
@@ -275,17 +240,7 @@ func (s *ArtifactStore) resolveExternalDependencies(ctx context.Context, orgID s
 			if dep.Kind == models.DependencyKindOrgService {
 				continue
 			}
-			var registryHit bool
-			if dep.Kind == models.DependencyKindExternal && s.externalResources != nil {
-				res, err := s.externalResources.Get(ctx, orgID, dep.Name)
-				if err != nil {
-					slog.WarnContext(ctx, "external-resource resolver: registry lookup failed",
-						"org", orgID, "dependency", dep.Name, "error", err)
-					continue
-				}
-				registryHit = res != nil
-			}
-			dep.Status, dep.Reason = models.ComputeDependencyStatus(*dep, registryHit, models.OrgServiceHit{})
+			dep.Status, dep.Reason = models.ComputeDependencyStatus(*dep, false, models.OrgServiceHit{})
 		}
 	}
 }

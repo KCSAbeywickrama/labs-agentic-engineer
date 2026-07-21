@@ -98,20 +98,19 @@ var (
 // get-design-bundle-at-tag, discard-design-changes, list-design-versions) was
 // removed outright — superseded by the Files API (list-files/read-file).
 // What remains: SaveAndProceed (hard gate → tag at HEAD, then task
-// reconciliation), CollectSpec (dependency spec collection), and the two
-// steps the thin POST /build path reuses pre-tag — DeriveEndUserAuthAtHead
-// and RegisterExternalResources (issue #164). There is no exported
-// interface — every caller holds the concrete type; the composition root
-// adapts the two build-path methods onto narrow consumer interfaces
-// (internal/app/build_adapters.go) since build cannot import design.
+// reconciliation), CollectSpec (dependency spec collection), and the pre-tag
+// step the thin POST /build path reuses — DeriveEndUserAuthAtHead (issue
+// #164). There is no exported interface — every caller holds the concrete
+// type; the composition root adapts the build-path method onto a narrow
+// consumer interface (internal/app/build_adapters.go) since build cannot
+// import design.
 type designService struct {
-	store               *artifacts.ArtifactStore
-	artifactSvc         artifacts.ArtifactService
-	taskSvc             taskReconciler            // for SaveAndProceed reconciliation; may be nil in tests
-	externalResourceReg externalResourceRegistrar // for SaveAndProceed external-resource registration; may be nil
-	provisionMinter     provisionIssueMinter      // for SaveAndProceed aep:provision gate minting; may be nil
-	fileCommitter       designFileCommitter       // for CollectSpec's committed-truth spec write; may be nil
-	resourceCatalog     resourceMarkerCatalog     // for SaveAndProceed end-user-auth derivation; may be nil (fails closed when platform-resource deps exist)
+	store           *artifacts.ArtifactStore
+	artifactSvc     artifacts.ArtifactService
+	taskSvc         taskReconciler       // for SaveAndProceed reconciliation; may be nil in tests
+	provisionMinter provisionIssueMinter // for SaveAndProceed aep:provision gate minting; may be nil
+	fileCommitter   designFileCommitter  // for CollectSpec's committed-truth spec write; may be nil
+	resourceCatalog resourceMarkerCatalog // for SaveAndProceed end-user-auth derivation; may be nil (fails closed when platform-resource deps exist)
 }
 
 // DesignFileWrite is one file in a CollectSpec atomic commit. Path is the full
@@ -159,15 +158,6 @@ type provisionIssueMinter interface {
 	EnsureProvisionIssues(ctx context.Context, orgID, projectID, designTag string) (map[string]int, error)
 }
 
-// externalResourceRegistrar is design_service's narrow consumer port for the
-// dependency-management external-resource catalog. *repositories.ExternalResourceRepository
-// satisfies it; defined here (consumer side) so design needn't import the
-// repositories package concretely. Wired via SetExternalResourceRegistry at the
-// composition root.
-type externalResourceRegistrar interface {
-	Upsert(ctx context.Context, orgID, name, description string, schema []models.ConfigKey) (*models.ExternalResource, error)
-}
-
 // taskReconciler is design_service's narrow consumer port for the task
 // feature's reconciliation hook. The full task.TaskService satisfies it.
 // Defining it here keeps design_service from importing the task package
@@ -191,13 +181,6 @@ func (s *designService) SetTaskService(taskSvc taskReconciler) {
 	s.taskSvc = taskSvc
 }
 
-// SetExternalResourceRegistry wires the external-resource catalog so `external`
-// dependencies are registered (best-effort) whenever a design is tagged. A nil
-// registry is a documented no-op (mirrors SetTaskService).
-func (s *designService) SetExternalResourceRegistry(reg externalResourceRegistrar) {
-	s.externalResourceReg = reg
-}
-
 // SetProvisionIssueMinter wires the provisioning feature so external /
 // platform-resource dependency gate issues are minted (best-effort) whenever a
 // design is tagged. A nil minter is a documented no-op.
@@ -218,46 +201,6 @@ func (s *designService) SetFileCommitter(c designFileCommitter) {
 // declares a platform-resource dependency; auth-free saves are unaffected.
 func (s *designService) SetResourceCatalog(c resourceMarkerCatalog) {
 	s.resourceCatalog = c
-}
-
-// registerExternalResources best-effort upserts every distinct `external`
-// dependency in the tagged design into the org's external-resource catalog (the
-// reusable definition layer consumers request access to later). Non-fatal: a
-// registry hiccup must never fail a design save — the value/wiring provisioning
-// happens later, independently, when a consumer requests access (Phase 6).
-func (s *designService) registerExternalResources(ctx context.Context, orgID string, design *artifacts.DesignFile) {
-	if s.externalResourceReg == nil || design == nil {
-		return
-	}
-	seen := map[string]struct{}{}
-	for _, c := range design.Components {
-		for _, dep := range c.Dependencies {
-			if dep.Kind != models.DependencyKindExternal {
-				continue
-			}
-			if _, ok := seen[dep.Name]; ok {
-				continue
-			}
-			seen[dep.Name] = struct{}{}
-			if _, err := s.externalResourceReg.Upsert(ctx, orgID, dep.Name, dep.Description, dep.Config); err != nil {
-				slog.WarnContext(ctx, "failed to register external resource",
-					"org", orgID, "resource", dep.Name, "error", err)
-			}
-		}
-	}
-}
-
-// RegisterExternalResources reads the design at HEAD and best-effort upserts
-// every distinct `external` dependency into the org catalog (the public entry
-// the build path's provisioning adapter calls before authoring bindings, so the
-// catalog resolves each external resource). A nil design is a no-op.
-func (s *designService) RegisterExternalResources(ctx context.Context, orgID, projectID string) error {
-	designFile, err := s.store.ReadDesign(ctx, orgID, projectID)
-	if err != nil {
-		return fmt.Errorf("design: read design: %w", err)
-	}
-	s.registerExternalResources(ctx, orgID, designFile)
-	return nil
 }
 
 // ListDependencies returns every component's dependencies in the design at
@@ -629,10 +572,6 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 
 	slog.InfoContext(ctx, "design save completed",
 		"project", projectID, "tag", res.Tag, "status", res.Status)
-
-	// Register every distinct `external` dependency in the tagged design into the
-	// org's external-resource catalog (best-effort; never fails the save).
-	s.registerExternalResources(ctx, orgID, designFile)
 
 	// Mint one aep:provision gate issue per distinct external / platform-resource
 	// dependency so consumer coding tasks hold until each is provisioned

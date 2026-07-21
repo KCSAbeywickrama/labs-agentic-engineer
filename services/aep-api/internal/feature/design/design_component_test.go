@@ -60,22 +60,12 @@ func (r staticOrgResolver) ExistsAnyVisibility(_ context.Context, _, name string
 	return r.visible[name], nil
 }
 
-// staticRegistryResolver is a minimal artifacts.ExternalResourceResolver:
-// `hits` names are registered (→ registry-reuse resolved); everything else is
-// absent.
-type staticRegistryResolver struct{ hits map[string]bool }
-
-func (r staticRegistryResolver) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
-	if r.hits[name] {
-		return &models.ExternalResource{Name: name}, nil
-	}
-	return nil, nil
-}
-
 // newDesignHarness assembles the real designService (wrapping the REAL
-// ArtifactStore over the given fake artifact service, with the org-service +
-// external-resource resolver ports wired) behind the real handler chain.
-func newDesignHarness(t *testing.T, files map[string]string, orgVisible map[string]bool, registryHits map[string]bool) *componenttest.Harness {
+// ArtifactStore over the given fake artifact service, with the org-service
+// resolver port wired) behind the real handler chain. External-resource status
+// derives purely from the design's own style/config (the registry-reuse rule
+// was retired with the external_resources table — D6).
+func newDesignHarness(t *testing.T, files map[string]string, orgVisible map[string]bool) *componenttest.Harness {
 	t.Helper()
 	fake := &artifactstest.FakeArtifactService{
 		ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
@@ -84,7 +74,6 @@ func newDesignHarness(t *testing.T, files map[string]string, orgVisible map[stri
 	}
 	store := artifacts.NewArtifactStore(fake)
 	store.SetOrgServiceResolver(staticOrgResolver{visible: orgVisible})
-	store.SetExternalResourceResolver(staticRegistryResolver{hits: registryHits})
 	svc := design.NewDesignService(store, fake)
 	return componenttest.New(t, componenttest.Options{Deps: api.Deps{DesignSvc: svc}})
 }
@@ -102,7 +91,7 @@ func mixedDependencyDesignFiles() map[string]string {
     {"kind": "org-service", "name": "billing"},
     {"kind": "external", "name": "stripe", "style": "rest-api", "specPath": "dependencies/stripe.openapi.yaml"},
     {"kind": "external", "name": "sendgrid"},
-    {"kind": "external", "name": "salesforce"},
+    {"kind": "external", "name": "salesforce", "style": "rest-api", "specPath": "dependencies/salesforce.openapi.yaml"},
     {"kind": "platform-resource", "name": "orders-db", "resourceType": "postgres-cnpg"}
   ]
 }
@@ -127,7 +116,7 @@ func TestDesignComponent_Unconfigured503(t *testing.T) {
 
 func TestDesignComponent_NoClaims401(t *testing.T) {
 	t.Parallel()
-	h := newDesignHarness(t, mixedDependencyDesignFiles(), nil, nil)
+	h := newDesignHarness(t, mixedDependencyDesignFiles(), nil)
 	if resp := h.NoAuth().Get(depsPath); resp.Code != 401 {
 		t.Fatalf("claimless: want the gate's ENFORCE 401, got %d body=%s", resp.Code, resp.Body.String())
 	}
@@ -142,8 +131,7 @@ func TestDesignComponent_NoClaims401(t *testing.T) {
 func TestDesignComponent_ListDependencies_ComputesStatusPerKind(t *testing.T) {
 	t.Parallel()
 	h := newDesignHarness(t, mixedDependencyDesignFiles(),
-		map[string]bool{"billing": true},    // org-service: namespace-visible → resolved
-		map[string]bool{"salesforce": true}, // external: registry reuse → resolved
+		map[string]bool{"billing": true}, // org-service: namespace-visible → resolved
 	)
 
 	resp := h.AsOrg("acme").Get(depsPath)
@@ -178,8 +166,9 @@ func TestDesignComponent_ListDependencies_ComputesStatusPerKind(t *testing.T) {
 		t.Errorf("sendgrid (external, no style): status/reason = %q/%q, want %q/%q",
 			d.Status, d.Reason, models.DependencyStatusUnresolved, models.DependencyReasonNeedsInput)
 	}
-	if d := byName["salesforce"]; d.Status != models.DependencyStatusResolved {
-		t.Errorf("salesforce (external, registry reuse): status = %q, want %q", d.Status, models.DependencyStatusResolved)
+	if d := byName["salesforce"]; d.Status != models.DependencyStatusResolved || d.SpecPath != "dependencies/salesforce.openapi.yaml" {
+		t.Errorf("salesforce (external, rest-api + specPath): status=%q specPath=%q, want %q/dependencies/salesforce.openapi.yaml",
+			d.Status, d.SpecPath, models.DependencyStatusResolved)
 	}
 	if d := byName["orders-db"]; d.Status != models.DependencyStatusResolved || d.ResourceType != "postgres-cnpg" {
 		t.Errorf("orders-db (platform-resource): status=%q resourceType=%q, want %q/postgres-cnpg",
@@ -191,7 +180,7 @@ func TestDesignComponent_ListDependencies_ComputesStatusPerKind(t *testing.T) {
 // (no design.md at all) surfaces as 404, not an empty list or a 500.
 func TestDesignComponent_ListDependencies_NoDesignIs404(t *testing.T) {
 	t.Parallel()
-	h := newDesignHarness(t, map[string]string{}, nil, nil)
+	h := newDesignHarness(t, map[string]string{}, nil)
 	resp := h.AsOrg("acme").Get(depsPath)
 	if resp.Code != 404 {
 		t.Fatalf("no design: want 404, got %d body=%s", resp.Code, resp.Body.String())

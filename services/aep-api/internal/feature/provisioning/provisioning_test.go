@@ -167,26 +167,6 @@ func (fakeRepos) ByFullName(context.Context, string) (string, string, error) {
 	return "acme", "warehouse", nil
 }
 
-type fakeCatalog struct {
-	entries map[string]*models.ExternalResource
-	deleted []string
-}
-
-func (f *fakeCatalog) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
-	return f.entries[name], nil
-}
-func (f *fakeCatalog) List(_ context.Context, _ string) ([]models.ExternalResource, error) {
-	out := make([]models.ExternalResource, 0, len(f.entries))
-	for _, e := range f.entries {
-		out = append(out, *e)
-	}
-	return out, nil
-}
-func (f *fakeCatalog) Delete(_ context.Context, _, name string) error {
-	f.deleted = append(f.deleted, name)
-	return nil
-}
-
 // fakeRTCatalog fakes ExternalRTCatalog — the OC-RT-backed org-settings
 // list+delete surface (Task 5) — with RT fixtures in place of DB rows.
 type fakeRTCatalog struct {
@@ -426,14 +406,13 @@ func designWithDeps() []models.DesignComponent {
 	}}
 }
 
-func newTestService(issues *fakeIssues, execs *fakeExecStore, reeval Reevaluator, design DesignReader, catalog *fakeCatalog, ext *fakeExtProv, plat *fakePlatProv, bindings *fakeBindings) *Service {
+func newTestService(issues *fakeIssues, execs *fakeExecStore, reeval Reevaluator, design DesignReader, ext *fakeExtProv, plat *fakePlatProv, bindings *fakeBindings) *Service {
 	return NewService(Deps{
 		Issues:   issues,
 		Execs:    execs,
 		Reeval:   reeval,
 		Design:   design,
 		Repos:    fakeRepos{},
-		Catalog:  catalog,
 		ExtProv:  ext,
 		PlatProv: plat,
 		Bindings: bindings,
@@ -444,7 +423,7 @@ func newTestService(issues *fakeIssues, execs *fakeExecStore, reeval Reevaluator
 
 func TestEnsureProvisionIssues_MintsPerDepDeduped(t *testing.T) {
 	issues := newFakeIssues(nil)
-	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(issues, &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 
 	gateByDep, err := svc.EnsureProvisionIssues(context.Background(), "org", "proj", "v1-1")
 	if err != nil {
@@ -502,15 +481,10 @@ func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
-	// The catalog's ConfigKeys carry the OPPOSITE secret shape from the
-	// design's dep.Config (api_key plain / region secret here, vs. api_key
-	// secret / region plain in designWithDeps): er/catalog.Get feeds RT
-	// authoring only, never classification. If the split ever started reading
-	// er.ConfigKeys instead of the design, this test would flip and catch it.
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key"}, {Key: "region", Secret: true}}},
-	}}
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
+	// Secret-vs-plain classification comes from the project's committed design
+	// (dep.Config), never a catalog: SaveValues reads the design to split
+	// api_key → secret, region → plain (see designWithDeps).
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, ext, &fakePlatProv{}, &fakeBindings{})
 
 	err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe", map[string]map[string]string{
 		"development": {"api_key": "sk_live_x", "region": "us"},
@@ -553,7 +527,7 @@ func TestProvision_PlatformIsAsync_LeftRunning(t *testing.T) {
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
 	plat := &fakePlatProv{}
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, plat, &fakeBindings{})
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, plat, &fakeBindings{})
 
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
 		t.Fatalf("Provision: %v", err)
@@ -589,7 +563,7 @@ func TestResourceWatcher_ReadyClosesGateAndReleases(t *testing.T) {
 	reeval := &fakeReeval{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{}}
 	plat := &fakePlatProv{}
-	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, plat, bindings)
+	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, plat, bindings)
 
 	// Provision (async) → running row pinned to the binding.
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
@@ -629,7 +603,7 @@ func TestResourceWatcher_StaleFails(t *testing.T) {
 	issues := newFakeIssues([]gitrepo.IssueInfo{gate})
 	execs := &fakeExecStore{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{"o-orders-db-development": {}}}
-	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
+	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 	if err := svc.Provision(context.Background(), "org", "proj", "orders-db", nil, nil); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
@@ -648,7 +622,7 @@ func TestStatus_MasksOutputsToNames(t *testing.T) {
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
 		"proj-orders-db-development": readyBinding("host", "port"),
 	}}
-	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 	st, err := svc.Status(context.Background(), "org", "proj", "orders-db", "")
 	if err != nil {
 		t.Fatalf("Status: %v", err)
@@ -856,7 +830,7 @@ func TestDeprovisionProject_TearsDownResources(t *testing.T) {
 
 func TestSaveValues_WrongKind400(t *testing.T) {
 	// stripe is external; asking to provision it as a platform resource is wrong-kind.
-	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
 	err := svc.Provision(context.Background(), "org", "proj", "stripe", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), resources.ErrDepWrongKind.Error()) {
 		t.Fatalf("provisioning an external dep as a resource must be wrong-kind, got %v", err)
@@ -901,9 +875,8 @@ func contains(ss []string, want string) bool {
 // provisioner must never be called.
 func TestSaveValues_DesignReadErrorFails(t *testing.T) {
 	ext := &fakeExtProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{"stripe": {Name: "stripe"}}}
 	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{},
-		fakeDesign{err: fmt.Errorf("boom")}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
+		fakeDesign{err: fmt.Errorf("boom")}, ext, &fakePlatProv{}, &fakeBindings{})
 
 	err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
 		map[string]map[string]string{"development": {"api_key": "sk_live_x"}})
@@ -924,7 +897,6 @@ func TestSaveValues_DesignReadErrorFails(t *testing.T) {
 func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
 	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
 	ext := &fakeExtProv{}
-	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{"stripe": {Name: "stripe"}}}
 	comps := []models.DesignComponent{
 		{Name: "webhook-worker", Dependencies: []models.Dependency{
 			{Kind: models.DependencyKindExternal, Name: "stripe", Config: []models.ConfigKey{{Key: "api_key"}}}, // plain, first
@@ -934,7 +906,7 @@ func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
 		}},
 	}
 	svc := newTestService(newFakeIssues([]gitrepo.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
-		fakeDesign{comps: comps}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
+		fakeDesign{comps: comps}, ext, &fakePlatProv{}, &fakeBindings{})
 
 	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
 		map[string]map[string]string{"development": {"api_key": "sk_live_x"}}); err != nil {
@@ -961,7 +933,7 @@ func TestSaveValues_AuthorsDefinitionFromDesign(t *testing.T) {
 	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
 	ext := &fakeExtProv{}
 	svc := newTestService(newFakeIssues([]gitrepo.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
-		fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, ext, &fakePlatProv{}, &fakeBindings{}) // empty catalog
+		fakeDesign{comps: designWithDeps()}, ext, &fakePlatProv{}, &fakeBindings{}) // empty catalog
 
 	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
 		map[string]map[string]string{"development": {"api_key": "sk", "region": "us"}}); err != nil {

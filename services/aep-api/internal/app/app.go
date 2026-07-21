@@ -863,20 +863,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		endpoints.WithRepoLocator(repoRepo),
 		endpoints.WithDesignReader(artifactStore),
 	)
-	// externalResourceRepo remains the org-level registry's WRITE/reuse-resolve
-	// side (design-save upsert, ComputeDependencyStatus's registry-reuse rule,
-	// the OC ResourceType-authoring schema Provision/authorExternalWithRef read)
-	// — none of that is in scope here. Secret-vs-plain CLASSIFICATION (the
-	// provision value split + ResolveRunnerSecrets) reads the project's
-	// committed design.json instead, never this registry (parity with the
-	// build path). The MCP list_external_resources/get_external_resource_schema
-	// tools AND the org-settings external-resources list+delete surface (Task
-	// 5) re-source to the org's provisioned ResourceTypes instead (Task 3):
-	// only a PROVISIONED external has an authored RT, so both surfaces now
-	// reflect provisioned externals only (D2), never this table — it is read
-	// only via externalResourceRepo.Get by the provision/value-collection paths
-	// below.
-	externalResourceRepo := repositories.NewExternalResourceRepository(db)
+	// External-resource definitions are no longer persisted in AEP's database:
+	// the authored OpenChoreo ResourceType is the org-level registry (read back
+	// via openchoreo.ExternalDefinitionFromRT). MCP discovery + org-settings
+	// list/delete re-source to those provisioned RTs; secret classification and
+	// RT authoring read the project's committed design.json.
 	// externalResourceRTCatalog is the single OC-RT-backed instance shared by
 	// the MCP discovery surface (List/Get) and the org-settings
 	// list+delete surface wired into provisioningSvc below (List/Delete) — one
@@ -921,20 +912,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// artifacts.OrgServiceResolver structurally).
 	artifactStore.SetOrgServiceResolver(orgEndpointCatalog)
 
-	// Read-time external-dependency registry-reuse resolution (rule 2 of the
-	// `external` precedence table, ComputeDependencyStatus): the same registry
-	// repository the design-save path upserts into (below) also answers the
-	// read-time "is this name already registered?" lookup. Consumer-side wiring
-	// — artifacts never imports the repositories package (the
-	// *ExternalResourceRepository satisfies artifacts.ExternalResourceResolver
-	// structurally).
-	artifactStore.SetExternalResourceResolver(externalResourceRepo)
-
-	// Register each tagged design's `external` dependencies into the org's
-	// external-resource catalog on save (best-effort). Consumer-side port —
-	// design never imports repositories concretely.
-	designService.SetExternalResourceRegistry(externalResourceRepo)
-
 	// Dependency provisioning (dependency-management Phase 6): the value/param
 	// collection surface + the aep:provision gate funnel. The provisioner cores
 	// author the OC Resource model; the service drives gate issues + provision
@@ -977,7 +954,6 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		Reeval:    funnel,
 		Design:    designComponents{store: artifactStore},
 		Repos:     repoNamer{repos: repoRepo, db: db},
-		Catalog:   externalResourceRepo,
 		RTCatalog: externalResourceRTCatalog,
 		ExtProv:   externalProvisioner,
 		PlatProv:  platformProvisioner,
@@ -1148,7 +1124,7 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 			Planner:            devflowPlanner{plan: taskPlan, reads: taskReads},
 			Validator:          devflowValidator{store: artifactStore, comp: componentService},
 			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},
-			Provisioner:        buildProvisioner{design: designService, prov: provisioningSvc},
+			Provisioner:        buildProvisioner{prov: provisioningSvc},
 		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

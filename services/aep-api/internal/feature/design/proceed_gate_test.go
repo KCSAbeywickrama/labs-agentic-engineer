@@ -24,7 +24,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts/artifactstest"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // --- proceed-gate (dependency-management Phase 5) ----------------------------
@@ -57,13 +56,6 @@ func (r gateOrgResolver) ExistsAnyVisibility(_ context.Context, _, name string) 
 	return r.exists[name] || r.visible[name], nil
 }
 
-// recordingRegistrar records the external-resource Upsert calls made on save.
-type recordingRegistrar struct{ names []string }
-
-func (r *recordingRegistrar) Upsert(_ context.Context, _, name, _ string, _ []models.ConfigKey) (*models.ExternalResource, error) {
-	r.names = append(r.names, name)
-	return &models.ExternalResource{Name: name}, nil
-}
 
 // designFilesWithDeps is a well-formed design tree whose single `consumer`
 // component carries the given dependencies JSON array.
@@ -156,15 +148,12 @@ func TestSaveAndProceed_GateAllowsResolvedOrgService(t *testing.T) {
 
 // TestSaveAndProceed_GateIgnoresValuesAndPlatformResource asserts the gate does
 // NOT block config-only external deps or platform-resource deps (they are
-// dispatch-gated in Phase 6), and that external deps are registered into the
-// org catalog on a successful save.
+// dispatch-gated in Phase 6).
 func TestSaveAndProceed_GateIgnoresValuesAndPlatformResource(t *testing.T) {
 	t.Parallel()
 	deps := `[{"kind":"external","name":"sendgrid"},{"kind":"platform-resource","name":"orders-db","resourceType":"postgres"}]`
 	fake := happySave(designFilesWithDeps(deps))
 	svc := newService(fake)
-	reg := &recordingRegistrar{}
-	svc.SetExternalResourceRegistry(reg)
 	// A platform-resource dep is present, so the save fetches CRT markers; the
 	// postgres type carries no end-user-auth role, so nothing is stamped.
 	svc.resourceCatalog = &fakeMarkerCatalog{markers: map[string]resources.TypeMarkers{}}
@@ -175,10 +164,5 @@ func TestSaveAndProceed_GateIgnoresValuesAndPlatformResource(t *testing.T) {
 	}
 	if got.Status != "approved" {
 		t.Fatalf("status = %q, want approved", got.Status)
-	}
-	// The config-only external dep is registered on save; the platform-resource
-	// is not an external and must not be.
-	if len(reg.names) != 1 || reg.names[0] != "sendgrid" {
-		t.Fatalf("external-resource registration: got %v, want [sendgrid]", reg.names)
 	}
 }

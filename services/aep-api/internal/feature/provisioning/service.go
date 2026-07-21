@@ -42,7 +42,6 @@ type Service struct {
 	reeval    Reevaluator
 	design    DesignReader
 	repos     RepoLocator
-	catalog   ExternalResourceCatalog
 	rtCatalog ExternalRTCatalog
 	extProv   ExternalProvisioner
 	platProv  PlatformProvisioner
@@ -88,7 +87,6 @@ type Deps struct {
 	Reeval    Reevaluator
 	Design    DesignReader
 	Repos     RepoLocator
-	Catalog   ExternalResourceCatalog
 	RTCatalog ExternalRTCatalog
 	ExtProv   ExternalProvisioner
 	PlatProv  PlatformProvisioner
@@ -106,7 +104,6 @@ func NewService(d Deps) *Service {
 		reeval:    d.Reeval,
 		design:    d.Design,
 		repos:     d.Repos,
-		catalog:   d.Catalog,
 		rtCatalog: d.RTCatalog,
 		extProv:   d.ExtProv,
 		platProv:  d.PlatProv,
