@@ -709,6 +709,7 @@ type OrganizationView struct {
 
 // PlatformResourceTypeDTO defines model for PlatformResourceTypeDTO.
 type PlatformResourceTypeDTO struct {
+	Consumers   []ConsumerDTO          `json:"consumers,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	Name        string                 `json:"name"`
 	Outputs     []string               `json:"outputs,omitempty"`

@@ -3425,6 +3425,11 @@ components:
     PlatformResourceTypeDTO:
       additionalProperties: false
       properties:
+        consumers:
+          items:
+            $ref: '#/components/schemas/ConsumerDTO'
+          type: array
+          nullable: true
         description:
           type: string
         name:

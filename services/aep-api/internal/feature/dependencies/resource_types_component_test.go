@@ -34,7 +34,9 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/api"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
+	"github.com/wso2/aep/aep-api/internal/feature/provisioning"
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
+	"github.com/wso2/aep/aep-api/models"
 )
 
 // stubResourceTypeLister satisfies dependencies.ResourceTypeLister.
@@ -45,6 +47,28 @@ type stubResourceTypeLister struct {
 
 func (s stubResourceTypeLister) List(context.Context) ([]resources.PlatformResourceType, error) {
 	return s.types, s.err
+}
+
+// stubDesignReader satisfies provisioning.DesignReader — the single-project
+// committed-design fixture the consumers overlay tests scan.
+type stubDesignReader struct{ comps []models.DesignComponent }
+
+func (s stubDesignReader) ReadDesignComponents(context.Context, string, string) ([]models.DesignComponent, error) {
+	return s.comps, nil
+}
+
+// stubProjectLister satisfies provisioning.ProjectLister, org-filtered like
+// the real repository-backed adapter.
+type stubProjectLister struct{ refs []provisioning.ProjectRef }
+
+func (s stubProjectLister) ListProjects(_ context.Context, orgID string) ([]provisioning.ProjectRef, error) {
+	var out []provisioning.ProjectRef
+	for _, r := range s.refs {
+		if r.OrgID == orgID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func newLister(t *testing.T, lister stubResourceTypeLister) *componenttest.Harness {
@@ -132,5 +156,68 @@ func TestPlatformResourceTypes_NoClaims401(t *testing.T) {
 
 	if resp := h.NoAuth().Get("/api/v1/dependencies/platform-resource-types"); resp.Code != 401 {
 		t.Fatalf("claimless: want 401, got %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+// The "used by" overlay: a component's platform-resource dependency
+// (design-scanned across the calling org's projects, via the real
+// provisioning.Service) surfaces as a ConsumerDTO on its matching type, keyed
+// case-insensitively on resourceType — mirroring how ExternalResourceDTO
+// carries its own design-scanned consumers.
+func TestPlatformResourceTypes_ConsumersOverlay(t *testing.T) {
+	t.Parallel()
+	prov := provisioning.NewService(provisioning.Deps{
+		Design: stubDesignReader{comps: []models.DesignComponent{{
+			Name: "orders",
+			Dependencies: []models.Dependency{
+				// Mixed-case resourceType must still match the "postgres-cnpg" type.
+				{Kind: models.DependencyKindPlatformResource, Name: "orders-db", ResourceType: "Postgres-CNPG"},
+			},
+		}}},
+		Projects: stubProjectLister{refs: []provisioning.ProjectRef{{OrgID: "acme", ProjectID: "shop"}}},
+	})
+	h := componenttest.New(t, componenttest.Options{Deps: api.Deps{
+		ResourceTypeCatalog: stubResourceTypeLister{types: []resources.PlatformResourceType{
+			{Name: "postgres-cnpg"},
+			{Name: "redis-cache"},
+		}},
+		ProvisioningSvc: prov,
+	}})
+
+	resp := h.AsOrg("acme").Get("/api/v1/dependencies/platform-resource-types")
+	if resp.Code != 200 {
+		t.Fatalf("list: got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got []apigen.PlatformResourceTypeDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if len(got[0].Consumers) != 1 || got[0].Consumers[0].ProjectID != "shop" || got[0].Consumers[0].ComponentName != "orders" {
+		t.Fatalf("postgres-cnpg consumers = %+v, want the design-scanned orders consumer", got[0].Consumers)
+	}
+	if len(got[1].Consumers) != 0 {
+		t.Fatalf("redis-cache must have no consumers, got %+v", got[1].Consumers)
+	}
+}
+
+// A nil/unwired ProvisioningSvc must not fail the request — the consumers
+// overlay is additive on top of the primary catalog data.
+func TestPlatformResourceTypes_NoProvisioningSvc_ConsumersEmpty(t *testing.T) {
+	t.Parallel()
+	h := newLister(t, stubResourceTypeLister{types: []resources.PlatformResourceType{{Name: "postgres-cnpg"}}})
+
+	resp := h.AsOrg("acme").Get("/api/v1/dependencies/platform-resource-types")
+	if resp.Code != 200 {
+		t.Fatalf("list: got %d body=%s", resp.Code, resp.Body.String())
+	}
+	var got []apigen.PlatformResourceTypeDTO
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body: %v\n%s", err, resp.Body.String())
+	}
+	if len(got) != 1 || len(got[0].Consumers) != 0 {
+		t.Fatalf("want no consumers with an unwired ProvisioningSvc, got %+v", got)
 	}
 }
