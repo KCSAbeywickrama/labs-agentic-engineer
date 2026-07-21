@@ -58,6 +58,9 @@ jobs:
       - name: Dead-code gate (aep-api)
         run: make -C services/aep-api deadcode-check
 
+      - name: Dead-code gate (TS — agents + playground)
+        run: make deadcode-ts-check
+
       - name: Lint
         run: make lint
 
