@@ -55,7 +55,8 @@ export function SettingsLayout() {
       <PageTitle>
         <PageTitle.Header>Settings</PageTitle.Header>
         <PageTitle.SubHeader>
-          Org-level GitHub and Anthropic credentials, and the skills catalogue
+          Org-level GitHub and Anthropic credentials, the skills catalogue, and
+          shared resources
         </PageTitle.SubHeader>
       </PageTitle>
 
