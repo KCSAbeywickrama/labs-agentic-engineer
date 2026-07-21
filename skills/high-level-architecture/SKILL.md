@@ -274,6 +274,15 @@ line and keep emitting the rest; the user replies in the same chat to steer or
 resolve it, now or later (see "Resolving or reconsidering a named dependency"
 below).
 
+**Close with a scannable summary, not a recap.** When the design is complete,
+end the turn with three parts and nothing more: (1) one line per component —
+name, type, one-clause role; (2) a **"Needs your input"** block listing ONLY
+the dependencies still ambiguous or unresolved, each with the single thing you
+need from the user; (3) a one-line pointer to `specs/design/`. The
+per-dependency narration above already carried the play-by-play, so the
+closing summary stays short and the user's next action is unmissable — a
+file-by-file recap buries it.
+
 ### Resolving an `external` dependency
 
 `external` is the one kind with real-world discovery to do — the SaaS or
@@ -404,17 +413,30 @@ A later chat turn may point you at a single dependency by name — a lean
 message like "resolve the `email` dependency on `notification-service`" or
 "reconsider the `stripe` dependency on `billing-api`". The message carries no
 dependency JSON and no playbook by design — you already have both: read that
-dependency's current entry straight from
-`specs/design/components/<component>/design.json` (it's part of the turn's
-snapshot), then apply the discovery/classification playbook above for its
-`kind` — the sibling check for `component`, `list_org_endpoints` for
-`org-service`, `list_platform_resource_types` for `platform-resource`, or the
-full `external` procedure — to either fill it in (it's unresolved) or change
-it (reconsider: present fresh alternatives as `candidates`, or repin
-per the user's steer, REMOVING `candidates` entirely per step 7 above once one
-is chosen). Edit ONLY that one dependency's entry: re-emit the component's
-whole `design.json` (never a patch) with every other field and dependency
-carried over exactly as they were.
+dependency's current entry from
+`specs/design/components/<component>/design.json` (it's in the turn's
+snapshot), then act on its current state:
+
+- **Ambiguous — it already carries `candidates`.** The user clicked to CHOOSE,
+  so hand them the choice: list the candidate options with a one-line
+  distinction each, and add that they may pick one of these or name another
+  relevant option. Pin the option the user names — the same signal rule as
+  discovery, so with no signal the choice stays theirs. Once they name one,
+  apply that candidate's `kind` playbook to finalize `style`/`package`/
+  `specPath`/`config`, and REMOVE the `candidates` array per step 7.
+- **Unresolved — needs-input or needs-spec, no `candidates`.** Apply the
+  discovery/classification playbook above for its `kind` (sibling check for
+  `component`, `list_org_endpoints` for `org-service`,
+  `list_platform_resource_types` for `platform-resource`, the full `external`
+  procedure). A signal-backed winner → pin it; 2+ equals with no signal → emit
+  them as `candidates` and let the user choose.
+- **Reconsider — it's already resolved.** Present fresh alternatives as
+  `candidates`, or repin to the one the user names, removing `candidates` once
+  one is chosen.
+
+Edit ONLY that one dependency's entry: re-emit the component's whole
+`design.json` (never a patch) with every other field and dependency carried
+over exactly as they were.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;
