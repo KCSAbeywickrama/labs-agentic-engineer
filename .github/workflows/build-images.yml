@@ -9,6 +9,13 @@ on:
   push:
     branches: [main]
 
+# Supersede in-flight builds when a PR branch is pushed again. Without this a
+# force-push stacks builds on the same ref, and a hung emulated build (see the
+# amd64-only note below) can otherwise burn runner minutes up to the 6h ceiling.
+concurrency:
+  group: build-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ── Detect which image sources changed ───────────────────────────────────────
   changes:
@@ -72,6 +79,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.has-images == 'true'
     runs-on: ubuntu-latest
+    # A single-platform native build is minutes; the arm64 half under QEMU was
+    # tens of minutes and occasionally hung. This ceiling kills a stuck build
+    # instead of letting it run to the GitHub 6h limit.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
@@ -90,6 +101,11 @@ jobs:
           # every other image); see services/aep-api/Dockerfile COPY --from=skills.
           build-contexts: ${{ matrix.buildContexts }}
           push: false
-          platforms: linux/amd64,linux/arm64
+          # PR validation only proves the Dockerfile still builds — one native
+          # platform is enough for that. The arm64 half ran under QEMU emulation
+          # (5–10x slower, and prone to hanging), so it's dropped here. True
+          # multi-arch (linux/amd64,linux/arm64) is built AND published by
+          # release.yml, which is the workflow that actually needs both arches.
+          platforms: linux/amd64
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
