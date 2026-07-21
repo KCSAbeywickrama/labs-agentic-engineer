@@ -151,10 +151,13 @@ type fakeReeval struct{ calls int }
 
 func (f *fakeReeval) Reevaluate(context.Context) error { f.calls++; return nil }
 
-type fakeDesign struct{ comps []models.DesignComponent }
+type fakeDesign struct {
+	comps []models.DesignComponent
+	err   error
+}
 
 func (f fakeDesign) ReadDesignComponents(context.Context, string, string) ([]models.DesignComponent, error) {
-	return f.comps, nil
+	return f.comps, f.err
 }
 
 type fakeRepos struct{}
@@ -466,8 +469,13 @@ func TestSaveValues_ProvisionsAndClosesGate(t *testing.T) {
 	execs := &fakeExecStore{}
 	reeval := &fakeReeval{}
 	ext := &fakeExtProv{}
+	// The catalog's ConfigKeys carry the OPPOSITE secret shape from the
+	// design's dep.Config (api_key plain / region secret here, vs. api_key
+	// secret / region plain in designWithDeps): er/catalog.Get feeds RT
+	// authoring only, never classification. If the split ever started reading
+	// er.ConfigKeys instead of the design, this test would flip and catch it.
 	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{
-		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}},
+		"stripe": {Name: "stripe", ConfigKeys: []models.ConfigKey{{Key: "api_key"}, {Key: "region", Secret: true}}},
 	}}
 	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
 
@@ -822,4 +830,61 @@ func contains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestSaveValues_DesignReadErrorFails: a design-read failure must fail the
+// call, NOT fall through to classifying every submitted value as plain for
+// lack of a schema (which would leak a secret into a ConfigMap). The external
+// provisioner must never be called.
+func TestSaveValues_DesignReadErrorFails(t *testing.T) {
+	ext := &fakeExtProv{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{"stripe": {Name: "stripe"}}}
+	svc := newTestService(newFakeIssues(nil), &fakeExecStore{}, &fakeReeval{},
+		fakeDesign{err: fmt.Errorf("boom")}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
+
+	err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
+		map[string]map[string]string{"development": {"api_key": "sk_live_x"}})
+	if err == nil {
+		t.Fatal("SaveValues must return an error when the design cannot be read")
+	}
+	if ext.calls != 0 {
+		t.Fatalf("external provisioner must NOT be called on a design-read failure, got %d", ext.calls)
+	}
+}
+
+// TestSaveValues_UnionSecretAcrossComponents: when two components declare the
+// same external dependency and only ONE marks a key secret, the value must be
+// classified secret (secret wins across the union) — regardless of which
+// component the design scan lists first. The component that declares api_key
+// PLAIN is listed FIRST here, so a first-component-wins classification would
+// leak the value into the plain map.
+func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
+	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
+	ext := &fakeExtProv{}
+	catalog := &fakeCatalog{entries: map[string]*models.ExternalResource{"stripe": {Name: "stripe"}}}
+	comps := []models.DesignComponent{
+		{Name: "webhook-worker", Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "stripe", Config: []models.ConfigKey{{Key: "api_key"}}}, // plain, first
+		}},
+		{Name: "checkout", Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "stripe", Config: []models.ConfigKey{{Key: "api_key", Secret: true}}}, // secret
+		}},
+	}
+	svc := newTestService(newFakeIssues([]gitrepo.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
+		fakeDesign{comps: comps}, catalog, ext, &fakePlatProv{}, &fakeBindings{})
+
+	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
+		map[string]map[string]string{"development": {"api_key": "sk_live_x"}}); err != nil {
+		t.Fatalf("SaveValues: %v", err)
+	}
+	if ext.calls != 1 {
+		t.Fatalf("external provisioner must be called once, got %d", ext.calls)
+	}
+	ev := ext.byEnv["development"]
+	if ev.Secret["api_key"] != "sk_live_x" {
+		t.Fatalf("api_key must be classified SECRET via the union (secret wins); got secret=%v plain=%v", ev.Secret, ev.Plain)
+	}
+	if _, leaked := ev.Plain["api_key"]; leaked {
+		t.Fatal("api_key leaked into the plain map despite being secret in one component")
+	}
 }

@@ -125,6 +125,17 @@ func (s *Service) findDepInProject(ctx context.Context, orgID, projectID, depNam
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read design: %w", err)
 	}
+	return matchDependency(comps, depName, kind)
+}
+
+// matchDependency scans already-read design components for the first
+// dependency matching (depName, kind) case-insensitively — the pure half of
+// findDepInProject, split out so a caller that also needs the full comps
+// slice for other purposes (SaveValues computes the UNION config schema
+// across every component) can read the design ONCE and reuse it, instead of
+// paying for a second design read. Returns ErrDepNotFound when no dependency
+// of that name exists and ErrDepWrongKind when it exists as another kind.
+func matchDependency(comps []models.DesignComponent, depName, kind string) (*models.Dependency, error) {
 	var wrongKind bool
 	for i := range comps {
 		for j := range comps[i].Dependencies {

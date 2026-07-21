@@ -16,6 +16,8 @@
 
 package models
 
+import "strings"
+
 // Component type vocabulary. AEP uses OpenChoreo's OWN terms end-to-end —
 // these are OC's ComponentType names minus the `deployment/` prefix (OC:
 // `deployment/service`, `deployment/web-application`), so no translation
@@ -300,6 +302,72 @@ type ExposesAPI struct {
 	// catalog lists it as a cross-project `org-service` target. Deliberate +
 	// source-of-truth: the provider owns this; the platform never patches it.
 	OrgPublished bool `json:"orgPublished,omitempty"`
+}
+
+// UnionExternalConfigKeys scans comps and returns, per external dependency
+// name, the UNION of Config[] declared by every component whose
+// Dependencies[] names it — a key present in ANY component's Config is
+// included, and Secret is OR'd across every declaring component, so a key
+// already marked secret by one component can never be downgraded to plain by
+// another component that omits it or marks it plain (secret wins). Dependency
+// names are grouped case-insensitively (the same fold match
+// provisioning.findDepInProject uses to locate a dependency) but keyed in the
+// result by the FIRST-SEEN exact casing, so a stray casing difference between
+// two components declaring "the same" external dependency cannot split it
+// into two separate map entries.
+//
+// This is the single source of truth two request-time classification paths
+// read (provisioning.SaveValues and dependencies/resources'
+// secretKeysByName). It MUST stay behaviorally identical to the build path's
+// independently-implemented secretKeysByDep
+// (internal/feature/build/inputs_coordinator.go), which performs the same
+// union-merge, secret-wins accumulation in its own package.
+func UnionExternalConfigKeys(comps []DesignComponent) map[string][]ConfigKey {
+	out := map[string][]ConfigKey{}
+	canonName := map[string]string{}        // lower(name) -> first-seen exact name
+	keyIndex := map[string]map[string]int{} // lower(name) -> config key -> index into out[canonName[lower(name)]]
+	for _, c := range comps {
+		for _, d := range c.Dependencies {
+			if d.Kind != DependencyKindExternal {
+				continue
+			}
+			lower := strings.ToLower(d.Name)
+			name, ok := canonName[lower]
+			if !ok {
+				name = d.Name
+				canonName[lower] = name
+				keyIndex[lower] = map[string]int{}
+			}
+			idx := keyIndex[lower]
+			merged := out[name]
+			for _, k := range d.Config {
+				if i, exists := idx[k.Key]; exists {
+					if k.Secret {
+						merged[i].Secret = true
+					}
+					continue
+				}
+				idx[k.Key] = len(merged)
+				merged = append(merged, k)
+			}
+			out[name] = merged
+		}
+	}
+	return out
+}
+
+// UnionExternalConfigFor returns the UNION Config[] schema (see
+// UnionExternalConfigKeys) for the external dependency matching depName
+// case-insensitively, or nil when no component in comps declares it. Callers
+// that already know the exact dependency name they want (e.g. SaveValues)
+// use this instead of scanning UnionExternalConfigKeys's full map themselves.
+func UnionExternalConfigFor(comps []DesignComponent, depName string) []ConfigKey {
+	for name, cfg := range UnionExternalConfigKeys(comps) {
+		if strings.EqualFold(name, depName) {
+			return cfg
+		}
+	}
+	return nil
 }
 
 // DesignComponents is a slice of DesignComponent.

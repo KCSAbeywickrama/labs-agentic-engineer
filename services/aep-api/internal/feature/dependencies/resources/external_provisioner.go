@@ -322,9 +322,13 @@ func (p *ExternalResourceProvisioner) ResolveRunnerSecrets(ctx context.Context, 
 
 // secretKeysByName reads the project's committed design at HEAD and returns,
 // per external dependency name, its secret config keys (Config[].Secret ==
-// true) — mirroring the build path's secretKeysByDep (internal/feature/build/
-// inputs_coordinator.go). A nil design reader (degraded/absent) yields an
-// empty map: every name is then skipped by the caller (len(keys) == 0), never
+// true), MERGED across every component that declares that name — mirroring
+// the build path's secretKeysByDep (internal/feature/build/
+// inputs_coordinator.go) via the shared models.UnionExternalConfigKeys helper,
+// so a name declared by two components no longer has its second component's
+// keys silently overwrite the first's (each name's config UNIONs; secret
+// wins on conflict). A nil design reader (degraded/absent) yields an empty
+// map: every name is then skipped by the caller (len(keys) == 0), never
 // treated as secret-free by falling back to the org catalog. A dependency
 // absent from the design, or with no config[], likewise resolves to no keys.
 func (p *ExternalResourceProvisioner) secretKeysByName(ctx context.Context, orgHandle, projectName string) (map[string][]string, error) {
@@ -336,20 +340,15 @@ func (p *ExternalResourceProvisioner) secretKeysByName(ctx context.Context, orgH
 	if err != nil {
 		return nil, err
 	}
-	for _, comp := range comps {
-		for _, dep := range comp.Dependencies {
-			if dep.Kind != models.DependencyKindExternal {
-				continue
+	for name, cfg := range models.UnionExternalConfigKeys(comps) {
+		var keys []string
+		for _, k := range cfg {
+			if k.Secret {
+				keys = append(keys, k.Key)
 			}
-			var keys []string
-			for _, k := range dep.Config {
-				if k.Secret {
-					keys = append(keys, k.Key)
-				}
-			}
-			if len(keys) > 0 {
-				out[dep.Name] = keys
-			}
+		}
+		if len(keys) > 0 {
+			out[name] = keys
 		}
 	}
 	return out, nil
