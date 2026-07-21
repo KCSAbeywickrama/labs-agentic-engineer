@@ -61,6 +61,39 @@ describe("activityLine", () => {
     expect(line.tone).toBe("neutral");
   });
 
+  it("renders a spec_updated event with the instruction subject", () => {
+    const event: ActivityEvent = {
+      id: "evt-4",
+      type: "spec_updated",
+      actorKind: "user",
+      actorId: VIEWER_EMAIL,
+      actorName: "Viewer Name",
+      title: "add a gym tracker web app",
+      occurredAt: "2026-07-17T10:02:00Z",
+    };
+
+    const line = activityLine(event, VIEWER_EMAIL);
+
+    expect(line.actor).toBe("You");
+    expect(line.text).toBe("updated the spec — add a gym tracker web app");
+    expect(line.tone).toBe("neutral");
+  });
+
+  it("renders a spec_updated event without a title", () => {
+    const event: ActivityEvent = {
+      id: "evt-5",
+      type: "spec_updated",
+      actorKind: "agent",
+      actorName: "Spec agent",
+      occurredAt: "2026-07-17T10:03:00Z",
+    };
+
+    const line = activityLine(event, VIEWER_EMAIL);
+
+    expect(line.actor).toBe("Spec agent");
+    expect(line.text).toBe("updated the spec");
+  });
+
   it("renders the teammate's name when the actor is a different user", () => {
     const event: ActivityEvent = {
       id: "evt-3",

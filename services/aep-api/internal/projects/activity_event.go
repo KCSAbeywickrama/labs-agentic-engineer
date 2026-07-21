@@ -37,7 +37,7 @@ type ActivityEvent struct {
 	OrgID     string `gorm:"not null;uniqueIndex:ux_activity_events_dedup,priority:1;index:idx_activity_events_feed,priority:1" json:"-"`
 	ProjectID string `gorm:"not null;uniqueIndex:ux_activity_events_dedup,priority:2;index:idx_activity_events_feed,priority:2" json:"-"`
 
-	Type string `gorm:"not null" json:"type"` // spec_published | plan_derived | task_started | task_deployed | task_failed
+	Type string `gorm:"not null" json:"type"` // spec_updated | spec_published | plan_derived | task_started | task_deployed | task_failed
 
 	// Actor identity — reuses the chat ChatAuthor model (#130). For a user:
 	// kind=user, id=email, name=display name (denormalized at emission — there

@@ -30,6 +30,7 @@ export interface ActivityLine {
 }
 
 const TONE_BY_TYPE: Record<string, StatusTone> = {
+  spec_updated: "neutral",
   spec_published: "neutral",
   plan_derived: "neutral",
   task_started: "info",
@@ -54,6 +55,8 @@ function issueRef(e: ActivityEvent): string {
 
 function bodyText(e: ActivityEvent): string {
   switch (e.type) {
+    case "spec_updated":
+      return e.title ? `updated the spec — ${e.title}` : "updated the spec";
     case "spec_published":
       return `published spec ${e.tag ?? ""} and started build`.replace(/\s+/g, " ").trim();
     case "plan_derived":
