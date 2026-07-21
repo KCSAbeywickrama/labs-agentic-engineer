@@ -109,6 +109,16 @@ type ResourceClient interface {
 	// ClusterResourceTypes (the platform-resource catalog — read-only).
 	ListClusterResourceTypes(ctx context.Context) ([]ResourceType, error)
 
+	// ListResourceTypes discovers the org-namespaced ResourceTypes registered
+	// in namespace (the org-level ResourceType registry — read-only). Mirrors
+	// ListClusterResourceTypes but scoped to one namespace instead of the
+	// cluster.
+	ListResourceTypes(ctx context.Context, namespace string) ([]ResourceType, error)
+
+	// GetResourceType fetches one namespaced ResourceType by name. Returns the
+	// ErrNotFound sentinel (via sentinelForStatus) when it does not exist.
+	GetResourceType(ctx context.Context, namespace, name string) (*ResourceType, error)
+
 	// ListWorkloadEndpoints enumerates every provider-side endpoint declared by
 	// the Workloads in an org's namespace (one row per endpoint, carrying owner +
 	// visibility). This is the dynamic source for the org endpoint catalog: the
@@ -635,6 +645,22 @@ func (c *resourceClient) ListClusterResourceTypes(ctx context.Context) ([]Resour
 		return nil, fmt.Errorf("list clusterresourcetypes: %w", err)
 	}
 	return out.Items, nil
+}
+
+func (c *resourceClient) ListResourceTypes(ctx context.Context, namespace string) ([]ResourceType, error) {
+	out := &resourceTypeList{}
+	if _, err := c.do(ctx, http.MethodGet, nsBase(namespace)+"/resourcetypes", nil, out); err != nil {
+		return nil, fmt.Errorf("list resourcetypes in %q: %w", namespace, err)
+	}
+	return out.Items, nil
+}
+
+func (c *resourceClient) GetResourceType(ctx context.Context, namespace, name string) (*ResourceType, error) {
+	out := &ResourceType{}
+	if _, err := c.do(ctx, http.MethodGet, nsBase(namespace)+"/resourcetypes/"+name, nil, out); err != nil {
+		return nil, fmt.Errorf("get resourcetype %q: %w", name, err)
+	}
+	return out, nil
 }
 
 // workloadList / workloadItem mirror just the slice of the Workload CR the
