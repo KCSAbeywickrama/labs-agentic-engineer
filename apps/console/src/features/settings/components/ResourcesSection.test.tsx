@@ -93,7 +93,7 @@ describe("ResourcesSection", () => {
 
     expect(screen.getByText("No external resources")).toBeInTheDocument();
     expect(
-      screen.getByText(/agents resolve third-party dependencies/i),
+      screen.getByText(/once a third-party dependency is provisioned/i),
     ).toBeInTheDocument();
   });
 
