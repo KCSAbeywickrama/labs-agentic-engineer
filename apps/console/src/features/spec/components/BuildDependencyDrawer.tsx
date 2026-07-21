@@ -298,10 +298,13 @@ function UsedByLine({ usedBy }: { usedBy: string[] }) {
  * #252 Task 17 — the resolved-dependency affordance: a small hamburger that
  * opens a one-item menu ("Discuss in chat & modify", the RECONSIDER intent).
  * Used by the panels whose dependency is already resolved at design time
- * (external-config — config values still to collect; platform-resource;
- * org-service) — the BlockerPanel/ExternalSpecPanel's "Resolve via chat"
- * button covers the non-resolved case instead. Never rendered alongside that
- * button for the same dependency.
+ * (external-config — config values still to collect; platform-resource).
+ * org-service never reaches this drawer in a resolved state — preflight's
+ * orgServiceItems only emits a drawer item when the status is Unresolved /
+ * Blocked / Ambiguous (services/aep-api/internal/feature/build/preflight.go)
+ * — so it uses the BlockerPanel/ExternalSpecPanel's "Resolve via chat" button
+ * (RESOLVE intent) instead. Never rendered alongside that button for the same
+ * dependency.
  */
 function DiscussInChatMenu({
   dependencyName,
@@ -314,7 +317,7 @@ function DiscussInChatMenu({
   return (
     <>
       <IconButton
-        aria-label={`More actions for ${dependencyName}`}
+        aria-label={`Actions for ${dependencyName}`}
         size="small"
         onClick={(e) => setAnchorEl(e.currentTarget)}
       >
@@ -493,6 +496,7 @@ function InfoPanel({
   kindLabel,
   detail,
   onDiscussInChat,
+  onResolveViaChat,
 }: {
   item: PreflightItem;
   usedBy: string[];
@@ -501,7 +505,14 @@ function InfoPanel({
   // The full "what the platform will do" note — shown on hover of the label
   // rather than taking up a line in the drawer.
   detail: string;
+  // Resolved dependency (platform-resource): the title-row hamburger →
+  // "Discuss in chat & modify" (RECONSIDER intent).
   onDiscussInChat?: ((item: PreflightItem) => void) | undefined;
+  // Non-resolved dependency (org-service — see the docblock above
+  // DiscussInChatMenu): a "Resolve via chat" button (RESOLVE intent),
+  // matching BlockerPanel/ExternalSpecPanel. Mutually exclusive with
+  // onDiscussInChat for a given caller.
+  onResolveViaChat?: ((item: PreflightItem) => void) | undefined;
 }) {
   return (
     <Stack spacing={1}>
@@ -562,6 +573,15 @@ function InfoPanel({
           {JSON.stringify(item.parameters, null, 2)}
         </Box>
       ) : null}
+      {onResolveViaChat ? (
+        <Button
+          size="small"
+          sx={{ alignSelf: "flex-start" }}
+          onClick={() => onResolveViaChat(item)}
+        >
+          Resolve via chat
+        </Button>
+      ) : null}
     </Stack>
   );
 }
@@ -579,11 +599,12 @@ export function BuildDependencyDrawer({
   onClose: () => void;
   onContinue: (inputs: BuildInputItem[]) => void;
   // Fires the Task 5 seeded-message flow for one item (#252 Task 10/17):
-  // "resolve" from the blocker/external-spec panels' "Resolve via chat"
-  // button (a non-resolved dependency); "reconsider" from the
-  // external-config/platform-resource/org-service panels' hamburger →
-  // "Discuss in chat & modify" (an already-resolved dependency the user
-  // wants to revisit). Optional so a caller that hasn't wired chat
+  // "resolve" from the blocker/external-spec/org-service panels' "Resolve
+  // via chat" button (a non-resolved dependency — org-service items never
+  // reach this drawer resolved, see preflight.go's orgServiceItems);
+  // "reconsider" from the external-config/platform-resource panels'
+  // hamburger → "Discuss in chat & modify" (an already-resolved dependency
+  // the user wants to revisit). Optional so a caller that hasn't wired chat
   // resolution yet (or a test) can omit it — the affordance simply doesn't
   // render.
   onResolveDependency?: (
@@ -664,12 +685,12 @@ export function BuildDependencyDrawer({
   );
 
   // #252 Task 17: the two fixed-intent wrappers each panel binds to its own
-  // affordance — "Resolve via chat" (blocker/external-spec: a non-resolved
-  // dependency) always fires "resolve"; the hamburger's "Discuss in chat &
-  // modify" (external-config/platform-resource/org-service: an already
-  // resolved dependency) always fires "reconsider". Both close through the
-  // SAME onResolveDependency the parent wires (Task 15's close-drawer-then-
-  // open-chat flow) — only the intent differs.
+  // affordance — "Resolve via chat" (blocker/external-spec/org-service: a
+  // non-resolved dependency) always fires "resolve"; the hamburger's
+  // "Discuss in chat & modify" (external-config/platform-resource: an
+  // already resolved dependency) always fires "reconsider". Both close
+  // through the SAME onResolveDependency the parent wires (Task 15's
+  // close-drawer-then-open-chat flow) — only the intent differs.
   const resolveViaChat = onResolveDependency
     ? (item: PreflightItem) => onResolveDependency(item, "resolve")
     : undefined;
@@ -792,7 +813,7 @@ export function BuildDependencyDrawer({
                 usedBy={group.usedBy}
                 kindLabel="Cross-project endpoint"
                 detail="We'll publish this cross-project endpoint — it updates and rebuilds the owning project; your build continues, and the consuming task waits until it's published."
-                onDiscussInChat={discussInChat}
+                onResolveViaChat={resolveViaChat}
               />
             ))}
           </Stack>

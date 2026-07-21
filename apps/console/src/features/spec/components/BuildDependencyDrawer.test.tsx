@@ -803,33 +803,41 @@ describe("BuildDependencyDrawer cross-component 'Used by' rendering (#252 Task 1
 });
 
 // #252 Task 17: state-based affordance in the drawer itself — a still
-// non-resolved dependency (blocker / external-spec) keeps its "Resolve via
-// chat" button; an already-resolved one (external-config, platform-resource,
-// org-service) gets a hamburger → "Discuss in chat & modify" instead. Never
-// both for the same dependency.
+// non-resolved dependency (blocker / external-spec / org-service) keeps its
+// "Resolve via chat" button; an already-resolved one (external-config,
+// platform-resource) gets a hamburger → "Discuss in chat & modify" instead.
+// Never both for the same dependency. org-service is always non-resolved
+// here — preflight's orgServiceItems only emits a drawer item when the
+// status is Unresolved/Blocked/Ambiguous
+// (services/aep-api/internal/feature/build/preflight.go:221-233), matching
+// how DesignView renders the same dependency (gated purely on status,
+// kind-agnostic).
 describe("BuildDependencyDrawer — resolved-dependency hamburger (#252 Task 17)", () => {
-  it("shows exactly one 'Resolve via chat' button (the external-spec item) and a hamburger for every other panel kind", () => {
+  it("shows a 'Resolve via chat' button for external-spec and org-service, and a hamburger for external-config/platform-resource", () => {
     setup();
 
-    // Only the external-spec item ("partner-openapi-spec") keeps the chat
-    // button — external-config/platform-resource/org-service are resolved.
+    // The external-spec item ("partner-openapi-spec") and the org-service
+    // item ("billing-service", never resolved) both keep the chat button —
+    // only external-config/platform-resource are resolved.
     expect(
       screen.getAllByRole("button", { name: /resolve via chat/i }),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
 
     expect(
-      screen.getByRole("button", { name: /more actions for stripe-config/i }),
+      screen.getByRole("button", { name: /actions for stripe-config/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /more actions for postgres/i }),
+      screen.getByRole("button", { name: /actions for postgres/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /more actions for billing-service/i }),
-    ).toBeInTheDocument();
-    // Never a hamburger for the external-spec item itself.
+    // Never a hamburger for the org-service or external-spec items.
     expect(
       screen.queryByRole("button", {
-        name: /more actions for partner-openapi-spec/i,
+        name: /actions for billing-service/i,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /actions for partner-openapi-spec/i,
       }),
     ).not.toBeInTheDocument();
   });
@@ -847,7 +855,7 @@ describe("BuildDependencyDrawer — resolved-dependency hamburger (#252 Task 17)
       screen.getByRole("button", { name: /resolve via chat/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /more actions/i }),
+      screen.queryByRole("button", { name: /actions for crm/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -855,7 +863,7 @@ describe("BuildDependencyDrawer — resolved-dependency hamburger (#252 Task 17)
     const { onResolveDependency } = setup();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /more actions for postgres/i }),
+      screen.getByRole("button", { name: /actions for postgres/i }),
     );
     fireEvent.click(
       screen.getByRole("menuitem", { name: /discuss in chat & modify/i }),
@@ -871,6 +879,36 @@ describe("BuildDependencyDrawer — resolved-dependency hamburger (#252 Task 17)
     );
   });
 
+  // The important fix (#252 Task 17 review): an org-service drawer item is
+  // ALWAYS non-resolved (see the describe-block comment above), so it must
+  // use the RESOLVE affordance — a "Resolve via chat" button firing the
+  // "resolve" intent — never the reconsider/hamburger path a resolved
+  // dependency gets.
+  it("org-service item uses the RESOLVE chat affordance (button, 'resolve' intent), never reconsider/hamburger", () => {
+    const orgServiceItem: PreflightItem = {
+      component: "checkout-api",
+      dependency: "billing-service",
+      kind: "org-service",
+      description: "Billing service endpoint",
+    };
+    const { onResolveDependency } = setup([orgServiceItem]);
+
+    // No hamburger for org-service — only the "Resolve via chat" button.
+    expect(
+      screen.queryByRole("button", { name: /actions for billing-service/i }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /resolve via chat/i }),
+    );
+
+    expect(onResolveDependency).toHaveBeenCalledTimes(1);
+    expect(onResolveDependency).toHaveBeenCalledWith(
+      orgServiceItem,
+      "resolve",
+    );
+  });
+
   it("without onResolveDependency wired: no hamburger and no chat button render", () => {
     render(
       <BuildDependencyDrawer
@@ -881,7 +919,7 @@ describe("BuildDependencyDrawer — resolved-dependency hamburger (#252 Task 17)
       />,
     );
     expect(
-      screen.queryByRole("button", { name: /more actions/i }),
+      screen.queryByRole("button", { name: /actions for/i }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /resolve via chat/i }),

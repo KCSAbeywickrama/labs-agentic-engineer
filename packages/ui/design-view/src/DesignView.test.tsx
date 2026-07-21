@@ -55,7 +55,7 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
       screen.queryByRole("button", { name: /resolve in chat/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /more actions for orders-api/i }),
+      screen.getByRole("button", { name: /actions for orders-api/i }),
     ).toBeInTheDocument();
   });
 
@@ -150,7 +150,7 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
       screen.queryByRole("button", { name: /resolve in chat/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /more actions/i }),
+      screen.queryByRole("button", { name: /actions/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -212,7 +212,7 @@ describe("DesignView — resolved-dependency hamburger (#252 Task 17)", () => {
         />,
       );
       expect(
-        screen.getByRole("button", { name: /more actions for thing/i }),
+        screen.getByRole("button", { name: /actions for thing/i }),
       ).toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: /resolve in chat/i }),
@@ -238,7 +238,7 @@ describe("DesignView — resolved-dependency hamburger (#252 Task 17)", () => {
         screen.getByRole("button", { name: /resolve in chat/i }),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /more actions/i }),
+        screen.queryByRole("button", { name: /actions/i }),
       ).not.toBeInTheDocument();
     },
   );
@@ -254,7 +254,7 @@ describe("DesignView — resolved-dependency hamburger (#252 Task 17)", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: /more actions for stripe/i }),
+      screen.getByRole("button", { name: /actions for stripe/i }),
     );
     fireEvent.click(
       screen.getByRole("menuitem", { name: /discuss in chat & modify/i }),
@@ -288,7 +288,7 @@ describe("DesignView — resolved-dependency hamburger (#252 Task 17)", () => {
       />,
     );
     expect(
-      screen.queryByRole("button", { name: /more actions/i }),
+      screen.queryByRole("button", { name: /actions/i }),
     ).not.toBeInTheDocument();
   });
 });

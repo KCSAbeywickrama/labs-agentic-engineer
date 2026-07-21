@@ -210,7 +210,7 @@ function ReconsiderMenu({ dependencyName, onReconsider }: {
   return (
     <>
       <IconButton
-        aria-label={`More actions for ${dependencyName}`}
+        aria-label={`Actions for ${dependencyName}`}
         size="small"
         onClick={(e) => setAnchorEl(e.currentTarget)}
         sx={{ ml: "auto" }}
