@@ -89,14 +89,16 @@ func (p *ExternalResourceProvisioner) Provision(
 	}
 
 	// 1. ResourceType (get-or-create; immutable once created). The cluster RT
-	// name is pinned to the generator's template version — a template change
-	// authors a fresh RT instead of silently reusing a stale same-named one on
-	// 409-conflict.
-	rtName := openchoreo.ExternalResourceRTName(er.ResourceTypeName)
-	rt, err := openchoreo.BuildExternalResourceType(rtName, toRTConfigKeys(er.ConfigKeys))
+	// name is a deterministic hash of the (key, secret) schema plus the
+	// generator's template version — the SAME schema always resolves to the
+	// SAME name (a stable get-or-create target), while a schema OR template
+	// change authors a fresh RT instead of silently reusing a stale same-named
+	// one on 409-conflict.
+	rt, err := openchoreo.BuildExternalResourceType(er.Name, er.Description, toRTConfigKeys(er.ConfigKeys))
 	if err != nil {
 		return nil, fmt.Errorf("external resources: build resourcetype: %w", err)
 	}
+	rtName := rt.Metadata.Name
 	if _, err := p.rc.EnsureResourceType(ctx, orgHandle, rt); err != nil {
 		return nil, fmt.Errorf("external resources: ensure resourcetype %q: %w", rtName, err)
 	}
@@ -174,11 +176,11 @@ func (p *ExternalResourceProvisioner) AuthorWithSecretRef(
 	}
 
 	// 1. ResourceType (get-or-create; immutable once created).
-	rtName := openchoreo.ExternalResourceRTName(er.ResourceTypeName)
-	rt, err := openchoreo.BuildExternalResourceType(rtName, toRTConfigKeys(er.ConfigKeys))
+	rt, err := openchoreo.BuildExternalResourceType(er.Name, er.Description, toRTConfigKeys(er.ConfigKeys))
 	if err != nil {
 		return nil, fmt.Errorf("external resources: build resourcetype: %w", err)
 	}
+	rtName := rt.Metadata.Name
 	if _, err := p.rc.EnsureResourceType(ctx, orgHandle, rt); err != nil {
 		return nil, fmt.Errorf("external resources: ensure resourcetype %q: %w", rtName, err)
 	}
@@ -365,7 +367,12 @@ func buildExternalResourceBinding(projectName, name, env, latestRelease, secretS
 func toRTConfigKeys(in []models.ConfigKey) []openchoreo.ExternalResourceConfigKey {
 	out := make([]openchoreo.ExternalResourceConfigKey, 0, len(in))
 	for _, k := range in {
-		out = append(out, openchoreo.ExternalResourceConfigKey{Key: k.Key, Secret: k.Secret})
+		out = append(out, openchoreo.ExternalResourceConfigKey{
+			Key:          k.Key,
+			Secret:       k.Secret,
+			Description:  k.Description,
+			DefaultValue: k.DefaultValue,
+		})
 	}
 	return out
 }
