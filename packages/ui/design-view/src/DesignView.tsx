@@ -29,7 +29,7 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { EllipsisVertical, Lock } from "@wso2/oxygen-ui-icons-react";
+import { EllipsisVertical, Lock, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import {
   parseComponentDesign,
   type ComponentDesign,
@@ -150,41 +150,40 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-function CandidateRow({ candidate }: { candidate: DependencyCandidate }) {
+// #252: an ambiguous dependency's `candidates` (2+ identified-but-not-pinned
+// options) used to render one detailed CandidateRow per candidate (name,
+// style, description, package, docs/spec links). That level of detail turned
+// out to be more than the card needs — resolution always happens via the
+// "Resolve via chat" affordance below, never by reading candidate metadata
+// off this card — so it's collapsed to a single concise note naming up to 3
+// candidates as examples. Shared by the design-view card here and mirrored
+// (independently, no cross-package import) by console's
+// BuildDependencyDrawer.tsx so the build-time blocker reads the same way.
+const MAX_CANDIDATE_EXAMPLES = 3;
+
+function candidateExamples(candidates: DependencyCandidate[]): string {
+  const names = candidates.map((c) => c.name);
+  const shown = names.slice(0, MAX_CANDIDATE_EXAMPLES).join(", ");
+  return names.length > MAX_CANDIDATE_EXAMPLES ? `${shown}…` : shown;
+}
+
+function AmbiguousCandidatesNote({
+  candidates,
+}: {
+  candidates: DependencyCandidate[];
+}) {
   return (
-    <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 1 }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-        <Typography component="span" sx={{ ...mono, fontWeight: 600 }}>
-          {candidate.name}
-        </Typography>
-        {candidate.style && (
-          <Chip size="small" variant="outlined" label={candidate.style} />
-        )}
+    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.75 }}>
+      <Box
+        component="span"
+        sx={{ display: "inline-flex", color: "warning.main", mt: "2px", flexShrink: 0 }}
+      >
+        <TriangleAlert size={16} />
       </Box>
-      {candidate.description && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          {candidate.description}
-        </Typography>
-      )}
-      {candidate.package && (
-        <Typography component="span" sx={{ ...mono, display: "block", mt: 0.5 }}>
-          {candidate.package}
-        </Typography>
-      )}
-      {(candidate.docsUrl || candidate.specUrl) && (
-        <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
-          {candidate.docsUrl && (
-            <Link href={candidate.docsUrl} target="_blank" rel="noopener noreferrer" variant="body2">
-              Docs
-            </Link>
-          )}
-          {candidate.specUrl && (
-            <Link href={candidate.specUrl} target="_blank" rel="noopener noreferrer" variant="body2">
-              Spec
-            </Link>
-          )}
-        </Stack>
-      )}
+      <Typography variant="body2" color="text.secondary">
+        Multiple candidates — e.g. {candidateExamples(candidates)}. Use
+        &quot;Resolve in chat&quot; to pick one (or name another that fits).
+      </Typography>
     </Box>
   );
 }
@@ -356,14 +355,7 @@ function DependencyCard({
 
       {dep.candidates && dep.candidates.length > 0 && (
         <Box sx={{ mt: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-            Candidates
-          </Typography>
-          <Stack spacing={1} sx={{ mt: 0.5 }}>
-            {dep.candidates.map((candidate) => (
-              <CandidateRow key={candidate.name} candidate={candidate} />
-            ))}
-          </Stack>
+          <AmbiguousCandidatesNote candidates={dep.candidates} />
         </Box>
       )}
 

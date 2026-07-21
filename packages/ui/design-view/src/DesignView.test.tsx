@@ -59,7 +59,7 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     ).toBeInTheDocument();
   });
 
-  it("ambiguous: shows an Ambiguous chip, renders candidates with Docs links, and Resolve in chat fires the callback with the dependency name", () => {
+  it("ambiguous: shows an Ambiguous chip, a concise multiple-candidates note naming the candidates (no detailed rows), and Resolve in chat fires the callback", () => {
     const onResolve = vi.fn();
     render(
       <DesignView
@@ -88,13 +88,13 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     );
 
     expect(screen.getByText("Ambiguous")).toBeInTheDocument();
-    expect(screen.getByText("stripe")).toBeInTheDocument();
-    expect(screen.getByText("adyen")).toBeInTheDocument();
 
-    const docsLinks = screen.getAllByRole("link", { name: "Docs" });
-    expect(docsLinks).toHaveLength(2);
-    expect(docsLinks[0]).toHaveAttribute("href", "https://stripe.com/docs");
-    expect(docsLinks[1]).toHaveAttribute("href", "https://adyen.com/docs");
+    // Concise note names the candidates as examples; the old per-candidate
+    // detail rows + Docs links are gone (resolution happens via chat).
+    const note = screen.getByText(/multiple candidates/i);
+    expect(note.textContent).toMatch(/stripe/);
+    expect(note.textContent).toMatch(/adyen/);
+    expect(screen.queryAllByRole("link", { name: "Docs" })).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: /resolve in chat/i }));
     expect(onResolve).toHaveBeenCalledTimes(1);
