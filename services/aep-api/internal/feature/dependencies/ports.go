@@ -23,7 +23,8 @@ package dependencies
 // interfaces wired concretely at the composition root (app.Build, D5). Each is
 // satisfied structurally by an existing type:
 //
-//   - ExternalResourceReader ← *repositories.ExternalResourceRepository (A3)
+//   - ExternalResourceReader ← *resources.ExternalResourceCatalog (Task 3 —
+//     org-namespaced OpenChoreo ResourceTypes, not the external_resources table)
 //   - OrgEndpointLister       ← *endpoints.Catalog (C1)
 //   - ResourceTypeLister      ← *resources.ResourceTypeCatalog (C3)
 
@@ -33,15 +34,18 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // ExternalResourceReader is the read slice of the org external-resource catalog
 // the MCP surface exposes (list every registered external resource, get one by
-// name). Get returns (nil, nil) when the name is not registered.
+// name). Sourced from the org's provisioned OpenChoreo ResourceTypes
+// (openchoreo.ExternalDefinitionFromRT) — ONLY a provisioned `external`
+// dependency has an authored RT, so this reflects provisioned externals only
+// (D2: an unprovisioned/design-only external is not discoverable here). Get
+// returns (nil, nil) when the name is not registered.
 type ExternalResourceReader interface {
-	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)
-	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
+	List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error)
+	Get(ctx context.Context, orgID, name string) (*openchoreo.ExternalResourceDefinition, error)
 }
 
 // OrgEndpointLister is the read slice of the org endpoint catalog — the

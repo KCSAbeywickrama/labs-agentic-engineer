@@ -23,8 +23,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // mcpTool is the MCP tools/list descriptor.
@@ -450,11 +450,15 @@ func (h *mcpHandler) validateAndNormalize(raw []byte) validateSpecView {
 	return validateSpecView{Valid: true, Operations: ops, NormalizedContent: normalized, Errors: []string{}}
 }
 
-// toExternalResourceView projects a stored ExternalResource to the agent-facing
-// shape (name, description, and its config keys with the secret flag).
-func toExternalResourceView(er *models.ExternalResource) externalResourceView {
-	keys := make([]configKeyDTO, 0, len(er.ConfigKeys))
-	for _, k := range er.ConfigKeys {
+// toExternalResourceView projects an external resource's definition —
+// reconstructed from its authored OpenChoreo ResourceType via
+// openchoreo.ExternalDefinitionFromRT — to the agent-facing shape (name,
+// description, and its config keys with the secret flag). The JSON shape is
+// unchanged from the pre-Task-3 DB-backed projection: only the source of `er`
+// moved (org RT registry, not the external_resources table).
+func toExternalResourceView(er *openchoreo.ExternalResourceDefinition) externalResourceView {
+	keys := make([]configKeyDTO, 0, len(er.Config))
+	for _, k := range er.Config {
 		keys = append(keys, configKeyDTO{Key: k.Key, Secret: k.Secret})
 	}
 	return externalResourceView{Name: er.Name, Description: er.Description, ConfigKeys: keys}

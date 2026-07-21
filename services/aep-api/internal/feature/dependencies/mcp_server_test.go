@@ -26,40 +26,50 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/feature/artifacts"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/endpoints"
 	"github.com/wso2/aep/aep-api/internal/feature/dependencies/resources"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
-	"github.com/wso2/aep/aep-api/models"
 )
 
 // ---- fake ports -------------------------------------------------------------
 
-type fakeResourceReader struct {
-	items   []models.ExternalResource
-	listErr error
-	getErr  error
-	// lastOrg records the org the handler passed down, proving it flows from
-	// the request context (the verified claim) into the port call.
+// externalCatalogFixture wires the real resources.ExternalResourceCatalog
+// over a ResourceClientMock returning canned org-namespaced ResourceTypes —
+// the OC-RT fixture that replaces the pre-Task-3 DB-row fake (external
+// resources are now sourced from provisioned ResourceTypes via
+// openchoreo.ExternalDefinitionFromRT, never the external_resources table).
+type externalCatalogFixture struct {
+	*resources.ExternalResourceCatalog
+	// lastOrg records the namespace the handler passed down (via List/Get →
+	// ListResourceTypes), proving it flows from the request context (the
+	// verified claim) into the port call.
 	lastOrg string
 }
 
-func (f *fakeResourceReader) List(_ context.Context, orgID string) ([]models.ExternalResource, error) {
-	f.lastOrg = orgID
-	return f.items, f.listErr
+// newExternalCatalogFixture builds a fixture whose ListResourceTypes returns
+// rts verbatim (or listErr, when set, to exercise both tools' error path).
+func newExternalCatalogFixture(listErr error, rts ...openchoreo.ResourceType) *externalCatalogFixture {
+	f := &externalCatalogFixture{}
+	rc := &mocks.ResourceClientMock{
+		ListResourceTypesFunc: func(_ context.Context, namespace string) ([]openchoreo.ResourceType, error) {
+			f.lastOrg = namespace
+			return rts, listErr
+		},
+	}
+	f.ExternalResourceCatalog = resources.NewExternalResourceCatalog(rc)
+	return f
 }
 
-func (f *fakeResourceReader) Get(_ context.Context, orgID, name string) (*models.ExternalResource, error) {
-	f.lastOrg = orgID
-	if f.getErr != nil {
-		return nil, f.getErr
-	}
-	for i := range f.items {
-		if f.items[i].Name == name {
-			return &f.items[i], nil
-		}
-	}
-	return nil, nil
+// mustBuildExternalRT builds an external resource's ResourceType fixture via
+// the SAME production builder (openchoreo.BuildExternalResourceType) real
+// provisioning uses — the error return is ignored because these fixed,
+// well-formed inputs (non-empty name, at least one non-empty key) can never
+// trigger it.
+func mustBuildExternalRT(name, description string, keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ResourceType {
+	rt, _ := openchoreo.BuildExternalResourceType(name, description, keys)
+	return *rt
 }
 
 type fakeEndpointLister struct {
@@ -164,15 +174,29 @@ func callBody(tool, args string) string {
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, tool, args)
 }
 
-func sampleHandler() (http.Handler, *fakeResourceReader, *fakeEndpointLister) {
-	er := &fakeResourceReader{items: []models.ExternalResource{{
-		Name:        "salesforce",
-		Description: "CRM",
-		ConfigKeys: models.ConfigKeySlice{
-			{Key: "SALESFORCE_URL", Secret: false},
-			{Key: "SALESFORCE_TOKEN", Secret: true},
-		},
-	}}}
+// nonExternalRT is a namespaced ResourceType fixture that carries NO
+// aep.openchoreo.dev/external-name annotation — e.g. an RT authored by
+// pre-self-describing code, or any other namespaced RT that isn't an
+// external-resource one. openchoreo.ExternalDefinitionFromRT reports ok=false
+// for it, and the catalog must silently skip it rather than surface a
+// half-formed entry.
+var nonExternalRT = openchoreo.ResourceType{
+	APIVersion: "openchoreo.dev/v1alpha1",
+	Kind:       "ResourceType",
+	Metadata:   openchoreo.OCObjectMeta{Name: "some-other-rt"},
+	Spec: openchoreo.ResourceTypeSpec{
+		Resources: []openchoreo.ResourceTypeManifest{{ID: "x", Template: []byte(`{}`)}},
+	},
+}
+
+func sampleHandler() (http.Handler, *externalCatalogFixture, *fakeEndpointLister) {
+	er := newExternalCatalogFixture(nil,
+		mustBuildExternalRT("salesforce", "CRM",
+			openchoreo.ExternalResourceConfigKey{Key: "SALESFORCE_URL", Secret: false},
+			openchoreo.ExternalResourceConfigKey{Key: "SALESFORCE_TOKEN", Secret: true},
+		),
+		nonExternalRT, // must be skipped — proves the external-name-annotation filter
+	)
 	ep := &fakeEndpointLister{
 		items: []openchoreo.WorkloadEndpointInfo{
 			{Project: "billing", Component: "invoice-api", Name: "rest", Type: "HTTP", Visibility: []string{"namespace"}},
@@ -354,6 +378,11 @@ func TestMCP_NoOrgOnContext_401(t *testing.T) {
 
 // ---- tools/call ----------------------------------------------------------------
 
+// TestMCP_ListExternalResources also proves the RT-registry filter: the
+// fixture (sampleHandler) carries TWO namespaced ResourceTypes — the
+// self-describing "salesforce" external RT and nonExternalRT, which lacks the
+// aep.openchoreo.dev/external-name annotation — yet exactly one entry comes
+// back, so a non-external RT sharing the namespace never leaks into the tool.
 func TestMCP_ListExternalResources(t *testing.T) {
 	h, er, _ := sampleHandler()
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
@@ -366,14 +395,21 @@ func TestMCP_ListExternalResources(t *testing.T) {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	if len(payload.ExternalResources) != 1 {
-		t.Fatalf("externalResources = %+v, want 1 entry", payload.ExternalResources)
+		t.Fatalf("externalResources = %+v, want 1 entry (nonExternalRT must be filtered out)", payload.ExternalResources)
 	}
 	got := payload.ExternalResources[0]
 	if got.Name != "salesforce" || got.Description != "CRM" || len(got.ConfigKeys) != 2 {
 		t.Errorf("unexpected view: %+v", got)
 	}
-	if !got.ConfigKeys[1].Secret {
+	secretByKey := map[string]bool{}
+	for _, k := range got.ConfigKeys {
+		secretByKey[k.Key] = k.Secret
+	}
+	if !secretByKey["SALESFORCE_TOKEN"] {
 		t.Errorf("SALESFORCE_TOKEN must be marked secret: %+v", got.ConfigKeys)
+	}
+	if secretByKey["SALESFORCE_URL"] {
+		t.Errorf("SALESFORCE_URL must NOT be marked secret: %+v", got.ConfigKeys)
 	}
 	if er.lastOrg != "org-1" {
 		t.Errorf("port called with org %q, want org-1 (context org must flow down)", er.lastOrg)
@@ -381,7 +417,7 @@ func TestMCP_ListExternalResources(t *testing.T) {
 }
 
 func TestMCP_ListExternalResources_PortError(t *testing.T) {
-	er := &fakeResourceReader{listErr: fmt.Errorf("db down")}
+	er := newExternalCatalogFixture(fmt.Errorf("db down"))
 	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_external_resources", `{}`)))
 	text := toolText(t, resp, true)
@@ -463,7 +499,7 @@ func TestMCP_ListOrgEndpoints(t *testing.T) {
 }
 
 func TestMCP_ListOrgEndpoints_NilLister_Empty(t *testing.T) {
-	er := &fakeResourceReader{}
+	er := newExternalCatalogFixture(nil)
 	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_endpoints", `{}`)))
 	text := toolText(t, resp, false)
@@ -512,7 +548,7 @@ func TestMCP_ListOrgComponentEndpoints(t *testing.T) {
 }
 
 func TestMCP_ListOrgComponentEndpoints_NilLister_Empty(t *testing.T) {
-	er := &fakeResourceReader{}
+	er := newExternalCatalogFixture(nil)
 	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_org_component_endpoints", `{}`)))
 	text := toolText(t, resp, false)
@@ -547,7 +583,7 @@ func TestMCP_ListPlatformResourceTypes(t *testing.T) {
 }
 
 func TestMCP_ListPlatformResourceTypes_NilLister_Empty(t *testing.T) {
-	er := &fakeResourceReader{}
+	er := newExternalCatalogFixture(nil)
 	h := NewMCPHandler(er, nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("list_platform_resource_types", `{}`)))
 	text := toolText(t, resp, false)
@@ -560,7 +596,7 @@ func TestMCP_ListPlatformResourceTypes_NilLister_Empty(t *testing.T) {
 
 func TestMCP_GetRemoteGitFileContents(t *testing.T) {
 	rg := &fakeRemoteGit{file: &RemoteGitFile{Content: "openapi: 3.0.0\n", SHA: "abc"}}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs/openapi.yaml","ref":"main"}`)))
 	text := toolText(t, resp, false)
@@ -585,7 +621,7 @@ func TestMCP_GetRemoteGitFileContents_Directory(t *testing.T) {
 	rg := &fakeRemoteGit{file: &RemoteGitFile{IsDirectory: true, Entries: []RemoteGitEntry{
 		{Path: "specs/openapi.yaml", Type: "file", SHA: "a"},
 	}}}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"billing-svc","path":"specs"}`)))
 	text := toolText(t, resp, false)
@@ -602,7 +638,7 @@ func TestMCP_GetRemoteGitFileContents_OwnerMismatch_ToolError(t *testing.T) {
 	// The reader refuses a cross-org owner; the handler must surface it as a
 	// tool-level error (isError=true), not data.
 	rg := &fakeRemoteGit{err: ErrOwnerNotInOrg}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"evilcorp","repo":"secret","path":"x"}`)))
 	text := toolText(t, resp, true) // wantErr = true
@@ -619,7 +655,7 @@ func TestMCP_GetRemoteGitFileContents_MissingArgs_ToolError(t *testing.T) {
 }
 
 func TestMCP_GetRemoteGitFileContents_NilReader_ToolError(t *testing.T) {
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("get_remote_git_file_contents", `{"owner":"acme","repo":"r","path":"x"}`)))
 	toolText(t, resp, true)
@@ -630,7 +666,7 @@ func TestMCP_SearchRemoteGitCode(t *testing.T) {
 		{Path: "specs/openapi.yaml", SHA: "a"},
 		{Path: "api/openapi.yaml", SHA: "b"},
 	}}
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, rg, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, rg, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1",
 		callBody("search_remote_git_code", `{"owner":"acme","repo":"billing-svc","query":"openapi"}`)))
 	text := toolText(t, resp, false)
@@ -804,7 +840,7 @@ func TestMCP_ValidateOpenAPISpec_MissingContent_ToolError(t *testing.T) {
 }
 
 func TestMCP_ValidateOpenAPISpec_NilPort_ToolError(t *testing.T) {
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("validate_openapi_spec", `{"content":"whatever"}`)))
 	toolText(t, resp, true)
 }
@@ -815,7 +851,7 @@ func TestMCP_ValidateOpenAPISpec_NilPort_ToolError(t *testing.T) {
 // behavior itself is exercised separately, through the real
 // artifacts.FetchSpecFromURL (see TestMCP_FetchOpenAPISpec_SSRFBlocked).
 func handlerWithFetcher(fetch SpecFetcher) http.Handler {
-	return NewMCPHandler(&fakeResourceReader{}, nil, nil, nil,
+	return NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil,
 		artifacts.ValidateOpenAPI, artifacts.NormalizeOpenAPIYAML, fetch)
 }
 
@@ -899,7 +935,7 @@ func TestMCP_FetchOpenAPISpec_MissingURL_ToolError(t *testing.T) {
 }
 
 func TestMCP_FetchOpenAPISpec_NilPort_ToolError(t *testing.T) {
-	h := NewMCPHandler(&fakeResourceReader{}, nil, nil, nil, nil, nil, nil)
+	h := NewMCPHandler(newExternalCatalogFixture(nil), nil, nil, nil, nil, nil, nil)
 	resp := decodeRPC(t, postRPC(t, h, "org-1", callBody("fetch_openapi_spec", `{"url":"https://example.com/openapi.yaml"}`)))
 	toolText(t, resp, true)
 }

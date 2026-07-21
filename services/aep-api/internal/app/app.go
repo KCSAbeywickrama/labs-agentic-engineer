@@ -849,10 +849,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Dependency-management MCP discovery readers (agnostic subset — Phase 4 of
 	// the dependency-management migration). The MCP surface (surfaces.go) is
 	// mounted behind the AgentsScopedVerifier; wire real backends for its four
-	// read-only tools: the org external-resource catalog (DB) and the org
-	// published endpoints + platform resource types (OC Resource-model client).
-	// The provisioning surface (value/param collection + the aep:provision issue
-	// funnel) is wired in the Phase-6 block further below.
+	// read-only tools: the org external-resource catalog (org-namespaced OC
+	// ResourceTypes, Task 3 — no longer the external_resources table) and the
+	// org published endpoints + platform resource types (OC Resource-model
+	// client). The provisioning surface (value/param collection + the
+	// aep:provision issue funnel) is wired in the Phase-6 block further below.
 	resourceClient := openchoreo.NewResourceClient(ocConfig)
 	// The resolver collaborators (repo locator + design reader) let the endpoint
 	// catalog discover each org-service's real OpenAPI contract + repo coords
@@ -862,8 +863,15 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 		endpoints.WithRepoLocator(repoRepo),
 		endpoints.WithDesignReader(artifactStore),
 	)
+	// externalResourceRepo remains the org-level registry's WRITE/reuse-resolve
+	// side (design-save upsert, ComputeDependencyStatus's registry-reuse rule,
+	// the provisioner's config-schema lookup) — none of that is in scope here.
+	// Only the MCP list_external_resources/get_external_resource_schema tools
+	// re-source to the org's provisioned ResourceTypes (Task 3): only a
+	// PROVISIONED external has an authored RT, so params.MCPExternalResources
+	// now reflects provisioned externals only (D2), never the table.
 	externalResourceRepo := repositories.NewExternalResourceRepository(db)
-	params.MCPExternalResources = externalResourceRepo
+	params.MCPExternalResources = resources.NewExternalResourceCatalog(resourceClient)
 	// Alerts (console issues #154, #155, BE handshake #156): org-scoped store
 	// for RCA-agent reports the console's notification bell and Alerts
 	// list/stepper read. Write side is a plain userJWT-secured endpoint (no
