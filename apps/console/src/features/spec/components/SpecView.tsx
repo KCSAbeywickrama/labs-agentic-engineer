@@ -45,6 +45,7 @@ import {
 } from "../../projects/api/queries";
 import { useDesignDependencies, useSpecFileContent, useSpecFiles } from "../api/queries";
 import { toSpecEntry } from "../api/mapping";
+import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
@@ -258,6 +259,21 @@ export function SpecView({ projectName }: { projectName: string }) {
       ),
     [componentDependencies],
   );
+  // #252 Task 15: cross-component "Used by" for the selected component's own
+  // cards — computed across EVERY component's dependencies (dependencies.data
+  // spans the whole project; componentDependencies above is only the
+  // selected one), keyed by the selected component's own dependency names.
+  // See dependencyUsedBy.ts's file header for why this is the annotation the
+  // per-component design.json view gets, rather than the drawer's literal
+  // one-card-per-shared-dependency merge (a single DesignView only ever
+  // renders one component at a time, so there is nothing to merge here).
+  const dependencyUsedBy = useMemo<Record<string, string[]>>(
+    () =>
+      selectedComponentName
+        ? computeDependencyUsedBy(dependencies.data ?? [], selectedComponentName)
+        : {},
+    [dependencies.data, selectedComponentName],
+  );
   // Fires Task 5's seeded "Resolve via chat" message with the dependency's
   // FULL endpoint entry (status/reason/sources/candidates/config included) —
   // never the locally parsed one, which deliberately drops status/reason.
@@ -274,6 +290,18 @@ export function SpecView({ projectName }: { projectName: string }) {
   // selected component's design.json, since the drawer's items can span
   // ANY of the project's service components, not just the one selected in
   // the file tree.
+  //
+  // #252 Task 15: also closes the drawer. The drawer is a MUI overlay Drawer
+  // (unlike the side-by-side chat panel AppLayout mounts — see its own
+  // comment above `chatOpen`), so left open it covers the chat panel the
+  // seeded message just opened and the user can't see what they're supposed
+  // to respond to. Closing only happens here, on the explicit click — NOT on
+  // turn-end (the useEffect above deliberately leaves the drawer open and
+  // just refreshes its items; re-opening mid-resolution is out of scope,
+  // matching Task 10's "do not auto-reopen" decision). The design-view
+  // "Resolve in chat" cards (handleResolveDependency above) have no
+  // equivalent occlusion: they render in the main content pane, which the
+  // chat panel opens BESIDE (Collapse in AppLayout), never over.
   const handleResolveDrawerDependency = (item: PreflightItem) => {
     const dep = (
       dependencies.data?.find((c) => c.componentName === item.component)
@@ -281,6 +309,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     ).find((d) => d.name === item.dependency);
     if (!dep) return;
     resolveDependencyViaChat(item.component, dep);
+    setDependencyDrawerOpen(false);
   };
 
   // Collab supplies live content when connected; the REST read (lazy, per
@@ -719,6 +748,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <DesignView
                         design={structuredLive}
                         dependencyStatus={dependencyStatus}
+                        dependencyUsedBy={dependencyUsedBy}
                         onResolveDependency={handleResolveDependency}
                       />
                     )
@@ -738,6 +768,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         key={content.data.sha}
                         design={content.data.content}
                         dependencyStatus={dependencyStatus}
+                        dependencyUsedBy={dependencyUsedBy}
                         onResolveDependency={handleResolveDependency}
                       />
                     )

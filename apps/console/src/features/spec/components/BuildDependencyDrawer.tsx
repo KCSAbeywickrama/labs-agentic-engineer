@@ -16,10 +16,11 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
+  Chip,
   Divider,
   Drawer,
   Stack,
@@ -33,10 +34,13 @@ type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
 
 /**
- * Per-item working state, keyed by `${component}::${dependency}`. Only the
- * input kinds (external-config / external-spec) carry state — platform-resource
- * and org-service are informational: clicking Continue is the user's approval
- * of every change listed, so there is no per-item toggle.
+ * Per-group working state, keyed by DependencyGroup.key (#252 Task 15 — a
+ * merged group's cross-component dedupe identity; a component-local
+ * dependency's key is equivalent to its own `${component}::${dependency}`, so
+ * this degrades to the pre-Task-15 per-item keying when nothing merges).
+ * Only the input kinds (external-config / external-spec) carry state —
+ * platform-resource and org-service are informational: clicking Continue is
+ * the user's approval of every change listed, so there is no per-item toggle.
  */
 type ItemState = {
   /** external-config: value typed per config key, keyed by key name. */
@@ -46,10 +50,6 @@ type ItemState = {
   /** external-spec: pasted-content field. */
   specContent: string;
 };
-
-function itemKey(item: PreflightItem): string {
-  return `${item.component}::${item.dependency}`;
-}
 
 /**
  * Kinds computed by the shared resolver (models.ComputeDependencyStatus) that
@@ -63,6 +63,110 @@ const BLOCKER_KINDS = new Set(["external-ambiguous", "external-unresolved"]);
 
 function isBlockerKind(kind: PreflightItem["kind"]): boolean {
   return BLOCKER_KINDS.has(kind);
+}
+
+/**
+ * #252 Task 15 — cross-component dependency dedupe key: two PreflightItems
+ * are "the same shared dependency" when they carry the same `kind` AND the
+ * same identity — `resourceType`+`dependency` name for a platform-resource
+ * (the canonical case: `thunder-app` end-user auth, a platform resource
+ * declared on both a web-application and its backing service), `dependency`
+ * name alone for every other kind. Task 14 lifted the ComponentType!=service
+ * preflight guard, so a project-scoped shared dependency now surfaces one
+ * PreflightItem PER consuming component — this key is what re-collapses
+ * those back into one card.
+ */
+function dependencyIdentity(item: PreflightItem): string {
+  return item.kind === "platform-resource"
+    ? `platform-resource:${item.resourceType ?? ""}:${item.dependency}`
+    : `${item.kind}:${item.dependency}`;
+}
+
+/**
+ * Order-independent signature of an external-config item's declared config
+ * keys. Only `external-config` carries per-item, user-facing config that can
+ * legitimately diverge between consumers (different env-var names/
+ * descriptions/defaults) — every other kind either has no config
+ * (org-service, the blocker kinds) or a platform-provisioned one
+ * (platform-resource, e.g. thunder-app: outputs -> env, never user-entered),
+ * so only this kind's entries are checked for divergence before merging.
+ */
+function configSignature(config: PreflightItem["config"]): string {
+  return JSON.stringify(
+    (config ?? [])
+      .map((c) => ({
+        key: c.key,
+        secret: Boolean(c.secret),
+        description: c.description ?? "",
+        defaultValue: c.defaultValue ?? "",
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+  );
+}
+
+function sameConfig(items: PreflightItem[]): boolean {
+  const first = configSignature(items[0]?.config);
+  return items.every((i) => configSignature(i.config) === first);
+}
+
+/**
+ * One rendered card after cross-component grouping (#252 Task 15). `items`
+ * holds every underlying PreflightItem the card represents — length 1 for a
+ * component-local dependency, or when an `external-config` group's config
+ * diverged across consumers (kept separate, not merged — the per-consumer
+ * config grouping + collect-once-fan-out for DIVERGENT config is a
+ * documented fast-follow, not this task). `representative` (the first item,
+ * sorted by component) drives the type-specific form/gating; `usedBy` is the
+ * sorted, deduped list of consuming components, rendered as the "Used by"
+ * indicator only when it has 2+ entries.
+ */
+interface DependencyGroup {
+  key: string;
+  items: PreflightItem[];
+  representative: PreflightItem;
+  usedBy: string[];
+}
+
+/** Cross-component dedupe (#252 Task 15) — see dependencyIdentity/sameConfig above. */
+export function groupPreflightItems(items: PreflightItem[]): DependencyGroup[] {
+  const buckets = new Map<string, PreflightItem[]>();
+  for (const item of items) {
+    const key = dependencyIdentity(item);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(item);
+    else buckets.set(key, [item]);
+  }
+
+  const groups: DependencyGroup[] = [];
+  for (const [key, bucketItems] of buckets) {
+    const sorted = [...bucketItems].sort((a, b) =>
+      a.component.localeCompare(b.component),
+    );
+    const canMerge =
+      sorted.length === 1 ||
+      sorted[0]!.kind !== "external-config" ||
+      sameConfig(sorted);
+
+    if (canMerge) {
+      groups.push({
+        key,
+        items: sorted,
+        representative: sorted[0]!,
+        usedBy: [...new Set(sorted.map((i) => i.component))].sort(),
+      });
+    } else {
+      // Divergent external-config: each consumer keeps its own card/form.
+      for (const item of sorted) {
+        groups.push({
+          key: `${key}::${item.component}`,
+          items: [item],
+          representative: item,
+          usedBy: [item.component],
+        });
+      }
+    }
+  }
+  return groups;
 }
 
 /**
@@ -91,10 +195,13 @@ function seedForItem(item?: PreflightItem): ItemState {
   };
 }
 
-function initialState(items: PreflightItem[]): Record<string, ItemState> {
+// #252 Task 15: keyed by DependencyGroup.key, not per-raw-item — a merged
+// group's config is collected ONCE and shared by every underlying item it
+// represents (see handleContinue's fan-out below).
+function initialState(groups: DependencyGroup[]): Record<string, ItemState> {
   const state: Record<string, ItemState> = {};
-  for (const item of items) {
-    state[itemKey(item)] = seedForItem(item);
+  for (const group of groups) {
+    state[group.key] = seedForItem(group.representative);
   }
   return state;
 }
@@ -163,12 +270,33 @@ function toBuildInputItem(
   return { ...base, kind: "org-service", approved: true };
 }
 
+/**
+ * The cross-component "Used by" indicator (#252 Task 15): rendered only for a
+ * merged group (2+ consuming components) — a component-local dependency (the
+ * common case) shows nothing extra.
+ */
+function UsedByLine({ usedBy }: { usedBy: string[] }) {
+  if (usedBy.length < 2) return null;
+  return (
+    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+      <Typography variant="caption" color="text.secondary">
+        Used by:
+      </Typography>
+      {usedBy.map((name) => (
+        <Chip key={name} size="small" variant="outlined" label={name} />
+      ))}
+    </Stack>
+  );
+}
+
 function ExternalConfigPanel({
   item,
+  usedBy,
   state,
   onChange,
 }: {
   item: PreflightItem;
+  usedBy: string[];
   state: ItemState;
   onChange: (key: string, value: string) => void;
 }) {
@@ -178,6 +306,7 @@ function ExternalConfigPanel({
       <Typography variant="body2" color="text.secondary">
         {item.description}
       </Typography>
+      <UsedByLine usedBy={usedBy} />
       {(item.config ?? []).map((configKey) => (
         <TextField
           key={configKey.key}
@@ -196,12 +325,14 @@ function ExternalConfigPanel({
 
 function ExternalSpecPanel({
   item,
+  usedBy,
   state,
   onUrlChange,
   onContentChange,
   onResolveViaChat,
 }: {
   item: PreflightItem;
+  usedBy: string[];
   state: ItemState;
   onUrlChange: (value: string) => void;
   onContentChange: (value: string) => void;
@@ -213,6 +344,7 @@ function ExternalSpecPanel({
       <Typography variant="body2" color="text.secondary">
         {item.description}
       </Typography>
+      <UsedByLine usedBy={usedBy} />
       <TextField
         label="Spec URL"
         value={state.specUrl}
@@ -253,9 +385,11 @@ function ExternalSpecPanel({
  */
 function BlockerPanel({
   item,
+  usedBy,
   onResolveViaChat,
 }: {
   item: PreflightItem;
+  usedBy: string[];
   onResolveViaChat?: ((item: PreflightItem) => void) | undefined;
 }) {
   return (
@@ -264,6 +398,7 @@ function BlockerPanel({
       <Typography variant="body2" color="text.secondary">
         {item.description}
       </Typography>
+      <UsedByLine usedBy={usedBy} />
       {onResolveViaChat ? (
         <Button
           size="small"
@@ -279,10 +414,12 @@ function BlockerPanel({
 
 function InfoPanel({
   item,
+  usedBy,
   kindLabel,
   detail,
 }: {
   item: PreflightItem;
+  usedBy: string[];
   // A short label shown right under the name (e.g. "Cross-project endpoint").
   kindLabel: string;
   // The full "what the platform will do" note — shown on hover of the label
@@ -292,6 +429,7 @@ function InfoPanel({
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle1">{item.dependency}</Typography>
+      <UsedByLine usedBy={usedBy} />
       {/* The kind sits right under the name; the verbose action note is on
           hover (dotted underline hints it's interactive) instead of inline. */}
       <Tooltip title={detail}>
@@ -368,58 +506,72 @@ export function BuildDependencyDrawer({
   // The parent closes the drawer on success.
   submitting?: boolean;
 }) {
+  // #252 Task 15: cross-component dedupe happens once per `items` change —
+  // every kind-bucket / state lookup below iterates GROUPS, not raw items, so
+  // a shared dependency declared on multiple components (thunder-app style)
+  // renders as one card instead of one per consuming component.
+  const groups = useMemo(() => groupPreflightItems(items), [items]);
+
   const [state, setState] = useState<Record<string, ItemState>>(() =>
-    initialState(items),
+    initialState(groups),
   );
 
   // Fresh state every time the drawer transitions to open, so a reopened
   // drawer never retains the prior session's typed values/toggles.
   useEffect(() => {
     if (open) {
-      setState(initialState(items));
+      setState(initialState(groups));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const canContinue = items.every((item) => {
-    const itemState = state[itemKey(item)];
-    return itemState ? isSatisfied(item, itemState) : false;
+  const canContinue = groups.every((group) => {
+    const groupState = state[group.key];
+    return groupState ? isSatisfied(group.representative, groupState) : false;
   });
 
-  function updateState(item: PreflightItem, patch: Partial<ItemState>) {
+  function updateState(group: DependencyGroup, patch: Partial<ItemState>) {
     setState((prev) => ({
       ...prev,
-      [itemKey(item)]: {
-        ...(prev[itemKey(item)] ?? seedForItem(item)),
+      [group.key]: {
+        ...(prev[group.key] ?? seedForItem(group.representative)),
         ...patch,
       },
     }));
   }
 
   function handleContinue() {
-    // Blocker items (ambiguous / needs-input) are never representable as a
+    // Blocker groups (ambiguous / needs-input) are never representable as a
     // BuildInputItem — there is no input to submit for them, and Continue is
     // disabled while any are present anyway (isSatisfied always reports them
     // unsatisfied). Filtering defensively here, rather than trusting the
     // disabled button alone, keeps toBuildInputItem total over the kinds it
-    // actually knows how to serialize.
-    const inputs = items
-      .filter((item) => !isBlockerKind(item.kind))
-      .map((item) =>
-        toBuildInputItem(item, state[itemKey(item)] ?? seedForItem(item)),
-      );
+    // actually knows how to serialize. A merged group's ONE typed state fans
+    // out to a BuildInputItem per underlying (component, dependency) pair —
+    // the wire contract is unchanged, so the collect-once UI still submits
+    // one input per original consumer.
+    const inputs = groups
+      .filter((group) => !isBlockerKind(group.representative.kind))
+      .flatMap((group) => {
+        const groupState = state[group.key] ?? seedForItem(group.representative);
+        return group.items.map((item) => toBuildInputItem(item, groupState));
+      });
     onContinue(inputs);
   }
 
-  const externalConfigItems = items.filter(
-    (i) => i.kind === "external-config",
+  const externalConfigGroups = groups.filter(
+    (g) => g.representative.kind === "external-config",
   );
-  const externalSpecItems = items.filter((i) => i.kind === "external-spec");
-  const blockerItems = items.filter((i) => isBlockerKind(i.kind));
-  const platformResourceItems = items.filter(
-    (i) => i.kind === "platform-resource",
+  const externalSpecGroups = groups.filter(
+    (g) => g.representative.kind === "external-spec",
   );
-  const orgServiceItems = items.filter((i) => i.kind === "org-service");
+  const blockerGroups = groups.filter((g) => isBlockerKind(g.representative.kind));
+  const platformResourceGroups = groups.filter(
+    (g) => g.representative.kind === "platform-resource",
+  );
+  const orgServiceGroups = groups.filter(
+    (g) => g.representative.kind === "org-service",
+  );
 
   return (
     <Drawer
@@ -446,13 +598,14 @@ export function BuildDependencyDrawer({
           Dependencies to resolve
         </Typography>
 
-        {blockerItems.length > 0 ? (
+        {blockerGroups.length > 0 ? (
           <>
             <Stack spacing={3} sx={{ mb: 3 }}>
-              {blockerItems.map((item) => (
+              {blockerGroups.map((group) => (
                 <BlockerPanel
-                  key={itemKey(item)}
-                  item={item}
+                  key={group.key}
+                  item={group.representative}
+                  usedBy={group.usedBy}
                   onResolveViaChat={onResolveDependency}
                 />
               ))}
@@ -461,18 +614,20 @@ export function BuildDependencyDrawer({
           </>
         ) : null}
 
-        {externalConfigItems.length > 0 ? (
+        {externalConfigGroups.length > 0 ? (
           <>
             <Stack spacing={3} sx={{ mb: 3 }}>
-              {externalConfigItems.map((item) => (
+              {externalConfigGroups.map((group) => (
                 <ExternalConfigPanel
-                  key={itemKey(item)}
-                  item={item}
-                  state={state[itemKey(item)] ?? seedForItem(item)}
+                  key={group.key}
+                  item={group.representative}
+                  usedBy={group.usedBy}
+                  state={state[group.key] ?? seedForItem(group.representative)}
                   onChange={(key, value) =>
-                    updateState(item, {
+                    updateState(group, {
                       values: {
-                        ...(state[itemKey(item)] ?? seedForItem(item)).values,
+                        ...(state[group.key] ?? seedForItem(group.representative))
+                          .values,
                         [key]: value,
                       },
                     })
@@ -484,17 +639,18 @@ export function BuildDependencyDrawer({
           </>
         ) : null}
 
-        {externalSpecItems.length > 0 ? (
+        {externalSpecGroups.length > 0 ? (
           <>
             <Stack spacing={3} sx={{ mb: 3 }}>
-              {externalSpecItems.map((item) => (
+              {externalSpecGroups.map((group) => (
                 <ExternalSpecPanel
-                  key={itemKey(item)}
-                  item={item}
-                  state={state[itemKey(item)] ?? seedForItem(item)}
-                  onUrlChange={(value) => updateState(item, { specUrl: value })}
+                  key={group.key}
+                  item={group.representative}
+                  usedBy={group.usedBy}
+                  state={state[group.key] ?? seedForItem(group.representative)}
+                  onUrlChange={(value) => updateState(group, { specUrl: value })}
                   onContentChange={(value) =>
-                    updateState(item, { specContent: value })
+                    updateState(group, { specContent: value })
                   }
                   onResolveViaChat={onResolveDependency}
                 />
@@ -504,15 +660,16 @@ export function BuildDependencyDrawer({
           </>
         ) : null}
 
-        {platformResourceItems.length > 0 ? (
+        {platformResourceGroups.length > 0 ? (
           <>
             <Stack spacing={2} sx={{ mb: 3 }}>
-              {platformResourceItems.map((item) => (
+              {platformResourceGroups.map((group) => (
                 <InfoPanel
-                  key={itemKey(item)}
-                  item={item}
-                  kindLabel={item.resourceType ?? "Platform resource"}
-                  detail={`We'll provision this ${item.resourceType ?? "resource"} for you.`}
+                  key={group.key}
+                  item={group.representative}
+                  usedBy={group.usedBy}
+                  kindLabel={group.representative.resourceType ?? "Platform resource"}
+                  detail={`We'll provision this ${group.representative.resourceType ?? "resource"} for you.`}
                 />
               ))}
             </Stack>
@@ -520,12 +677,13 @@ export function BuildDependencyDrawer({
           </>
         ) : null}
 
-        {orgServiceItems.length > 0 ? (
+        {orgServiceGroups.length > 0 ? (
           <Stack spacing={2} sx={{ mb: 3 }}>
-            {orgServiceItems.map((item) => (
+            {orgServiceGroups.map((group) => (
               <InfoPanel
-                key={itemKey(item)}
-                item={item}
+                key={group.key}
+                item={group.representative}
+                usedBy={group.usedBy}
                 kindLabel="Cross-project endpoint"
                 detail="We'll publish this cross-project endpoint — it updates and rebuilds the owning project; your build continues, and the consuming task waits until it's published."
               />

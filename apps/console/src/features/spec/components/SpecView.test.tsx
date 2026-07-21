@@ -108,16 +108,21 @@ vi.mock("@aep/ui-design-view", () => ({
   DesignView: ({
     design,
     dependencyStatus,
+    dependencyUsedBy,
     onResolveDependency,
   }: {
     design: string;
     dependencyStatus?: Record<string, { status?: string; reason?: string }>;
+    dependencyUsedBy?: Record<string, string[]>;
     onResolveDependency?: (name: string) => void;
   }) => (
     <div data-testid="design-view">
       <div data-testid="design-view-content">{design}</div>
       <div data-testid="design-view-status">
         {JSON.stringify(dependencyStatus ?? {})}
+      </div>
+      <div data-testid="design-view-usedby">
+        {JSON.stringify(dependencyUsedBy ?? {})}
       </div>
       <button onClick={() => onResolveDependency?.("stripe")}>
         Resolve stripe
@@ -423,6 +428,43 @@ describe("SpecView dependency wiring (#252 Task 9)", () => {
       CHECKOUT_DEPS[0]!.dependencies![0],
     );
   });
+
+  // #252 Task 15: cross-component "Used by", computed across EVERY
+  // component's dependencies (not just the selected one) and keyed by the
+  // selected component's own dependency names.
+  it("passes a cross-component 'Used by' map to DesignView for a dependency shared with another component", () => {
+    const SHARED_DEPS: ComponentDependencies[] = [
+      {
+        componentName: "checkout-api",
+        dependencies: [
+          { kind: "external", name: "stripe", status: "unresolved", reason: "needs-input" },
+          { kind: "platform-resource", name: "thunder-app", resourceType: "auth" },
+        ],
+      },
+      {
+        componentName: "checkout-web",
+        dependencies: [
+          { kind: "platform-resource", name: "thunder-app", resourceType: "auth" },
+        ],
+      },
+    ];
+    mockUseDesignDependencies.mockReturnValue({
+      data: SHARED_DEPS,
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+
+    render(<SpecView projectName="proj1" />);
+    const usedBy = JSON.parse(
+      screen.getByTestId("design-view-usedby").textContent ?? "{}",
+    );
+    expect(usedBy).toEqual({
+      "thunder-app": ["checkout-api", "checkout-web"],
+    });
+    // stripe is component-local (only checkout-api declares it) — no entry.
+    expect(usedBy).not.toHaveProperty("stripe");
+  });
 });
 
 // --- #252 Task 10: build dependency drawer wiring --------------------------
@@ -501,5 +543,33 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
 
     expect(mockPreflightRefetch).not.toHaveBeenCalled();
     expect(mockFlush).not.toHaveBeenCalled();
+  });
+
+  // #252 Task 15: the drawer is a MUI overlay — left open after "Resolve via
+  // chat" it covers the chat panel the seeded message just opened, so the
+  // user can't see what they're meant to respond to. Closing it is this
+  // handler's job, alongside firing the seeded chat flow.
+  it('closes the dependency drawer when "Resolve via chat" is clicked, so the seeded chat is visible', async () => {
+    mockPreflightRefetch.mockResolvedValue({
+      data: { needsInput: true, items: DRAWER_PREFLIGHT_ITEMS },
+    });
+
+    render(<SpecView projectName="proj1" />);
+    clickBuild();
+    await waitFor(() =>
+      expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByText("Resolve drawer item"));
+
+    // The seeded chat flow still fires (same lookup as the test above)...
+    expect(mockResolveViaChat).toHaveBeenCalledWith(
+      "checkout-api",
+      CHECKOUT_DEPS[0]!.dependencies![0],
+    );
+    // ...and the drawer closes so the chat panel it opens is actually visible.
+    await waitFor(() =>
+      expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument(),
+    );
   });
 });

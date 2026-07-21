@@ -200,10 +200,19 @@ function ConfigChip({ entry }: { entry: DesignConfigEntry }) {
 function DependencyCard({
   dep,
   status,
+  usedBy,
   onResolve,
 }: {
   dep: Dependency;
   status?: DependencyStatusInfo | undefined;
+  /**
+   * #252 Task 15: every OTHER component (besides the one this card's design
+   * belongs to) that declares an equivalent dependency (same kind+identity —
+   * see DesignViewProps.dependencyUsedBy). Rendered as a "Used by" line only
+   * when 2+ entries are present; a component-local dependency (the common
+   * case) gets nothing extra.
+   */
+  usedBy?: string[] | undefined;
   onResolve?: (() => void) | undefined;
 }) {
   const color = KIND_COLOR[dep.kind] ?? FALLBACK;
@@ -211,6 +220,7 @@ function DependencyCard({
   const resolutionStatus = status?.status;
   const isResolved = resolutionStatus === "resolved";
   const showResolution = Boolean(resolutionStatus) && !isResolved;
+  const showUsedBy = (usedBy?.length ?? 0) > 1;
 
   return (
     <Box
@@ -239,6 +249,17 @@ function DependencyCard({
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
           {dep.description}
         </Typography>
+      )}
+
+      {showUsedBy && usedBy && (
+        <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap" }}>
+          <Typography variant="caption" color="text.secondary">
+            Used by:
+          </Typography>
+          {usedBy.map((name) => (
+            <Chip key={name} size="small" variant="outlined" label={name} />
+          ))}
+        </Box>
       )}
 
       {dep.sources && dep.sources.length > 0 && (
@@ -310,10 +331,12 @@ function DependencyCard({
 function DesignBody({
   design,
   dependencyStatus,
+  dependencyUsedBy,
   onResolveDependency,
 }: {
   design: ComponentDesign;
   dependencyStatus?: Record<string, DependencyStatusInfo> | undefined;
+  dependencyUsedBy?: Record<string, string[]> | undefined;
   onResolveDependency?: ((dependencyName: string) => void) | undefined;
 }) {
   const typeColor = TYPE_COLOR[design.type] ?? FALLBACK;
@@ -365,6 +388,7 @@ function DesignBody({
               key={`${dep.kind}:${dep.name}:${i}`}
               dep={dep}
               status={dependencyStatus?.[dep.name]}
+              usedBy={dependencyUsedBy?.[dep.name]}
               onResolve={
                 onResolveDependency ? () => onResolveDependency(dep.name) : undefined
               }
@@ -393,6 +417,20 @@ export interface DesignViewProps {
    */
   dependencyStatus?: Record<string, DependencyStatusInfo> | undefined;
   /**
+   * OPTIONAL cross-component "Used by" (#252 Task 15), keyed by THIS design's
+   * own dependency `name`: every other component that also declares an
+   * equivalent dependency (same kind + identity — see
+   * BuildDependencyDrawer.tsx's `groupPreflightItems`, the same dedupe rule
+   * applied to the build-time drawer). This package has no notion of "other
+   * components" of its own — the caller (console's SpecView) computes this
+   * across every component's dependencies via `computeDependencyUsedBy` and
+   * passes only the slice relevant to the design being rendered. Optional and
+   * keyed defensively, like `dependencyStatus` above: a missing/absent entry
+   * (the common case — a dependency only this component declares) just
+   * renders without a "Used by" line.
+   */
+  dependencyUsedBy?: Record<string, string[]> | undefined;
+  /**
    * Called with a dependency's `name` when the user clicks "Resolve in
    * chat" on a non-resolved card (only rendered when `dependencyStatus`
    * marks that dependency non-resolved). This package has no chat/collab
@@ -407,6 +445,7 @@ export interface DesignViewProps {
 export function DesignView({
   design,
   dependencyStatus,
+  dependencyUsedBy,
   onResolveDependency,
 }: DesignViewProps) {
   const parsed = useMemo(() => parseComponentDesign(design), [design]);
@@ -423,6 +462,7 @@ export function DesignView({
     <DesignBody
       design={parsed}
       dependencyStatus={dependencyStatus}
+      dependencyUsedBy={dependencyUsedBy}
       onResolveDependency={onResolveDependency}
     />
   );

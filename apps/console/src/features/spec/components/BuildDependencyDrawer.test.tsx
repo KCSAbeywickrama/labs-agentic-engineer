@@ -21,7 +21,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
+import { BuildDependencyDrawer, groupPreflightItems } from "./BuildDependencyDrawer";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
 type BuildInputItem = components["schemas"]["BuildInputItem"];
@@ -503,5 +503,299 @@ describe("BuildDependencyDrawer blocker items (#252 Task 10)", () => {
       screen.getByRole("button", { name: /resolve via chat/i }),
     );
     expect(onResolveDependency).toHaveBeenCalledWith(specItem);
+  });
+});
+
+// #252 Task 15: Task 14 lifted the ComponentType!=service preflight guard, so
+// a project-scoped shared dependency (the canonical case: `thunder-app`
+// end-user auth, declared on both a web-application and its backing service)
+// now surfaces one PreflightItem PER consuming component. groupPreflightItems
+// is the pure dedupe helper that re-collapses those into one card.
+describe("groupPreflightItems (#252 Task 15)", () => {
+  const THUNDER_SPA: PreflightItem = {
+    component: "web-frontend",
+    dependency: "thunder-app",
+    kind: "platform-resource",
+    description: "End-user authentication (Thunder)",
+    resourceType: "auth",
+  };
+  const THUNDER_SERVICE: PreflightItem = {
+    component: "auth-service",
+    dependency: "thunder-app",
+    kind: "platform-resource",
+    description: "End-user authentication (Thunder)",
+    resourceType: "auth",
+  };
+
+  it("merges same-kind, same-identity entries across components into one group with the union of consumers", () => {
+    const groups = groupPreflightItems([THUNDER_SPA, THUNDER_SERVICE]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.usedBy).toEqual(["auth-service", "web-frontend"]);
+    expect(groups[0]!.items).toHaveLength(2);
+    // Representative is deterministic (sorted by component), not "whichever
+    // arrived first" — auth-service < web-frontend alphabetically.
+    expect(groups[0]!.representative.component).toBe("auth-service");
+  });
+
+  it("does not merge entries with a different dependency name (different identity)", () => {
+    const other: PreflightItem = {
+      ...THUNDER_SPA,
+      component: "billing-service",
+      dependency: "postgres",
+      resourceType: "postgres",
+    };
+
+    const groups = groupPreflightItems([THUNDER_SPA, other]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.every((g) => g.usedBy.length === 1)).toBe(true);
+  });
+
+  it("does not merge entries with the same dependency name but a different kind", () => {
+    const orgServiceVariant: PreflightItem = {
+      component: "auth-service",
+      dependency: "thunder-app",
+      kind: "org-service",
+      description: "Cross-project endpoint",
+    };
+
+    const groups = groupPreflightItems([THUNDER_SPA, orgServiceVariant]);
+
+    expect(groups).toHaveLength(2);
+  });
+
+  it("does not merge platform-resource entries with the same name but a different resourceType", () => {
+    const differentResourceType: PreflightItem = {
+      ...THUNDER_SERVICE,
+      resourceType: "session-store",
+    };
+
+    const groups = groupPreflightItems([THUNDER_SPA, differentResourceType]);
+
+    expect(groups).toHaveLength(2);
+  });
+
+  it("merges external-config entries whose config is identical, order-independent", () => {
+    const a: PreflightItem = {
+      component: "web-frontend",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      config: [
+        { key: "SMTP_HOST", secret: false, defaultValue: "smtp.example.com" },
+        { key: "SMTP_PASSWORD", secret: true },
+      ],
+    };
+    const b: PreflightItem = {
+      component: "auth-service",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      // Same keys, reverse order, same attributes — a genuine identical dep.
+      config: [
+        { key: "SMTP_PASSWORD", secret: true },
+        { key: "SMTP_HOST", secret: false, defaultValue: "smtp.example.com" },
+      ],
+    };
+
+    const groups = groupPreflightItems([a, b]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.usedBy).toEqual(["auth-service", "web-frontend"]);
+  });
+
+  it("does NOT merge external-config entries whose config diverges — keeps them separate (fast-follow boundary)", () => {
+    const a: PreflightItem = {
+      component: "web-frontend",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      config: [{ key: "SMTP_HOST", secret: false }],
+    };
+    const b: PreflightItem = {
+      component: "auth-service",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      // A different config key set — genuinely divergent, not the same dep.
+      config: [{ key: "SMTP_ENDPOINT", secret: false }],
+    };
+
+    const groups = groupPreflightItems([a, b]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.every((g) => g.items.length === 1)).toBe(true);
+    expect(groups.every((g) => g.usedBy.length === 1)).toBe(true);
+  });
+});
+
+describe("BuildDependencyDrawer cross-component 'Used by' rendering (#252 Task 15)", () => {
+  const THUNDER_SPA: PreflightItem = {
+    component: "web-frontend",
+    dependency: "thunder-app",
+    kind: "platform-resource",
+    description: "End-user authentication (Thunder)",
+    resourceType: "auth",
+  };
+  const THUNDER_SERVICE: PreflightItem = {
+    component: "auth-service",
+    dependency: "thunder-app",
+    kind: "platform-resource",
+    description: "End-user authentication (Thunder)",
+    resourceType: "auth",
+  };
+
+  it("renders a shared dependency ONCE (not once per consuming component) with a 'Used by' listing every consumer", () => {
+    setup([THUNDER_SPA, THUNDER_SERVICE]);
+
+    // The regression: before Task 15 this rendered TWICE (once per component).
+    expect(screen.getAllByText("thunder-app")).toHaveLength(1);
+    expect(screen.getByText("web-frontend")).toBeInTheDocument();
+    expect(screen.getByText("auth-service")).toBeInTheDocument();
+  });
+
+  it("does not render a 'Used by' line for a component-local (non-shared) dependency", () => {
+    setup([
+      {
+        component: "checkout-api",
+        dependency: "postgres",
+        kind: "platform-resource",
+        description: "Postgres database",
+        resourceType: "postgres",
+      },
+    ]);
+
+    expect(screen.queryByText(/used by/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps un-shared dependencies of a different kind/identity as separate cards, each with its own 'Resolve via chat'", () => {
+    const ambiguousA: PreflightItem = {
+      component: "checkout-api",
+      dependency: "crm",
+      kind: "external-ambiguous",
+      description: "More than one candidate fits.",
+    };
+    const ambiguousB: PreflightItem = {
+      component: "billing-service",
+      dependency: "weather-api",
+      kind: "external-unresolved",
+      description: "Needs information only you can provide.",
+    };
+    setup([ambiguousA, ambiguousB]);
+
+    expect(
+      screen.getAllByRole("button", { name: /resolve via chat/i }),
+    ).toHaveLength(2);
+    expect(screen.queryByText(/used by/i)).not.toBeInTheDocument();
+  });
+
+  it("a merged blocker still blocks Continue, and 'Resolve via chat' fires ONCE for the shared dependency", () => {
+    const blockerA: PreflightItem = {
+      component: "web-frontend",
+      dependency: "crm",
+      kind: "external-ambiguous",
+      description: "More than one candidate fits — resolve which one to use.",
+    };
+    const blockerB: PreflightItem = {
+      component: "auth-service",
+      dependency: "crm",
+      kind: "external-ambiguous",
+      description: "More than one candidate fits — resolve which one to use.",
+    };
+    const { onResolveDependency } = setup([blockerA, blockerB]);
+
+    // One merged card, not two.
+    expect(screen.getAllByText("crm")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /resolve via chat/i }),
+    );
+
+    expect(onResolveDependency).toHaveBeenCalledTimes(1);
+    // Fired with the deterministic representative — proves it's ONE call for
+    // the shared dep, not one per underlying consumer.
+    expect(onResolveDependency).toHaveBeenCalledWith(
+      expect.objectContaining({ dependency: "crm", component: "auth-service" }),
+    );
+  });
+
+  it("collects an identical external-config value ONCE and fans it out to every consumer on Continue", () => {
+    const a: PreflightItem = {
+      component: "web-frontend",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      config: [{ key: "SMTP_HOST", secret: false }],
+    };
+    const b: PreflightItem = {
+      component: "auth-service",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      config: [{ key: "SMTP_HOST", secret: false }],
+    };
+    const { onContinue } = setup([a, b]);
+
+    // Exactly one input field is rendered — the merged, collect-once form.
+    const fields = screen.getAllByLabelText(/SMTP_HOST/i);
+    expect(fields).toHaveLength(1);
+    fireEvent.change(fields[0]!, { target: { value: "smtp.shared.example.com" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    const inputs = onContinue.mock.calls[0]?.[0] as BuildInputItem[];
+    expect(inputs).toHaveLength(2);
+    for (const consumer of ["web-frontend", "auth-service"]) {
+      const input = inputs.find((i) => i.component === consumer);
+      expect(input).toMatchObject({
+        component: consumer,
+        dependency: "smtp-config",
+        kind: "external-config",
+        values: [{ key: "SMTP_HOST", value: "smtp.shared.example.com" }],
+      });
+    }
+  });
+
+  it("keeps divergent external-config entries as separate forms — filling one does not satisfy the other", () => {
+    const a: PreflightItem = {
+      component: "web-frontend",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      config: [{ key: "SMTP_HOST", secret: false }],
+    };
+    const b: PreflightItem = {
+      component: "auth-service",
+      dependency: "smtp-config",
+      kind: "external-config",
+      description: "SMTP relay credentials",
+      config: [{ key: "SMTP_ENDPOINT", secret: false }],
+    };
+    const { onContinue } = setup([a, b]);
+
+    expect(screen.queryByText(/used by/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/SMTP_HOST/i), {
+      target: { value: "smtp.web.example.com" },
+    });
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/SMTP_ENDPOINT/i), {
+      target: { value: "smtp.auth.example.com" },
+    });
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    const inputs = onContinue.mock.calls[0]?.[0] as BuildInputItem[];
+    expect(inputs).toHaveLength(2);
+    expect(inputs.find((i) => i.component === "web-frontend")).toMatchObject({
+      values: [{ key: "SMTP_HOST", value: "smtp.web.example.com" }],
+    });
+    expect(inputs.find((i) => i.component === "auth-service")).toMatchObject({
+      values: [{ key: "SMTP_ENDPOINT", value: "smtp.auth.example.com" }],
+    });
   });
 });

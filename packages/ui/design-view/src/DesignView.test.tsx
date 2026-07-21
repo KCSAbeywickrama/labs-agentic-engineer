@@ -189,3 +189,50 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     expect(screen.getAllByTestId("secret-icon")).toHaveLength(1);
   });
 });
+
+// #252 Task 15: cross-component "Used by" — the console computes this map
+// across every component's dependencies (this package has no notion of
+// "other components" of its own) and passes only the slice for the
+// currently-rendered design.
+describe("DesignView — cross-component 'Used by' (#252 Task 15)", () => {
+  it('renders a "Used by" line listing every consuming component when 2+ are present', () => {
+    render(
+      <DesignView
+        design={designJson([
+          { kind: "platform-resource", name: "thunder-app", resourceType: "auth" },
+        ])}
+        dependencyUsedBy={{ "thunder-app": ["auth-service", "web-frontend"] }}
+      />,
+    );
+    expect(screen.getByText(/used by/i)).toBeInTheDocument();
+    expect(screen.getByText("auth-service")).toBeInTheDocument();
+    expect(screen.getByText("web-frontend")).toBeInTheDocument();
+  });
+
+  it('renders no "Used by" line when the dependency has no entry (component-local, the common case)', () => {
+    render(
+      <DesignView
+        design={designJson([{ kind: "external", name: "stripe" }])}
+        dependencyUsedBy={{}}
+      />,
+    );
+    expect(screen.queryByText(/used by/i)).not.toBeInTheDocument();
+  });
+
+  it('renders no "Used by" line for a single-entry (self-only) usedBy list', () => {
+    render(
+      <DesignView
+        design={designJson([{ kind: "external", name: "stripe" }])}
+        dependencyUsedBy={{ stripe: ["checkout-api"] }}
+      />,
+    );
+    expect(screen.queryByText(/used by/i)).not.toBeInTheDocument();
+  });
+
+  it("renders without dependencyUsedBy at all — existing callers unaffected", () => {
+    render(
+      <DesignView design={designJson([{ kind: "external", name: "stripe" }])} />,
+    );
+    expect(screen.queryByText(/used by/i)).not.toBeInTheDocument();
+  });
+});
