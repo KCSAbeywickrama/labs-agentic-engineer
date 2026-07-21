@@ -70,18 +70,21 @@ func (s *fakeSecretWriter) WriteExternalResourceSecret(_ context.Context, _, _, 
 	return "user-app-secrets/wc-org/cred-" + entityName, "cred-" + entityName, nil
 }
 
-// fakeLookup serves one registered external resource by name.
-type fakeLookup struct{ er *models.ExternalResource }
-
-func (f *fakeLookup) Get(_ context.Context, _, name string) (*models.ExternalResource, error) {
-	if f.er != nil && f.er.Name == name {
-		return f.er, nil
-	}
-	return nil, nil
+// fakeDesign serves ResolveRunnerSecrets the project's committed design
+// components — the single source of truth for secret classification (mirrors
+// the build path's design read; package-local since dependencies/resources
+// holds an empty arch-allowlist row and never imports another feature).
+type fakeDesign struct {
+	comps []models.DesignComponent
+	err   error
 }
 
-func newTestProvisioner(lookup externalResourceLookup, rc openchoreo.ResourceClient, sm SecretWriter) *ExternalResourceProvisioner {
-	p := NewExternalResourceProvisioner(lookup, rc, sm)
+func (f fakeDesign) ReadDesignComponents(context.Context, string, string) ([]models.DesignComponent, error) {
+	return f.comps, f.err
+}
+
+func newTestProvisioner(design DesignReader, rc openchoreo.ResourceClient, sm SecretWriter) *ExternalResourceProvisioner {
+	p := NewExternalResourceProvisioner(design, rc, sm)
 	p.pollInterval = time.Millisecond
 	p.pollTimeout = time.Second
 	return p
@@ -391,14 +394,18 @@ func TestResolveRunnerSecrets_ReadsBindingStorePath(t *testing.T) {
 			Spec: openchoreo.ResourceReleaseBindingSpec{ResourceTypeEnvironmentConfigs: cfg},
 		}, nil
 	}
-	lookup := &fakeLookup{er: &models.ExternalResource{
-		Name: "openweather", ResourceTypeName: "openweather",
-		ConfigKeys: []models.ConfigKey{
-			{Key: "OPENWEATHER_BASE_URL"},
-			{Key: "OPENWEATHER_API_KEY", Secret: true},
+	// The design's config[] is the classification source — NOT the org catalog
+	// (this test wires no catalog/lookup at all anymore).
+	design := fakeDesign{comps: []models.DesignComponent{{
+		Name: "weather-svc",
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "openweather", Config: []models.ConfigKey{
+				{Key: "OPENWEATHER_BASE_URL"},
+				{Key: "OPENWEATHER_API_KEY", Secret: true},
+			}},
 		},
-	}}
-	p := newTestProvisioner(lookup, rc, &fakeSecretWriter{})
+	}}}
+	p := newTestProvisioner(design, rc, &fakeSecretWriter{})
 
 	got, err := p.ResolveRunnerSecrets(context.Background(), "default", "proj", "development",
 		[]string{"openweather", "unregistered"})
@@ -423,16 +430,54 @@ func TestResolveRunnerSecrets_SkipsAllPlainAndUnprovisioned(t *testing.T) {
 	rc.GetBindingFunc = func(_ context.Context, _, _ string) (*openchoreo.ResourceReleaseBinding, error) {
 		return nil, nil // not yet provisioned
 	}
-	lookup := &fakeLookup{er: &models.ExternalResource{
-		Name:       "plainsvc",
-		ConfigKeys: []models.ConfigKey{{Key: "BASE_URL"}},
-	}}
-	p := newTestProvisioner(lookup, rc, &fakeSecretWriter{})
+	design := fakeDesign{comps: []models.DesignComponent{{
+		Name: "plain-svc",
+		Dependencies: []models.Dependency{
+			{Kind: models.DependencyKindExternal, Name: "plainsvc", Config: []models.ConfigKey{{Key: "BASE_URL"}}},
+		},
+	}}}
+	p := newTestProvisioner(design, rc, &fakeSecretWriter{})
 	got, err := p.ResolveRunnerSecrets(context.Background(), "default", "proj", "development", []string{"plainsvc"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("all-plain resource must be skipped, got %+v", got)
+	}
+}
+
+// TestResolveRunnerSecrets_DesignReadErrorFailsClean proves the edge case a
+// misclassification would leak into the runner pod: a design-read failure
+// must propagate as an error, never silently degrade to "no secret keys" (a
+// forward-tolerant empty result here would just skip an existing secret,
+// which is safe; but a design-read ERROR is a different signal — it means we
+// cannot know the schema at all, and must fail rather than guess).
+func TestResolveRunnerSecrets_DesignReadErrorFailsClean(t *testing.T) {
+	t.Parallel()
+
+	rc := newFakeRC("rel-1")
+	design := fakeDesign{err: errors.New("design read boom")}
+	p := newTestProvisioner(design, rc, &fakeSecretWriter{})
+	if _, err := p.ResolveRunnerSecrets(context.Background(), "default", "proj", "development", []string{"openweather"}); err == nil {
+		t.Fatal("a design-read failure must propagate, not silently classify as secret-free")
+	}
+}
+
+// TestResolveRunnerSecrets_UnknownDepInDesignSkipped proves a name absent from
+// the design entirely (design read SUCCEEDED, just found nothing) resolves to
+// no secret keys — same as an external dep with an empty config[] — and is
+// skipped like an unprovisioned resource, not an error.
+func TestResolveRunnerSecrets_UnknownDepInDesignSkipped(t *testing.T) {
+	t.Parallel()
+
+	rc := newFakeRC("rel-1")
+	design := fakeDesign{comps: []models.DesignComponent{{Name: "svc"}}} // no dependencies at all
+	p := newTestProvisioner(design, rc, &fakeSecretWriter{})
+	got, err := p.ResolveRunnerSecrets(context.Background(), "default", "proj", "development", []string{"openweather"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a name absent from the design must be skipped (no secret keys), got %+v", got)
 	}
 }

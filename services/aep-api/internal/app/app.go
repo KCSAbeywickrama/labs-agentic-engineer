@@ -865,8 +865,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	)
 	// externalResourceRepo remains the org-level registry's WRITE/reuse-resolve
 	// side (design-save upsert, ComputeDependencyStatus's registry-reuse rule,
-	// the provisioner's config-schema lookup) — none of that is in scope here.
-	// Only the MCP list_external_resources/get_external_resource_schema tools
+	// the OC ResourceType-authoring schema Provision/authorExternalWithRef read)
+	// — none of that is in scope here. Secret-vs-plain CLASSIFICATION (the
+	// provision value split + ResolveRunnerSecrets) reads the project's
+	// committed design.json instead, never this registry (parity with the
+	// build path). Only the MCP list_external_resources/get_external_resource_schema tools
 	// re-source to the org's provisioned ResourceTypes (Task 3): only a
 	// PROVISIONED external has an authored RT, so params.MCPExternalResources
 	// now reflects provisioned externals only (D2), never the table.
@@ -930,7 +933,11 @@ func Build(cfg config.Config, db *gorm.DB) (*App, error) {
 	// Executions (Kind=provision) and closes each issue with a no-secrets
 	// reference; the readiness watcher observes platform-resource bindings'
 	// native Ready condition out-of-band and releases gated consumer tasks.
-	externalProvisioner := resources.NewExternalResourceProvisioner(externalResourceRepo, resourceClient, smWriter)
+	// designComponents{store: artifactStore} is the SAME design-reader adapter
+	// wired into provisioningSvc below (Deps.Design) — ResolveRunnerSecrets
+	// classifies secret-vs-plain config keys from the project's committed
+	// design.json, never the org catalog (parity with the build path).
+	externalProvisioner := resources.NewExternalResourceProvisioner(designComponents{store: artifactStore}, resourceClient, smWriter)
 	// The public build surface: its InputsCoordinator runs the drawer inputs'
 	// pre-tag work (collect external specs, derive end-user auth) and stages
 	// external-config secrets to SM-API through externalProvisioner before the

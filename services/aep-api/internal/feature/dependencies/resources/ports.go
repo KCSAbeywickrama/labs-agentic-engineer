@@ -27,13 +27,6 @@ import (
 	"github.com/wso2/aep/aep-api/models"
 )
 
-// externalResourceLookup is the slice of the org-level external-resource
-// catalog this package reads. *repositories.ExternalResourceRepository
-// satisfies it. Returns (nil, nil) when the name is not registered.
-type externalResourceLookup interface {
-	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
-}
-
 // SecretWriter is the slice of the SM-API writer the provisioner needs.
 // Satisfied by *orgcreds.SMAPIWriter.
 type SecretWriter interface {
@@ -57,11 +50,14 @@ type SecretWriter interface {
 // (provisioning.ExternalResourceCatalog + the design-scan consumers), reading
 // *repositories.ExternalResourceRepository directly.
 
-// DesignReader is the slice of the design store the resource provisioner reads:
-// the project's authored design components, whose platform-resource entries
-// carry the ClusterResourceType to provision. It deliberately returns ONLY
-// models-typed data — NOT artifacts.DesignFile — so this package keeps its
-// empty arch-allowlist row (no dependencies/resources → artifacts feature
+// DesignReader is the slice of the design store the resource provisioner
+// reads: the project's authored design components, whose platform-resource
+// entries carry the ClusterResourceType to provision and whose external
+// entries carry the config[] schema (with Secret flags) ResolveRunnerSecrets
+// classifies by — the same schema the build path reads, so neither path
+// consults the org catalog for secret classification. It deliberately returns
+// ONLY models-typed data — NOT artifacts.DesignFile — so this package keeps
+// its empty arch-allowlist row (no dependencies/resources → artifacts feature
 // edge). The composition root adapts artifacts.ArtifactStore.ReadDesign with
 // a one-line wrapper returning design.Components ((nil, nil) design ⇒ nil
 // components — "no design yet").

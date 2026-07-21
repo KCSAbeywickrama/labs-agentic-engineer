@@ -26,9 +26,10 @@ import (
 )
 
 // SaveValues collects an external dependency's per-env values, splits them into
-// plain / secret by the registered schema (the user never marks secrecy),
-// writes the secrets to SM-API + authors the OC external Resource model, then
-// completes the provision gate synchronously — the external ResourceType is
+// plain / secret by the dependency's config schema declared in the project's
+// committed design.json (the user never marks secrecy), writes the secrets to
+// SM-API + authors the OC external Resource model, then completes the
+// provision gate synchronously — the external ResourceType is
 // readyWhen:${true}, so the binding is Ready as soon as OC reconciles it, and
 // upstream likewise treats values-collected as immediately deployed.
 //
@@ -36,7 +37,13 @@ import (
 // ctx must carry the user JWT — the SM-API writer reads the ouId claim for the
 // vault path). No secret value is persisted outside SM-API or echoed anywhere.
 func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, depName string, envValues map[string]map[string]string) error {
-	if _, err := s.findDepInProject(ctx, orgID, projectID, depName, models.DependencyKindExternal); err != nil {
+	// dep carries the design's config[] schema (with Secret flags) — the same
+	// source of truth the build path's secretKeysByDep reads. A dep whose
+	// design can't be read or found fails here (ErrDepNotFound/ErrDepWrongKind
+	// or the underlying design-read error), so a value is never misclassified
+	// plain for lack of a schema.
+	dep, err := s.findDepInProject(ctx, orgID, projectID, depName, models.DependencyKindExternal)
+	if err != nil {
 		return err
 	}
 	er, err := s.catalog.Get(ctx, orgID, depName)
@@ -51,7 +58,7 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 	}
 	byEnv := make(map[string]resources.EnvValues, len(envValues))
 	for env, vals := range envValues {
-		byEnv[env] = splitBySchema(er.ConfigKeys, vals)
+		byEnv[env] = splitBySchema(dep.Config, vals)
 	}
 
 	// Admit a provision run for the gate issue (when one exists). Values are
@@ -99,8 +106,8 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 }
 
 // splitBySchema partitions a flat env value map into plain / secret entries by
-// the registered config schema. A value whose key is not in the schema is
-// treated as plain (forward-tolerant).
+// the dependency's design.json config schema. A value whose key is not in the
+// schema is treated as plain (forward-tolerant).
 func splitBySchema(keys []models.ConfigKey, vals map[string]string) resources.EnvValues {
 	secret := make(map[string]bool, len(keys))
 	for _, k := range keys {
