@@ -257,6 +257,23 @@ and schema from what they return, not from the requirement's wording:
   `description` and pick the type whose description matches the need; when
   none matches, leave the dependency unresolved rather than forcing a fit.
 
+**Narrate each dependency decision in chat as you make it.** The
+design-generate turn runs in the chat panel, so your turn text is what the
+user watches live. As you settle each dependency — `component`, `org-service`,
+`platform-resource`, or `external` alike — say it in one concise plain-prose
+line before moving to the next:
+
+- resolved → `✓ <capability>: using <choice>`
+- candidates → `<capability>: options are A / B / C — tell me which (I'll
+  continue meanwhile)`
+- needs-input → `<capability>: I couldn't identify the system — tell me which
+  + how it authenticates`
+
+Never block the design on an ambiguous or unresolved dependency — print the
+line and keep emitting the rest; the user replies in the same chat to steer or
+resolve it, now or later (see "Resolving or reconsidering a named dependency"
+below).
+
 ### Resolving an `external` dependency
 
 `external` is the one kind with real-world discovery to do — the SaaS or
@@ -268,8 +285,10 @@ a procedure, in order:
    resource resolves from that registry regardless of `style`/`specPath`/
    `package`. Don't re-discover what the org already has.
 2. **`web_search` for candidates** when nothing registered fits. Stop at the
-   options actually worth presenting — usually one clear winner, occasionally
-   two or three genuine contenders.
+   options actually worth presenting to step 6 below — a single option only
+   when a real signal already points to it; just as often, the search
+   legitimately turns up 2–3 genuine contenders to hand the user as
+   `candidates`.
 3. **Classify each candidate's style.** `rest-api` when the component talks to
    specific HTTP endpoints; `sdk` when it codes against a vendor SDK/library —
    the candidate's own docs make this obvious ("REST API reference" vs.
@@ -301,17 +320,26 @@ a procedure, in order:
    format.
 6. **Emit the outcome** — never a `status`/`reason`, only the fields the
    platform derives one from:
-   - One option clearly wins → emit it **resolved**: `style` + (`package` or
-     `specPath`), `config`, and `sources` (the docs link, the spec link, the
-     package-registry link — whatever provenance you used).
-   - 2+ options are genuinely worth the user's call → emit `candidates` (2 or
-     more — never one: one option fully known resolves outright, one option
-     only partially known is a partial dep, not a candidate, so leave `style`
-     and whatever else you know set on the dependency itself and let the
-     missing field compute the specific unresolved reason). Each candidate
-     carries its own `style` and a lean `docsUrl`/`specUrl`/`package`; leave
-     the dependency's own `style`, `package`, and `specPath` unset until one is
-     pinned.
+   - **A real SIGNAL points to one option → it clearly wins ON THAT SIGNAL →
+     emit it resolved.** A signal is one of: the requirement names or implies
+     the vendor, an already-registered external resource fits (registry
+     reuse), an org or platform skill mandates it, or a concrete technical
+     reason forces it (must match an existing stack/format). Emit `style` +
+     (`package` or `specPath`), `config`, and `sources` (the docs link, the
+     spec link, the package-registry link — whatever provenance you used). A
+     preference with no such signal behind it — "this one is popular" or
+     "this is what I'd pick" — is not a signal; it's a guess dressed as a
+     resolution, and it belongs in `candidates` instead.
+   - **No signal, and 2+ viable equivalents exist → emit `candidates`.** This
+     is the EXPECTED outcome for a genuinely-choosable dependency (e.g.
+     transactional email: SendGrid/Resend/Postmark) — do not force a pick the
+     requirements don't justify. `candidates` needs 2 or more entries — never
+     one: one option fully known resolves outright, one option only partially
+     known is a partial dep, not a candidate, so leave `style` and whatever
+     else you know set on the dependency itself and let the missing field
+     compute the specific unresolved reason. Each candidate carries its own
+     `style` and a lean `docsUrl`/`specUrl`/`package`; leave the dependency's
+     own `style`, `package`, and `specPath` unset until one is pinned.
    - You can't even identify what system fills the need → emit a style-less
      entry (no `style`, no `candidates`): just `name` + a `description` saying
      what's missing and what the user needs to supply. The platform computes
@@ -369,6 +397,24 @@ schema (a draft carrying it now fails the write-gate); migrate
 `needsSpec: true` to `style: "rest-api"`. An `external` dependency should
 almost always carry at least one `config` key — the value-collection gate
 needs something to collect.
+
+### Resolving or reconsidering a named dependency on request
+
+A later chat turn may point you at a single dependency by name — a lean
+message like "resolve the `email` dependency on `notification-service`" or
+"reconsider the `stripe` dependency on `billing-api`". The message carries no
+dependency JSON and no playbook by design — you already have both: read that
+dependency's current entry straight from
+`specs/design/components/<component>/design.json` (it's part of the turn's
+snapshot), then apply the discovery/classification playbook above for its
+`kind` — the sibling check for `component`, `list_org_endpoints` for
+`org-service`, `list_platform_resource_types` for `platform-resource`, or the
+full `external` procedure — to either fill it in (it's unresolved) or change
+it (reconsider: present fresh alternatives as `candidates`, or repin
+per the user's steer, REMOVING `candidates` entirely per step 7 above once one
+is chosen). Edit ONLY that one dependency's entry: re-emit the component's
+whole `design.json` (never a patch) with every other field and dependency
+carried over exactly as they were.
 
 Every dependency carries a one-line `description`: what the target is and how
 the component uses it (for an `external`, which endpoints/SDK and auth scheme;
