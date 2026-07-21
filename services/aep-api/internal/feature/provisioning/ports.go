@@ -80,13 +80,15 @@ type RepoLocator interface {
 	ByFullName(ctx context.Context, fullName string) (orgID, projectID string, err error)
 }
 
-// ExternalResourceCatalog is the org-level external-resource registry the
-// provisioning surface reads and prunes: Get (its config schema drives the
-// plain/secret split at value collection), List, and the guarded Delete.
-// Consumers are NOT read from the DB (upstream's component_tasks table is gone) —
-// they are scanned from committed design artifacts (ProjectLister + DesignReader).
-// *repositories.ExternalResourceRepository satisfies it; Get returns (nil, nil)
-// when the name is not registered.
+// ExternalResourceCatalog is the org-level external-resource registry backed
+// by the (now-orphan) external_resources table. Get/List/Delete are no longer
+// read by any authoring path — value_service.go and build_provision.go build
+// the RT-authoring *models.ExternalResource straight off the project's design
+// (models.UnionExternalConfigFor + the matched dependency's Description), and
+// the org-settings list/delete surface reads ExternalRTCatalog (OC RTs)
+// instead. This port is kept only so the table/repository still compile;
+// nothing in this package calls it. *repositories.ExternalResourceRepository
+// satisfies it; Get returns (nil, nil) when the name is not registered.
 type ExternalResourceCatalog interface {
 	Get(ctx context.Context, orgID, name string) (*models.ExternalResource, error)
 	List(ctx context.Context, orgID string) ([]models.ExternalResource, error)

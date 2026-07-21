@@ -43,7 +43,8 @@ type ExternalResourceView struct {
 // org's namespaced OpenChoreo ResourceTypes via rtCatalog (Slice 3's
 // resources.ExternalResourceCatalog, reconstructed off each authored RT and
 // deduped to the newest schema-version RT per name) — never the
-// external_resources table (s.catalog, still read by .Get elsewhere — see
+// external_resources table (s.catalog is no longer read anywhere in this
+// package; authoring now builds its definition off the design — see
 // build_provision.go / value_service.go).
 func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]ExternalResourceView, error) {
 	defs, err := s.rtCatalog.List(ctx, orgID)

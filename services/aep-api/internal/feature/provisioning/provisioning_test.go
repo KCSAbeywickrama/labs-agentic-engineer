@@ -217,17 +217,25 @@ type fakeExtProv struct {
 	result        *resources.ProvisionResult
 	err           error
 	deprovisioned []string
+	// lastER is the *models.ExternalResource the last Provision call received —
+	// lets a test assert the RT-authoring definition was built from the design
+	// (name/description/config schema) rather than fetched from the catalog.
+	lastER *models.ExternalResource
 
 	// AuthorWithSecretRef spies (the build path's no-SM-write author half).
 	authorRefCalls int
 	authorByEnv    map[string]resources.PreparedEnvValues
 	authorResult   *resources.ProvisionResult
 	authorErr      error
+	// authorLastER is the *models.ExternalResource the last AuthorWithSecretRef
+	// call received — same purpose as lastER, for the build author path.
+	authorLastER *models.ExternalResource
 }
 
-func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error) {
+func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, er *models.ExternalResource, byEnv map[string]resources.EnvValues) (*resources.ProvisionResult, error) {
 	f.calls++
 	f.byEnv = byEnv
+	f.lastER = er
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -236,9 +244,10 @@ func (f *fakeExtProv) Provision(_ context.Context, _, _, _ string, _ *models.Ext
 	}
 	return &resources.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"development": "o-ext-development"}}, nil
 }
-func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, _ *models.ExternalResource, byEnv map[string]resources.PreparedEnvValues) (*resources.ProvisionResult, error) {
+func (f *fakeExtProv) AuthorWithSecretRef(_ context.Context, _, _ string, er *models.ExternalResource, byEnv map[string]resources.PreparedEnvValues) (*resources.ProvisionResult, error) {
 	f.authorRefCalls++
 	f.authorByEnv = byEnv
+	f.authorLastER = er
 	if f.authorErr != nil {
 		return nil, f.authorErr
 	}
@@ -940,5 +949,33 @@ func TestSaveValues_UnionSecretAcrossComponents(t *testing.T) {
 	}
 	if _, leaked := ev.Plain["api_key"]; leaked {
 		t.Fatal("api_key leaked into the plain map despite being secret in one component")
+	}
+}
+
+// TestSaveValues_AuthorsDefinitionFromDesign proves the RT-authoring definition
+// (name + description + config schema) is built off the DESIGN, not the
+// external_resources table: with an EMPTY catalog (the old code returned
+// ErrNotRegistered here), SaveValues still succeeds and the external
+// provisioner receives a design-sourced ExternalResource.
+func TestSaveValues_AuthorsDefinitionFromDesign(t *testing.T) {
+	gate := provisionGateIssue(10, "stripe", taskmeta.GateConfigCollection)
+	ext := &fakeExtProv{}
+	svc := newTestService(newFakeIssues([]gitrepo.IssueInfo{gate}), &fakeExecStore{}, &fakeReeval{},
+		fakeDesign{comps: designWithDeps()}, &fakeCatalog{}, ext, &fakePlatProv{}, &fakeBindings{}) // empty catalog
+
+	if err := svc.SaveValues(context.Background(), "org", "org", "proj", "stripe",
+		map[string]map[string]string{"development": {"api_key": "sk", "region": "us"}}); err != nil {
+		t.Fatalf("SaveValues must author from the design even with an empty catalog: %v", err)
+	}
+	if ext.lastER == nil || ext.lastER.Name != "stripe" {
+		t.Fatalf("Provision must receive a design-built ExternalResource, got %+v", ext.lastER)
+	}
+	// Config schema comes from the design union: api_key secret, region plain.
+	secret := map[string]bool{}
+	for _, k := range ext.lastER.ConfigKeys {
+		secret[k.Key] = k.Secret
+	}
+	if !secret["api_key"] || secret["region"] {
+		t.Fatalf("authored config must reflect the design schema; got %v", secret)
 	}
 }

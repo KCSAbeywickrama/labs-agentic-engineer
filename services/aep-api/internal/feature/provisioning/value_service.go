@@ -53,18 +53,18 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 	if err != nil {
 		return fmt.Errorf("provisioning: read design: %w", err)
 	}
-	if _, err := matchDependency(comps, depName, models.DependencyKindExternal); err != nil {
+	dep, err := matchDependency(comps, depName, models.DependencyKindExternal)
+	if err != nil {
 		return err
 	}
 	unionConfig := models.UnionExternalConfigFor(comps, depName)
 
-	er, err := s.catalog.Get(ctx, orgID, depName)
-	if err != nil {
-		return fmt.Errorf("provisioning: get external resource %q: %w", depName, err)
-	}
-	if er == nil {
-		return resources.ErrNotRegistered
-	}
+	// The external definition the RT is authored against is built straight off
+	// the design — name + the matched dependency's Description + the UNION
+	// config schema just computed above — NOT fetched from the external_resources
+	// table (that reader is gone; the design is now the only source, same as
+	// classification above).
+	er := &models.ExternalResource{Name: depName, Description: dep.Description, ConfigKeys: unionConfig}
 	if len(envValues) == 0 {
 		return fmt.Errorf("provisioning: no environment values provided for %q", depName)
 	}
