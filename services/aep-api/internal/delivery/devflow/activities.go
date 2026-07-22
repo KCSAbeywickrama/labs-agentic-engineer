@@ -19,6 +19,7 @@ package devflow
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -45,6 +46,8 @@ type Activities struct {
 	validator          Validator
 	validationResolver ValidationResolver
 	provisioner        BuildProvisioner
+	recorder           ActivityRecorder
+	titles             TaskTitleReader
 }
 
 // Deps carries the activity adapters. Any field may be nil in narrow contexts
@@ -59,6 +62,8 @@ type Deps struct {
 	Validator          Validator
 	ValidationResolver ValidationResolver
 	Provisioner        BuildProvisioner
+	Recorder           ActivityRecorder
+	Titles             TaskTitleReader
 }
 
 // NewActivities wires the activity adapters.
@@ -72,6 +77,8 @@ func NewActivities(d Deps) *Activities {
 		validator:          d.Validator,
 		validationResolver: d.ValidationResolver,
 		provisioner:        d.Provisioner,
+		recorder:           d.Recorder,
+		titles:             d.Titles,
 	}
 }
 
@@ -257,4 +264,50 @@ func (a *Activities) ProvisionDependencies(ctx context.Context, in ProvisionDeps
 		return nil, nil
 	}
 	return a.provisioner.ProvisionForBuild(ctx, in.OrgID, in.ProjectID, in.Tag, in.Inputs)
+}
+
+// RecordActivityInput is a workflow → activity payload for one project activity
+// event. OccurredAtUnix is workflow.Now(ctx).Unix() so the row's time is
+// deterministic across workflow replay. DedupKey makes a retry a no-op.
+type RecordActivityInput struct {
+	Type           string `json:"type"`
+	OrgID          string `json:"orgId"`
+	ProjectID      string `json:"projectId"`
+	Tag            string `json:"tag,omitempty"`
+	Issue          int    `json:"issue,omitempty"`
+	Component      string `json:"component,omitempty"`
+	Count          int    `json:"count,omitempty"` // plan_derived: number of tasks
+	ActorKind      string `json:"actorKind"`
+	ActorID        string `json:"actorId,omitempty"`
+	ActorName      string `json:"actorName"`
+	DedupKey       string `json:"dedupKey"`
+	OccurredAtUnix int64  `json:"occurredAtUnix"`
+}
+
+// RecordActivity appends one project activity event (best-effort). Resolves the
+// Task title for task-* events when Issue > 0. Never returns an error that
+// should fail the workflow — recording is observational.
+func (a *Activities) RecordActivity(ctx context.Context, in RecordActivityInput) error {
+	if a.recorder == nil {
+		return nil
+	}
+	title := ""
+	if in.Issue > 0 && a.titles != nil {
+		title = a.titles.TitleFor(ctx, in.OrgID, in.ProjectID, in.Issue)
+	}
+	a.recorder.Record(ctx, RecordedActivity{
+		OrgID:      in.OrgID,
+		ProjectID:  in.ProjectID,
+		Type:       in.Type,
+		ActorKind:  in.ActorKind,
+		ActorID:    in.ActorID,
+		ActorName:  in.ActorName,
+		Issue:      in.Issue,
+		Title:      title,
+		Component:  in.Component,
+		Tag:        in.Tag,
+		DedupKey:   in.DedupKey,
+		OccurredAt: time.Unix(in.OccurredAtUnix, 0).UTC(),
+	})
+	return nil
 }

@@ -89,10 +89,11 @@ type openBaoStore struct {
 // and token. The client is configured with a short request timeout so
 // startup readiness checks can fail fast.
 //
-//deadcode:keep OpenBao/Vault credential backend is retained but not yet wired
 // (the live App-credential path runs against the Postgres dbStore, which never
 // satisfies the *openBaoStore type-assertions in app_token_minter.go). Wire it
 // or remove the credential path — see issue #263.
+//
+//deadcode:keep OpenBao/Vault credential backend is retained but not yet wired
 func NewOpenBaoStore(addr, token, mount, owner string) (OpenBaoStore, error) {
 	if addr == "" {
 		return nil, errors.New("openbao: addr is required")

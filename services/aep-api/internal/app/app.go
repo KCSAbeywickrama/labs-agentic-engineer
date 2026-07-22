@@ -125,6 +125,9 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
 	idpRepo := organization.NewIDPRepository(db)
 	codingAgentLogRepo := delivery.NewCodingAgentLogRepository(db)
+	activityRepo := projects.NewActivityEventRepository(db)
+	activityHub := projects.NewActivityHub()
+	activitySvc := projects.NewActivityService(activityRepo, activityHub)
 
 	// Temporal devflow runtime. Constructed always, but connects lazily in the
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
@@ -373,6 +376,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
+		Recorder:   turnActivityRecorder{svc: activitySvc},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
@@ -792,13 +796,14 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// tag reads, the org skills library, and the collab oracle/descriptor. Its
 	// slice handlers embed straight into the edge's composite.
 	specHandlers, err := spechttpapi.New(spec.Deps{
-		GenAI:       genaiSvc,
-		Files:       filesSvc,
-		Artifacts:   artifactSvcGit,
-		Skills:      skillSvc,
-		SkillMut:    skillMutationSvc,
-		SkillImport: skillImportSvc,
-		CollabRepo:  repoService,
+		GenAI:         genaiSvc,
+		Files:         filesSvc,
+		FilesActivity: filesActivityRecorder{svc: activitySvc},
+		Artifacts:     artifactSvcGit,
+		Skills:        skillSvc,
+		SkillMut:      skillMutationSvc,
+		SkillImport:   skillImportSvc,
+		CollabRepo:    repoService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble spec domain: %w", err)
@@ -813,6 +818,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		ProjectSvc:   projectService,
 		ComponentSvc: componentService,
 		ConfigSvc:    configService,
+		ActivitySvc:  activitySvc,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble projects domain: %w", err)
@@ -926,11 +932,12 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// preflight services (whose ports depend on the external-resource provisioner
 	// constructed just above).
 	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
-		BuildSvc:     buildSvc,
-		PreflightSvc: preflightSvc,
-		TaskReads:    taskReads,
-		TaskCommands: taskCommands,
-		TaskStream:   taskStreamSvc,
+		BuildSvc:      buildSvc,
+		PreflightSvc:  preflightSvc,
+		BuildActivity: buildActivityRecorder{svc: activitySvc},
+		TaskReads:     taskReads,
+		TaskCommands:  taskCommands,
+		TaskStream:    taskStreamSvc,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
@@ -1086,6 +1093,8 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 			Validator:          devflowValidator{store: artifactStore, comp: componentService},
 			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},
 			Provisioner:        buildProvisioner{design: designService, prov: provisioningSvc},
+			Recorder:           devflowActivityRecorder{svc: activitySvc},
+			Titles:             devflowTitles{reads: taskReads},
 		})
 		watchers = append(watchers, devflow.NewWorkerWatcher(devflowRuntime, devflowActs))
 		slog.Info("devflow: temporal worker watcher registered", "hostPort", cfg.Temporal.HostPort)

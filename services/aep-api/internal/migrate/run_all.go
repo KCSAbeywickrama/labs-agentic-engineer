@@ -62,6 +62,7 @@ func BaseModels() []any {
 		&delivery.Execution{},
 		&spec.AgentTurn{},
 		&delivery.DevflowRun{},
+		&projects.ActivityEvent{},
 	}
 }
 

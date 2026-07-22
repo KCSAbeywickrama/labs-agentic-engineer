@@ -17,10 +17,12 @@
 package devflow
 
 import (
+	"fmt"
 	"time"
 
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/activityvocab"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -81,9 +83,30 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 	gates := newGateKeeper(in.Gates, func(g string) { status.PendingGate = g })
 	info := workflow.GetInfo(ctx)
 
+	// recordTask emits a best-effort task_* activity event (issue #239). The
+	// dedup key includes the tag so a rebuild (new tag) produces fresh events,
+	// while workflow.Now(ctx) keeps a workflow retry from double-recording
+	// (same key → repo no-op). The activity error is ignored — recording must
+	// not gate the run.
+	recordTask := func(evType, dedupSuffix string) {
+		_ = workflow.ExecuteActivity(recordActivityOpts(ctx), (*Activities).RecordActivity, RecordActivityInput{
+			Type:           evType,
+			OrgID:          in.OrgID,
+			ProjectID:      in.ProjectID,
+			Tag:            in.Tag,
+			Issue:          in.Issue,
+			ActorKind:      activityvocab.ActorAgent,
+			ActorID:        "build-agent",
+			ActorName:      "Build agent",
+			DedupKey:       fmt.Sprintf("task:%s#%d:%s:%s", in.Repo, in.Issue, in.Tag, dedupSuffix),
+			OccurredAtUnix: workflow.Now(ctx).Unix(),
+		}).Get(ctx, nil)
+	}
+
 	fail := func(msg string) (TaskFlowResult, error) {
 		status.Phase, status.Error = delivery.TaskPhaseFailed, msg
 		markRunStatus(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusFailed, msg)
+		recordTask(activityvocab.TypeTaskFailed, "failed")
 		return TaskFlowResult{Issue: in.Issue, Outcome: delivery.OutcomeFailed, Error: msg}, nil
 	}
 
@@ -108,6 +131,7 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 
 	// Dispatch the coding agent through the funnel and wait for the PR — the
 	// coding agent's success IS the PR opening (§7).
+	recordTask(activityvocab.TypeTaskStarted, "started")
 	pr, err := runCodingPhase(ctx, in.OrgID, in.ProjectID, in.Repo, in.Issue, &status)
 	if err != nil {
 		return fail(err.Error())
@@ -138,5 +162,6 @@ func TaskFlowWorkflow(ctx workflow.Context, in TaskFlowInput) (TaskFlowResult, e
 
 	status.Phase = delivery.TaskPhaseDone
 	markRunStatus(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusCompleted, "")
+	recordTask(activityvocab.TypeTaskDeployed, "deployed")
 	return TaskFlowResult{Issue: in.Issue, Outcome: delivery.OutcomeSucceeded}, nil
 }
