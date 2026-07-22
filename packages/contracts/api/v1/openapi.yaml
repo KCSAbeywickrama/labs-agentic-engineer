@@ -1758,6 +1758,37 @@ paths:
       summary: Attach to a turn's event stream (SSE replay + live tail)
       tags:
       - GenAI
+  /projects/{projectName}/usage:
+    get:
+      description: Per-phase actual usage for a project (#245) — spec, build, validation, plus the current
+        drafting cycle. USD derived at read time from the configured model rates (ADR-0011).
+      operationId: get-project-usage
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUsage'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Get per-phase project usage
+      tags:
+      - Projects
   /rca-agent/reports:
     get:
       operationId: list-rca-agent-reports
@@ -2394,6 +2425,10 @@ components:
           type: string
         tasks:
           $ref: '#/components/schemas/BuildTally'
+        usage:
+          $ref: '#/components/schemas/Usage'
+          description: Aggregate actual usage of the run's coding executions (#245); absent for runs
+            that predate usage capture.
       required:
       - tag
       - status
@@ -3476,6 +3511,28 @@ components:
       - build
       - deploy
       type: object
+    ProjectUsage:
+      additionalProperties: false
+      description: Per-phase actual usage for a project (#245). All figures derive from persisted per-run token records (ADR-0011); costUsd is computed at read time from the configured model rates.
+      properties:
+        build:
+          $ref: "#/components/schemas/Usage"
+          description: All coding/build executions.
+        draftCycle:
+          $ref: "#/components/schemas/Usage"
+          description: Spec/design agent turns since the last published spec tag — the Spec view chip.
+        spec:
+          $ref: "#/components/schemas/Usage"
+          description: All spec/design agent turns (project lifetime).
+        validation:
+          $ref: "#/components/schemas/Usage"
+          description: All validation executions.
+      required:
+        - spec
+        - build
+        - validation
+        - draftCycle
+      type: object
     ProvisionBody:
       additionalProperties: false
       properties:
@@ -3909,6 +3966,9 @@ components:
           type: string
         title:
           type: string
+        usage:
+          $ref: "#/components/schemas/Usage"
+          description: Aggregate actual usage across the task's executions (#245); absent for tasks that predate usage capture.
       required:
       - issueNumber
       - title
@@ -4089,6 +4149,39 @@ components:
           type: string
       required:
       - skillMd
+      type: object
+    Usage:
+      additionalProperties: false
+      description: Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+      properties:
+        cacheCreationTokens:
+          format: int64
+          type: integer
+        cacheReadTokens:
+          format: int64
+          type: integer
+        costUsd:
+          description: Catalog-derived USD; null when pricing is unavailable for the model.
+          format: double
+          type: number
+          nullable: true
+          x-go-type: '*float64'
+        inputTokens:
+          format: int64
+          type: integer
+        model:
+          description: Model id the work ran on; "" on mixed-model aggregates.
+          type: string
+        outputTokens:
+          format: int64
+          type: integer
+      required:
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - model
+        - costUsd
       type: object
     Warning:
       additionalProperties: false
