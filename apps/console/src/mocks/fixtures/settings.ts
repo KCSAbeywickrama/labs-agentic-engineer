@@ -382,9 +382,11 @@ description: Conventional-commit message rules for agent-authored PRs.
 ];
 
 // Embedded content differs from the org repo copy — surfaces in GET
-// /skills/updates until synced. "code-review" is absent from the repo.
+// /skills/updates until synced. "code-review" is absent from the repo. All
+// seeds are state "update" (clean copies the sync will refresh); the
+// overridden/conflict states get their own fixtures with the review UI.
 export const seedSkillUpdates: SkillUpdate[] = [
-  { name: "task-breakdown" },
-  { name: "go" },
-  { name: "code-review" },
+  { name: "task-breakdown", state: "update" },
+  { name: "go", state: "update" },
+  { name: "code-review", state: "update" },
 ];
