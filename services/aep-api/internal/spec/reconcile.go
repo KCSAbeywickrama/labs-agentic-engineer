@@ -113,9 +113,9 @@ func (s *SkillService) EnsureProvisioned(ctx context.Context, orgID string) erro
 	return err
 }
 
-// Reconcile content-reconciles the embedded library for an org
-// (seed/overwrite/purge/skip + legacy-layout migration). Used by project
-// creation and the admin "Sync built-in skills" action. §6.
+// Reconcile drives the three-way reconcile of the embedded library for an org
+// (seed/refresh/backfill/override/conflict/purge + legacy-layout migration).
+// Used by project creation and the admin "Sync built-in skills" action. §6.
 func (s *SkillService) Reconcile(ctx context.Context, orgID string) (int, error) {
 	repo, err := s.ensureSkillsRepo(ctx, orgID)
 	if err != nil {
