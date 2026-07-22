@@ -71,13 +71,11 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
               {
                 name: "stripe",
                 style: "sdk",
-                docsUrl: "https://stripe.com/docs",
                 package: "npm:stripe",
               },
               {
                 name: "adyen",
                 style: "rest-api",
-                docsUrl: "https://adyen.com/docs",
               },
             ],
           },
@@ -152,27 +150,6 @@ describe("DesignView — dependency status cards (#252 Task 9)", () => {
     expect(
       screen.queryByRole("button", { name: /actions/i }),
     ).not.toBeInTheDocument();
-  });
-
-  it("renders sources as links to the raw URL", () => {
-    render(
-      <DesignView
-        design={designJson([
-          {
-            kind: "external",
-            name: "stripe",
-            sources: ["https://stripe.com/docs", "https://npmjs.com/stripe"],
-          },
-        ])}
-        dependencyStatus={{ stripe: { status: "resolved" } }}
-      />,
-    );
-    expect(
-      screen.getByRole("link", { name: "https://stripe.com/docs" }),
-    ).toHaveAttribute("href", "https://stripe.com/docs");
-    expect(
-      screen.getByRole("link", { name: "https://npmjs.com/stripe" }),
-    ).toHaveAttribute("href", "https://npmjs.com/stripe");
   });
 
   it("renders config keys, marking exactly the secret one with the secret chip's icon", () => {

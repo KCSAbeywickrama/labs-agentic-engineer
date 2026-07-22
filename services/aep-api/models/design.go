@@ -161,25 +161,19 @@ type Dependency struct {
 	// external: REST API ("rest-api") or SDK ("sdk") shape. Meaningful ONLY on
 	// kind=external — a platform-resource is catalog-picked, an org-service is
 	// catalog-resolved; neither has web provenance. Every resolution state is
-	// DERIVED from which of Style/Package/Sources/Candidates/SpecPath/SpecUrl
-	// are present, never a stored flag (the old NeedsSpec boolean is gone).
-	// Enforced mechanically by the zod write-gate (superRefine) and the Go fold
-	// validator (agentfold), not by this struct.
+	// DERIVED from which of Style/Package/Candidates/SpecPath are present, never
+	// a stored flag (the old NeedsSpec boolean is gone). Enforced mechanically by
+	// the zod write-gate (superRefine) and the Go fold validator (agentfold), not
+	// by this struct.
 	Style DependencyStyle `json:"style,omitempty"`
 	// external (sdk style): one ecosystem-prefixed package identifier, e.g.
 	// "npm:stripe@^14" — version inline but optional (omitted ⇒ latest
 	// compatible). External-only.
 	Package string `json:"package,omitempty"`
-	// external: stored contract path, component-relative (dependencies/<name>.openapi.yaml).
+	// external: the contract location — EITHER a URL (a public spec/docs URL) OR
+	// a repo-relative path (dependencies/<name>.openapi.yaml) once a spec has been
+	// collected into the consumer's own repo. External-only.
 	SpecPath string `json:"specPath,omitempty"`
-	// external: transient published-OpenAPI hint auto-fetched at design save then cleared.
-	SpecUrl string `json:"specUrl,omitempty"`
-	// external: provenance of the pinned/declared intent (docs + spec +
-	// package-registry links) — survives resolution. On pin, the chosen
-	// candidate's DocsUrl/SpecUrl/package-registry link fold into this slice.
-	// Distinct from Candidates[].DocsUrl (a single per-option link). Present
-	// only with at least one entry — never an empty slice. External-only.
-	Sources []string `json:"sources,omitempty"`
 	// external: 2+ identified-but-not-pinned options — the "ambiguous"
 	// resolution state. Omitted, never empty: one option fully known collapses
 	// to a resolved dep, one option partially known is a partial dep (not a
@@ -205,11 +199,6 @@ type DependencyCandidate struct {
 	Name        string          `json:"name"`
 	Style       DependencyStyle `json:"style"`
 	Description string          `json:"description,omitempty"`
-	// DocsUrl is the single canonical docs link for THIS option (lean
-	// comparison cards) — distinct from the dep-level Sources, which is the
-	// pinned choice's provenance after resolution.
-	DocsUrl string `json:"docsUrl,omitempty"`
-	SpecUrl string `json:"specUrl,omitempty"`
 	// Package: sdk-style candidates only; ecosystem-prefixed package identifier.
 	Package string `json:"package,omitempty"`
 }

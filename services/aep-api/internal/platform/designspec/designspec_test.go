@@ -84,7 +84,7 @@ func TestNameMustEqualDir(t *testing.T) {
 	wantCode(t, ValidateComponentDesignInDir([]byte(validComponent), "payments"), CodeSchemaViolation)
 }
 
-// --- external-only intent fields (style/package/sources/candidates) --------
+// --- external-only intent fields (style/package/specPath/candidates) -------
 //
 // The published schema declares these as plain properties (no kind-
 // conditioning: that business rule is TS/Go-code-only — the zod superRefine +
@@ -97,9 +97,9 @@ func designWithDep(depJSON string) string {
 }
 
 func TestExternalIntentFieldsAccepted(t *testing.T) {
-	dep := `{"kind":"external","name":"stripe","style":"sdk","package":"npm:stripe@^14","sources":["https://stripe.com/docs/api"]}`
+	dep := `{"kind":"external","name":"stripe","style":"sdk","package":"npm:stripe@^14","specPath":"dependencies/stripe.openapi.yaml"}`
 	if err := ValidateComponentDesign([]byte(designWithDep(dep))); err != nil {
-		t.Fatalf("style/package/sources rejected: %v", err)
+		t.Fatalf("style/package/specPath rejected: %v", err)
 	}
 }
 
@@ -120,9 +120,18 @@ func TestCandidatesMinItems_RejectsFewerThanTwo(t *testing.T) {
 	}
 }
 
-func TestSourcesMinItems_RejectsEmpty(t *testing.T) {
-	dep := `{"kind":"external","name":"stripe","sources":[]}`
-	wantCode(t, ValidateComponentDesign([]byte(designWithDep(dep))), CodeSchemaViolation)
+// TestRetiredExternalFieldsRejected documents the hard-break: specUrl (URL
+// hint) and sources (provenance array) were removed from the schema — the
+// coding agent now researches contracts freely from the web — so both reject
+// the same way any other unknown dependency property does
+// (additionalProperties: false).
+func TestRetiredExternalFieldsRejected(t *testing.T) {
+	for _, dep := range []string{
+		`{"kind":"external","name":"stripe","specUrl":"https://example.com/stripe.yaml"}`,
+		`{"kind":"external","name":"stripe","sources":["https://stripe.com/docs/api"]}`,
+	} {
+		wantCode(t, ValidateComponentDesign([]byte(designWithDep(dep))), CodeSchemaViolation)
+	}
 }
 
 // TestNeedsSpecNoLongerKnown documents the hard-break: needsSpec was removed

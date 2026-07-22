@@ -108,9 +108,9 @@ func TestComputeDependencyStatus(t *testing.T) {
 			wantReason: DependencyReasonNeedsInput,
 		},
 		{
-			name: "rule 4: rest-api with no specPath is unresolved/needs-spec (specUrl is a hint, not the contract)",
+			name: "rule 4: rest-api with no specPath is unresolved/needs-spec",
 			dep: Dependency{Kind: DependencyKindExternal, Name: "stripe",
-				Style: DependencyStyleRestAPI, SpecUrl: "https://api.example.com/openapi.yaml"},
+				Style: DependencyStyleRestAPI},
 			wantStatus: DependencyStatusUnresolved,
 			wantReason: DependencyReasonNeedsSpec,
 		},

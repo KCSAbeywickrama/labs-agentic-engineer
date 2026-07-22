@@ -112,9 +112,9 @@ type schema struct {
 	Enum                 []any           `json:"enum"`
 	MinLength            *int            `json:"minLength"`
 	// MinItems enforces an array's minimum length (e.g. a dependency's
-	// `candidates` — 2+ — and `sources` — 1+ — per the derived-state
-	// resolution model: a field that is ever written must carry meaningful
-	// content, never an empty placeholder).
+	// `candidates` — 2+ — per the derived-state resolution model: a field
+	// that is ever written must carry meaningful content, never an empty
+	// placeholder).
 	MinItems *int    `json:"minItems"`
 	Items    *schema `json:"items"`
 }

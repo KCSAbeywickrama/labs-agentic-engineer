@@ -349,7 +349,7 @@ a procedure, in order:
      known is a partial dep, not a candidate, so leave `style` and whatever
      else you know set on the dependency itself and let the missing field
      compute the specific unresolved reason. Each candidate carries its own
-     `style` and a lean `docsUrl`/`package`; leave the dependency's
+     `style` and a lean `package`; leave the dependency's
      own `style`, `package`, and `specPath` unset until one is pinned.
    - You can't even identify what system fills the need → emit a style-less
      entry (no `style`, no `candidates`): just `name` + a `description` saying

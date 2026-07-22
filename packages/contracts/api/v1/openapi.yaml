@@ -2866,13 +2866,6 @@ components:
           type: string
         specPath:
           type: string
-        specUrl:
-          type: string
-        sources:
-          items:
-            type: string
-          type: array
-          nullable: true
         candidates:
           items:
             $ref: '#/components/schemas/DependencyCandidate'
@@ -2905,10 +2898,6 @@ components:
         style:
           type: string
         description:
-          type: string
-        docsUrl:
-          type: string
-        specUrl:
           type: string
         package:
           type: string

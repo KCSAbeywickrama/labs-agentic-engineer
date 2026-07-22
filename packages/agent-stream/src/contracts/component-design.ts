@@ -117,10 +117,10 @@ export type DependencyStyle = "rest-api" | "sdk";
  * and `name` are required; every other field is optional. `status`/`reason`
  * are deliberately ABSENT — they are read-time computed, never authored.
  *
- * `style`/`package`/`sources`/`candidates` (like `specPath`/`specUrl`) are
- * meaningful only on `kind: "external"` — a `platform-resource` is
- * catalog-picked, an `org-service` is catalog-resolved, neither has web
- * provenance. Every resolution state (resolved / ambiguous / unresolved) is
+ * `style`/`package`/`specPath`/`candidates` are meaningful only on
+ * `kind: "external"` — a `platform-resource` is catalog-picked, an
+ * `org-service` is catalog-resolved, neither has web provenance. Every
+ * resolution state (resolved / ambiguous / unresolved) is
  * DERIVED from which of these fields are present, never stored as a flag: the
  * old `needsSpec` boolean is gone (a boolean can contradict reality; a missing
  * field cannot).
@@ -138,18 +138,12 @@ export interface Dependency {
    * compatible). External-only.
    */
   package?: string;
-  /** external: stored contract path, component-relative (dependencies/<name>.openapi.yaml). */
-  specPath?: string;
-  /** external: transient published-OpenAPI hint auto-fetched at save then cleared. */
-  specUrl?: string;
   /**
-   * external: provenance of the pinned/declared intent (docs + spec +
-   * package-registry links) — survives resolution. On pin, the chosen
-   * candidate's docsUrl/specUrl/package-registry link fold into this array.
-   * Distinct from `candidates[].docsUrl` (a single per-option link). Present
-   * only with at least one entry. External-only.
+   * external: the stored contract location — either a URL (an auto-fetched
+   * published OpenAPI spec) or a repo-relative path
+   * (dependencies/<name>.openapi.yaml).
    */
-  sources?: string[];
+  specPath?: string;
   /**
    * external: 2+ identified-but-not-pinned options — the "ambiguous"
    * resolution state. Omitted, never empty: one option fully known ⇒
@@ -180,9 +174,6 @@ export interface DependencyCandidate {
   name: string;
   style: DependencyStyle;
   description?: string;
-  /** Single canonical docs link for THIS option (lean comparison cards). */
-  docsUrl?: string;
-  specUrl?: string;
   /** sdk-style candidates only: ecosystem-prefixed package identifier. */
   package?: string;
 }

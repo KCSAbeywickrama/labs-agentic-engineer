@@ -71,16 +71,6 @@
           "specPath": {
             "type": "string"
           },
-          "specUrl": {
-            "type": "string"
-          },
-          "sources": {
-            "minItems": 1,
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "candidates": {
             "minItems": 2,
             "type": "array",
@@ -99,12 +89,6 @@
                   ]
                 },
                 "description": {
-                  "type": "string"
-                },
-                "docsUrl": {
-                  "type": "string"
-                },
-                "specUrl": {
                   "type": "string"
                 },
                 "package": {

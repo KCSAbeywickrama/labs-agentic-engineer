@@ -399,7 +399,7 @@ func TestMarshalComponentDesignJSON_NameMustEqualDir(t *testing.T) {
 // hard-break: `needsSpec` was dropped from the schema entirely (no read-path
 // shim, no back-compat — dependency-management schema revision, derived-state
 // model). DisallowUnknownFields now rejects it like any other retired key; the
-// needs-spec resolution STATE is reborn from style/specPath/specUrl via the
+// needs-spec resolution STATE is reborn from style/specPath via the
 // shared resolver (a later task), computed at read time — never stored.
 func TestParseComponentDesignJSON_NeedsSpecNowUnknownFieldRejected(t *testing.T) {
 	raw := `{"name":"checkout","type":"service","dependencies":[{"kind":"external","name":"weather","needsSpec":true}]}`
@@ -413,9 +413,9 @@ func TestParseComponentDesignJSON_NeedsSpecNowUnknownFieldRejected(t *testing.T)
 }
 
 // TestComponentDesignJSON_ExternalIntentFields_RoundTrip covers the four
-// external-only intent fields (style, package, sources, candidates) added
-// alongside the needsSpec removal: an SDK-resolved dep (style+package+
-// sources), an ambiguous dep (2+ candidates), and a needs-input dep (no
+// external-only intent fields (style, package, specPath, candidates) added
+// alongside the needsSpec removal: an SDK-resolved dep (style+package), an
+// ambiguous dep (2+ candidates), and a needs-input dep (no
 // fields at all — the agent could not classify it without the user) all
 // survive a parse → marshal round trip byte-identically.
 func TestComponentDesignJSON_ExternalIntentFields_RoundTrip(t *testing.T) {
@@ -428,11 +428,7 @@ func TestComponentDesignJSON_ExternalIntentFields_RoundTrip(t *testing.T) {
       "name": "stripe",
       "description": "Payments via the stripe Node SDK (secret-key auth).",
       "style": "sdk",
-      "package": "npm:stripe@^14",
-      "sources": [
-        "https://stripe.com/docs/api",
-        "https://www.npmjs.com/package/stripe"
-      ]
+      "package": "npm:stripe@^14"
     },
     {
       "kind": "external",
@@ -442,15 +438,12 @@ func TestComponentDesignJSON_ExternalIntentFields_RoundTrip(t *testing.T) {
         {
           "name": "sendgrid-rest",
           "style": "rest-api",
-          "description": "SendGrid v3 Web API",
-          "docsUrl": "https://docs.sendgrid.com/api-reference",
-          "specUrl": "https://x/sendgrid.openapi.json"
+          "description": "SendGrid v3 Web API"
         },
         {
           "name": "resend-sdk",
           "style": "sdk",
           "description": "Resend Node SDK",
-          "docsUrl": "https://resend.com/docs",
           "package": "npm:resend@^4.0.0"
         }
       ]
@@ -475,16 +468,11 @@ func TestComponentDesignJSON_ExternalIntentFields_RoundTrip(t *testing.T) {
 	if stripe.Style != models.DependencyStyleSDK || stripe.Package != "npm:stripe@^14" {
 		t.Fatalf("stripe style/package drifted: %+v", stripe)
 	}
-	if want := []string{"https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"}; !reflect.DeepEqual(stripe.Sources, want) {
-		t.Fatalf("stripe sources drifted: %+v", stripe.Sources)
-	}
-
 	email := comp.Dependencies[1]
 	if len(email.Candidates) != 2 {
 		t.Fatalf("want 2 candidates, got %d: %+v", len(email.Candidates), email.Candidates)
 	}
-	if email.Candidates[0].Name != "sendgrid-rest" || email.Candidates[0].Style != models.DependencyStyleRestAPI ||
-		email.Candidates[0].DocsUrl != "https://docs.sendgrid.com/api-reference" || email.Candidates[0].SpecUrl != "https://x/sendgrid.openapi.json" {
+	if email.Candidates[0].Name != "sendgrid-rest" || email.Candidates[0].Style != models.DependencyStyleRestAPI {
 		t.Fatalf("candidate[0] drifted: %+v", email.Candidates[0])
 	}
 	if email.Candidates[1].Name != "resend-sdk" || email.Candidates[1].Style != models.DependencyStyleSDK ||
@@ -493,7 +481,7 @@ func TestComponentDesignJSON_ExternalIntentFields_RoundTrip(t *testing.T) {
 	}
 
 	crm := comp.Dependencies[2]
-	if crm.Style != "" || crm.Package != "" || len(crm.Sources) != 0 || len(crm.Candidates) != 0 {
+	if crm.Style != "" || crm.Package != "" || len(crm.Candidates) != 0 {
 		t.Fatalf("needs-input dep must carry none of the intent fields: %+v", crm)
 	}
 

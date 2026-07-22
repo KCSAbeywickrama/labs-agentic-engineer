@@ -23,10 +23,8 @@ import {
   Button,
   Chip,
   IconButton,
-  Link,
   Menu,
   MenuItem,
-  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import { EllipsisVertical, Lock, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
@@ -251,7 +249,7 @@ function ConfigChip({ entry }: { entry: DesignConfigEntry }) {
 // A dependency reads as: what kind it is (the badge), its name, an optional
 // read-time status chip (#252 Task 9 — from DesignViewProps.dependencyStatus,
 // NEVER computed here), and a one-line description, followed by its intent
-// (sources/candidates/config) and a state-based affordance (#252 Task 17):
+// (candidates/config) and a state-based affordance (#252 Task 17):
 // a non-resolved dependency gets the reason plus a "Resolve in chat" button;
 // a resolved one gets a hamburger → "Discuss in chat & modify" instead. Never
 // both for the same dependency — `isResolved` gates which one renders.
@@ -328,28 +326,6 @@ function DependencyCard({
           {usedBy.map((name) => (
             <Chip key={name} size="small" variant="outlined" label={name} />
           ))}
-        </Box>
-      )}
-
-      {dep.sources && dep.sources.length > 0 && (
-        <Box sx={{ mt: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-            Sources
-          </Typography>
-          <Stack spacing={0.5} sx={{ mt: 0.5 }}>
-            {dep.sources.map((src) => (
-              <Link
-                key={src}
-                href={src}
-                target="_blank"
-                rel="noopener noreferrer"
-                variant="body2"
-                sx={{ wordBreak: "break-all" }}
-              >
-                {src}
-              </Link>
-            ))}
-          </Stack>
         </Box>
       )}
 

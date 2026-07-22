@@ -35,7 +35,7 @@ import (
 // used to drive that check was dropped (dependency-management schema revision
 // — derived-state model); the equivalent check is reborn once the shared
 // resolver (a later task) can derive an external dependency's resolution
-// state from style/specPath/specUrl against the live catalog. external-values
+// state from style/specPath against the live catalog. external-values
 // (config-only external) and platform-resource deps are NOT proceed-gated —
 // they are dispatch-gated in Phase 6.
 

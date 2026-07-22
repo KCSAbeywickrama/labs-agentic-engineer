@@ -58,23 +58,18 @@ const dependencyCandidateSchema = z.strictObject({
   name: z.string().min(1),
   style: z.enum(["rest-api", "sdk"]),
   description: z.string().optional(),
-  docsUrl: z.string().optional(),
-  specUrl: z.string().optional(),
   package: z.string().optional(),
 });
 
 // The dependency fields meaningful ONLY on kind="external" (candidates, style,
-// package, specPath, specUrl, sources): a platform-resource is catalog-picked,
-// an org-service is catalog-resolved — neither has web provenance. Enforced
-// mechanically below (superRefine), mirrored in the Go fold gate
-// (agentfold/designgate.go).
+// package, specPath): a platform-resource is catalog-picked, an org-service
+// is catalog-resolved — neither has web provenance. Enforced mechanically
+// below (superRefine), mirrored in the Go fold gate (agentfold/designgate.go).
 const EXTERNAL_ONLY_DEPENDENCY_FIELDS = [
   "candidates",
   "style",
   "package",
   "specPath",
-  "specUrl",
-  "sources",
 ] as const;
 
 // One unified, kind-discriminated dependency edge — the successor to the legacy
@@ -83,7 +78,7 @@ const EXTERNAL_ONLY_DEPENDENCY_FIELDS = [
 // the Go codec) but unknown keys — status/reason especially — are rejected.
 // `needsSpec` is GONE (dependency-management schema revision — derived-state
 // model): every resolution state is derived from which of style/package/
-// sources/candidates/specPath/specUrl are present, never a stored flag.
+// candidates/specPath are present, never a stored flag.
 const dependencyObjectSchema = z.strictObject({
   kind: z.enum(["component", "org-service", "external", "platform-resource"]),
   name: z.string().min(1),
@@ -93,10 +88,9 @@ const dependencyObjectSchema = z.strictObject({
   // external (sdk style): one ecosystem-prefixed package identifier, e.g.
   // "npm:stripe@^14" — version inline but optional.
   package: z.string().optional(),
+  // external: stored contract location — a URL (auto-fetched published spec)
+  // or a repo-relative path (dependencies/<name>.openapi.yaml).
   specPath: z.string().optional(),
-  specUrl: z.string().optional(),
-  // external: provenance of the pinned/declared intent — omitted, never [].
-  sources: z.array(z.string()).min(1).optional(),
   // external: 2+ identified-but-not-pinned options — omitted, never empty or
   // single-item (a lone option is a partial dep, not a candidate).
   candidates: z.array(dependencyCandidateSchema).min(2).optional(),

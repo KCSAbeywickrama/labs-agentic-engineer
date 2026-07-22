@@ -182,10 +182,16 @@ func TestWiring_ExternalDepWithSpecGetsContractLine(t *testing.T) {
 		t.Fatalf("want one wiring comment, got %d", len(posted))
 	}
 	body := posted[0]
-	want := "Consumed API contract: `specs/design/components/web/dependencies/stripe.openapi.yaml` — " +
-		"implement the client against these exact operations; do not invent endpoints."
-	if !strings.Contains(body, want) {
-		t.Errorf("wiring comment missing exact external-spec contract line:\nwant substring: %s\ngot body:\n%s", want, body)
+	// specPath is a repo file path here → the contract line names the dep + its
+	// specPath and marks it the source of truth (relaxed wording — the coding
+	// agent researches beyond it).
+	if !strings.Contains(body, "External API contract for `stripe`: `dependencies/stripe.openapi.yaml`") ||
+		!strings.Contains(body, "source of truth") {
+		t.Errorf("wiring comment missing the external contract line:\ngot body:\n%s", body)
+	}
+	// The relaxed wording must NOT carry the old hard restriction.
+	if strings.Contains(body, "do not invent endpoints") {
+		t.Errorf("external contract line should be relaxed (no 'do not invent endpoints'):\n%s", body)
 	}
 }
 

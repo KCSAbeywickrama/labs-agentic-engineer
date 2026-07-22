@@ -45,7 +45,7 @@ const FULL = JSON.stringify({
     {
       kind: "external",
       name: "stripe",
-      specUrl: "https://x/openapi.yaml",
+      specPath: "https://x/openapi.yaml",
       config: [{ key: "STRIPE_API_KEY", secret: true }],
       description: "Charges customers.",
     },
@@ -125,11 +125,11 @@ describe("parseComponentDesign", () => {
     expect(d.skillsApplied).toEqual(["go", "react"]);
   });
 
-  // #252 Task 9: style/package/sources/candidates are persisted intent
+  // #252 Task 9: style/package/candidates are persisted intent
   // (component-design.schema.json), unlike status/reason which are read-time
   // computed and never present in the raw file — see the file-header comment.
   describe("external dependency intent fields (#252 Task 9)", () => {
-    it("parses style, package, sources, and candidates", () => {
+    it("parses style, package, specPath, and candidates", () => {
       const d = parseComponentDesign(
         JSON.stringify({
           name: "svc",
@@ -139,10 +139,10 @@ describe("parseComponentDesign", () => {
               name: "payments",
               style: "sdk",
               package: "npm:stripe@^14",
-              sources: ["https://stripe.com/docs", "https://npmjs.com/stripe"],
+              specPath: "https://stripe.com/openapi.yaml",
               candidates: [
-                { name: "stripe", style: "sdk", docsUrl: "https://stripe.com/docs" },
-                { name: "adyen", style: "rest-api", specUrl: "https://adyen.com/openapi.yaml" },
+                { name: "stripe", style: "sdk" },
+                { name: "adyen", style: "rest-api" },
               ],
             },
           ],
@@ -152,17 +152,14 @@ describe("parseComponentDesign", () => {
       const dep = d.dependencies[0]!;
       expect(dep.style).toBe("sdk");
       expect(dep.package).toBe("npm:stripe@^14");
-      expect(dep.sources).toEqual([
-        "https://stripe.com/docs",
-        "https://npmjs.com/stripe",
-      ]);
+      expect(dep.specPath).toBe("https://stripe.com/openapi.yaml");
       expect(dep.candidates).toEqual([
-        { name: "stripe", style: "sdk", docsUrl: "https://stripe.com/docs" },
-        { name: "adyen", style: "rest-api", specUrl: "https://adyen.com/openapi.yaml" },
+        { name: "stripe", style: "sdk" },
+        { name: "adyen", style: "rest-api" },
       ]);
     });
 
-    it("omits sources/candidates/style/package when absent, never emitting empty arrays", () => {
+    it("omits candidates/style/package/specPath when absent, never emitting empty arrays", () => {
       const d = parseComponentDesign(
         JSON.stringify({
           name: "svc",
@@ -173,11 +170,11 @@ describe("parseComponentDesign", () => {
       const dep = d.dependencies[0]!;
       expect(dep.style).toBeUndefined();
       expect(dep.package).toBeUndefined();
-      expect(dep.sources).toBeUndefined();
+      expect(dep.specPath).toBeUndefined();
       expect(dep.candidates).toBeUndefined();
     });
 
-    it("drops non-string sources entries and nameless candidates", () => {
+    it("drops nameless candidates", () => {
       const d = parseComponentDesign(
         JSON.stringify({
           name: "svc",
@@ -185,7 +182,6 @@ describe("parseComponentDesign", () => {
             {
               kind: "external",
               name: "payments",
-              sources: ["https://stripe.com/docs", 42, null],
               candidates: [{ style: "sdk" }, { name: "stripe", style: "sdk" }],
             },
           ],
@@ -193,7 +189,6 @@ describe("parseComponentDesign", () => {
       );
       if ("kind" in d) throw new Error("unexpected parse error");
       const dep = d.dependencies[0]!;
-      expect(dep.sources).toEqual(["https://stripe.com/docs"]);
       expect(dep.candidates).toEqual([{ name: "stripe", style: "sdk" }]);
     });
 

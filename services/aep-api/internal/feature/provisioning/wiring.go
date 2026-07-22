@@ -187,7 +187,7 @@ func (w *WiringResolver) resolveDependenciesYAML(ctx context.Context, orgID, pro
 	// bound yet.
 	for _, d := range comp.Dependencies {
 		if d.Kind == models.DependencyKindExternal && d.SpecPath != "" {
-			contractSections = append(contractSections, externalSpecContractSection(component, d.Name))
+			contractSections = append(contractSections, externalSpecContractSection(d.Name, d.SpecPath))
 		}
 	}
 
@@ -279,19 +279,17 @@ func localComponentContractSection(depName string) string {
 	)
 }
 
-// externalSpecContractSection renders the "Consumed API contract" guidance
-// for an `external` dependency whose OpenAPI spec was collected and
-// committed to the consumer's own repo at design time (specPath set): the
-// coding agent must implement the client against that EXACT stored contract
-// — the spec is already in its own checked-out repo, so no MCP round-trip is
-// needed. Path is the same one Task 5's resolution-message builder, Task 7's
-// snapshot filter, and Task 8's skill all construct — kept byte-consistent
-// here rather than read off the stored (component-relative) specPath value.
-func externalSpecContractSection(component, depName string) string {
+// externalSpecContractSection renders the contract note for an `external`
+// dependency that has a `specPath` — which is EITHER a URL or a repo-relative
+// file path. It is the authoritative contract when present; the coding agent
+// fetches it (URL) or reads it (file) and researches the API's own docs for
+// anything the contract doesn't cover.
+func externalSpecContractSection(depName, specPath string) string {
 	return fmt.Sprintf(
-		"Consumed API contract: `specs/design/components/%s/dependencies/%s.openapi.yaml` — "+
-			"implement the client against these exact operations; do not invent endpoints.",
-		component, depName,
+		"External API contract for `%s`: `%s` — if this is a URL, fetch it; if a path, "+
+			"it is a file in your checked-out repo. Use it as the source of truth for the "+
+			"API's operations, and research the provider's docs for anything it doesn't cover.",
+		depName, specPath,
 	)
 }
 

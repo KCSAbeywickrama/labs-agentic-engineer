@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/wso2/aep/aep-api/internal/api/apigen"
-
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 )
 

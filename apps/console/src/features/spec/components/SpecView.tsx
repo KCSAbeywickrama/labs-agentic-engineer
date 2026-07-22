@@ -246,8 +246,8 @@ export function SpecView({ projectName }: { projectName: string }) {
     [dependencies.data, selectedComponentName],
   );
   // Keyed by dependency name for DesignView's optional dependencyStatus prop
-  // — status/reason are the ONLY fields this map carries. sources/candidates/
-  // config are already in the raw design.json DesignView parses itself; see
+  // — status/reason are the ONLY fields this map carries. candidates/config
+  // are already in the raw design.json DesignView parses itself; see
   // DesignViewProps.dependencyStatus's comment for why status/reason can't
   // join them.
   const dependencyStatus = useMemo<Record<string, DependencyStatusInfo>>(
@@ -276,7 +276,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     [dependencies.data, selectedComponentName],
   );
   // Fires Task 5's seeded chat message with the dependency's FULL endpoint
-  // entry (status/reason/sources/candidates/config included) — never the
+  // entry (status/reason/candidates/config included) — never the
   // locally parsed one, which deliberately drops status/reason. `intent`
   // (#252 Task 17) is "resolve" from the design-view card's chat button on a
   // non-resolved dependency, or "reconsider" from its hamburger's "Discuss in

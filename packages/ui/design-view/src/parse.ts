@@ -24,8 +24,8 @@
  * componentAgentInstructions) are ignored, and a malformed file degrades to a
  * ParseError the view shows as an alert instead of throwing.
  *
- * A dependency's `style`/`package`/`sources`/`candidates` ARE parsed here —
- * they are authored/derived intent, persisted in the raw file exactly like
+ * A dependency's `style`/`package`/`candidates` ARE parsed here — they are
+ * authored/derived intent, persisted in the raw file exactly like
  * `specPath`/`config` (packages/contracts/schemas/component-design.schema.json).
  * `status`/`reason` are the ONE exception: deliberately NOT modelled, because
  * they are read-time computed server-side (models.ComputeDependencyStatus,
@@ -52,8 +52,6 @@ export interface DependencyCandidate {
   /** "rest-api" | "sdk"; kept as a raw string so an unknown style still renders. */
   style?: string;
   description?: string;
-  docsUrl?: string;
-  specUrl?: string;
   package?: string;
 }
 
@@ -66,10 +64,8 @@ export interface Dependency {
   style?: string;
   /** external (sdk style) only: ecosystem-prefixed package identifier. */
   package?: string;
+  /** external only: stored contract location — a URL or a repo-relative path. */
   specPath?: string;
-  specUrl?: string;
-  /** external only: provenance links for the pinned/declared intent. */
-  sources?: string[];
   /** external only: 2+ identified-but-not-pinned options (the "ambiguous" state). */
   candidates?: DependencyCandidate[];
   config?: DesignConfigEntry[];
@@ -131,11 +127,6 @@ function parseConfig(v: unknown): DesignConfigEntry[] {
   return out;
 }
 
-function parseStringArray(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  return v.filter((s): s is string => typeof s === "string" && s.length > 0);
-}
-
 function parseCandidates(v: unknown): DependencyCandidate[] {
   if (!Array.isArray(v)) return [];
   const out: DependencyCandidate[] = [];
@@ -148,10 +139,6 @@ function parseCandidates(v: unknown): DependencyCandidate[] {
     if (style) candidate.style = style;
     const description = optStr(item.description);
     if (description) candidate.description = description;
-    const docsUrl = optStr(item.docsUrl);
-    if (docsUrl) candidate.docsUrl = docsUrl;
-    const specUrl = optStr(item.specUrl);
-    if (specUrl) candidate.specUrl = specUrl;
     const pkg = optStr(item.package);
     if (pkg) candidate.package = pkg;
     out.push(candidate);
@@ -175,10 +162,6 @@ function parseDependencies(v: unknown): Dependency[] {
     if (pkg) dep.package = pkg;
     const specPath = optStr(item.specPath);
     if (specPath) dep.specPath = specPath;
-    const specUrl = optStr(item.specUrl);
-    if (specUrl) dep.specUrl = specUrl;
-    const sources = parseStringArray(item.sources);
-    if (sources.length) dep.sources = sources;
     const candidates = parseCandidates(item.candidates);
     if (candidates.length) dep.candidates = candidates;
     const resourceType = optStr(item.resourceType);

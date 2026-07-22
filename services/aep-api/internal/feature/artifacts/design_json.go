@@ -101,7 +101,7 @@ type endpointJSON struct {
 // dependencyJSON is the on-disk shape for one unified dependency entry. It
 // mirrors models.Dependency MINUS Status/Reason (read-time computed, never
 // persisted): omitting them makes DisallowUnknownFields reject any `status` or
-// `reason` key inside a dependency entry. `style`/`package`/`sources`/
+// `reason` key inside a dependency entry. `style`/`package`/`specPath`/
 // `candidates` are external-only (kind-conditioned validation lives in the
 // write-gates — the zod superRefine + agentfold/designgate.go — not here: this
 // decoder stays lenient about kind-specific fields, matching the rest of the
@@ -113,8 +113,6 @@ type dependencyJSON struct {
 	Style        string          `json:"style,omitempty"`
 	Package      string          `json:"package,omitempty"`
 	SpecPath     string          `json:"specPath,omitempty"`
-	SpecUrl      string          `json:"specUrl,omitempty"`
-	Sources      []string        `json:"sources,omitempty"`
 	Candidates   []candidateJSON `json:"candidates,omitempty"`
 	Config       []configKeyJSON `json:"config,omitempty"`
 	ResourceType string          `json:"resourceType,omitempty"`
@@ -127,8 +125,6 @@ type candidateJSON struct {
 	Name        string `json:"name"`
 	Style       string `json:"style"`
 	Description string `json:"description,omitempty"`
-	DocsUrl     string `json:"docsUrl,omitempty"`
-	SpecUrl     string `json:"specUrl,omitempty"`
 	Package     string `json:"package,omitempty"`
 }
 
@@ -229,8 +225,8 @@ func validateExposure(dir, exposure string) error {
 // codec has no org/registry context to correctly resolve against — that
 // requires the shared resolver, which reads the live catalog). Every
 // resolution state (resolved/ambiguous/unresolved) is derived at READ time by
-// that resolver from the presence/absence of Style/Package/Sources/
-// Candidates/SpecPath/SpecUrl — never stored, never computed here.
+// that resolver from the presence/absence of Style/Package/Candidates/SpecPath
+// — never stored, never computed here.
 //
 // A dependency entry missing `kind` or `name`, or declaring a `kind` outside
 // the closed set, is a schema ERROR (the entry used to be silently dropped,
@@ -259,8 +255,6 @@ func assembleDependencies(dir string, in []dependencyJSON) ([]models.Dependency,
 			Style:        d.Style,
 			Package:      d.Package,
 			SpecPath:     d.SpecPath,
-			SpecUrl:      d.SpecUrl,
-			Sources:      append([]string(nil), d.Sources...),
 			Candidates:   toModelCandidates(d.Candidates),
 			Config:       toModelConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
@@ -329,8 +323,6 @@ func toJSONDeps(in []models.Dependency) []dependencyJSON {
 			Style:        d.Style,
 			Package:      d.Package,
 			SpecPath:     d.SpecPath,
-			SpecUrl:      d.SpecUrl,
-			Sources:      append([]string(nil), d.Sources...),
 			Candidates:   toJSONCandidates(d.Candidates),
 			Config:       toJSONConfigKeys(d.Config),
 			ResourceType: d.ResourceType,
@@ -352,8 +344,6 @@ func toModelCandidates(in []candidateJSON) []models.DependencyCandidate {
 			Name:        c.Name,
 			Style:       c.Style,
 			Description: c.Description,
-			DocsUrl:     c.DocsUrl,
-			SpecUrl:     c.SpecUrl,
 			Package:     c.Package,
 		})
 	}
@@ -370,8 +360,6 @@ func toJSONCandidates(in []models.DependencyCandidate) []candidateJSON {
 			Name:        c.Name,
 			Style:       c.Style,
 			Description: c.Description,
-			DocsUrl:     c.DocsUrl,
-			SpecUrl:     c.SpecUrl,
 			Package:     c.Package,
 		})
 	}

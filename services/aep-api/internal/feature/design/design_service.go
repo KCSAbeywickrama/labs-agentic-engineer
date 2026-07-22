@@ -42,7 +42,7 @@ var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generati
 // used to drive this was dropped (dependency-management schema revision —
 // derived-state model, see design_json.go); the equivalent check is reborn
 // once the shared resolver (a later task) can derive an external dependency's
-// resolution state from style/specPath/specUrl against the live catalog.
+// resolution state from style/specPath against the live catalog.
 // external-values (config-only) and platform-resource dependencies are NOT
 // proceed-gated here — they are dispatch-gated in Phase 6. The tag-cut is the
 // only path that checks this; committed-truth has no autosave to gate.
@@ -297,11 +297,10 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 		return "", err
 	}
 
-	// Record specPath + drop the transient specUrl hint, then render ONLY this
-	// component's design.json through the canonical codec.
+	// Record specPath, then render ONLY this component's design.json through the
+	// canonical codec.
 	comp := design.Components[compIdx]
 	comp.Dependencies[depIdx].SpecPath = specPath
-	comp.Dependencies[depIdx].SpecUrl = ""
 	rendered, rerr := artifacts.SplitDesign(&artifacts.DesignFile{Components: []models.DesignComponent{comp}})
 	if rerr != nil {
 		return "", fmt.Errorf("render component %q design.json: %w", component, rerr)
@@ -445,41 +444,10 @@ func (s *designService) SaveAndProceed(ctx context.Context, orgID, projectID, co
 		return nil, artifacts.ErrDesignNotFound
 	}
 
-	// Auto-fetch-on-save (dependency-management): before the gate, fetch any
-	// `external` dependency the architect flagged with a specUrl hint but no
-	// specPath yet, through CollectSpec (SSRF-guarded fetch → validate/normalize
-	// → atomic commit of the spec + the design.json specPath edit that clears the
-	// needs-spec gate). A fetch failure is non-fatal: the gate then blocks the
-	// save until the spec is supplied by hand. Each success commits to main,
-	// advancing HEAD past any pinned commit, so we re-read at HEAD afterwards.
-	fetched := false
-	for ci := range designFile.Components {
-		comp := designFile.Components[ci]
-		for di := range comp.Dependencies {
-			dep := comp.Dependencies[di]
-			if dep.Kind != models.DependencyKindExternal || dep.SpecUrl == "" || dep.SpecPath != "" {
-				continue
-			}
-			if _, ferr := s.CollectSpec(ctx, orgID, projectID, comp.Name, dep.Name, nil, dep.SpecUrl); ferr != nil {
-				slog.WarnContext(ctx, "design save: auto-fetch spec failed (non-fatal — gate may block)",
-					"project", projectID, "component", comp.Name, "dependency", dep.Name, "error", ferr)
-				continue
-			}
-			fetched = true
-		}
-	}
-	if fetched {
-		// HEAD advanced past the (possibly pinned) commit — re-read at HEAD so the
-		// gate + tag observe the freshly committed specPaths.
-		commitSHA = ""
-		designFile, err = s.store.ReadDesign(ctx, orgID, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("re-read design after auto-fetch: %w", err)
-		}
-		if designFile == nil {
-			return nil, artifacts.ErrDesignNotFound
-		}
-	}
+	// (External specs are no longer auto-fetched-and-stored on save: a rest-api's
+	// specPath may be a URL the coding agent fetches at build time, or a
+	// user-provided spec file. A spec-less rest-api stays needs-spec and the
+	// build gate asks the user to supply one.)
 
 	// Derive exposesAPI.auth from an end-user-auth platform-resource dependency
 	// (auth-as-platform-resource): a service component that declares a

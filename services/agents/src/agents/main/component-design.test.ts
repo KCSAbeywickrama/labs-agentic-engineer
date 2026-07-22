@@ -75,7 +75,6 @@ test("dependencies: kind=external with spec + config is accepted", () => {
       name: "stripe",
       style: "rest-api",
       specPath: "dependencies/stripe.openapi.yaml",
-      specUrl: "https://example.com/stripe.yaml",
       config: [
         { key: "STRIPE_API_KEY", secret: true, description: "Your Stripe secret API key" },
         { key: "STRIPE_ACCOUNT", secret: false, defaultValue: "acct_default" },
@@ -109,7 +108,7 @@ test("dependencies: all four kinds together validate", () => {
   assert.equal(check(doc), null);
 });
 
-// --- external-only intent fields (style/package/sources/candidates) --------
+// --- external-only intent fields (style/package/specPath/candidates) -------
 
 test("dependencies: needsSpec is retired -> unknown key SCHEMA_VIOLATION", () => {
   const doc = baseDoc();
@@ -117,7 +116,7 @@ test("dependencies: needsSpec is retired -> unknown key SCHEMA_VIOLATION", () =>
   assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
 });
 
-test("dependencies: style + package + sources accepted on kind=external", () => {
+test("dependencies: style + package accepted on kind=external", () => {
   const doc = baseDoc();
   doc.dependencies = [
     {
@@ -125,7 +124,6 @@ test("dependencies: style + package + sources accepted on kind=external", () => 
       name: "stripe",
       style: "sdk",
       package: "npm:stripe@^14",
-      sources: ["https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"],
     },
   ];
   assert.equal(check(doc), null);
@@ -138,7 +136,7 @@ test("dependencies: 2+ candidates accepted on kind=external", () => {
       kind: "external",
       name: "email-provider",
       candidates: [
-        { name: "sendgrid-rest", style: "rest-api", docsUrl: "https://docs.sendgrid.com/api-reference" },
+        { name: "sendgrid-rest", style: "rest-api", description: "SendGrid v3 Web API" },
         { name: "resend-sdk", style: "sdk", package: "npm:resend@^4.0.0" },
       ],
     },
@@ -160,9 +158,18 @@ test("dependencies: candidates: [] -> SCHEMA_VIOLATION (omit, never empty)", () 
   assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
 });
 
-test("dependencies: sources: [] -> SCHEMA_VIOLATION (minItems 1)", () => {
+// specUrl (URL hint) and sources (provenance array) were removed from the
+// schema — the coding agent now researches contracts freely from the web — so
+// both reject as unknown keys (strictObject) even on kind="external".
+test("dependencies: retired specUrl -> unknown key SCHEMA_VIOLATION", () => {
   const doc = baseDoc();
-  doc.dependencies = [{ kind: "external", name: "stripe", sources: [] }];
+  doc.dependencies = [{ kind: "external", name: "stripe", specUrl: "https://example.com/stripe.yaml" }];
+  assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
+});
+
+test("dependencies: retired sources -> unknown key SCHEMA_VIOLATION", () => {
+  const doc = baseDoc();
+  doc.dependencies = [{ kind: "external", name: "stripe", sources: ["https://stripe.com/docs/api"] }];
   assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
 });
 
@@ -172,14 +179,12 @@ test("dependencies: an invalid style value -> SCHEMA_VIOLATION", () => {
   assert.equal(check(doc)?.code, "SCHEMA_VIOLATION");
 });
 
-// candidates/style/package/specPath/specUrl/sources are external-only —
-// mechanically rejected on any other kind (component-design-schema.ts superRefine).
+// candidates/style/package/specPath are external-only — mechanically rejected
+// on any other kind (component-design-schema.ts superRefine).
 for (const [field, value] of [
   ["style", "sdk"],
   ["package", "npm:stripe@^14"],
   ["specPath", "dependencies/stripe.openapi.yaml"],
-  ["specUrl", "https://example.com/stripe.yaml"],
-  ["sources", ["https://example.com/docs"]],
 ] as const) {
   test(`dependencies: ${field} is external-only -> SCHEMA_VIOLATION on kind=org-service`, () => {
     const doc = baseDoc();
