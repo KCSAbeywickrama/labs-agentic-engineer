@@ -111,8 +111,9 @@ func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID s
 	return names, nil
 }
 
-// ComponentPaths maps each design component's (lowercased) name to its source
-// directory (appPath) for the path-based build trigger. Satisfies
+// ComponentPaths maps each design component's name (verbatim, as authored in
+// the design) to its source directory (appPath) for the path-based build
+// trigger. Callers match against these keys case-insensitively. Satisfies
 // execution.DesignReader.
 func (d designComponents) ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	design, err := d.store.ReadDesign(ctx, orgID, projectID)

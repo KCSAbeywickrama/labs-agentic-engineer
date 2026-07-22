@@ -116,11 +116,15 @@ func (e *Events) WithAutoMerge(enabled bool, repos RepoLookup, merger PRMerger) 
 }
 
 // maybeAutoMerge squash-merges a just-opened coding-agent PR when auto-merge is
-// enabled. Best-effort: a resolution or merge failure is logged, never returned
-// (it must not fail webhook processing — the PR simply stays open for a human,
-// or the sweep/next delivery retries). GitHub answers 405 while checks are
-// pending/unmergeable; MergePullRequest reconciles an already-merged PR to
-// success, so a benign not-yet-mergeable error just leaves the PR open.
+// enabled. Best-effort and fail-open: a resolution or merge failure is logged,
+// never returned (it must not fail webhook processing) and the PR is simply left
+// OPEN for a human — the safe fallback. This is a one-shot attempt on PR-open:
+// it is NOT retried (the coding Execution is terminal by this point, so a later
+// edited/ready_for_review delivery returns before reaching here), so it targets
+// deployments whose repos have no required checks blocking an immediate squash.
+// GitHub answers 405 while checks are pending/unmergeable; MergePullRequest
+// reconciles an already-merged PR to success, so a benign not-yet-mergeable
+// error just leaves the PR open for review.
 func (e *Events) maybeAutoMerge(ctx context.Context, repoFullName string, prNumber int) {
 	if !e.autoMerge || e.merger == nil || e.repos == nil || prNumber == 0 {
 		return
@@ -219,9 +223,13 @@ func (e *Events) PullRequestOpened(ctx context.Context, _, _ string, payload []b
 		HeadSHA:  p.PullRequest.MergeCommitSHA,
 	})
 	e.notifier.Notify(p.Repository.FullName, issueNumber)
-	// Flag-gated auto-merge: only reached for a non-draft coding-agent PR that
-	// links a Task with an active coding attempt (the guards above), so it never
-	// touches unrelated human PRs. No-op unless explicitly enabled via config.
+	// Flag-gated auto-merge (no-op unless explicitly enabled via config). The
+	// guards above scope it tightly: a non-draft PR whose body "Closes #N" a Task
+	// with a currently-ACTIVE coding attempt — i.e. the coding agent's own PR in
+	// the normal flow. There is no PR-author check (in App mode the runner's PR
+	// login equals the platform identity; in PAT mode it is a real user), so the
+	// residual, narrow risk is a human racing the agent with a Closes-ref PR on
+	// that same active Task in a deployment that opted into auto-merge.
 	e.maybeAutoMerge(ctx, p.Repository.FullName, p.PullRequest.Number)
 	return nil
 }
@@ -293,24 +301,29 @@ func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumbe
 
 	components := e.buildTargets(ctx, facts, prNumber)
 
+	// Dedupe on MERGE IDENTITY (merge SHA) per COMPONENT: skip a component that
+	// already has a build row for THIS merge (a GitHub re-delivery). The existing
+	// rows are loaded ONCE here — not per component — so fan-out over N components
+	// stays a single ListByIssue read instead of an N+1 scan. Distinct components
+	// under one merge each admit their own row; a new merge carries a new SHA so
+	// it always admits fresh (§7 retry = new row). Empty mergeSHA skips dedupe.
+	builtForMerge := map[string]bool{}
+	if mergeSHA != "" {
+		rows, derr := e.store.ListByIssue(ctx, repoFullName, issueNumber)
+		if derr != nil {
+			return derr
+		}
+		for i := range rows {
+			if rows[i].Kind == string(taskmeta.KindBuild) && rows[i].CommitSHA == mergeSHA {
+				builtForMerge[strings.ToLower(rows[i].Component)] = true
+			}
+		}
+	}
+
 	var firstErr error
 	for i, comp := range components {
-		// Dedupe on MERGE IDENTITY (merge SHA) per COMPONENT: skip only when THIS
-		// component already has a build row for THIS merge (a GitHub re-delivery).
-		// Distinct components under one merge each admit their own row; a new
-		// merge carries a new SHA so it always admits fresh (§7 retry = new row).
-		if mergeSHA != "" {
-			built, derr := e.buildExistsForMerge(ctx, repoFullName, issueNumber, comp, mergeSHA)
-			if derr != nil {
-				if i == 0 {
-					return derr
-				}
-				slog.WarnContext(ctx, "path-based build: dedupe check failed for extra component", "component", comp, "error", derr)
-				continue
-			}
-			if built {
-				continue // re-delivery of this same merge for this component
-			}
+		if builtForMerge[strings.ToLower(comp)] {
+			continue // re-delivery of this same merge for this component
 		}
 		cf := facts
 		cf.Component = comp
@@ -413,24 +426,6 @@ func (e *Events) admitAndDispatchBuild(ctx context.Context, facts delivery.TaskF
 		return err
 	}
 	return nil
-}
-
-// buildExistsForMerge reports whether a build Execution (active or terminal)
-// already targets mergeSHA for THIS component of this Task — the per-component
-// merge-identity dedupe for spawnBuild. It scans all rows (not just the latest)
-// so a re-delivery of an OLDER merge is also caught, and a new merge is never
-// blocked by a prior one.
-func (e *Events) buildExistsForMerge(ctx context.Context, repoFullName string, issueNumber int, component, mergeSHA string) (bool, error) {
-	rows, err := e.store.ListByIssue(ctx, repoFullName, issueNumber)
-	if err != nil {
-		return false, err
-	}
-	for i := range rows {
-		if rows[i].Kind == string(taskmeta.KindBuild) && rows[i].CommitSHA == mergeSHA && strings.EqualFold(rows[i].Component, component) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // ReconcileTaskPR is the sweep's PR-state healer (§5): for one Task whose latest

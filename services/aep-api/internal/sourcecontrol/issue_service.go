@@ -197,10 +197,6 @@ func (s *issueService) lockRepoCreates(owner, repo string) func() {
 	return s.createLocks.lock(owner + "/" + repo)
 }
 
-// dedupeLabelFor turns a caller-supplied dedupe key into the GitHub label that
-// marks issues created with that key. Whitespace collapses to "-" and the
-// result is capped at GitHub's 50-char label limit — the cap is deterministic
-// (same key → same label), so we truncate rather than hash.
 // dedupeLabelPrefix namespaces the dedupe label. GitHub caps label names at 50
 // characters.
 const (
