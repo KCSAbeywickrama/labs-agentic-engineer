@@ -19,23 +19,30 @@ package spec
 // Provisioning + platform-skill reconciliation. The platform skill library
 // ships in the BFF container as on-disk files (config.SkillsDir, read at
 // runtime; platform + org kinds, kind in frontmatter) and is seeded +
-// reconciled into each org's skills repo (the live store) under the FLAT layout
-// skills/<name>/. Reconcile is a THREE-WAY compare against skills-manifest.json
-// (§3), the per-org baseline of what each platform-managed skill was last
-// handed at: absent repo copy → seed; org clean + platform moved → refresh;
-// org moved + platform clean → leave the override alone; both moved → leave
-// it alone as a conflict (unless they converged, which auto-resolves); a
-// pre-manifest repo copy is backfilled (stamped, never clobbered). The
-// manifest is rewritten in the SAME commit as any file changes it reflects. A
-// name owned by a user kind (custom/imported) is SKIPPED — the user copy
-// wins. Names the manifest still tracks as platform-shipped that the embed no
-// longer ships are purged (a clean copy's files are deleted; an overridden
-// copy's files are kept and the entry is dropped — divergence is ownership).
-// Reconcile also MIGRATES legacy-layout repos (skills/<kindDir>/<name>/) in
-// the same single commit: user skills move to their flat dir with the kind
-// stamped into frontmatter, embedded skills are rewritten flat (a divergent
-// legacy copy is treated as a pre-manifest override, per the backfill rule
-// above), and the retired kind dirs are removed (§4).
+// reconciled into each org's skills repo (the live store) under the FLAT
+// layout skills/<name>/. Reconcile is a THREE-WAY compare per skill against
+// skills-manifest.json (§3), the org's baseline of what a platform-managed
+// skill was last handed at: did the org's copy move off the baseline, and did
+// the platform's move off the baseline? absent repo copy → seed; org clean +
+// platform moved → refresh (and advance the baseline); org moved + platform
+// clean → leave the override alone (never touched); both moved → leave it
+// alone as a conflict, surfaced by /updates, UNLESS the two copies converged
+// on identical content, which auto-resolves clean; a pre-manifest repo copy
+// is backfilled (baseline stamped so future compares work, a divergent copy
+// treated as an override and never clobbered). The manifest is rewritten in
+// the SAME commit as any file changes it reflects. A name owned by a user
+// kind (custom/imported) never carries a platform manifest entry, so it is
+// skipped outright — the user copy always wins. Names the manifest still
+// tracks as platform-shipped that the embed no longer ships are purged: a
+// clean copy's files are deleted; an overridden copy's files are kept and
+// just the entry dropped (divergence is ownership — it becomes a plain org
+// skill). A name with no manifest entry at all is org-authored and reconcile
+// never touches it. Reconcile also MIGRATES legacy-layout repos
+// (skills/<kindDir>/<name>/) in the same single commit: user skills move to
+// their flat dir with the kind stamped into frontmatter, embedded skills are
+// rewritten flat (a divergent legacy copy is treated as a pre-manifest
+// override, per the backfill rule above), and the retired kind dirs are
+// removed (§4).
 
 import (
 	"context"
