@@ -315,6 +315,11 @@ func TestSkillsComponent_Updates_MatchesGolden(t *testing.T) {
 	if strings.Join(gotElem, ",") != strings.Join(wantElem, ",") {
 		t.Fatalf("updates[] element field set drifted:\n got %v\nwant %v", gotElem, wantElem)
 	}
+	if arr, ok := decodeObject(t, resp.Body.Bytes())["updates"].([]any); ok && len(arr) == 1 {
+		if el, ok := arr[0].(map[string]any); !ok || el["state"] != "overridden" {
+			t.Fatalf("drifted org copy must report overridden, got %v", arr[0])
+		}
+	}
 }
 
 func TestSkillsComponent_Sync(t *testing.T) {

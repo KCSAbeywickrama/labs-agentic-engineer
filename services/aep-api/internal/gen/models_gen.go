@@ -135,6 +135,27 @@ func (e PreflightItemKind) Valid() bool {
 	}
 }
 
+// Defines values for SkillUpdateState.
+const (
+	Conflict   SkillUpdateState = "conflict"
+	Overridden SkillUpdateState = "overridden"
+	Update     SkillUpdateState = "update"
+)
+
+// Valid indicates whether the value is a known member of the SkillUpdateState enum.
+func (e SkillUpdateState) Valid() bool {
+	switch e {
+	case Conflict:
+		return true
+	case Overridden:
+		return true
+	case Update:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskStreamEventType.
 const (
 	TaskStreamEventTypeDone      TaskStreamEventType = "done"
@@ -911,10 +932,17 @@ type SkillSyncOutput struct {
 	Updated int64  `json:"updated"`
 }
 
-// SkillUpdate One built-in whose embedded (platform) content differs from the org's repo copy. Reconcile compares ContentSHA, not a hand-maintained version.
+// SkillUpdate One platform-shipped skill whose state differs from the org's baseline: state
+// "update" = org copy clean, platform shipped new content (sync will refresh);
+// "overridden" = org modified its copy (sync will never touch it);
+// "conflict" = both moved since the baseline (review required).
 type SkillUpdate struct {
-	Name string `json:"name"`
+	Name  string           `json:"name"`
+	State SkillUpdateState `json:"state"`
 }
+
+// SkillUpdateState defines model for SkillUpdate.State.
+type SkillUpdateState string
 
 // SkillUpdateList defines model for SkillUpdateList.
 type SkillUpdateList struct {

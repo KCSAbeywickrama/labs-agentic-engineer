@@ -49,10 +49,14 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// SkillUpdate is one row of the "updates available" badge: an org-kind skill
-// whose embedded content differs from (or is absent from) the org's repo. §6.3.
+// SkillUpdate is one row of the "updates available" view: a platform-shipped
+// skill whose state differs from the org's baseline. State semantics: "update"
+// = clean copy, platform moved (sync refreshes it); "overridden" = org moved
+// (sync never touches it); "conflict" = both moved (review required). §6.3 +
+// skills-experience spec §3.
 type SkillUpdate struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	State string `json:"state"`
 }
 
 // ensureSkillsRepo idempotently provisions the org's skills repo, seeding
@@ -284,11 +288,10 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	return changed, nil
 }
 
-// UpdatesAvailable returns the embedded skills (org + platform — both list on
-// the skills page now) whose embedded content differs from (or is missing
-// from) the org's repo — the data behind the badge. Names owned by a user
-// kind are skipped — reconcile will never overwrite them, so a badge entry
-// would be permanently stuck. §6.3.
+// UpdatesAvailable evaluates the same three-way compare as reconcile,
+// read-only. Names owned by a user kind or with an imported manifest entry
+// are skipped; a pre-manifest divergent copy reports "overridden" (the
+// migration posture: never suggest a clobber).
 func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]SkillUpdate, error) {
 	repo, err := s.ensureSkillsRepo(ctx, orgID)
 	if err != nil {
@@ -298,7 +301,7 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 	if err != nil {
 		return nil, err
 	}
-	entries, err := s.loadCatalogEntries(ctx, orgID, repo)
+	entries, manifest, err := s.loadEntriesAndManifest(ctx, orgID, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -312,8 +315,17 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 		if ok && isUserKind(cur.Kind) {
 			continue
 		}
-		if !ok || cur.ContentSHA != b.ContentSHA {
-			out = append(out, SkillUpdate{Name: b.Name})
+		var entry *ManifestEntry
+		if e, has := manifest[b.Name]; has {
+			entry = &e
+		}
+		switch decideReconcile(b.ContentSHA, cur.ContentSHA, ok, entry) {
+		case actionSeed, actionRefresh:
+			out = append(out, SkillUpdate{Name: b.Name, State: "update"})
+		case actionOverride, actionBackfillOverride:
+			out = append(out, SkillUpdate{Name: b.Name, State: "overridden"})
+		case actionConflict:
+			out = append(out, SkillUpdate{Name: b.Name, State: "conflict"})
 		}
 	}
 	return out, nil

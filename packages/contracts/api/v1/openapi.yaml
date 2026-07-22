@@ -3666,12 +3666,22 @@ components:
     SkillUpdate:
       additionalProperties: false
       description: |
-        One built-in whose embedded (platform) content differs from the org's repo copy. Reconcile compares ContentSHA, not a hand-maintained version.
+        One platform-shipped skill whose state differs from the org's baseline: state
+        "update" = org copy clean, platform shipped new content (sync will refresh);
+        "overridden" = org modified its copy (sync will never touch it);
+        "conflict" = both moved since the baseline (review required).
       properties:
         name:
           type: string
+        state:
+          enum:
+          - update
+          - overridden
+          - conflict
+          type: string
       required:
       - name
+      - state
       type: object
     SkillUpdateList:
       additionalProperties: false

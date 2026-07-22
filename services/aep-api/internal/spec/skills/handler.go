@@ -134,7 +134,7 @@ func (h *Handler) ListSkillUpdates(ctx context.Context, _ gen.ListSkillUpdatesRe
 		Count:   int64(len(updates)),
 	}
 	for _, u := range updates {
-		out.Updates = append(out.Updates, gen.SkillUpdate{Name: u.Name})
+		out.Updates = append(out.Updates, gen.SkillUpdate{Name: u.Name, State: gen.SkillUpdateState(u.State)})
 	}
 	return gen.ListSkillUpdates200JSONResponse(out), nil
 }

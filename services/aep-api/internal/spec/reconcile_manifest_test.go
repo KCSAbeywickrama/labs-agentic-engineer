@@ -183,3 +183,33 @@ func TestReconcile_PurgeOnlyCleanCopies(t *testing.T) {
 		t.Fatal("overridden retiree should lose its manifest entry (released to org)")
 	}
 }
+
+func TestUpdatesAvailable_ThreeWayStates(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, libWith("v1"))
+	ctx := context.Background()
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Clean + platform moved → "update".
+	svc.SwapLibrary(libWith("v2"))
+	rows, err := svc.UpdatesAvailable(ctx, "org1")
+	if err != nil || len(rows) != 1 || rows[0].State != "update" {
+		t.Fatalf("want one 'update' row, got %v err=%v", rows, err)
+	}
+
+	// Org moved too → "conflict".
+	host.writeAtHead("org1", skillRepoPath("demo"), demoMD("org custom"))
+	rows, err = svc.UpdatesAvailable(ctx, "org1")
+	if err != nil || len(rows) != 1 || rows[0].State != "conflict" {
+		t.Fatalf("want one 'conflict' row, got %v err=%v", rows, err)
+	}
+
+	// Platform back at base, org still moved → "overridden".
+	svc.SwapLibrary(libWith("v1"))
+	rows, err = svc.UpdatesAvailable(ctx, "org1")
+	if err != nil || len(rows) != 1 || rows[0].State != "overridden" {
+		t.Fatalf("want one 'overridden' row, got %v err=%v", rows, err)
+	}
+}
