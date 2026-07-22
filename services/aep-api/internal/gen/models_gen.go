@@ -388,6 +388,9 @@ type BuildSummary struct {
 	Status    BuildSummaryStatus `json:"status"`
 	Tag       string             `json:"tag"`
 	Tasks     BuildTally         `json:"tasks"`
+
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	Usage Usage `json:"usage,omitempty"`
 }
 
 // BuildSummaryStatus defines model for BuildSummary.Status.
@@ -839,6 +842,21 @@ type ProjectStatus struct {
 	SpecStatus string `json:"specStatus"`
 }
 
+// ProjectUsage Per-phase actual usage for a project (#245). All figures derive from persisted per-run token records (ADR-0011); costUsd is computed at read time from the configured model rates.
+type ProjectUsage struct {
+	// Build Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	Build Usage `json:"build"`
+
+	// DraftCycle Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	DraftCycle Usage `json:"draftCycle"`
+
+	// Spec Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	Spec Usage `json:"spec"`
+
+	// Validation Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	Validation Usage `json:"validation"`
+}
+
 // PromoteFromIssueRequest defines model for PromoteFromIssueRequest.
 type PromoteFromIssueRequest struct {
 	// ComponentName Component this issue is about
@@ -1055,6 +1073,9 @@ type TaskView struct {
 	PrURL     string `json:"prUrl,omitempty"`
 	Rationale string `json:"rationale,omitempty"`
 	Title     string `json:"title"`
+
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	Usage Usage `json:"usage,omitempty"`
 }
 
 // TimelineEvent A unified-timeline entry: today's ProgressEvent (phase | tool_use | git_commit | git_push | gh_action | build_step | log | result) plus its attribution — which execution attempt it came from. This is the per-row shape the console renders; the FE groups rows by executionId/kind.
@@ -1144,6 +1165,20 @@ type UpdateConfigBody struct {
 type UpdateSkillInput struct {
 	References map[string]string `json:"references,omitempty"`
 	SkillMd    string            `json:"skillMd"`
+}
+
+// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+type Usage struct {
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+
+	// CostUsd Catalog-derived USD; null when pricing is unavailable for the model.
+	CostUsd     *float64 `json:"costUsd"`
+	InputTokens int64    `json:"inputTokens"`
+
+	// Model Model id the work ran on; "" on mixed-model aggregates.
+	Model        string `json:"model"`
+	OutputTokens int64  `json:"outputTokens"`
 }
 
 // Warning defines model for Warning.
