@@ -262,12 +262,25 @@ func isCatalogPath(rel string) bool {
 	if hasDotSegment(parts[1:]) {
 		return false
 	}
-	if legacyKindDirs[parts[1]] != "" {
-		// legacy: skills/<kindDir>/<name>/... — SKILL.md at depth 4, aux files deeper.
-		return len(parts) >= 4
+	if len(parts) == 3 {
+		// skills/<name>/SKILL.md is ALWAYS a flat skill's body: depth alone
+		// discriminates the two layouts, never <name>. A flat skill literally
+		// named "custom"/"builtin"/"flow"/"imported" (legacyKindDirs' keys) must
+		// keep at depth 3 — routing it into the legacy branch below silently
+		// dropped it from the catalog.
+		return true
 	}
-	// flat: skills/<name>/... — SKILL.md at depth 3, aux files deeper.
-	return len(parts) >= 3
+	// len(parts) >= 4: skills/<x>/<y>/... is ambiguous when <x> is a legacy
+	// kind dir name — it could be legacy (skills/<kindDir>/<name>/<refKey...>)
+	// or a flat skill literally named <x> with an aux file nested under a
+	// subdirectory named <y> (skills/<name>/<subdir>/...). reservedSkillNames
+	// (skill_mutation_service.go) keeps user-created skills out of the
+	// legacyKindDirs vocabulary, so in practice this only touches
+	// platform-shipped names. This is a keep filter, not the discriminator —
+	// both interpretations need the blob, so we keep it either way and let
+	// parseBundleEntries (which sees the whole path set) resolve the
+	// ambiguity.
+	return true
 }
 
 // hasDotSegment reports whether any path segment (file or directory) starts
@@ -330,7 +343,13 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 		if len(parts) < 3 || parts[0] != skillsRootDir {
 			continue
 		}
-		if legacyKindDirs[parts[1]] != "" {
+		// len(parts) >= 4 under a legacy kind dir name is ambiguous — see
+		// isCatalogPath. Resolve it for free here (pass 1 already ran): if a
+		// flat SKILL.md body exists for parts[1], these are that flat skill's
+		// aux files, not legacy junk, so the flat interpretation wins and no
+		// aux file is ever silently dropped.
+		_, flatBodyExists := bodies[key{"", parts[1]}]
+		if legacyKindDirs[parts[1]] != "" && !flatBodyExists {
 			// legacy: skills/<kindDir>/<name>/<refKey...> — needs at least the
 			// kind dir + name + one path segment past the skill root.
 			if len(parts) < 4 {
@@ -345,9 +364,6 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 			continue
 		}
 		// flat: skills/<name>/<refKey...>
-		if len(parts) < 3 {
-			continue
-		}
 		k := key{"", parts[1]}
 		if _, ok := bodies[k]; !ok {
 			continue

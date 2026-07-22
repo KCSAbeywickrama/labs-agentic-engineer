@@ -317,3 +317,40 @@ func TestReconcile_CarriesStandardStructure(t *testing.T) {
 		t.Fatalf("re-reconcile must be a no-op, wrote %d (err %v)", n, err)
 	}
 }
+
+// TestReconcile_FlatSkillNamedLikeLegacyKindDir: a flat skill literally named
+// "custom" — a legacyKindDirs key — must survive the catalog read intact,
+// SKILL.md and aux file both. Depth alone discriminates flat vs. legacy
+// layout, never the name; before this test's fix, skills/custom/SKILL.md
+// (depth 3) was routed into the legacy branch, which requires depth >= 4, and
+// the skill silently vanished from the catalog.
+func TestReconcile_FlatSkillNamedLikeLegacyKindDir(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c := NewComponentStoreWithLibrary(t, fstest.MapFS{
+		"custom/SKILL.md":        {Data: []byte(mkSkillMD("custom", "platform", "flat skill literally named custom"))},
+		"custom/scripts/run.mjs": {Data: []byte("console.log(1)\n")},
+	})
+	skills, err := c.Svc.List(ctx, "org1") // first read provisions + seeds
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byName := map[string]Skill{}
+	for _, sk := range skills {
+		byName[sk.Name] = sk
+	}
+	custom, ok := byName["custom"]
+	if !ok {
+		t.Fatalf("flat skill named %q vanished from the catalog: %v", "custom", skillKeysOf(byName))
+	}
+	if !strings.Contains(custom.SkillMD, "flat skill literally named custom") {
+		t.Fatalf("custom SKILL.md body wrong: %q", custom.SkillMD)
+	}
+	if custom.References["scripts/run.mjs"] != "console.log(1)\n" {
+		t.Fatalf("custom aux file lost: %v", custom.References)
+	}
+	// Re-reconcile: clean copy, no rewrite.
+	if n, err := c.Svc.Reconcile(ctx, "org1"); err != nil || n != 0 {
+		t.Fatalf("re-reconcile must be a no-op, wrote %d (err %v)", n, err)
+	}
+}
