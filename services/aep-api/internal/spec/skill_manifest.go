@@ -82,3 +82,57 @@ func renderSkillsManifest(m SkillsManifest) []byte {
 	}
 	return append(raw, '\n')
 }
+
+// reconcileAction is the per-skill outcome of the three-way compare (spec §3):
+// two questions — did the org change their copy (repo vs baseHash)? did the
+// platform change theirs (embedded vs baseHash)? — four answers, plus the
+// seed and pre-manifest backfill cases.
+type reconcileAction int
+
+const (
+	actionSkip             reconcileAction = iota // nothing to do
+	actionSeed                                    // no repo copy: write files + stamp baseHash
+	actionRefresh                                 // org clean, platform moved: write files + advance baseHash
+	actionBackfill                                // pre-manifest copy matching embed: stamp baseHash only
+	actionBackfillOverride                        // pre-manifest copy diverged: stamp baseHash, treat as override, never write files
+	actionOverride                                // org moved, platform not: leave alone
+	actionConflict                                // both moved: leave alone, surface for review
+)
+
+//deadcode:keep wired by the three-way reconcile (plan task 3, issue #293)
+// decideReconcile is the pure three-way decision for ONE embedded skill.
+// entry is the skill's manifest entry (nil = pre-manifest or org-authored);
+// repoSHA is the org copy's contentSHA ("" when repoExists is false).
+func decideReconcile(embeddedSHA, repoSHA string, repoExists bool, entry *ManifestEntry) reconcileAction {
+	if !repoExists {
+		return actionSeed
+	}
+	if entry == nil {
+		// Migration backfill (issue #293): stamp the baseline; a copy that
+		// matches the shipped content is clean, anything else is treated as
+		// an override — never clobbered during migration.
+		if repoSHA == embeddedSHA {
+			return actionBackfill
+		}
+		return actionBackfillOverride
+	}
+	if entry.Kind != ManifestKindPlatform {
+		return actionSkip // imported-owned name: reconcile never manages it
+	}
+	orgMoved := repoSHA != entry.BaseHash
+	platformMoved := embeddedSHA != entry.BaseHash
+	switch {
+	case !orgMoved && !platformMoved:
+		return actionSkip
+	case !orgMoved && platformMoved:
+		return actionRefresh
+	case orgMoved && !platformMoved:
+		return actionOverride
+	case repoSHA == embeddedSHA:
+		// Both moved but converged (org manually adopted the new platform
+		// content): auto-resolve — stamp the base, no conflict.
+		return actionBackfill
+	default:
+		return actionConflict
+	}
+}

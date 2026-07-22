@@ -58,3 +58,42 @@ func TestSkillsManifest_ParseTolerant(t *testing.T) {
 		}
 	}
 }
+
+func TestDecideReconcile(t *testing.T) {
+	t.Parallel()
+	plat := func(base string) *ManifestEntry { return &ManifestEntry{Kind: ManifestKindPlatform, BaseHash: base} }
+	cases := []struct {
+		name       string
+		embedded   string
+		repo       string
+		repoExists bool
+		entry      *ManifestEntry
+		want       reconcileAction
+	}{
+		// No repo copy at all → seed (fresh org, or org deleted a platform copy).
+		{"absent", "E1", "", false, nil, actionSeed},
+		{"absent despite entry", "E1", "", false, plat("E1"), actionSeed},
+		// Pre-manifest repo copy (migration/backfill — issue #293 policy).
+		{"backfill clean", "E1", "E1", true, nil, actionBackfill},
+		{"backfill divergent = override", "E1", "X9", true, nil, actionBackfillOverride},
+		// Steady state, entry present.
+		{"nothing moved", "E1", "E1", true, plat("E1"), actionSkip},
+		{"platform moved, org clean", "E2", "E1", true, plat("E1"), actionRefresh},
+		{"org moved, platform not", "E1", "X9", true, plat("E1"), actionOverride},
+		{"both moved", "E2", "X9", true, plat("E1"), actionConflict},
+		// Edit-then-revert returns to clean automatically (spec §3).
+		{"reverted org edit", "E2", "E1", true, plat("E1"), actionRefresh},
+		// Both moved but CONVERGED (org manually adopted the new platform
+		// content) → auto-resolve: stamp the base, no conflict.
+		{"converged", "E2", "E2", true, plat("E1"), actionBackfill},
+		// A non-platform entry never participates (imported name — defensive).
+		{"imported entry", "E1", "X9", true, &ManifestEntry{Kind: ManifestKindImported, BaseHash: "X9"}, actionSkip},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := decideReconcile(c.embedded, c.repo, c.repoExists, c.entry); got != c.want {
+				t.Fatalf("decideReconcile(%s) = %v, want %v", c.name, got, c.want)
+			}
+		})
+	}
+}
