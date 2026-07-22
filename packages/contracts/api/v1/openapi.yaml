@@ -3637,6 +3637,17 @@ components:
     SkillDetailBody:
       additionalProperties: false
       properties:
+        binaryReferences:
+          description: |-
+            Sorted paths of aux files whose content is NOT valid UTF-8 (e.g.
+            images, other binaries). Their bytes are never inlined into
+            `references` — encoding/json silently replaces invalid UTF-8 with
+            U+FFFD rather than erroring, so inlining would corrupt the file
+            content without any visible failure. The console renders these
+            entries name-only.
+          items:
+            type: string
+          type: array
         compatibility:
           type: string
         contentSha:
@@ -3670,6 +3681,7 @@ components:
       - description
       - skillMd
       - references
+      - binaryReferences
       - contentSha
       - updatedAt
       type: object
