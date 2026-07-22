@@ -23,6 +23,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/projects/componentconfig"
 	"github.com/wso2/aep/aep-api/internal/projects/componentread"
 	"github.com/wso2/aep/aep-api/internal/projects/projectcrud"
+	"github.com/wso2/aep/aep-api/internal/projects/projectusage"
 )
 
 // Every slice names its type Handler, so embedding them directly would be
@@ -33,6 +34,7 @@ type (
 	componentbuildHandler  = componentbuild.Handler
 	componentconfigHandler = componentconfig.Handler
 	activityfeedHandler    = activityfeed.Handler
+	projectusageHandler    = projectusage.Handler
 )
 
 // Handlers is the projects domain's slice handlers, embedded so Go promotes each
@@ -43,6 +45,7 @@ type Handlers struct {
 	*componentbuildHandler
 	*componentconfigHandler
 	*activityfeedHandler
+	*projectusageHandler
 }
 
 // New assembles the domain: pure wiring, constructor injection only.
@@ -57,5 +60,6 @@ func New(d projects.Deps) (*Handlers, error) {
 		componentbuildHandler:  componentbuild.New(d.ComponentSvc),
 		componentconfigHandler: componentconfig.New(d.ConfigSvc),
 		activityfeedHandler:    activityfeed.New(d.ActivitySvc),
+		projectusageHandler:    projectusage.New(),
 	}, nil
 }
