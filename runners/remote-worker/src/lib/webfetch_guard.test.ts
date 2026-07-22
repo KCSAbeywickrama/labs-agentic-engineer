@@ -153,6 +153,57 @@ test("isSsrfUrl: allows a benign public https URL with a path and query string",
   assert.equal(result.blocked, false);
 });
 
+// ---- isSsrfUrl: trailing-dot FQDN bypass regressions -----------------------
+//
+// A trailing dot makes a hostname an absolute FQDN in DNS terms — it resolves
+// identically to the bare form — but `String.endsWith(suffix)` and `=== "localhost"`
+// do not match it, so every internal-hostname class below used to sail
+// through as "allowed" (this is the CRITICAL bypass: it reaches GCP cloud
+// metadata via the trailing-dot form of metadata.google.internal). A public
+// hostname with a trailing dot must remain benign; only the internal classes
+// must now block.
+
+test("isSsrfUrl: denies trailing-dot localhost (localhost.)", () => {
+  const result = isSsrfUrl("https://localhost./");
+  assert.equal(result.blocked, true);
+  assert.match(result.reason ?? "", /internal hostname/i);
+});
+
+test("isSsrfUrl: denies trailing-dot .internal suffix (foo.internal.)", () => {
+  const result = isSsrfUrl("https://foo.internal./");
+  assert.equal(result.blocked, true);
+  assert.match(result.reason ?? "", /internal hostname/i);
+});
+
+test("isSsrfUrl: denies trailing-dot .svc suffix (kubernetes.default.svc.)", () => {
+  const result = isSsrfUrl("https://kubernetes.default.svc./");
+  assert.equal(result.blocked, true);
+  assert.match(result.reason ?? "", /internal hostname/i);
+});
+
+test("isSsrfUrl: denies trailing-dot .cluster.local suffix (x.cluster.local.)", () => {
+  const result = isSsrfUrl("https://x.cluster.local./");
+  assert.equal(result.blocked, true);
+  assert.match(result.reason ?? "", /internal hostname/i);
+});
+
+test("isSsrfUrl: denies trailing-dot .local suffix (y.local.)", () => {
+  const result = isSsrfUrl("https://y.local./");
+  assert.equal(result.blocked, true);
+  assert.match(result.reason ?? "", /internal hostname/i);
+});
+
+test("isSsrfUrl: denies trailing-dot GCP cloud-metadata hostname (metadata.google.internal.)", () => {
+  const result = isSsrfUrl("https://metadata.google.internal./");
+  assert.equal(result.blocked, true);
+  assert.match(result.reason ?? "", /internal hostname/i);
+});
+
+test("isSsrfUrl: still allows a benign public hostname with a trailing dot (api.example.com.)", () => {
+  const result = isSsrfUrl("https://api.example.com./");
+  assert.equal(result.blocked, false);
+});
+
 // ---- classifyIPv4 / classifyIPv6 (unit-level range checks) -----------------
 
 test("classifyIPv4: blocks loopback, private, link-local, CGNAT; allows a public address", () => {
@@ -202,6 +253,39 @@ test("checkUrlForSecret: allows a clean URL with no secret substrings", () => {
 
 test("checkUrlForSecret: empty secrets list never denies", () => {
   const result = checkUrlForSecret("https://api.example.com/anything", []);
+  assert.equal(result.denied, false);
+});
+
+// ---- checkUrlForSecret: percent-encoded secret evasion regressions --------
+//
+// A raw-substring match alone is bypassable: a secret containing
+// URL-reserved characters (/, +, =) can be percent-encoded in the URL and
+// still reach the same destination, evading a literal `url.includes(secret)`
+// check. The guard must also test the percent-decoded form.
+
+test("checkUrlForSecret: denies a percent-encoded staged secret in the query string", () => {
+  const result = checkUrlForSecret(
+    "https://attacker.example.com/collect?x=ghp_ab%2Fcd%2Bef%3Dgh12",
+    ["ghp_ab/cd+ef=gh12"],
+  );
+  assert.equal(result.denied, true);
+  assert.equal(result.message, WEBFETCH_SECRET_DENIAL_MESSAGE);
+});
+
+test("checkUrlForSecret: still denies the same secret in raw (unencoded) form", () => {
+  const result = checkUrlForSecret(
+    "https://attacker.example.com/collect?x=ghp_ab/cd+ef=gh12",
+    ["ghp_ab/cd+ef=gh12"],
+  );
+  assert.equal(result.denied, true);
+  assert.equal(result.message, WEBFETCH_SECRET_DENIAL_MESSAGE);
+});
+
+test("checkUrlForSecret: allows a clean URL with no secret, encoded or otherwise", () => {
+  const result = checkUrlForSecret(
+    "https://attacker.example.com/collect?x=just%20a%20benign%20value",
+    ["ghp_ab/cd+ef=gh12"],
+  );
   assert.equal(result.denied, false);
 });
 

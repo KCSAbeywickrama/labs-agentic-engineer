@@ -220,7 +220,13 @@ export function isSsrfUrl(rawUrl: string): AddressCheck {
   if (!hostname) {
     return { blocked: true, reason: "URL has no host" };
   }
-  const lowerHost = hostname.toLowerCase();
+  // Strip trailing dot(s) once, right after lowercasing: a trailing-dot FQDN
+  // (e.g. "metadata.google.internal.") is DNS-equivalent to its bare form but
+  // would otherwise slip past the suffix/localhost denylist below (`endsWith`
+  // no longer matches). Harmless to literal IPs — WHATWG URL parsing already
+  // strips a literal IP's trailing dot before .hostname is read — and to
+  // bracketed IPv6 hosts, which never contain a ".".
+  const lowerHost = hostname.toLowerCase().replace(/\.+$/, "");
 
   if (lowerHost.startsWith("[") && lowerHost.endsWith("]")) {
     const addr = lowerHost.slice(1, -1);
@@ -266,14 +272,27 @@ export const WEBFETCH_SECRET_DENIAL_MESSAGE =
 
 /**
  * checkUrlForSecret is the pure DLP predicate, analogous to
- * websearch_dlp.ts's checkWebSearchQuery: deny iff `url` contains any of
- * `secrets` as a substring. `secrets` is expected to be
- * `stagedSecretValues(childEnv)` — the same deny-by-default candidate list
- * websearch_dlp.ts computes, reused rather than duplicated.
+ * websearch_dlp.ts's checkWebSearchQuery: deny iff `url` — or its
+ * percent-decoded form — contains any of `secrets` as a substring. `secrets`
+ * is expected to be `stagedSecretValues(childEnv)` — the same
+ * deny-by-default candidate list websearch_dlp.ts computes, reused rather
+ * than duplicated.
+ *
+ * A raw substring match alone is bypassable: a secret containing
+ * URL-reserved characters (`/ + = :` space, etc.) can be percent-encoded in
+ * the URL and still land at the same destination, evading a literal
+ * `url.includes(secret)` check. So this also tests the decoded haystack.
+ * Matching stays case-sensitive — secrets are case-sensitive.
  */
 export function checkUrlForSecret(url: string, secrets: readonly string[]): UrlSecretCheck {
+  const haystacks = [url];
+  try {
+    haystacks.push(decodeURIComponent(url));
+  } catch {
+    // Malformed percent-encoding: keep the raw haystack only.
+  }
   for (const secret of secrets) {
-    if (secret && url.includes(secret)) {
+    if (secret && haystacks.some((haystack) => haystack.includes(secret))) {
       return { denied: true, message: WEBFETCH_SECRET_DENIAL_MESSAGE };
     }
   }
