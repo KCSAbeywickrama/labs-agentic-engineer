@@ -29,9 +29,12 @@ import (
 type Deps struct {
 	BuildSvc     *build.Service
 	PreflightSvc *build.PreflightService
-	TaskReads    *task.Reads
-	TaskCommands *task.Commands
-	TaskStream   *execution.TaskStreamService
+	// BuildActivity records the spec_published feed line on build start
+	// (issue #239); nil disables recording.
+	BuildActivity build.SpecPublishedRecorder
+	TaskReads     *task.Reads
+	TaskCommands  *task.Commands
+	TaskStream    *execution.TaskStreamService
 }
 
 // Every slice names its type Handler, so embedding them directly would be
@@ -55,7 +58,7 @@ type Handlers struct {
 // unwired one (each slice's nil guard), matching the pre-migration edge.
 func New(d Deps) (*Handlers, error) {
 	return &Handlers{
-		buildHandler:     build.NewHandler(d.BuildSvc, d.PreflightSvc),
+		buildHandler:     build.NewHandler(d.BuildSvc, d.PreflightSvc, d.BuildActivity),
 		taskHandler:      task.NewHandler(d.TaskReads, d.TaskCommands),
 		executionHandler: execution.NewHandler(d.TaskStream),
 	}, nil
