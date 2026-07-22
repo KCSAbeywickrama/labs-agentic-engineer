@@ -249,28 +249,36 @@ func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *sour
 }
 
 // isCatalogPath keeps exactly the blobs the catalog is parsed from — both
-// layouts (§4.1):
+// layouts (§4.1), every aux file (standard structure: scripts/, references/,
+// assets/, and any extras) alongside SKILL.md, skipping only dotfiles:
 //
-//	flat:   skills/<name>/SKILL.md, skills/<name>/references/*.md
-//	legacy: skills/<kindDir>/<name>/SKILL.md, skills/<kindDir>/<name>/references/*.md
+//	flat:   skills/<name>/SKILL.md, skills/<name>/<any aux file, any depth>
+//	legacy: skills/<kindDir>/<name>/SKILL.md, skills/<kindDir>/<name>/<any aux file, any depth>
 func isCatalogPath(rel string) bool {
 	parts := strings.Split(rel, "/")
 	if len(parts) < 3 || parts[0] != skillsRootDir {
 		return false
 	}
-	switch len(parts) {
-	case 3: // flat SKILL.md
-		return parts[2] == skillFileName
-	case 4: // flat reference OR legacy SKILL.md
-		if parts[2] == "references" && strings.HasSuffix(parts[3], ".md") {
-			return true
-		}
-		return legacyKindDirs[parts[1]] != "" && parts[3] == skillFileName
-	case 5: // legacy reference
-		return legacyKindDirs[parts[1]] != "" && parts[3] == "references" && strings.HasSuffix(parts[4], ".md")
-	default:
+	if hasDotSegment(parts[1:]) {
 		return false
 	}
+	if legacyKindDirs[parts[1]] != "" {
+		// legacy: skills/<kindDir>/<name>/... — SKILL.md at depth 4, aux files deeper.
+		return len(parts) >= 4
+	}
+	// flat: skills/<name>/... — SKILL.md at depth 3, aux files deeper.
+	return len(parts) >= 3
+}
+
+// hasDotSegment reports whether any path segment (file or directory) starts
+// with a dot — the same skip rule loadLibrary applies to the on-disk library.
+func hasDotSegment(parts []string) bool {
+	for _, p := range parts {
+		if strings.HasPrefix(p, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // catalogEntry is one parsed skill plus where it was found: legacyDir is the
@@ -307,8 +315,10 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 			bodies[key{parts[1], parts[2]}] = content
 		}
 	}
-	// Pass 2: references. skills/<x>/references/*.md is a FLAT ref unless <x>
-	// is a legacy kind dir without a flat body (then it is legacy junk to skip).
+	// Pass 2: every aux file (standard structure: scripts/, references/,
+	// assets/, any extras — no extension filter), keyed by its path relative to
+	// the skill root. skills/<x>/... is a FLAT aux file unless <x> is a legacy
+	// kind dir without a flat body (then it is legacy junk to skip).
 	addRef := func(k key, refKey, content string) {
 		if refs[k] == nil {
 			refs[k] = map[string]string{}
@@ -317,18 +327,36 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 	}
 	for path, content := range files {
 		parts := strings.Split(path, "/")
-		if len(parts) < 4 || parts[0] != skillsRootDir {
+		if len(parts) < 3 || parts[0] != skillsRootDir {
 			continue
 		}
-		switch {
-		case len(parts) == 4 && parts[2] == "references" && strings.HasSuffix(parts[3], ".md"):
-			k := key{"", parts[1]}
-			if _, ok := bodies[k]; ok {
-				addRef(k, refsPrefix+parts[3], content)
+		if legacyKindDirs[parts[1]] != "" {
+			// legacy: skills/<kindDir>/<name>/<refKey...> — needs at least the
+			// kind dir + name + one path segment past the skill root.
+			if len(parts) < 4 {
+				continue
 			}
-		case len(parts) == 5 && legacyKindDirs[parts[1]] != "" && parts[3] == "references" && strings.HasSuffix(parts[4], ".md"):
-			addRef(key{parts[1], parts[2]}, refsPrefix+parts[4], content)
+			k := key{parts[1], parts[2]}
+			refKey := strings.Join(parts[3:], "/")
+			if refKey == skillFileName {
+				continue
+			}
+			addRef(k, refKey, content)
+			continue
 		}
+		// flat: skills/<name>/<refKey...>
+		if len(parts) < 3 {
+			continue
+		}
+		k := key{"", parts[1]}
+		if _, ok := bodies[k]; !ok {
+			continue
+		}
+		refKey := strings.Join(parts[2:], "/")
+		if refKey == skillFileName {
+			continue
+		}
+		addRef(k, refKey, content)
 	}
 
 	deduped := map[string]catalogEntry{}
