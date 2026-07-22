@@ -44,9 +44,6 @@ import {
   useProjectTags,
 } from "../../projects/api/queries";
 import { useSpecFileContent, useSpecFiles } from "../api/queries";
-import { useProjectUsage } from "../../usage/api/queries";
-import { totalTokens } from "../../usage/lib/format";
-import { UsageChip } from "../../usage/components/UsageChip";
 import { toSpecEntry } from "../api/mapping";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
@@ -102,9 +99,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
   // back to the collab mock BFF's default org so mock mode keeps working.
   const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
-  // Cost visibility (#245): the header's draft-cycle spend chip — spec/design
-  // turn usage since the last published tag, mirroring the version chips.
-  const usageQ = useProjectUsage(projectName);
   const [selection, setSelection] = useState<SpecSelection | null>(null);
   const [addArtifactOpen, setAddArtifactOpen] = useState(false);
   // Build (#162): commit-then-build. buildPhase drives the button label /
@@ -457,15 +451,6 @@ export function SpecView({ projectName }: { projectName: string }) {
             <Chip size="small" color="warning" label="draft changes" />
           )}
           {chip && <Chip size="small" color={chip.color} label={chip.label} />}
-          {/* Draft-cycle spend (#245): what this version-in-progress has cost
-              in spec/design turns. Hidden until any spend exists. */}
-          {usageQ.data && totalTokens(usageQ.data.draftCycle) > 0 && (
-            <UsageChip
-              usage={usageQ.data.draftCycle}
-              label="spec"
-              context="Spec & design agent spend — current draft cycle"
-            />
-          )}
 
           <Divider orientation="vertical" flexItem />
 

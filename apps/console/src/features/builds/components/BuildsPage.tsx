@@ -32,7 +32,6 @@ import {
 } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
 import { TasksList } from "../../tasks/components/TasksList";
-import { UsageChip } from "../../usage/components/UsageChip";
 import { useBuilds } from "../api/queries";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
@@ -154,15 +153,6 @@ function BuildSummaryCard({ build }: { build: BuildSummary }) {
         >
           <Typography variant="h6">{build.tag}</Typography>
           <Chip size="small" label={chip.label} color={chip.color} />
-          {/* Actual build cost (#245): the run's aggregate coding-execution
-              usage — accrues on the existing poll while the build runs.
-              Absent for runs that predate usage capture. */}
-          {build.usage && (
-            <UsageChip
-              usage={build.usage}
-              context={`Agent spend — build ${build.tag}`}
-            />
-          )}
           <Box sx={{ flexGrow: 1 }} />
           {planning ? (
             // Subtle "planning" signal for the selected tag: the run has started
