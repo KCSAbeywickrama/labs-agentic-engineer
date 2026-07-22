@@ -187,13 +187,16 @@ kind by WHAT the target is:
   service). Classify it into one of two styles — see "Resolving an `external`
   dependency" below for the full discovery procedure:
   - **`style: "rest-api"`** — the component calls specific HTTP endpoints.
-    Always needs a STORED OpenAPI contract at `specPath`
-    (`dependencies/<name>.openapi.yaml`) — never just a URL.
+    Needs an OpenAPI contract at `specPath`, which is EITHER a URL (a public
+    spec/docs URL you discovered) OR a repo-relative path to a user-provided
+    spec file (`dependencies/<name>.openapi.yaml`). The coding agent reads
+    whichever it is — fetching the URL or the file — and researches the API
+    beyond it as needed.
   - **`style: "sdk"`** — the component codes against a vendor SDK/library.
     Declare `package`, one ecosystem-prefixed identifier
     (`npm:stripe@^14`, `go:...`, `pypi:...`).
 
-  `style`, `package`, `specPath`, `specUrl`, `sources`, and `candidates` are
+  `style`, `package`, `specPath`, and `candidates` are
   meaningful ONLY on `kind: "external"` — declaring any of them on a
   `component`/`org-service`/`platform-resource` dependency is a schema
   violation (the zod write-gate and the Go fold gate both reject it).
@@ -214,11 +217,9 @@ kind by WHAT the target is:
   { "kind": "component", "name": "expense-api" },
   { "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres" },
   { "kind": "external", "name": "stripe", "style": "sdk", "package": "npm:stripe@^14",
-    "sources": ["https://stripe.com/docs/api", "https://www.npmjs.com/package/stripe"],
     "config": [ { "key": "STRIPE_API_KEY", "secret": true, "description": "Your Stripe secret API key" } ] },
   { "kind": "external", "name": "github", "style": "rest-api",
-    "description": "GitHub REST API for issues + PRs.",
-    "specUrl": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json" }
+    "description": "GitHub REST API for issues + PRs." }
 ]
 ```
 
@@ -310,23 +311,18 @@ a procedure, in order:
    the candidate's own docs make this obvious ("REST API reference" vs.
    "install our SDK").
 4. **Resolve the contract.**
-   - `rest-api` ALWAYS needs a stored contract — there is no keys-only
-     fallback. If you find a spec URL, call `fetch_openapi_spec` (fetches,
-     validates, and normalizes the document; stores nothing). Once you're
-     confident it's the right, valid contract, write the normalized content to
+   - `rest-api` needs a `specPath` — a public spec/docs URL, or a repo-relative
+     path to a stored spec file. Prefer a URL you discovered: confirm it's a
+     real OpenAPI document with `fetch_openapi_spec` (it fetches + validates;
+     stores nothing), then set `specPath` to that URL — the coding agent fetches
+     it at build time and researches the API further. If the user hands you a
+     spec file (or the API is private/undocumented), `addFile` it to
      `specs/design/components/<component>/dependencies/<dep-name>.openapi.yaml`
-     (addFile) and set the dependency's `specPath` to
-     `dependencies/<dep-name>.openapi.yaml` — it resolves immediately. If you
-     only have the URL and haven't fetched/verified it in-turn, set `specUrl`
-     alone as a hint: the platform retries the same fetch-validate-store at
-     design save and clears `specUrl` on success. A failed retry is non-fatal at
-     design save (external deps aren't gated there), but the dep stays
-     `needs-spec` and WILL block the build gate until a spec is stored — so
-     prefer fetching and storing it yourself over relying on that safety net. If no
-     spec exists anywhere, author a minimal OpenAPI 3.x
-     document yourself from the operations the docs describe (only what the
-     component actually calls, never invented endpoints), validate it with
-     `validate_openapi_spec`, then store it the same way (addFile + `specPath`).
+     and set `specPath` to that repo-relative path. Either way the dep resolves;
+     with NO `specPath` at all it stays `needs-spec` and the build gate asks the
+     user to supply one. Don't hand-author a whole spec — the coding agent
+     researches the API; only store a file when the user provides one or the
+     contract isn't publicly discoverable.
    - `sdk` needs `package`: one ecosystem-prefixed identifier (`npm:`, `go:`,
      `pypi:`), version inline but optional (`npm:resend` with no version ⇒ the
      coding agent picks the latest compatible).
@@ -341,8 +337,7 @@ a procedure, in order:
      the vendor, an already-registered external resource fits (registry
      reuse), an org or platform skill mandates it, or a concrete technical
      reason forces it (must match an existing stack/format). Emit `style` +
-     (`package` or `specPath`), `config`, and `sources` (the docs link, the
-     spec link, the package-registry link — whatever provenance you used). A
+     (`package` or `specPath`) and `config`. A
      preference with no such signal behind it — "this one is popular" or
      "this is what I'd pick" — is not a signal; it's a guess dressed as a
      resolution, and it belongs in `candidates` instead.
@@ -354,7 +349,7 @@ a procedure, in order:
      known is a partial dep, not a candidate, so leave `style` and whatever
      else you know set on the dependency itself and let the missing field
      compute the specific unresolved reason. Each candidate carries its own
-     `style` and a lean `docsUrl`/`specUrl`/`package`; leave the dependency's
+     `style` and a lean `docsUrl`/`package`; leave the dependency's
      own `style`, `package`, and `specPath` unset until one is pinned.
    - You can't even identify what system fills the need → emit a style-less
      entry (no `style`, no `candidates`): just `name` + a `description` saying
@@ -362,9 +357,8 @@ a procedure, in order:
      this as `unresolved`/`needs-input`.
 7. **On pin** (a chat turn collapses `candidates` to one choice): REMOVE the
    `candidates` field entirely (never leave a one-item array — that's a schema
-   violation), set the chosen option's `style` and `package`/`specPath`, and
-   fold its `docsUrl`/`specUrl`/package-registry link into the dependency's
-   `sources`.
+   violation), and set the chosen option's `style` and `package`/`specPath`
+   (a spec URL or a stored-file path).
 
 **Config-key conventions.** `config` is the env-var schema the consuming
 component codes against. Use `SCREAMING_SNAKE_CASE` keys. `secret` is opt-in:
@@ -405,7 +399,7 @@ time from which fields are present, first match wins: `candidates` present
 (2+) → `ambiguous`; dependency `name` matches a registered external resource →
 `resolved` (registry reuse, regardless of `style`); `style` absent →
 `unresolved`/`needs-input`; `style: "rest-api"` with no `specPath` →
-`unresolved`/`needs-spec` (`specUrl` is a fetch hint, not the contract);
+`unresolved`/`needs-spec`;
 `style: "sdk"` with no `package` → `unresolved`/`needs-input`; otherwise →
 `resolved`. Declare the intent (kind + name + the fields above) and let the
 platform derive the state — the old `needsSpec` boolean is REMOVED from the
