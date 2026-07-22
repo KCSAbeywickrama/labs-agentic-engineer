@@ -25,6 +25,7 @@ package activityvocab
 // Activity event types — the v1 taxonomy (issue #239). Plain string constants:
 // canonical values here, no enum type.
 const (
+	TypeSpecUpdated   = "spec_updated"
 	TypeSpecPublished = "spec_published"
 	TypePlanDerived   = "plan_derived"
 	TypeTaskStarted   = "task_started"

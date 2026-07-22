@@ -375,6 +375,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
+		Recorder:   turnActivityRecorder{svc: activitySvc},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
@@ -787,13 +788,14 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// tag reads, the org skills library, and the collab oracle/descriptor. Its
 	// slice handlers embed straight into the edge's composite.
 	specHandlers, err := spechttpapi.New(spec.Deps{
-		GenAI:       genaiSvc,
-		Files:       filesSvc,
-		Artifacts:   artifactSvcGit,
-		Skills:      skillSvc,
-		SkillMut:    skillMutationSvc,
-		SkillImport: skillImportSvc,
-		CollabRepo:  repoService,
+		GenAI:         genaiSvc,
+		Files:         filesSvc,
+		FilesActivity: filesActivityRecorder{svc: activitySvc},
+		Artifacts:     artifactSvcGit,
+		Skills:        skillSvc,
+		SkillMut:      skillMutationSvc,
+		SkillImport:   skillImportSvc,
+		CollabRepo:    repoService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble spec domain: %w", err)

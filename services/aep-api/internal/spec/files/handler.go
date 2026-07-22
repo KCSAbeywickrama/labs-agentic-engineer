@@ -35,10 +35,15 @@ import (
 // catch-all registered in server.go routes nested ones — both land here with
 // PathValue-decoded (unescaped) bytes, so unicode/escaped paths survive the
 // chain byte-identically.
-type Handler struct{ files spec.FilesService }
+type Handler struct {
+	files    spec.FilesService
+	activity spec.SpecUpdatedRecorder
+}
 
 // New returns the slice's handler.
-func New(files spec.FilesService) *Handler { return &Handler{files: files} }
+func New(files spec.FilesService, activity spec.SpecUpdatedRecorder) *Handler {
+	return &Handler{files: files, activity: activity}
+}
 
 func (h *Handler) ListFiles(ctx context.Context, request gen.ListFilesRequestObject) (gen.ListFilesResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
@@ -84,6 +89,11 @@ func (h *Handler) ApplyFiles(ctx context.Context, request gen.ApplyFilesRequestO
 			return applyConflictsToWire(conflicts), nil
 		}
 		return nil, mapFilesError(err)
+	}
+	// A byte-identical apply makes no commit — nothing happened, so nothing
+	// reaches the feed.
+	if h.activity != nil && res.Changed {
+		h.activity.RecordSpecUpdated(ctx, org, request.ProjectName, res.CommitSHA)
 	}
 	return gen.ApplyFiles200JSONResponse(applyResultToWire(res)), nil
 }

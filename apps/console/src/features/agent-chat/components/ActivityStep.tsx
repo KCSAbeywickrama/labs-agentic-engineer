@@ -79,20 +79,28 @@ function StatusGlyph({
   );
 }
 
-/** The label + optional file chip for a single tool op. */
+/** The label + optional file chip for a single tool op, plus its full error.
+ *  The error wraps (never ellipsizes) — a DSL validation message is the fix
+ *  instruction, so cutting it to one line hides the actionable part. */
 function StepLine({ msg, showFile }: { msg: ToolMessage; showFile: boolean }) {
   return (
-    <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-        {opLabel(msg.op, msg.status)}
-      </Typography>
-      {showFile && (
-        <Tooltip title={msg.path}>
-          <Chip size="small" variant="outlined" label={leafName(msg.path)} sx={{ maxWidth: 180 }} />
-        </Tooltip>
-      )}
+    <Stack spacing={0.25} sx={{ minWidth: 0, flexGrow: 1 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+          {opLabel(msg.op, msg.status)}
+        </Typography>
+        {showFile && (
+          <Tooltip title={msg.path}>
+            <Chip size="small" variant="outlined" label={leafName(msg.path)} sx={{ maxWidth: 180 }} />
+          </Tooltip>
+        )}
+      </Stack>
       {!msg.ok && msg.errorText && (
-        <Typography variant="caption" color="error" noWrap>
+        <Typography
+          variant="caption"
+          color="error"
+          sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+        >
           {msg.errorText}
         </Typography>
       )}
@@ -123,9 +131,11 @@ export function ActivityStep({
         data-testid="activity-step"
         direction="row"
         spacing={1}
-        sx={{ alignItems: "center", py: 0.25, minWidth: 0 }}
+        sx={{ alignItems: "flex-start", py: 0.25, minWidth: 0 }}
       >
-        <StatusGlyph status={only.status} ok={only.ok} />
+        <Box sx={{ display: "flex", flexShrink: 0, mt: "3px" }}>
+          <StatusGlyph status={only.status} ok={only.ok} />
+        </Box>
         <StepLine msg={only} showFile />
       </Stack>
     );
@@ -169,9 +179,11 @@ export function ActivityStep({
               key={t.id}
               direction="row"
               spacing={1}
-              sx={{ alignItems: "center", minWidth: 0 }}
+              sx={{ alignItems: "flex-start", minWidth: 0 }}
             >
-              <StatusGlyph status={t.status} ok={t.ok} />
+              <Box sx={{ display: "flex", flexShrink: 0, mt: "3px" }}>
+                <StatusGlyph status={t.status} ok={t.ok} />
+              </Box>
               <StepLine msg={t} showFile={false} />
             </Stack>
           ))}
