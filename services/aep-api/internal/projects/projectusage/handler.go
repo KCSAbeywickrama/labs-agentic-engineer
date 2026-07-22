@@ -22,21 +22,17 @@ import (
 	"github.com/wso2/aep/aep-api/internal/gen"
 )
 
-// Handler serves get-project-usage. PLACEHOLDER until the #249 backend
-// (capture, persistence, per-phase aggregation, USD derivation per ADR-0011)
-// lands: no usage capture exists yet, so all-zero rollups are the truth —
-// the console hides zero-usage chips.
+// Handler serves list-project-usage. PLACEHOLDER until the #299 backend
+// (capture, model_rates, write-time USD stamping per amended ADR-0011)
+// lands: no usage capture exists yet, so an empty card list is the truth —
+// the console renders its empty state.
 type Handler struct{}
 
 // New returns the slice's handler.
 func New() *Handler { return &Handler{} }
 
-func (h *Handler) GetProjectUsage(_ context.Context, _ gen.GetProjectUsageRequestObject) (gen.GetProjectUsageResponseObject, error) {
-	zero := gen.Usage{} // zero tokens, "" model, null costUsd — nothing captured yet
-	return gen.GetProjectUsage200JSONResponse(gen.ProjectUsage{
-		Spec:       zero,
-		Build:      zero,
-		Validation: zero,
-		DraftCycle: zero,
+func (h *Handler) ListProjectUsage(_ context.Context, _ gen.ListProjectUsageRequestObject) (gen.ListProjectUsageResponseObject, error) {
+	return gen.ListProjectUsage200JSONResponse(gen.ProjectUsageList{
+		Projects: []gen.ProjectUsageCard{},
 	}), nil
 }

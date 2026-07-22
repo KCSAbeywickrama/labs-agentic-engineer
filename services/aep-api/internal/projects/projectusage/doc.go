@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package projectusage serves the per-phase agent-usage read for the console's
-// cost-visibility surfaces (#245).
+// Package projectusage serves the org-wide per-project agent-usage read for
+// the console's Settings → Usage page (#291).
 //
-// Triggers: get-project-usage.
-// Ports:    none yet — the op answers all-zero usage until the #249 capture
-// and aggregation backend lands (zero spend IS the truth today: nothing is
-// captured, and the console hides zero-usage chips).
+// Triggers: list-project-usage.
+// Ports:    none yet — the op answers an empty card list until the #299
+// capture and write-time-stamping backend lands (no usage IS the truth
+// today: nothing is captured, and the console renders its empty state).
 package projectusage

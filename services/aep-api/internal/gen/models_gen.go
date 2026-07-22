@@ -363,7 +363,7 @@ type BuildSummary struct {
 	Tag       string             `json:"tag"`
 	Tasks     BuildTally         `json:"tasks"`
 
-	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 	Usage Usage `json:"usage,omitempty"`
 }
 
@@ -816,19 +816,24 @@ type ProjectStatus struct {
 	SpecStatus string `json:"specStatus"`
 }
 
-// ProjectUsage Per-phase actual usage for a project (#245). All figures derive from persisted per-run token records (ADR-0011); costUsd is computed at read time from the configured model rates.
-type ProjectUsage struct {
-	// Build Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Build Usage `json:"build"`
+// ProjectUsageCard One project's lifetime agent usage (#291). Identity comes from the usage rows' stored project slug, so a card survives its project's deletion.
+type ProjectUsageCard struct {
+	// Deleted True when no live project matches the slug — rendered as a greyed card.
+	Deleted bool `json:"deleted"`
 
-	// DraftCycle Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	DraftCycle Usage `json:"draftCycle"`
+	// DisplayName The live project's display name; falls back to the slug for deleted projects.
+	DisplayName string `json:"displayName"`
 
-	// Spec Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Spec Usage `json:"spec"`
+	// ProjectName Project name (DNS-label slug) as stored on the usage rows.
+	ProjectName string `json:"projectName"`
 
-	// Validation Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Validation Usage `json:"validation"`
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
+	Usage Usage `json:"usage"`
+}
+
+// ProjectUsageList Org-wide usage roll-up (#291), ordered by costUsd descending (null-cost cards last).
+type ProjectUsageList struct {
+	Projects []ProjectUsageCard `json:"projects"`
 }
 
 // PromoteFromIssueRequest defines model for PromoteFromIssueRequest.
@@ -1048,7 +1053,7 @@ type TaskView struct {
 	Rationale string `json:"rationale,omitempty"`
 	Title     string `json:"title"`
 
-	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 	Usage Usage `json:"usage,omitempty"`
 }
 
@@ -1141,12 +1146,12 @@ type UpdateSkillInput struct {
 	SkillMd    string            `json:"skillMd"`
 }
 
-// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 type Usage struct {
 	CacheCreationTokens int64 `json:"cacheCreationTokens"`
 	CacheReadTokens     int64 `json:"cacheReadTokens"`
 
-	// CostUsd Catalog-derived USD; null when pricing is unavailable for the model.
+	// CostUsd Write-time-stamped USD (sum, for aggregates); null when no stamp exists.
 	CostUsd     *float64 `json:"costUsd"`
 	InputTokens int64    `json:"inputTokens"`
 
