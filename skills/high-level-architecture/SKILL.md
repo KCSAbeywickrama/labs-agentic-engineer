@@ -232,11 +232,15 @@ for every dependency's name and shape — call them before authoring an
 `external`, `org-service`, or `platform-resource` dependency, and take the name
 and schema from what they return, not from the requirement's wording:
 
-- `list_external_resources` / `get_external_resource_schema` — reuse an
-  already-registered external resource by its EXACT `name` and `config` schema
-  rather than inventing a parallel one. Only when nothing registered fits do
-  you move on to discovering a new one (`web_search`) — see "Resolving an
-  `external` dependency" below.
+- `list_external_resources` / `get_external_resource_schema` — read each
+  registered resource's `name` AND `description`, and reuse the one whose
+  description fits the need, adopting its EXACT `name` + `config` schema rather
+  than inventing a parallel one. The description is the match signal: a
+  registered resource described as "transactional email delivery" is the right
+  reuse for an "email" need even when its name (say `sendgrid`) doesn't echo the
+  requirement's wording. Only when no registered resource fits do you move on to
+  discovering a new one (`web_search`) — see "Resolving an `external`
+  dependency" below.
 - `list_org_endpoints` — the org-service catalog every `org-service` `name` is
   copied from verbatim (see the `org-service` kind above). When no row fills the
   role the requirement describes, leave the dependency unresolved rather than
@@ -253,8 +257,8 @@ and schema from what they return, not from the requirement's wording:
   operations/paths/schemas the contract exposes; on `none`, say so plainly in
   the `description` instead of inventing a shape.
 - `list_platform_resource_types` — get a valid `resourceType` (and its
-  parameters) before declaring a `platform-resource`. Read each type's
-  `description` and pick the type whose description matches the need; when
+  parameters) before declaring a `platform-resource`. Read each type's `name`
+  AND `description` and pick the type whose description matches the need; when
   none matches, leave the dependency unresolved rather than forcing a fit.
 
 **Narrate each dependency decision in chat as you make it.** The
@@ -290,9 +294,12 @@ legacy system doesn't live in any catalog you can look up directly. Work it as
 a procedure, in order:
 
 1. **Reuse first.** `list_external_resources` / `get_external_resource_schema`
-   (above) — a dependency whose `name` matches an already-registered external
-   resource resolves from that registry regardless of `style`/`specPath`/
-   `package`. Don't re-discover what the org already has.
+   (above) — scan the registered resources by `name` AND `description`, and
+   when one's description fits the need, author the dependency under that
+   resource's EXACT registered `name`: it then resolves from the registry
+   regardless of `style`/`specPath`/`package`. A resource whose description
+   fits is the right reuse even when its name doesn't echo the requirement's
+   wording. Don't re-discover what the org already has.
 2. **`web_search` for candidates** when nothing registered fits. Stop at the
    options actually worth presenting to step 6 below — a single option only
    when a real signal already points to it; just as often, the search
