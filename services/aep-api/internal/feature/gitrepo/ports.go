@@ -97,6 +97,10 @@ type IssueOps interface {
 	// pending, conflicts, already merged) is returned as an error for the
 	// caller to reconcile against GetPullRequest.
 	MergePullRequest(ctx context.Context, owner, repo string, cred credentials.Credential, number int) error
+	// ListPullRequestFiles returns the paths of every file changed by a pull
+	// request. The path-based build trigger maps these onto the components whose
+	// source they touched so a merged PR rebuilds every affected component.
+	ListPullRequestFiles(ctx context.Context, owner, repo string, cred credentials.Credential, number int) ([]string, error)
 }
 
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.
