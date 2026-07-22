@@ -221,6 +221,13 @@
   transition: transform var(--diagram-layout-duration) var(--diagram-layout-ease);
 }
 
+/* AEP divergence from upstream: while a node is under the pointer (React Flow
+   marks it `.dragging`), the layout transition would ease every pointer-move
+   transform and make the node trail and stutter — track the pointer directly. */
+.react-flow__node.dragging {
+  transition: none;
+}
+
 .diagram-node--position-animated .cell-boundary {
   transition:
     width var(--diagram-layout-duration) var(--diagram-layout-ease),

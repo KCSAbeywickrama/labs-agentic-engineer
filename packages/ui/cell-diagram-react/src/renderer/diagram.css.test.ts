@@ -60,6 +60,13 @@ describe("diagram interaction styles", () => {
     expect(styles).toContain("--diagram-edge-enter-delay: 80ms;");
   });
 
+  // AEP divergence from upstream: without this exemption the layout transition
+  // eases every pointer-move transform of the node being dragged, so it trails
+  // and stutters instead of tracking the pointer.
+  it("exempts the actively dragged node from the layout transition", () => {
+    expect(ruleFor(".react-flow__node.dragging")).toContain("transition: none;");
+  });
+
   it("visually distinguishes temporary layout state and disabled auto arrange", () => {
     expect(ruleFor(".canvas-notification")).toContain("position: absolute;");
     expect(ruleFor(".canvas-notification")).toContain("pointer-events: none;");
