@@ -40,19 +40,22 @@ import (
 const ExternalResourceRTTemplateVersion = 2
 
 // rtTemplateVersionLabel records the generator version on the RT for debugging.
-// aep-prefixed (not openchoreo.dev/*) like the other aep-authored labels in
-// constants.go, so it never collides with OC's own label validation.
-const rtTemplateVersionLabel = "aep.openchoreo.dev/rt-template-version"
+// It uses the platform's own `aep.wso2.com/*` domain (see markers.go / ADR-0007),
+// keeping the external RT symmetric with the platform-resource ClusterResourceType
+// markers and clear of OC's `openchoreo.dev` domain.
+const rtTemplateVersionLabel = "aep.wso2.com/rt-template-version"
 
 // externalNameAnnotation / externalDescriptionAnnotation carry the external
 // resource's logical identity on the authored RT — OC has no native
 // description field, and the RT's own metadata.name is the hashed cluster
-// name (see ExternalResourceRTName), not the logical one. aep-prefixed (not
-// openchoreo.dev/*) like rtTemplateVersionLabel, so they never collide with
-// OC's own annotation validation. ExternalDefinitionFromRT reads these back.
+// name (see ExternalResourceRTName), not the logical one. They use the
+// platform's `aep.wso2.com/*` domain (matching markers.go's
+// aep.wso2.com/description and ADR-0007), so the external RT stays symmetric
+// with the platform-resource markers and clear of OC's own `openchoreo.dev`
+// annotations. ExternalDefinitionFromRT reads these back.
 const (
-	externalNameAnnotation        = "aep.openchoreo.dev/external-name"
-	externalDescriptionAnnotation = "aep.openchoreo.dev/description"
+	externalNameAnnotation        = "aep.wso2.com/external-name"
+	externalDescriptionAnnotation = "aep.wso2.com/description"
 )
 
 // ExternalResourceRTName is the cluster ResourceType name for an external
@@ -150,9 +153,9 @@ const retainPolicyDelete = "Delete"
 //     Workload.spec.dependencies.resources[].envBindings.
 //
 // `name` is the external resource's logical name (e.g. "salesforce") — it
-// becomes the aep.openchoreo.dev/external-name annotation, and (combined with
+// becomes the aep.wso2.com/external-name annotation, and (combined with
 // the schema) the cluster RT name via ExternalResourceRTName. `description`
-// (optional) becomes the aep.openchoreo.dev/description annotation. The RT is
+// (optional) becomes the aep.wso2.com/description annotation. The RT is
 // self-describing: ExternalDefinitionFromRT reconstructs {name, description,
 // config[]} from an authored RT without a DB round-trip. ResourceTypes are
 // effectively immutable — a changed key/secret schema mints a new RT name
@@ -342,7 +345,7 @@ type ExternalResourceDefinition struct {
 
 // ExternalDefinitionFromRT recovers the external resource definition an
 // authored RT carries: the logical name + description off the
-// aep.openchoreo.dev/external-name / aep.openchoreo.dev/description
+// aep.wso2.com/external-name / aep.wso2.com/description
 // annotations, and each config key's key/description/default off
 // spec.parameters, with secret classification taken from spec.outputs (a key
 // is secret iff its output carries a secretKeyRef, plain iff a

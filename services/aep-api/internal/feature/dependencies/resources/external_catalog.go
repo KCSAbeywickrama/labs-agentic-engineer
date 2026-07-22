@@ -50,12 +50,12 @@ func NewExternalResourceCatalog(rc openchoreo.ResourceClient) *ExternalResourceC
 // namespace, reconstructed from its authored ResourceType and sorted by name.
 // A namespaced ResourceType that is not self-describing as an external
 // (openchoreo.ExternalDefinitionFromRT's ok=false — e.g. it lacks the
-// aep.openchoreo.dev/external-name annotation) is silently skipped: it is not
+// aep.wso2.com/external-name annotation) is silently skipped: it is not
 // an external-resource RT.
 //
 // ResourceTypes are immutable and never deleted (see ExternalResourceRTName):
 // a schema change mints a brand-new RT while the OLD one persists, and BOTH
-// carry the same aep.openchoreo.dev/external-name annotation. Without
+// carry the same aep.wso2.com/external-name annotation. Without
 // deduping, one logical name could surface twice — so results are grouped by
 // the reconstructed logical name first, keeping only the newest RT per name
 // (see newerExternalRT) before sorting.
@@ -124,7 +124,7 @@ func (c *ExternalResourceCatalog) Get(ctx context.Context, orgID, name string) (
 // openchoreo.ExternalDefinitionFromRT reconstruction List/Get use). Because
 // ResourceTypes are immutable and never deleted in place (see
 // ExternalResourceRTName), more than one RT can carry the same
-// aep.openchoreo.dev/external-name annotation — a stale schema-version left
+// aep.wso2.com/external-name annotation — a stale schema-version left
 // behind by an earlier edit — so deleting a logical name removes ALL matching
 // RTs, not just the newest one List/Get would surface. Idempotent: a name with
 // no matching RT is a no-op, mirroring DeleteResourceType's own 404-tolerance.

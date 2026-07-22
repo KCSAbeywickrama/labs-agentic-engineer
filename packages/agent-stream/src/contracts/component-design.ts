@@ -139,9 +139,9 @@ export interface Dependency {
    */
   package?: string;
   /**
-   * external: the stored contract location — either a URL (an auto-fetched
-   * published OpenAPI spec) or a repo-relative path
-   * (dependencies/<name>.openapi.yaml).
+   * external: the contract location — either a URL to a published OpenAPI
+   * spec (recorded as-is, NOT fetched-and-stored) or a repo-relative path to a
+   * user-provided committed spec (dependencies/<name>.openapi.yaml).
    */
   specPath?: string;
   /**

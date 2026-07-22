@@ -46,9 +46,10 @@ type SecretWriter interface {
 // GitHub-native aep:provision funnel; the completion port it uses there is
 // "close the provision issue + Funnel.Reevaluate", not a component_tasks
 // projector. The org-level external-resource catalog (list/delete + the
-// consumer scan for the in-use delete guard) also lives there now
-// (provisioning.ExternalResourceCatalog + the design-scan consumers), reading
-// *repositories.ExternalResourceRepository directly.
+// consumer scan for the in-use delete guard) also lives there now: the
+// provisioning ExternalRTCatalog port, backed by resources.ExternalResourceCatalog
+// over the OpenChoreo client (org-namespaced ResourceTypes), plus the design-scan
+// consumers. The old external_resources DB table + its repository were removed.
 
 // DesignReader is the slice of the design store the resource provisioner
 // reads: the project's authored design components, whose platform-resource

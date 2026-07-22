@@ -157,7 +157,7 @@ function PlatformResourcesTab({
   if (items.length === 0) {
     return (
       <ResourceEmptyState
-        icon={<Boxes size={48} style={{ opacity: 0.3, marginBottom: 16 }} />}
+        icon={<Boxes size={48} aria-hidden style={{ opacity: 0.3, marginBottom: 16 }} />}
         headline="No platform resources"
         body="No platform resource types are installed — a platform engineer installs these into the cluster."
       />
@@ -190,7 +190,7 @@ function ExternalResourcesTab({
   if (items.length === 0) {
     return (
       <ResourceEmptyState
-        icon={<Plug size={48} style={{ opacity: 0.3, marginBottom: 16 }} />}
+        icon={<Plug size={48} aria-hidden style={{ opacity: 0.3, marginBottom: 16 }} />}
         headline="No external resources"
         body="External resources appear here once a third-party dependency is provisioned in a project."
       />
@@ -209,6 +209,7 @@ export function ResourcesSection() {
       <Tabs
         value={tab}
         onChange={(_, value) => setTab(value as ResourceTabValue)}
+        aria-label="Resource categories"
         sx={{ mb: 3 }}
       >
         <Tab

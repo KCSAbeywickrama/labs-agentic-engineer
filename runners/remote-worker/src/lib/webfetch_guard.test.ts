@@ -126,6 +126,20 @@ test("isSsrfUrl: denies internal hostname suffixes .local, .internal, .cluster.l
   assert.equal(isSsrfUrl("https://localhost/api").blocked, true);
 });
 
+test("isSsrfUrl: denies a single-label (dotless) host — resolves internally via search domains", () => {
+  // Bare names have no public TLD; in-cluster they resolve to internal services.
+  assert.equal(isSsrfUrl("https://kubernetes/api").blocked, true);
+  assert.equal(isSsrfUrl("https://metadata/computeMetadata/v1/").blocked, true);
+  const r = isSsrfUrl("https://internal-svc/");
+  assert.equal(r.blocked, true);
+  assert.match(r.reason ?? "", /single-label/i);
+});
+
+test("isSsrfUrl: still allows a normal public host that carries a dot", () => {
+  // Guard against the dotless rule over-blocking ordinary public FQDNs.
+  assert.equal(isSsrfUrl("https://openweathermap.org/current").blocked, false);
+});
+
 test("isSsrfUrl: denies a plain http:// URL (non-https scheme)", () => {
   const result = isSsrfUrl("http://api.example.com/docs");
   assert.equal(result.blocked, true);

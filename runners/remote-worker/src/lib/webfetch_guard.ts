@@ -35,12 +35,19 @@
 // this hook only ever sees the literal `tool_input.url` string pre-dispatch
 // (there is no dial-time hook to intercept a resolved IP), so the guard
 // necessarily works at the URL/hostname level: scheme + literal-IP
-// classification + a fixed internal-hostname-suffix denylist. It does NOT
-// resolve DNS names — a public hostname is allowed here on the same basis
-// the Go fetcher's own DNS-rebinding-safe dialer takes over the resolved-IP
-// check at connect time; nothing this runner does bypasses that fetch-time
-// guard where one exists. On any parse ambiguity, this hook denies —
-// fail-closed is mandatory for a security-critical gate.
+// classification + a fixed internal-hostname denylist (dotless single-label
+// hosts and the known cluster suffixes). It does NOT resolve DNS names, and —
+// unlike the Go BFF fetcher (spec_collect.go), which has a DNS-rebinding-safe
+// dialer that re-checks the RESOLVED IP at connect time — the SDK's WebFetch
+// has NO connect-time guard. So a public-looking hostname whose A record points
+// at an internal IP is allowed here and then dialed. That residual (and the
+// unrestricted egress available via Bash) is closed only by an egress
+// NetworkPolicy on the runner pod, which is the real network boundary; this
+// hook is best-effort defense-in-depth, not an airtight SSRF gate. Redirects
+// ARE covered: WebFetch does not auto-follow a cross-host 3xx — it emits a
+// "REDIRECT DETECTED" message and the model must issue a NEW WebFetch call for
+// the redirect target, which re-enters this hook. On any parse ambiguity, this
+// hook denies — fail-closed is mandatory for a security-critical gate.
 
 import type { HookCallback, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 
@@ -247,6 +254,17 @@ export function isSsrfUrl(rawUrl: string): AddressCheck {
     INTERNAL_HOSTNAME_SUFFIXES.some((suffix) => lowerHost.endsWith(suffix))
   ) {
     return { blocked: true, reason: `internal hostname (${lowerHost})` };
+  }
+  // A single-label (dotless) host is never a public FQDN — public names always
+  // carry a TLD dot. Inside the cluster a bare name resolves via resolv.conf
+  // search domains to an internal service (e.g. "kubernetes" → the API server,
+  // "metadata" → a cloud metadata alias). Deny it as defense-in-depth. Literal
+  // IPs are already classified above, so they never reach here. NB: partial
+  // in-cluster names that DO carry a dot (`<svc>.<ns>`, `kubernetes.default`)
+  // still slip past this string-level check — the egress NetworkPolicy is the
+  // airtight boundary for those.
+  if (!lowerHost.includes(".")) {
+    return { blocked: true, reason: `single-label internal hostname (${lowerHost})` };
   }
 
   return { blocked: false };

@@ -125,7 +125,7 @@ type ResourceClient interface {
 	// ExternalResourceCatalog.Delete) to prune every RT registered under a
 	// logical external-resource name — ResourceTypes are immutable and never
 	// edited in place, so more than one RT can carry the same
-	// aep.openchoreo.dev/external-name annotation (see ExternalResourceRTName).
+	// aep.wso2.com/external-name annotation (see ExternalResourceRTName).
 	DeleteResourceType(ctx context.Context, namespace, name string) error
 
 	// ListWorkloadEndpoints enumerates every provider-side endpoint declared by

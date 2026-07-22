@@ -88,8 +88,9 @@ const dependencyObjectSchema = z.strictObject({
   // external (sdk style): one ecosystem-prefixed package identifier, e.g.
   // "npm:stripe@^14" — version inline but optional.
   package: z.string().optional(),
-  // external: stored contract location — a URL (auto-fetched published spec)
-  // or a repo-relative path (dependencies/<name>.openapi.yaml).
+  // external: the contract location — either a URL to a published spec
+  // (recorded as-is, NOT fetched-and-stored) or a repo-relative path to a
+  // user-provided committed spec (dependencies/<name>.openapi.yaml).
   specPath: z.string().optional(),
   // external: 2+ identified-but-not-pinned options — omitted, never empty or
   // single-item (a lone option is a partial dep, not a candidate).

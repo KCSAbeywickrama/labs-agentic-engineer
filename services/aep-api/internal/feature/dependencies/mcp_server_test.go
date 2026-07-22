@@ -183,7 +183,7 @@ func callBody(tool, args string) string {
 }
 
 // nonExternalRT is a namespaced ResourceType fixture that carries NO
-// aep.openchoreo.dev/external-name annotation — e.g. an RT authored by
+// aep.wso2.com/external-name annotation — e.g. an RT authored by
 // pre-self-describing code, or any other namespaced RT that isn't an
 // external-resource one. openchoreo.ExternalDefinitionFromRT reports ok=false
 // for it, and the catalog must silently skip it rather than surface a
@@ -390,7 +390,7 @@ func TestMCP_NoOrgOnContext_401(t *testing.T) {
 // TestMCP_ListExternalResources also proves the RT-registry filter: the
 // fixture (sampleHandler) carries TWO namespaced ResourceTypes — the
 // self-describing "salesforce" external RT and nonExternalRT, which lacks the
-// aep.openchoreo.dev/external-name annotation — yet exactly one entry comes
+// aep.wso2.com/external-name annotation — yet exactly one entry comes
 // back, so a non-external RT sharing the namespace never leaks into the tool.
 func TestMCP_ListExternalResources(t *testing.T) {
 	h, er, _ := sampleHandler(t)
@@ -482,7 +482,7 @@ func TestMCP_GetExternalResourceSchema(t *testing.T) {
 // key/secret schema mints a brand-new RT name — see ExternalResourceRTName)
 // and are never deleted, so an external resource that has gone through a
 // schema change carries TWO namespaced RTs sharing the SAME
-// aep.openchoreo.dev/external-name annotation — a stale one and a current
+// aep.wso2.com/external-name annotation — a stale one and a current
 // one. Both list_external_resources and get_external_resource_schema must
 // surface the logical name exactly ONCE, picking the RT with the NEWER
 // metadata.creationTimestamp — never the stale schema, never both, and
