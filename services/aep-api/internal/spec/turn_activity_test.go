@@ -51,6 +51,7 @@ func (r *genaiRig) startCollabTurn(t *testing.T, uuid, instruction string) strin
 // recordedTurnActivity is one captured spec.TurnActivityRecorder call.
 type recordedTurnActivity struct {
 	orgID, projectID, turnID, title string
+	editedPaths                     []string
 }
 
 // captureTurnActivity collects recorder calls for assertion (issue #239).
@@ -59,10 +60,10 @@ type captureTurnActivity struct {
 	rows []recordedTurnActivity
 }
 
-func (c *captureTurnActivity) RecordSpecUpdated(_ context.Context, orgID, projectID, turnID, title string) {
+func (c *captureTurnActivity) RecordSpecUpdated(_ context.Context, orgID, projectID, turnID, title string, editedPaths []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rows = append(c.rows, recordedTurnActivity{orgID, projectID, turnID, title})
+	c.rows = append(c.rows, recordedTurnActivity{orgID, projectID, turnID, title, editedPaths})
 }
 
 func (c *captureTurnActivity) all() []recordedTurnActivity {
@@ -134,6 +135,11 @@ func TestTurnActivity_RoomScopedTurnRecordsAgentEdit(t *testing.T) {
 	}
 	if rows[0].turnID != turnID || rows[0].title != "add a gym tracker web app" {
 		t.Errorf("row = %+v, want the turn's id + instruction subject", rows[0])
+	}
+	// The manifest's paths ride along so the app-root authorship coordinator
+	// can suppress the committer's later flush of exactly these files.
+	if len(rows[0].editedPaths) != 1 || rows[0].editedPaths[0] != "requirements/requirements.md" {
+		t.Errorf("editedPaths = %v, want the manifest's mutated path", rows[0].editedPaths)
 	}
 }
 

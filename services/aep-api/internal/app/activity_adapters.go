@@ -79,39 +79,84 @@ func (r buildActivityRecorder) RecordSpecPublished(ctx context.Context, orgID, p
 // specAuthorship bridges the async gap between a room-scoped genai turn
 // finishing and the collab committer later flushing that turn's doc edits to git
 // (issue #239). A room turn writes into the shared doc and commits nothing; the
-// committer flushes ~a debounce-window later via files/apply, under the user's
-// own token — so at the git layer the agent's work is indistinguishable from a
-// manual edit and would be mis-attributed to the user. The turn is the only
-// place agent authorship is still known, so it marks the project here; the next
-// apply that lands a commit claims the mark and suppresses its (wrong) user
-// line, because the turn already recorded the agent line.
+// committer flushes via files/apply, under the user's own token — so at the git
+// layer the agent's work is indistinguishable from a manual edit and would be
+// mis-attributed to the user. The turn is the only place agent authorship is
+// still known, so it marks the exact paths its manifest touched; an apply whose
+// commit contains a marked path is carrying agent text, claims those marks, and
+// suppresses its (wrong) user line, because the turn already recorded the agent
+// line.
 //
-// A boolean per (org, project) is precise for the common cases: agent-only edit
-// (mark set → claimed → no user line), user-only edit (no mark → user line),
-// and agent-then-user within one flush (attributed to the agent). The state is
-// in-process, matching the single aep-api replica of the deployment; a restart
-// between a turn and its flush at worst mislabels that one flush as manual.
-type specAuthorship struct{ pending sync.Map } // key: orgID + "\x00" + projectID
+// Marks are per path, not per project, because the committer holds agent-marked
+// markdown until the session-end force flush: a user's own edit can land in an
+// interim commit between the turn and that flush, and a project-wide mark would
+// suppress the user's line and then label the eventual agent commit as the
+// user — both halves inverted. Path scoping keeps the two flushes independent:
+// the user's disjoint commit records as the user, the agent's paths stay marked
+// until they actually land. A commit that mixes a marked path with user edits is
+// one commit and one feed line, attributed to the agent (the agent line exists;
+// a second line would double-report the commit). The state is in-process,
+// matching the single aep-api replica of the deployment; a restart between a
+// turn and its flush at worst mislabels that one flush as manual.
+type specAuthorship struct {
+	mu sync.Mutex
+	// pending maps orgID+"\x00"+projectID to the agent-edited paths whose
+	// commit has not yet landed.
+	pending map[string]map[string]struct{}
+}
 
 func specKey(orgID, projectID string) string { return orgID + "\x00" + projectID }
 
-// markAgent records that an agent turn authored uncommitted spec edits for this
-// project.
-func (a *specAuthorship) markAgent(orgID, projectID string) {
-	a.pending.Store(specKey(orgID, projectID), struct{}{})
+// markAgent records the paths an agent turn edited that are still awaiting the
+// committer's flush. No paths, no mark — a committed (non-room) turn lands its
+// own commit and needs no suppression.
+func (a *specAuthorship) markAgent(orgID, projectID string, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pending == nil {
+		a.pending = make(map[string]map[string]struct{})
+	}
+	key := specKey(orgID, projectID)
+	set := a.pending[key]
+	if set == nil {
+		set = make(map[string]struct{})
+		a.pending[key] = set
+	}
+	for _, p := range paths {
+		set[p] = struct{}{}
+	}
 }
 
-// claimAgent reports whether an agent authored the change now being committed,
-// consuming the mark so a later manual edit is not swept up by it.
-func (a *specAuthorship) claimAgent(orgID, projectID string) bool {
-	_, ok := a.pending.LoadAndDelete(specKey(orgID, projectID))
-	return ok
+// claimAgent reports whether the commit now landing (touching paths) carries
+// agent-authored edits, consuming the matched marks so a later commit to the
+// same path records normally.
+func (a *specAuthorship) claimAgent(orgID, projectID string, paths []string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	set := a.pending[specKey(orgID, projectID)]
+	if len(set) == 0 {
+		return false
+	}
+	claimed := false
+	for _, p := range paths {
+		if _, ok := set[p]; ok {
+			delete(set, p)
+			claimed = true
+		}
+	}
+	if len(set) == 0 {
+		delete(a.pending, specKey(orgID, projectID))
+	}
+	return claimed
 }
 
 // filesActivityRecorder implements files.SpecUpdatedRecorder: an apply landed a
 // real commit, so the project's spec changed. This is the path the collab
-// session flush and the spec editor's save share. A flush that carries an agent
-// turn's doc edits is already on the feed as the agent (recorded at turn
+// session flush and the spec editor's save share. A commit that contains an
+// agent turn's doc edits is already on the feed as the agent (recorded at turn
 // finish), so it is suppressed here; a genuine manual edit falls through and is
 // attributed to the signed-in user. Deduped by commit sha.
 type filesActivityRecorder struct {
@@ -119,8 +164,8 @@ type filesActivityRecorder struct {
 	authorship *specAuthorship
 }
 
-func (r filesActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectName, commitSHA string) {
-	if r.authorship.claimAgent(orgID, projectName) {
+func (r filesActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectName, commitSHA string, paths []string) {
+	if r.authorship.claimAgent(orgID, projectName, paths) {
 		return // agent-authored — the turn already recorded the agent line.
 	}
 	email, name := userIdentityFromContext(ctx)
@@ -138,16 +183,17 @@ func (r filesActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, pro
 
 // turnActivityRecorder implements spec.TurnActivityRecorder: a genai turn
 // authored spec changes. A turn is the agent working, so the actor is always the
-// agent (the console renders "Spec agent updated the spec"). It also marks the
-// project as agent-authored so the committer's later flush of the same edits is
-// suppressed rather than double-recorded as a manual edit. Deduped by turn id.
+// agent (the console renders "Spec agent updated the spec"). A room turn also
+// marks its edited paths as agent-authored so the committer's later flush of
+// those edits is suppressed rather than double-recorded as a manual edit (a
+// committed turn passes no paths — its commit is its own). Deduped by turn id.
 type turnActivityRecorder struct {
 	svc        *projects.ActivityService
 	authorship *specAuthorship
 }
 
-func (r turnActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title string) {
-	r.authorship.markAgent(orgID, projectID)
+func (r turnActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title string, editedPaths []string) {
+	r.authorship.markAgent(orgID, projectID, editedPaths)
 	r.svc.Record(ctx, projects.ActivityInput{
 		OrgID:      orgID,
 		ProjectID:  projectID,

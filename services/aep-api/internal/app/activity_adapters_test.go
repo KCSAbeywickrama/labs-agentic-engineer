@@ -55,8 +55,8 @@ func newRecorders() (turnActivityRecorder, filesActivityRecorder, *captureActivi
 func TestSpecAuthorship_AgentTurnThenFlush_OneAgentLine(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker")
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-abc")
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-abc", []string{"specs/requirements/requirements.md"})
 
 	if len(repo.rows) != 1 {
 		t.Fatalf("recorded rows = %d, want 1 (agent line only, flush suppressed): %+v", len(repo.rows), repo.rows)
@@ -78,7 +78,7 @@ func TestSpecAuthorship_AgentTurnThenFlush_OneAgentLine(t *testing.T) {
 func TestSpecAuthorship_ManualFlush_RecordsUser(t *testing.T) {
 	_, files, repo := newRecorders()
 
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-manual")
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-sha-manual", []string{"specs/requirements/requirements.md"})
 
 	if len(repo.rows) != 1 {
 		t.Fatalf("recorded rows = %d, want 1 (manual user edit): %+v", len(repo.rows), repo.rows)
@@ -92,15 +92,42 @@ func TestSpecAuthorship_ManualFlush_RecordsUser(t *testing.T) {
 	}
 }
 
-// The mark is consumed exactly once: a second flush after a single agent turn is
-// a genuine manual edit and records the user (the mark does not linger and
-// swallow later real edits).
+// Marks are per PATH, not per project: the committer holds agent-marked
+// markdown until the session-end force flush, so a user's own edit can land in
+// an interim commit BETWEEN the agent turn and the agent flush. That disjoint
+// commit must record as the user, and the agent's flush — landing after it —
+// must still be suppressed. (With a project-wide mark both halves inverted:
+// the user's line vanished and the agent's commit recorded as the user.)
+func TestSpecAuthorship_UserFlushBetweenTurnAndAgentFlush(t *testing.T) {
+	turn, files, repo := newRecorders()
+
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
+	// Interim debounce flush: only the user's hand-edited file (the agent's
+	// markdown is still held pending review).
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-user", []string{"specs/design/design.json"})
+	// Session-end force flush finally lands the agent's markdown.
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-agent", []string{"specs/requirements/requirements.md"})
+
+	if len(repo.rows) != 2 {
+		t.Fatalf("recorded rows = %d, want 2 (agent turn + user's own edit): %+v", len(repo.rows), repo.rows)
+	}
+	if repo.rows[0].ActorKind != activityvocab.ActorAgent {
+		t.Errorf("row 0 actor = %q, want agent", repo.rows[0].ActorKind)
+	}
+	if repo.rows[1].ActorKind != activityvocab.ActorUser || repo.rows[1].DedupKey != "apply:commit-user" {
+		t.Errorf("row 1 = (%q, %q), want the user's interim edit as user", repo.rows[1].ActorKind, repo.rows[1].DedupKey)
+	}
+}
+
+// The mark is consumed exactly once: after the agent's paths land, a second
+// flush touching the same path is a genuine manual edit and records the user
+// (the mark does not linger and swallow later real edits).
 func TestSpecAuthorship_MarkConsumedOnce(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker")
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-1") // agent flush — suppressed
-	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-2") // later manual edit — user
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-1", []string{"specs/requirements/requirements.md"}) // agent flush — suppressed
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-2", []string{"specs/requirements/requirements.md"}) // later manual edit — user
 
 	if len(repo.rows) != 2 {
 		t.Fatalf("recorded rows = %d, want 2 (agent turn + later manual edit): %+v", len(repo.rows), repo.rows)
@@ -113,13 +140,30 @@ func TestSpecAuthorship_MarkConsumedOnce(t *testing.T) {
 	}
 }
 
+// A committed (non-room) turn passes no paths: it lands its own commit, so
+// nothing is marked and a user's next apply — even to the same file — records
+// as the user.
+func TestSpecAuthorship_CommittedTurnMarksNothing(t *testing.T) {
+	turn, files, repo := newRecorders()
+
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", nil)
+	files.RecordSpecUpdated(context.Background(), "acme", "web", "commit-manual", []string{"specs/requirements/requirements.md"})
+
+	if len(repo.rows) != 2 {
+		t.Fatalf("recorded rows = %d, want 2 (agent turn + manual edit): %+v", len(repo.rows), repo.rows)
+	}
+	if repo.rows[1].ActorKind != activityvocab.ActorUser {
+		t.Errorf("row 1 actor = %q, want user (no mark from a committed turn)", repo.rows[1].ActorKind)
+	}
+}
+
 // The mark is scoped per (org, project): an agent turn in one project does not
-// suppress a manual edit in another.
+// suppress a manual edit to the same path in another.
 func TestSpecAuthorship_ScopedPerProject(t *testing.T) {
 	turn, files, repo := newRecorders()
 
-	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker")
-	files.RecordSpecUpdated(context.Background(), "acme", "other", "commit-other")
+	turn.RecordSpecUpdated(context.Background(), "acme", "web", "turn-1", "add a gym tracker", []string{"specs/requirements/requirements.md"})
+	files.RecordSpecUpdated(context.Background(), "acme", "other", "commit-other", []string{"specs/requirements/requirements.md"})
 
 	if len(repo.rows) != 2 {
 		t.Fatalf("recorded rows = %d, want 2 (agent in web + user in other): %+v", len(repo.rows), repo.rows)

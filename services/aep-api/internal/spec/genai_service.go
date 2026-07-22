@@ -232,8 +232,11 @@ type ServiceDeps struct {
 // user identity is passed.
 type TurnActivityRecorder interface {
 	// RecordSpecUpdated appends the agent-authored line for turnID. title is the
-	// turn's instruction subject.
-	RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title string)
+	// turn's instruction subject. editedPaths are the collab-doc paths a room
+	// turn edited — they let the implementation suppress the committer's later
+	// flush of the same edits; a committed turn passes nil (its commit is its
+	// own, nothing flushes later).
+	RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title string, editedPaths []string)
 }
 
 // Service is the typed entry point behind the turn/status/stream/rehydrate

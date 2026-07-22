@@ -305,10 +305,11 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		// feed can attribute this agent work — the committer's later flush lands
 		// under the user's token and cannot (issue #239).
 		return TurnTerminal{
-			Status:     turnStatusCompleted,
-			CommitSHA:  job.baseRef,
-			NoChanges:  true,
-			SpecEdited: !manifest.IsEmpty(),
+			Status:      turnStatusCompleted,
+			CommitSHA:   job.baseRef,
+			NoChanges:   true,
+			SpecEdited:  !manifest.IsEmpty(),
+			EditedPaths: manifest.MutatedPaths(),
 		}
 	}
 
@@ -486,7 +487,7 @@ func (s *Service) recordTurnActivity(ctx context.Context, job turnJob, term Turn
 	if s.recorder == nil || term.Status != turnStatusCompleted || !term.SpecEdited {
 		return
 	}
-	s.recorder.RecordSpecUpdated(ctx, job.orgID, job.projectID, job.turnID, firstLine(job.summary, 96))
+	s.recorder.RecordSpecUpdated(ctx, job.orgID, job.projectID, job.turnID, firstLine(job.summary, 96), term.EditedPaths)
 }
 
 // turnBaseReader adapts Workspace.ReadFile at the turn's base ref into the
