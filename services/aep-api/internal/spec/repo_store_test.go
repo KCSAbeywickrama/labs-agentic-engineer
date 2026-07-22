@@ -551,7 +551,7 @@ func TestCommitFiles_ConcurrentCommitsSerialize(t *testing.T) {
 		go func(i int, name string) {
 			defer wg.Done()
 			writes := map[string][]byte{skillRepoPath(name): []byte(skillMDNamed(name, ""))}
-			_, errs[i] = svc.commitFiles(ctx, "org1", repo, "add "+name, writes, nil)
+			_, errs[i] = svc.commitFiles(ctx, "org1", repo, "add "+name, writes, nil, nil)
 		}(i, name)
 	}
 	wg.Wait()
@@ -589,6 +589,62 @@ func TestCommitFiles_ConcurrentCommitsSerialize(t *testing.T) {
 		t.Fatalf("mirrorGitDir: %v", err)
 	}
 	gitDirOut(t, mirror, "fsck", "--strict")
+}
+
+// TestCommitFiles_ManifestMergeSurvivesCASRetry is the regression for the
+// lost-update hazard: the manifest merge now runs INSIDE the CAS closure, so a
+// concurrent commit that adds another skill's entry between this op's base
+// read and its push is folded in on the forced retry instead of clobbered.
+//
+// It is a genuine race-shaped test driven through the real engine + real
+// origin + real CAS retry: the injected manifestFn, on its FIRST invocation,
+// lands a competing entry ("A") directly on the origin — advancing main after
+// this attempt resolved its base but before it pushes. The push is rejected
+// non-fast-forward, Mutate re-fetches + re-runs the closure against the new
+// base ({..,A}), and this op's own entry ("B") is merged on top → both survive.
+// A pre-rendered manifest captured outside the closure would drop "A" here.
+func TestCommitFiles_ManifestMergeSurvivesCASRetry(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStore(t)
+	ctx := context.Background()
+	repo, err := svc.ensureSkillsRepo(ctx, "org1") // provision + seed
+	if err != nil {
+		t.Fatalf("ensureSkillsRepo: %v", err)
+	}
+
+	injected := false
+	manifestFn := func(m SkillsManifest) SkillsManifest {
+		if !injected {
+			injected = true
+			// A concurrent writer lands entry "A" on origin, advancing main
+			// past the base this attempt built on → forces the CAS retry.
+			competitor := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+			competitor["A"] = ManifestEntry{Kind: ManifestKindImported, BaseHash: "aaa"}
+			host.writeAtHead("org1", skillsManifestPath, string(renderSkillsManifest(competitor)))
+		}
+		m["B"] = ManifestEntry{Kind: ManifestKindImported, BaseHash: "bbb"}
+		return m
+	}
+
+	writes := map[string][]byte{skillRepoPath("B"): []byte(skillMDNamed("B", ""))}
+	if _, err := svc.commitFiles(ctx, "org1", repo, "add B", writes, nil, manifestFn); err != nil {
+		t.Fatalf("commitFiles: %v", err)
+	}
+	if !injected {
+		t.Fatal("manifestFn never ran — the merge closure was skipped")
+	}
+
+	final := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	if _, ok := final["A"]; !ok {
+		t.Fatalf("concurrent entry A lost — manifest not re-read on the CAS retry: %#v", final)
+	}
+	if _, ok := final["B"]; !ok {
+		t.Fatalf("this op's entry B missing from the merged manifest: %#v", final)
+	}
+	// Same-commit invariant: B's SKILL.md landed alongside the manifest.
+	if got := host.readAtHead("org1", skillRepoPath("B")); !strings.Contains(got, "name: B") {
+		t.Fatalf("skill B file did not land in the same commit: %q", got)
+	}
 }
 
 func skillKeysOf(m map[string]Skill) []string {

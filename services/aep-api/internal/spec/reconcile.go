@@ -183,6 +183,15 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	var deletes []string
 	written, migrated, purged := 0, 0, 0
 	manifestDirty := false
+	// manifestSet/manifestDelete are the manifest DELTA reconcile computes
+	// against the pre-read `manifest`. They are re-applied INSIDE the commit
+	// closure (commitFiles' manifestFn) against the attempt's live base, so a
+	// concurrent import/delete that advanced the manifest is merged in rather
+	// than clobbered on a CAS retry. The `manifest` map itself is still mutated
+	// in place below purely to keep the pre-read decision logic
+	// (entry lookups, dirty accounting) unchanged.
+	manifestSet := map[string]ManifestEntry{}
+	manifestDelete := map[string]bool{}
 
 	stageWrite := func(name, skillMD string, refs map[string]string) {
 		writes[skillRepoPath(name)] = []byte(skillMD)
@@ -191,10 +200,12 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		}
 	}
 	setBase := func(name, sha string) {
-		if manifest[name] != (ManifestEntry{Kind: ManifestKindPlatform, BaseHash: sha}) {
-			manifest[name] = ManifestEntry{Kind: ManifestKindPlatform, BaseHash: sha}
+		want := ManifestEntry{Kind: ManifestKindPlatform, BaseHash: sha}
+		if manifest[name] != want {
+			manifest[name] = want
 			manifestDirty = true
 		}
+		manifestSet[name] = want // record the delta op (idempotent per attempt)
 	}
 
 	for _, b := range embedded {
@@ -267,6 +278,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		purged++
 		manifestDirty = true
 		delete(manifest, name)
+		manifestDelete[name] = true // record the delta op
 		if cur, ok := current[name]; ok && cur.ContentSHA == entry.BaseHash {
 			if cur.legacyDir == "" {
 				deletes = append(deletes, skillRepoDir(name))
@@ -284,11 +296,22 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	if changed == 0 && !manifestDirty {
 		return 0, nil
 	}
-	if manifestDirty || changed > 0 {
-		writes[skillsManifestPath] = renderSkillsManifest(manifest)
+	// The manifest is merged in the SAME commit as the file changes, but via
+	// the closure-scoped delta (commitFiles' manifestFn) so a concurrent
+	// writer's entries survive a CAS retry. Only the manifest is retry-safe;
+	// the file writes/deletes above were planned against the pre-read state
+	// (see commitFiles' scope-boundary note).
+	manifestFn := func(m SkillsManifest) SkillsManifest {
+		for name, entry := range manifestSet {
+			m[name] = entry
+		}
+		for name := range manifestDelete {
+			delete(m, name)
+		}
+		return m
 	}
 	msg := fmt.Sprintf("chore(skills): reconcile embedded library (%d written, %d migrated, %d retired)", written, migrated, purged)
-	if _, err := s.commitFiles(ctx, orgID, repo, msg, writes, deletes); err != nil {
+	if _, err := s.commitFiles(ctx, orgID, repo, msg, writes, deletes, manifestFn); err != nil {
 		return 0, err
 	}
 	slog.InfoContext(ctx, "skills: reconciled embedded skills", "org", orgID, "written", written, "migrated", migrated, "purged", purged)

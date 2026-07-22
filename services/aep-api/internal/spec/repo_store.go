@@ -33,7 +33,9 @@ package spec
 // architect and tech-lead resolvers consume it unchanged.
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -405,7 +407,20 @@ func parseBundleEntries(ctx context.Context, files map[string]string) []catalogE
 // commitFiles applies a set of blob writes + path/prefix deletes to the skills
 // repo's default branch in a single commit through Workspace.Mutate, which
 // owns the bounded fast-forward CAS retry (design D5). §9.
-func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, message string, writes map[string][]byte, deletePrefixes []string) (string, error) {
+//
+// manifestFn, when non-nil, is the retry-safe manifest merge: it runs INSIDE
+// the CAS closure on EVERY attempt, re-reading skills-manifest.json from the
+// attempt's current base (tx.Base()) and applying this operation's delta
+// (upsert one entry / drop one entry / reconcile's computed set+delete). This
+// is the fix for the lost-update hazard — a pre-rendered manifest captured
+// outside the closure would, on a non-fast-forward retry, silently clobber any
+// entry a concurrent commit added; re-reading + re-merging per attempt folds
+// the concurrent entry in instead. The rendered manifest is staged in the SAME
+// commit as the file writes/deletes below (the same-commit invariant), and
+// only when the merge actually changes the bytes (so a no-op delta never
+// churns the manifest, and a delete of an absent entry never conjures an empty
+// manifest file).
+func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, message string, writes map[string][]byte, deletePrefixes []string, manifestFn func(SkillsManifest) SkillsManifest) (string, error) {
 	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
 	if err != nil {
 		return "", err
@@ -430,6 +445,26 @@ func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sour
 		}
 		for p, data := range writes {
 			tx.Write(p, data)
+		}
+		// Manifest merge, re-read + re-applied against THIS attempt's base so
+		// the CAS retry loop never loses a concurrently-added entry. NOTE the
+		// scope boundary: only the manifest is made retry-safe here. The file
+		// writes/deletes above were planned by the caller against the base it
+		// pre-read; a competing commit could in theory invalidate that plan
+		// too, but that hazard pre-dates the shared manifest and full
+		// re-planning inside the closure is out of scope — ONLY the manifest
+		// merge is folded per attempt.
+		if manifestFn != nil {
+			raw, _, rerr := tx.Base().Read(skillsManifestPath)
+			if rerr != nil && !errors.Is(rerr, sourcecontrol.ErrPathNotFound) {
+				return fmt.Errorf("read manifest baseline: %w", rerr)
+			}
+			base := parseSkillsManifest(raw)
+			renderedBase := renderSkillsManifest(base)
+			merged := renderSkillsManifest(manifestFn(base)) // manifestFn may mutate base in place
+			if !bytes.Equal(renderedBase, merged) {
+				tx.Write(skillsManifestPath, merged)
+			}
 		}
 		return nil
 	}, sourcecontrol.CommitOpts{Message: message, Author: author, Committer: committer})
@@ -461,13 +496,16 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 	for refKey, content := range references {
 		writes[skillRefPath(name, refKey)] = []byte(content)
 	}
+	// The manifest entry (imports only) is upserted INSIDE the commit closure
+	// so a concurrent import's entry is never clobbered on a CAS retry — see
+	// commitFiles. Capture entry by value; the closure runs per attempt.
+	var manifestFn func(SkillsManifest) SkillsManifest
 	if entry != nil {
-		_, manifest, merr := s.loadEntriesAndManifest(ctx, orgID, repo)
-		if merr != nil {
-			return fmt.Errorf("load manifest: %w", merr)
+		e := *entry
+		manifestFn = func(m SkillsManifest) SkillsManifest {
+			m[name] = e
+			return m
 		}
-		manifest[name] = *entry
-		writes[skillsManifestPath] = renderSkillsManifest(manifest)
 	}
 	deletes := legacySkillDirs(name)
 	if pruneStaleRefs {
@@ -475,7 +513,7 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 		// stages writes after deletes, so rewritten refs win.
 		deletes = append(deletes, skillRepoDir(name)+"/"+strings.TrimSuffix(refsPrefix, "/"))
 	}
-	_, err = s.commitFiles(ctx, orgID, repo, message, writes, deletes)
+	_, err = s.commitFiles(ctx, orgID, repo, message, writes, deletes, manifestFn)
 	return err
 }
 
@@ -488,16 +526,16 @@ func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message 
 	if err != nil {
 		return err
 	}
-	var writes map[string][]byte
-	_, manifest, merr := s.loadEntriesAndManifest(ctx, orgID, repo)
-	if merr != nil {
-		return fmt.Errorf("load manifest: %w", merr)
+	// Drop the name's manifest entry (if any) INSIDE the commit closure so the
+	// entry never outlives its files AND a concurrent commit's entries survive
+	// the CAS retry — see commitFiles. commitFiles stages the manifest only
+	// when this delete actually removes an entry (an absent name is a no-op
+	// that never conjures an empty manifest file).
+	manifestFn := func(m SkillsManifest) SkillsManifest {
+		delete(m, name)
+		return m
 	}
-	if _, ok := manifest[name]; ok {
-		delete(manifest, name)
-		writes = map[string][]byte{skillsManifestPath: renderSkillsManifest(manifest)}
-	}
-	_, err = s.commitFiles(ctx, orgID, repo, message, writes, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...))
+	_, err = s.commitFiles(ctx, orgID, repo, message, nil, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...), manifestFn)
 	return err
 }
 
