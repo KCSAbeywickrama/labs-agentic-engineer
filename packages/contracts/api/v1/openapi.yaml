@@ -2229,7 +2229,7 @@ components:
         id:
           type: string
         type:
-          enum: [spec_published, plan_derived, task_started, task_deployed, task_failed]
+          enum: [spec_updated, spec_published, plan_derived, task_started, task_deployed, task_failed]
           type: string
           x-go-type: string
         actorKind:

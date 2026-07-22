@@ -17,6 +17,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { projectKeys } from "../projects/api/keys.js";
 import {
   addMessage,
   chatKeyFor,
@@ -64,6 +66,15 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
   const [activeTurnId, setActiveTurnId] = useState<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const author = useCurrentAuthor();
+  const queryClient = useQueryClient();
+
+  // A committed turn changed spec files in git; refetch the project cache tree
+  // (spec file list included) so views keyed off committed truth — e.g. the
+  // Architecture tab's "Designing…" state — settle instead of serving the
+  // staleTime-Infinity snapshot until a reload.
+  const onTurnCommitted = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: projectKeys.detail(projectName) });
+  }, [queryClient, projectName]);
 
   // Mount / project switch: rehydrate an empty log from the server history,
   // then re-attach to a still-running chat turn (replay from 0).
@@ -86,7 +97,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setActiveTurnId(active.turnId);
       dropTurnOutput(chatKey, active.turnId); // replay-from-0 re-adds it all
       try {
-        await attachAndFoldTurn(chatKey, projectName, active.turnId, ac.signal);
+        await attachAndFoldTurn(chatKey, projectName, active.turnId, ac.signal, onTurnCommitted);
       } catch {
         // surfaced by the fold's error handling; the view just settles
       } finally {
@@ -101,7 +112,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setIsSending(false);
       setActiveTurnId(undefined);
     };
-  }, [chatKey, org, projectName]);
+  }, [chatKey, org, projectName, onTurnCommitted]);
 
   const send = useCallback(
     (instruction: string) => {
@@ -139,7 +150,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         });
         const signal = abortRef.current?.signal ?? new AbortController().signal;
         try {
-          await attachAndFoldTurn(chatKey, projectName, turnId, signal);
+          await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted);
         } catch {
           if (!signal.aborted) {
             setTurnStatus(chatKey, turnId, "failed");
@@ -156,7 +167,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         }
       })();
     },
-    [chatKey, org, projectName, isSending, author],
+    [chatKey, org, projectName, isSending, author, onTurnCommitted],
   );
 
   const newConversation = useCallback(() => {

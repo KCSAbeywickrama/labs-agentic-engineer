@@ -21,10 +21,9 @@ import { Activity } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { SectionTitle } from "../../../components/SectionTitle";
 import type { StatusTone } from "../../../components/StatusChip";
-import type { components } from "../../../generated/aep-api";
-import { agentActivity } from "../lib/projectActivity";
-
-type TaskView = components["schemas"]["TaskView"];
+import { useSession } from "../../../auth/SessionContext";
+import { useActivityFeed } from "../../activity/hooks/useActivityFeed";
+import { activityLine } from "../../activity/lib/render";
 
 // Maps an activity item's tone to the leading status dot's colour.
 const DOT_COLOR: Record<StatusTone, string> = {
@@ -36,11 +35,25 @@ const DOT_COLOR: Record<StatusTone, string> = {
   neutral: "text.disabled",
 };
 
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  return `${Math.round(hrs / 24)} d ago`;
+}
+
 // The overview's "agent activity" feed: a status-dotted timeline (dots joined
 // by a vertical rail) of what the platform's agents — and you — have done on
-// this project, derived from the build tasks. The Builds page owns the detail.
-export function AgentActivity({ tasks }: { tasks: TaskView[] }) {
-  const items = agentActivity(tasks);
+// this project, sourced from the real activity feed (seeded read + SSE tail).
+// The Builds page owns the detail.
+export function AgentActivity({ projectName }: { projectName: string }) {
+  const { user } = useSession();
+  const { events } = useActivityFeed(projectName);
+  const items = events.map((e) => activityLine(e, user.email));
 
   return (
     <div>
@@ -89,7 +102,7 @@ export function AgentActivity({ tasks }: { tasks: TaskView[] }) {
                     {item.text}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {item.time}
+                    {relativeTime(item.occurredAt)}
                   </Typography>
                 </Box>
               </Box>

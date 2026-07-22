@@ -48,7 +48,9 @@ export function CellDiagramPanel({
     liveSource ?? (restFallback ? (rest.data?.content ?? null) : null);
   // An agent peer in the room means a design turn is running; badge the pane
   // and show a "waiting" cell rather than the generic "generate a design"
-  // empty state.
+  // empty state. The badge MUST key on the peer, not the live text: the doc
+  // is re-seeded from git on every workspace load, so text alone would keep
+  // "Designing…" up long after the turn ended (#239).
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
 
   if (restFallback && rest.isPending) {
