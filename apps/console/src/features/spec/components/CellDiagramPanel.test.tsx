@@ -18,45 +18,47 @@
 
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { CellDiagramPanel } from "./CellDiagramPanel";
 import { DESIGN_CELL_PATH } from "../api/designTree";
+import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
 
 // The heavy lazy renderer is irrelevant here — record what source it receives.
 vi.mock("@aep/ui-cell-diagram-view", () => ({
-  CellDiagramView: ({ source }: { source?: string }) => (
-    <div data-testid="cell-view" data-source={source ?? ""} />
+  CellDiagramView: ({ source, emptyState }: { source?: string; emptyState?: unknown }) => (
+    <div data-testid="cell-view" data-source={source ?? ""}>
+      {source?.trim() ? null : <>{emptyState}</>}
+    </div>
   ),
 }));
 
-// The committed/derived DSL is configured per test.
-const mockDerived = vi.fn();
-vi.mock("../api/useDerivedDesign", () => ({
-  useDerivedCellDiagram: (...args: unknown[]) => mockDerived(...args),
+// The committed-blob read (solo/offline fallback) is configured per test.
+const mockContent = vi.fn();
+vi.mock("../api/queries", () => ({
+  useSpecFileContent: (...args: unknown[]) => mockContent(...args),
 }));
 
-const DERIVED_DSL = "title Committed\ncomponent api service\n";
 const LIVE_DSL = "title Live\ncomponent api service\nsouth email-provider\n";
+const COMMITTED_DSL = "title Committed\ncomponent api service\n";
 
-function makeCollab(ytext: Y.Text | null): CollabSpec {
+const committedEntry = {
+  path: DESIGN_CELL_PATH,
+  sha: "abc123",
+  group: "designs",
+} as SpecFileEntry;
+
+function makeCollab(ytext: Y.Text | null, agent = false): CollabSpec {
   return {
-    peers: [{ kind: "agent", name: "agent" }],
+    peers: agent ? [{ kind: "agent", name: "agent" }] : [],
     getFileText: (path: string) => (path === DESIGN_CELL_PATH ? ytext : null),
   } as unknown as CollabSpec;
 }
 
-function renderPanel(collab: CollabSpec, preferLiveCell = false) {
-  return render(
-    <CellDiagramPanel
-      projectName="p"
-      files={[]}
-      collab={collab}
-      preferLiveCell={preferLiveCell}
-    />,
-  );
+function renderPanel(collab: CollabSpec, files: SpecFileEntry[] = []) {
+  return render(<CellDiagramPanel projectName="p" files={files} collab={collab} />);
 }
 
 function liveText(content: string): Y.Text {
@@ -67,38 +69,66 @@ function liveText(content: string): Y.Text {
 }
 
 beforeEach(() => {
-  mockDerived.mockReset();
+  mockContent.mockReset();
+  mockContent.mockReturnValue({ data: undefined, isPending: false, isError: false });
 });
 
-describe("CellDiagramPanel source precedence", () => {
-  it("renders the derived (committed) DSL between turns", () => {
-    mockDerived.mockReturnValue({ dsl: DERIVED_DSL, isPending: false, isError: false });
-    renderPanel(makeCollab(liveText(LIVE_DSL)));
+describe("CellDiagramPanel — design.cell is the single source", () => {
+  it("renders the live collab design.cell when connected, and grows with it", () => {
+    const ytext = liveText(LIVE_DSL);
+    renderPanel(makeCollab(ytext), [committedEntry]);
 
-    expect(screen.getByTestId("cell-view").dataset.source).toBe(DERIVED_DSL);
+    expect(screen.getByTestId("cell-view").dataset.source).toBe(LIVE_DSL);
+    // The REST fallback stays disabled while the doc supplies the text.
+    expect(mockContent).toHaveBeenLastCalledWith("p", null);
+
+    act(() => {
+      ytext.insert(ytext.length, "api -> email-provider\n");
+    });
+    expect(screen.getByTestId("cell-view").dataset.source).toContain("api -> email-provider");
+  });
+
+  it("falls back to the committed design.cell blob when the doc has no text (solo/offline)", () => {
+    mockContent.mockReturnValue({
+      data: { content: COMMITTED_DSL, sha: "abc123" },
+      isPending: false,
+      isError: false,
+    });
+    renderPanel(makeCollab(null), [committedEntry]);
+
+    expect(mockContent).toHaveBeenLastCalledWith("p", committedEntry);
+    expect(screen.getByTestId("cell-view").dataset.source).toBe(COMMITTED_DSL);
+  });
+
+  it("shows a spinner while the committed blob loads", () => {
+    mockContent.mockReturnValue({ data: undefined, isPending: true, isError: false });
+    renderPanel(makeCollab(null), [committedEntry]);
+
+    expect(screen.getByLabelText("Loading architecture diagram")).toBeInTheDocument();
+  });
+
+  it("surfaces a committed-blob read failure", () => {
+    mockContent.mockReturnValue({ data: undefined, isPending: false, isError: true });
+    renderPanel(makeCollab(null), [committedEntry]);
+
+    expect(
+      screen.getByText(/failed to load the architecture diagram source/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the waiting state while an agent turn runs and design.cell has no content yet", () => {
+    renderPanel(makeCollab(null, true), []);
+
+    expect(screen.getByText(/waiting for the agent/i)).toBeInTheDocument();
+  });
+
+  it("badges the pane with Designing… only while an agent turn runs", () => {
+    renderPanel(makeCollab(liveText(LIVE_DSL), true), []);
+    expect(screen.getByText("Designing…")).toBeInTheDocument();
+  });
+
+  it("shows no badge without an agent peer", () => {
+    renderPanel(makeCollab(liveText(LIVE_DSL), false), []);
     expect(screen.queryByText("Designing…")).not.toBeInTheDocument();
-  });
-
-  it("renders the live stream when the derived DSL is not yet resolved", () => {
-    mockDerived.mockReturnValue({ dsl: null, isPending: false, isError: false });
-    renderPanel(makeCollab(liveText(LIVE_DSL)));
-
-    expect(screen.getByTestId("cell-view").dataset.source).toBe(LIVE_DSL);
-    expect(screen.getByText("Designing…")).toBeInTheDocument();
-  });
-
-  it("prefers the live stream over a stale derived DSL after a rewrite (preferLiveCell)", () => {
-    mockDerived.mockReturnValue({ dsl: DERIVED_DSL, isPending: false, isError: false });
-    renderPanel(makeCollab(liveText(LIVE_DSL)), true);
-
-    expect(screen.getByTestId("cell-view").dataset.source).toBe(LIVE_DSL);
-    expect(screen.getByText("Designing…")).toBeInTheDocument();
-  });
-
-  it("holds the derived DSL through the removeFile→addFile gap (preferLiveCell, empty live)", () => {
-    mockDerived.mockReturnValue({ dsl: DERIVED_DSL, isPending: false, isError: false });
-    renderPanel(makeCollab(null), true);
-
-    expect(screen.getByTestId("cell-view").dataset.source).toBe(DERIVED_DSL);
   });
 });

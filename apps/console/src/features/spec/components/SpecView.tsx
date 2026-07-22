@@ -609,12 +609,7 @@ export function SpecView({ projectName }: { projectName: string }) {
               }
             >
               {effectiveSelection.kind === "cell-diagram" ? (
-                <CellDiagramPanel
-                  projectName={projectName}
-                  files={files}
-                  collab={collab}
-                  preferLiveCell={cellChangeCount > 0}
-                />
+                <CellDiagramPanel projectName={projectName} files={files} collab={collab} />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel
                   projectName={projectName}

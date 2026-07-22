@@ -18,7 +18,7 @@
 
 import { Alert, Box, Chip, CircularProgress, Typography } from "@wso2/oxygen-ui";
 import { CellDiagramView } from "@aep/ui-cell-diagram-view";
-import { useDerivedCellDiagram } from "../api/useDerivedDesign";
+import { useSpecFileContent } from "../api/queries";
 import { DESIGN_CELL_PATH } from "../api/designTree";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
@@ -28,53 +28,48 @@ export function CellDiagramPanel({
   projectName,
   files,
   collab,
-  preferLiveCell = false,
 }: {
   projectName: string;
   files: SpecFileEntry[];
   collab: CollabSpec;
-  /** True once the agent has changed design.cell this session — the doc's
-   *  live DSL is then strictly fresher than the committed design.json bundle
-   *  (which only refreshes on commit), so the live doc takes precedence. */
-  preferLiveCell?: boolean;
 }) {
-  const { dsl, isPending, isError } = useDerivedCellDiagram(projectName, files);
-
-  // Between turns the committed design.json bundle is authoritative — `dsl` is
-  // derived from it (design.json → cell DSL, same boundary rules as
-  // design.cell). The live `design.cell` DSL streaming into the collab doc
-  // renders instead while the derived DSL is not yet resolved (no committed
-  // design.json, or its fetches still pending/failing mid-turn) or once an
-  // agent rewrite made it stale (`preferLiveCell`), so the diagram grows
-  // piece-by-piece as the agent writes. Both paths feed the SAME renderer via
-  // a DSL string, so the streamed and reloaded diagrams match.
+  // design.cell IS the architecture: the diagram always renders the file
+  // itself, never a projection of the design.json bundle. Connected, the
+  // collab doc supplies it live (committed content is seeded into the room;
+  // an agent editFile lands in place, a restructure's removeFile + addFile
+  // re-streams line by line). Solo/offline, the committed git blob is
+  // fetched over REST instead.
   const liveSource = useYTextString(collab.getFileText(DESIGN_CELL_PATH));
-  const derivedReady = !isPending && !isError && dsl != null;
-  const liveNonEmpty = typeof liveSource === "string" && liveSource.trim().length > 0;
-  const streaming = liveNonEmpty && (!derivedReady || preferLiveCell);
-  // An agent peer in the room means a design is actively being generated; show a
-  // "waiting" cell rather than the generic "generate a design" empty state.
+  const committed =
+    files.find((f) => f.path === DESIGN_CELL_PATH && f.sha !== "") ?? null;
+  const restFallback = liveSource === null ? committed : null;
+  const rest = useSpecFileContent(projectName, restFallback);
+  const source =
+    liveSource ?? (restFallback ? (rest.data?.content ?? null) : null);
+  // An agent peer in the room means a design turn is running; badge the pane
+  // and show a "waiting" cell rather than the generic "generate a design"
+  // empty state.
   const agentBusy = collab.peers.some((p) => p.kind === "agent");
 
-  if (!streaming && isPending) {
+  if (restFallback && rest.isPending) {
     return (
       <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <CircularProgress aria-label="Loading architecture diagram" />
       </Box>
     );
   }
-  if (!streaming && isError) {
-    return <Alert severity="error">Failed to load the design sources for the diagram.</Alert>;
+  if (restFallback && rest.isError) {
+    return <Alert severity="error">Failed to load the architecture diagram source.</Alert>;
   }
 
-  // The diagram fills the pane. While streaming, a thin toolbar row carries the
-  // "Designing…" badge; otherwise the diagram takes the whole pane. Both view
-  // components have a `flex: 1, minHeight: 0` root, so the flex column lets them
-  // fill the space without re-introducing the sizing bug they were written to
-  // avoid.
+  // The diagram fills the pane. While a turn is running, a thin toolbar row
+  // carries the "Designing…" badge; otherwise the diagram takes the whole
+  // pane. Both view components have a `flex: 1, minHeight: 0` root, so the
+  // flex column lets them fill the space without re-introducing the sizing
+  // bug they were written to avoid.
   return (
     <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      {streaming && (
+      {agentBusy && Boolean(source?.trim()) && (
         <Box
           sx={{
             px: 1.5,
@@ -89,7 +84,7 @@ export function CellDiagramPanel({
         </Box>
       )}
       <CellDiagramView
-        source={(streaming ? liveSource : dsl) ?? undefined}
+        source={source ?? undefined}
         emptyState={
           agentBusy ? (
             <Typography variant="body2">
