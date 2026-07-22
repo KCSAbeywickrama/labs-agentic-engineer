@@ -30,6 +30,11 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
+import { createLink, Link } from "@tanstack/react-router";
+import { EmptyState } from "../../../components/EmptyState";
+import { PageHeader } from "../../../components/PageHeader";
+import { SectionTitle } from "../../../components/SectionTitle";
+import { StatusChip, type StatusTone } from "../../../components/StatusChip";
 import {
   useComponentsDeployments,
   useProjectComponents,
@@ -39,29 +44,34 @@ import {
   groupDeploymentCards,
   type DeploymentCard,
 } from "../lib/deploymentRows";
+import { phaseChip } from "../lib/phaseChip";
 import { validationView } from "../lib/pipeline";
+
+const LinkChip = createLink(Chip);
 
 // Chip vocabulary for a card's state (#216): the label keeps the backend's
 // raw condition reason (it's the vocabulary operators see in OpenChoreo),
-// only the two join-derived states get console-authored labels.
+// only the two join-derived states get console-authored labels. Tones feed
+// the shared StatusChip (Task 4) so this card's chip shares one palette
+// with every other status pill in the app.
 function cardChip(card: DeploymentCard): {
   label: string;
-  color: "success" | "error" | "info" | "default";
+  tone: StatusTone;
   outlined?: boolean;
 } {
   switch (card.kind) {
     case "notDeployed":
-      return { label: "Not deployed", color: "default", outlined: true };
+      return { label: "Not deployed", tone: "neutral", outlined: true };
     case "undeployed":
-      return { label: "Undeployed", color: "default" };
+      return { label: "Undeployed", tone: "neutral" };
     case "success":
-      return { label: card.deployment?.status ?? "Ready", color: "success" };
+      return { label: card.deployment?.status ?? "Ready", tone: "success" };
     case "error":
-      return { label: card.deployment?.status ?? "Failed", color: "error" };
+      return { label: card.deployment?.status ?? "Failed", tone: "error" };
     case "transitional":
-      return { label: card.deployment?.status ?? "In progress", color: "info" };
+      return { label: card.deployment?.status ?? "In progress", tone: "info" };
     default:
-      return { label: "Pending", color: "default", outlined: true };
+      return { label: "Pending", tone: "neutral", outlined: true };
   }
 }
 
@@ -100,10 +110,9 @@ function BoardCard({ card, column }: { card: DeploymentCard; column: string }) {
           <Typography variant="subtitle2" sx={{ flexGrow: 1, minWidth: 0 }}>
             {card.displayName}
           </Typography>
-          <Chip
+          <StatusChip
             label={chip.label}
-            size="small"
-            color={chip.color}
+            tone={chip.tone}
             {...(chip.outlined && { variant: "outlined" as const })}
           />
         </Stack>
@@ -173,18 +182,23 @@ function BoardColumn({
   column,
   cards,
   emptyText,
+  projectName,
   version,
   validation,
+  validationIssue,
   validationUrl,
 }: {
   title: string;
   column: string;
   cards: DeploymentCard[];
   emptyText: string;
+  projectName: string;
   version?: string;
-  // The whole-project validation run state for this environment (dev only), with
-  // a link to its PR. null = nothing to show.
+  // The whole-project validation run state for this environment (dev only).
+  // null = nothing to show. With the issue number the chip opens the internal
+  // validation log page; the external PR/issue URL is only a fallback.
   validation?: ReturnType<typeof validationView>;
+  validationIssue?: number;
   validationUrl?: string;
 }) {
   // Capitalize the shared lowercase label for the chip ("validating" → "Validating").
@@ -203,54 +217,60 @@ function BoardColumn({
         p: 2,
       }}
     >
-      <Stack
-        direction="row"
-        spacing={1}
-        sx={{ alignItems: "center", mb: 2, px: 0.5 }}
+      <SectionTitle
+        trailing={
+          <>
+            <Chip label={cards.length} size="small" variant="outlined" />
+            {version && (
+              <Chip
+                label={version}
+                size="small"
+                color="primary"
+                variant="outlined"
+                title="Spec version live in this environment"
+              />
+            )}
+            {validation &&
+              (validationIssue ? (
+                <LinkChip
+                  label={validationLabel}
+                  size="small"
+                  color={validation.tone as "info" | "success" | "error"}
+                  variant="outlined"
+                  clickable
+                  to="/projects/$projectName/deployments/validation/$issueNumber"
+                  params={{ projectName, issueNumber: validationIssue }}
+                  title="Open the validation log"
+                />
+              ) : validationUrl ? (
+                <Chip
+                  label={validationLabel}
+                  size="small"
+                  color={validation.tone as "info" | "success" | "error"}
+                  variant="outlined"
+                  clickable
+                  component="a"
+                  href={validationUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open the validation PR"
+                />
+              ) : (
+                <Chip
+                  label={validationLabel}
+                  size="small"
+                  color={validation.tone as "info" | "success" | "error"}
+                  variant="outlined"
+                  title="Validation status"
+                />
+              ))}
+          </>
+        }
       >
-        <Typography variant="subtitle1">{title}</Typography>
-        <Chip label={cards.length} size="small" variant="outlined" />
-        {version && (
-          <Chip
-            label={version}
-            size="small"
-            color="primary"
-            variant="outlined"
-            title="Spec version live in this environment"
-          />
-        )}
-        {validation &&
-          (validationUrl ? (
-            <Chip
-              label={validationLabel}
-              size="small"
-              color={validation.tone as "info" | "success" | "error"}
-              variant="outlined"
-              clickable
-              component="a"
-              href={validationUrl}
-              target="_blank"
-              rel="noreferrer"
-              title="Open the validation PR"
-            />
-          ) : (
-            <Chip
-              label={validationLabel}
-              size="small"
-              color={validation.tone as "info" | "success" | "error"}
-              variant="outlined"
-              title="Validation status"
-            />
-          ))}
-      </Stack>
+        {title}
+      </SectionTitle>
       {cards.length === 0 ? (
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ py: 3, textAlign: "center" }}
-        >
-          {emptyText}
-        </Typography>
+        <EmptyState compact description={emptyText} />
       ) : (
         <Stack spacing={1.5}>
           {cards.map((card) => (
@@ -280,40 +300,70 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const status = useProjectStatus(projectName);
   const devVersion = status.data?.deploy.version || undefined;
   // Whole-project validation runs against dev after components deploy; surface
-  // its coarse state (and a link to its PR) on the Development column header.
-  const devValidation = validationView(status.data?.deploy.validation ?? "");
+  // its coarse state on the Development column header. Completed = the report
+  // is ready: the chip jumps straight to the PR. The internal log view (routed
+  // via the issue number) is for watching a live run or diagnosing a failed
+  // one, so completed withholds the issue and falls through to the URL chip.
+  const devValidationStatus = status.data?.deploy.validation ?? "";
+  const devValidation = validationView(devValidationStatus);
+  const devValidationIssue =
+    devValidationStatus === "completed"
+      ? undefined
+      : status.data?.deploy.validationIssue || undefined;
   const devValidationUrl = status.data?.deploy.validationUrl || undefined;
+
+  // Unconditional, like Builds (Task 5): the back link and project status
+  // stay reachable through every state below, not just the loaded board.
+  const header = (
+    <PageHeader
+      title="Deployments"
+      {...(status.data && { status: phaseChip(status.data) })}
+      backTo={{
+        link: <Link to="/projects/$projectName" params={{ projectName }} />,
+        label: "Back to Overview",
+      }}
+    />
+  );
 
   if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-        <CircularProgress aria-label="Loading deployments" />
-      </Box>
+      <>
+        {header}
+        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
+          <CircularProgress aria-label="Loading deployments" />
+        </Box>
+      </>
     );
   }
 
   if (components.isError) {
     return (
-      <Alert
-        severity="error"
-        action={
-          <Button onClick={() => void components.refetch()}>Retry</Button>
-        }
-      >
-        Failed to load deployments
-        {components.error instanceof Error && components.error.message
-          ? `: ${components.error.message}`
-          : ""}
-      </Alert>
+      <>
+        {header}
+        <Alert
+          severity="error"
+          action={
+            <Button onClick={() => void components.refetch()}>Retry</Button>
+          }
+        >
+          Failed to load deployments
+          {components.error instanceof Error && components.error.message
+            ? `: ${components.error.message}`
+            : ""}
+        </Alert>
+      </>
     );
   }
 
   if (componentNames.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
-        Nothing to deploy yet — components appear here once the published
-        design produces them, and agents deploy to dev on merge.
-      </Typography>
+      <>
+        {header}
+        <EmptyState
+          compact
+          description="Nothing to deploy yet — components appear here once the published design produces them, and agents deploy to dev on merge."
+        />
+      </>
     );
   }
 
@@ -324,6 +374,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
 
   return (
     <>
+      {header}
       {deployments.failedCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Deployments for {deployments.failedCount} component
@@ -341,8 +392,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           column="development"
           cards={board.development}
           emptyText="Nothing in development yet."
+          projectName={projectName}
           {...(devVersion && { version: devVersion })}
           validation={devValidation}
+          {...(devValidationIssue && { validationIssue: devValidationIssue })}
           {...(devValidationUrl && { validationUrl: devValidationUrl })}
         />
         <BoardColumn
@@ -350,6 +403,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           column="production"
           cards={board.production}
           emptyText="Nothing in production yet — dev is the only deploy target for now."
+          projectName={projectName}
         />
       </Stack>
     </>

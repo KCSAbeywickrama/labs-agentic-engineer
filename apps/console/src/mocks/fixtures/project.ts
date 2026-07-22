@@ -1,4 +1,5 @@
 import type { components } from "../../generated/aep-api";
+import { buildUsageByScenario, taskUsage } from "./usage";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type ComponentList = components["schemas"]["ComponentList"];
@@ -158,6 +159,7 @@ export const projectStatuses: Record<
       status: "deployed",
       components: { total: 3, ready: 3 },
       validation: "completed",
+      validationIssue: 30,
       validationUrl: `${REPO_URL}/pull/42`,
     },
   },
@@ -413,12 +415,15 @@ function task(
   derivedStatus: string,
   component?: string,
 ): TaskView {
+  const usage = taskUsage[issueNumber];
   return {
     issueNumber,
     title,
     derivedStatus,
     issueUrl: `${BOARD_URL}/${issueNumber}`,
     ...(component !== undefined && { component }),
+    // Pending tasks (no execution yet) carry no usage — exercises the "—" cell (#245).
+    ...(usage !== undefined && { usage }),
     attention: null,
     dependsOn: null,
     executions: {},
@@ -427,35 +432,30 @@ function task(
   };
 }
 
-// The project's validation task — created alongside the coding tasks but NOT
-// shown in the builds list (its status rides deploy.validation on the
-// deployments board). Kept here so the list filter is exercised.
-const validationTask: TaskView = {
-  issueNumber: 20,
-  title: "Validate acceptance criteria",
-  derivedStatus: "in_progress",
-  executorClass: "validation",
-  operation: "validate",
-  issueUrl: `${BOARD_URL}/20`,
-  attention: null,
-  dependsOn: null,
-  executions: {},
-  hold: false,
-  lineage: { specTag: "v1" },
-};
-
+// No validation task here: list-tasks returns implementation tasks only (the
+// backend excludes the aep:validation Task — its status rides
+// deploy.validation on the deployments board).
 const buildingTasks: TaskView[] = [
   task(12, "Checkout flow with cart persistence", "pending", "storefront"),
   task(10, "Product catalog CRUD endpoints", "in_progress", "catalog-api"),
   task(9, "Scaffold storefront app shell", "merged", "storefront"),
   task(11, "Orders service payment integration", "failed", "orders-api"),
-  validationTask,
 ];
 
 const doneTasks: TaskView[] = buildingTasks.map((t) => ({
   ...t,
   derivedStatus: "deployed",
 }));
+
+// The project's ONE validation task (issue 30, deploy.validationIssue in the
+// deployed scenario): kept OUT of projectTasks — list-tasks never returns it —
+// but get-task and the log stream still serve it, which is what the
+// deployments board's validation chip deep-links to.
+export const validationTask: TaskView = {
+  ...task(30, "Validate deployed system against acceptance criteria", "deployed"),
+  executorClass: "validation",
+  prUrl: `${REPO_URL}/pull/42`,
+};
 
 export const projectTasks: Record<
   Exclude<ProjectScenario, "error">,
@@ -481,6 +481,8 @@ const runningV1Build: BuildList = {
       status: "in_progress",
       tasks: { total: 4, done: 0, failed: 1, active: 3 },
       startedAt: "2026-07-10T09:12:00Z",
+      // Mid-build the aggregate is the cost so far — it accrues on the poll (#245).
+      usage: buildUsageByScenario.running,
     },
   ],
 };
@@ -492,6 +494,7 @@ const completedV1Build: BuildList = {
       tasks: { total: 4, done: 4, failed: 0, active: 0 },
       startedAt: "2026-07-10T09:12:00Z",
       completedAt: "2026-07-10T10:03:00Z",
+      usage: buildUsageByScenario.completed,
     },
   ],
 };

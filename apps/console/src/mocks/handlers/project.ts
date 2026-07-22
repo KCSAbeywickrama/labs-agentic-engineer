@@ -18,11 +18,13 @@ import {
   type ProjectScenario,
 } from "../fixtures/project";
 import {
+  findTask,
   isSettledStatus,
   liveLine,
   streamFrames,
   taskDetailOf,
 } from "../fixtures/task-log";
+import { projectUsage } from "../fixtures/usage";
 
 function scenario(): ProjectScenario {
   return (
@@ -79,6 +81,10 @@ export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/builds", () =>
     respond((s) => projectBuilds[s]),
   ),
+  // Cost visibility (#245): per-phase actual usage.
+  http.get("*/api/v1/projects/:projectName/usage", () =>
+    respond((s) => projectUsage[s]),
+  ),
   // Task page (#173): one task with its execution history…
   http.get("*/api/v1/projects/:projectName/tasks/:issueNumber", ({ params }) => {
     const s = scenario();
@@ -113,7 +119,7 @@ export const projectHandlers = [
       }
       const issueNumber = Number(params.issueNumber);
       const frames = streamFrames(s, issueNumber);
-      const task = projectTasks[s].find((t) => t.issueNumber === issueNumber);
+      const task = findTask(s, issueNumber);
       const settled = !task || isSettledStatus(task.derivedStatus);
       const encoder = new TextEncoder();
       let timer: ReturnType<typeof setInterval> | undefined;
