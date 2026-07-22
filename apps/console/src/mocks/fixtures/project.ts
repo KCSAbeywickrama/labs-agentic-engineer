@@ -461,7 +461,7 @@ export const validationTask: TaskView = {
 // the e2e criteria in validationCriteriaJson — the checklist SEED the console
 // reads from the store. Only issue 30 has any (the validation task); everything
 // else returns []. A finished run: all e2e criteria terminal, one failed.
-type CriterionStatus = components["schemas"]["CriterionStatus"];
+type CriterionStatus = components["schemas"]["ValidationCriterionStatus"];
 export function validationCriterionStatuses(issueNumber: number): CriterionStatus[] {
   if (issueNumber !== validationTask.issueNumber) return [];
   const at = "2026-07-10T10:02:00Z";

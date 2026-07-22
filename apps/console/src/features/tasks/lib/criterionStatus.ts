@@ -20,7 +20,7 @@ import type { CriterionRunStatus } from "@aep/ui-validation-view";
 import type { components } from "../../../generated/aep-api";
 
 type TimelineEvent = components["schemas"]["TimelineEvent"];
-type CriterionStatusRow = components["schemas"]["CriterionStatus"];
+type CriterionStatusRow = components["schemas"]["ValidationCriterionStatus"];
 
 const RUN_STATUSES = new Set<CriterionRunStatus>([
   "validating",

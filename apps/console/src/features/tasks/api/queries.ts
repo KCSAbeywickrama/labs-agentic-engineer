@@ -71,7 +71,7 @@ export function useTaskCriteria(projectName: string, issueNumber: number) {
     queryKey: taskKeys.criteria(projectName, issueNumber),
     queryFn: async () => {
       const { data, error } = await client.GET(
-        "/projects/{projectName}/tasks/{issueNumber}/criteria",
+        "/projects/{projectName}/tasks/{issueNumber}/validation-criteria",
         { params: { path: { projectName, issueNumber } } },
       );
       if (error) {

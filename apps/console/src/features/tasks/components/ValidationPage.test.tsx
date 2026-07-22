@@ -26,7 +26,7 @@ import type { TaskLogState } from "../hooks/useTaskLog";
 
 type TaskDetail = components["schemas"]["TaskDetail"];
 type TaskView = components["schemas"]["TaskView"];
-type CriterionStatus = components["schemas"]["CriterionStatus"];
+type CriterionStatus = components["schemas"]["ValidationCriterionStatus"];
 
 // Router replaced so the back LinkIconButton renders as a plain anchor.
 vi.mock("@tanstack/react-router", () => ({

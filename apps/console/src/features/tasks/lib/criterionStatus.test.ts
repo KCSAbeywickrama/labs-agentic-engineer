@@ -21,7 +21,7 @@ import type { components } from "../../../generated/aep-api";
 import { mergeCriterionStatus, splitCriterionLines } from "./criterionStatus";
 
 type TimelineEvent = components["schemas"]["TimelineEvent"];
-type CriterionStatusRow = components["schemas"]["CriterionStatus"];
+type CriterionStatusRow = components["schemas"]["ValidationCriterionStatus"];
 
 function line(overrides: Partial<TimelineEvent> & { kind: string }): TimelineEvent {
   return {

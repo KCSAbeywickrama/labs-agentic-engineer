@@ -109,7 +109,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   acceptance criterion's begin/end to the `runner-criteria-report` callback, which upserts
   `criterion_statuses` keyed by `(repo, issue_number, criterion_id)` (last-write-wins; execution id is
   provenance, not a key — a same-issue retry collapses onto the same rows). The console reads them via
-  `get-task-criteria` as its checklist seed and overlays the live `kind:"criterion"` stream frames, so a
+  `get-task-validation-criteria` as its checklist seed and overlays the live `kind:"criterion"` stream frames, so a
   finished or FAILED (never-merged) run still shows the complete checklist without depending on the log
   snapshot tail. The runner also emits the same events onto its stdout NDJSON, so they ride the existing
   `stream-task-log` path for the live view with no backend stream-merge.

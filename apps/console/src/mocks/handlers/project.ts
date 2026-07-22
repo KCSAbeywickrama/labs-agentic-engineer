@@ -89,7 +89,7 @@ export const projectHandlers = [
   // Task page (#173): one task with its execution history…
   // Validation criteria checklist store (get-task-criteria). Registered BEFORE
   // the get-task route below so the more specific path wins the match.
-  http.get("*/api/v1/projects/:projectName/tasks/:issueNumber/criteria", ({ params }) => {
+  http.get("*/api/v1/projects/:projectName/tasks/:issueNumber/validation-criteria", ({ params }) => {
     const s = scenario();
     if (s === "error") {
       return HttpResponse.json(projectSectionError, { status: 500 });

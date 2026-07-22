@@ -524,21 +524,6 @@ type CreateSkillInput struct {
 	SkillMd    string            `json:"skillMd"`
 }
 
-// CriterionStatus A validation acceptance criterion's latest run status, from the durable per-criterion store (fed live by the runner). One entry per criterion the runner has reported for the validation Task.
-type CriterionStatus struct {
-	// ID Stable acceptance-criterion id (e.g. "AC-001-a").
-	ID string `json:"id"`
-
-	// RequirementID Parent requirement id; "" when the reporter did not supply it.
-	RequirementID string `json:"requirementId"`
-
-	// Status validating | passed | failed | skipped.
-	Status string `json:"status"`
-
-	// UpdatedAt When this status was last written.
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
 // DeleteOp defines model for DeleteOp.
 type DeleteOp struct {
 	BaseSha string `json:"baseSha,omitempty"`
@@ -1168,6 +1153,21 @@ type Usage struct {
 	// Model Model id the work ran on; "" on mixed-model aggregates.
 	Model        string `json:"model"`
 	OutputTokens int64  `json:"outputTokens"`
+}
+
+// ValidationCriterionStatus A validation acceptance criterion's latest run status, from the durable per-criterion store (fed live by the runner). One entry per criterion the runner has reported for the validation Task.
+type ValidationCriterionStatus struct {
+	// ID Stable acceptance-criterion id (e.g. "AC-001-a").
+	ID string `json:"id"`
+
+	// RequirementID Parent requirement id; "" when the reporter did not supply it.
+	RequirementID string `json:"requirementId"`
+
+	// Status validating | passed | failed | skipped.
+	Status string `json:"status"`
+
+	// UpdatedAt When this status was last written.
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Warning defines model for Warning.

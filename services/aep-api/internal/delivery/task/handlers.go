@@ -79,10 +79,10 @@ func (h *Handler) GetTask(ctx context.Context, request gen.GetTaskRequestObject)
 	return getTaskJSONResponse(*detail), nil
 }
 
-// GetTaskCriteria lists a validation Task's per-acceptance-criterion statuses
-// from the durable store (the console's checklist seed). An empty list is a
-// valid "nothing reported yet" state, not a 404.
-func (h *Handler) GetTaskCriteria(ctx context.Context, request gen.GetTaskCriteriaRequestObject) (gen.GetTaskCriteriaResponseObject, error) {
+// GetTaskValidationCriteria lists a validation Task's per-acceptance-criterion
+// statuses from the durable store (the console's checklist seed). An empty list
+// is a valid "nothing reported yet" state, not a 404.
+func (h *Handler) GetTaskValidationCriteria(ctx context.Context, request gen.GetTaskValidationCriteriaRequestObject) (gen.GetTaskValidationCriteriaResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.reads == nil {
 		return nil, errTasksNotConfigured()
@@ -91,7 +91,7 @@ func (h *Handler) GetTaskCriteria(ctx context.Context, request gen.GetTaskCriter
 	if err != nil {
 		return nil, mapTaskReadError(err)
 	}
-	return getTaskCriteriaJSONResponse(rows), nil
+	return getTaskValidationCriteriaJSONResponse(rows), nil
 }
 
 // PromoteTaskFromIssue turns an ad-hoc GitHub issue into a coding Task and
@@ -130,12 +130,12 @@ func (r getTaskJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
 	return writeJSONBody(w, http.StatusOK, delivery.TaskDetail(r))
 }
 
-// getTaskCriteriaJSONResponse marshals the delivery DTO verbatim (same reason as
-// the list/get bodies above): delivery.CriterionStatus already carries the wire
-// tags (id/requirementId/status/updatedAt), and updatedAt is always set.
-type getTaskCriteriaJSONResponse []delivery.CriterionStatus
+// getTaskValidationCriteriaJSONResponse marshals the delivery DTO verbatim (same
+// reason as the list/get bodies above): delivery.CriterionStatus already carries
+// the wire tags (id/requirementId/status/updatedAt), and updatedAt is always set.
+type getTaskValidationCriteriaJSONResponse []delivery.CriterionStatus
 
-func (r getTaskCriteriaJSONResponse) VisitGetTaskCriteriaResponse(w http.ResponseWriter) error {
+func (r getTaskValidationCriteriaJSONResponse) VisitGetTaskValidationCriteriaResponse(w http.ResponseWriter) error {
 	return writeJSONBody(w, http.StatusOK, []delivery.CriterionStatus(r))
 }
 

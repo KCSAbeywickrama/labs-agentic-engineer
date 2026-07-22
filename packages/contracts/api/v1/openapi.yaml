@@ -1600,9 +1600,9 @@ paths:
       summary: Stream a Task's live state (status + executions + unified timeline) as SSE
       tags:
       - Tasks
-  /projects/{projectName}/tasks/{issueNumber}/criteria:
+  /projects/{projectName}/tasks/{issueNumber}/validation-criteria:
     get:
-      operationId: get-task-criteria
+      operationId: get-task-validation-criteria
       parameters:
       - description: Project name (DNS-label slug)
         in: path
@@ -1627,7 +1627,7 @@ paths:
                 type: array
                 nullable: true
                 items:
-                  $ref: '#/components/schemas/CriterionStatus'
+                  $ref: '#/components/schemas/ValidationCriterionStatus'
           description: OK
         default:
           content:
@@ -2836,31 +2836,6 @@ components:
       required:
       - name
       - skillMd
-      type: object
-    CriterionStatus:
-      additionalProperties: false
-      description: A validation acceptance criterion's latest run status, from the
-        durable per-criterion store (fed live by the runner). One entry per criterion
-        the runner has reported for the validation Task.
-      properties:
-        id:
-          description: Stable acceptance-criterion id (e.g. "AC-001-a").
-          type: string
-        requirementId:
-          description: Parent requirement id; "" when the reporter did not supply it.
-          type: string
-        status:
-          description: validating | passed | failed | skipped.
-          type: string
-        updatedAt:
-          description: When this status was last written.
-          format: date-time
-          type: string
-      required:
-      - id
-      - requirementId
-      - status
-      - updatedAt
       type: object
     DeleteOp:
       additionalProperties: false
@@ -4261,6 +4236,31 @@ components:
       - path
       - code
       - message
+      type: object
+    ValidationCriterionStatus:
+      additionalProperties: false
+      description: A validation acceptance criterion's latest run status, from the
+        durable per-criterion store (fed live by the runner). One entry per criterion
+        the runner has reported for the validation Task.
+      properties:
+        id:
+          description: Stable acceptance-criterion id (e.g. "AC-001-a").
+          type: string
+        requirementId:
+          description: Parent requirement id; "" when the reporter did not supply it.
+          type: string
+        status:
+          description: validating | passed | failed | skipped.
+          type: string
+        updatedAt:
+          description: When this status was last written.
+          format: date-time
+          type: string
+      required:
+      - id
+      - requirementId
+      - status
+      - updatedAt
       type: object
     WorkflowRun:
       additionalProperties: false
