@@ -62,6 +62,18 @@ func TestDedupeLabelFor(t *testing.T) {
 	if got := dedupeLabelFor(strings.Repeat("x", 200)); len(got) != 50 {
 		t.Errorf("expected 50-char cap, got %d", len(got))
 	}
+	// Over-length keys (long component + error fingerprint) must NOT collide by
+	// truncation: two distinct keys sharing a >50-char prefix get distinct
+	// labels via the appended key hash.
+	longA := "sre-rca/demo-developers-test-1-service1/aaaaaaaaaa"
+	longB := "sre-rca/demo-developers-test-1-service1/bbbbbbbbbb"
+	la, lb := dedupeLabelFor(longA), dedupeLabelFor(longB)
+	if len(la) > 50 || len(lb) > 50 {
+		t.Errorf("over-length keys exceeded 50-char cap: %q (%d), %q (%d)", la, len(la), lb, len(lb))
+	}
+	if la == lb {
+		t.Errorf("distinct long keys collided to the same label: %q", la)
+	}
 }
 
 func TestRankIssuesByQuery(t *testing.T) {

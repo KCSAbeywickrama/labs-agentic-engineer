@@ -86,17 +86,37 @@ func (f *Funnel) OnExecuteIntent(ctx context.Context, repoFullName string, issue
 	}
 
 	// Retry semantics (§7 "retry = a new row of that kind"): if the latest coding
-	// Execution succeeded into a MERGED PR whose latest build FAILED, an execute
-	// intent retries the BUILD at the stored merge SHA (a new build row) rather
+	// Execution succeeded into a MERGED PR whose build(s) FAILED, an execute
+	// intent retries the BUILD(s) at the stored merge SHA (new build rows) rather
 	// than re-running coding — this is what the console's Execute/Retry button
 	// means for a build failure. Every other state (pending / failed-coding /
 	// rejected) re-runs coding, unchanged.
+	//
+	// Path-based build fan-out means one merge can spawn a build per changed
+	// component, and those builds can end in DIFFERENT states — so retry EVERY
+	// component whose latest build failed (each at its own component name), not
+	// just the globally-latest build row.
 	execs, err := f.store.LatestPerKind(ctx, facts.Repo, facts.IssueNumber)
 	if err != nil {
 		return fmt.Errorf("load executions for %s#%d: %w", facts.Repo, facts.IssueNumber, err)
 	}
-	if fb := failedMergedBuild(execs); fb != nil {
-		return f.retryBuild(ctx, facts, fb.CommitSHA)
+	if coding := execs[string(taskmeta.KindCoding)]; coding != nil &&
+		taskmeta.ExecutionStatus(coding.Status) == taskmeta.ExecSucceeded {
+		rows, lerr := f.store.ListByIssue(ctx, facts.Repo, facts.IssueNumber)
+		if lerr != nil {
+			return fmt.Errorf("list executions for %s#%d: %w", facts.Repo, facts.IssueNumber, lerr)
+		}
+		if failed := failedComponentBuilds(rows); len(failed) > 0 {
+			var firstErr error
+			for comp, sha := range failed {
+				cf := facts
+				cf.Component = comp
+				if rerr := f.retryBuild(ctx, cf, sha); rerr != nil && firstErr == nil {
+					firstErr = rerr
+				}
+			}
+			return firstErr
+		}
 	}
 
 	row := &models.Execution{
@@ -226,24 +246,32 @@ func (f *Funnel) dispatch(ctx context.Context, facts TaskFacts, row *models.Exec
 	return nil
 }
 
-// failedMergedBuild returns the latest build row when the Task is in the
-// "merged PR, build failed" state a build retry recovers: the latest coding
-// Execution succeeded (ended at PR-open) AND the latest build failed AND its
-// merge SHA is recorded (needed to re-trigger). Otherwise nil (coding is the
-// retry).
-func failedMergedBuild(execs map[string]*models.Execution) *models.Execution {
-	coding := execs[string(taskmeta.KindCoding)]
-	build := execs[string(taskmeta.KindBuild)]
-	if coding == nil || build == nil {
-		return nil
+// failedComponentBuilds returns, per component, the merge SHA of that
+// component's LATEST build when it FAILED and carries a merge SHA to re-trigger.
+// buildRows is every Execution for the Task (non-build kinds are ignored; the
+// latest build per component wins by CreatedAt). A path-based fan-out can leave
+// some components' builds failed while others succeeded, so a build retry must
+// recover EACH failed component — not just the globally-latest build row. The
+// caller gates this on the latest coding Execution having succeeded (a merged
+// PR); otherwise coding is the retry.
+func failedComponentBuilds(buildRows []models.Execution) map[string]string {
+	latest := map[string]*models.Execution{}
+	for i := range buildRows {
+		b := &buildRows[i]
+		if b.Kind != string(taskmeta.KindBuild) {
+			continue
+		}
+		if cur, ok := latest[b.Component]; !ok || b.CreatedAt.After(cur.CreatedAt) {
+			latest[b.Component] = b
+		}
 	}
-	if taskmeta.ExecutionStatus(coding.Status) != taskmeta.ExecSucceeded {
-		return nil
+	out := map[string]string{}
+	for comp, b := range latest {
+		if taskmeta.ExecutionStatus(b.Status) == taskmeta.ExecFailed && b.CommitSHA != "" {
+			out[comp] = b.CommitSHA
+		}
 	}
-	if taskmeta.ExecutionStatus(build.Status) != taskmeta.ExecFailed || build.CommitSHA == "" {
-		return nil
-	}
-	return build
+	return out
 }
 
 // gate applies the advisory gate check to an admitted queued coding row and

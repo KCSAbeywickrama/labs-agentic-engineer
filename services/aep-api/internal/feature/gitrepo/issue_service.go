@@ -18,6 +18,8 @@ package gitrepo
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -62,6 +64,10 @@ type IssueService interface {
 	// MergePullRequest squash-merges an open pull request. Used by the devflow
 	// task workflow's auto merge-pr gate.
 	MergePullRequest(ctx context.Context, orgID, projectID string, number int) error
+	// ListPullRequestFiles returns the paths of every file changed by a pull
+	// request — the path-based build trigger's input for mapping a merged PR's
+	// diff onto the components whose source it touched.
+	ListPullRequestFiles(ctx context.Context, orgID, projectID string, number int) ([]string, error)
 }
 
 type issueService struct {
@@ -196,12 +202,34 @@ func (s *issueService) lockRepoCreates(owner, repo string) func() {
 // marks issues created with that key. Whitespace collapses to "-" and the
 // result is capped at GitHub's 50-char label limit — the cap is deterministic
 // (same key → same label), so we truncate rather than hash.
+// dedupeLabelPrefix namespaces the dedupe label. GitHub caps label names at 50
+// characters.
+const (
+	dedupeLabelPrefix = "dedupe:"
+	maxGitHubLabelLen = 50
+	dedupeHashLen     = 10 // hex chars of the key hash appended on overflow
+)
+
+// dedupeLabelFor maps a dedupe key to its GitHub label. Short keys map to a
+// readable `dedupe:<normalised-key>` label unchanged (so component-only keys
+// stay stable). Keys that would exceed GitHub's 50-char label limit — e.g. a
+// long component name plus an error fingerprint — keep a readable prefix and
+// append a hash of the FULL normalised key, so two distinct long keys can never
+// collide by being truncated to the same 50-char string.
 func dedupeLabelFor(key string) string {
-	label := "dedupe:" + strings.ToLower(strings.Join(strings.Fields(key), "-"))
-	if len(label) > 50 {
-		label = label[:50]
+	norm := strings.ToLower(strings.Join(strings.Fields(key), "-"))
+	label := dedupeLabelPrefix + norm
+	if len(label) <= maxGitHubLabelLen {
+		return label
 	}
-	return label
+	sum := sha256.Sum256([]byte(norm))
+	hash := hex.EncodeToString(sum[:])[:dedupeHashLen]
+	// Room for the prefix, a '-' separator, and the hash suffix.
+	keep := maxGitHubLabelLen - len(dedupeLabelPrefix) - 1 - dedupeHashLen
+	if keep > len(norm) {
+		keep = len(norm)
+	}
+	return dedupeLabelPrefix + norm[:keep] + "-" + hash
 }
 
 func (s *issueService) ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]IssueInfo, error) {
@@ -323,6 +351,14 @@ func (s *issueService) MergePullRequest(ctx context.Context, orgID, projectID st
 		return err
 	}
 	return s.github.MergePullRequest(ctx, owner, repoName, cred, number)
+}
+
+func (s *issueService) ListPullRequestFiles(ctx context.Context, orgID, projectID string, number int) ([]string, error) {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.github.ListPullRequestFiles(ctx, owner, repoName, cred, number)
 }
 
 // resolveRepoAndCredential looks up the project's git repository, parses its

@@ -110,6 +110,26 @@ func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID s
 	return names, nil
 }
 
+// ComponentPaths maps each design component's (lowercased) name to its source
+// directory (appPath) for the path-based build trigger. Satisfies
+// execution.DesignReader.
+func (d designComponents) ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error) {
+	design, err := d.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if design == nil {
+		return nil, nil
+	}
+	paths := make(map[string]string, len(design.Components))
+	for _, c := range design.Components {
+		// Real (design) name — the build path uses it verbatim to trigger the
+		// build; matching against facts.Component is done case-insensitively.
+		paths[c.Name] = strings.Trim(c.AppPath, "/")
+	}
+	return paths, nil
+}
+
 // ReadDesignComponents exposes the project's authored design components at HEAD.
 // Satisfies provisioning.DesignReader (and dependencies/resources.DesignReader).
 func (d designComponents) ReadDesignComponents(ctx context.Context, orgID, projectID string) ([]models.DesignComponent, error) {

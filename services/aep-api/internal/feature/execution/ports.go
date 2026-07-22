@@ -46,9 +46,19 @@ type RepoLookup interface {
 }
 
 // PRReader reads a pull request's live state for the sweep's PR-state
-// reconciliation (§5). gitrepo.IssueService satisfies it.
+// reconciliation (§5) and its changed-file list for the path-based build
+// trigger. gitrepo.IssueService satisfies it.
 type PRReader interface {
 	GetPullRequestState(ctx context.Context, orgID, projectID string, number int) (*gitrepo.PullRequestState, error)
+	// ListPullRequestFiles returns the paths of every file the PR changed, used
+	// to map a merged PR onto the components whose source it touched.
+	ListPullRequestFiles(ctx context.Context, orgID, projectID string, number int) ([]string, error)
+}
+
+// PRMerger squash-merges a pull request — the (flag-gated) auto-merge of a
+// coding-agent PR the moment it opens. gitrepo.IssueService satisfies it.
+type PRMerger interface {
+	MergePullRequest(ctx context.Context, orgID, projectID string, number int) error
 }
 
 // RepoRef identifies one project repository for the reconciliation sweep.
@@ -73,6 +83,14 @@ type DesignReader interface {
 	// ComponentNames returns the lowercased set of component names present in
 	// the project's design at HEAD, or nil when the project has no design yet.
 	ComponentNames(ctx context.Context, orgID, projectID string) (map[string]bool, error)
+	// ComponentPaths returns, per component, its source directory (appPath)
+	// relative to the repo root — the design (unprefixed) component name mapped
+	// to its appPath. The path-based build trigger matches a merged PR's changed
+	// files against these prefixes to decide which components to rebuild.
+	// Components with an empty appPath (repo-root build context) are returned
+	// with "" so the caller can treat them as matching any change. Returns nil
+	// when the project has no design yet.
+	ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error)
 	// ProvisionDepNames returns, per component (lowercased name), the names of
 	// that component's provisioning dependencies (external + platform-resource) —
 	// the deps the funnel's dependency-kind-aware gate holds a consumer coding

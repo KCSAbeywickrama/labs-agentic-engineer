@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/devflow"
@@ -59,6 +60,20 @@ type Events struct {
 	// transition (coding done / merged / rejected) instantly instead of on the
 	// stream's slow re-derive tick. Nil-safe.
 	notifier *TaskStreamHub
+	// design maps changed files to components for the path-based build fan-out
+	// (a merged PR rebuilds every component whose appPath it touched, not just
+	// the Task's bound component). Nil-safe: unset falls back to building only
+	// the Task's component (the pre-fan-out behavior).
+	design DesignReader
+	// autoMerge, when true, squash-merges a coding-agent PR the moment it opens
+	// (linking a Task), removing the human review gate. DISABLED by default: this
+	// auto-deploys unreviewed agent-authored code (the coding-agent's PRs are not
+	// guaranteed correct), so a deployment must explicitly opt in via config.
+	// repos resolves the delivered repo full name to org/project; merger does the
+	// squash-merge. All three must be set for auto-merge to fire.
+	autoMerge bool
+	repos     RepoLookup
+	merger    PRMerger
 }
 
 // NewEvents wires the pull_request handlers. prs may be nil (then the sweep
@@ -79,6 +94,48 @@ func (e *Events) WithWorkflowSignaler(s *devflow.Signaler) *Events {
 func (e *Events) WithTaskNotifier(h *TaskStreamHub) *Events {
 	e.notifier = h
 	return e
+}
+
+// WithDesignReader wires the design reader used by the path-based build fan-out
+// to map a merged PR's changed files onto components. Optional — unset leaves
+// the single-component build behavior unchanged.
+func (e *Events) WithDesignReader(d DesignReader) *Events {
+	e.design = d
+	return e
+}
+
+// WithAutoMerge enables (flag-gated) auto-merge of coding-agent PRs on open.
+// enabled must be true AND both repos+merger set for it to fire. Default is
+// DISABLED — auto-merge deploys unreviewed agent-authored code, so a deployment
+// opts in explicitly (secure default). Optional — unset leaves the PR as the
+// human review gate.
+func (e *Events) WithAutoMerge(enabled bool, repos RepoLookup, merger PRMerger) *Events {
+	e.autoMerge = enabled
+	e.repos = repos
+	e.merger = merger
+	return e
+}
+
+// maybeAutoMerge squash-merges a just-opened coding-agent PR when auto-merge is
+// enabled. Best-effort: a resolution or merge failure is logged, never returned
+// (it must not fail webhook processing — the PR simply stays open for a human,
+// or the sweep/next delivery retries). GitHub answers 405 while checks are
+// pending/unmergeable; MergePullRequest reconciles an already-merged PR to
+// success, so a benign not-yet-mergeable error just leaves the PR open.
+func (e *Events) maybeAutoMerge(ctx context.Context, repoFullName string, prNumber int) {
+	if !e.autoMerge || e.merger == nil || e.repos == nil || prNumber == 0 {
+		return
+	}
+	orgID, projectID, err := e.repos.ByFullName(ctx, repoFullName)
+	if err != nil {
+		slog.WarnContext(ctx, "auto-merge: resolve repo failed", "repo", repoFullName, "pr", prNumber, "error", err)
+		return
+	}
+	if err := e.merger.MergePullRequest(ctx, orgID, projectID, prNumber); err != nil {
+		slog.WarnContext(ctx, "auto-merge: merge failed (PR left open for review/retry)", "repo", repoFullName, "pr", prNumber, "error", err)
+		return
+	}
+	slog.InfoContext(ctx, "auto-merged coding-agent PR", "repo", repoFullName, "pr", prNumber)
 }
 
 // RegisterHandlers installs the pull_request handlers on the webhook router.
@@ -163,6 +220,10 @@ func (e *Events) PullRequestOpened(ctx context.Context, _, _ string, payload []b
 		HeadSHA:  p.PullRequest.MergeCommitSHA,
 	})
 	e.notifier.Notify(p.Repository.FullName, issueNumber)
+	// Flag-gated auto-merge: only reached for a non-draft coding-agent PR that
+	// links a Task with an active coding attempt (the guards above), so it never
+	// touches unrelated human PRs. No-op unless explicitly enabled via config.
+	e.maybeAutoMerge(ctx, p.Repository.FullName, p.PullRequest.Number)
 	return nil
 }
 
@@ -202,29 +263,20 @@ func (e *Events) PullRequestClosed(ctx context.Context, _, _ string, payload []b
 		MergeSHA: p.PullRequest.MergeCommitSHA,
 	})
 	e.notifier.Notify(p.Repository.FullName, issueNumber)
-	return e.spawnBuild(ctx, p.Repository.FullName, issueNumber, p.PullRequest.MergeCommitSHA)
+	return e.spawnBuild(ctx, p.Repository.FullName, issueNumber, p.PullRequest.Number, p.PullRequest.MergeCommitSHA)
 }
 
-// spawnBuild admits + dispatches a build Execution for a merged Task. Shared by
+// spawnBuild admits + dispatches build Executions for a merged Task. Shared by
 // the PR-closed(merged) webhook and the sweep's PR-state healer.
-func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumber int, mergeSHA string) error {
-	// Dedupe on MERGE IDENTITY (the merge commit SHA), NOT task lifetime: skip
-	// only when a build row already exists FOR THIS MERGE (active OR terminal) —
-	// i.e. a GitHub re-delivery of the same merge webhook. A genuinely new merged
-	// PR carries a new SHA, so it admits a fresh build row through TryAdmit as
-	// normal even when an older attempt's terminal build exists (§7 retry = a new
-	// row; a task with a failed build for an OLD merge stays retryable). SHA is
-	// globally unique per merge, so it is the robust dedupe key — PR numbers churn
-	// across coding attempts and TryAdmit's mutex only blocks ACTIVE rows.
-	if mergeSHA != "" {
-		built, err := e.buildExistsForMerge(ctx, repoFullName, issueNumber, mergeSHA)
-		if err != nil {
-			return err
-		}
-		if built {
-			return nil // re-delivery of this same merge — already built
-		}
-	}
+//
+// Path-based fan-out: a merged PR rebuilds EVERY component whose source it
+// touched — not just the Task's bound component — because the coding agent
+// often lands a cross-component fix in one PR (e.g. an incident that alerts on
+// service1 whose fix is in service2). The Task's own component is always built;
+// extra components are discovered by matching the PR's changed files against
+// each design component's appPath. Degrades to the single Task component when
+// the PR number, PR-file reader, or design paths are unavailable.
+func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumber, prNumber int, mergeSHA string) error {
 	facts, ok, err := e.funnel.TaskFactsFor(ctx, repoFullName, issueNumber)
 	if err != nil {
 		return err
@@ -239,6 +291,98 @@ func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumbe
 		// (validation-phase). Deriving stays at merged with no build Execution.
 		return nil
 	}
+
+	components := e.buildTargets(ctx, facts, prNumber)
+
+	var firstErr error
+	for i, comp := range components {
+		// Dedupe on MERGE IDENTITY (merge SHA) per COMPONENT: skip only when THIS
+		// component already has a build row for THIS merge (a GitHub re-delivery).
+		// Distinct components under one merge each admit their own row; a new
+		// merge carries a new SHA so it always admits fresh (§7 retry = new row).
+		if mergeSHA != "" {
+			built, derr := e.buildExistsForMerge(ctx, repoFullName, issueNumber, comp, mergeSHA)
+			if derr != nil {
+				if i == 0 {
+					return derr
+				}
+				slog.WarnContext(ctx, "path-based build: dedupe check failed for extra component", "component", comp, "error", derr)
+				continue
+			}
+			if built {
+				continue // re-delivery of this same merge for this component
+			}
+		}
+		cf := facts
+		cf.Component = comp
+		if berr := e.admitAndDispatchBuild(ctx, cf, mergeSHA); berr != nil {
+			// The Task's own component (i==0) is the primary: propagate its error
+			// so the webhook retries. An extra component's failure is logged but
+			// must not block the other builds or fail the whole delivery.
+			if i == 0 {
+				firstErr = berr
+			} else {
+				slog.WarnContext(ctx, "path-based build failed for extra component", "component", comp, "error", berr)
+			}
+		}
+	}
+	return firstErr
+}
+
+// buildTargets is the set of components to build for a merged PR: always the
+// Task's own component (first — its dispatch error is the one propagated), plus
+// any design component whose appPath prefixes a file the PR changed. Degrades to
+// just facts.Component when the PR number, PR-file reader, or design reader is
+// unavailable, or on any lookup error.
+func (e *Events) buildTargets(ctx context.Context, facts TaskFacts, prNumber int) []string {
+	targets := []string{facts.Component}
+	seen := map[string]bool{strings.ToLower(facts.Component): true}
+
+	if prNumber == 0 || e.prs == nil || e.design == nil {
+		return targets
+	}
+	files, err := e.prs.ListPullRequestFiles(ctx, facts.OrgID, facts.ProjectID, prNumber)
+	if err != nil {
+		slog.WarnContext(ctx, "path-based build: list PR files failed, building only the Task component", "pr", prNumber, "error", err)
+		return targets
+	}
+	paths, err := e.design.ComponentPaths(ctx, facts.OrgID, facts.ProjectID)
+	if err != nil {
+		slog.WarnContext(ctx, "path-based build: read component paths failed, building only the Task component", "error", err)
+		return targets
+	}
+	for name, appPath := range paths {
+		if seen[strings.ToLower(name)] {
+			continue
+		}
+		if changedUnder(files, appPath) {
+			targets = append(targets, name)
+			seen[strings.ToLower(name)] = true
+		}
+	}
+	return targets
+}
+
+// changedUnder reports whether any changed file lives under appPath (a
+// component's source directory relative to the repo root). An empty appPath
+// means the component builds from the repo root, so any change matches.
+func changedUnder(files []string, appPath string) bool {
+	if appPath == "" {
+		return len(files) > 0
+	}
+	prefix := appPath + "/"
+	for _, f := range files {
+		if f == appPath || strings.HasPrefix(f, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// admitAndDispatchBuild admits one build Execution for facts.Component pinned to
+// mergeSHA and dispatches it through the class executor. Extracted so the
+// path-based fan-out can call it once per target component.
+func (e *Events) admitAndDispatchBuild(ctx context.Context, facts TaskFacts, mergeSHA string) error {
 	row := &models.Execution{
 		OrgID:       facts.OrgID,
 		ProjectID:   facts.ProjectID,
@@ -257,7 +401,7 @@ func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumbe
 		return err
 	}
 	if !admitted {
-		return nil // a build for this merge is already in flight
+		return nil // a build for this (component, merge) is already in flight
 	}
 	executor, ok := e.registry.Lookup(facts.Class)
 	if !ok {
@@ -272,17 +416,18 @@ func (e *Events) spawnBuild(ctx context.Context, repoFullName string, issueNumbe
 	return nil
 }
 
-// buildExistsForMerge reports whether any build Execution (active or terminal)
-// already targets mergeSHA for this Task — the merge-identity dedupe for
-// spawnBuild. It scans all rows (not just the latest) so a re-delivery of an
-// OLDER merge is also caught, and a new merge is never blocked by a prior one.
-func (e *Events) buildExistsForMerge(ctx context.Context, repoFullName string, issueNumber int, mergeSHA string) (bool, error) {
+// buildExistsForMerge reports whether a build Execution (active or terminal)
+// already targets mergeSHA for THIS component of this Task — the per-component
+// merge-identity dedupe for spawnBuild. It scans all rows (not just the latest)
+// so a re-delivery of an OLDER merge is also caught, and a new merge is never
+// blocked by a prior one.
+func (e *Events) buildExistsForMerge(ctx context.Context, repoFullName string, issueNumber int, component, mergeSHA string) (bool, error) {
 	rows, err := e.store.ListByIssue(ctx, repoFullName, issueNumber)
 	if err != nil {
 		return false, err
 	}
 	for i := range rows {
-		if rows[i].Kind == string(taskmeta.KindBuild) && rows[i].CommitSHA == mergeSHA {
+		if rows[i].Kind == string(taskmeta.KindBuild) && rows[i].CommitSHA == mergeSHA && strings.EqualFold(rows[i].Component, component) {
 			return true, nil
 		}
 	}
@@ -318,7 +463,7 @@ func (e *Events) ReconcileTaskPR(ctx context.Context, orgID, projectID, repoFull
 	}
 	switch {
 	case pr.Merged:
-		return e.spawnBuild(ctx, repoFullName, issueNumber, pr.MergeCommitSHA)
+		return e.spawnBuild(ctx, repoFullName, issueNumber, prNum, pr.MergeCommitSHA)
 	case pr.State == "closed":
 		return e.recordRejection(ctx, repoFullName, issueNumber)
 	}

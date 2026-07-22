@@ -253,8 +253,10 @@ func TestEvents_PRMerged_PlatformSenderStillSpawnsBuild(t *testing.T) {
 // blocks ACTIVE rows; the SHA guard is what stops a terminal-row duplicate).
 func TestEvents_PRMerged_ReDeliveryAfterBuild_NoDuplicate(t *testing.T) {
 	store := newFakeStore()
-	// A build already ran to completion for THIS merge (SHA abc123).
-	_, b, _ := store.TryAdmit(context.Background(), &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), CommitSHA: "abc123"})
+	// A build already ran to completion for THIS merge (SHA abc123) for the
+	// Task's component (build rows always carry their component; the per-component
+	// merge-identity dedupe keys on it).
+	_, b, _ := store.TryAdmit(context.Background(), &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "order-service", CommitSHA: "abc123"})
 	_, _ = store.Finish(context.Background(), b.ID, string(taskmeta.ExecSucceeded), "")
 
 	issues := newFakeIssues([]gitrepo.IssueInfo{taskIssue(2, "order-service", nil, nil, "open")})
@@ -270,6 +272,97 @@ func TestEvents_PRMerged_ReDeliveryAfterBuild_NoDuplicate(t *testing.T) {
 	}
 	if n := countBuilds(store, 2); n != 1 {
 		t.Fatalf("expected exactly one build row after same-merge re-delivery, got %d", n)
+	}
+}
+
+// TestEvents_PRMerged_PathBasedFanOut builds EVERY component whose source the
+// merged PR touched — not just the Task's bound component. Here the Task is on
+// order-service but the PR also edits worker/, so both must build.
+func TestEvents_PRMerged_PathBasedFanOut(t *testing.T) {
+	store := newFakeStore()
+	issues := newFakeIssues([]gitrepo.IssueInfo{taskIssue(2, "order-service", nil, nil, "open")})
+	exec := &fakeExecutor{store: store, startOK: true}
+	prs := fakePRReader{
+		states: map[int]*gitrepo.PullRequestState{7: {State: "closed", Merged: true, MergeCommitSHA: "sha1"}},
+		files:  map[int][]string{7: {"order-service/main.go", "worker/handler.go", "README.md"}},
+	}
+	e := newEventsWithPR(store, issues, exec, prs).
+		WithDesignReader(fakeDesign{paths: map[string]string{"order-service": "order-service", "worker": "worker"}})
+
+	if err := e.PullRequestClosed(context.Background(), "pull_request", "closed",
+		prPayload("closed", 7, true, "sha1", "Closes #2", "dev")); err != nil {
+		t.Fatalf("PullRequestClosed(merged): %v", err)
+	}
+
+	built := map[string]bool{}
+	for _, r := range exec.got {
+		if r.Execution.Kind == string(taskmeta.KindBuild) {
+			built[r.Task.Component] = true
+		}
+	}
+	if !built["order-service"] || !built["worker"] || len(built) != 2 {
+		t.Fatalf("expected builds for order-service AND worker only, got %v", built)
+	}
+}
+
+// TestEvents_PRMerged_NoDesignReader_BuildsOnlyTaskComponent pins the graceful
+// fallback: with no design reader / PR-file source wired, a merged PR builds
+// only the Task's own component (the pre-fan-out behavior).
+func TestEvents_PRMerged_NoDesignReader_BuildsOnlyTaskComponent(t *testing.T) {
+	store := newFakeStore()
+	issues := newFakeIssues([]gitrepo.IssueInfo{taskIssue(2, "order-service", nil, nil, "open")})
+	exec := &fakeExecutor{store: store, startOK: true}
+	e := newEvents(store, issues, exec) // no prs, no design reader
+
+	if err := e.PullRequestClosed(context.Background(), "pull_request", "closed",
+		prPayload("closed", 7, true, "sha1", "Closes #2", "dev")); err != nil {
+		t.Fatalf("PullRequestClosed(merged): %v", err)
+	}
+
+	built := map[string]bool{}
+	for _, r := range exec.got {
+		if r.Execution.Kind == string(taskmeta.KindBuild) {
+			built[r.Task.Component] = true
+		}
+	}
+	if !built["order-service"] || len(built) != 1 {
+		t.Fatalf("expected exactly one build for order-service, got %v", built)
+	}
+}
+
+// TestEvents_PROpened_AutoMerge pins the flag-gated auto-merge: enabled → the
+// coding-agent PR is merged on open; disabled → it is left for a human.
+func TestEvents_PROpened_AutoMerge(t *testing.T) {
+	setup := func() (*fakeStore, *fakeIssues, *fakeExecutor) {
+		store := newFakeStore()
+		_, row, _ := store.TryAdmit(context.Background(), &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindCoding)})
+		store.markRunning(row.ID)
+		issues := newFakeIssues([]gitrepo.IssueInfo{taskIssue(2, "order-service", nil, nil, "open")})
+		return store, issues, &fakeExecutor{store: store, startOK: true}
+	}
+
+	// Enabled → merged.
+	store, issues, exec := setup()
+	merger := &fakeMerger{}
+	e := newEvents(store, issues, exec).WithAutoMerge(true, fakeRepos{orgID: "org1", projectID: "proj1"}, merger)
+	if err := e.PullRequestOpened(context.Background(), "pull_request", "opened",
+		prPayload("opened", 7, false, "", "Closes #2", "dev")); err != nil {
+		t.Fatalf("PullRequestOpened: %v", err)
+	}
+	if merger.merged != 7 {
+		t.Fatalf("auto-merge enabled: expected PR 7 merged, got %d", merger.merged)
+	}
+
+	// Disabled (default) → not merged.
+	store, issues, exec = setup()
+	merger = &fakeMerger{}
+	e = newEvents(store, issues, exec).WithAutoMerge(false, fakeRepos{orgID: "org1", projectID: "proj1"}, merger)
+	if err := e.PullRequestOpened(context.Background(), "pull_request", "opened",
+		prPayload("opened", 7, false, "", "Closes #2", "dev")); err != nil {
+		t.Fatalf("PullRequestOpened: %v", err)
+	}
+	if merger.merged != 0 {
+		t.Fatalf("auto-merge disabled: expected no merge, got PR %d", merger.merged)
 	}
 }
 

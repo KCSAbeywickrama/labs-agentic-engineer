@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/feature/gitrepo"
@@ -52,6 +53,62 @@ func newTestFunnel(store *fakeStore, issues *fakeIssues, design map[string]bool,
 		reg.Register(taskmeta.ClassCoding, exec)
 	}
 	return NewFunnel(store, issues, fakeRepos{orgID: "org1", projectID: "proj1"}, fakeDesign{names: design}, reg)
+}
+
+func TestFailedComponentBuilds(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	rows := []models.Execution{
+		{Kind: string(taskmeta.KindCoding), Component: "order-service", Status: string(taskmeta.ExecSucceeded), CreatedAt: t0},
+		{Kind: string(taskmeta.KindBuild), Component: "order-service", Status: string(taskmeta.ExecSucceeded), CommitSHA: "sha", CreatedAt: t0.Add(time.Second)},
+		{Kind: string(taskmeta.KindBuild), Component: "worker", Status: string(taskmeta.ExecFailed), CommitSHA: "sha", CreatedAt: t0.Add(2 * time.Second)},
+	}
+	got := failedComponentBuilds(rows)
+	if len(got) != 1 || got["worker"] != "sha" {
+		t.Fatalf("expected only the failed component {worker: sha}, got %v", got)
+	}
+
+	// A later succeeded build for the same component clears its failure (latest
+	// build per component wins).
+	rows = append(rows, models.Execution{Kind: string(taskmeta.KindBuild), Component: "worker", Status: string(taskmeta.ExecSucceeded), CommitSHA: "sha", CreatedAt: t0.Add(3 * time.Second)})
+	if got := failedComponentBuilds(rows); len(got) != 0 {
+		t.Fatalf("latest worker build succeeded → no retry, got %v", got)
+	}
+}
+
+// TestFunnel_ExecuteRetriesFailedComponentBuildOnly pins the per-component build
+// retry: after a path-based fan-out where one component's build succeeded and
+// another's failed, an Execute intent retries ONLY the failed component (not the
+// succeeded one, and not a coding re-run).
+func TestFunnel_ExecuteRetriesFailedComponentBuildOnly(t *testing.T) {
+	store := newFakeStore()
+	ctx := context.Background()
+	// coding succeeded (PR merged); order-service build succeeded; worker build FAILED.
+	_, c, _ := store.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindCoding), Component: "order-service"})
+	_, _ = store.Finish(ctx, c.ID, string(taskmeta.ExecSucceeded), "")
+	_, b1, _ := store.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "order-service", CommitSHA: "sha"})
+	_, _ = store.Finish(ctx, b1.ID, string(taskmeta.ExecSucceeded), "")
+	_, b2, _ := store.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "worker", CommitSHA: "sha"})
+	_, _ = store.Finish(ctx, b2.ID, string(taskmeta.ExecFailed), "boom")
+
+	issues := newFakeIssues([]gitrepo.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
+	exec := &fakeExecutor{store: store, startOK: true}
+	f := newTestFunnel(store, issues, map[string]bool{"order-service": true, "worker": true}, exec)
+
+	if err := f.OnExecuteIntent(ctx, "o/r", 2); err != nil {
+		t.Fatalf("OnExecuteIntent: %v", err)
+	}
+	var builtComps []string
+	for _, r := range exec.got {
+		switch r.Execution.Kind {
+		case string(taskmeta.KindBuild):
+			builtComps = append(builtComps, r.Task.Component)
+		case string(taskmeta.KindCoding):
+			t.Fatalf("expected a build retry, got a coding re-run")
+		}
+	}
+	if len(builtComps) != 1 || builtComps[0] != "worker" {
+		t.Fatalf("expected retry of the failed component (worker) only, got %v", builtComps)
+	}
 }
 
 func TestFunnel_DepsSatisfied_Dispatches(t *testing.T) {
