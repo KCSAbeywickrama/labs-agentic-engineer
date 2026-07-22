@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/contracts/activityvocab"
@@ -75,13 +76,53 @@ func (r buildActivityRecorder) RecordSpecPublished(ctx context.Context, orgID, p
 	})
 }
 
+// specAuthorship bridges the async gap between a room-scoped genai turn
+// finishing and the collab committer later flushing that turn's doc edits to git
+// (issue #239). A room turn writes into the shared doc and commits nothing; the
+// committer flushes ~a debounce-window later via files/apply, under the user's
+// own token — so at the git layer the agent's work is indistinguishable from a
+// manual edit and would be mis-attributed to the user. The turn is the only
+// place agent authorship is still known, so it marks the project here; the next
+// apply that lands a commit claims the mark and suppresses its (wrong) user
+// line, because the turn already recorded the agent line.
+//
+// A boolean per (org, project) is precise for the common cases: agent-only edit
+// (mark set → claimed → no user line), user-only edit (no mark → user line),
+// and agent-then-user within one flush (attributed to the agent). The state is
+// in-process, matching the single aep-api replica of the deployment; a restart
+// between a turn and its flush at worst mislabels that one flush as manual.
+type specAuthorship struct{ pending sync.Map } // key: orgID + "\x00" + projectID
+
+func specKey(orgID, projectID string) string { return orgID + "\x00" + projectID }
+
+// markAgent records that an agent turn authored uncommitted spec edits for this
+// project.
+func (a *specAuthorship) markAgent(orgID, projectID string) {
+	a.pending.Store(specKey(orgID, projectID), struct{}{})
+}
+
+// claimAgent reports whether an agent authored the change now being committed,
+// consuming the mark so a later manual edit is not swept up by it.
+func (a *specAuthorship) claimAgent(orgID, projectID string) bool {
+	_, ok := a.pending.LoadAndDelete(specKey(orgID, projectID))
+	return ok
+}
+
 // filesActivityRecorder implements files.SpecUpdatedRecorder: an apply landed a
 // real commit, so the project's spec changed. This is the path the collab
-// session flush and the spec editor's save share, which is what puts ordinary
-// spec work on the feed. Deduped by commit sha.
-type filesActivityRecorder struct{ svc *projects.ActivityService }
+// session flush and the spec editor's save share. A flush that carries an agent
+// turn's doc edits is already on the feed as the agent (recorded at turn
+// finish), so it is suppressed here; a genuine manual edit falls through and is
+// attributed to the signed-in user. Deduped by commit sha.
+type filesActivityRecorder struct {
+	svc        *projects.ActivityService
+	authorship *specAuthorship
+}
 
 func (r filesActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectName, commitSHA string) {
+	if r.authorship.claimAgent(orgID, projectName) {
+		return // agent-authored — the turn already recorded the agent line.
+	}
 	email, name := userIdentityFromContext(ctx)
 	r.svc.Record(ctx, projects.ActivityInput{
 		OrgID:      orgID,
@@ -96,14 +137,18 @@ func (r filesActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, pro
 }
 
 // turnActivityRecorder implements spec.TurnActivityRecorder: a genai turn
-// committed straight to main. The turn runs detached, so the request context is
-// long gone — the actor comes from the turn's captured commit author rather
-// than from ctx, falling back to the agent when the turn carries no identity.
-// Deduped by turn id.
-type turnActivityRecorder struct{ svc *projects.ActivityService }
+// authored spec changes. A turn is the agent working, so the actor is always the
+// agent (the console renders "Spec agent updated the spec"). It also marks the
+// project as agent-authored so the committer's later flush of the same edits is
+// suppressed rather than double-recorded as a manual edit. Deduped by turn id.
+type turnActivityRecorder struct {
+	svc        *projects.ActivityService
+	authorship *specAuthorship
+}
 
-func (r turnActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title, actorEmail, actorName string) {
-	in := projects.ActivityInput{
+func (r turnActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title string) {
+	r.authorship.markAgent(orgID, projectID)
+	r.svc.Record(ctx, projects.ActivityInput{
 		OrgID:      orgID,
 		ProjectID:  projectID,
 		Type:       activityvocab.TypeSpecUpdated,
@@ -113,11 +158,7 @@ func (r turnActivityRecorder) RecordSpecUpdated(ctx context.Context, orgID, proj
 		Title:      title,
 		DedupKey:   "turn:" + turnID + ":committed",
 		OccurredAt: time.Now().UTC(),
-	}
-	if actorEmail != "" {
-		in.ActorKind, in.ActorID, in.ActorName = activityvocab.ActorUser, actorEmail, actorName
-	}
-	r.svc.Record(ctx, in)
+	})
 }
 
 // userIdentityFromContext returns (email, displayName) for the signed-in user,

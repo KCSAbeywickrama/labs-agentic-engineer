@@ -61,6 +61,12 @@ type TurnTerminal struct {
 	Paths     []string
 	NoChanges bool
 	Message   string
+	// SpecEdited is true when the turn authored real spec changes: a committed
+	// turn whose fold produced a net change, or a room-scoped turn whose agent
+	// edited the collab doc (issue #239 — the activity feed's agent-authorship
+	// signal). It is independent of NoChanges: a room turn is always NoChanges
+	// (git is untouched until the committer flushes the doc) yet still SpecEdited.
+	SpecEdited bool
 }
 
 // TurnRepository is the agent_turns row store (design D17/D18): the durable
