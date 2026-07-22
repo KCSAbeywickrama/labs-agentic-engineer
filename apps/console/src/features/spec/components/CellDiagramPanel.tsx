@@ -19,35 +19,39 @@
 import { Alert, Box, Chip, CircularProgress, Typography } from "@wso2/oxygen-ui";
 import { CellDiagramView } from "@aep/ui-cell-diagram-view";
 import { useDerivedCellDiagram } from "../api/useDerivedDesign";
+import { DESIGN_CELL_PATH } from "../api/designTree";
 import type { SpecFileEntry } from "../api/mapping";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextString } from "../collab/useYTextString";
-
-/** Project-level cell-diagram DSL the agent streams first, ahead of design.json. */
-const DESIGN_CELL_PATH = "specs/design/design.cell";
 
 export function CellDiagramPanel({
   projectName,
   files,
   collab,
+  preferLiveCell = false,
 }: {
   projectName: string;
   files: SpecFileEntry[];
   collab: CollabSpec;
+  /** True once the agent has rewritten design.cell this session — the doc's
+   *  live DSL is then strictly fresher than the committed design.json bundle
+   *  (which only refreshes on commit), so the live stream takes precedence. */
+  preferLiveCell?: boolean;
 }) {
   const { dsl, isPending, isError } = useDerivedCellDiagram(projectName, files);
 
-  // The committed design.json bundle is authoritative — `dsl` is derived from
-  // it (design.json → cell DSL, same boundary rules as design.cell). While it
-  // is not yet resolved (no committed design.json, or its fetches still
-  // pending/failing mid-turn), fall back to the live `design.cell` DSL
-  // streaming into the collab doc so the diagram renders piece-by-piece as the
-  // agent writes it. Both paths feed the SAME renderer via a DSL string, so the
-  // streamed and reloaded diagrams match.
+  // Between turns the committed design.json bundle is authoritative — `dsl` is
+  // derived from it (design.json → cell DSL, same boundary rules as
+  // design.cell). The live `design.cell` DSL streaming into the collab doc
+  // renders instead while the derived DSL is not yet resolved (no committed
+  // design.json, or its fetches still pending/failing mid-turn) or once an
+  // agent rewrite made it stale (`preferLiveCell`), so the diagram grows
+  // piece-by-piece as the agent writes. Both paths feed the SAME renderer via
+  // a DSL string, so the streamed and reloaded diagrams match.
   const liveSource = useYTextString(collab.getFileText(DESIGN_CELL_PATH));
   const derivedReady = !isPending && !isError && dsl != null;
-  const streaming =
-    !derivedReady && typeof liveSource === "string" && liveSource.trim().length > 0;
+  const liveNonEmpty = typeof liveSource === "string" && liveSource.trim().length > 0;
+  const streaming = liveNonEmpty && (!derivedReady || preferLiveCell);
   // An agent peer in the room means a design is actively being generated; show a
   // "waiting" cell rather than the generic "generate a design" empty state.
   const agentBusy = collab.peers.some((p) => p.kind === "agent");

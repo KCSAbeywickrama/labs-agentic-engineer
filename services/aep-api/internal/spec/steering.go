@@ -51,7 +51,13 @@ var steeringByUseCase = map[string]string{
 // the architecture skill and to DISCOVER real provider names before touching a
 // component's dependencies — without it the MCP tool can sit present-but-unused,
 // producing invented role-based org-service names that fail exact-name
-// resolution at build.
+// resolution at build. It also fixes the architecture-change ordering:
+// design.cell is the project's architecture contract, so a change that alters
+// the architecture rewrites it FIRST (removeFile + one addFile, so the console
+// re-streams the live diagram) before the rest of the design follows.
 const collabDepsSteer = "\n\nBefore editing any design.json, load the `high-level-architecture` skill. " +
 	"When your change adds or edits a component's `dependencies` — especially an `org-service` referencing another project — " +
-	"FIRST call `list_org_endpoints` and copy the provider component name VERBATIM; never invent a role-based name."
+	"FIRST call `list_org_endpoints` and copy the provider component name VERBATIM; never invent a role-based name. " +
+	"When the requested change ALTERS THE ARCHITECTURE — a component added, removed, or renamed; an edge, exposure, or external/SaaS dependency changed — " +
+	"load the `cell-architecture-dsl` skill and rewrite specs/design/design.cell FIRST (removeFile, then ONE addFile with the complete updated diagram), " +
+	"then update design.md and every affected design.json to match; do not narrate the process."

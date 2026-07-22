@@ -42,6 +42,17 @@ appears as a `dependencies[]` entry on that component's design.json (and vice
 versa — an interaction in design.json must be an edge in design.cell). A
 mismatch between the two is a defect, not a stylistic choice.
 
+## Incremental architecture changes
+
+When a later change alters the ARCHITECTURE of an existing design — a component
+added/removed/renamed, an edge or exposure changed, an external/SaaS dependency
+added or dropped — keep the generation order: rewrite
+`specs/design/design.cell` FIRST (load `cell-architecture-dsl`; removeFile then
+ONE addFile), then the design.md Components/Interactions sections, then every
+affected component's design.json. design.cell stays the architecture contract
+after every change, not just the first one. A change that alters none of those
+leaves design.cell untouched.
+
 ## The top-level design.md
 
 These sections, in order. Depth rule: **every requirement must have a home** in
