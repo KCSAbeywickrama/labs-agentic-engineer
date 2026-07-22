@@ -1,0 +1,82 @@
+// Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package spec
+
+// skills-manifest.json — the per-org baseline memory (spec §3). A
+// platform-managed sidecar at the org-skills repo ROOT recording, per
+// non-org-authored skill, the content it was last handed at: platform-shipped
+// skills get kind "platform" (whatever their frontmatter kind — the manifest
+// kind is provenance, the frontmatter kind is a human label), imports get
+// "imported" + their source. baseHash is contentSHA output (bare hex). A
+// skill with NO entry is org-authored: reconcile never touches it. Parsing
+// is tolerant — a corrupt manifest must never brick reads; the next
+// reconcile rewrites it. Rendering is deterministic (encoding/json sorts map
+// keys) so commits diff cleanly.
+
+import (
+	"encoding/json"
+	"log/slog"
+)
+
+// skillsManifestPath is the manifest's repo-relative path — at the repo root,
+// deliberately OUTSIDE skills/ so isCatalogPath never surfaces it as a skill.
+const skillsManifestPath = "skills-manifest.json"
+
+// Manifest provenance kinds. Distinct vocabulary from the frontmatter skill
+// kinds: "platform" covers every embedded-library skill (frontmatter platform
+// AND org kinds alike).
+const (
+	ManifestKindPlatform = "platform"
+	ManifestKindImported = "imported"
+)
+
+// ManifestEntry is one skill's baseline: what it is, where it came from, and
+// the contentSHA it was last handed at.
+type ManifestEntry struct {
+	Kind     string `json:"kind"`
+	Source   string `json:"source,omitempty"`
+	BaseHash string `json:"baseHash"`
+}
+
+// SkillsManifest maps skill name → baseline entry.
+type SkillsManifest map[string]ManifestEntry
+
+// parseSkillsManifest decodes raw bytes into a manifest. Nil/empty/corrupt
+// input yields an empty (non-nil) manifest with a warning — never an error.
+func parseSkillsManifest(raw []byte) SkillsManifest {
+	if len(raw) == 0 {
+		return SkillsManifest{}
+	}
+	var m SkillsManifest
+	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+		slog.Warn("skills: manifest unparseable — treating as empty", "error", err)
+		return SkillsManifest{}
+	}
+	return m
+}
+
+// renderSkillsManifest encodes the manifest deterministically: 2-space
+// indent, sorted keys (encoding/json sorts map keys), trailing newline.
+func renderSkillsManifest(m SkillsManifest) []byte {
+	raw, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		// A map[string]struct of strings cannot fail to marshal; guard anyway.
+		slog.Warn("skills: manifest render failed", "error", err)
+		return []byte("{}\n")
+	}
+	return append(raw, '\n')
+}
