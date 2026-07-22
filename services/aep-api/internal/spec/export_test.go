@@ -70,6 +70,20 @@ func NewComponentStore(t *testing.T) *ComponentStore {
 	return &ComponentStore{Svc: svc, host: host}
 }
 
+// newTestStoreWithLibrary is newTestStore with an injected platform library —
+// lets a test swap the library between reconciles (platform-moved / retired
+// scenarios), which testLibraryFS(t)'s fixed on-disk tree cannot express.
+func newTestStoreWithLibrary(t *testing.T, fsys fs.FS) (*SkillService, *testGitHost) {
+	t.Helper()
+	host := newTestGitHost(t)
+	svc := NewSkillService(sourcecontrol.NewGitOpsService(fakeResolver{}, host.engine), host, fsys)
+	return svc, host
+}
+
+// SwapLibrary points an existing service at a new platform library, modeling
+// a platform release: same org repos, new embedded content.
+func (s *SkillService) SwapLibrary(fsys fs.FS) { s.library = fsys }
+
 // DriftOrg rewrites an org-kind skill's SKILL.md directly on the org's ORIGIN
 // (advancing main), so a subsequent read/UpdatesAvailable sees a repo copy
 // whose content differs from the embedded copy — the state that drives the "updates available"

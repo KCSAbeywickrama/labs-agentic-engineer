@@ -245,12 +245,16 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	if rw.Kind != SkillKindCustom || !strings.Contains(rw.SkillMD, "user shadow") {
 		t.Fatalf("shadow must resolve custom-wins, got kind=%q body=%q", rw.Kind, rw.SkillMD)
 	}
-	// Drifted embedded skills were rewritten from the embed.
-	if strings.Contains(byName["go"].SkillMD, "OLD embedded go") {
-		t.Fatalf("embedded go must be rewritten from the embed")
+	// Divergent legacy copies of embedded names predate the manifest, so under
+	// the three-way reconcile they are pre-manifest backfill-overrides: moved
+	// flat and stamped, but their content is preserved, not clobbered back to
+	// the embed (spec §3 — same rule TestReconcile_BackfillStampsPreManifestRepo
+	// pins for the flat-layout case).
+	if !strings.Contains(byName["go"].SkillMD, "OLD embedded go") {
+		t.Fatalf("divergent pre-manifest legacy copy of go must be preserved as an override, not rewritten from the embed")
 	}
-	if strings.Contains(byName["task-planning"].SkillMD, "OLD flow body") {
-		t.Fatalf("embedded task-planning must be rewritten from the embed")
+	if !strings.Contains(byName["task-planning"].SkillMD, "OLD flow body") {
+		t.Fatalf("divergent pre-manifest legacy copy of task-planning must be preserved as an override, not rewritten from the embed")
 	}
 
 	// The badge must not offer an "update" for a user-owned name.

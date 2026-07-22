@@ -111,6 +111,25 @@ func (h *testGitHost) removeAtHead(orgID, path string) {
 	h.origin(orgID).Remove(h.t, "test remove "+path, path)
 }
 
+// readAtHead returns one file's exact content at the org's origin main tip
+// ("" if the org, the ref, or the path is absent), so tests can assert
+// committed bytes outside the skill catalog (e.g. skills-manifest.json)
+// without failing the test on a legitimate absence. Mirrors gitDirOut's
+// plumbing but tolerates the not-found case gittest.Remote.FileAt does not.
+func (h *testGitHost) readAtHead(orgID, path string) string {
+	origin := h.origin(orgID)
+	if origin == nil {
+		return ""
+	}
+	cmd := exec.Command("git", "--git-dir", origin.Dir(), "cat-file", "blob", "main:"+path)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 // mirrorGitDir is the engine-side bare mirror location for the org's skills repo.
 func (h *testGitHost) mirrorGitDir(orgID string) (string, error) {
 	h.mu.Lock()

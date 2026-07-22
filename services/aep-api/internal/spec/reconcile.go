@@ -20,15 +20,22 @@ package spec
 // ships in the BFF container as on-disk files (config.SkillsDir, read at
 // runtime; platform + org kinds, kind in frontmatter) and is seeded +
 // reconciled into each org's skills repo (the live store) under the FLAT layout
-// skills/<name>/. Reconcile is content-hash based: absent →
-// seed; embedded content SHA ≠ repo content SHA → overwrite (replacing the
-// whole skill dir, so stale references never linger); else leave. A name owned
-// by a user kind (custom/imported) is SKIPPED — the user copy wins. Retired
-// names the embed no longer ships are purged. Reconcile also MIGRATES
-// legacy-layout repos (skills/<kindDir>/<name>/) in the same single commit:
-// user skills move to their flat dir with the kind stamped into frontmatter,
-// embedded skills are rewritten flat, and the retired kind dirs are removed
-// (§4).
+// skills/<name>/. Reconcile is a THREE-WAY compare against skills-manifest.json
+// (§3), the per-org baseline of what each platform-managed skill was last
+// handed at: absent repo copy → seed; org clean + platform moved → refresh;
+// org moved + platform clean → leave the override alone; both moved → leave
+// it alone as a conflict (unless they converged, which auto-resolves); a
+// pre-manifest repo copy is backfilled (stamped, never clobbered). The
+// manifest is rewritten in the SAME commit as any file changes it reflects. A
+// name owned by a user kind (custom/imported) is SKIPPED — the user copy
+// wins. Names the manifest still tracks as platform-shipped that the embed no
+// longer ships are purged (a clean copy's files are deleted; an overridden
+// copy's files are kept and the entry is dropped — divergence is ownership).
+// Reconcile also MIGRATES legacy-layout repos (skills/<kindDir>/<name>/) in
+// the same single commit: user skills move to their flat dir with the kind
+// stamped into frontmatter, embedded skills are rewritten flat (a divergent
+// legacy copy is treated as a pre-manifest override, per the backfill rule
+// above), and the retired kind dirs are removed (§4).
 
 import (
 	"context"
@@ -112,28 +119,42 @@ func isUserKind(kind string) bool {
 }
 
 // reconcileEmbedded drives the whole repo to the desired flat state in ONE
-// commit:
+// commit, deciding each embedded skill's fate with the three-way compare
+// (decideReconcile, §3) against its skills-manifest.json baseline:
 //
-//   - every embedded skill absent from the repo, content-drifted, or still in
-//     a legacy dir is (re)written flat — unless a user kind owns the name
-//     (the user copy wins, the embedded skill is skipped);
+//   - every embedded skill absent from the repo, or clean with the platform
+//     moved, is (re)written flat and its baseline advanced — unless a user
+//     kind owns the name (the user copy wins, the embedded skill is
+//     skipped);
+//   - a repo copy the org diverged (with the platform not moving, or a
+//     conflict where both moved) is left alone — reconcile never clobbers an
+//     org edit;
+//   - a pre-manifest repo copy (no entry yet — first reconcile after this
+//     migration, or a legacy-dir copy) is backfilled: the baseline is stamped
+//     so future reconciles compare correctly, but a divergent copy's content
+//     is never rewritten;
 //   - user skills found in legacy dirs are moved to their flat dir with the
 //     kind stamped into frontmatter (§4);
-//   - platform/org-kind skills the embed no longer ships are purged (without
-//     this a retired skill would linger in every org repo forever and keep
-//     getting inlined into agent prompts);
+//   - names the manifest still tracks as platform-shipped that the embed no
+//     longer ships are purged: a clean copy's files are deleted (without this
+//     a retired skill would linger in every org repo forever and keep
+//     getting inlined into agent prompts); an overridden copy's files are
+//     kept and its entry dropped (the org now owns the name outright);
 //   - the retired legacy kind dirs are removed wholesale (writes land at flat
 //     paths, so the staged prefix deletes only ever remove old copies).
 //
-// A rewritten skill's flat directory is replaced wholesale (delete staged
-// before the writes) so references removed by the new content never linger.
-// Returns the number of skills written + migrated + purged. §6.2.
+// The manifest is rewritten in the same commit as any file changes it
+// reflects. A rewritten skill's flat directory is replaced wholesale (delete
+// staged before the writes) so references removed by the new content never
+// linger. Returns the number of skills written + migrated + purged (the
+// manifest-only stamp of a backfill is not counted, but still committed).
+// §6.2.
 func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) (int, error) {
 	embedded, err := loadLibrary(s.library)
 	if err != nil {
 		return 0, err
 	}
-	entries, err := s.loadCatalogEntries(ctx, orgID, repo)
+	entries, manifest, err := s.loadEntriesAndManifest(ctx, orgID, repo)
 	if err != nil {
 		return 0, err
 	}
@@ -150,6 +171,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	writes := map[string][]byte{}
 	var deletes []string
 	written, migrated, purged := 0, 0, 0
+	manifestDirty := false
 
 	stageWrite := func(name, skillMD string, refs map[string]string) {
 		writes[skillRepoPath(name)] = []byte(skillMD)
@@ -157,43 +179,84 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 			writes[skillRefPath(name, refKey)] = []byte(content)
 		}
 	}
+	setBase := func(name, sha string) {
+		if manifest[name] != (ManifestEntry{Kind: ManifestKindPlatform, BaseHash: sha}) {
+			manifest[name] = ManifestEntry{Kind: ManifestKindPlatform, BaseHash: sha}
+			manifestDirty = true
+		}
+	}
 
 	for _, b := range embedded {
 		embeddedNames[b.Name] = true
 		cur, ok := current[b.Name]
 		if ok && isUserKind(cur.Kind) {
-			continue // the user copy owns this name — never overwrite it
+			continue // a custom/imported copy owns this name — never touch it
 		}
-		if ok && cur.legacyDir == "" && cur.ContentSHA == b.ContentSHA {
-			continue
+		var entry *ManifestEntry
+		if e, has := manifest[b.Name]; has {
+			entry = &e
 		}
-		written++
-		// Replace the whole flat dir: the delete is staged first, the new
-		// files win (legacy copies fall to the wholesale prefix deletes below).
-		deletes = append(deletes, skillRepoDir(b.Name))
-		stageWrite(b.Name, b.SkillMD, b.References)
-	}
-
-	for name, cur := range current {
-		if isUserKind(cur.Kind) {
-			if cur.legacyDir != "" {
-				// Migrate: move to the flat dir with the kind stamped so the
-				// file stays self-describing under the flat layout. Content
-				// that already round-tripped the parser cannot realistically
-				// fail the stamp; if it somehow does, move it unstamped (it
-				// would read as org) rather than lose it.
-				migrated++
-				stamped, serr := stampFrontmatterKind(cur.SkillMD, cur.Kind)
-				if serr != nil {
-					slog.WarnContext(ctx, "skills: migrate stamp failed — moving unstamped", "org", orgID, "name", name, "error", serr)
-					stamped = cur.SkillMD
-				}
-				stageWrite(name, stamped, cur.References)
+		// Legacy-dir copies predate the manifest: treat as pre-manifest (nil
+		// entry) so backfill semantics apply; the rewrite below re-flattens.
+		if ok && cur.legacyDir != "" && entry == nil {
+			if cur.ContentSHA == b.ContentSHA {
+				written++ // legacy but clean: rewrite flat at embed content
+				deletes = append(deletes, skillRepoDir(b.Name))
+				stageWrite(b.Name, b.SkillMD, b.References)
+				setBase(b.Name, b.ContentSHA)
+			} else {
+				// Divergent legacy copy of an embedded name: keep content,
+				// move flat via the user-skill migration path below is NOT
+				// available (kind is platform/org) — rewrite flat preserving
+				// the org's content, stamp as override.
+				written++
+				deletes = append(deletes, skillRepoDir(b.Name))
+				stageWrite(b.Name, cur.SkillMD, cur.References)
+				setBase(b.Name, b.ContentSHA)
 			}
 			continue
 		}
-		if !embeddedNames[name] {
-			purged++
+		switch decideReconcile(b.ContentSHA, cur.ContentSHA, ok, entry) {
+		case actionSeed, actionRefresh:
+			written++
+			deletes = append(deletes, skillRepoDir(b.Name))
+			stageWrite(b.Name, b.SkillMD, b.References)
+			setBase(b.Name, b.ContentSHA)
+		case actionBackfill, actionBackfillOverride:
+			setBase(b.Name, b.ContentSHA) // stamp only — no file writes
+		case actionOverride, actionConflict:
+			// Org-owned divergence: never write files, never move the base.
+			// (These actions only arise with an existing entry — the nil-entry
+			// divergent case is actionBackfillOverride above.)
+		case actionSkip:
+		}
+	}
+
+	// Legacy migration of user-kind skills: unchanged from today.
+	for name, cur := range current {
+		if isUserKind(cur.Kind) && cur.legacyDir != "" {
+			migrated++
+			stamped, serr := stampFrontmatterKind(cur.SkillMD, cur.Kind)
+			if serr != nil {
+				slog.WarnContext(ctx, "skills: migrate stamp failed — moving unstamped", "org", orgID, "name", name, "error", serr)
+				stamped = cur.SkillMD
+			}
+			stageWrite(name, stamped, cur.References)
+		}
+	}
+
+	// Purge: ONLY names the manifest says are platform-shipped and the embed
+	// no longer ships. Clean copy → delete; overridden copy → keep the files,
+	// drop the entry (divergence = ownership, it becomes a plain org skill).
+	// Names with no manifest entry are org-authored and never touched.
+	for name, entry := range manifest {
+		if entry.Kind != ManifestKindPlatform || embeddedNames[name] {
+			continue
+		}
+		purged++
+		manifestDirty = true
+		delete(manifest, name)
+		if cur, ok := current[name]; ok && cur.ContentSHA == entry.BaseHash {
 			if cur.legacyDir == "" {
 				deletes = append(deletes, skillRepoDir(name))
 			} // legacy copies fall to the wholesale prefix deletes below
@@ -201,16 +264,17 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	}
 
 	if hasLegacy {
-		// Remove the retired kind dirs wholesale — every preserved skill was
-		// rewritten at its flat path in this same commit.
 		for dir := range legacyKindDirs {
 			deletes = append(deletes, skillsRootDir+"/"+dir)
 		}
 	}
 
 	changed := written + migrated + purged
-	if changed == 0 {
+	if changed == 0 && !manifestDirty {
 		return 0, nil
+	}
+	if manifestDirty || changed > 0 {
+		writes[skillsManifestPath] = renderSkillsManifest(manifest)
 	}
 	msg := fmt.Sprintf("chore(skills): reconcile embedded library (%d written, %d migrated, %d retired)", written, migrated, purged)
 	if _, err := s.commitFiles(ctx, orgID, repo, msg, writes, deletes); err != nil {

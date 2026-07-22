@@ -235,6 +235,24 @@ func (s *SkillService) loadCatalogEntries(ctx context.Context, orgID string, rep
 	return parseBundleEntries(ctx, files), nil
 }
 
+// loadEntriesAndManifest is loadCatalogEntries plus the skills-manifest.json
+// baseline, read from the SAME ref so entries and manifest are a consistent
+// snapshot. The manifest is tolerant-parsed (absent/corrupt → empty).
+func (s *SkillService) loadEntriesAndManifest(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]catalogEntry, SkillsManifest, error) {
+	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
+	if err != nil {
+		return nil, nil, err
+	}
+	keep := func(rel string) bool { return rel == skillsManifestPath || isCatalogPath(rel) }
+	files, _, err := s.git.Workspace().ReadBundle(ctx, ref, "", keep)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read skills bundle: %w", err)
+	}
+	manifest := parseSkillsManifest([]byte(files[skillsManifestPath]))
+	delete(files, skillsManifestPath) // never let it near the skill parser
+	return parseBundleEntries(ctx, files), manifest, nil
+}
+
 // loadCatalog is loadCatalogEntries projected to the Skill catalog shape.
 func (s *SkillService) loadCatalog(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) ([]Skill, error) {
 	entries, err := s.loadCatalogEntries(ctx, orgID, repo)

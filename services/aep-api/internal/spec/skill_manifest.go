@@ -55,7 +55,6 @@ type ManifestEntry struct {
 // SkillsManifest maps skill name → baseline entry.
 type SkillsManifest map[string]ManifestEntry
 
-//deadcode:keep wired by the three-way reconcile (plan task 3, issue #293)
 // parseSkillsManifest decodes raw bytes into a manifest. Nil/empty/corrupt
 // input yields an empty (non-nil) manifest with a warning — never an error.
 func parseSkillsManifest(raw []byte) SkillsManifest {
@@ -70,7 +69,6 @@ func parseSkillsManifest(raw []byte) SkillsManifest {
 	return m
 }
 
-//deadcode:keep wired by the three-way reconcile (plan task 3, issue #293)
 // renderSkillsManifest encodes the manifest deterministically: 2-space
 // indent, sorted keys (encoding/json sorts map keys), trailing newline.
 func renderSkillsManifest(m SkillsManifest) []byte {
@@ -99,7 +97,6 @@ const (
 	actionConflict                                // both moved: leave alone, surface for review
 )
 
-//deadcode:keep wired by the three-way reconcile (plan task 3, issue #293)
 // decideReconcile is the pure three-way decision for ONE embedded skill.
 // entry is the skill's manifest entry (nil = pre-manifest or org-authored);
 // repoSHA is the org copy's contentSHA ("" when repoExists is false).
