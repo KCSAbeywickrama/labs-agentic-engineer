@@ -142,7 +142,7 @@ func TestInternalSurface_CriteriaReport(t *testing.T) {
 	// from the verified token (not the body). Reaching the handler at all proves
 	// the deny-by-default gate has a case for this op.
 	body := `{"criterionId":"AC-001-a","status":"passed","requirementId":"REQ-001"}`
-	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/criteria", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/validation-criteria", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -159,7 +159,7 @@ func TestInternalSurface_CriteriaReport(t *testing.T) {
 
 	// Unknown execution (org fence miss) → 404.
 	crit.err = validation.ErrExecutionNotFound
-	req = httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/criteria", strings.NewReader(body))
+	req = httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/validation-criteria", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
@@ -177,7 +177,7 @@ func TestInternalSurface_CriteriaReport_NotConfigured(t *testing.T) {
 		RunnerAuth: auth.NewRunnerAuthorizer(mgr, nil, nil),
 	}})
 	tok, _ := mgr.Issue("exec-42", "org-acme", "proj-1")
-	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/criteria",
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/validation-criteria",
 		strings.NewReader(`{"criterionId":"AC-001-a","status":"passed"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")

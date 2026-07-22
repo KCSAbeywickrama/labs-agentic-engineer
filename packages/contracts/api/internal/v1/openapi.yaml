@@ -108,9 +108,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
           description: Error
-  /executions/{executionId}/criteria:
+  /executions/{executionId}/validation-criteria:
     post:
-      operationId: runner-criteria-report
+      operationId: runner-validation-criteria
       summary: Report a validation criterion's live status (runner callback)
       tags:
       - Internal
@@ -129,7 +129,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CriterionReport'
+              $ref: '#/components/schemas/ValidationCriterionReport'
       responses:
         '204':
           description: Stored
@@ -243,11 +243,11 @@ components:
           type: string
         username:
           type: string
-    CriterionReport:
+    ValidationCriterionReport:
       description: One acceptance-criterion status transition reported live by the
         validation runner's Playwright reporter (per test begin/end). Generated as
-        igen.CriterionReport (no x-go-type) — igen stays a leaf; the edge projects
-        it onto the delivery domain's own input type.
+        igen.ValidationCriterionReport (no x-go-type) — igen stays a leaf; the edge
+        projects it onto the delivery domain's own input type.
       type: object
       additionalProperties: false
       properties:

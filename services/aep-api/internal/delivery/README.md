@@ -106,7 +106,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the pair the console validation log page consumes. `TaskView.prUrl` (recovered from the succeeded coding
   Execution's `pr#N` reason, no live PR query) links each Task's PR.
 - **Per-criterion validation progress is durable, log-independent.** The Playwright runner reports each
-  acceptance criterion's begin/end to the `runner-criteria-report` callback, which upserts
+  acceptance criterion's begin/end to the `runner-validation-criteria` callback, which upserts
   `criterion_statuses` keyed by `(repo, issue_number, criterion_id)` (last-write-wins; execution id is
   provenance, not a key — a same-issue retry collapses onto the same rows). The console reads them via
   `get-task-validation-criteria` as its checklist seed and overlays the live `kind:"criterion"` stream frames, so a

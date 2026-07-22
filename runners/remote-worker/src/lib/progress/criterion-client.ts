@@ -49,7 +49,7 @@ export async function reportCriterion(
     return;
   }
   const base = cfg.platformURL.endsWith("/") ? cfg.platformURL.slice(0, -1) : cfg.platformURL;
-  const url = new URL(`${base}/internal/v1/executions/${encodeURIComponent(cfg.taskId)}/criteria`);
+  const url = new URL(`${base}/internal/v1/executions/${encodeURIComponent(cfg.taskId)}/validation-criteria`);
 
   const headers: Record<string, string> = {
     "Authorization": `Bearer ${cfg.bearer.trim()}`,

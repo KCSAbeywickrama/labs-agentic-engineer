@@ -105,7 +105,7 @@ func runnerAuthGate(authorizer *auth.RunnerAuthorizer) igen.StrictMiddlewareFunc
 				executionID = req.ExecutionID
 			case igen.RunnerValidationCredentialsRequestObject:
 				executionID = req.ExecutionID
-			case igen.RunnerCriteriaReportRequestObject:
+			case igen.RunnerValidationCriteriaRequestObject:
 				executionID = req.ExecutionID
 			default:
 				return nil, errUnauthorized("unauthenticated internal operation: " + operationID)
@@ -230,7 +230,7 @@ func (s *internalServer) RunnerValidationCredentials(ctx context.Context, reques
 	return igen.RunnerValidationCredentials200JSONResponse(toIgenTestCredential(*resp)), nil
 }
 
-func (s *internalServer) RunnerCriteriaReport(ctx context.Context, request igen.RunnerCriteriaReportRequestObject) (igen.RunnerCriteriaReportResponseObject, error) {
+func (s *internalServer) RunnerValidationCriteria(ctx context.Context, request igen.RunnerValidationCriteriaRequestObject) (igen.RunnerValidationCriteriaResponseObject, error) {
 	if s.deps.Criteria == nil {
 		return nil, errServiceUnavailable("criteria reporting not configured")
 	}
@@ -249,5 +249,5 @@ func (s *internalServer) RunnerCriteriaReport(ctx context.Context, request igen.
 		}
 		return nil, errInternal("failed to record criterion status")
 	}
-	return igen.RunnerCriteriaReport204Response{}, nil
+	return igen.RunnerValidationCriteria204Response{}, nil
 }
