@@ -57,7 +57,7 @@ func newTestFunnel(store *fakeStore, issues *fakeIssues, design map[string]bool,
 
 func TestFailedComponentBuilds(t *testing.T) {
 	t0 := time.Unix(1000, 0)
-	rows := []models.Execution{
+	rows := []delivery.Execution{
 		{Kind: string(taskmeta.KindCoding), Component: "order-service", Status: string(taskmeta.ExecSucceeded), CreatedAt: t0},
 		{Kind: string(taskmeta.KindBuild), Component: "order-service", Status: string(taskmeta.ExecSucceeded), CommitSHA: "sha", CreatedAt: t0.Add(time.Second)},
 		{Kind: string(taskmeta.KindBuild), Component: "worker", Status: string(taskmeta.ExecFailed), CommitSHA: "sha", CreatedAt: t0.Add(2 * time.Second)},
@@ -69,7 +69,7 @@ func TestFailedComponentBuilds(t *testing.T) {
 
 	// A later succeeded build for the same component clears its failure (latest
 	// build per component wins).
-	rows = append(rows, models.Execution{Kind: string(taskmeta.KindBuild), Component: "worker", Status: string(taskmeta.ExecSucceeded), CommitSHA: "sha", CreatedAt: t0.Add(3 * time.Second)})
+	rows = append(rows, delivery.Execution{Kind: string(taskmeta.KindBuild), Component: "worker", Status: string(taskmeta.ExecSucceeded), CommitSHA: "sha", CreatedAt: t0.Add(3 * time.Second)})
 	if got := failedComponentBuilds(rows); len(got) != 0 {
 		t.Fatalf("latest worker build succeeded → no retry, got %v", got)
 	}
@@ -83,14 +83,14 @@ func TestFunnel_ExecuteRetriesFailedComponentBuildOnly(t *testing.T) {
 	store := newFakeStore()
 	ctx := context.Background()
 	// coding succeeded (PR merged); order-service build succeeded; worker build FAILED.
-	_, c, _ := store.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindCoding), Component: "order-service"})
+	_, c, _ := store.TryAdmit(ctx, &delivery.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindCoding), Component: "order-service"})
 	_, _ = store.Finish(ctx, c.ID, string(taskmeta.ExecSucceeded), "")
-	_, b1, _ := store.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "order-service", CommitSHA: "sha"})
+	_, b1, _ := store.TryAdmit(ctx, &delivery.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "order-service", CommitSHA: "sha"})
 	_, _ = store.Finish(ctx, b1.ID, string(taskmeta.ExecSucceeded), "")
-	_, b2, _ := store.TryAdmit(ctx, &models.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "worker", CommitSHA: "sha"})
+	_, b2, _ := store.TryAdmit(ctx, &delivery.Execution{Repo: "o/r", IssueNumber: 2, Kind: string(taskmeta.KindBuild), Component: "worker", CommitSHA: "sha"})
 	_, _ = store.Finish(ctx, b2.ID, string(taskmeta.ExecFailed), "boom")
 
-	issues := newFakeIssues([]gitrepo.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
+	issues := newFakeIssues([]sourcecontrol.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
 	exec := &fakeExecutor{store: store, startOK: true}
 	f := newTestFunnel(store, issues, map[string]bool{"order-service": true, "worker": true}, exec)
 
