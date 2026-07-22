@@ -11,7 +11,7 @@ their write-authority + the read projection.**
 flowchart LR
   API(["/api/v1"]) --> HTTP
   subgraph projects
-    HTTP["httpapi — projectcrud · componentread · componentbuild · componentconfig"]
+    HTTP["httpapi — projectcrud · componentread · componentbuild · componentconfig · projectusage"]
     ROOT["root — Service · ComponentService · ConfigService · TraitSyncService + shared HTTP vocab (httperrors.go)"]
     HTTP --> ROOT
   end
@@ -34,6 +34,7 @@ services (`Service`, `ComponentService`, `ConfigService`, `TraitSyncService`) li
 | `componentread` | list-components / get-component | `ComponentService` |
 | `componentbuild` | trigger-build / list-builds / build-logs / list-deployments / component-openapi | `ComponentService` |
 | `componentconfig` | get / update component env-config | `ConfigService` |
+| `projectusage` | get-project-usage (per-phase agent usage, #245) | none — all-zero placeholder until #249 lands capture + aggregation |
 
 The shared HTTP vocabulary — `RequireSlug`, `RequireComponentSlugs`, `MapProjectError`, `MapComponentError`
 and the private `errFromStatus` — lives in the ROOT (`httperrors.go`), because a slice may not import a
