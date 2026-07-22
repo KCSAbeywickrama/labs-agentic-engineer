@@ -52,7 +52,7 @@ import { useCollabSpec } from "../collab/useCollabSpec";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
-import { useDesignCellRewriteCount } from "../collab/useDesignCellRewrite";
+import { useDesignCellChangeCount } from "../collab/useDesignCellChange";
 import { AddArtifactDialog } from "./AddArtifactDialog";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
 import { SpecFileList } from "./SpecFileList";
@@ -141,18 +141,19 @@ export function SpecView({ projectName }: { projectName: string }) {
     if (generate === "design") setSelection({ kind: "cell-diagram" });
   }, [generate]);
 
-  // An architectural chat change rewrites design.cell (removeFile + streamed
-  // addFile). Navigate to the Architecture tab once per rewrite — even over a
-  // manual selection — so the user watches the change stream in; they can
-  // still click away mid-stream without being yanked back.
+  // An architectural chat change updates design.cell (targeted editFile
+  // patches, or a removeFile + streamed addFile for a restructure). Navigate
+  // to the Architecture tab once per change burst — even over a manual
+  // selection — so the user watches the change land; they can still click
+  // away mid-turn without being yanked back.
   const designCellLive = useYTextString(collab.getFileText(DESIGN_CELL_PATH));
-  const cellRewriteCount = useDesignCellRewriteCount(
+  const cellChangeCount = useDesignCellChangeCount(
     designCellLive,
     agentInRoom && collab.status === "connected",
   );
   useEffect(() => {
-    if (cellRewriteCount > 0) setSelection({ kind: "cell-diagram" });
-  }, [cellRewriteCount]);
+    if (cellChangeCount > 0) setSelection({ kind: "cell-diagram" });
+  }, [cellChangeCount]);
 
   // Default selection: while a design turn is actively producing design.cell,
   // default to Architecture (covers a reload mid-turn); otherwise the first
@@ -612,7 +613,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                   projectName={projectName}
                   files={files}
                   collab={collab}
-                  preferLiveCell={cellRewriteCount > 0}
+                  preferLiveCell={cellChangeCount > 0}
                 />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel

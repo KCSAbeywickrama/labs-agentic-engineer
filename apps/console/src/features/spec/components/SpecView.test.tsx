@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
@@ -268,16 +268,17 @@ describe("SpecView onBuild routing (#164)", () => {
   });
 });
 
-describe("SpecView architecture-tab navigation on design.cell rewrite", () => {
+describe("SpecView architecture-tab navigation on design.cell change", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFlush.mockResolvedValue(undefined);
   });
 
-  // A connected room whose doc carries a streamed design.cell. The agent's
-  // removeFile deletes the Y.Map entry; in the real hook the re-render is
-  // delivered by useCollabSpec's version bump (a new collab object), which the
-  // test simulates with a reassignment + rerender.
+  // A connected room whose doc carries design.cell. An agent editFile lands as
+  // an in-place Y.Text patch (useYTextString observes it directly); a
+  // restructure's removeFile deletes the Y.Map entry, whose re-render the real
+  // hook receives via useCollabSpec's version bump — simulated here with a
+  // reassignment + rerender.
   function connectedRoom(withAgent: boolean) {
     const doc = new Y.Doc();
     const files = doc.getMap<Y.Text>("files");
@@ -292,10 +293,24 @@ describe("SpecView architecture-tab navigation on design.cell rewrite", () => {
         : [],
       getFileText: (path: string) => files.get(path) ?? null,
     };
-    return { files, collab };
+    return { files, ytext, collab };
   }
 
-  it("navigates to the Architecture tab when the agent rewrites design.cell", () => {
+  it("navigates to the Architecture tab when the agent patches design.cell in place", () => {
+    const room = connectedRoom(true);
+    mockCollab = room.collab;
+
+    render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    act(() => {
+      room.ytext.insert(room.ytext.length, "south email-provider service\n");
+    });
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+  });
+
+  it("navigates on a restructure (removeFile deletes the doc entry)", () => {
     const room = connectedRoom(true);
     mockCollab = room.collab;
 
@@ -313,11 +328,11 @@ describe("SpecView architecture-tab navigation on design.cell rewrite", () => {
     const room = connectedRoom(false);
     mockCollab = room.collab;
 
-    const { rerender } = render(<SpecView projectName="proj1" />);
+    render(<SpecView projectName="proj1" />);
 
-    room.files.delete("specs/design/design.cell");
-    mockCollab = { ...room.collab, version: 1 };
-    rerender(<SpecView projectName="proj1" />);
+    act(() => {
+      room.ytext.insert(room.ytext.length, "south email-provider service\n");
+    });
 
     expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });

@@ -33,9 +33,9 @@ export function CellDiagramPanel({
   projectName: string;
   files: SpecFileEntry[];
   collab: CollabSpec;
-  /** True once the agent has rewritten design.cell this session — the doc's
+  /** True once the agent has changed design.cell this session — the doc's
    *  live DSL is then strictly fresher than the committed design.json bundle
-   *  (which only refreshes on commit), so the live stream takes precedence. */
+   *  (which only refreshes on commit), so the live doc takes precedence. */
   preferLiveCell?: boolean;
 }) {
   const { dsl, isPending, isError } = useDerivedCellDiagram(projectName, files);

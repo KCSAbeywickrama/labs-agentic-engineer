@@ -47,7 +47,7 @@ export const COLLAB_DEPS_STEER =
   "When your change adds or edits a component's `dependencies` — especially an `org-service` referencing another project — " +
   "FIRST call `list_org_endpoints` and copy the provider component name VERBATIM; never invent a role-based name. " +
   "When the requested change ALTERS THE ARCHITECTURE — a component added, removed, or renamed; an edge, exposure, or external/SaaS dependency changed — " +
-  "load the `cell-architecture-dsl` skill and rewrite specs/design/design.cell FIRST (removeFile, then ONE addFile with the complete updated diagram), " +
+  "load the `cell-architecture-dsl` skill and update specs/design/design.cell FIRST with targeted editFile edits (removeFile + ONE addFile only when restructuring MOST of the diagram), " +
   "then update design.md and every affected design.json to match; do not narrate the process.";
 
 // MUST match planInstruction,

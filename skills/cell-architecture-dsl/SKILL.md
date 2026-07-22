@@ -1,6 +1,6 @@
 ---
 name: cell-architecture-dsl
-description: Use when generating a design OR when ANY change alters the architecture — a component added, removed, or renamed; an edge or dependency changed; exposure changed; an external/SaaS dependency added or dropped. specs/design/design.cell moves FIRST, before design.md and the component design.json files. Covers the grammar, the AEP boundary semantics (where each dependency goes), and the write protocol that streams the live architecture diagram.
+description: Use when generating a design OR when ANY change alters the architecture — a component added, removed, or renamed; an edge or dependency changed; exposure changed; an external/SaaS dependency added or dropped. specs/design/design.cell moves FIRST, before design.md and the component design.json files. Covers the grammar, the AEP boundary semantics (where each dependency goes), and the write protocol that drives the live architecture diagram.
 metadata:
   aep:
     kind: platform
@@ -148,10 +148,13 @@ changes who calls whom (an edge), changes a component's exposure, or adds or
 drops an org/external/SaaS dependency. For such a change design.cell moves
 FIRST and the rest of the design follows it:
 
-1. Rewrite the WHOLE file: `removeFile specs/design/design.cell`, then ONE
-   `addFile` with the complete updated diagram. Never patch it with anchored
-   `editFile`s — only a fresh `addFile` re-streams the live diagram, so the
-   user watches the change happen as you write.
+1. Update design.cell with targeted `editFile` edits — add or remove just the
+   affected lines (a component/external declaration, an edge). Each applied
+   edit lands in the live diagram IN PLACE, so the user sees exactly the
+   requested change without the diagram tearing down and rebuilding. Only
+   when the change replaces MOST of the diagram (a restructure) re-emit it
+   instead: `removeFile`, then ONE `addFile` with the complete new diagram
+   (the fresh add re-streams it line by line).
 2. Update `specs/design/design.md` (Components, Interactions) to match.
 3. Re-emit every affected `components/<name>/design.json` — same component
    ids, and every design.cell edge touching a component appears in that
