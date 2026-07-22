@@ -116,7 +116,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 
 	// Repositories
 	executionRepo := delivery.NewExecutionRepository(db)
-	criterionStatusRepo := delivery.NewCriterionStatusRepository(db)
+	validationCriterionStatusRepo := delivery.NewValidationCriterionStatusRepository(db)
 	configRepo := projects.NewConfigRepository(db)
 	repoRepo := sourcecontrol.NewRepoRepository(db)
 	workflowRunRepo := delivery.NewWorkflowRunRepository(db)
@@ -411,7 +411,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// half (funnel, coding executor, watchers) is wired below, after
 	// asServiceIdentity. repoService/artifactStore/artifactSvcGit/gitOpsService
 	// satisfy the task consumer ports directly.
-	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit, designComponents{store: artifactStore}, criterionStatusRepo)
+	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit, designComponents{store: artifactStore}, validationCriterionStatusRepo)
 	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
 		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
 
@@ -690,7 +690,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// criterion's live status; upserted into the store the console reads back.
 	validationCriteriaSvc := validation.NewCriterionIngestService(
 		validationExecLocator{repo: executionRepo},
-		criterionStoreAdapter{repo: criterionStatusRepo},
+		criterionStoreAdapter{repo: validationCriterionStatusRepo},
 	)
 
 	// Controllers
@@ -704,7 +704,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 			RunnerAuth:            runnerAuth,
 			ValidationContext:     validationContextSvc,
 			ValidationCredentials: validationCredentialsSvc,
-			Criteria:              validationCriteriaSvc,
+			ValidationCriteria:              validationCriteriaSvc,
 		},
 		WebhookController:   webhookCtrl,
 		OrgGitHubController: orgGitHubCtrl,

@@ -67,15 +67,15 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | org-credential reads · `AnthropicKeyResolver` | needs | `platform/secrets` / P3a org repositories — coding-agent runner secrets |
 | `ExecutionReader` (`ops.ExecutionFact`) | offers | `ops` — latest-execution-per-kind correlation (`execution.OpsExecutionReader`, P6-retired the app bridge) |
 | `ValidationContext` · `ValidationCredentials` · `CriterionReporter` | offers | the S2S runner callbacks (`/internal/v1`, via the internalServer — not the public edge) |
-| `CriterionStatusReader` | needs | `task` → the criteria checklist read (satisfied by `*delivery.CriterionStatusRepository`) |
+| `ValidationCriterionStatusReader` | needs | `task` → the criteria checklist read (satisfied by `*delivery.ValidationCriterionStatusRepository`) |
 
 ## Owns
 - The **executions** write-API (admit/finish/reevaluate through the funnel) and **workflow_runs**; the
   Temporal `Runtime`, `Signaler`, and the dev/task/validation workflows.
-- **Persistence**: the `executions` / `workflow_runs` / `coding_agent_logs` / `criterion_statuses` gorm and
+- **Persistence**: the `executions` / `workflow_runs` / `coding_agent_logs` / `validation_criterion_statuses` gorm and
   their entities live in this domain — `repository_execution.go` · `repository_workflow_run.go` ·
-  `repository_coding_agent_log.go` · `repository_criterion_status.go` over the `execution.go` /
-  `workflow_run.go` / `coding_agent_log.go` / `criterion_status.go` entities — as single write-authority.
+  `repository_coding_agent_log.go` · `repository_validation_criterion_status.go` over the `execution.go` /
+  `workflow_run.go` / `coding_agent_log.go` / `validation_criterion_status.go` entities — as single write-authority.
 
 ## Invariants — don't break
 - **`task ⊥ execution`.** The GitHub-facing half (`task`) and the platform-owned half (`execution`) are
@@ -107,7 +107,7 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   Execution's `pr#N` reason, no live PR query) links each Task's PR.
 - **Per-criterion validation progress is durable, log-independent.** The Playwright runner reports each
   acceptance criterion's begin/end to the `runner-validation-criteria` callback, which upserts
-  `criterion_statuses` keyed by `(repo, issue_number, criterion_id)` (last-write-wins; execution id is
+  `validation_criterion_statuses` keyed by `(repo, issue_number, criterion_id)` (last-write-wins; execution id is
   provenance, not a key — a same-issue retry collapses onto the same rows). The console reads them via
   `get-task-validation-criteria` as its checklist seed and overlays the live `kind:"criterion"` stream frames, so a
   finished or FAILED (never-merged) run still shows the complete checklist without depending on the log

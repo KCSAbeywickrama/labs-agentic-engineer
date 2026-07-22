@@ -33,7 +33,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
 import { ValidationView } from "@aep/ui-validation-view";
-import { useTask, useTaskCriteria } from "../api/queries";
+import { useTask, useTaskValidationCriteria } from "../api/queries";
 import { useTaskLog } from "../hooks/useTaskLog";
 import {
   useSpecFiles,
@@ -42,7 +42,7 @@ import {
 import {
   mergeCriterionStatus,
   splitCriterionLines,
-} from "../lib/criterionStatus";
+} from "../lib/validationCriterionStatus";
 import { TaskLogView } from "./TaskLogView";
 import { TaskStatusChip } from "./TaskStatusChip";
 import { EXEC_ACTIVE, useSecondsSince } from "./TaskPage";
@@ -79,7 +79,7 @@ export function ValidationPage({
     criteriaEntry ? { path: criteriaEntry.path, sha: criteriaEntry.sha } : null,
   );
   // A one-shot seed; the live SSE stream (below) pushes updates during the run.
-  const criteria = useTaskCriteria(projectName, issueNumber);
+  const criteria = useTaskValidationCriteria(projectName, issueNumber);
   // An attempt is still queued/running — used to reassure during long, silent
   // stretches (a Playwright runner cold start pulls a hefty browser image).
   const anyRunning = log.executions.some((e) => EXEC_ACTIVE.has(e.status));

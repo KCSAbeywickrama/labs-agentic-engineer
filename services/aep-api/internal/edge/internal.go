@@ -53,9 +53,9 @@ type InternalDeps struct {
 	// answers 503 for its op.
 	ValidationContext     validation.ContextProvider
 	ValidationCredentials validation.CredentialRequester
-	// Criteria backs the criteria-report callback (the runner's live per-criterion
-	// status); a nil reporter answers 503 for its op.
-	Criteria validation.CriterionReporter
+	// ValidationCriteria backs the criteria-report callback (the runner's live
+	// per-criterion status); a nil reporter answers 503 for its op.
+	ValidationCriteria validation.CriterionReporter
 }
 
 // internalServer implements igen.StrictServerInterface.
@@ -231,14 +231,14 @@ func (s *internalServer) RunnerValidationCredentials(ctx context.Context, reques
 }
 
 func (s *internalServer) RunnerValidationCriteria(ctx context.Context, request igen.RunnerValidationCriteriaRequestObject) (igen.RunnerValidationCriteriaResponseObject, error) {
-	if s.deps.Criteria == nil {
+	if s.deps.ValidationCriteria == nil {
 		return nil, errServiceUnavailable("criteria reporting not configured")
 	}
 	if request.Body == nil {
 		return nil, errBadRequest("criteria report body is required")
 	}
 	org := tenant.BoundOrgFromContext(ctx)
-	err := s.deps.Criteria.ReportCriterion(ctx, request.ExecutionID, org, validation.CriterionReportInput{
+	err := s.deps.ValidationCriteria.ReportCriterion(ctx, request.ExecutionID, org, validation.CriterionReportInput{
 		CriterionID:   request.Body.CriterionID,
 		Status:        request.Body.Status,
 		RequirementID: request.Body.RequirementID,

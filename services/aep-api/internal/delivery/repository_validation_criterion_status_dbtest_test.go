@@ -24,8 +24,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 )
 
-func criterionRow(org, repo string, issue int, id, status string) *delivery.CriterionStatus {
-	return &delivery.CriterionStatus{
+func validationCriterionRow(org, repo string, issue int, id, status string) *delivery.ValidationCriterionStatus {
+	return &delivery.ValidationCriterionStatus{
 		Repo: repo, IssueNumber: issue, CriterionID: id,
 		OrgID: org, ProjectID: "proj", Status: status, ExecutionID: "exec-1",
 	}
@@ -37,16 +37,16 @@ func criterionRow(org, repo string, issue int, id, status string) *delivery.Crit
 func TestCriterionStatusRepository_UpsertLastWriteWins(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
-	repo := delivery.NewCriterionStatusRepository(db)
+	repo := delivery.NewValidationCriterionStatusRepository(db)
 	ctx := context.Background()
 
-	if err := repo.Upsert(ctx, criterionRow("orga", "o/r", 30, "AC-001-a", "validating")); err != nil {
+	if err := repo.Upsert(ctx, validationCriterionRow("orga", "o/r", 30, "AC-001-a", "validating")); err != nil {
 		t.Fatalf("upsert validating: %v", err)
 	}
-	if err := repo.Upsert(ctx, criterionRow("orga", "o/r", 30, "AC-001-a", "passed")); err != nil {
+	if err := repo.Upsert(ctx, validationCriterionRow("orga", "o/r", 30, "AC-001-a", "passed")); err != nil {
 		t.Fatalf("upsert passed: %v", err)
 	}
-	if err := repo.Upsert(ctx, criterionRow("orga", "o/r", 30, "AC-002-a", "failed")); err != nil {
+	if err := repo.Upsert(ctx, validationCriterionRow("orga", "o/r", 30, "AC-002-a", "failed")); err != nil {
 		t.Fatalf("upsert second criterion: %v", err)
 	}
 
@@ -71,10 +71,10 @@ func TestCriterionStatusRepository_UpsertLastWriteWins(t *testing.T) {
 func TestCriterionStatusRepository_OrgFence(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
-	repo := delivery.NewCriterionStatusRepository(db)
+	repo := delivery.NewValidationCriterionStatusRepository(db)
 	ctx := context.Background()
 
-	if err := repo.Upsert(ctx, criterionRow("orga", "o/r", 30, "AC-001-a", "passed")); err != nil {
+	if err := repo.Upsert(ctx, validationCriterionRow("orga", "o/r", 30, "AC-001-a", "passed")); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 

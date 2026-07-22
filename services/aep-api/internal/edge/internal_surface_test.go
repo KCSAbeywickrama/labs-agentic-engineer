@@ -90,7 +90,7 @@ func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *
 		InternalDeps: InternalDeps{
 			CredsRefresh: svc,
 			RunnerAuth:   auth.NewRunnerAuthorizer(mgr, nil, nil),
-			Criteria:     crit,
+			ValidationCriteria:     crit,
 		},
 	})
 	return h, mgr, svc, crit

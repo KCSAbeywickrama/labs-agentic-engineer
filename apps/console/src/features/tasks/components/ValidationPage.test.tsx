@@ -59,7 +59,7 @@ let mockDetail: {
 let mockCriteria: CriterionStatus[];
 vi.mock("../api/queries", () => ({
   useTask: () => mockDetail,
-  useTaskCriteria: () => ({ data: mockCriteria }),
+  useTaskValidationCriteria: () => ({ data: mockCriteria }),
 }));
 
 let mockLog: TaskLogState;

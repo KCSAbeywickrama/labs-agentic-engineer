@@ -40,15 +40,15 @@ type Reads struct {
 	execs    ExecutionReader
 	versions VersionReader         // optional (stale-design attention)
 	design   DesignReader          // optional (dependency-gated on_hold reconciliation)
-	criteria CriterionStatusReader // optional (validation criteria checklist)
+	criteria ValidationCriterionStatusReader // optional (validation criteria checklist)
 }
 
 // NewReads wires the read path. versions may be nil (then the stale-design
 // attention flag is not computed). design may be nil (then the dependency-gated
 // on_hold reconciliation degrades to component-dep gating only — provision /
-// org-service dep resolution is skipped). criteria may be nil (then Criteria
-// returns an empty checklist).
-func NewReads(issues IssueClient, repos RepoResolver, execs ExecutionReader, versions VersionReader, design DesignReader, criteria CriterionStatusReader) *Reads {
+// org-service dep resolution is skipped). criteria may be nil (then
+// ValidationCriteria returns an empty checklist).
+func NewReads(issues IssueClient, repos RepoResolver, execs ExecutionReader, versions VersionReader, design DesignReader, criteria ValidationCriterionStatusReader) *Reads {
 	return &Reads{issues: issues, repos: repos, execs: execs, versions: versions, design: design, criteria: criteria}
 }
 
@@ -328,14 +328,15 @@ func (r *Reads) Get(ctx context.Context, orgID, projectID string, issueNumber in
 	return &delivery.TaskDetail{TaskView: *view, ExecutionHistory: hv}, nil
 }
 
-// Criteria returns the validation Task's per-acceptance-criterion checklist from
-// the durable store (fed live by the runner). Empty when there is no store wired
+// ValidationCriteria returns the validation Task's per-acceptance-criterion
+// checklist from the durable store (fed live by the runner). Empty when there is
+// no store wired
 // or nothing reported yet — the console overlays live stream frames on top and
 // renders the full criteria list from the criteria file regardless, so an empty
 // result is a clean "nothing reported" state, not an error.
-func (r *Reads) Criteria(ctx context.Context, orgID, projectID string, issueNumber int) ([]delivery.CriterionStatus, error) {
+func (r *Reads) ValidationCriteria(ctx context.Context, orgID, projectID string, issueNumber int) ([]delivery.ValidationCriterionStatus, error) {
 	if r.criteria == nil {
-		return []delivery.CriterionStatus{}, nil
+		return []delivery.ValidationCriterionStatus{}, nil
 	}
 	_, owner, name, err := resolveProjectRepo(ctx, r.repos, orgID, projectID)
 	if err != nil {

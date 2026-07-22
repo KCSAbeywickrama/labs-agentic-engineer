@@ -63,7 +63,7 @@ var goldenStepOrder = []string{
 	"workflow_runs",
 	"coding_agent_logs",
 	"phase10_rca_agent_reports",
-	"criterion_statuses",
+	"validation_criterion_statuses",
 }
 
 // TestStepOrderGolden pins the ordered list. Steps is a pure builder, so this

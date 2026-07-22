@@ -41,7 +41,7 @@ import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
-import { startCriterionListener, type CriterionListener } from "./lib/progress/criterion-listener.js";
+import { startValidationCriterionListener, type ValidationCriterionListener } from "./lib/progress/validation-criterion-listener.js";
 import { fileURLToPath } from "node:url";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { materializeSkills } from "./lib/skills_materializer.js";
@@ -234,13 +234,13 @@ async function main(): Promise<number> {
   // childEnv, and the Playwright reporter (inheriting them) can reach the socket.
   // Coding runs pay nothing (the gate below). Best-effort: a listener failure
   // degrades to no live checklist, never blocks the run.
-  let criterionListener: CriterionListener | undefined;
+  let criterionListener: ValidationCriterionListener | undefined;
   if (req.taskKind === "validation" && platformURL) {
     try {
       const sockPath = path.join(os.tmpdir(), "aep-criteria", req.taskId, "progress.sock");
       await fs.promises.mkdir(path.dirname(sockPath), { recursive: true });
       await fs.promises.rm(sockPath, { force: true }); // resume-safety
-      criterionListener = await startCriterionListener(sockPath, {
+      criterionListener = await startValidationCriterionListener(sockPath, {
         platformURL,
         taskId: req.taskId,
         bearer: req.bearer,

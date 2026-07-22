@@ -83,7 +83,7 @@ type ExecutionTaskLocator interface {
 }
 
 // CriterionStore upserts a criterion's latest status (last-write-wins on
-// (repo, issue_number, criterion_id)). delivery.CriterionStatusRepository
+// (repo, issue_number, criterion_id)). delivery.ValidationCriterionStatusRepository
 // satisfies the adapter wired at the composition root.
 type CriterionStore interface {
 	UpsertCriterion(ctx context.Context, orgID, projectID, repo string, issueNumber int, executionID, criterionID, requirementID, status string) error

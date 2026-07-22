@@ -136,10 +136,10 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 		// (issues #154, #155, BE handshake #156). One idempotent CREATE TABLE
 		// + its (org_id, created_at) list index.
 		ctxStep("phase10_rca_agent_reports", RunPhase10RcaAgentReports),
-		// criterion_statuses: the validation criteria checklist store, keyed by
+		// validation_criterion_statuses: the validation criteria checklist store, keyed by
 		// (repo, issue_number, criterion_id). Independent of executions (no FK),
 		// so ordering vs it is not load-bearing; appended last.
-		ctxStep("criterion_statuses", RunCriterionStatuses),
+		ctxStep("validation_criterion_statuses", RunValidationCriterionStatuses),
 	}
 }
 

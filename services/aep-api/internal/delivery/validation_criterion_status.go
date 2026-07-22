@@ -18,7 +18,7 @@ package delivery
 
 import "time"
 
-// CriterionStatus is the durable, live-fed record of one validation acceptance
+// ValidationCriterionStatus is the durable, live-fed record of one validation acceptance
 // criterion's latest run status. The validation runner's Playwright reporter
 // reports each criterion's begin/end (per test) to the internal criteria
 // callback, which upserts a row here; the console reads them back by issue
@@ -31,7 +31,7 @@ import "time"
 // checklist, so a same-issue retry upserts onto the same rows (last-write-wins).
 // ExecutionID is kept for provenance only, not as a key or FK — rows outlive any
 // single execution attempt.
-type CriterionStatus struct {
+type ValidationCriterionStatus struct {
 	Repo          string    `gorm:"type:text;primaryKey;column:repo" json:"-"`
 	IssueNumber   int       `gorm:"primaryKey;column:issue_number" json:"-"`
 	CriterionID   string    `gorm:"type:text;primaryKey;column:criterion_id" json:"id"`
@@ -43,4 +43,4 @@ type CriterionStatus struct {
 	UpdatedAt     time.Time `gorm:"type:timestamptz;not null;default:now();column:updated_at" json:"updatedAt"`
 }
 
-func (CriterionStatus) TableName() string { return "criterion_statuses" }
+func (ValidationCriterionStatus) TableName() string { return "validation_criterion_statuses" }

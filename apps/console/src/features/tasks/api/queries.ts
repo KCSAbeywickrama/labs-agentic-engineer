@@ -66,9 +66,9 @@ export function useAllTasks(projectName: string, tag?: string) {
 // where early events already scrolled off the live log snapshot. So a single
 // fetch per mount is enough — no refetchInterval. Empty is a valid "nothing
 // reported yet" state.
-export function useTaskCriteria(projectName: string, issueNumber: number) {
+export function useTaskValidationCriteria(projectName: string, issueNumber: number) {
   return useQuery({
-    queryKey: taskKeys.criteria(projectName, issueNumber),
+    queryKey: taskKeys.validationCriteria(projectName, issueNumber),
     queryFn: async () => {
       const { data, error } = await client.GET(
         "/projects/{projectName}/tasks/{issueNumber}/validation-criteria",

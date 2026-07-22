@@ -22,7 +22,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import { startCriterionListener } from "./criterion-listener.js";
+import { startValidationCriterionListener } from "./validation-criterion-listener.js";
 import { _resetEmitterForTesting } from "./emitter.js";
 
 // POST a JSON body to the listener's Unix socket and wait for its ack.
@@ -66,7 +66,7 @@ test("criterion-listener: a POST emits a kind:criterion stdout line (live sink)"
   const sock = tmpSock("emit");
   await fs.promises.rm(sock, { force: true });
   // platformURL "" → sink 2 (durable POST) no-ops; we assert the live sink only.
-  const listener = await startCriterionListener(sock, { platformURL: "", taskId: "t", bearer: "" });
+  const listener = await startValidationCriterionListener(sock, { platformURL: "", taskId: "t", bearer: "" });
 
   const lines = await captureStdout(async () => {
     const code = await postToSock(sock, JSON.stringify({ criterionId: "AC-001-a", status: "validating", requirementId: "REQ-001" }));
@@ -88,7 +88,7 @@ test("criterion-listener: a POST emits a kind:criterion stdout line (live sink)"
 test("criterion-listener: malformed / incomplete payloads emit nothing", async () => {
   const sock = tmpSock("bad");
   await fs.promises.rm(sock, { force: true });
-  const listener = await startCriterionListener(sock, { platformURL: "", taskId: "t", bearer: "" });
+  const listener = await startValidationCriterionListener(sock, { platformURL: "", taskId: "t", bearer: "" });
 
   const lines = await captureStdout(async () => {
     await postToSock(sock, "not json");

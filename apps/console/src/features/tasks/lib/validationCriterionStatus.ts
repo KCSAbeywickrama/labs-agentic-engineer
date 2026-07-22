@@ -35,13 +35,6 @@ function asRunStatus(s: string | undefined): CriterionRunStatus | undefined {
     : undefined;
 }
 
-// A stream line is a criterion event when kind === "criterion"; it carries the
-// AC id in `step` and the status in `status` (the runner reuses those fields so
-// the pipeline needs no new schema — see the aep-validation criterion reporter).
-export function isCriterionLine(line: TimelineEvent): boolean {
-  return line.kind === "criterion";
-}
-
 // mergeCriterionStatus builds the id→status map the ValidationView checklist
 // consumes: the durable store rows are the base (they survive a finished/FAILED
 // run), and the live stream's `criterion` frames overlay them (fresher —

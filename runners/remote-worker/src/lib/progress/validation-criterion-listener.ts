@@ -29,9 +29,9 @@
 
 import http from "node:http";
 import { emit } from "./emitter.js";
-import { reportCriterion, type CriterionClientConfig } from "./criterion-client.js";
+import { reportValidationCriterion, type ValidationCriterionClientConfig } from "./validation-criterion-client.js";
 
-export interface CriterionListener {
+export interface ValidationCriterionListener {
   socketPath: string;
   close: () => Promise<void>;
 }
@@ -50,13 +50,13 @@ function normalizeStatus(s: unknown): CriterionStatus | undefined {
   }
 }
 
-// startCriterionListener binds the Unix socket and starts fanning out events.
+// startValidationCriterionListener binds the Unix socket and starts fanning out events.
 // `cfg` carries the platform coordinates for sink 2; when its platformURL/bearer
 // is blank, sink 2 no-ops (sink 1 still emits).
-export function startCriterionListener(
+export function startValidationCriterionListener(
   socketPath: string,
-  cfg: CriterionClientConfig,
-): Promise<CriterionListener> {
+  cfg: ValidationCriterionClientConfig,
+): Promise<ValidationCriterionListener> {
   const server = http.createServer((req, res) => {
     if (req.method !== "POST") {
       res.writeHead(405).end();
@@ -92,7 +92,7 @@ export function startCriterionListener(
   });
 }
 
-async function handleReport(raw: string, cfg: CriterionClientConfig): Promise<void> {
+async function handleReport(raw: string, cfg: ValidationCriterionClientConfig): Promise<void> {
   let parsed: { criterionId?: unknown; status?: unknown; requirementId?: unknown };
   try {
     parsed = JSON.parse(raw);
@@ -119,7 +119,7 @@ async function handleReport(raw: string, cfg: CriterionClientConfig): Promise<vo
   // Sink 2 — durable store. Best-effort; a failure is logged (stderr, so it
   // never pollutes the NDJSON stdout stream) and swallowed.
   try {
-    await reportCriterion(cfg, { criterionId, status, requirementId: requirementId || undefined });
+    await reportValidationCriterion(cfg, { criterionId, status, requirementId: requirementId || undefined });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[criterion-listener] durable report failed (non-fatal): ${msg}`);

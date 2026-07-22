@@ -50,16 +50,16 @@ func TestComputeAttention_CleanTaskIsEmptyNonNilSlice(t *testing.T) {
 	}
 }
 
-// fakeCriteria is an in-memory CriterionStatusReader: it records the scope it
+// fakeCriteria is an in-memory ValidationCriterionStatusReader: it records the scope it
 // was read with and returns a fixed set of rows.
 type fakeCriteria struct {
-	rows     []delivery.CriterionStatus
+	rows     []delivery.ValidationCriterionStatus
 	gotOrg   string
 	gotRepo  string
 	gotIssue int
 }
 
-func (f *fakeCriteria) ListByIssueScoped(_ context.Context, orgID, repo string, issue int) ([]delivery.CriterionStatus, error) {
+func (f *fakeCriteria) ListByIssueScoped(_ context.Context, orgID, repo string, issue int) ([]delivery.ValidationCriterionStatus, error) {
 	f.gotOrg, f.gotRepo, f.gotIssue = orgID, repo, issue
 	return f.rows, nil
 }
@@ -67,13 +67,13 @@ func (f *fakeCriteria) ListByIssueScoped(_ context.Context, orgID, repo string, 
 // TestReads_CriteriaReadsFromStore: Criteria resolves the project repo and reads
 // the store org-scoped by (repo, issue).
 func TestReads_CriteriaReadsFromStore(t *testing.T) {
-	fc := &fakeCriteria{rows: []delivery.CriterionStatus{
+	fc := &fakeCriteria{rows: []delivery.ValidationCriterionStatus{
 		{CriterionID: "AC-001-a", Status: "passed"},
 		{CriterionID: "AC-002-a", Status: "failed"},
 	}}
 	reads := NewReads(newFakeIssues(), fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil, fc)
 
-	rows, err := reads.Criteria(context.Background(), "org1", "proj1", 30)
+	rows, err := reads.ValidationCriteria(context.Background(), "org1", "proj1", 30)
 	if err != nil {
 		t.Fatalf("Criteria: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestReads_CriteriaReadsFromStore(t *testing.T) {
 // skeleton from the criteria file.
 func TestReads_CriteriaNilReaderDegrades(t *testing.T) {
 	reads := NewReads(newFakeIssues(), fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil, nil)
-	rows, err := reads.Criteria(context.Background(), "org1", "proj1", 30)
+	rows, err := reads.ValidationCriteria(context.Background(), "org1", "proj1", 30)
 	if err != nil {
 		t.Fatalf("Criteria: %v", err)
 	}

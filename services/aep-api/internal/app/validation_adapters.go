@@ -85,15 +85,15 @@ func (l validationExecLocator) LookupExecutionTask(ctx context.Context, orgHandl
 	return row.Repo, row.IssueNumber, row.ProjectID, true, nil
 }
 
-// criterionStoreAdapter adapts the criterion_statuses repository to validation's
-// CriterionStore port: it builds the row from the flat args and upserts it
-// (last-write-wins on (repo, issue_number, criterion_id)).
+// criterionStoreAdapter adapts the validation_criterion_statuses repository to
+// validation's CriterionStore port: it builds the row from the flat args and
+// upserts it (last-write-wins on (repo, issue_number, criterion_id)).
 type criterionStoreAdapter struct {
-	repo delivery.CriterionStatusRepository
+	repo delivery.ValidationCriterionStatusRepository
 }
 
 func (a criterionStoreAdapter) UpsertCriterion(ctx context.Context, orgID, projectID, repo string, issueNumber int, executionID, criterionID, requirementID, status string) error {
-	return a.repo.Upsert(ctx, &delivery.CriterionStatus{
+	return a.repo.Upsert(ctx, &delivery.ValidationCriterionStatus{
 		Repo:          repo,
 		IssueNumber:   issueNumber,
 		CriterionID:   criterionID,

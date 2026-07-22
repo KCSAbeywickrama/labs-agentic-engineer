@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import { mergeCriterionStatus, splitCriterionLines } from "./criterionStatus";
+import { mergeCriterionStatus, splitCriterionLines } from "./validationCriterionStatus";
 
 type TimelineEvent = components["schemas"]["TimelineEvent"];
 type CriterionStatusRow = components["schemas"]["ValidationCriterionStatus"];

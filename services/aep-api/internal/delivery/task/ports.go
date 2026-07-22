@@ -100,12 +100,12 @@ type ExecutionReader interface {
 	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]delivery.Execution, error)
 }
 
-// CriterionStatusReader is the read side of the criterion_statuses store — the
+// ValidationCriterionStatusReader is the read side of the validation_criterion_statuses store — the
 // validation Task's per-acceptance-criterion checklist, org-scoped by issue.
-// delivery.CriterionStatusRepository satisfies it. A nil reader degrades the
-// Criteria read to an empty list (the store is optional infra).
-type CriterionStatusReader interface {
-	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]delivery.CriterionStatus, error)
+// delivery.ValidationCriterionStatusRepository satisfies it. A nil reader degrades the
+// ValidationCriteria read to an empty list (the store is optional infra).
+type ValidationCriterionStatusReader interface {
+	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]delivery.ValidationCriterionStatus, error)
 }
 
 // DesignReader exposes each component's declared dependencies from the design at

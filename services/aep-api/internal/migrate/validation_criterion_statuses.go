@@ -23,7 +23,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// criterion_statuses.go — the validation criteria checklist store.
+// validation_criterion_statuses.go — the validation criteria checklist store.
 //
 // One row per (repo, issue_number, criterion_id): the validation runner's
 // Playwright reporter reports each acceptance criterion's live status to the
@@ -35,9 +35,9 @@ import (
 // Task's issue (a same-issue retry upserts onto the same rows), and rows outlive
 // any single execution attempt. execution_id is provenance only. No TTL —
 // mirrors coding_agent_logs.
-func RunCriterionStatuses(ctx context.Context, db *gorm.DB) error {
+func RunValidationCriterionStatuses(ctx context.Context, db *gorm.DB) error {
 	stmt := `
-		CREATE TABLE IF NOT EXISTS criterion_statuses (
+		CREATE TABLE IF NOT EXISTS validation_criterion_statuses (
 		  repo           TEXT         NOT NULL,
 		  issue_number   BIGINT       NOT NULL,
 		  criterion_id   TEXT         NOT NULL,
@@ -49,10 +49,10 @@ func RunCriterionStatuses(ctx context.Context, db *gorm.DB) error {
 		  updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
 		  PRIMARY KEY (repo, issue_number, criterion_id)
 		);
-		CREATE INDEX IF NOT EXISTS idx_criterion_statuses_org_issue
-		  ON criterion_statuses(org_id, repo, issue_number);`
+		CREATE INDEX IF NOT EXISTS idx_validation_criterion_statuses_org_issue
+		  ON validation_criterion_statuses(org_id, repo, issue_number);`
 	if err := db.WithContext(ctx).Exec(stmt).Error; err != nil {
-		return fmt.Errorf("criterion_statuses: %w", err)
+		return fmt.Errorf("validation_criterion_statuses: %w", err)
 	}
 	return nil
 }

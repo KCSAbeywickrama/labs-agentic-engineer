@@ -87,7 +87,7 @@ func (h *Handler) GetTaskValidationCriteria(ctx context.Context, request gen.Get
 	if h.reads == nil {
 		return nil, errTasksNotConfigured()
 	}
-	rows, err := h.reads.Criteria(ctx, org, request.ProjectName, int(request.IssueNumber))
+	rows, err := h.reads.ValidationCriteria(ctx, org, request.ProjectName, int(request.IssueNumber))
 	if err != nil {
 		return nil, mapTaskReadError(err)
 	}
@@ -131,12 +131,12 @@ func (r getTaskJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
 }
 
 // getTaskValidationCriteriaJSONResponse marshals the delivery DTO verbatim (same
-// reason as the list/get bodies above): delivery.CriterionStatus already carries
+// reason as the list/get bodies above): delivery.ValidationCriterionStatus already carries
 // the wire tags (id/requirementId/status/updatedAt), and updatedAt is always set.
-type getTaskValidationCriteriaJSONResponse []delivery.CriterionStatus
+type getTaskValidationCriteriaJSONResponse []delivery.ValidationCriterionStatus
 
 func (r getTaskValidationCriteriaJSONResponse) VisitGetTaskValidationCriteriaResponse(w http.ResponseWriter) error {
-	return writeJSONBody(w, http.StatusOK, []delivery.CriterionStatus(r))
+	return writeJSONBody(w, http.StatusOK, []delivery.ValidationCriterionStatus(r))
 }
 
 // errTasksNotConfigured is the nil-service guard the Huma registration carried

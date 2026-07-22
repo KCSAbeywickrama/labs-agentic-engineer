@@ -23,32 +23,32 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// CriterionStatusRepository is the criterion_statuses store: the internal
+// ValidationCriterionStatusRepository is the validation_criterion_statuses store: the internal
 // criteria callback upserts one row per acceptance criterion as the validation
 // runner reports it live, and the task read path lists them by issue number for
 // the console checklist. Org-scoped reads; upsert is last-write-wins on
 // (repo, issue_number, criterion_id).
-type CriterionStatusRepository interface {
+type ValidationCriterionStatusRepository interface {
 	// Upsert writes the criterion's latest status, overwriting an existing row
 	// for the same (repo, issue_number, criterion_id).
-	Upsert(ctx context.Context, row *CriterionStatus) error
+	Upsert(ctx context.Context, row *ValidationCriterionStatus) error
 
 	// ListByIssueScoped returns every criterion status for one validation Task,
 	// org-fenced. Ordered by criterion id for a stable checklist. A miss is an
 	// empty slice, not an error.
-	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]CriterionStatus, error)
+	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]ValidationCriterionStatus, error)
 }
 
-type criterionStatusRepository struct {
+type validationCriterionStatusRepository struct {
 	db *gorm.DB
 }
 
-// NewCriterionStatusRepository builds the criterion_statuses store.
-func NewCriterionStatusRepository(db *gorm.DB) CriterionStatusRepository {
-	return &criterionStatusRepository{db: db}
+// NewValidationCriterionStatusRepository builds the validation_criterion_statuses store.
+func NewValidationCriterionStatusRepository(db *gorm.DB) ValidationCriterionStatusRepository {
+	return &validationCriterionStatusRepository{db: db}
 }
 
-func (r *criterionStatusRepository) Upsert(ctx context.Context, row *CriterionStatus) error {
+func (r *validationCriterionStatusRepository) Upsert(ctx context.Context, row *ValidationCriterionStatus) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "repo"}, {Name: "issue_number"}, {Name: "criterion_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
@@ -57,8 +57,8 @@ func (r *criterionStatusRepository) Upsert(ctx context.Context, row *CriterionSt
 	}).Create(row).Error
 }
 
-func (r *criterionStatusRepository) ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]CriterionStatus, error) {
-	var rows []CriterionStatus
+func (r *validationCriterionStatusRepository) ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]ValidationCriterionStatus, error) {
+	var rows []ValidationCriterionStatus
 	err := r.db.WithContext(ctx).
 		Where("org_id = ? AND repo = ? AND issue_number = ?", orgID, repo, issueNumber).
 		Order("criterion_id ASC").

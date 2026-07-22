@@ -25,25 +25,25 @@
 import http from "node:http";
 import https from "node:https";
 
-export interface CriterionClientConfig {
+export interface ValidationCriterionClientConfig {
   platformURL: string;
   taskId: string;
   bearer: string;
   correlationId?: string;
 }
 
-export interface CriterionReport {
+export interface ValidationCriterionReport {
   criterionId: string;
   status: string;
   requirementId?: string;
 }
 
-// reportCriterion POSTs one criterion transition to the internal criteria
+// reportValidationCriterion POSTs one criterion transition to the internal criteria
 // callback. Resolves on a 2xx; rejects otherwise (the caller decides whether to
 // swallow). A blank platformURL or bearer is a no-op resolve (dev / unauth runs).
-export async function reportCriterion(
-  cfg: CriterionClientConfig,
-  report: CriterionReport,
+export async function reportValidationCriterion(
+  cfg: ValidationCriterionClientConfig,
+  report: ValidationCriterionReport,
 ): Promise<void> {
   if (!cfg.platformURL.trim() || !cfg.bearer.trim()) {
     return;
