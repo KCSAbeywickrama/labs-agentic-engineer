@@ -155,6 +155,11 @@ export function runClaudeQuery(
     AEP_PLATFORM_URL: process.env.AEP_PLATFORM_URL ?? "",
     AEP_GIT_SERVICE_URL: req.gitServiceUrl,
     AEP_CORRELATION_ID: req.correlationId ?? "",
+    // Validation live-progress bridge (validation runs only; oneshot sets these
+    // before the run). The Playwright reporter POSTs each criterion begin/end to
+    // the socket; the harness fans it out to the log stream + durable store.
+    AEP_CRITERION_SOCK: process.env.AEP_CRITERION_SOCK ?? "",
+    AEP_CRITERION_REPORTER: process.env.AEP_CRITERION_REPORTER ?? "",
   };
 
   // Two-tier plugin list: the base `aep` plugin (workflow + base

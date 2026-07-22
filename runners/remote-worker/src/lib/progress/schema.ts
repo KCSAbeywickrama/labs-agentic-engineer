@@ -30,7 +30,8 @@ export type ProgressKind =
   | "git_push"
   | "gh_action"
   | "log"
-  | "result";
+  | "result"
+  | "criterion";
 
 interface ProgressEnvelope {
   schemaVersion: typeof PROGRESS_SCHEMA_VERSION;
@@ -83,6 +84,17 @@ export interface ResultEvent extends ProgressEnvelope {
   error?: string;
 }
 
+// CriterionEvent carries one validation acceptance-criterion transition, emitted
+// by the harness on behalf of the Playwright reporter (per test begin/end). It
+// reuses `step` (the AC id) and `status` so the backend needs no new fields — the
+// generic ProgressEvent parser and the console TimelineEvent already expose both.
+export interface CriterionEvent extends ProgressEnvelope {
+  kind: "criterion";
+  step: string; // acceptance-criterion id, e.g. "AC-001-a"
+  status: "validating" | "passed" | "failed" | "skipped";
+  summary?: string; // the requirement id, when the reporter supplies it
+}
+
 export type ProgressEvent =
   | PhaseEvent
   | ToolUseEvent
@@ -90,7 +102,8 @@ export type ProgressEvent =
   | GitPushEvent
   | GhActionEvent
   | LogEvent
-  | ResultEvent;
+  | ResultEvent
+  | CriterionEvent;
 
 // Discriminated union of payloads (no envelope fields). The emitter stamps
 // schemaVersion / ts / seq itself so callers cannot forget.
@@ -101,4 +114,5 @@ export type ProgressEventInput =
   | { kind: "git_push"; sha?: string; branch?: string; summary?: string }
   | { kind: "gh_action"; command: string; summary?: string }
   | { kind: "log"; level?: "info" | "warn" | "error"; summary: string }
-  | { kind: "result"; status: "success" | "failure"; summary?: string; error?: string };
+  | { kind: "result"; status: "success" | "failure"; summary?: string; error?: string }
+  | { kind: "criterion"; step: string; status: "validating" | "passed" | "failed" | "skipped"; summary?: string };

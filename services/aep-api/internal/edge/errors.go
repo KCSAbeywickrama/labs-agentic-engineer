@@ -53,6 +53,7 @@ const (
 // the same thing, or one of the two would fall through to a bare 500.
 type apiError = apierr.Error
 
+func errBadRequest(msg string) error         { return apierr.BadRequest(msg) }
 func errUnauthorized(msg string) error       { return apierr.Unauthorized(msg) }
 func errForbidden(msg string) error          { return apierr.Forbidden(msg) }
 func errNotFound(msg string) error           { return apierr.NotFound(msg) }

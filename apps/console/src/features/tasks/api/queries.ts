@@ -57,6 +57,32 @@ export function useAllTasks(projectName: string, tag?: string) {
   });
 }
 
+// A validation task's per-acceptance-criterion statuses from the durable store —
+// a one-shot checklist SEED, NOT a live poll. Live updates during a run arrive
+// over the SSE stream (each criterion event is emitted to pod stdout and rides
+// stream-task-log, which useTaskLog overlays on this seed). The seed matters for
+// two things the stream can't cover on its own: a finished/FAILED run whose PR
+// never merged (nothing else surfaces the outcome), and a fresh mid-run load
+// where early events already scrolled off the live log snapshot. So a single
+// fetch per mount is enough — no refetchInterval. Empty is a valid "nothing
+// reported yet" state.
+export function useTaskCriteria(projectName: string, issueNumber: number) {
+  return useQuery({
+    queryKey: taskKeys.criteria(projectName, issueNumber),
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/tasks/{issueNumber}/criteria",
+        { params: { path: { projectName, issueNumber } } },
+      );
+      if (error) {
+        throw new Error(apiErrorMessage(error, "Failed to load validation criteria"));
+      }
+      return data ?? [];
+    },
+    staleTime: 30_000,
+  });
+}
+
 // One task with its execution history — the task page's initial state; the
 // log stream (useTaskLog) takes over from there.
 export function useTask(projectName: string, issueNumber: number) {

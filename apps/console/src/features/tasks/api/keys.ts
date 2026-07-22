@@ -25,4 +25,6 @@ export const taskKeys = {
     [...taskKeys.all(projectName), "list", tag ?? "all-versions"] as const,
   detail: (projectName: string, issueNumber: number) =>
     [...taskKeys.all(projectName), "detail", issueNumber] as const,
+  criteria: (projectName: string, issueNumber: number) =>
+    [...taskKeys.all(projectName), "criteria", issueNumber] as const,
 };

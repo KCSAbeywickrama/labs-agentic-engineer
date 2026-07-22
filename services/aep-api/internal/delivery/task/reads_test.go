@@ -50,6 +50,55 @@ func TestComputeAttention_CleanTaskIsEmptyNonNilSlice(t *testing.T) {
 	}
 }
 
+// fakeCriteria is an in-memory CriterionStatusReader: it records the scope it
+// was read with and returns a fixed set of rows.
+type fakeCriteria struct {
+	rows     []delivery.CriterionStatus
+	gotOrg   string
+	gotRepo  string
+	gotIssue int
+}
+
+func (f *fakeCriteria) ListByIssueScoped(_ context.Context, orgID, repo string, issue int) ([]delivery.CriterionStatus, error) {
+	f.gotOrg, f.gotRepo, f.gotIssue = orgID, repo, issue
+	return f.rows, nil
+}
+
+// TestReads_CriteriaReadsFromStore: Criteria resolves the project repo and reads
+// the store org-scoped by (repo, issue).
+func TestReads_CriteriaReadsFromStore(t *testing.T) {
+	fc := &fakeCriteria{rows: []delivery.CriterionStatus{
+		{CriterionID: "AC-001-a", Status: "passed"},
+		{CriterionID: "AC-002-a", Status: "failed"},
+	}}
+	reads := NewReads(newFakeIssues(), fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil, fc)
+
+	rows, err := reads.Criteria(context.Background(), "org1", "proj1", 30)
+	if err != nil {
+		t.Fatalf("Criteria: %v", err)
+	}
+	if len(rows) != 2 || rows[0].CriterionID != "AC-001-a" {
+		t.Errorf("rows = %+v", rows)
+	}
+	if fc.gotOrg != "org1" || fc.gotRepo != "o/r" || fc.gotIssue != 30 {
+		t.Errorf("read scope = org=%q repo=%q issue=%d; want org1/o\\/r/30", fc.gotOrg, fc.gotRepo, fc.gotIssue)
+	}
+}
+
+// TestReads_CriteriaNilReaderDegrades: with no store wired, Criteria returns an
+// empty (non-nil) slice, never an error — the console still renders the checklist
+// skeleton from the criteria file.
+func TestReads_CriteriaNilReaderDegrades(t *testing.T) {
+	reads := NewReads(newFakeIssues(), fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil, nil)
+	rows, err := reads.Criteria(context.Background(), "org1", "proj1", 30)
+	if err != nil {
+		t.Fatalf("Criteria: %v", err)
+	}
+	if rows == nil || len(rows) != 0 {
+		t.Errorf("want empty non-nil slice, got %+v", rows)
+	}
+}
+
 // TestListReads_ValidationTaskExcluded pins the list read-model boundary: the
 // project's aep:validation Task is a phase of the run (surfaced via /status
 // deploy.validation + validationUrl), NOT an implementation task, so
@@ -61,7 +110,7 @@ func TestListReads_ValidationTaskExcluded(t *testing.T) {
 	issues.seed(taggedIssue(10, "order-service", "v1"))
 	issues.seed(validationIssue(30, "v1"))
 
-	reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil)
+	reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, newFakeExecReader(), nil, nil, nil)
 
 	views, err := reads.List(context.Background(), "org1", "proj1", "open")
 	if err != nil {
@@ -142,7 +191,7 @@ func TestReads_PRURLDerivation(t *testing.T) {
 			if tc.exec != nil {
 				execs.put(10, *tc.exec)
 			}
-			reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil)
+			reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil, nil)
 
 			views, err := reads.List(context.Background(), "org1", "proj1", "open")
 			if err != nil {
@@ -182,7 +231,7 @@ func TestReads_PRURLForValidationTask(t *testing.T) {
 		Status: string(taskmeta.ExecSucceeded),
 		Reason: taskmeta.ReasonPROpenPrefix + "7",
 	})
-	reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil)
+	reads := NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, nil, nil)
 
 	detail, err := reads.Get(context.Background(), "org1", "proj1", 30)
 	if err != nil {
@@ -198,7 +247,7 @@ func TestReads_PRURLForValidationTask(t *testing.T) {
 // newReadsWithDesign wires a read path with a DesignReader so the second pass
 // resolves provision / org-service deps.
 func newReadsWithDesign(issues *fakeIssues, execs *fakeExecReader, design fakeDesign) *Reads {
-	return NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, design)
+	return NewReads(issues, fakeRepos{repo: defaultRepo()}, execs, nil, design, nil)
 }
 
 func viewsByNumber(t *testing.T, views []delivery.TaskView) map[int]delivery.TaskView {

@@ -66,3 +66,25 @@ type ContextProvider interface {
 type CredentialRequester interface {
 	RequestCredentials(ctx context.Context, executionID, orgHandle string, req CredentialRequest) (*TestCredential, error)
 }
+
+// CriterionReporter is the internal criteria-callback endpoint's view of the
+// criterion ingest service (*CriterionIngestService satisfies it).
+type CriterionReporter interface {
+	ReportCriterion(ctx context.Context, executionID, orgHandle string, req CriterionReportInput) error
+}
+
+// ExecutionTaskLocator resolves a runner's execution id to its Task (repo +
+// issue number + project), fenced by the caller's org. Broader than
+// ExecutionLocator (which returns only the project): the criteria store is keyed
+// by (repo, issue_number). delivery.ExecutionRepository's GetByIDScoped satisfies
+// the adapter wired at the composition root.
+type ExecutionTaskLocator interface {
+	LookupExecutionTask(ctx context.Context, orgHandle, executionID string) (repo string, issueNumber int, projectID string, found bool, err error)
+}
+
+// CriterionStore upserts a criterion's latest status (last-write-wins on
+// (repo, issue_number, criterion_id)). delivery.CriterionStatusRepository
+// satisfies the adapter wired at the composition root.
+type CriterionStore interface {
+	UpsertCriterion(ctx context.Context, orgID, projectID, repo string, issueNumber int, executionID, criterionID, requirementID, status string) error
+}

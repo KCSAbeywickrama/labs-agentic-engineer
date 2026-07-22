@@ -50,7 +50,7 @@ and every former feature→feature edge becomes a legal slice→root type refere
 | `execution` | the ONE funnel (admit/finish/reevaluate), registry, sweep, `TaskStreamService`, `OpsExecutionReader` | `Executor`/`DispatchRequest`/`TaskFacts`, `Signaler`, `TaskStreamHub` |
 | `codingagent` | the CodingExecutor + dispatcher + job watchers + templates | `Executor`/`DispatchRequest`/`TaskStreamHub`, `Signaler` |
 | `devflow` | the Temporal dev/task/validation workflows, activities, worker | `Runtime`, `Signaler`, the workflow I/O vocab |
-| `validation` | the two S2S validation runner callbacks (context / test-credentials) | — (no cross-edges; least entangled) |
+| `validation` | the three S2S validation runner callbacks (context / test-credentials / criteria-report) | — (no cross-edges; least entangled) |
 | `httpapi` | the aggregator: embeds build/task/execution handlers; **holds `Deps`** (see below) | imports the sub-packages (the exempt aggregator) |
 
 **`Deps` lives in `httpapi`, not the root.** Every other domain keeps its `Deps` in the domain root, but
@@ -66,14 +66,16 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 | `RepoLookup` (`owner/name`) | needs | `sourcecontrol` — repo full-name resolution |
 | org-credential reads · `AnthropicKeyResolver` | needs | `platform/secrets` / P3a org repositories — coding-agent runner secrets |
 | `ExecutionReader` (`ops.ExecutionFact`) | offers | `ops` — latest-execution-per-kind correlation (`execution.OpsExecutionReader`, P6-retired the app bridge) |
-| `ValidationContext` · `ValidationCredentials` | offers | the S2S runner callbacks (`/internal/v1`, via the internalServer — not the public edge) |
+| `ValidationContext` · `ValidationCredentials` · `CriterionReporter` | offers | the S2S runner callbacks (`/internal/v1`, via the internalServer — not the public edge) |
+| `CriterionStatusReader` | needs | `task` → the criteria checklist read (satisfied by `*delivery.CriterionStatusRepository`) |
 
 ## Owns
 - The **executions** write-API (admit/finish/reevaluate through the funnel) and **workflow_runs**; the
   Temporal `Runtime`, `Signaler`, and the dev/task/validation workflows.
-- **Persistence**: the `executions` / `workflow_runs` / `coding_agent_logs` gorm and their entities live in
-  this domain — `repository_execution.go` · `repository_workflow_run.go` · `repository_coding_agent_log.go`
-  over the `execution.go` / `workflow_run.go` / `coding_agent_log.go` entities — as single write-authority.
+- **Persistence**: the `executions` / `workflow_runs` / `coding_agent_logs` / `criterion_statuses` gorm and
+  their entities live in this domain — `repository_execution.go` · `repository_workflow_run.go` ·
+  `repository_coding_agent_log.go` · `repository_criterion_status.go` over the `execution.go` /
+  `workflow_run.go` / `coding_agent_log.go` / `criterion_status.go` entities — as single write-authority.
 
 ## Invariants — don't break
 - **`task ⊥ execution`.** The GitHub-facing half (`task`) and the platform-owned half (`execution`) are
@@ -103,4 +105,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   (+ `validationIssue`, `validationUrl`); `get-task` and `stream-task-log` still serve it by issue number —
   the pair the console validation log page consumes. `TaskView.prUrl` (recovered from the succeeded coding
   Execution's `pr#N` reason, no live PR query) links each Task's PR.
+- **Per-criterion validation progress is durable, log-independent.** The Playwright runner reports each
+  acceptance criterion's begin/end to the `runner-criteria-report` callback, which upserts
+  `criterion_statuses` keyed by `(repo, issue_number, criterion_id)` (last-write-wins; execution id is
+  provenance, not a key — a same-issue retry collapses onto the same rows). The console reads them via
+  `get-task-criteria` as its checklist seed and overlays the live `kind:"criterion"` stream frames, so a
+  finished or FAILED (never-merged) run still shows the complete checklist without depending on the log
+  snapshot tail. The runner also emits the same events onto its stdout NDJSON, so they ride the existing
+  `stream-task-log` path for the live view with no backend stream-merge.
 - Platform-wide rules (tenant gate, secrets fence, persistence-in-domain) → [../../README.md](../../README.md).

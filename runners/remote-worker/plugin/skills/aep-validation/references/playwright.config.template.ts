@@ -37,6 +37,13 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["json", { outputFile: "test-results/results.json" }],
+    // Live per-criterion progress: only in the AEP validation runner (which sets
+    // AEP_CRITERION_REPORTER to the absolute in-pod reporter path). Absent on a
+    // developer's machine, so this committed config stays fully portable — the
+    // spread is [] and Playwright runs with just list+json.
+    ...(process.env.AEP_CRITERION_REPORTER
+      ? [[process.env.AEP_CRITERION_REPORTER] as [string]]
+      : []),
   ],
   outputDir: "test-results/artifacts",
   use: {

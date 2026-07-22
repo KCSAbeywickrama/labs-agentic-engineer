@@ -29,6 +29,18 @@ type ComponentEndpoint struct {
 	URL       string `json:"url"`
 }
 
+// CriterionReport One acceptance-criterion status transition reported live by the validation runner's Playwright reporter (per test begin/end). Generated as igen.CriterionReport (no x-go-type) — igen stays a leaf; the edge projects it onto the delivery domain's own input type.
+type CriterionReport struct {
+	// CriterionID Stable acceptance-criterion id (e.g. "AC-001-a").
+	CriterionID string `json:"criterionId"`
+
+	// RequirementID Parent requirement id, when the reporter knows it.
+	RequirementID string `json:"requirementId,omitempty"`
+
+	// Status validating | passed | failed | skipped.
+	Status string `json:"status"`
+}
+
 // Error Flat error envelope returned by every non-2xx response.
 type Error struct {
 	// Code Machine-readable error code (stable slug).
@@ -91,6 +103,9 @@ type publisherCCContextKey string
 // taskJWTContextKey is the context key for taskJWT security scheme
 type taskJWTContextKey string
 
+// RunnerCriteriaReportJSONRequestBody defines body for RunnerCriteriaReport for application/json ContentType.
+type RunnerCriteriaReportJSONRequestBody = CriterionReport
+
 // RunnerValidationCredentialsJSONRequestBody defines body for RunnerValidationCredentials for application/json ContentType.
 type RunnerValidationCredentialsJSONRequestBody = TestCredentialRequest
 
@@ -99,6 +114,9 @@ type ServerInterface interface {
 	// Refresh an execution's git credentials (runner callback)
 	// (POST /executions/{executionId}/credentials/refresh)
 	RunnerRefreshCredentials(w http.ResponseWriter, r *http.Request, executionID string)
+	// Report a validation criterion's live status (runner callback)
+	// (POST /executions/{executionId}/criteria)
+	RunnerCriteriaReport(w http.ResponseWriter, r *http.Request, executionID string)
 	// Request test credentials for a validation run (runner callback)
 	// (POST /executions/{executionId}/test-credentials)
 	RunnerValidationCredentials(w http.ResponseWriter, r *http.Request, executionID string)
@@ -141,6 +159,40 @@ func (siw *ServerInterfaceWrapper) RunnerRefreshCredentials(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunnerRefreshCredentials(w, r, executionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunnerCriteriaReport operation middleware
+func (siw *ServerInterfaceWrapper) RunnerCriteriaReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "executionId" -------------
+	var executionID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "executionId", r.PathValue("executionId"), &executionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "executionId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, TaskJWTScopes, []string{})
+
+	ctx = context.WithValue(ctx, PublisherCCScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunnerCriteriaReport(w, r, executionID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -339,6 +391,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/executions/{executionId}/credentials/refresh", wrapper.RunnerRefreshCredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/executions/{executionId}/criteria", wrapper.RunnerCriteriaReport)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/executions/{executionId}/test-credentials", wrapper.RunnerValidationCredentials)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/executions/{executionId}/validation-context", wrapper.RunnerValidationContext)
 
@@ -373,6 +426,40 @@ type RunnerRefreshCredentialsdefaultJSONResponse struct {
 }
 
 func (response RunnerRefreshCredentialsdefaultJSONResponse) VisitRunnerRefreshCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunnerCriteriaReportRequestObject struct {
+	ExecutionID string `json:"executionId"`
+	Body        *RunnerCriteriaReportJSONRequestBody
+}
+
+type RunnerCriteriaReportResponseObject interface {
+	VisitRunnerCriteriaReportResponse(w http.ResponseWriter) error
+}
+
+type RunnerCriteriaReport204Response struct {
+}
+
+func (response RunnerCriteriaReport204Response) VisitRunnerCriteriaReportResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RunnerCriteriaReportdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RunnerCriteriaReportdefaultJSONResponse) VisitRunnerCriteriaReportResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -468,6 +555,9 @@ type StrictServerInterface interface {
 	// Refresh an execution's git credentials (runner callback)
 	// (POST /executions/{executionId}/credentials/refresh)
 	RunnerRefreshCredentials(ctx context.Context, request RunnerRefreshCredentialsRequestObject) (RunnerRefreshCredentialsResponseObject, error)
+	// Report a validation criterion's live status (runner callback)
+	// (POST /executions/{executionId}/criteria)
+	RunnerCriteriaReport(ctx context.Context, request RunnerCriteriaReportRequestObject) (RunnerCriteriaReportResponseObject, error)
 	// Request test credentials for a validation run (runner callback)
 	// (POST /executions/{executionId}/test-credentials)
 	RunnerValidationCredentials(ctx context.Context, request RunnerValidationCredentialsRequestObject) (RunnerValidationCredentialsResponseObject, error)
@@ -524,6 +614,39 @@ func (sh *strictHandler) RunnerRefreshCredentials(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RunnerRefreshCredentialsResponseObject); ok {
 		if err := validResponse.VisitRunnerRefreshCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunnerCriteriaReport operation middleware
+func (sh *strictHandler) RunnerCriteriaReport(w http.ResponseWriter, r *http.Request, executionID string) {
+	var request RunnerCriteriaReportRequestObject
+
+	request.ExecutionID = executionID
+
+	var body RunnerCriteriaReportJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunnerCriteriaReport(ctx, request.(RunnerCriteriaReportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunnerCriteriaReport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunnerCriteriaReportResponseObject); ok {
+		if err := validResponse.VisitRunnerCriteriaReportResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

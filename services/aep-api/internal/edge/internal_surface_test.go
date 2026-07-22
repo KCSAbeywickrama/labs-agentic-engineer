@@ -38,6 +38,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/delivery/validation"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
@@ -57,7 +58,20 @@ func (f *fakeCredsRefresh) Refresh(_ context.Context, executionID, orgHandle str
 	}, nil
 }
 
-func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *fakeCredsRefresh) {
+type fakeCriteriaReporter struct {
+	gotExecution, gotOrg string
+	got                  validation.CriterionReportInput
+	err                  error
+	calls                int
+}
+
+func (f *fakeCriteriaReporter) ReportCriterion(_ context.Context, executionID, orgHandle string, req validation.CriterionReportInput) error {
+	f.calls++
+	f.gotExecution, f.gotOrg, f.got = executionID, orgHandle, req
+	return f.err
+}
+
+func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *fakeCredsRefresh, *fakeCriteriaReporter) {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -71,18 +85,20 @@ func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *
 		t.Fatalf("NewTaskTokenManager: %v", err)
 	}
 	svc := &fakeCredsRefresh{}
+	crit := &fakeCriteriaReporter{}
 	h := NewHandler(AppParams{
 		InternalDeps: InternalDeps{
 			CredsRefresh: svc,
 			RunnerAuth:   auth.NewRunnerAuthorizer(mgr, nil, nil),
+			Criteria:     crit,
 		},
 	})
-	return h, mgr, svc
+	return h, mgr, svc, crit
 }
 
 func TestInternalSurface_RunnerRefresh_Lockstep(t *testing.T) {
 	t.Parallel()
-	h, mgr, svc := newInternalTestStack(t)
+	h, mgr, svc, _ := newInternalTestStack(t)
 
 	tok, err := mgr.Issue("exec-42", "org-acme", "proj-1")
 	if err != nil {
@@ -117,9 +133,64 @@ func TestInternalSurface_RunnerRefresh_Lockstep(t *testing.T) {
 	}
 }
 
+func TestInternalSurface_CriteriaReport(t *testing.T) {
+	t.Parallel()
+	h, mgr, _, crit := newInternalTestStack(t)
+	tok, _ := mgr.Issue("exec-42", "org-acme", "proj-1")
+
+	// Happy path: a valid token for the path execution → 204, and the org comes
+	// from the verified token (not the body). Reaching the handler at all proves
+	// the deny-by-default gate has a case for this op.
+	body := `{"criterionId":"AC-001-a","status":"passed","requirementId":"REQ-001"}`
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/criteria", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 204 {
+		t.Fatalf("criteria report: want 204, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if crit.calls != 1 || crit.gotExecution != "exec-42" || crit.gotOrg != "org-acme" {
+		t.Fatalf("reporter saw calls=%d execution=%q org=%q", crit.calls, crit.gotExecution, crit.gotOrg)
+	}
+	if crit.got.CriterionID != "AC-001-a" || crit.got.Status != "passed" || crit.got.RequirementID != "REQ-001" {
+		t.Fatalf("reporter got %+v", crit.got)
+	}
+
+	// Unknown execution (org fence miss) → 404.
+	crit.err = validation.ErrExecutionNotFound
+	req = httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/criteria", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 404 {
+		t.Fatalf("unknown execution: want 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInternalSurface_CriteriaReport_NotConfigured(t *testing.T) {
+	t.Parallel()
+	// Nil Criteria dep → 503 (fail-safe), but still behind the auth gate.
+	_, mgr, _, _ := newInternalTestStack(t)
+	h2 := NewHandler(AppParams{InternalDeps: InternalDeps{
+		RunnerAuth: auth.NewRunnerAuthorizer(mgr, nil, nil),
+	}})
+	tok, _ := mgr.Issue("exec-42", "org-acme", "proj-1")
+	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/criteria",
+		strings.NewReader(`{"criterionId":"AC-001-a","status":"passed"}`))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h2.ServeHTTP(rec, req)
+	if rec.Code != 503 {
+		t.Fatalf("nil criteria dep: want 503, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestInternalSurface_AuthPosture(t *testing.T) {
 	t.Parallel()
-	h, mgr, _ := newInternalTestStack(t)
+	h, mgr, _, _ := newInternalTestStack(t)
 
 	// No bearer → 401 envelope.
 	req := httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/credentials/refresh", strings.NewReader(""))

@@ -32,6 +32,7 @@
 // watcher picks up via the WorkflowRun terminal status.
 
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { provisionWorkspace, refreshGitToken } from "./lib/workspace.js";
@@ -40,6 +41,8 @@ import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
+import { startCriterionListener, type CriterionListener } from "./lib/progress/criterion-listener.js";
+import { fileURLToPath } from "node:url";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { materializeSkills } from "./lib/skills_materializer.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
@@ -226,13 +229,46 @@ async function main(): Promise<number> {
     console.log("[oneshot] AEP_SKILLS_REPO_URL not set — skipping per-task skills");
   }
 
+  // Validation runs stream live per-criterion progress: start the harness-side
+  // listener BEFORE the run so the env vars are set when runClaudeQuery builds
+  // childEnv, and the Playwright reporter (inheriting them) can reach the socket.
+  // Coding runs pay nothing (the gate below). Best-effort: a listener failure
+  // degrades to no live checklist, never blocks the run.
+  let criterionListener: CriterionListener | undefined;
+  if (req.taskKind === "validation" && platformURL) {
+    try {
+      const sockPath = path.join(os.tmpdir(), "aep-criteria", req.taskId, "progress.sock");
+      await fs.promises.mkdir(path.dirname(sockPath), { recursive: true });
+      await fs.promises.rm(sockPath, { force: true }); // resume-safety
+      criterionListener = await startCriterionListener(sockPath, {
+        platformURL,
+        taskId: req.taskId,
+        bearer: req.bearer,
+        correlationId: req.correlationId,
+      });
+      process.env.AEP_CRITERION_SOCK = sockPath;
+      process.env.AEP_CRITERION_REPORTER = fileURLToPath(
+        new URL("../plugin/skills/aep-validation/references/criterion-reporter.cjs", import.meta.url),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[oneshot] ⚠️  criterion listener unavailable — live checklist degraded: ${msg}`);
+    }
+  }
+
   const log = openTaskLog(layout.workspace);
-  const { completion } = runClaudeQuery(req, layout, log, {
-    skillsPluginDir,
-    preloadSkillNames,
-  });
-  const result = await completion;
-  return result.exitCode;
+  try {
+    const { completion } = runClaudeQuery(req, layout, log, {
+      skillsPluginDir,
+      preloadSkillNames,
+    });
+    const result = await completion;
+    return result.exitCode;
+  } finally {
+    if (criterionListener) {
+      await criterionListener.close().catch(() => {});
+    }
+  }
 }
 
 main()

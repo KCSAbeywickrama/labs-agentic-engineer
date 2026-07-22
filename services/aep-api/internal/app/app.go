@@ -116,6 +116,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 
 	// Repositories
 	executionRepo := delivery.NewExecutionRepository(db)
+	criterionStatusRepo := delivery.NewCriterionStatusRepository(db)
 	configRepo := projects.NewConfigRepository(db)
 	repoRepo := sourcecontrol.NewRepoRepository(db)
 	workflowRunRepo := delivery.NewWorkflowRunRepository(db)
@@ -410,7 +411,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// half (funnel, coding executor, watchers) is wired below, after
 	// asServiceIdentity. repoService/artifactStore/artifactSvcGit/gitOpsService
 	// satisfy the task consumer ports directly.
-	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit, designComponents{store: artifactStore})
+	taskReads := task.NewReads(issueService, repoService, executionRepo, artifactSvcGit, designComponents{store: artifactStore}, criterionStatusRepo)
 	taskPlan := task.NewPlanService(repoService, artifactSvcGit, gitOpsService,
 		anthropicKeyForGenAI, agentsvcClient, issueService, workspaceEngine, task.SkillsRepoResolver(skillsRepoForTurns))
 
@@ -685,6 +686,12 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		validationExecLocator{repo: executionRepo},
 		mockValidationCredentials{},
 	)
+	// Criteria runner callback: the Playwright reporter reports each acceptance
+	// criterion's live status; upserted into the store the console reads back.
+	validationCriteriaSvc := validation.NewCriterionIngestService(
+		validationExecLocator{repo: executionRepo},
+		criterionStoreAdapter{repo: criterionStatusRepo},
+	)
 
 	// Controllers
 	params := edge.AppParams{
@@ -697,6 +704,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 			RunnerAuth:            runnerAuth,
 			ValidationContext:     validationContextSvc,
 			ValidationCredentials: validationCredentialsSvc,
+			Criteria:              validationCriteriaSvc,
 		},
 		WebhookController:   webhookCtrl,
 		OrgGitHubController: orgGitHubCtrl,

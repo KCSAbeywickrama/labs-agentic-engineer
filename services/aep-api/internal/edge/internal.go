@@ -53,6 +53,9 @@ type InternalDeps struct {
 	// answers 503 for its op.
 	ValidationContext     validation.ContextProvider
 	ValidationCredentials validation.CredentialRequester
+	// Criteria backs the criteria-report callback (the runner's live per-criterion
+	// status); a nil reporter answers 503 for its op.
+	Criteria validation.CriterionReporter
 }
 
 // internalServer implements igen.StrictServerInterface.
@@ -101,6 +104,8 @@ func runnerAuthGate(authorizer *auth.RunnerAuthorizer) igen.StrictMiddlewareFunc
 			case igen.RunnerValidationContextRequestObject:
 				executionID = req.ExecutionID
 			case igen.RunnerValidationCredentialsRequestObject:
+				executionID = req.ExecutionID
+			case igen.RunnerCriteriaReportRequestObject:
 				executionID = req.ExecutionID
 			default:
 				return nil, errUnauthorized("unauthenticated internal operation: " + operationID)
@@ -223,4 +228,26 @@ func (s *internalServer) RunnerValidationCredentials(ctx context.Context, reques
 		return nil, errInternal("failed to request test credentials")
 	}
 	return igen.RunnerValidationCredentials200JSONResponse(toIgenTestCredential(*resp)), nil
+}
+
+func (s *internalServer) RunnerCriteriaReport(ctx context.Context, request igen.RunnerCriteriaReportRequestObject) (igen.RunnerCriteriaReportResponseObject, error) {
+	if s.deps.Criteria == nil {
+		return nil, errServiceUnavailable("criteria reporting not configured")
+	}
+	if request.Body == nil {
+		return nil, errBadRequest("criteria report body is required")
+	}
+	org := tenant.BoundOrgFromContext(ctx)
+	err := s.deps.Criteria.ReportCriterion(ctx, request.ExecutionID, org, validation.CriterionReportInput{
+		CriterionID:   request.Body.CriterionID,
+		Status:        request.Body.Status,
+		RequirementID: request.Body.RequirementID,
+	})
+	if err != nil {
+		if errors.Is(err, validation.ErrExecutionNotFound) {
+			return nil, errNotFound("no validation task for this execution")
+		}
+		return nil, errInternal("failed to record criterion status")
+	}
+	return igen.RunnerCriteriaReport204Response{}, nil
 }

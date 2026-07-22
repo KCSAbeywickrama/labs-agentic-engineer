@@ -79,6 +79,21 @@ func (h *Handler) GetTask(ctx context.Context, request gen.GetTaskRequestObject)
 	return getTaskJSONResponse(*detail), nil
 }
 
+// GetTaskCriteria lists a validation Task's per-acceptance-criterion statuses
+// from the durable store (the console's checklist seed). An empty list is a
+// valid "nothing reported yet" state, not a 404.
+func (h *Handler) GetTaskCriteria(ctx context.Context, request gen.GetTaskCriteriaRequestObject) (gen.GetTaskCriteriaResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if h.reads == nil {
+		return nil, errTasksNotConfigured()
+	}
+	rows, err := h.reads.Criteria(ctx, org, request.ProjectName, int(request.IssueNumber))
+	if err != nil {
+		return nil, mapTaskReadError(err)
+	}
+	return getTaskCriteriaJSONResponse(rows), nil
+}
+
 // PromoteTaskFromIssue turns an ad-hoc GitHub issue into a coding Task and
 // dispatches it through the funnel (async 202, empty body). The second half
 // of the SRE/RCA handoff: aep-mcp-server calls this right after create-issue.
@@ -113,6 +128,15 @@ type getTaskJSONResponse delivery.TaskDetail
 
 func (r getTaskJSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
 	return writeJSONBody(w, http.StatusOK, delivery.TaskDetail(r))
+}
+
+// getTaskCriteriaJSONResponse marshals the delivery DTO verbatim (same reason as
+// the list/get bodies above): delivery.CriterionStatus already carries the wire
+// tags (id/requirementId/status/updatedAt), and updatedAt is always set.
+type getTaskCriteriaJSONResponse []delivery.CriterionStatus
+
+func (r getTaskCriteriaJSONResponse) VisitGetTaskCriteriaResponse(w http.ResponseWriter) error {
+	return writeJSONBody(w, http.StatusOK, []delivery.CriterionStatus(r))
 }
 
 // errTasksNotConfigured is the nil-service guard the Huma registration carried

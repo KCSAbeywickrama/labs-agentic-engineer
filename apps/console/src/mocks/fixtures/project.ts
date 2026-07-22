@@ -457,6 +457,22 @@ export const validationTask: TaskView = {
   prUrl: `${REPO_URL}/pull/42`,
 };
 
+// Durable per-criterion statuses for the validation task (issue 30), matching
+// the e2e criteria in validationCriteriaJson — the checklist SEED the console
+// reads from the store. Only issue 30 has any (the validation task); everything
+// else returns []. A finished run: all e2e criteria terminal, one failed.
+type CriterionStatus = components["schemas"]["CriterionStatus"];
+export function validationCriterionStatuses(issueNumber: number): CriterionStatus[] {
+  if (issueNumber !== validationTask.issueNumber) return [];
+  const at = "2026-07-10T10:02:00Z";
+  return [
+    { id: "AC-001-a", requirementId: "REQ-001", status: "passed", updatedAt: at },
+    { id: "AC-001-b", requirementId: "REQ-001", status: "passed", updatedAt: at },
+    { id: "AC-002-a", requirementId: "REQ-002", status: "failed", updatedAt: at },
+    { id: "AC-003-a", requirementId: "REQ-003", status: "passed", updatedAt: at },
+  ];
+}
+
 export const projectTasks: Record<
   Exclude<ProjectScenario, "error">,
   TaskView[]

@@ -1600,6 +1600,46 @@ paths:
       summary: Stream a Task's live state (status + executions + unified timeline) as SSE
       tags:
       - Tasks
+  /projects/{projectName}/tasks/{issueNumber}/criteria:
+    get:
+      operationId: get-task-criteria
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: GitHub issue number of the validation Task
+        in: path
+        name: issueNumber
+        required: true
+        schema:
+          description: GitHub issue number of the validation Task
+          format: int64
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                nullable: true
+                items:
+                  $ref: '#/components/schemas/CriterionStatus'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: List a validation Task's per-acceptance-criterion statuses (durable store)
+      tags:
+      - Tasks
   /projects/{projectName}/tasks/{issueNumber}/promote-from-issue:
     post:
       operationId: promote-task-from-issue
@@ -2796,6 +2836,31 @@ components:
       required:
       - name
       - skillMd
+      type: object
+    CriterionStatus:
+      additionalProperties: false
+      description: A validation acceptance criterion's latest run status, from the
+        durable per-criterion store (fed live by the runner). One entry per criterion
+        the runner has reported for the validation Task.
+      properties:
+        id:
+          description: Stable acceptance-criterion id (e.g. "AC-001-a").
+          type: string
+        requirementId:
+          description: Parent requirement id; "" when the reporter did not supply it.
+          type: string
+        status:
+          description: validating | passed | failed | skipped.
+          type: string
+        updatedAt:
+          description: When this status was last written.
+          format: date-time
+          type: string
+      required:
+      - id
+      - requirementId
+      - status
+      - updatedAt
       type: object
     DeleteOp:
       additionalProperties: false

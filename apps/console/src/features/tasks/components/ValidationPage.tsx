@@ -32,13 +32,27 @@ import {
   GitPullRequest,
 } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
-import { useTask } from "../api/queries";
+import { ValidationView } from "@aep/ui-validation-view";
+import { useTask, useTaskCriteria } from "../api/queries";
 import { useTaskLog } from "../hooks/useTaskLog";
+import {
+  useSpecFiles,
+  useSpecFileContent,
+} from "../../spec/api/queries";
+import {
+  mergeCriterionStatus,
+  splitCriterionLines,
+} from "../lib/criterionStatus";
 import { TaskLogView } from "./TaskLogView";
 import { TaskStatusChip } from "./TaskStatusChip";
 import { EXEC_ACTIVE, useSecondsSince } from "./TaskPage";
 
 const LinkIconButton = createLink(IconButton);
+
+// The acceptance oracle, authored in the design phase. Read from the repo to
+// render the checklist skeleton (all criteria, method badges); the live/durable
+// per-criterion statuses overlay it.
+const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 
 // The validation console: the deployments board's validation chip lands here.
 // Same anatomy as TaskPage (get-task seeds the header, the SSE stream owns
@@ -54,6 +68,18 @@ export function ValidationPage({
 }) {
   const detail = useTask(projectName, issueNumber);
   const log = useTaskLog(projectName, issueNumber);
+  // The criteria checklist: the oracle file (skeleton) + the durable store seed
+  // overlaid with the live stream frames. The store poll runs while the run is
+  // active so a fresh page keeps up before/without the stream.
+  const specFiles = useSpecFiles(projectName);
+  const criteriaEntry =
+    specFiles.data?.find((e) => e.path === CRITERIA_PATH) ?? null;
+  const criteriaFile = useSpecFileContent(
+    projectName,
+    criteriaEntry ? { path: criteriaEntry.path, sha: criteriaEntry.sha } : null,
+  );
+  // A one-shot seed; the live SSE stream (below) pushes updates during the run.
+  const criteria = useTaskCriteria(projectName, issueNumber);
   // An attempt is still queued/running — used to reassure during long, silent
   // stretches (a Playwright runner cold start pulls a hefty browser image).
   const anyRunning = log.executions.some((e) => EXEC_ACTIVE.has(e.status));
@@ -64,6 +90,11 @@ export function ValidationPage({
     `${log.phase}:${log.lines.length}`,
     log.phase !== "ended" && (log.lines.length === 0 || anyRunning),
   );
+
+  // Criterion frames drive the checklist, not the flat log; split them out.
+  const { logLines } = splitCriterionLines(log.lines);
+  const statusById = mergeCriterionStatus(criteria.data, log.lines);
+  const criteriaText = criteriaFile.data?.content;
 
   if (detail.isPending) {
     return (
@@ -102,7 +133,7 @@ export function ValidationPage({
     tail = "· attaching to the validation log…";
   } else if (log.phase === "ended") {
     tail = `· validation settled — ${derivedStatus}`;
-  } else if (log.lines.length === 0) {
+  } else if (logLines.length === 0) {
     // Live, no timeline yet: the validation attempt is being prepared
     // (dispatch / scheduling) before the runner's first line lands.
     tail =
@@ -175,7 +206,39 @@ export function ValidationPage({
           </IconButton>
         </Tooltip>
       </Stack>
-      <TaskLogView lines={log.lines} {...(tail ? { tail } : {})} />
+      {criteriaText && (
+        // The criteria checklist dominates the view; it matches the log's full
+        // width (fillWidth drops the readable 960px cap) and grows, leaving the
+        // log a reduced strip below.
+        <Box
+          sx={{
+            flex: "1 1 auto",
+            minHeight: 240,
+            display: "flex",
+            mb: 2,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+            overflow: "hidden",
+          }}
+        >
+          <ValidationView criteria={criteriaText} statusById={statusById} fillWidth />
+        </Box>
+      )}
+      <Box
+        sx={{
+          // Full height when there's no checklist; a reduced strip beneath it
+          // when there is (the checklist is the primary surface here).
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          ...(criteriaText
+            ? { flex: "0 0 30%", maxHeight: 260 }
+            : { flex: "1 1 auto" }),
+        }}
+      >
+        <TaskLogView lines={logLines} {...(tail ? { tail } : {})} />
+      </Box>
     </Box>
   );
 }

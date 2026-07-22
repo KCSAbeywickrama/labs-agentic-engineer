@@ -71,6 +71,40 @@ func (l validationExecLocator) LookupExecutionProject(ctx context.Context, orgHa
 	return row.ProjectID, true, nil
 }
 
+// LookupExecutionTask resolves the run's Task (repo + issue + project), org-fenced
+// — the criteria store is keyed by (repo, issue_number), so the criteria callback
+// needs more than the project id.
+func (l validationExecLocator) LookupExecutionTask(ctx context.Context, orgHandle, executionID string) (string, int, string, bool, error) {
+	row, err := l.repo.GetByIDScoped(ctx, orgHandle, executionID)
+	if err != nil {
+		return "", 0, "", false, err
+	}
+	if row == nil {
+		return "", 0, "", false, nil
+	}
+	return row.Repo, row.IssueNumber, row.ProjectID, true, nil
+}
+
+// criterionStoreAdapter adapts the criterion_statuses repository to validation's
+// CriterionStore port: it builds the row from the flat args and upserts it
+// (last-write-wins on (repo, issue_number, criterion_id)).
+type criterionStoreAdapter struct {
+	repo delivery.CriterionStatusRepository
+}
+
+func (a criterionStoreAdapter) UpsertCriterion(ctx context.Context, orgID, projectID, repo string, issueNumber int, executionID, criterionID, requirementID, status string) error {
+	return a.repo.Upsert(ctx, &delivery.CriterionStatus{
+		Repo:          repo,
+		IssueNumber:   issueNumber,
+		CriterionID:   criterionID,
+		OrgID:         orgID,
+		ProjectID:     projectID,
+		RequirementID: requirementID,
+		Status:        status,
+		ExecutionID:   executionID,
+	})
+}
+
 // componentDeployLister is the ListDeployments slice of ComponentService the
 // endpoint resolver needs (satisfied structurally by *component.componentService).
 type componentDeployLister interface {

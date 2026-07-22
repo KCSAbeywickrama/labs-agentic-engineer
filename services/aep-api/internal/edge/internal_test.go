@@ -44,6 +44,9 @@ func TestInternalContract(t *testing.T) {
 		"/executions/{executionId}/validation-context",
 		"runner-validation-credentials",
 		"/executions/{executionId}/test-credentials",
+		// Validation criteria live-status callback (per-criterion checklist).
+		"runner-criteria-report",
+		"/executions/{executionId}/criteria",
 		"taskJWT",
 		"publisherCC",
 	} {
