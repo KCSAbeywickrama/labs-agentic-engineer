@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "console-mock",
+      "runtimeExecutable": "/Users/anjanash/.nvm/versions/node/v22.16.0/bin/npx",
+      "runtimeArgs": ["pnpm", "--filter", "@aep/console", "dev"],
+      "cwd": "/Users/anjanash/Desktop/Office/labs-agentic-engineer-cost245",
+      "env": { "VITE_API_MODE": "mock" },
+      "port": 5173
+    }
+  ]
+}

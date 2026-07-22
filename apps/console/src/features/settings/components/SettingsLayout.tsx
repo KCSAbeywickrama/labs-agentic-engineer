@@ -28,13 +28,14 @@ import {
   useMediaQuery,
   useTheme,
 } from "@wso2/oxygen-ui";
-import { KeyRound, Sparkles } from "@wso2/oxygen-ui-icons-react";
+import { Coins, KeyRound, Sparkles } from "@wso2/oxygen-ui-icons-react";
 
 // Each section is its own route (issue #143): deep-linkable and back/forward
 // correct, matching the legacy console's settings/<section> URLs.
 const SECTIONS = [
   { path: "/settings/credentials", label: "Credentials", Icon: KeyRound },
   { path: "/settings/skills", label: "Skills", Icon: Sparkles },
+  { path: "/settings/usage", label: "Usage", Icon: Coins },
 ] as const;
 
 // v1 note (issue #96): no role gate here — any authenticated org member who
@@ -54,7 +55,8 @@ export function SettingsLayout() {
       <PageTitle>
         <PageTitle.Header>Settings</PageTitle.Header>
         <PageTitle.SubHeader>
-          Org-level GitHub and Anthropic credentials, and the skills catalogue
+          Org-level GitHub and Anthropic credentials, the skills catalogue,
+          and per-project agent usage
         </PageTitle.SubHeader>
       </PageTitle>
 

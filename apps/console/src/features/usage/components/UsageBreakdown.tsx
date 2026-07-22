@@ -67,7 +67,8 @@ export function UsageBreakdown({
       )}
       {usage.costUsd === null && (
         <Typography variant="caption" sx={{ opacity: 0.7 }}>
-          No configured rate for this model — tokens only.
+          No stamped cost — this usage predates pricing or its model had no
+          rate.
         </Typography>
       )}
     </Stack>
