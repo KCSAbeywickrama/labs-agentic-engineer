@@ -447,9 +447,12 @@ func (s *SkillService) commitFiles(ctx context.Context, orgID string, repo *sour
 // commit (the SKILL.md path and any reference being rewritten are protected
 // from the delete). Creates/imports pass pruneStaleRefs=false: there is nothing
 // to prune for a brand-new skill. Any retired-layout directories of the same
-// name are cleaned up in the same commit (no-ops on migrated repos). Used by
-// the mutation + import services and the reconciler. §9.
-func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD string, references map[string]string, message string, pruneStaleRefs bool) error {
+// name are cleaned up in the same commit (no-ops on migrated repos). When
+// entry is non-nil the skill's skills-manifest.json entry is written in the
+// SAME commit (imports stamp provenance; custom create/update pass nil —
+// org-authored skills never get an entry). Used by the mutation + import
+// services and the reconciler. §9.
+func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD string, references map[string]string, message string, pruneStaleRefs bool, entry *ManifestEntry) error {
 	repo, err := s.ensureSkillsRepo(ctx, orgID)
 	if err != nil {
 		return err
@@ -457,6 +460,14 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 	writes := map[string][]byte{skillRepoPath(name): []byte(skillMD)}
 	for refKey, content := range references {
 		writes[skillRefPath(name, refKey)] = []byte(content)
+	}
+	if entry != nil {
+		_, manifest, merr := s.loadEntriesAndManifest(ctx, orgID, repo)
+		if merr != nil {
+			return fmt.Errorf("load manifest: %w", merr)
+		}
+		manifest[name] = *entry
+		writes[skillsManifestPath] = renderSkillsManifest(manifest)
 	}
 	deletes := legacySkillDirs(name)
 	if pruneStaleRefs {
@@ -469,13 +480,24 @@ func (s *SkillService) writeSkillFiles(ctx context.Context, orgID, name, skillMD
 }
 
 // deleteSkillDir removes a skill's whole directory (plus any retired-layout
-// copies of the name) in one commit. §9.
+// copies of the name) in one commit. If the name has a skills-manifest.json
+// entry (an imported skill), it is dropped in the SAME commit so the
+// manifest never outlives the files it describes. §9.
 func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message string) error {
 	repo, err := s.ensureSkillsRepo(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	_, err = s.commitFiles(ctx, orgID, repo, message, nil, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...))
+	var writes map[string][]byte
+	_, manifest, merr := s.loadEntriesAndManifest(ctx, orgID, repo)
+	if merr != nil {
+		return fmt.Errorf("load manifest: %w", merr)
+	}
+	if _, ok := manifest[name]; ok {
+		delete(manifest, name)
+		writes = map[string][]byte{skillsManifestPath: renderSkillsManifest(manifest)}
+	}
+	_, err = s.commitFiles(ctx, orgID, repo, message, writes, append([]string{skillRepoDir(name)}, legacySkillDirs(name)...))
 	return err
 }
 

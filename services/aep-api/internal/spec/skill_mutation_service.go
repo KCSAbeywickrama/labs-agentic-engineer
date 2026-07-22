@@ -160,7 +160,7 @@ func (m *SkillMutationService) Create(ctx context.Context, orgID, actor string, 
 
 	refs := normalizeRefs(in.References)
 	msg := fmt.Sprintf("feat(skills): add custom skill %q\n\nby %s", name, actor)
-	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, false); err != nil {
+	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, false, nil); err != nil {
 		return nil, fmt.Errorf("commit custom skill %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill created", "orgID", orgID, "name", name, "actor", actor)
@@ -207,7 +207,7 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 	refs := normalizeRefs(in.References)
 	msg := fmt.Sprintf("chore(skills): update custom skill %q\n\nby %s", name, actor)
 	// pruneStaleRefs=true: an update may have removed reference files.
-	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, true); err != nil {
+	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, true, nil); err != nil {
 		return nil, fmt.Errorf("commit update for %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill updated", "orgID", orgID, "name", name, "actor", actor)
