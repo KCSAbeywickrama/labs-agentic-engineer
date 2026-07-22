@@ -223,11 +223,12 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 		t.Fatalf("loadEmbeddedLibrary: %v", err)
 	}
 	by := nameSet(got)
-	if len(got) != 10 {
-		t.Fatalf("library size = %d, want 10: %v", len(got), keysOf(by))
+	if len(got) != 11 {
+		t.Fatalf("library size = %d, want 11: %v", len(got), keysOf(by))
 	}
 	wantKinds := map[string]string{
 		"api-management": "org", "go": "org", "react-webapp": "org", "thunder-authentication": "org",
+		"cell-architecture-dsl": "platform",
 		"excalidraw-wireframes": "platform", "high-level-architecture": "platform",
 		"openapi-conventions": "platform", "task-breakdown": "platform", "task-planning": "platform",
 		"validation-criteria": "platform",
