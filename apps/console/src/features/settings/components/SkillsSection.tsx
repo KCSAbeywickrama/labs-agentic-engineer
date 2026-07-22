@@ -134,7 +134,15 @@ export function SkillsSection() {
   }
 
   const { skills, repoUrl } = data;
-  const updatable = new Set((updates ?? []).map((u) => u.name));
+  // Three-way update states: only "update" rows are sync-appliable, so only
+  // they feed the badge and the sync count. "overridden" (org customized,
+  // platform unchanged) has nothing to apply and stays quiet. "conflict"
+  // (platform updated a skill the org customized) is deliberately NOT synced —
+  // surfaced as an informational chip until the review flow lands (#298).
+  const applicable = (updates ?? []).filter((u) => u.state === "update");
+  const conflicted = (updates ?? []).filter((u) => u.state === "conflict");
+  const updatable = new Set(applicable.map((u) => u.name));
+  const conflictedNames = new Set(conflicted.map((u) => u.name));
   const syncedCount = syncSkills.data?.updated ?? 0;
 
   // Filter → sort → clamp → slice as one pure derivation: a list that shrinks
@@ -189,8 +197,17 @@ export function SkillsSection() {
         <Box
           sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
         >
+          {conflicted.length > 0 && (
+            <Tooltip title="The platform shipped updates for skills you have customized. Sync leaves your versions untouched; reviewing and applying them is coming soon.">
+              <Chip
+                size="small"
+                color="info"
+                label={`${conflicted.length} customized skill${conflicted.length === 1 ? " has" : "s have"} platform updates`}
+              />
+            </Tooltip>
+          )}
           <SyncUpdatesControl
-            count={updates?.length ?? 0}
+            count={applicable.length}
             pending={syncSkills.isPending}
             onSync={() => syncSkills.mutate()}
           />
@@ -277,6 +294,15 @@ export function SkillsSection() {
                               color="warning"
                               label="update available"
                             />
+                          )}
+                          {conflictedNames.has(skill.name) && (
+                            <Tooltip title="You customized this skill and the platform has since updated it. Sync won't overwrite your version.">
+                              <Chip
+                                size="small"
+                                color="info"
+                                label="platform update — customized"
+                              />
+                            </Tooltip>
                           )}
                         </Box>
                         <Typography
