@@ -154,6 +154,13 @@ vi.mock("../../projects/api/queries", () => ({
 const mockUseSpecFiles = vi.fn();
 const mockUseSpecFileContent = vi.fn();
 const mockUseDesignDependencies = vi.fn();
+
+// Cost visibility (#245): stubbed like the other data hooks — no spend — so
+// the chip renders nothing and Build routing stays the subject.
+vi.mock("../../usage/api/queries", () => ({
+  useProjectUsage: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+
 vi.mock("../api/queries", () => ({
   useSpecFiles: (...args: unknown[]) => mockUseSpecFiles(...args),
   useSpecFileContent: (...args: unknown[]) => mockUseSpecFileContent(...args),

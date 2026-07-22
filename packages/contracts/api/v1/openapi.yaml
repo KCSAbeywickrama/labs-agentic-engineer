@@ -1545,8 +1545,10 @@ paths:
           description: Error
       security:
       - userJWT: []
-      summary: List a project's Tasks (live GitHub ⋈ executions → derived status), optionally scoped to
-        one spec/build version tag
+      summary: List a project's implementation Tasks (live GitHub ⋈ executions → derived status),
+        optionally scoped to one spec/build version tag. The aep:validation Task is excluded — it is
+        a phase of the run, surfaced via the project status's deploy.validation; get-task still
+        serves it by number.
       tags:
       - Tasks
   /projects/{projectName}/tasks/{issueNumber}:
@@ -1788,6 +1790,37 @@ paths:
       summary: Attach to a turn's event stream (SSE replay + live tail)
       tags:
       - GenAI
+  /projects/{projectName}/usage:
+    get:
+      description: Per-phase actual usage for a project (#245) — spec, build, validation, plus the current
+        drafting cycle. USD derived at read time from the configured model rates (ADR-0011).
+      operationId: get-project-usage
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUsage'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Get per-phase project usage
+      tags:
+      - Projects
   /rca-agent/reports:
     get:
       operationId: list-rca-agent-reports
@@ -2099,9 +2132,6 @@ paths:
 components:
   schemas:
     AccessRequest:
-      x-go-type: models.AccessRequest
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       properties:
         consumerComponentName:
@@ -2427,6 +2457,10 @@ components:
           type: string
         tasks:
           $ref: '#/components/schemas/BuildTally'
+        usage:
+          $ref: '#/components/schemas/Usage'
+          description: Aggregate actual usage of the run's coding executions (#245); absent for runs
+            that predate usage capture.
       required:
       - tag
       - status
@@ -2529,9 +2563,6 @@ components:
       - name
       type: object
     ComponentConfig:
-      x-go-type: models.ComponentConfig
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       nullable: true
       additionalProperties: false
       properties:
@@ -2602,9 +2633,9 @@ components:
       - spec
       type: object
     ConfigKey:
-      x-go-type: models.ConfigKey
+      x-go-type: contracts.ConfigKey
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/contracts
       additionalProperties: false
       properties:
         defaultValue:
@@ -2647,9 +2678,9 @@ components:
       - key
       type: object
     ConfigPatch:
-      x-go-type: models.ConfigPatch
+      x-go-type: orgconfig.ConfigPatch
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         gitProvider:
@@ -2706,9 +2737,9 @@ components:
           nullable: true
       type: object
     ConfigProjection:
-      x-go-type: models.ConfigProjection
+      x-go-type: orgconfig.ConfigProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         gitProvider:
@@ -2843,11 +2874,11 @@ components:
       type: object
     Dependency:
       description: A component's unified, kind-discriminated dependency entry. status/reason
-        are read-time computed by models.ComputeDependencyStatus — never authored,
+        are read-time computed by spec.ComputeDependencyStatus — never authored,
         never persisted (Design.json write-gate rejects them).
-      x-go-type: models.Dependency
+      x-go-type: contracts.Dependency
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/contracts
       additionalProperties: false
       properties:
         kind:
@@ -2888,9 +2919,9 @@ components:
       type: object
     DependencyCandidate:
       description: One option in an ambiguous external dependency's resolution set.
-      x-go-type: models.DependencyCandidate
+      x-go-type: contracts.DependencyCandidate
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/contracts
       additionalProperties: false
       properties:
         name:
@@ -2960,6 +2991,13 @@ components:
           - completed
           - failed
           type: string
+        validationIssue:
+          description: >-
+            Issue number of the project's validation task; absent when there is
+            no validation run. The console uses it to open the internal
+            validation log page (get-task / stream-task-log accept it).
+          format: int64
+          type: integer
         validationUrl:
           description: >-
             Link to the associated validation PR (the validation issue as a
@@ -3025,9 +3063,6 @@ components:
     EnvVar:
       # Hand-written in models/ (the gorm-persisted EnvVarSlice embeds it);
       # gen aliases this type to keep the models↔gen dependency one-way.
-      x-go-type: models.EnvVar
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       properties:
         key:
@@ -3156,9 +3191,9 @@ components:
       - sha
       type: object
     GitProviderProjection:
-      x-go-type: models.GitProviderProjection
+      x-go-type: orgconfig.GitProviderProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         connectedAt:
@@ -3206,9 +3241,9 @@ components:
       - connectedAt
       type: object
     IDPProjection:
-      x-go-type: models.IDPProjection
+      x-go-type: orgconfig.IDPProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         hasClientSecret:
@@ -3338,9 +3373,9 @@ components:
       - Labels
       type: object
     LLMProjection:
-      x-go-type: models.LLMProjection
+      x-go-type: orgconfig.LLMProjection
       x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
       properties:
         connectedAt:
@@ -3612,6 +3647,28 @@ components:
       - build
       - deploy
       type: object
+    ProjectUsage:
+      additionalProperties: false
+      description: Per-phase actual usage for a project (#245). All figures derive from persisted per-run token records (ADR-0011); costUsd is computed at read time from the configured model rates.
+      properties:
+        build:
+          $ref: "#/components/schemas/Usage"
+          description: All coding/build executions.
+        draftCycle:
+          $ref: "#/components/schemas/Usage"
+          description: Spec/design agent turns since the last published spec tag — the Spec view chip.
+        spec:
+          $ref: "#/components/schemas/Usage"
+          description: All spec/design agent turns (project lifetime).
+        validation:
+          $ref: "#/components/schemas/Usage"
+          description: All validation executions.
+      required:
+        - spec
+        - build
+        - validation
+        - draftCycle
+      type: object
     ProvisionBody:
       additionalProperties: false
       properties:
@@ -3627,9 +3684,6 @@ components:
           type: object
       type: object
     RcaAgentReport:
-      x-go-type: models.RcaAgentReport
-      x-go-type-import:
-        path: github.com/wso2/aep/aep-api/models
       additionalProperties: false
       description: An RCA report from the OpenChoreo SRE/RCA-agent handoff (console issues
       properties:
@@ -3647,6 +3701,7 @@ components:
         deployedAt:
           type: string
           format: date-time
+          x-go-type: '*time.Time'
         diagnosis:
           description: Full RCA diagnosis + remediation content (markdown)
           type: string
@@ -3664,6 +3719,7 @@ components:
             absent when the handoff was config-only
           format: int64
           type: integer
+          x-go-type: '*int64'
         issueTitle:
           type: string
         issueUrl:
@@ -3683,6 +3739,7 @@ components:
       - summary
       - classification
       - diagnosis
+      - dispatched
       - deployed
       type: object
     RcaAgentReportList:
@@ -3940,6 +3997,11 @@ components:
           type: string
         origin:
           type: string
+        prUrl:
+          description: >-
+            Link to the task's pull request, recovered from the succeeded coding
+            execution's "pr#N" reason; absent before a PR opens.
+          type: string
         rationale:
           type: string
         title:
@@ -4031,10 +4093,18 @@ components:
           type: string
         origin:
           type: string
+        prUrl:
+          description: >-
+            Link to the task's pull request, recovered from the succeeded coding
+            execution's "pr#N" reason; absent before a PR opens.
+          type: string
         rationale:
           type: string
         title:
           type: string
+        usage:
+          $ref: "#/components/schemas/Usage"
+          description: Aggregate actual usage across the task's executions (#245); absent for tasks that predate usage capture.
       required:
       - issueNumber
       - title
@@ -4215,6 +4285,39 @@ components:
           type: string
       required:
       - skillMd
+      type: object
+    Usage:
+      additionalProperties: false
+      description: Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+      properties:
+        cacheCreationTokens:
+          format: int64
+          type: integer
+        cacheReadTokens:
+          format: int64
+          type: integer
+        costUsd:
+          description: Catalog-derived USD; null when pricing is unavailable for the model.
+          format: double
+          type: number
+          nullable: true
+          x-go-type: '*float64'
+        inputTokens:
+          format: int64
+          type: integer
+        model:
+          description: Model id the work ran on; "" on mixed-model aggregates.
+          type: string
+        outputTokens:
+          format: int64
+          type: integer
+      required:
+        - inputTokens
+        - outputTokens
+        - cacheReadTokens
+        - cacheCreationTokens
+        - model
+        - costUsd
       type: object
     Warning:
       additionalProperties: false

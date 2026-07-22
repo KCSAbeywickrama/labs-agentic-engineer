@@ -18,7 +18,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildMcpOptions } from "./runner.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildMcpOptions, resolveBaseAgentConfig } from "./runner.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
 // the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
@@ -77,4 +79,28 @@ test("buildMcpOptions: allowedTools includes both WebSearch and WebFetch (D9)", 
 
   assert.ok(result.allowedTools.includes("WebSearch"));
   assert.ok(result.allowedTools.includes("WebFetch"));
+});
+
+// --- resolveBaseAgentConfig: the defaults are pinned byte-identical to the
+// pre-parameterization behavior (docs/design/playground.md §3) ---------------
+
+const SHIPPED_PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugin");
+
+test("resolveBaseAgentConfig: defaults pin today's plugin + preload exactly", () => {
+  const impl = resolveBaseAgentConfig(undefined, "implementation");
+  assert.equal(impl.pluginPath, SHIPPED_PLUGIN);
+  assert.deepEqual(impl.preload, ["aep:aep"]);
+
+  const val = resolveBaseAgentConfig(undefined, "validation");
+  assert.equal(val.pluginPath, SHIPPED_PLUGIN);
+  assert.deepEqual(val.preload, ["aep:aep", "aep:aep-validation"]);
+});
+
+test("resolveBaseAgentConfig: an explicit basePreload owns the FULL list (no validation append)", () => {
+  const local = resolveBaseAgentConfig(
+    { basePluginPath: "/x/plugin-local", basePreload: ["aep-local:aep-local"] },
+    "validation",
+  );
+  assert.equal(local.pluginPath, "/x/plugin-local");
+  assert.deepEqual(local.preload, ["aep-local:aep-local"]);
 });

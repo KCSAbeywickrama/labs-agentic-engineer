@@ -98,7 +98,7 @@ func shortHash(keys []ExternalResourceConfigKey) string {
 }
 
 // ExternalResourceConfigKey is one env-var key in an external resource's
-// schema. Mirrors the agents/BFF models.ConfigKey without importing models
+// schema. Mirrors the agents/BFF spec.ConfigKey without importing models
 // (keeps the OC client leaf-level).
 type ExternalResourceConfigKey struct {
 	Key    string
