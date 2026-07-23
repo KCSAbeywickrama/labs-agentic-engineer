@@ -19,6 +19,7 @@
 import type { components } from "../../generated/aep-api";
 
 type Usage = components["schemas"]["Usage"];
+type PhaseUsage = components["schemas"]["PhaseUsage"];
 type ProjectUsageCard = components["schemas"]["ProjectUsageCard"];
 type ProjectUsageList = components["schemas"]["ProjectUsageList"];
 
@@ -113,16 +114,54 @@ export const buildUsageByScenario = {
 
 export type UsageScenario = "default" | "empty" | "error";
 
+// A plausible mock split of a total across the three SDLC phases (#291):
+// spec/design ~20%, build ~70%, validation ~10%. Tokens and cost scale
+// together; a null (unpriced) total keeps null costs per phase.
+function scale(u: Usage, f: number): Usage {
+  return {
+    inputTokens: Math.round(u.inputTokens * f),
+    outputTokens: Math.round(u.outputTokens * f),
+    cacheReadTokens: Math.round(u.cacheReadTokens * f),
+    cacheCreationTokens: Math.round(u.cacheCreationTokens * f),
+    model: u.model,
+    costUsd: u.costUsd === null ? null : Math.round(u.costUsd * f * 100) / 100,
+  };
+}
+
+function phasesOf(u: Usage): PhaseUsage {
+  return { spec: scale(u, 0.2), build: scale(u, 0.7), validation: scale(u, 0.1) };
+}
+
 const card = (
   projectName: string,
   displayName: string,
   deleted: boolean,
   u: Usage,
-): ProjectUsageCard => ({ projectName, displayName, deleted, usage: u });
+): ProjectUsageCard => ({
+  projectName,
+  displayName,
+  deleted,
+  usage: u,
+  phases: phasesOf(u),
+});
 
-// The org roll-up, costUsd descending with null-cost cards last (the contract's
-// ordering). Covers: live projects, a deleted project that kept its spend, and
-// a pre-stamping project whose rows carry tokens but no USD.
+// An idle live project: no agent has run yet, so a real $0 (not a null unpriced
+// cost). The Usage page lists every live project, not only ones with spend.
+function idle(): Usage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    model: "",
+    costUsd: 0,
+  };
+}
+
+// The org roll-up in the tiered order the backend emits: stamped-cost desc,
+// then unpriced-but-active (tokens only), then idle $0 projects last. Covers:
+// live projects with spend, a deleted project that kept its spend, a
+// pre-stamping project (tokens, null cost), and a brand-new idle project.
 export const orgUsage: Record<Exclude<UsageScenario, "error">, ProjectUsageList> = {
   default: {
     projects: [
@@ -156,6 +195,7 @@ export const orgUsage: Record<Exclude<UsageScenario, "error">, ProjectUsageList>
         false,
         unstamped(52_000, 27_000, 410_000, 68_000), // pre-v2 rows: tokens only
       ),
+      card("fresh-idea", "Fresh Idea", false, idle()), // new project, $0
     ],
   },
   empty: { projects: [] },

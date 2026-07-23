@@ -3522,11 +3522,37 @@ components:
         usage:
           $ref: "#/components/schemas/Usage"
           description: Lifetime totals; costUsd sums write-time stamps and is null when no row is stamped.
+        phases:
+          $ref: "#/components/schemas/PhaseUsage"
+          description: The same lifetime spend split across the three SDLC phases (#291) — shown as a
+            secondary line in the card's breakdown expand. Always all three phases; a phase the project
+            never ran is a zero card.
       required:
         - projectName
         - displayName
         - deleted
         - usage
+        - phases
+      type: object
+    PhaseUsage:
+      additionalProperties: false
+      description: A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns;
+        build covers the build + coding executions; validation covers the validation executions. Each is a
+        full Usage so a phase can degrade to tokens when its rows are unstamped.
+      properties:
+        spec:
+          $ref: "#/components/schemas/Usage"
+          description: Spec/design agent turns.
+        build:
+          $ref: "#/components/schemas/Usage"
+          description: Build + coding executions.
+        validation:
+          $ref: "#/components/schemas/Usage"
+          description: Validation executions.
+      required:
+        - spec
+        - build
+        - validation
       type: object
     ProjectUsageList:
       additionalProperties: false

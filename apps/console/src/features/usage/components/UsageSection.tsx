@@ -109,6 +109,7 @@ function ProjectCard({ card }: { card: ProjectUsageCard }) {
         <Box sx={{ flexGrow: 1 }} />
         <UsageChip
           usage={card.usage}
+          phases={card.phases}
           context={`Agent spend — ${card.displayName}`}
         />
       </CardContent>

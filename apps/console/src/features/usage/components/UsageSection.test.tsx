@@ -25,6 +25,7 @@ import { UsageSection } from "./UsageSection";
 
 type ProjectUsageList = components["schemas"]["ProjectUsageList"];
 type Usage = components["schemas"]["Usage"];
+type PhaseUsage = components["schemas"]["PhaseUsage"];
 
 // --- Usage query: replaced wholesale so the test needs neither a
 // QueryClientProvider nor MSW — only the rendering under test is real. ----
@@ -49,6 +50,21 @@ function usage(costUsd: number | null): Usage {
   };
 }
 
+// A trivial phase split for the required `phases` field — the total lands in
+// the build phase, spec/validation zero. These tests assert on the total, not
+// the phase rows.
+function phasesOf(u: Usage): PhaseUsage {
+  const z: Usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    model: "",
+    costUsd: 0,
+  };
+  return { spec: z, build: u, validation: z };
+}
+
 describe("UsageSection", () => {
   it("renders one card per project with the USD figure on the cost chip", () => {
     mockResult = {
@@ -61,6 +77,7 @@ describe("UsageSection", () => {
             displayName: "Storefront Webapp",
             deleted: false,
             usage: usage(12.34),
+            phases: phasesOf(usage(12.34)),
           },
         ],
       },
@@ -82,12 +99,14 @@ describe("UsageSection", () => {
             displayName: "legacy-crm-poc",
             deleted: true,
             usage: usage(3.5),
+            phases: phasesOf(usage(3.5)),
           },
           {
             projectName: "spike",
             displayName: "Spike",
             deleted: false,
             usage: usage(null), // pre-stamping rows: tokens only, no USD
+            phases: phasesOf(usage(null)),
           },
         ],
       },
@@ -109,6 +128,7 @@ describe("UsageSection", () => {
             displayName: "Storefront Webapp",
             deleted: false,
             usage: usage(12.34),
+            phases: phasesOf(usage(12.34)),
           },
         ],
       },
@@ -118,6 +138,65 @@ describe("UsageSection", () => {
     expect(screen.getByText("Agent spend — Storefront Webapp")).toBeTruthy();
     expect(screen.getByText("Cache read")).toBeTruthy();
     expect(screen.getByText("1.0M tok")).toBeTruthy();
+  });
+
+  it("shows the per-phase cost split in the expanded breakdown", () => {
+    mockResult = {
+      isPending: false,
+      isError: false,
+      data: {
+        projects: [
+          {
+            projectName: "storefront-webapp",
+            displayName: "Storefront Webapp",
+            deleted: false,
+            usage: usage(12.34),
+            phases: {
+              spec: usage(2.0),
+              build: usage(9.0),
+              validation: usage(1.34),
+            },
+          },
+        ],
+      },
+    };
+    render(<UsageSection />);
+    fireEvent.click(screen.getByText("$12.34"));
+    expect(screen.getByText("Cost by phase")).toBeTruthy();
+    expect(screen.getByText("Spec / design")).toBeTruthy();
+    expect(screen.getByText("$2")).toBeTruthy();
+    expect(screen.getByText("Build")).toBeTruthy();
+    expect(screen.getByText("$9")).toBeTruthy();
+    expect(screen.getByText("Validation")).toBeTruthy();
+    expect(screen.getByText("$1.34")).toBeTruthy();
+  });
+
+  it("renders an idle live project as a $0 card (not hidden)", () => {
+    mockResult = {
+      isPending: false,
+      isError: false,
+      data: {
+        projects: [
+          {
+            projectName: "fresh-idea",
+            displayName: "Fresh Idea",
+            deleted: false,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheCreationTokens: 0,
+              model: "",
+              costUsd: 0, // idle: real $0, not a null unpriced cost
+            },
+            phases: phasesOf(usage(0)),
+          },
+        ],
+      },
+    };
+    render(<UsageSection />);
+    expect(screen.getByText("Fresh Idea")).toBeTruthy();
+    expect(screen.getByText("$0")).toBeTruthy();
   });
 
   it("shows the empty state when no project has usage", () => {

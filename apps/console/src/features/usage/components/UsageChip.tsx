@@ -19,26 +19,36 @@
 import { useState } from "react";
 import { Box, Chip, Popover, Tooltip } from "@wso2/oxygen-ui";
 import { Coins } from "@wso2/oxygen-ui-icons-react";
-import { formatTokens, formatUsd, totalTokens, type Usage } from "../lib/format";
+import {
+  formatTokens,
+  formatUsd,
+  totalTokens,
+  type PhaseUsage,
+  type Usage,
+} from "../lib/format";
 import { UsageBreakdown } from "./UsageBreakdown";
 
-// The folded cost figure (#245): USD is the ONLY primary value — the token
+// The folded cost figure (#245/#291): USD is the ONLY primary value — the token
 // detail is a technical view that lives behind an explicit expand (click),
-// never in the chip label. costUsd null (no configured rate) degrades to
-// tokens-only, the one exception. Renders nothing at zero.
+// never in the chip label. A stamped costUsd (incl. $0 for an idle project)
+// shows as USD; a null cost (captured usage the platform could not price)
+// degrades to tokens. On the Usage page every project cards, idle ones as $0,
+// so the chip never hides.
 export function UsageChip({
   usage,
+  phases,
   label,
   context,
 }: {
   usage: Usage;
+  /** The per-phase split (#291), shown as a small section in the expand. */
+  phases?: PhaseUsage;
   label?: string;
   /** Names what the figure covers in the expanded breakdown, e.g. "Agent spend — build v1". */
   context?: string;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const tokens = totalTokens(usage);
-  if (tokens === 0) return null;
 
   const figures =
     usage.costUsd !== null
@@ -66,7 +76,7 @@ export function UsageChip({
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
       >
         <Box sx={{ p: 1.5, minWidth: 220 }}>
-          <UsageBreakdown usage={usage} context={context} />
+          <UsageBreakdown usage={usage} phases={phases} context={context} />
         </Box>
       </Popover>
     </>
