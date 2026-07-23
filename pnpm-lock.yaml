@@ -44,9 +44,6 @@ importers:
       '@aep/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@aep/design-projection':
-        specifier: workspace:*
-        version: link:../../packages/design-projection
       '@aep/excalidraw-dsl':
         specifier: workspace:*
         version: link:../../packages/excalidraw-dsl

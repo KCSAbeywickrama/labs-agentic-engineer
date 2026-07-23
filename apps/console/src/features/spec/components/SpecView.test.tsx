@@ -18,8 +18,9 @@
 
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
 import type { components } from "../../../generated/aep-api";
 import { chatKeyFor, notifyTurnEnd } from "../../agent-chat/chatStore";
 import { SpecView } from "./SpecView";
@@ -48,24 +49,38 @@ vi.mock("@wso2/oxygen-ui", async () => {
   };
 });
 
-// --- Collab room: solo/offline-shaped stub (status "offline" exercises the
-// header's "solo session" metadata text — see the metadata-line test below);
-// flush is the only call SpecView awaits, so it's the only piece most tests
-// need to configure. --
+// --- Collab room: a mutable stub, solo/offline-shaped by default (status
+// "offline" exercises the header's "solo session" metadata text — see the
+// metadata-line test below). Tests that need a live room (the design.cell
+// rewrite-navigation tests) reassign `mockCollab`; the global beforeEach
+// resets it. --
 const mockFlush = vi.fn().mockResolvedValue(undefined);
+const soloCollab = () => ({
+  status: "offline",
+  peers: [] as { clientId: number; name: string; color: string; kind: string }[],
+  getFileText: (() => null) as (path: string) => Y.Text | null,
+  getFileFragment: () => null,
+  docPaths: [] as string[],
+  provider: null,
+  self: { name: "You", color: "#000000" },
+  isLocalTransaction: () => false,
+  version: 0,
+  flush: mockFlush,
+});
+let mockCollab = soloCollab();
 vi.mock("../collab/useCollabSpec", () => ({
-  useCollabSpec: () => ({
-    status: "offline",
-    peers: [],
-    getFileText: () => null,
-    getFileFragment: () => null,
-    docPaths: [],
-    provider: null,
-    self: { name: "You", color: "#000000" },
-    isLocalTransaction: () => false,
-    version: 0,
-    flush: mockFlush,
-  }),
+  useCollabSpec: () => mockCollab,
+}));
+
+beforeEach(() => {
+  mockCollab = soloCollab();
+});
+
+// --- CellDiagramPanel: its own behavior is covered by
+// CellDiagramPanel.test.tsx; here a testid-only stub marks when SpecView's
+// selection lands on the Architecture tab. ------------------------------
+vi.mock("./CellDiagramPanel", () => ({
+  CellDiagramPanel: () => <div data-testid="cell-diagram-panel" />,
 }));
 
 vi.mock("../../../auth/SessionContext", () => ({
@@ -632,6 +647,76 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("SpecView architecture-tab navigation on design.cell change", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFlush.mockResolvedValue(undefined);
+  });
+
+  // A connected room whose doc carries design.cell. An agent editFile lands as
+  // an in-place Y.Text patch (useYTextString observes it directly); a
+  // restructure's removeFile deletes the Y.Map entry, whose re-render the real
+  // hook receives via useCollabSpec's version bump — simulated here with a
+  // reassignment + rerender.
+  function connectedRoom(withAgent: boolean) {
+    const doc = new Y.Doc();
+    const files = doc.getMap<Y.Text>("files");
+    const ytext = new Y.Text();
+    files.set("specs/design/design.cell", ytext);
+    ytext.insert(0, "title X\ncomponent api service\n");
+    const collab = {
+      ...soloCollab(),
+      status: "connected",
+      peers: withAgent
+        ? [{ clientId: 1, name: "Agent", color: "#000000", kind: "agent" }]
+        : [],
+      getFileText: (path: string) => files.get(path) ?? null,
+    };
+    return { files, ytext, collab };
+  }
+
+  it("navigates to the Architecture tab when the agent patches design.cell in place", () => {
+    const room = connectedRoom(true);
+    mockCollab = room.collab;
+
+    render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    act(() => {
+      room.ytext.insert(room.ytext.length, "south email-provider service\n");
+    });
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+  });
+
+  it("navigates on a restructure (removeFile deletes the doc entry)", () => {
+    const room = connectedRoom(true);
+    mockCollab = room.collab;
+
+    const { rerender } = render(<SpecView projectName="proj1" />);
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
+
+    room.files.delete("specs/design/design.cell");
+    mockCollab = { ...room.collab, version: 1 };
+    rerender(<SpecView projectName="proj1" />);
+
+    expect(screen.getByTestId("cell-diagram-panel")).toBeInTheDocument();
+  });
+
+  it("does not navigate when no agent peer is in the room", () => {
+    const room = connectedRoom(false);
+    mockCollab = room.collab;
+
+    render(<SpecView projectName="proj1" />);
+
+    act(() => {
+      room.ytext.insert(room.ytext.length, "south email-provider service\n");
+    });
+
+    expect(screen.queryByTestId("cell-diagram-panel")).not.toBeInTheDocument();
   });
 });
 
