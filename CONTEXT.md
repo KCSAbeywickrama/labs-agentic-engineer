@@ -47,23 +47,19 @@ opposite side of the wire).
 
 **External dependency**:
 A dependency kind (`kind: external`): a component declaring it needs a
-third-party API or SDK (`style: rest-api | sdk`) — e.g. "this service calls
-Stripe." It names the config keys the component reads (and which are secret)
-and, for a REST API, an optional `specPath` — a URL or a committed spec file —
-pointing at the provider's contract, which the coding agent uses as a starting
-point while researching the provider's docs itself (ADR-0010). Whether it is
-resolved is computed at read time (ADR-0003), never stored.
-_Avoid_: `needsSpec`, `specUrl`, `sources` — retired fields; a design.json
-carrying them fails to parse (like `callerIdentity`).
+third-party API or SDK (`style: rest-api | sdk`). It names the config keys the
+component reads (which are secret) and, for a REST API, an optional `specPath`
+— a URL or a committed spec file — the coding agent uses as a starting point,
+researching the provider's docs beyond it (ADR-0010). Resolved-or-not is
+computed at read time (ADR-0003), never stored.
+_Avoid_: `needsSpec`, `specUrl`, `sources` — retired fields, rejected on parse.
 
 **External resource**:
-The org-level record of one such third-party integration once it has actually
-been provisioned — its name, description, and config-key schema — kept so a
-later design can reuse it by name instead of redefining it. One external
-resource can back many components' external dependencies, across projects, and
-it exists only after first provision ("provision-gated"). Where the record is
-stored is not a design-time concern (see ADR-0009).
-_Avoid_: "external_resources table" (the removed database registry); connection.
+The org-level record of a provisioned third-party integration — its name,
+description, and config-key schema — reusable by name across projects once
+provisioned. Stored as an org-namespaced OpenChoreo `ResourceType`, not a
+database table (ADR-0009).
+_Avoid_: "external_resources table" (removed); connection.
 
 **Resource-type marker**:
 A declaration a platform engineer attaches to a resource type in the catalog,
