@@ -87,6 +87,7 @@ export function CellDiagramPanel({
       )}
       <CellDiagramView
         source={source ?? undefined}
+        layoutKey={projectName}
         emptyState={
           agentBusy ? (
             <Typography variant="body2">
