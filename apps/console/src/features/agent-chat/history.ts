@@ -17,21 +17,27 @@
  */
 
 // Server history → display log for rehydrate (#130 multi-user threads):
-// user/assistant text only — tool/system parts don't reconstruct into cards,
-// the shared spec doc already reflects them. A user message carries `author`
-// when the server payload has one, so a teammate's turn is distinguishable
-// from the signed-in user's once rehydrated (pure mapping — kept out of
-// useAgentChat.ts so it's independently testable).
+// user/assistant text — plus question cards reconstructed from ask_question /
+// ask_questions tool-calls (ADR-0012), without which an awaiting-human
+// conversation would rehydrate in a fresh browser with the pending question
+// invisible and unanswerable. File-tool parts stay dropped (the shared spec
+// doc already reflects them). A user message carries `author` when the server
+// payload has one, so a teammate's turn is distinguishable from the signed-in
+// user's once rehydrated (pure mapping — kept out of useAgentChat.ts so it's
+// independently testable). The recorded selection itself is local display
+// state and does not survive a cross-browser move; answered-ness derives from
+// the later user messages via answerableQuestionIds.
 
 import type { ChatMessage } from "./chatStore.js";
+import { isQuestionTool, parseQuestionsInput } from "./questionCards.js";
 import type { ConversationMessage } from "./api/turns.js";
 
 export function projectableHistory(history: ConversationMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const m of history) {
     const text = contentText(m.content);
-    if (!text) continue;
     if (m.role === "user") {
+      if (!text) continue;
       out.push({
         id: "",
         role: "user",
@@ -40,10 +46,32 @@ export function projectableHistory(history: ConversationMessage[]): ChatMessage[
         ...(m.author ? { author: m.author } : {}),
       });
     } else if (m.role === "assistant") {
-      out.push({ id: "", role: "assistant", turnId: "history", content: text });
+      if (text) out.push({ id: "", role: "assistant", turnId: "history", content: text });
+      for (const q of questionCardsOf(m.content)) out.push(q);
     }
   }
   return out;
+}
+
+/** Reconstruct question cards from an assistant message's tool-call parts. */
+function questionCardsOf(content: unknown): Extract<ChatMessage, { role: "question" }>[] {
+  if (!Array.isArray(content)) return [];
+  const cards: Extract<ChatMessage, { role: "question" }>[] = [];
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) continue;
+    const p = part as { type?: string; toolName?: string; input?: unknown; toolCallId?: string };
+    if (p.type !== "tool-call" || !isQuestionTool(p.toolName)) continue;
+    const questions = parseQuestionsInput(p.toolName!, p.input);
+    if (!questions) continue;
+    cards.push({
+      id: "",
+      role: "question",
+      turnId: "history",
+      toolCallId: p.toolCallId ?? "",
+      questions,
+    });
+  }
+  return cards;
 }
 
 function contentText(content: unknown): string {

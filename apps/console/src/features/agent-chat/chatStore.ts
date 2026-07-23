@@ -22,6 +22,8 @@
 // uuid per (org, project), minted lazily on first send — the BFF's
 // conversation store is the durable history; this log is display state.
 
+import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
+
 export type ChatMessage =
   | {
       id: string;
@@ -55,6 +57,17 @@ export type ChatMessage =
       path: string;
       ok: boolean;
       errorText?: string;
+    }
+  | {
+      id: string;
+      role: "question";
+      turnId: string;
+      /** Correlates the card with its ask_question(s) tool-call (replay-stable). */
+      toolCallId: string;
+      /** One entry (ask_question) or several (ask_questions) — rendered as one card. */
+      questions: AskQuestionInput[];
+      /** Set once answered via the card — one entry per question; flips it read-only. */
+      answers?: QuestionAnswer[];
     }
   | { id: string; role: "error"; content: string };
 
@@ -125,27 +138,79 @@ export function addMessage(key: string, msg: WithoutId<ChatMessage>): void {
 }
 
 /**
- * Add or update a tool card in place, keyed by `toolCallId`. A "streaming" card
- * ("Creating <file>") is written the moment the path resolves mid tool-input,
- * then flipped to "done" ("Created <file>") on the tool-result — same card, no
- * duplicate row. A blank toolCallId always appends (never a false in-place hit).
+ * Add or update a card in place, keyed by (role, toolCallId) — ONE definition
+ * of the replay-dedupe rule for tool and question cards alike: a re-fold of the
+ * same frame hits the existing card instead of duplicating it, and a blank
+ * toolCallId always appends (never a false in-place hit). `merge` lets a caller
+ * keep fields the fresh fold doesn't know (e.g. a recorded answer).
+ */
+function upsertByToolCallId<R extends "tool" | "question">(
+  key: string,
+  role: R,
+  msg: WithoutId<Extract<ChatMessage, { role: R }>>,
+  merge?: (existing: Extract<ChatMessage, { role: R }>) => Partial<ChatMessage>,
+): void {
+  const messages = [...load(key)];
+  const withKey = msg as { toolCallId: string };
+  const idx = withKey.toolCallId
+    ? messages.findIndex(
+        (m) => m.role === role && (m as { toolCallId?: string }).toolCallId === withKey.toolCallId,
+      )
+    : -1;
+  if (idx >= 0) {
+    const existing = messages[idx]!;
+    messages[idx] = {
+      ...existing,
+      ...msg,
+      ...(merge ? merge(existing as Extract<ChatMessage, { role: R }>) : {}),
+      id: existing.id,
+    } as ChatMessage;
+  } else {
+    messages.push({ ...msg, id: nextId() } as ChatMessage);
+  }
+  persist(key, messages);
+}
+
+/**
+ * Add or update a tool card: a "streaming" card ("Creating <file>") is written
+ * the moment the path resolves mid tool-input, then flipped to "done" on the
+ * tool-result — same card, no duplicate row.
  */
 export function upsertToolMessage(
   key: string,
   msg: WithoutId<Extract<ChatMessage, { role: "tool" }>>,
 ): void {
-  const messages = [...load(key)];
-  const idx = msg.toolCallId
-    ? messages.findIndex(
-        (m) => m.role === "tool" && m.toolCallId === msg.toolCallId,
-      )
-    : -1;
-  if (idx >= 0) {
-    messages[idx] = { ...messages[idx], ...msg, id: messages[idx]!.id } as ChatMessage;
-  } else {
-    messages.push({ ...msg, id: nextId() } as ChatMessage);
-  }
-  persist(key, messages);
+  upsertByToolCallId(key, "tool", msg);
+}
+
+/**
+ * Add a question card (ADR-0012); a replay-from-0 re-fold keeps any answers
+ * already recorded on the existing card.
+ */
+export function upsertQuestionMessage(
+  key: string,
+  msg: WithoutId<Extract<ChatMessage, { role: "question" }>>,
+): void {
+  upsertByToolCallId(key, "question", msg, (existing) =>
+    existing.answers ? { answers: existing.answers } : {},
+  );
+}
+
+/**
+ * Record a card's answers (ADR-0012) — the card flips read-only. Keyed by the
+ * message id (unique per card), NOT toolCallId: blank toolCallIds are legal on
+ * cards and must never gang-answer every blank-id card at once.
+ */
+export function answerQuestion(
+  key: string,
+  messageId: string,
+  answers: QuestionAnswer[],
+): void {
+  if (!messageId) return;
+  persist(
+    key,
+    load(key).map((m) => (m.role === "question" && m.id === messageId ? { ...m, answers } : m)),
+  );
 }
 
 /** Streamed text accumulates into the turn's last assistant message. */

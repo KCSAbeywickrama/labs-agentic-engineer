@@ -19,11 +19,23 @@
 import { Fragment, type ReactNode } from "react";
 import { Box, Link, Stack, Typography } from "@wso2/oxygen-ui";
 import { Check, Sparkles, X as XIcon } from "@wso2/oxygen-ui-icons-react";
+import type { QuestionAnswer } from "@aep/agent-stream";
 import { MarkdownView } from "../../../components/MarkdownView";
 import type { ChatItem } from "../toolGrouping";
 import type { FeedBlock } from "../feed";
 import { ActivityStep } from "./ActivityStep";
+import { QuestionCard, type QuestionMessage } from "./QuestionCard";
 import { WorkingIndicator } from "./WorkingIndicator";
+
+/** How a turn's question cards are wired to the composer/log — threaded from
+ *  AgentChatPanel through MessageList so a card knows if it's still live. */
+export interface QuestionCardProps {
+  /** Ids of question messages that still accept input (from answerableQuestionIds). */
+  answerableIds: Set<string>;
+  /** A turn is in flight — cards stay visible but hold submissions. */
+  busy: boolean;
+  onAnswer: (msg: QuestionMessage, answers: QuestionAnswer[]) => void;
+}
 
 // One agent turn in the activity stream (task 3): the "✦ Agent" header with
 // teammate attribution, narration (markdown), tool steps on a vertical rail,
@@ -96,10 +108,12 @@ function TurnBody({
   items,
   expandedGroups,
   onToggleGroup,
+  questionCard,
 }: {
   items: ChatItem[];
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
+  questionCard: QuestionCardProps;
 }) {
   const out: ReactNode[] = [];
   let rail: ReactNode[] = [];
@@ -149,6 +163,16 @@ function TurnBody({
       if (msg.content) {
         out.push(<MarkdownView key={msg.id}>{msg.content}</MarkdownView>);
       }
+    } else if (msg.role === "question") {
+      out.push(
+        <QuestionCard
+          key={msg.id}
+          msg={msg as QuestionMessage}
+          answerable={questionCard.answerableIds.has(msg.id)}
+          busy={questionCard.busy}
+          onAnswer={questionCard.onAnswer}
+        />,
+      );
     }
   });
   flushRail("rail-tail");
@@ -160,11 +184,13 @@ export function TurnBlock({
   expandedGroups,
   onToggleGroup,
   onOpenSpec,
+  questionCard,
 }: {
   turn: TurnFeedBlock;
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
   onOpenSpec: () => void;
+  questionCard: QuestionCardProps;
 }) {
   return (
     <Box data-testid="turn-block">
@@ -187,6 +213,7 @@ export function TurnBlock({
         items={turn.items}
         expandedGroups={expandedGroups}
         onToggleGroup={onToggleGroup}
+        questionCard={questionCard}
       />
       <TurnFooter status={turn.status} onOpenSpec={onOpenSpec} />
     </Box>
