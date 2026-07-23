@@ -18,9 +18,25 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrInvalidCriterionReport means the report is malformed — a blank criterion id
+// or status, or a status outside the closed set. The endpoint surfaces it as 400
+// (a client error), never a 500.
+var ErrInvalidCriterionReport = errors.New("validation: invalid criterion report")
+
+// criterionStatuses is the closed set of run states the store accepts (mirrors
+// the ValidationCriterionReport.status enum in the contract). Anything else is a
+// client error rather than a persisted arbitrary value.
+var criterionStatuses = map[string]bool{
+	"validating": true,
+	"passed":     true,
+	"failed":     true,
+	"skipped":    true,
+}
 
 // CriterionReportInput is one criterion status transition the validation
 // runner's Playwright reporter reports live (per test begin/end). The parent
@@ -48,14 +64,17 @@ func NewCriterionIngestService(execs ExecutionTaskLocator, store CriterionStore)
 
 // ReportCriterion upserts one criterion's status for the runner's execution.
 // orgHandle is the verified caller org (the internal runner-auth gate fences it
-// against the execution). A blank criterion id or status is rejected; an
-// execution that does not resolve in the caller's org is ErrExecutionNotFound
-// (surfaced as 404).
+// against the execution). A blank criterion id/status or a status outside the
+// closed set is ErrInvalidCriterionReport (surfaced as 400); an execution that
+// does not resolve in the caller's org is ErrExecutionNotFound (surfaced as 404).
 func (s *CriterionIngestService) ReportCriterion(ctx context.Context, executionID, orgHandle string, req CriterionReportInput) error {
 	criterionID := strings.TrimSpace(req.CriterionID)
 	status := strings.TrimSpace(req.Status)
 	if criterionID == "" || status == "" {
-		return fmt.Errorf("criterion report: criterionId and status are required")
+		return fmt.Errorf("%w: criterionId and status are required", ErrInvalidCriterionReport)
+	}
+	if !criterionStatuses[status] {
+		return fmt.Errorf("%w: unknown status %q", ErrInvalidCriterionReport, status)
 	}
 	repo, issue, projectID, found, err := s.execs.LookupExecutionTask(ctx, orgHandle, executionID)
 	if err != nil {

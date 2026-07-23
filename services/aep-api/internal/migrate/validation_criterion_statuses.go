@@ -25,11 +25,17 @@ import (
 
 // validation_criterion_statuses.go — the validation criteria checklist store.
 //
-// One row per (repo, issue_number, criterion_id): the validation runner's
+// One row per (org_id, repo, issue_number, criterion_id): the validation runner's
 // Playwright reporter reports each acceptance criterion's live status to the
 // internal criteria callback, which upserts here (last-write-wins). The console
-// lists them by issue number to seed its criteria checklist, so a finished or
-// FAILED (never-merged) run still shows the complete per-criterion outcome.
+// lists them by issue number (org-fenced) to seed its criteria checklist, so a
+// finished or FAILED (never-merged) run still shows the complete per-criterion
+// outcome.
+//
+// org_id LEADS the key: the tenant fence is part of the write identity, so two
+// orgs sharing a repo slug never overwrite each other's rows, and the org-fenced
+// read (WHERE org_id, repo, issue_number) is served by the PK's own prefix — no
+// separate secondary index needed.
 //
 // Deliberately NOT keyed to / FK'd on executions: the key is the validation
 // Task's issue (a same-issue retry upserts onto the same rows), and rows outlive
@@ -38,19 +44,17 @@ import (
 func RunValidationCriterionStatuses(ctx context.Context, db *gorm.DB) error {
 	stmt := `
 		CREATE TABLE IF NOT EXISTS validation_criterion_statuses (
+		  org_id         TEXT         NOT NULL,
 		  repo           TEXT         NOT NULL,
 		  issue_number   BIGINT       NOT NULL,
 		  criterion_id   TEXT         NOT NULL,
-		  org_id         TEXT         NOT NULL,
 		  project_id     TEXT         NOT NULL,
 		  requirement_id TEXT         NOT NULL DEFAULT '',
 		  status         TEXT         NOT NULL,
 		  execution_id   TEXT         NOT NULL DEFAULT '',
 		  updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
-		  PRIMARY KEY (repo, issue_number, criterion_id)
-		);
-		CREATE INDEX IF NOT EXISTS idx_validation_criterion_statuses_org_issue
-		  ON validation_criterion_statuses(org_id, repo, issue_number);`
+		  PRIMARY KEY (org_id, repo, issue_number, criterion_id)
+		);`
 	if err := db.WithContext(ctx).Exec(stmt).Error; err != nil {
 		return fmt.Errorf("validation_criterion_statuses: %w", err)
 	}

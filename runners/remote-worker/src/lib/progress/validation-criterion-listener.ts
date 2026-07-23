@@ -78,6 +78,14 @@ export function startValidationCriterionListener(
     req.on("error", () => {});
   });
 
+  // Bound each request's lifetime. Without this a caller that sends only the
+  // headers (or stalls mid-body) keeps its socket open, and server.close() —
+  // which oneshot awaits during shutdown — would block on it. requestTimeout
+  // makes the server 408 + destroy an incomplete request; headersTimeout does
+  // the same before a body even starts. Normal fast POSTs are unaffected.
+  server.requestTimeout = 5_000;
+  server.headersTimeout = 5_000;
+
   return new Promise((resolve, reject) => {
     server.on("error", reject);
     server.listen(socketPath, () => {
@@ -86,6 +94,9 @@ export function startValidationCriterionListener(
         close: () =>
           new Promise<void>((res) => {
             server.close(() => res());
+            // Force-drop any lingering (keep-alive / idle) sockets so close()
+            // resolves promptly instead of waiting on an idle client.
+            server.closeAllConnections?.();
           }),
       });
     });

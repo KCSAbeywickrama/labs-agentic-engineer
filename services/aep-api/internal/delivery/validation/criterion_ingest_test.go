@@ -88,15 +88,18 @@ func TestReportCriterion_UnknownExecutionIs404(t *testing.T) {
 	}
 }
 
-func TestReportCriterion_RejectsBlankFields(t *testing.T) {
+func TestReportCriterion_RejectsInvalidInput(t *testing.T) {
 	store := &fakeCriterionStore{}
 	svc := NewCriterionIngestService(fakeTaskLocator{found: true}, store)
 	for _, in := range []CriterionReportInput{
-		{CriterionID: "", Status: "passed"},
-		{CriterionID: "AC-001-a", Status: "  "},
+		{CriterionID: "", Status: "passed"},         // blank id
+		{CriterionID: "AC-001-a", Status: "  "},     // blank status
+		{CriterionID: "AC-001-a", Status: "bogus"},  // status outside the closed set
+		{CriterionID: "AC-001-a", Status: "PASSED"}, // wrong case — not a member
 	} {
-		if err := svc.ReportCriterion(context.Background(), "exec-1", "org", in); err == nil {
-			t.Errorf("expected error for %+v", in)
+		err := svc.ReportCriterion(context.Background(), "exec-1", "org", in)
+		if !errors.Is(err, ErrInvalidCriterionReport) {
+			t.Errorf("want ErrInvalidCriterionReport (→ 400) for %+v, got %v", in, err)
 		}
 	}
 	if store.last != nil {

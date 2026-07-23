@@ -26,16 +26,18 @@ import "time"
 // never-merged) run still shows the complete per-criterion outcome, independent
 // of the log-snapshot tail.
 //
-// Keyed by `(repo, issue_number, criterion_id)`, NOT by execution id: the
-// console reads by the validation Task's issue number and wants the CURRENT
-// checklist, so a same-issue retry upserts onto the same rows (last-write-wins).
+// Keyed by `(org_id, repo, issue_number, criterion_id)`, NOT by execution id:
+// the console reads by the validation Task's issue number (org-fenced) and wants
+// the CURRENT checklist, so a same-issue retry upserts onto the same rows
+// (last-write-wins). OrgID leads the key so the tenant fence is part of the
+// write identity too — two orgs sharing a repo slug never overwrite each other.
 // ExecutionID is kept for provenance only, not as a key or FK — rows outlive any
 // single execution attempt.
 type ValidationCriterionStatus struct {
+	OrgID         string    `gorm:"type:text;not null;primaryKey;column:org_id" json:"-"`
 	Repo          string    `gorm:"type:text;primaryKey;column:repo" json:"-"`
 	IssueNumber   int       `gorm:"primaryKey;column:issue_number" json:"-"`
 	CriterionID   string    `gorm:"type:text;primaryKey;column:criterion_id" json:"id"`
-	OrgID         string    `gorm:"type:text;not null;index;column:org_id" json:"-"`
 	ProjectID     string    `gorm:"type:text;not null;column:project_id" json:"-"`
 	RequirementID string    `gorm:"type:text;not null;default:'';column:requirement_id" json:"requirementId"`
 	Status        string    `gorm:"type:text;not null;column:status" json:"status"`

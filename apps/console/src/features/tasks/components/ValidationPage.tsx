@@ -134,9 +134,12 @@ export function ValidationPage({
     tail = "· attaching to the validation log…";
   } else if (log.phase === "ended") {
     tail = `· validation settled — ${derivedStatus}`;
-  } else if (logLines.length === 0) {
+  } else if (log.lines.length === 0) {
     // Live, no timeline yet: the validation attempt is being prepared
-    // (dispatch / scheduling) before the runner's first line lands.
+    // (dispatch / scheduling) before the runner's first line lands. Check the
+    // RAW timeline, not logLines — a checklist that is actively validating emits
+    // only `criterion` frames (split out of logLines), which still means the
+    // agent has started.
     tail =
       `· preparing the validation agent…${idleSeconds >= 20 ? " (a cold start can take up to a minute)" : ""}` +
       ` · ${idleSeconds}s`;

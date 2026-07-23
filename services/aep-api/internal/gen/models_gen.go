@@ -1189,7 +1189,7 @@ type ValidationCriterionStatus struct {
 	// RequirementID Parent requirement id; "" when the reporter did not supply it.
 	RequirementID string `json:"requirementId"`
 
-	// Status validating | passed | failed | skipped.
+	// Status The criterion's latest run status (validating, passed, failed, or skipped). Not enum-constrained here — the value is server-produced from the durable store; the closed set is enforced on the ingest path (ValidationCriterionReport.status).
 	Status string `json:"status"`
 
 	// UpdatedAt When this status was last written.

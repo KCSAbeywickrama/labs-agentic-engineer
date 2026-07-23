@@ -23,6 +23,30 @@ const (
 	TaskJWTScopes     taskJWTContextKey     = "taskJWT.Scopes"
 )
 
+// Defines values for ValidationCriterionReportStatus.
+const (
+	Failed     ValidationCriterionReportStatus = "failed"
+	Passed     ValidationCriterionReportStatus = "passed"
+	Skipped    ValidationCriterionReportStatus = "skipped"
+	Validating ValidationCriterionReportStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the ValidationCriterionReportStatus enum.
+func (e ValidationCriterionReportStatus) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case Passed:
+		return true
+	case Skipped:
+		return true
+	case Validating:
+		return true
+	default:
+		return false
+	}
+}
+
 // ComponentEndpoint defines model for ComponentEndpoint.
 type ComponentEndpoint struct {
 	Component string `json:"component"`
@@ -93,9 +117,12 @@ type ValidationCriterionReport struct {
 	// RequirementID Parent requirement id, when the reporter knows it.
 	RequirementID string `json:"requirementId,omitempty"`
 
-	// Status validating | passed | failed | skipped.
-	Status string `json:"status"`
+	// Status The criterion's latest run status.
+	Status ValidationCriterionReportStatus `json:"status"`
 }
+
+// ValidationCriterionReportStatus The criterion's latest run status.
+type ValidationCriterionReportStatus string
 
 // publisherCCContextKey is the context key for publisherCC security scheme
 type publisherCCContextKey string

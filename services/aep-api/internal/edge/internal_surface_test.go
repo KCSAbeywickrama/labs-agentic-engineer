@@ -88,9 +88,9 @@ func newInternalTestStack(t *testing.T) (http.Handler, *auth.TaskTokenManager, *
 	crit := &fakeCriteriaReporter{}
 	h := NewHandler(AppParams{
 		InternalDeps: InternalDeps{
-			CredsRefresh: svc,
-			RunnerAuth:   auth.NewRunnerAuthorizer(mgr, nil, nil),
-			ValidationCriteria:     crit,
+			CredsRefresh:       svc,
+			RunnerAuth:         auth.NewRunnerAuthorizer(mgr, nil, nil),
+			ValidationCriteria: crit,
 		},
 	})
 	return h, mgr, svc, crit
@@ -166,6 +166,17 @@ func TestInternalSurface_CriteriaReport(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != 404 {
 		t.Fatalf("unknown execution: want 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Malformed report (blank/unknown status) → 400, not 500.
+	crit.err = validation.ErrInvalidCriterionReport
+	req = httptest.NewRequest(http.MethodPost, "/internal/v1/executions/exec-42/validation-criteria", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Fatalf("invalid criterion report: want 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

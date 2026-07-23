@@ -58,6 +58,15 @@ describe("mergeCriterionStatus", () => {
     expect(mergeCriterionStatus([], lines)).toEqual({ "AC-001-a": "passed" });
   });
 
+  it("preserves the skipped status (durable seed and live frame)", () => {
+    const durable = [row("AC-001-a", "skipped")];
+    const lines = [line({ kind: "criterion", step: "AC-002-a", status: "skipped" })];
+    expect(mergeCriterionStatus(durable, lines)).toEqual({
+      "AC-001-a": "skipped",
+      "AC-002-a": "skipped",
+    });
+  });
+
   it("ignores non-criterion lines and unknown statuses", () => {
     const lines = [
       line({ kind: "log", message: "hi" }),

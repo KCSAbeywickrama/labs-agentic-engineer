@@ -4391,7 +4391,10 @@ components:
           description: Parent requirement id; "" when the reporter did not supply it.
           type: string
         status:
-          description: validating | passed | failed | skipped.
+          description: The criterion's latest run status (validating, passed,
+            failed, or skipped). Not enum-constrained here — the value is
+            server-produced from the durable store; the closed set is enforced
+            on the ingest path (ValidationCriterionReport.status).
           type: string
         updatedAt:
           description: When this status was last written.

@@ -27,10 +27,10 @@ import (
 // criteria callback upserts one row per acceptance criterion as the validation
 // runner reports it live, and the task read path lists them by issue number for
 // the console checklist. Org-scoped reads; upsert is last-write-wins on
-// (repo, issue_number, criterion_id).
+// (org_id, repo, issue_number, criterion_id).
 type ValidationCriterionStatusRepository interface {
 	// Upsert writes the criterion's latest status, overwriting an existing row
-	// for the same (repo, issue_number, criterion_id).
+	// for the same (org_id, repo, issue_number, criterion_id).
 	Upsert(ctx context.Context, row *ValidationCriterionStatus) error
 
 	// ListByIssueScoped returns every criterion status for one validation Task,
@@ -50,9 +50,9 @@ func NewValidationCriterionStatusRepository(db *gorm.DB) ValidationCriterionStat
 
 func (r *validationCriterionStatusRepository) Upsert(ctx context.Context, row *ValidationCriterionStatus) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "repo"}, {Name: "issue_number"}, {Name: "criterion_id"}},
+		Columns: []clause.Column{{Name: "org_id"}, {Name: "repo"}, {Name: "issue_number"}, {Name: "criterion_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"org_id", "project_id", "requirement_id", "status", "execution_id", "updated_at",
+			"project_id", "requirement_id", "status", "execution_id", "updated_at",
 		}),
 	}).Create(row).Error
 }

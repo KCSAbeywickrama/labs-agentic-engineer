@@ -107,8 +107,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   Execution's `pr#N` reason, no live PR query) links each Task's PR.
 - **Per-criterion validation progress is durable, log-independent.** The Playwright runner reports each
   acceptance criterion's begin/end to the `runner-validation-criteria` callback, which upserts
-  `validation_criterion_statuses` keyed by `(repo, issue_number, criterion_id)` (last-write-wins; execution id is
-  provenance, not a key — a same-issue retry collapses onto the same rows). The console reads them via
+  `validation_criterion_statuses` keyed by `(org_id, repo, issue_number, criterion_id)` (last-write-wins; org_id
+  leads the key so the tenant fence is part of the write identity; execution id is provenance, not a key — a
+  same-issue retry collapses onto the same rows). The console reads them via
   `get-task-validation-criteria` as its checklist seed and overlays the live `kind:"criterion"` stream frames, so a
   finished or FAILED (never-merged) run still shows the complete checklist without depending on the log
   snapshot tail. The runner also emits the same events onto its stdout NDJSON, so they ride the existing

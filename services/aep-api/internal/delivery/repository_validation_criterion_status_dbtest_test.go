@@ -66,6 +66,39 @@ func TestCriterionStatusRepository_UpsertLastWriteWins(t *testing.T) {
 	}
 }
 
+// TestCriterionStatusRepository_SameKeyDifferentOrgs: org_id is part of the
+// conflict identity, so the SAME (repo, issue, criterion) reported by two orgs
+// persists as two independent rows — neither upsert overwrites the other.
+func TestCriterionStatusRepository_SameKeyDifferentOrgs(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	repo := delivery.NewValidationCriterionStatusRepository(db)
+	ctx := context.Background()
+
+	if err := repo.Upsert(ctx, validationCriterionRow("orga", "o/r", 30, "AC-001-a", "passed")); err != nil {
+		t.Fatalf("upsert orga: %v", err)
+	}
+	if err := repo.Upsert(ctx, validationCriterionRow("orgb", "o/r", 30, "AC-001-a", "failed")); err != nil {
+		t.Fatalf("upsert orgb (same repo/issue/criterion): %v", err)
+	}
+
+	mine, err := repo.ListByIssueScoped(ctx, "orga", "o/r", 30)
+	if err != nil {
+		t.Fatalf("list orga: %v", err)
+	}
+	if len(mine) != 1 || mine[0].Status != "passed" {
+		t.Fatalf("orga = %+v; want one row AC-001-a/passed (not overwritten by orgb)", mine)
+	}
+
+	other, err := repo.ListByIssueScoped(ctx, "orgb", "o/r", 30)
+	if err != nil {
+		t.Fatalf("list orgb: %v", err)
+	}
+	if len(other) != 1 || other[0].Status != "failed" {
+		t.Fatalf("orgb = %+v; want one row AC-001-a/failed", other)
+	}
+}
+
 // TestCriterionStatusRepository_OrgFence: ListByIssueScoped never leaks another
 // org's rows, and a miss is an empty slice.
 func TestCriterionStatusRepository_OrgFence(t *testing.T) {

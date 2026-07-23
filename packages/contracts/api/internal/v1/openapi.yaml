@@ -255,8 +255,9 @@ components:
           description: Stable acceptance-criterion id (e.g. "AC-001-a").
           type: string
         status:
-          description: validating | passed | failed | skipped.
+          description: The criterion's latest run status.
           type: string
+          enum: [validating, passed, failed, skipped]
         requirementId:
           description: Parent requirement id, when the reporter knows it.
           type: string

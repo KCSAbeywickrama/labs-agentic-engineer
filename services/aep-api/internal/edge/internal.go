@@ -240,12 +240,15 @@ func (s *internalServer) RunnerValidationCriteria(ctx context.Context, request i
 	org := tenant.BoundOrgFromContext(ctx)
 	err := s.deps.ValidationCriteria.ReportCriterion(ctx, request.ExecutionID, org, validation.CriterionReportInput{
 		CriterionID:   request.Body.CriterionID,
-		Status:        request.Body.Status,
+		Status:        string(request.Body.Status),
 		RequirementID: request.Body.RequirementID,
 	})
 	if err != nil {
 		if errors.Is(err, validation.ErrExecutionNotFound) {
 			return nil, errNotFound("no validation task for this execution")
+		}
+		if errors.Is(err, validation.ErrInvalidCriterionReport) {
+			return nil, errBadRequest("criterionId and status are required; status must be one of validating, passed, failed, skipped")
 		}
 		return nil, errInternal("failed to record criterion status")
 	}
