@@ -36,6 +36,7 @@ import {
   notifyTurnEnd,
 } from "./chatStore.js";
 import { isQuestionTool, parseQuestionsInput } from "./questionCards.js";
+import { getQuestionDoc, mirrorQuestion } from "./questionRoom.js";
 import { getTurn, openTurnStream } from "./api/turns.js";
 
 const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
@@ -54,6 +55,9 @@ export async function attachAndFoldTurn(
   turnId: string,
   signal: AbortSignal,
   onCommitted?: () => void,
+  /** Local user id of the turn-owner — stamped on questions mirrored into the
+   *  collab room so only the owner can submit them (collab spike). */
+  ownerId?: string,
 ): Promise<void> {
   let sawTerminal = false;
   // Per tool call: accumulate its streamed input args so the path can be read as
@@ -98,12 +102,13 @@ export async function attachAndFoldTurn(
         if (!isQuestionTool(part.toolName)) break;
         const questions = parseQuestionsInput(part.toolName!, part.input);
         if (!questions) break;
-        upsertQuestionMessage(chatKey, {
-          role: "question",
-          turnId,
-          toolCallId: part.toolCallId ?? "",
-          questions,
-        });
+        const toolCallId = part.toolCallId ?? "";
+        upsertQuestionMessage(chatKey, { role: "question", turnId, toolCallId, questions });
+        // Collab spike: also mirror onto the shared room map so all
+        // participants see the question on the main spec panel. No-op when the
+        // spec route (which owns the doc) isn't mounted, or with no owner id.
+        const doc = getQuestionDoc();
+        if (doc && ownerId && toolCallId) mirrorQuestion(doc, { toolCallId, questions, ownerId });
         break;
       }
       case "tool-result": {

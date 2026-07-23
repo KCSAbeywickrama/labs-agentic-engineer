@@ -143,11 +143,21 @@ function OneQuestion({
 // Memoized: the panel re-renders per streamed text-delta, but a card's props
 // only change when its log entry does — settled cards skip reconciliation
 // entirely (onAnswer is the hook's stable callback).
+const draftsToAnswers = (drafts: Draft[]): QuestionAnswer[] =>
+  drafts.map((d) => ({
+    selected: d.selected,
+    ...(d.note.trim() ? { freeText: d.note.trim() } : {}),
+  }));
+
 export const QuestionCard = memo(function QuestionCard({
   msg,
   answerable,
   busy,
   onAnswer,
+  controlledDraft,
+  onDraftChange,
+  submitLabelOverride,
+  canSubmitOverride,
 }: {
   msg: QuestionMessage;
   /** Derived from the log: unanswered AND not superseded by a delivered user message. */
@@ -155,17 +165,42 @@ export const QuestionCard = memo(function QuestionCard({
   /** A turn is in flight — keep the card visible but hold submissions. */
   busy: boolean;
   onAnswer: (msg: QuestionMessage, answers: QuestionAnswer[]) => void;
+  /**
+   * Controlled mode (collab spike): when `onDraftChange` is given the card's
+   * selections are driven by `controlledDraft` (a shared Yjs draft) and every
+   * toggle/note edit is pushed up instead of held in local state — so a pick by
+   * one participant reflects live for everyone. Omitted → the chat panel's
+   * local-draft behavior, byte-identical.
+   */
+  controlledDraft?: QuestionAnswer[] | null;
+  onDraftChange?: (answers: QuestionAnswer[]) => void;
+  /** Collab spike: relabel/gate submit (e.g. non-owners can't send to the agent). */
+  submitLabelOverride?: string;
+  canSubmitOverride?: boolean;
 }) {
   const readOnly = !answerable;
   const isForm = msg.questions.length > 1;
-  const [drafts, setDrafts] = useState<Draft[]>(() =>
+  const controlled = onDraftChange != null;
+  const [localDrafts, setLocalDrafts] = useState<Draft[]>(() =>
     msg.questions.map(() => ({ selected: [], note: "" })),
   );
+  // Controlled: derive drafts from the shared answer; uncontrolled: local state.
+  const drafts: Draft[] = controlled
+    ? msg.questions.map((_, i) => ({
+        selected: controlledDraft?.[i]?.selected ?? [],
+        note: controlledDraft?.[i]?.freeText ?? "",
+      }))
+    : localDrafts;
+
+  const commit = (next: Draft[]) => {
+    if (controlled) onDraftChange!(draftsToAnswers(next));
+    else setLocalDrafts(next);
+  };
 
   const toggle = (qi: number, label: string) => {
     if (readOnly || busy) return;
-    setDrafts((prev) =>
-      prev.map((d, i) => {
+    commit(
+      drafts.map((d, i) => {
         if (i !== qi) return d;
         const multi = msg.questions[qi]!.multiSelect === true;
         const selected = multi
@@ -178,21 +213,16 @@ export const QuestionCard = memo(function QuestionCard({
     );
   };
   const setNote = (qi: number, note: string) => {
-    setDrafts((prev) => prev.map((d, i) => (i === qi ? { ...d, note } : d)));
+    commit(drafts.map((d, i) => (i === qi ? { ...d, note } : d)));
   };
 
   const answered = (d: Draft) => d.selected.length > 0 || d.note.trim().length > 0;
-  const canSubmit = !readOnly && !busy && drafts.every(answered);
+  const canSubmit =
+    !readOnly && !busy && drafts.every(answered) && (canSubmitOverride ?? true);
 
   const submit = () => {
     if (!canSubmit) return;
-    onAnswer(
-      msg,
-      drafts.map((d) => ({
-        selected: d.selected,
-        ...(d.note.trim() ? { freeText: d.note.trim() } : {}),
-      })),
-    );
+    onAnswer(msg, draftsToAnswers(drafts));
   };
 
   return (
@@ -237,7 +267,7 @@ export const QuestionCard = memo(function QuestionCard({
       {!readOnly && (
         <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1.5 }}>
           <Button size="small" variant="contained" disabled={!canSubmit} onClick={submit}>
-            {isForm ? "Submit answers" : "Answer"}
+            {submitLabelOverride ?? (isForm ? "Submit answers" : "Answer")}
           </Button>
         </Stack>
       )}

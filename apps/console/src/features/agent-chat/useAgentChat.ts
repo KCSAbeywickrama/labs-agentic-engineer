@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { buildAnswerInstruction, buildAnswersInstruction, type QuestionAnswer } from "@aep/agent-stream";
+import type { QuestionAnswer } from "@aep/agent-stream";
 import { projectKeys } from "../projects/api/keys.js";
 import {
   addMessage,
@@ -39,6 +39,7 @@ import {
   startCollabTurn,
 } from "./api/turns.js";
 import { attachAndFoldTurn } from "./runTurn.js";
+import { serializeQuestionAnswer } from "./questionCards.js";
 import { projectableHistory } from "./history.js";
 import { useCurrentAuthor } from "./currentUser.js";
 
@@ -106,7 +107,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setActiveTurnId(active.turnId);
       dropTurnOutput(chatKey, active.turnId); // replay-from-0 re-adds it all
       try {
-        await attachAndFoldTurn(chatKey, projectName, active.turnId, ac.signal, onTurnCommitted);
+        await attachAndFoldTurn(chatKey, projectName, active.turnId, ac.signal, onTurnCommitted, author.id);
       } catch {
         // surfaced by the fold's error handling; the view just settles
       } finally {
@@ -121,7 +122,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setIsSending(false);
       setActiveTurnId(undefined);
     };
-  }, [chatKey, org, projectName, onTurnCommitted]);
+  }, [chatKey, org, projectName, onTurnCommitted, author.id]);
 
   // One turn dispatch, shared by send and answer. `onStarted` fires after
   // startCollabTurn succeeds — the earliest point the instruction is durably on
@@ -163,7 +164,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         });
         const signal = abortRef.current?.signal ?? new AbortController().signal;
         try {
-          await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted);
+          await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted, author.id);
         } catch {
           if (!signal.aborted) {
             setTurnStatus(chatKey, turnId, "failed");
@@ -187,21 +188,9 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
 
   const answer = useCallback<AgentChat["answer"]>(
     (msg, answers) => {
-      const instruction =
-        msg.questions.length === 1
-          ? buildAnswerInstruction(
-              msg.questions[0]!.question,
-              answers[0]?.selected ?? [],
-              answers[0]?.freeText,
-            )
-          : buildAnswersInstruction(
-              msg.questions.map((q, i) => ({
-                question: q.question,
-                selected: answers[i]?.selected ?? [],
-                ...(answers[i]?.freeText ? { freeText: answers[i]!.freeText } : {}),
-              })),
-            );
-      dispatch(instruction, () => answerQuestion(chatKey, msg.id, answers));
+      dispatch(serializeQuestionAnswer(msg.questions, answers), () =>
+        answerQuestion(chatKey, msg.id, answers),
+      );
     },
     [dispatch, chatKey],
   );

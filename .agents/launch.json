@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "console",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.nvm/versions/node/v22.16.0/bin:$PATH\" && pnpm --filter @aep/console dev --port 8091"
+      ],
+      "port": 8091
+    }
+  ]
+}

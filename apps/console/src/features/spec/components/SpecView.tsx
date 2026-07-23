@@ -50,6 +50,8 @@ import { UsageChip } from "../../usage/components/UsageChip";
 import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
+import { SpecQuestionBanner } from "./SpecQuestionBanner";
+import { setQuestionDoc } from "../../agent-chat/questionRoom";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
@@ -91,6 +93,14 @@ export function SpecView({ projectName }: { projectName: string }) {
   // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
   // back to the collab mock BFF's default org so mock mode keeps working.
   const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
+  // Collab question cards spike: publish the live room doc so the chat fold (a
+  // sibling subtree) can mirror agent questions into it while this view is
+  // mounted; clear on unmount. The banner below reads the same doc directly.
+  const roomDoc = collab.provider?.document ?? null;
+  useEffect(() => {
+    setQuestionDoc(roomDoc);
+    return () => setQuestionDoc(null);
+  }, [roomDoc]);
   // Chat-path turn-end flush (#252 Task 5): the chat panel's chatKey uses a
   // DIFFERENT fallback ("default", matching AppLayout/AgentChatPanel) than
   // the collab room's org scoping above ("acme") — these are unrelated
@@ -691,6 +701,17 @@ export function SpecView({ projectName }: { projectName: string }) {
           >
             {buildError}
           </Alert>
+        )}
+
+        {/* Collab question cards spike: agent question surfaced to the whole
+            room on the main panel, answered together. chatKey uses the
+            "default" org fallback (matching the chat panel), not the room's. */}
+        {roomDoc && (
+          <SpecQuestionBanner
+            doc={roomDoc}
+            org={orgHandle ?? "default"}
+            projectName={projectName}
+          />
         )}
 
         {/* Body: grouped file list + file content */}
