@@ -24,7 +24,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -38,6 +37,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Eye, FolderGit2, Pencil, Trash2, Upload } from "@wso2/oxygen-ui-icons-react";
+import { StatusChip } from "../../../components/StatusChip";
 import {
   useConfig,
   useDeleteSkill,
@@ -45,7 +45,7 @@ import {
   useSkills,
   useSyncSkills,
 } from "../api/queries";
-import { kindBlurb, kindChipColor, kindLabel, normalizeKind } from "../skillKind";
+import { kindBlurb, kindChipTone, kindLabel, normalizeKind } from "../skillKind";
 import { paginateSkills } from "../skillsList";
 import { EditSkillDialog } from "./EditSkillDialog";
 import { ImportSkillDialog } from "./ImportSkillDialog";
@@ -199,11 +199,13 @@ export function SkillsSection() {
         >
           {conflicted.length > 0 && (
             <Tooltip title="The platform shipped updates for skills you have customized. Sync leaves your versions untouched; reviewing and applying them is coming soon.">
-              <Chip
-                size="small"
-                color="info"
-                label={`${conflicted.length} customized skill${conflicted.length === 1 ? " has" : "s have"} platform updates`}
-              />
+              {/* Box holds the ref Tooltip needs — StatusChip doesn't forward one. */}
+              <Box sx={{ display: "inline-flex" }}>
+                <StatusChip
+                  tone="info"
+                  label={`${conflicted.length} customized skill${conflicted.length === 1 ? " has" : "s have"} platform updates`}
+                />
+              </Box>
             </Tooltip>
           )}
           <SyncUpdatesControl
@@ -282,26 +284,28 @@ export function SkillsSection() {
                               including read-only-ness — there is no separate
                               read-only chip. */}
                           <Tooltip title={kindBlurb(kind)}>
-                            <Chip
-                              size="small"
-                              color={kindChipColor(kind)}
-                              label={kindLabel(kind)}
-                            />
+                            {/* Box holds the ref Tooltip needs — StatusChip
+                                doesn't forward one. */}
+                            <Box sx={{ display: "inline-flex" }}>
+                              <StatusChip
+                                label={kindLabel(kind)}
+                                tone={kindChipTone(kind)}
+                              />
+                            </Box>
                           </Tooltip>
                           {updatable.has(skill.name) && (
-                            <Chip
-                              size="small"
-                              color="warning"
-                              label="update available"
-                            />
+                            <StatusChip label="update available" tone="warning" />
                           )}
                           {conflictedNames.has(skill.name) && (
                             <Tooltip title="You customized this skill and the platform has since updated it. Sync won't overwrite your version.">
-                              <Chip
-                                size="small"
-                                color="info"
-                                label="platform update — customized"
-                              />
+                              {/* Box holds the ref Tooltip needs — StatusChip
+                                  doesn't forward one. */}
+                              <Box sx={{ display: "inline-flex" }}>
+                                <StatusChip
+                                  label="platform update — customized"
+                                  tone="info"
+                                />
+                              </Box>
                             </Tooltip>
                           )}
                         </Box>

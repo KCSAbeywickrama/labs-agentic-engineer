@@ -16,10 +16,7 @@
  * under the License.
  */
 
-import { Chip } from "@wso2/oxygen-ui";
-import { taskChip } from "../api/status";
-
-export function TaskStatusChip({ derivedStatus }: { derivedStatus: string }) {
-  const chip = taskChip(derivedStatus);
-  return <Chip size="small" label={chip.label} color={chip.color} />;
-}
+export const usageKeys = {
+  project: (projectName: string) =>
+    ["projects", "detail", projectName, "usage"] as const,
+};

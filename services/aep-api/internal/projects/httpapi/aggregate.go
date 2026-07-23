@@ -18,10 +18,12 @@ package httpapi
 
 import (
 	"github.com/wso2/aep/aep-api/internal/projects"
+	"github.com/wso2/aep/aep-api/internal/projects/activityfeed"
 	"github.com/wso2/aep/aep-api/internal/projects/componentbuild"
 	"github.com/wso2/aep/aep-api/internal/projects/componentconfig"
 	"github.com/wso2/aep/aep-api/internal/projects/componentread"
 	"github.com/wso2/aep/aep-api/internal/projects/projectcrud"
+	"github.com/wso2/aep/aep-api/internal/projects/projectusage"
 )
 
 // Every slice names its type Handler, so embedding them directly would be
@@ -31,6 +33,8 @@ type (
 	componentreadHandler   = componentread.Handler
 	componentbuildHandler  = componentbuild.Handler
 	componentconfigHandler = componentconfig.Handler
+	activityfeedHandler    = activityfeed.Handler
+	projectusageHandler    = projectusage.Handler
 )
 
 // Handlers is the projects domain's slice handlers, embedded so Go promotes each
@@ -40,6 +44,8 @@ type Handlers struct {
 	*componentreadHandler
 	*componentbuildHandler
 	*componentconfigHandler
+	*activityfeedHandler
+	*projectusageHandler
 }
 
 // New assembles the domain: pure wiring, constructor injection only.
@@ -53,5 +59,7 @@ func New(d projects.Deps) (*Handlers, error) {
 		componentreadHandler:   componentread.New(d.ComponentSvc),
 		componentbuildHandler:  componentbuild.New(d.ComponentSvc),
 		componentconfigHandler: componentconfig.New(d.ConfigSvc),
+		activityfeedHandler:    activityfeed.New(d.ActivitySvc),
+		projectusageHandler:    projectusage.New(),
 	}, nil
 }
