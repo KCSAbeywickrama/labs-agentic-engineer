@@ -20,8 +20,26 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ElementType } from "react";
 import type { components } from "../../../generated/aep-api";
 import { ResourcesSection } from "./ResourcesSection";
+
+// Router replaced so the drawer's "Used by" ProjectLink renders as a plain
+// anchor (createLink pattern, cf. ValidationPage.test).
+vi.mock("@tanstack/react-router", () => ({
+  createLink: (Component: ElementType) =>
+    function MockLink({
+      to,
+      params,
+      ...rest
+    }: { to: string; params?: Record<string, unknown> } & Record<string, unknown>) {
+      let href = to;
+      for (const [key, value] of Object.entries(params ?? {})) {
+        href = href.replace(`$${key}`, String(value));
+      }
+      return <Component component="a" href={href} {...rest} />;
+    },
+}));
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];

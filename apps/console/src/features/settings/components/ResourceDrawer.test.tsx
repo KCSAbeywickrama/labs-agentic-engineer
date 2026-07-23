@@ -20,8 +20,26 @@
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ElementType } from "react";
 import type { components } from "../../../generated/aep-api";
 import { ResourceDrawer } from "./ResourceDrawer";
+
+// Router replaced so the "Used by" ProjectLink renders as a plain anchor
+// (createLink pattern, cf. ValidationPage.test).
+vi.mock("@tanstack/react-router", () => ({
+  createLink: (Component: ElementType) =>
+    function MockLink({
+      to,
+      params,
+      ...rest
+    }: { to: string; params?: Record<string, unknown> } & Record<string, unknown>) {
+      let href = to;
+      for (const [key, value] of Object.entries(params ?? {})) {
+        href = href.replace(`$${key}`, String(value));
+      }
+      return <Component component="a" href={href} {...rest} />;
+    },
+}));
 
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
@@ -99,6 +117,10 @@ describe("ResourceDrawer", () => {
     expect(
       screen.getByText("Used by 2 component(s) — remove those dependencies first"),
     ).toBeInTheDocument();
+    // Each "Used by" item links to its project.
+    expect(
+      screen.getByRole("link", { name: "checkout-api · acme" }).getAttribute("href"),
+    ).toBe("/projects/acme");
   });
 
   it("external, unused: delete is enabled and confirming calls the delete mutation", () => {

@@ -33,11 +33,17 @@ import {
   Divider,
   Drawer,
   IconButton,
+  Link,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown, Lock, X } from "@wso2/oxygen-ui-icons-react";
+import { createLink } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
+
+// Router-typed Oxygen Link (the console's createLink pattern, cf. ValidationPage)
+// so a "Used by" consumer can navigate to its project.
+const ProjectLink = createLink(Link);
 import { useDeleteExternalResource } from "../api/queries";
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
@@ -137,13 +143,26 @@ function ConsumersSection({ consumers }: { consumers: ConsumerDTO[] }) {
       {consumers.length === 0 ? (
         <EmptyNote />
       ) : (
-        <Stack spacing={0.5}>
+        // Each consumer is one component (in a project) that declares this
+        // external dependency; the component name links to its project (there
+        // is no per-component route — components live inside the project view).
+        <Box component="ul" sx={{ listStyleType: "disc", m: 0, pl: 2.5 }}>
           {consumers.map((consumer) => (
-            <Typography key={`${consumer.projectId}/${consumer.componentName}`} variant="body2">
-              {consumer.componentName} · {consumer.projectId}
-            </Typography>
+            <Box
+              component="li"
+              key={`${consumer.projectId}/${consumer.componentName}`}
+              sx={{ mb: 0.5, "&::marker": { color: "text.disabled" } }}
+            >
+              <ProjectLink
+                to="/projects/$projectName"
+                params={{ projectName: consumer.projectId }}
+                variant="body2"
+              >
+                {consumer.componentName} · {consumer.projectId}
+              </ProjectLink>
+            </Box>
           ))}
-        </Stack>
+        </Box>
       )}
     </CollapsibleSection>
   );
@@ -199,13 +218,19 @@ function OutputsSection({ outputs }: { outputs: string[] }) {
       {outputs.length === 0 ? (
         <EmptyNote />
       ) : (
-        <Stack spacing={0.5}>
+        <Box component="ul" sx={{ listStyleType: "disc", m: 0, pl: 2.5 }}>
           {outputs.map((output) => (
-            <Typography key={output} component="code" variant="body2">
-              {output}
-            </Typography>
+            <Box
+              component="li"
+              key={output}
+              sx={{ mb: 0.5, "&::marker": { color: "text.disabled" } }}
+            >
+              <Typography component="code" variant="body2">
+                {output}
+              </Typography>
+            </Box>
           ))}
-        </Stack>
+        </Box>
       )}
     </CollapsibleSection>
   );
