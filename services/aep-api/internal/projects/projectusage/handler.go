@@ -20,19 +20,25 @@ import (
 	"context"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
+	"github.com/wso2/aep/aep-api/internal/projects"
 )
 
-// Handler serves list-project-usage. PLACEHOLDER until the #299 backend
-// (capture, model_rates, write-time USD stamping per amended ADR-0011)
-// lands: no usage capture exists yet, so an empty card list is the truth —
-// the console renders its empty state.
-type Handler struct{}
+// Handler serves list-project-usage (#291): the org-wide Settings → Usage
+// roll-up. All aggregation + labelling lives in projects.UsageService; the
+// slice is pure edge wiring — resolve the bound org, delegate, respond.
+type Handler struct {
+	svc *projects.UsageService
+}
 
 // New returns the slice's handler.
-func New() *Handler { return &Handler{} }
+func New(svc *projects.UsageService) *Handler { return &Handler{svc: svc} }
 
-func (h *Handler) ListProjectUsage(_ context.Context, _ gen.ListProjectUsageRequestObject) (gen.ListProjectUsageResponseObject, error) {
-	return gen.ListProjectUsage200JSONResponse(gen.ProjectUsageList{
-		Projects: []gen.ProjectUsageCard{},
-	}), nil
+func (h *Handler) ListProjectUsage(ctx context.Context, _ gen.ListProjectUsageRequestObject) (gen.ListProjectUsageResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	list, err := h.svc.ListProjectUsage(ctx, org)
+	if err != nil {
+		return nil, projects.MapProjectError(err)
+	}
+	return gen.ListProjectUsage200JSONResponse(list), nil
 }

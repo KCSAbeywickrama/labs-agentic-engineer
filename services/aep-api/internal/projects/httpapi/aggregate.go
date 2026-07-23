@@ -56,6 +56,6 @@ func New(d projects.Deps) (*Handlers, error) {
 		componentreadHandler:   componentread.New(d.ComponentSvc),
 		componentbuildHandler:  componentbuild.New(d.ComponentSvc),
 		componentconfigHandler: componentconfig.New(d.ConfigSvc),
-		projectusageHandler:    projectusage.New(),
+		projectusageHandler:    projectusage.New(d.UsageSvc),
 	}, nil
 }

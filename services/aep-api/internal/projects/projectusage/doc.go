@@ -18,7 +18,8 @@
 // the console's Settings → Usage page (#291).
 //
 // Triggers: list-project-usage.
-// Ports:    none yet — the op answers an empty card list until the #299
-// capture and write-time-stamping backend lands (no usage IS the truth
-// today: nothing is captured, and the console renders its empty state).
+// Ports:    the projects.UsageService — folds the spec-turn and
+// coding-execution per-project roll-ups, labels each by the org's live
+// projects (a usage slug with no live project is shown as a deleted card), and
+// orders by write-time-stamped cost. The slice itself is pure edge wiring.
 package projectusage

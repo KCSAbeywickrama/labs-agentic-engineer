@@ -32,4 +32,7 @@ type Deps struct {
 	ComponentSvc ComponentService
 	// ConfigSvc is the component env-var config service behind the two config ops.
 	ConfigSvc ConfigService
+	// UsageSvc is the org-wide agent-usage roll-up behind list-project-usage
+	// (#291): the Settings → Usage page's per-project cost cards.
+	UsageSvc *UsageService
 }

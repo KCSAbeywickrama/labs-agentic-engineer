@@ -38,6 +38,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/database"
+	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 	"github.com/wso2/aep/aep-api/internal/projects"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -62,6 +63,7 @@ func BaseModels() []any {
 		&delivery.Execution{},
 		&spec.AgentTurn{},
 		&delivery.DevflowRun{},
+		&modelcost.ModelRate{},
 	}
 }
 
@@ -136,6 +138,11 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 		// (issues #154, #155, BE handshake #156). One idempotent CREATE TABLE
 		// + its (org_id, created_at) list index.
 		ctxStep("phase10_rca_agent_reports", RunPhase10RcaAgentReports),
+		// model_rates seed (#291): the platform's active model at today's
+		// rates. AutoMigrate (BaseModels) creates the table; this idempotent
+		// step inserts the claude-sonnet-5 row so write-time USD stamping has
+		// a price card to resolve against. Ops-managed thereafter.
+		ctxStep("model_rates_seed", RunModelRatesSeed),
 	}
 }
 

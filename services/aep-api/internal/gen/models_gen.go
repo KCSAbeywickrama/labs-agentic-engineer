@@ -715,6 +715,18 @@ type OrganizationView struct {
 	UUID        uuid.UUID `json:"uuid"`
 }
 
+// PhaseUsage A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns; build covers the build + coding executions; validation covers the validation executions. Each is a full Usage so a phase can degrade to tokens when its rows are unstamped.
+type PhaseUsage struct {
+	// Build Actual token usage for one unit of agent work or an aggregate (#245,
+	Build Usage `json:"build"`
+
+	// Spec Actual token usage for one unit of agent work or an aggregate (#245,
+	Spec Usage `json:"spec"`
+
+	// Validation Actual token usage for one unit of agent work or an aggregate (#245,
+	Validation Usage `json:"validation"`
+}
+
 // PlatformResourceTypeDTO defines model for PlatformResourceTypeDTO.
 type PlatformResourceTypeDTO struct {
 	Description string                 `json:"description,omitempty"`
@@ -823,6 +835,9 @@ type ProjectUsageCard struct {
 
 	// DisplayName The live project's display name; falls back to the slug for deleted projects.
 	DisplayName string `json:"displayName"`
+
+	// Phases A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns; build covers the build + coding executions; validation covers the validation executions. Each is a full Usage so a phase can degrade to tokens when its rows are unstamped.
+	Phases PhaseUsage `json:"phases"`
 
 	// ProjectName Project name (DNS-label slug) as stored on the usage rows.
 	ProjectName string `json:"projectName"`

@@ -37,7 +37,7 @@ import (
 func TestFunnel_AdmissionUnderConcurrency_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t) // self-skips under -short / no Docker
-	repo := delivery.NewExecutionRepository(db)
+	repo := delivery.NewExecutionRepository(db, nil)
 
 	// One open, executable coding Task with no deps.
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
@@ -92,7 +92,7 @@ func TestFunnel_ReAdmittableAfterFinish_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
-	repo := delivery.NewExecutionRepository(db)
+	repo := delivery.NewExecutionRepository(db, nil)
 
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{taskIssue(2, "order-service", nil, []string{taskmeta.LabelExecute}, "open")})
 	exec := &fakeExecutor{} // records only — the admitted row stays queued (active)
@@ -151,7 +151,7 @@ func TestFunnel_ReevaluateAdmitsWhenDepsSatisfied_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
-	repo := delivery.NewExecutionRepository(db)
+	repo := delivery.NewExecutionRepository(db, nil)
 
 	issues := newFakeIssues([]sourcecontrol.IssueInfo{
 		taskIssue(1, "user-service", nil, nil, "open"),
