@@ -34,7 +34,7 @@ services (`Service`, `ComponentService`, `ConfigService`, `TraitSyncService`) li
 | `componentread` | list-components / get-component | `ComponentService` |
 | `componentbuild` | trigger-build / list-builds / build-logs / list-deployments / component-openapi | `ComponentService` |
 | `componentconfig` | get / update component env-config | `ConfigService` |
-| `projectusage` | list-project-usage (org-wide per-project usage cards, #291) | none — empty-list placeholder until #299 lands capture + stamping |
+| `projectusage` | list-project-usage (org-wide per-project usage cards, #291) | `*UsageService` — folds spec-turn + coding-execution per-project usage, labels by live projects, orders by stamped cost |
 
 The shared HTTP vocabulary — `RequireSlug`, `RequireComponentSlugs`, `MapProjectError`, `MapComponentError`
 and the private `errFromStatus` — lives in the ROOT (`httperrors.go`), because a slice may not import a
