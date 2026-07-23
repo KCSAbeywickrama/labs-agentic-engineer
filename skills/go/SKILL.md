@@ -85,11 +85,12 @@ For a Go service a `web-application` calls directly — the web-app declares a
 unset), include this Scope bullet:
 
 - "CORS: a browser calls this service cross-origin (the web-app is served from
-  a different gateway host), so wrap the router in a permissive CORS middleware
-  that sets `Access-Control-Allow-Origin`/`-Methods`/`-Headers` and answers the
-  `OPTIONS` preflight with 204 — the browser blocks every call otherwise. A
-  managed API (`exposesAPI` set) instead relies on the gateway for CORS and
-  must NOT add its own; see the api-management skill."
+  a different gateway host), so you MUST wrap the router in a permissive CORS
+  middleware that sets `Access-Control-Allow-Origin`/`-Methods`/`-Headers` and
+  answers the `OPTIONS` preflight with 204 — the browser blocks every call
+  otherwise, and the web-app is dead on arrival. This is not optional for this
+  kind of service. A managed API (`exposesAPI` set) instead relies on the
+  gateway for CORS and must NOT add its own; see the api-management skill."
 
 For every Go task, include this Acceptance criteria bullet:
 
@@ -97,6 +98,19 @@ For every Go task, include this Acceptance criteria bullet:
   external dependencies, the committed `go.sum` matches a fresh
   `go mod tidy` run. A stdlib-only service has NO `go.sum` — that is
   expected; do not hand-create one."
+
+For a Go service a `web-application` calls directly (a non-managed API,
+`exposesAPI` unset — the SAME condition as the CORS Scope bullet above), you
+MUST ALSO include this Acceptance criteria bullet, and confirm it before you
+open the PR:
+
+- "The router is wrapped in the CORS middleware (the raw `mux` is NOT served
+  directly): a cross-origin browser `GET`/`POST` succeeds and an `OPTIONS`
+  preflight returns 204 with `Access-Control-Allow-Origin`/`-Methods`/`-Headers`
+  set. Verify explicitly: `curl -i -X OPTIONS <one endpoint>` returns `204` AND
+  shows an `Access-Control-Allow-Origin` header. Serving the raw mux with no
+  CORS wrapper is an INCOMPLETE task for this kind of service — the deployed
+  web-app will fail every fetch."
 
 ### Coding agent — implementation
 
