@@ -53,9 +53,10 @@ export function useSpecFiles(projectName: string) {
 }
 
 /**
- * Fetch one spec file's content. Shared by the lazy selection hook below and
- * the derived-view hooks (useDerivedCellDiagram, useDerivedWireframe), which
- * fetch several files at once outside of a single "selected file" context.
+ * Fetch one spec file's content. Shared by the lazy selection hook below, the
+ * derived wireframe hook (useDerivedWireframe), and the cell-diagram panel's
+ * solo/offline design.cell read — reads outside a single "selected file"
+ * context.
  */
 export async function fetchSpecFileContent(
   projectName: string,
