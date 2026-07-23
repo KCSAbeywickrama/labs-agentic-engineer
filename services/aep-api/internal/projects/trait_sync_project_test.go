@@ -122,12 +122,13 @@ func traitServiceJSON(name, auth string) string {
 
 // --- SyncProjectAPITraits -----------------------------------------------------
 
-func TestSyncProjectAPITraits_ReEmitsEnabledServicesOnly(t *testing.T) {
+func TestSyncProjectAPITraits_SyncsAllServiceComponents(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// api: protected end-user service (re-emitted, sibling-CORS active).
 	// s2s: protected service-to-service (re-emitted, but no SPA origins).
-	// worker: unprotected service (skipped — ResolveAPISecurityEnabled=false).
+	// worker: unprotected service (now ALSO synced — auto-RCA covers every
+	//         service component, even without a managed API).
 	// web: web-app (skipped — not ComponentType "service").
 	files := map[string]string{
 		spec.DesignRootFile:             traitRootMd(),
@@ -143,7 +144,7 @@ func TestSyncProjectAPITraits_ReEmitsEnabledServicesOnly(t *testing.T) {
 		t.Fatalf("SyncProjectAPITraits: %v", err)
 	}
 
-	// Exactly the two enabled service components get their traits re-emitted.
+	// All three service components (api, s2s, worker) sync; the web-app does not.
 	emitted := map[string]bool{}
 	for _, c := range oc.UpdateComponentTraitsCalls() {
 		emitted[c.ComponentName] = true
@@ -151,14 +152,14 @@ func TestSyncProjectAPITraits_ReEmitsEnabledServicesOnly(t *testing.T) {
 	if !emitted["api"] || !emitted["s2s"] {
 		t.Errorf("both enabled services must be re-emitted; got %v", emitted)
 	}
-	if emitted["worker"] {
-		t.Errorf("unprotected service must not be re-emitted")
+	if !emitted["worker"] {
+		t.Errorf("plain service must be synced too (auto-RCA covers all service components); got %v", emitted)
 	}
 	if emitted["web"] {
 		t.Errorf("web-app must not be re-emitted (only ComponentType=service)")
 	}
-	if n := len(oc.UpdateComponentTraitsCalls()); n != 2 {
-		t.Errorf("want 2 trait emits (api, s2s); got %d", n)
+	if n := len(oc.UpdateComponentTraitsCalls()); n != 3 {
+		t.Errorf("want 3 trait emits (api, s2s, worker); got %d", n)
 	}
 
 	// Only the end-user API pulls sibling SPA origins: ListDeployments is
