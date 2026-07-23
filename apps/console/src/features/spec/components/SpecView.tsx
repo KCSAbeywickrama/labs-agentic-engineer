@@ -96,7 +96,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // Collab question cards spike: publish the live room doc so the chat fold (a
   // sibling subtree) can mirror agent questions into it while this view is
   // mounted; clear on unmount. The banner below reads the same doc directly.
-  const roomDoc = collab.provider?.document ?? null;
+  const roomDoc = collab.doc;
   useEffect(() => {
     setQuestionDoc(roomDoc);
     return () => setQuestionDoc(null);
