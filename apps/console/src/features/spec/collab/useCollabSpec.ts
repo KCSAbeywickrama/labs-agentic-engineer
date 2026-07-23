@@ -221,7 +221,7 @@ export function useCollabSpec(
           ? listDocPaths(docRef.current)
           : [],
       provider: status === "connected" ? providerRef.current : null,
-      doc: docRef.current,
+      doc: docReady ? docRef.current : null,
       self: {
         name: user.name,
         color:
