@@ -64,6 +64,7 @@ func BaseModels() []any {
 		&spec.AgentTurn{},
 		&delivery.DevflowRun{},
 		&modelcost.ModelRate{},
+		&projects.ActivityEvent{},
 	}
 }
 

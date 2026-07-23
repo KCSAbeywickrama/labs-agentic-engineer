@@ -180,4 +180,3 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 		RateStamper:     rateStamper,
 	}, nil
 }
-

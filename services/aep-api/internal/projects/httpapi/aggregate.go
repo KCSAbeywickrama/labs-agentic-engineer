@@ -18,6 +18,7 @@ package httpapi
 
 import (
 	"github.com/wso2/aep/aep-api/internal/projects"
+	"github.com/wso2/aep/aep-api/internal/projects/activityfeed"
 	"github.com/wso2/aep/aep-api/internal/projects/componentbuild"
 	"github.com/wso2/aep/aep-api/internal/projects/componentconfig"
 	"github.com/wso2/aep/aep-api/internal/projects/componentread"
@@ -32,6 +33,7 @@ type (
 	componentreadHandler   = componentread.Handler
 	componentbuildHandler  = componentbuild.Handler
 	componentconfigHandler = componentconfig.Handler
+	activityfeedHandler    = activityfeed.Handler
 	projectusageHandler    = projectusage.Handler
 )
 
@@ -42,6 +44,7 @@ type Handlers struct {
 	*componentreadHandler
 	*componentbuildHandler
 	*componentconfigHandler
+	*activityfeedHandler
 	*projectusageHandler
 }
 
@@ -56,6 +59,7 @@ func New(d projects.Deps) (*Handlers, error) {
 		componentreadHandler:   componentread.New(d.ComponentSvc),
 		componentbuildHandler:  componentbuild.New(d.ComponentSvc),
 		componentconfigHandler: componentconfig.New(d.ConfigSvc),
+		activityfeedHandler:    activityfeed.New(d.ActivitySvc),
 		projectusageHandler:    projectusage.New(d.UsageSvc),
 	}, nil
 }

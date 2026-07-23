@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/activityvocab"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -115,4 +116,36 @@ func TestProvisionDependencies_InputsButUnwiredErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("inputs with no provisioner wired must error")
 	}
+}
+
+// TestRecordActivity_mapsAndResolvesTitle: the activity maps the workflow
+// input onto RecordedActivity and resolves the Task title for a task-scoped
+// event (Issue > 0) through the TaskTitleReader port.
+func TestRecordActivity_mapsAndResolvesTitle(t *testing.T) {
+	rec := &captureRecorder{}
+	acts := NewActivities(Deps{
+		Recorder: rec,
+		Titles:   titleReaderFunc(func(_ context.Context, _, _ string, issue int) string { return "Catalog" }),
+	})
+	err := acts.RecordActivity(context.Background(), RecordActivityInput{
+		Type: activityvocab.TypeTaskDeployed, OrgID: "o", ProjectID: "p", Tag: "v1-1",
+		Issue: 10, ActorKind: activityvocab.ActorAgent, ActorID: "build-agent",
+		ActorName: "Build agent", DedupKey: "task:repo#10:v1-1:deployed", OccurredAtUnix: 1_700_000_000,
+	})
+	if err != nil {
+		t.Fatalf("RecordActivity: %v", err)
+	}
+	if len(rec.got) != 1 || rec.got[0].Title != "Catalog" || rec.got[0].Type != activityvocab.TypeTaskDeployed {
+		t.Fatalf("unexpected recorded event: %+v", rec.got)
+	}
+}
+
+type captureRecorder struct{ got []RecordedActivity }
+
+func (c *captureRecorder) Record(_ context.Context, e RecordedActivity) { c.got = append(c.got, e) }
+
+type titleReaderFunc func(context.Context, string, string, int) string
+
+func (f titleReaderFunc) TitleFor(ctx context.Context, o, p string, i int) string {
+	return f(ctx, o, p, i)
 }
