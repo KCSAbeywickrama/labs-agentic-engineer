@@ -163,7 +163,7 @@ function TurnBody({
       if (msg.content) {
         out.push(<MarkdownView key={msg.id}>{msg.content}</MarkdownView>);
       }
-    } else if (msg.role === "question") {
+    } else if (msg.role === "question" && msg.questions?.length) {
       out.push(
         <QuestionCard
           key={msg.id}

@@ -84,13 +84,25 @@ function convKey(org: string, project: string): string {
   return `aep.chat.conv.${org}.${project}`;
 }
 
+/**
+ * A persisted message is renderable only if it matches the CURRENT schema.
+ * Guards against a log written by an older build (the `aep.chat.v1` key is
+ * shared across branches/sessions) — e.g. a `question` message from before the
+ * `questions[]` shape — which would otherwise crash the card renderer. Such
+ * stale entries are dropped, not migrated: they are transient display state.
+ */
+function isRenderable(m: ChatMessage): boolean {
+  if (m.role === "question") return Array.isArray(m.questions) && m.questions.length > 0;
+  return true;
+}
+
 function load(key: string): ChatMessage[] {
   const cached = logs.get(key);
   if (cached) return cached;
   let messages: ChatMessage[] = [];
   try {
     const raw = localStorage.getItem(key);
-    if (raw) messages = JSON.parse(raw) as ChatMessage[];
+    if (raw) messages = (JSON.parse(raw) as ChatMessage[]).filter(isRenderable);
   } catch {
     messages = [];
   }
