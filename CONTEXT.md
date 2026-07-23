@@ -45,6 +45,26 @@ a stored "connected/not" flag.
 _Avoid_: connection (in OpenChoreo that names a consumed endpoint — the
 opposite side of the wire).
 
+**External resource**:
+A provisioned third-party integration — a REST API or SDK (e.g. Stripe,
+OpenWeatherMap) — registered at the org level together with its config-key
+schema (which env-var keys it reads, which are secret). The org-level registry
+of reusable externals is **not** a database table: the org-namespaced
+OpenChoreo `ResourceType` itself IS the registry (ADR-0009), authored at
+provision and read back via `ExternalDefinitionFromRT`. Reusable across a
+project's components — and across projects — once provisioned (provision-gated).
+_Avoid_: "external_resources table" (removed); connection.
+
+**External dependency**:
+A dependency kind (`kind: external`): a component's use of an external
+resource, with `style: rest-api | sdk`. Carries the `config[]` keys it reads
+and, for `rest-api`, an optional `specPath` — a URL or a committed spec file —
+that the coding agent treats as a contract hint while researching the
+provider's docs from the web beyond it (ADR-0010). Status is derived at read
+time (ADR-0003), never stored.
+_Avoid_: `needsSpec`, `specUrl`, `sources` (retired schema fields — a
+design.json carrying them is rejected on parse, like `callerIdentity`).
+
 **Resource-type marker**:
 A declaration a platform engineer attaches to a resource type in the catalog,
 naming a generic consumption behavior that type needs — for example, "using
