@@ -31,7 +31,7 @@
 export interface SkillCatalogEntry {
   name: string;
   description: string;
-  /** True when the skill carries `references/*.md` (drives the loadSkillReference tool + catalog note). */
+  /** True when the skill carries any aux file (docs, scripts, assets, …) — drives the loadSkillReference tool + catalog note. */
   hasReferences: boolean;
 }
 
