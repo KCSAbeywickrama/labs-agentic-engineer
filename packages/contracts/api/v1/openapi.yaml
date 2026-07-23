@@ -1876,8 +1876,9 @@ paths:
       - GenAI
   /usage/projects:
     get:
-      description: Org-wide agent usage, one card per project that has any recorded usage — including
-        projects that were since deleted (#291). Figures are lifetime sums of persisted per-row records;
+      description: Org-wide agent usage (#291), one card per project. Every LIVE project is carded —
+        idle ones (no agent has run) as a real $0 — plus any since-deleted project that still carries
+        recorded usage (shown as a deleted card). Figures are lifetime sums of persisted per-row records;
         costUsd sums the amounts stamped at capture time (ADR-0011 as amended) and is null when no row
         carries a stamp.
       operationId: list-project-usage
@@ -3833,7 +3834,8 @@ components:
       type: object
     ProjectUsageList:
       additionalProperties: false
-      description: Org-wide usage roll-up (#291), ordered by costUsd descending (null-cost cards last).
+      description: Org-wide usage roll-up (#291), tiered — stamped-cost projects first (costUsd desc),
+        then projects with usage the platform could not price (by tokens), then idle $0 projects last.
       properties:
         projects:
           items:

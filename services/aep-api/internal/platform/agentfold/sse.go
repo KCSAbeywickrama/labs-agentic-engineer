@@ -59,7 +59,10 @@ type TurnUsage struct {
 	OutputTokens        int64  `json:"outputTokens"`
 	CacheReadTokens     int64  `json:"cacheReadTokens"`
 	CacheCreationTokens int64  `json:"cacheCreationTokens"`
-	Model               string `json:"model,omitempty"`
+	// Always emitted (no omitempty): the TS @aep/agent-stream TurnUsage.model
+	// is a required field, and "" is meaningful (unknown/mixed model). Dropping
+	// it on re-marshal would break the "field names match the wire" guarantee.
+	Model string `json:"model"`
 }
 
 // SSEDone is the terminal sentinel payload: `data: [DONE]`.

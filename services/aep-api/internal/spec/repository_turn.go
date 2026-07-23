@@ -289,8 +289,11 @@ func (r *turnRepository) SumUsageByProject(ctx context.Context, orgID string) (m
 			"COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens, "+
 			"COALESCE(SUM(cache_creation_tokens),0) AS cache_creation_tokens, "+
 			"SUM(cost_usd) AS cost_usd, "+ // NULL when no row is stamped — exactly the #291 semantic
-			"COUNT(DISTINCT model_id) FILTER (WHERE model_id <> '') AS models, "+
-			"COALESCE(MAX(model_id) FILTER (WHERE model_id <> ''), '') AS max_model").
+			// Count distinct model_id INCLUDING '' so any unknown-model row
+			// makes the project's model degrade to '' (matching
+			// contracts.TokenUsage.Add: a mix of known + unknown is '').
+			"COUNT(DISTINCT model_id) AS models, "+
+			"COALESCE(MAX(model_id), '') AS max_model").
 		Where("org_id = ?", orgID).
 		Group("project_id").
 		// Only projects with real token traffic — a failed turn that captured

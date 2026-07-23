@@ -895,7 +895,7 @@ type ProjectUsageCard struct {
 	Usage Usage `json:"usage"`
 }
 
-// ProjectUsageList Org-wide usage roll-up (#291), ordered by costUsd descending (null-cost cards last).
+// ProjectUsageList Org-wide usage roll-up (#291), tiered — stamped-cost projects first (costUsd desc), then projects with usage the platform could not price (by tokens), then idle $0 projects last.
 type ProjectUsageList struct {
 	Projects []ProjectUsageCard `json:"projects"`
 }

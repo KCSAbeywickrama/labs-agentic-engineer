@@ -18,8 +18,9 @@ package contracts
 
 // TokenUsage is the cross-runtime token-usage shape (#245/#249): what both
 // agent runtimes report per unit of work and what the usage columns persist
-// (ADR-0011 — tokens + model are the stored truth; USD is derived at read
-// time, never carried here). Field names match the runner NDJSON `usage`
+// (amended ADR-0011 — tokens + model are the stored truth; USD is stamped at
+// capture time onto the row's cost_usd from the model_rates then in force, and
+// is not carried on this shape). Field names match the runner NDJSON `usage`
 // object and the agents-stream manifest `usage` field byte-for-byte.
 type TokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`

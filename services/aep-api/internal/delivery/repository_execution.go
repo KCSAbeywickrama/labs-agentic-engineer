@@ -423,8 +423,11 @@ func (r *executionRepository) SumUsageByProjectPhase(ctx context.Context, orgID 
 			"COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens, "+
 			"COALESCE(SUM(cache_creation_tokens),0) AS cache_creation_tokens, "+
 			"SUM(cost_usd) AS cost_usd, "+ // NULL when no row is stamped — the #291 semantic
-			"COUNT(DISTINCT model_id) FILTER (WHERE model_id <> '') AS models, "+
-			"COALESCE(MAX(model_id) FILTER (WHERE model_id <> ''), '') AS max_model").
+			// Count distinct model_id INCLUDING '' so any unknown-model row
+			// makes the phase's model degrade to '' (matching
+			// contracts.TokenUsage.Add: a mix of known + unknown is '').
+			"COUNT(DISTINCT model_id) AS models, "+
+			"COALESCE(MAX(model_id), '') AS max_model").
 		Where("org_id = ? AND project_id <> ''", orgID).
 		Group("project_id, phase").
 		// Only phases with real token traffic — a run that captured nothing

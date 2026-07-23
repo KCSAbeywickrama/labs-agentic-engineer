@@ -18,6 +18,7 @@ package codingagent
 
 import (
 	"bufio"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
@@ -31,7 +32,11 @@ import (
 func usageFromLog(text string) *contracts.TokenUsage {
 	var found *contracts.TokenUsage
 	scanner := bufio.NewScanner(strings.NewReader(text))
-	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	// The runner's terminal `result` line carries the full usage JSON and can
+	// be large; size the buffer generously (16 MiB) so a long line is scanned,
+	// not silently dropped mid-log — the token-too-long default (64 KiB) would
+	// stop the scan before the result and lose the usage.
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		// Cheap pre-filter before the JSON parse: result lines are rare.
@@ -44,6 +49,12 @@ func usageFromLog(text string) *contracts.TokenUsage {
 			u := *ev.Usage
 			found = &u
 		}
+	}
+	// A scan error (e.g. a line still over the raised cap) stops the loop
+	// early and could hide the terminal result — surface it rather than
+	// returning a silently-incomplete usage.
+	if err := scanner.Err(); err != nil {
+		slog.Warn("codingagent.usageFromLog: log scan stopped early — captured usage may be incomplete", "error", err)
 	}
 	return found
 }
