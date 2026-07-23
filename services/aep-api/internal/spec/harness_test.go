@@ -234,5 +234,5 @@ func (r *rig) tag(name, msg string) {
 	r.remote.Tag(r.t, name, msg)
 }
 
-func (r *rig) tags() []string              { return r.remote.Tags(r.t) }
-func (r *rig) headSHA() string             { return r.remote.HeadSHA(r.t) }
+func (r *rig) tags() []string  { return r.remote.Tags(r.t) }
+func (r *rig) headSHA() string { return r.remote.HeadSHA(r.t) }

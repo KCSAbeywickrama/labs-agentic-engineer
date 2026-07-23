@@ -19,9 +19,10 @@
 import Markdown from "react-markdown";
 import { Box } from "@wso2/oxygen-ui";
 
-// Renders a SKILL.md *body* (frontmatter already stripped — see skillMd.ts).
-// Styling is theme-token only so it holds up in light and dark.
-export function SkillMarkdown({ body }: { body: string }) {
+// Console-wide markdown renderer for agent-authored content (skill bodies,
+// alert diagnoses, and — later — agent chat messages). Styling is
+// theme-token only so it holds up in light and dark; see design-system.md.
+export function MarkdownView({ children }: { children: string }) {
   return (
     <Box
       sx={{
@@ -80,7 +81,7 @@ export function SkillMarkdown({ body }: { body: string }) {
         "& img": { maxWidth: "100%" },
       }}
     >
-      <Markdown>{body}</Markdown>
+      <Markdown>{children}</Markdown>
     </Box>
   );
 }
