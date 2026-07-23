@@ -20,12 +20,11 @@ comment conventions, and deny-list all still apply. Its
 implementation-specific sections (build verification, workload.yaml,
 App Path structure) do NOT apply here.
 
-**Reference files** used below live in this skill's `references/`
-directory (in the platform runner: `/app/plugin/skills/aep-validation/references/`);
-templates copied into the test harness live under `assets/` (in the platform
-runner: `/app/plugin/skills/aep-validation/assets/`), and the report
-generator lives under `scripts/` (in the platform runner:
-`/app/plugin/skills/aep-validation/scripts/`).
+The workflow docs `references/authoring.md` and `references/healing.md`
+are referenced below by relative path; the platform runner root for this
+skill is `/app/plugin/skills/aep-validation/` (docs under that plus
+`authoring.md`/`healing.md`, templates under `assets/`, the report
+generator under `scripts/`).
 
 ## Workflow
 
