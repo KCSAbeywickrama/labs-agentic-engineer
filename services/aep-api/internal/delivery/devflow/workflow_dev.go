@@ -25,6 +25,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/wso2/aep/aep-api/internal/contracts/activityvocab"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -91,6 +92,22 @@ func DevFlowWorkflow(ctx workflow.Context, in delivery.DevFlowInput) (delivery.D
 	if cyc := detectDepCycle(tasks); len(cyc) > 0 {
 		return fail("dependency cycle detected: " + strings.Join(cyc, " → "))
 	}
+
+	// Record the plan_derived milestone (best-effort, deduped by tag so a
+	// workflow retry is a no-op). Recording must not gate the build, so the
+	// activity error is ignored.
+	_ = workflow.ExecuteActivity(recordActivityOpts(ctx), (*Activities).RecordActivity, RecordActivityInput{
+		Type:           activityvocab.TypePlanDerived,
+		OrgID:          in.OrgID,
+		ProjectID:      in.ProjectID,
+		Tag:            reqTag,
+		Count:          len(tasks),
+		ActorKind:      activityvocab.ActorAgent,
+		ActorID:        "plan-agent",
+		ActorName:      "Plan agent",
+		DedupKey:       "plan:" + in.ProjectID + ":" + reqTag + ":derived",
+		OccurredAtUnix: workflow.Now(ctx).Unix(),
+	}).Get(ctx, nil)
 
 	// 2b. Provision dependencies (issue #164): mint the aep:provision gates and
 	// author each dependency the build drawer supplied by kind — external
@@ -409,6 +426,15 @@ func planActivityOpts(ctx workflow.Context) workflow.Context {
 func countsActivityOpts(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 2 * time.Minute,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+	})
+}
+
+// recordActivityOpts: short, best-effort activity for appending a project
+// activity event. A failure never fails the build (the caller ignores the error).
+func recordActivityOpts(ctx workflow.Context) workflow.Context {
+	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Second,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	})
 }

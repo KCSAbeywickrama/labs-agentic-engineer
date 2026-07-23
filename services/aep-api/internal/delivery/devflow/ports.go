@@ -19,6 +19,8 @@ package devflow
 import (
 	"context"
 
+	"time"
+
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -101,4 +103,39 @@ type ProvisionFailure struct {
 	Component  string
 	Dependency string
 	Reason     string
+}
+
+// RecordedActivity is one project activity event to append. This is devflow's
+// own type — the projects domain defines a field-identical twin (ActivityInput);
+// the app-root adapter maps between them (delivery must not import projects —
+// projects already imports delivery).
+type RecordedActivity struct {
+	OrgID     string
+	ProjectID string
+	Type      string
+	ActorKind string
+	ActorID   string
+	ActorName string
+
+	Issue     int
+	Title     string
+	Component string
+	Tag       string
+
+	DedupKey   string
+	OccurredAt time.Time
+}
+
+// ActivityRecorder appends a project activity event (best-effort). The devflow
+// activities call it from a real activity ctx (DB-capable), never from workflow
+// code. Satisfied by an app-root adapter over the projects activity service.
+type ActivityRecorder interface {
+	Record(ctx context.Context, e RecordedActivity)
+}
+
+// TaskTitleReader resolves a Task's human title for a task-* activity line
+// (the workflow input carries no title). "" when unknown — the line degrades to
+// just "#<issue>". Satisfied by an app-level adapter over the task reads.
+type TaskTitleReader interface {
+	TitleFor(ctx context.Context, orgID, projectID string, issue int) string
 }

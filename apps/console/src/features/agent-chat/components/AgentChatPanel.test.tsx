@@ -33,7 +33,34 @@ const KEY = chatKeyFor(ORG, PROJECT);
 // out of scope here). ------------------------------------------------------
 const mockSend = vi.fn();
 vi.mock("../useAgentChat", () => ({
-  useAgentChat: () => ({ messages: [], isSending: false, send: mockSend }),
+  useAgentChat: () => ({
+    messages: [],
+    isSending: false,
+    activeTurnId: undefined,
+    send: mockSend,
+    newConversation: vi.fn(),
+  }),
+}));
+
+// The merged multi-user panel stamps outgoing messages with the signed-in
+// author (via useCurrentAuthor -> useSession), which throws outside an
+// AuthGuard — this test renders the panel bare, so stub the session.
+vi.mock("../../../auth/SessionContext", () => ({
+  useSession: () => ({
+    user: { name: "Test User", email: "test@example.com" },
+    orgHandle: "acme",
+    signOut: vi.fn(),
+  }),
+}));
+
+// The panel's stick-to-bottom scroll behavior is browser-only (drives a
+// ResizeObserver, absent in jsdom) and orthogonal to the pendingSeed wiring
+// under test — stub it out with inert refs.
+vi.mock("use-stick-to-bottom", () => ({
+  useStickToBottom: () => ({
+    scrollRef: { current: null },
+    contentRef: { current: null },
+  }),
 }));
 
 // --- Turn-end fallback (#252 Task 5): its own behavior is covered by

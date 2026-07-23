@@ -42,13 +42,16 @@ const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
  * Attach to a running turn's stream and fold it to its terminal. Resolves
  * when the turn reaches a terminal (or the signal aborts — the turn keeps
  * running server-side; a later re-attach replays it). A severed stream falls
- * back to one authoritative status poll.
+ * back to one authoritative status poll. `onCommitted` fires once when the
+ * turn completes (turn-committed, or the fallback poll landing on completed)
+ * so the caller can refresh caches the commit invalidated.
  */
 export async function attachAndFoldTurn(
   chatKey: string,
   projectName: string,
   turnId: string,
   signal: AbortSignal,
+  onCommitted?: () => void,
 ): Promise<void> {
   let sawTerminal = false;
   // Per tool call: accumulate its streamed input args so the path can be read as
@@ -116,6 +119,7 @@ export async function attachAndFoldTurn(
         // chat panel's fallback + the spec view's deterministic room flush
         // both react to (see chatStore's turn-end bus + useTurnEndFlush).
         notifyTurnEnd(chatKey, "completed");
+        onCommitted?.();
         break;
       case "turn-failed":
         sawTerminal = true;
@@ -151,6 +155,7 @@ export async function attachAndFoldTurn(
   if (status?.status === "completed") {
     setTurnStatus(chatKey, turnId, "completed");
     notifyTurnEnd(chatKey, "completed");
+    onCommitted?.();
   } else if (status?.status === "failed") {
     setTurnStatus(chatKey, turnId, "failed");
     notifyTurnEnd(chatKey, "failed");

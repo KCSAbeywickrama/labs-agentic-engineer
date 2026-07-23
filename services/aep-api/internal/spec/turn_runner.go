@@ -456,6 +456,7 @@ func (s *Service) finishTurn(ctx context.Context, job turnJob, term TurnTerminal
 		return
 	}
 	s.broker.Terminal(job.turnID, terminalEventJSON(term))
+	s.recordTurnActivity(ctx, job, term)
 	// Notify any waiting devflow workflow of the terminal outcome (best-effort).
 	// The hook does I/O (a DB lookup + a Temporal signal), so it runs detached
 	// with its own bounded context — a slow hook must never delay or fail the
@@ -467,6 +468,23 @@ func (s *Service) finishTurn(ctx context.Context, job turnJob, term TurnTerminal
 			hook(hookCtx, job.orgID, job.projectID, job.turnID, job.useCase, term.Status)
 		}()
 	}
+}
+
+// recordTurnActivity appends the spec_updated feed line for a turn that landed
+// a real commit (issue #239). Best-effort and observational: a nil recorder, a
+// failed turn, or a no-changes completion record nothing. The actor is the
+// prompting user (the commit author), so the console renders "You updated the
+// spec"; the turn id keys dedup so a re-finish is a no-op.
+func (s *Service) recordTurnActivity(ctx context.Context, job turnJob, term TurnTerminal) {
+	if s.recorder == nil || term.Status != turnStatusCompleted || term.NoChanges {
+		return
+	}
+	var email, name string
+	if job.author != nil {
+		email, name = job.author.Email, job.author.Name
+	}
+	s.recorder.RecordSpecUpdated(ctx, job.orgID, job.projectID, job.turnID,
+		firstLine(job.summary, 96), email, name)
 }
 
 // turnBaseReader adapts Workspace.ReadFile at the turn's base ref into the

@@ -417,6 +417,13 @@ type rigConfig struct {
 	skillsRepo spec.SkillsRepoResolver
 	mcpTokens  spec.MCPTokenMinter
 	mcpBaseURL string
+	recorder   spec.TurnActivityRecorder
+}
+
+// withRecorder wires an activity recorder so a committed turn's spec_updated
+// line can be asserted.
+func withRecorder(r spec.TurnActivityRecorder) rigOption {
+	return func(rc *rigConfig) { rc.recorder = r }
 }
 
 // withAgentsClient swaps the agents client (e.g. a panicking fake) — everything
@@ -510,6 +517,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		SkillsRepo: skillsRepo,
 		MCPTokens:  cfg.mcpTokens,
 		MCPBaseURL: cfg.mcpBaseURL,
+		Recorder:   cfg.recorder,
 	})
 	rig.h = componenttest.New(t, componenttest.Options{Deps: edge.Deps{Spec: mustSpecHandlers(t, spec.Deps{GenAI: svc})}})
 	return rig
