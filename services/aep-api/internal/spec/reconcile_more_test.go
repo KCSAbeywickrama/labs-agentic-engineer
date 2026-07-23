@@ -253,7 +253,8 @@ func TestLoadEmbeddedLibrary(t *testing.T) {
 
 // TestLoadLibrary_StandardStructure: a skill dir carrying scripts/, assets/,
 // references/ (non-.md included), a nested extra dir, and a binary file loads
-// with every aux file byte-faithful under its relative path.
+// with every aux file byte-faithful under its relative path; a dotfile and a
+// nested dot-dir file are both skipped.
 func TestLoadLibrary_StandardStructure(t *testing.T) {
 	t.Parallel()
 	bin := string([]byte{0x00, 0xFF, 0x10, 0x80}) // not valid UTF-8
@@ -266,6 +267,7 @@ func TestLoadLibrary_StandardStructure(t *testing.T) {
 		"demo/extra/notes.txt":      {Data: []byte("extra file")},
 		"demo/assets/logo.png":      {Data: []byte(bin)},
 		"demo/.hidden":              {Data: []byte("skip me")},
+		"demo/scripts/.cache/x":     {Data: []byte("skip me too")},
 	}
 	got, err := loadLibrary(fsys)
 	if err != nil {
@@ -290,6 +292,9 @@ func TestLoadLibrary_StandardStructure(t *testing.T) {
 		if sk.References[p] != content {
 			t.Fatalf("%s not byte-faithful", p)
 		}
+	}
+	if _, ok := sk.References["scripts/.cache/x"]; ok {
+		t.Fatalf("nested dot-dir file must not be carried: %v", keysOf(sk.References))
 	}
 }
 

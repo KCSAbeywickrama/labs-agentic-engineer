@@ -127,11 +127,19 @@ func TestParseAndValidateSkillMD(t *testing.T) {
 	t.Run("reference path must not be a dotfile", func(t *testing.T) {
 		_, _, err := parseAndValidateSkillMD(validSkillMD, map[string]string{"assets/.DS_Store": "junk"})
 		assertIssueCode(t, err, "REFERENCE_PATH_INVALID")
+		assertIssueMessageContains(t, err, "dotfile segment")
 	})
 
 	t.Run("reference traversal", func(t *testing.T) {
 		_, _, err := parseAndValidateSkillMD(validSkillMD, map[string]string{"references/../x.md": "x"})
 		assertIssueCode(t, err, "REFERENCE_PATH_INVALID")
+		assertIssueMessageContains(t, err, "path traversal or an empty segment")
+	})
+
+	t.Run("reference path must not contain an empty segment", func(t *testing.T) {
+		_, _, err := parseAndValidateSkillMD(validSkillMD, map[string]string{"a//b.md": "x"})
+		assertIssueCode(t, err, "REFERENCE_PATH_INVALID")
+		assertIssueMessageContains(t, err, "path traversal or an empty segment")
 	})
 
 	t.Run("reference path must not be absolute", func(t *testing.T) {
@@ -290,5 +298,16 @@ func assertIssueCode(t *testing.T, err error, code string) {
 	}
 	if verr.Issues[0].Code != code {
 		t.Fatalf("expected code %s, got %s (%s)", code, verr.Issues[0].Code, verr.Issues[0].Message)
+	}
+}
+
+func assertIssueMessageContains(t *testing.T, err error, substr string) {
+	t.Helper()
+	var verr *SkillValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected *SkillValidationError, got %T: %v", err, err)
+	}
+	if !strings.Contains(verr.Issues[0].Message, substr) {
+		t.Fatalf("expected message to contain %q, got %q", substr, verr.Issues[0].Message)
 	}
 }

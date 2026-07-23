@@ -60,7 +60,10 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   org's flat `org-skills` repo (kind in frontmatter) is reconciled content-SHA-wise — seed / overwrite /
   purge platform+org, skip user-owned. Model-context reads (the design agent's `loadSkillReference`) and
   JSON API responses inline UTF-8 text only; binary aux files are listed, never inlined
-  (`binaryReferences` in the API; a corrective error naming the binary path in the tool).
+  (`binaryReferences` in the API; a corrective error naming the binary path in the tool). Binary aux
+  files are therefore delivery-only over the JSON API — their content never round-trips through a
+  GET→edit→PUT cycle — and stay durable only via the embedded library or tarball import, which carry
+  the bytes directly rather than through `binaryReferences`.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.

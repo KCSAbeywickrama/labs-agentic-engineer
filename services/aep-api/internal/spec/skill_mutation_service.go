@@ -314,13 +314,13 @@ func validateSkillRefPath(refPath string) error {
 		return fmt.Errorf("reference key %q must be a relative path", refPath)
 	}
 	parts := strings.Split(refPath, "/")
-	if hasDotSegment(parts) {
-		return fmt.Errorf("reference key %q must not contain a dotfile segment", refPath)
-	}
 	for _, seg := range parts {
 		if seg == "" || seg == "." || seg == ".." {
 			return fmt.Errorf("reference key %q must not contain path traversal or an empty segment", refPath)
 		}
+	}
+	if hasDotSegment(parts) {
+		return fmt.Errorf("reference key %q must not contain a dotfile segment", refPath)
 	}
 	return nil
 }
