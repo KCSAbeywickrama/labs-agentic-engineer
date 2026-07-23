@@ -127,6 +127,10 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	activityRepo := projects.NewActivityEventRepository(db)
 	activityHub := projects.NewActivityHub()
 	activitySvc := projects.NewActivityService(activityRepo, activityHub)
+	// Shared by the turn + files recorders: a room-scoped turn marks the project
+	// agent-authored; the committer's later files/apply flush claims the mark and
+	// suppresses its user line (issue #239 — see specAuthorship).
+	specAuthored := &specAuthorship{}
 
 	// Temporal devflow runtime. Constructed always, but connects lazily in the
 	// worker watcher's retry loop (never at Build time), so aep-api boots and
@@ -375,7 +379,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		Broker:     turnBroker,
 		Snapshots:  workspaceEngine,
 		SkillsRepo: skillsRepoForTurns,
-		Recorder:   turnActivityRecorder{svc: activitySvc},
+		Recorder:   turnActivityRecorder{svc: activitySvc, authorship: specAuthored},
 	}
 	// MCP discovery on design-generation turns (dependency-management Phase 5):
 	// the BFF mints a short-lived aud:aep-api-mcp token per turn so the agents
@@ -790,7 +794,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	specHandlers, err := spechttpapi.New(spec.Deps{
 		GenAI:         genaiSvc,
 		Files:         filesSvc,
-		FilesActivity: filesActivityRecorder{svc: activitySvc},
+		FilesActivity: filesActivityRecorder{svc: activitySvc, authorship: specAuthored},
 		Artifacts:     artifactSvcGit,
 		Skills:        skillSvc,
 		SkillMut:      skillMutationSvc,
