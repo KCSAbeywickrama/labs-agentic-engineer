@@ -511,4 +511,3 @@ func trimmedMapsEqual(a, b map[string]string) bool {
 	}
 	return true
 }
-

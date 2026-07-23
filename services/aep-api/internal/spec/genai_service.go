@@ -219,6 +219,20 @@ type ServiceDeps struct {
 	// or a slow hook must never delay or fail the turn. Kept as a plain func so
 	// the genai package does not import devflow.
 	TurnFinishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
+	// Recorder, when set, gets the spec_updated feed line for every turn that
+	// lands a real commit (issue #239). Optional; nil disables recording.
+	Recorder TurnActivityRecorder
+}
+
+// TurnActivityRecorder appends the spec_updated activity line (issue #239) for
+// a turn that committed. Primitives only, so spec need not import projects (the
+// app-root adapter maps these onto the activity service's input). Best-effort:
+// implementations never return an error — recording must not fail a turn.
+type TurnActivityRecorder interface {
+	// RecordSpecUpdated appends the line for turnID. title is the turn's
+	// instruction subject; actorEmail/actorName identify the prompting user
+	// and are "" when the turn carries no author identity.
+	RecordSpecUpdated(ctx context.Context, orgID, projectID, turnID, title, actorEmail, actorName string)
 }
 
 // Service is the typed entry point behind the turn/status/stream/rehydrate
@@ -237,6 +251,7 @@ type Service struct {
 	mcpTokens  MCPTokenMinter
 	mcpBaseURL string
 	finishHook func(ctx context.Context, orgID, projectID, turnID, useCase, outcome string)
+	recorder   TurnActivityRecorder
 }
 
 // NewService wires the genai service.
@@ -253,6 +268,7 @@ func NewService(d ServiceDeps) *Service {
 		mcpTokens:  d.MCPTokens,
 		mcpBaseURL: d.MCPBaseURL,
 		finishHook: d.TurnFinishHook,
+		recorder:   d.Recorder,
 	}
 }
 

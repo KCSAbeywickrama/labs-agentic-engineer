@@ -29,8 +29,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { StatusChip } from "../../../components/StatusChip";
 import { useAllTasks } from "../api/queries";
-import { TaskStatusChip } from "./TaskStatusChip";
+import { taskChip } from "../api/status";
 
 // The flat task list (#173): one row per task, status chip inline — the user
 // watches chips go green. Card-variant listing per the components list /
@@ -144,16 +145,24 @@ export function TasksList({
                 )}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 120 }}>
-                {t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
-                  <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
-                    {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
-                    <Box sx={{ display: "inline-flex" }}>
-                      <TaskStatusChip derivedStatus={t.derivedStatus} />
-                    </Box>
-                  </Tooltip>
-                ) : (
-                  <TaskStatusChip derivedStatus={t.derivedStatus} />
-                )}
+                {(() => {
+                  const chip = taskChip(t.derivedStatus);
+                  const pill = (
+                    <StatusChip
+                      label={chip.label}
+                      tone={chip.tone}
+                      appearance="soft"
+                    />
+                  );
+                  return t.derivedStatus === "on_hold" && t.blockedBy?.length ? (
+                    <Tooltip title={`Waiting for ${t.blockedBy.join(", ")}`}>
+                      {/* Box holds the ref Tooltip needs; hovering the pill shows the reason. */}
+                      <Box sx={{ display: "inline-flex" }}>{pill}</Box>
+                    </Tooltip>
+                  ) : (
+                    pill
+                  );
+                })()}
               </ListingTable.Cell>
               <ListingTable.Cell sx={{ maxWidth: 64 }}>
                 <Tooltip title="Open the GitHub issue">
