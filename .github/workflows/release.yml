@@ -272,13 +272,13 @@ jobs:
 
           **Linux (amd64)**
           \`\`\`bash
-          curl -L https://github.com/wso2/aep/releases/download/ctl%2Fv${{ inputs.version }}/aep-linux-amd64 \
+          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aep-linux-amd64 \
             -o /usr/local/bin/aep && chmod +x /usr/local/bin/aep
           \`\`\`
 
           **macOS (Apple Silicon)**
           \`\`\`bash
-          curl -L https://github.com/wso2/aep/releases/download/ctl%2Fv${{ inputs.version }}/aep-darwin-arm64 \
+          curl -L https://github.com/${{ github.repository }}/releases/download/ctl%2Fv${{ inputs.version }}/aep-darwin-arm64 \
             -o /usr/local/bin/aep && chmod +x /usr/local/bin/aep
           \`\`\`" \
             dist/aep-*
