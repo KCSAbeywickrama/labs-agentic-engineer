@@ -81,6 +81,11 @@ build:
       docker:
         dockerfile: Dockerfile
 
+    - image: ghcr.io/wso2/aep/secret-manager-api
+      context: deployments/local-secret-manager-api
+      docker:
+        dockerfile: Dockerfile
+
 deploy:
   helm:
     releases:
@@ -91,6 +96,12 @@ deploy:
         valuesFiles:
           - deployments/helm-charts/platform/values.yaml
           - deployments/helm-charts/platform/values.local.yaml
+          # Per-developer overrides (git-ignored), layered last so it wins. Copy
+          # values.local.dev.yaml.example to values.local.dev.yaml and edit — e.g.
+          # webhook.deliveryURL for local GitHub webhook delivery. The
+          # dev-cluster/deploy-local Make targets create an empty stub if it is
+          # missing, so skaffold never fails on a fresh checkout.
+          - deployments/helm-charts/platform/values.local.dev.yaml
         setValueTemplates:
           aepApi.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_aep_api}}"
           aepApi.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_aep_api}}"
@@ -103,6 +114,7 @@ deploy:
           console.image.repository: "{{.IMAGE_REPO_ghcr_io_wso2_aep_console}}"
           console.image.tag: "{{.IMAGE_TAG_ghcr_io_wso2_aep_console}}"
           codingAgentDispatch.clusterGatewayProxy.image: "{{.IMAGE_REPO_ghcr_io_wso2_aep_cluster_gateway_proxy}}:{{.IMAGE_TAG_ghcr_io_wso2_aep_cluster_gateway_proxy}}"
+          codingAgentDispatch.secretManagerApi.image: "{{.IMAGE_REPO_ghcr_io_wso2_aep_secret_manager_api}}:{{.IMAGE_TAG_ghcr_io_wso2_aep_secret_manager_api}}"
 
 portForward:
   - resourceType: service

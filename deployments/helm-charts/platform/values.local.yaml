@@ -33,11 +33,17 @@ localOrgProvisioning:
   enabled: true
   orgNamespace: default
 
-# GitHub webhooks via smee.io relay. Set webhook.deliveryURL to your smee.io
-# channel URL and set webhook.localSmee.enabled: true to activate.
+# GitHub webhooks are OFF by default locally. To trigger component builds on PR
+# merge, enable delivery in the git-ignored values.local.dev.yaml (copy from
+# values.local.dev.yaml.example): set webhook.deliveryURL + localSmee.enabled.
 webhook:
   localSmee:
     enabled: false
+
+# OpenBao is pre-installed by setup-prerequisites.sh in its own namespace
+# (standalone, not bundled as a subchart like the aep-init/bootstrap path).
+openbao:
+  addr: "http://openbao.openbao.svc:8200"
 
 # k3d's local-path provisioner does not support ReadWriteMany.
 workspaces:
