@@ -108,12 +108,14 @@ type UpdateSkillInput struct {
 	References map[string]string `json:"references,omitempty"`
 }
 
-// SkillMutationService owns the org-editable write surface: create/update for
-// org skills, update/delete for imported skills, and the read-only guard for
-// platform skills (delete stays scoped to imported — a deletable org name is
-// indistinguishable at the kind level from a platform-seeded one; only the
-// reconcile-owned manifest tells them apart). Writes commit directly to the
-// org's skills repo on `main`. See docs/design/skills-repo-storage.md §9.
+// SkillMutationService owns the org-editable write surface: create/update/
+// delete for org and imported skills, and the read-only guard for platform
+// skills. Delete additionally consults the reconcile-owned manifest — a
+// deletable (user-authored) org name is indistinguishable at the kind level
+// from a platform-seeded one, so the manifest's origin entry is what tells
+// them apart; a platform-seeded org skill stays undeletable even though it is
+// editable. Writes commit directly to the org's skills repo on `main`. See
+// docs/design/skills-repo-storage.md §9.
 type SkillMutationService struct {
 	skills *SkillService
 }
@@ -219,11 +221,14 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 	return newSkillValue(orgID, existing.Kind, name, stamped, refs, fm), nil
 }
 
-// Delete removes a custom or imported skill (deletes the skill's directory and
-// commits). Builtins return ErrSkillNotEditable. The prior
-// IMPORTED_SKILL_IN_USE guard is dropped — with HEAD reads and no snapshots
-// there are no rows to protect (docs/design/skills-repo-storage.md §9); an
-// in-flight task simply reads HEAD without the deleted skill.
+// Delete removes an editable skill that is not platform-seeded (deletes the
+// skill's directory and commits). Platform-kind skills, and org-kind skills
+// the manifest tracks as platform-seeded (kind alone can't tell those apart
+// from a user-authored org skill — the manifest baseline can), return
+// ErrSkillNotEditable. The prior IMPORTED_SKILL_IN_USE guard is dropped —
+// with HEAD reads and no snapshots there are no rows to protect
+// (docs/design/skills-repo-storage.md §9); an in-flight task simply reads
+// HEAD without the deleted skill.
 func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name string) error {
 	if m == nil || m.skills == nil {
 		return fmt.Errorf("skill mutation service: not configured")
@@ -235,8 +240,15 @@ func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name st
 	if existing == nil {
 		return ErrSkillNotFound
 	}
-	if !isUserKind(existing.Kind) {
-		return ErrSkillNotEditable // org + platform are reconcile-managed
+	if !SkillEditable(existing.Kind) {
+		return ErrSkillNotEditable // platform is reconcile-managed
+	}
+	seeded, err := m.skills.isPlatformSeeded(ctx, orgID, name)
+	if err != nil {
+		return fmt.Errorf("platform-seeded check %q: %w", name, err)
+	}
+	if seeded {
+		return ErrSkillNotEditable // platform-seeded org skill is reconcile-managed
 	}
 
 	msg := fmt.Sprintf("chore(skills): delete %s skill %q\n\nby %s", existing.Kind, name, actor)

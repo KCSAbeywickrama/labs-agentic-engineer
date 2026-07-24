@@ -372,7 +372,7 @@ func TestReconcile_NoopWhenUpToDate(t *testing.T) {
 	}
 }
 
-func TestCreateOrgSkill_EditableNotDeletable(t *testing.T) {
+func TestCreateOrgSkill_EditableAndDeletable(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
@@ -416,12 +416,14 @@ func TestCreateOrgSkill_EditableNotDeletable(t *testing.T) {
 		t.Fatalf("duplicate create err = %v, want ErrSkillNameCollision", err)
 	}
 
-	// Delete is scoped to imported skills only (Delete's gate is isUserKind,
-	// unchanged by the fold) — an org skill, user-authored or platform-seeded,
-	// cannot be told apart from a same-kind mutation call, so it is not
-	// deletable through this path even though it is editable.
-	if err := mut.Delete(ctx, "org1", "tester", "payments-pci"); !errors.Is(err, ErrSkillNotEditable) {
-		t.Fatalf("delete org skill err = %v, want ErrSkillNotEditable", err)
+	// Delete is manifest-aware: a user-authored org skill (no platform
+	// manifest entry, unlike a platform-seeded one) is deletable through this
+	// path, editable AND owned by the org.
+	if err := mut.Delete(ctx, "org1", "tester", "payments-pci"); err != nil {
+		t.Fatalf("delete user-authored org skill err = %v, want success", err)
+	}
+	if resolved, _ := svc.Resolve(ctx, "org1", "payments-pci"); resolved != nil {
+		t.Fatalf("payments-pci should be gone after delete, got %+v", resolved)
 	}
 }
 

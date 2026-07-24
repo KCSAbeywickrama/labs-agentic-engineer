@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -146,6 +147,70 @@ func TestCatalog_DegradesOnReadError(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("outage degrade should serve empty, got %v", namesOf(got))
+	}
+}
+
+// Editing a platform-seeded org skill in-console makes it an override:
+// content changes, manifest baseline is preserved, reconcile won't revert it.
+func TestUpdate_SeededOrgSkillBecomesOverride(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, libWith("v1")) // "demo" is org-kind, seeded
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed + stamp baseline
+		t.Fatalf("seed: %v", err)
+	}
+	baseBefore := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].BaseHash
+
+	mut := NewSkillMutationService(svc)
+	if _, err := mut.Update(ctx, "org1", "tester", "demo", UpdateSkillInput{SkillMD: demoMD("org edit")}); err != nil {
+		t.Fatalf("update seeded org skill should be allowed: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); !strings.Contains(got, "org edit") {
+		t.Fatalf("edit did not land: %q", got)
+	}
+	baseAfter := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].BaseHash
+	if baseAfter != baseBefore {
+		t.Fatalf("edit must NOT move the manifest baseline (that is what makes it an override): %s -> %s", baseBefore, baseAfter)
+	}
+	// Reconcile now sees repo != baseHash, platform == baseHash → override, left alone.
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); !strings.Contains(got, "org edit") {
+		t.Fatalf("reconcile reverted an in-console edit: %q", got)
+	}
+}
+
+// A user-authored org skill round-trips: create -> delete succeeds (it has no
+// platform manifest entry).
+func TestDelete_UserAuthoredOrgSkill_RoundTrips(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestStore(t)
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // provision
+		t.Fatalf("provision: %v", err)
+	}
+	mut := NewSkillMutationService(svc)
+	create := "---\nname: acme-notes\ndescription: mine.\nmetadata:\n  aep.version: \"1\"\n---\n\nbody\n"
+	if _, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{Name: "acme-notes", SkillMD: create}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := mut.Delete(ctx, "org1", "tester", "acme-notes"); err != nil {
+		t.Fatalf("user-authored org skill must be deletable: %v", err)
+	}
+}
+
+// A platform-seeded org skill (go) is editable but NOT deletable.
+func TestDelete_SeededOrgSkill_Forbidden(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestStore(t)
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // seed + stamp baseline
+		t.Fatalf("seed: %v", err)
+	}
+	mut := NewSkillMutationService(svc)
+	if err := mut.Delete(ctx, "org1", "tester", "go"); err == nil {
+		t.Fatal("a platform-seeded org skill must not be deletable")
 	}
 }
 

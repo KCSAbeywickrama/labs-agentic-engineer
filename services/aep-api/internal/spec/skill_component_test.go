@@ -476,12 +476,11 @@ func TestSkillsComponent_Delete_Builtin_403(t *testing.T) {
 	}
 }
 
-// TestSkillsComponent_Delete_OrgSkillForbidden pins the flip side of "go"
-// becoming editable: a newly-authored org skill is NOT deletable through this
-// path — Delete stays scoped to imported (org and platform-seeded org are
-// indistinguishable at the kind level, so the mutation service never deletes
-// either through this call).
-func TestSkillsComponent_Delete_OrgSkillForbidden(t *testing.T) {
+// TestSkillsComponent_Delete_OrgSkillRoundTrips: a newly-authored org skill IS
+// deletable through this path — it carries no platform manifest entry, so the
+// manifest-aware Delete gate (editable AND not platform-seeded) lets the org
+// remove its own skill even though org and platform-seeded org share a kind.
+func TestSkillsComponent_Delete_OrgSkillRoundTrips(t *testing.T) {
 	t.Parallel()
 	h, _ := newHarness(t)
 
@@ -490,10 +489,30 @@ func TestSkillsComponent_Delete_OrgSkillForbidden(t *testing.T) {
 		t.Fatalf("seed create: %d %s", resp.Code, resp.Body.String())
 	}
 	resp := h.AsOrg("acme").Delete(base + "/delete-me")
-	if resp.Code != 403 {
-		t.Fatalf("delete org skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
+	if resp.Code != 200 {
+		t.Fatalf("delete org skill: want 200, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if resp := h.AsOrg("acme").Get(base + "/delete-me"); resp.Code != 200 {
+	if resp := h.AsOrg("acme").Get(base + "/delete-me"); resp.Code != 404 {
+		t.Fatalf("after delete: want 404 (gone), got %d", resp.Code)
+	}
+}
+
+// TestSkillsComponent_Delete_SeededOrgSkillForbidden pins the flip side: a
+// platform-seeded org skill ("go") stays undeletable even though it is
+// editable — the manifest's platform-origin entry is what tells it apart
+// from a user-authored org skill at the same kind.
+func TestSkillsComponent_Delete_SeededOrgSkillForbidden(t *testing.T) {
+	t.Parallel()
+	h, _ := newHarness(t)
+
+	if resp := h.AsOrg("acme").Get(base); resp.Code != 200 { // seed + stamp baseline
+		t.Fatalf("seed: %d %s", resp.Code, resp.Body.String())
+	}
+	resp := h.AsOrg("acme").Delete(base + "/go")
+	if resp.Code != 403 {
+		t.Fatalf("delete platform-seeded org skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := h.AsOrg("acme").Get(base + "/go"); resp.Code != 200 {
 		t.Fatalf("after forbidden delete: want 200 (still present), got %d", resp.Code)
 	}
 }

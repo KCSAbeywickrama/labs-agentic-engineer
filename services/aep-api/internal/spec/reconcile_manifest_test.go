@@ -184,6 +184,31 @@ func TestReconcile_PurgeOnlyCleanCopies(t *testing.T) {
 	}
 }
 
+// A user-authored org skill (no manifest entry, non-embedded name) is NEVER
+// touched by reconcile — the fold must not make reconcile clobber it.
+func TestReconcile_UserAuthoredOrgSkillUntouched(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, libWith("v1")) // library ships only "demo"
+	ctx := context.Background()
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Org authors "acme" (org kind, not in the library, no manifest entry).
+	host.writeAtHead("org1", skillRepoPath("acme"),
+		"---\nname: acme\ndescription: mine\nmetadata:\n  aep:\n    kind: org\n---\n\nmine\n")
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("acme")); !strings.Contains(got, "mine") {
+		t.Fatalf("user-authored org skill was clobbered/removed: %q", got)
+	}
+	// And it never gets a manifest entry.
+	m := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
+	if _, ok := m["acme"]; ok {
+		t.Fatal("user-authored org skill must have no manifest entry")
+	}
+}
+
 func TestUpdatesAvailable_ThreeWayStates(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStoreWithLibrary(t, libWith("v1"))
