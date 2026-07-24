@@ -48,7 +48,7 @@ export function paginateSkills<T extends SkillLike>(
 ): SkillsPage<T> {
   const q = query.trim().toLowerCase();
   // Match the displayed kind label as well as the raw value — the chip reads
-  // "Organization", so that is what people will type.
+  // "Built-in", so that is what people will type.
   const matches = (skill: T) =>
     !q ||
     [
