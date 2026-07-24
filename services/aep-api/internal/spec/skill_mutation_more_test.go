@@ -195,6 +195,9 @@ func TestDelete_UserAuthoredOrgSkill_RoundTrips(t *testing.T) {
 	if _, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{Name: "acme-notes", SkillMD: create}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	if deletable, err := svc.SkillDeletable(ctx, "org1", "acme-notes", SkillKindOrg); err != nil || !deletable {
+		t.Fatalf("SkillDeletable(acme-notes) = %v, %v — want true, nil", deletable, err)
+	}
 	if err := mut.Delete(ctx, "org1", "tester", "acme-notes"); err != nil {
 		t.Fatalf("user-authored org skill must be deletable: %v", err)
 	}
@@ -211,6 +214,30 @@ func TestDelete_SeededOrgSkill_Forbidden(t *testing.T) {
 	mut := NewSkillMutationService(svc)
 	if err := mut.Delete(ctx, "org1", "tester", "go"); err == nil {
 		t.Fatal("a platform-seeded org skill must not be deletable")
+	}
+
+	// The single-skill projection (SkillService.SkillDeletable, feeding the
+	// GetSkill/Update detail response) must agree with Delete's own guard —
+	// editable in place, never deletable.
+	deletable, err := svc.SkillDeletable(ctx, "org1", "go", SkillKindOrg)
+	if err != nil {
+		t.Fatalf("SkillDeletable: %v", err)
+	}
+	if deletable {
+		t.Fatal("SkillDeletable(go) = true, want false — platform-seeded org skill")
+	}
+	if !SkillEditable(SkillKindOrg) {
+		t.Fatal("org kind must remain editable even though this instance is platform-seeded")
+	}
+
+	// A platform kind (never editable) is never deletable either, regardless
+	// of seeded status.
+	platDeletable, err := svc.SkillDeletable(ctx, "org1", "task-planning", SkillKindPlatform)
+	if err != nil {
+		t.Fatalf("SkillDeletable(platform): %v", err)
+	}
+	if platDeletable {
+		t.Fatal("SkillDeletable(task-planning) = true, want false — platform kind is never editable/deletable")
 	}
 }
 

@@ -407,8 +407,20 @@ func TestCreateOrgSkill_EditableAndDeletable(t *testing.T) {
 			found = &summaries[i]
 		}
 	}
-	if found == nil || !found.Editable {
-		t.Fatalf("org skill should appear in summaries as editable; got %+v", found)
+	if found == nil || !found.Editable || !found.Deletable {
+		t.Fatalf("user-authored org skill should appear in summaries as editable AND deletable; got %+v", found)
+	}
+
+	// A platform-seeded org skill (go) is editable in place but must never be
+	// deletable — deletability is decoupled from editability (§ isPlatformSeeded).
+	var goSum *SkillSummary
+	for i := range summaries {
+		if summaries[i].Name == "go" {
+			goSum = &summaries[i]
+		}
+	}
+	if goSum == nil || !goSum.Editable || goSum.Deletable {
+		t.Fatalf("platform-seeded org skill %q should be editable but NOT deletable; got %+v", "go", goSum)
 	}
 
 	// Duplicate create → collision.

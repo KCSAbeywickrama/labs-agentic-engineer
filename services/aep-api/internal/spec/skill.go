@@ -69,6 +69,17 @@ const (
 // guidance) kind is read-only.
 func SkillEditable(kind string) bool { return kind != SkillKindPlatform }
 
+// SkillDeletable is the deletability rule, decoupled from editability: a
+// platform-seeded org skill (e.g. "go") is editable in place (an override)
+// but stays reconcile-managed and must never be deletable, while a
+// user-authored org skill (no manifest entry) and every imported skill are
+// both editable and deletable. seeded is the manifest-derived signal —
+// isPlatformSeeded / the per-name manifest lookup in ListSummaries — never
+// derivable from kind alone. Mirrors Delete's own guard
+// (skill_mutation_service.go) exactly, so a summary/detail response never
+// promises a delete the mutation service would then refuse.
+func SkillDeletable(kind string, seeded bool) bool { return SkillEditable(kind) && !seeded }
+
 // SkillsRepoSentinelProjectID and SkillsRepoDirName re-export the canonical
 // gitfs constants (§11.3 — the workspace-naming vocabulary lives in the package
 // that owns the workspace layout). Owned by the spec domain; consumers reference

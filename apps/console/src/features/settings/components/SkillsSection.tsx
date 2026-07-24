@@ -329,23 +329,27 @@ export function SkillsSection() {
                           View
                         </Button>
                         {skill.editable && (
-                          <>
-                            <Button
-                              size="small"
-                              startIcon={<Pencil size={16} />}
-                              onClick={() => setEditTarget(skill.name)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="small"
-                              color="error"
-                              startIcon={<Trash2 size={16} />}
-                              onClick={() => setDeleteTarget(skill.name)}
-                            >
-                              Delete
-                            </Button>
-                          </>
+                          <Button
+                            size="small"
+                            startIcon={<Pencil size={16} />}
+                            onClick={() => setEditTarget(skill.name)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        {/* Deletable is decoupled from editable: a platform-seeded
+                            org skill (e.g. "go") is editable in place but stays
+                            reconcile-managed and must never show a Delete button
+                            that would just 403. */}
+                        {skill.deletable && (
+                          <Button
+                            size="small"
+                            color="error"
+                            startIcon={<Trash2 size={16} />}
+                            onClick={() => setDeleteTarget(skill.name)}
+                          >
+                            Delete
+                          </Button>
                         )}
                       </Box>
                     </Box>

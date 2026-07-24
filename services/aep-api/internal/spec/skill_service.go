@@ -65,6 +65,7 @@ type SkillSummary struct {
 	Description string `json:"description"`
 	ContentSHA  string `json:"contentSha"`
 	Editable    bool   `json:"editable"`
+	Deletable   bool   `json:"deletable"`
 }
 
 // ---- frontmatter parsing ----------------------------------------------------

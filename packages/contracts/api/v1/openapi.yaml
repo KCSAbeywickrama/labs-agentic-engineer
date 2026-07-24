@@ -3782,6 +3782,8 @@ components:
           type: string
         contentSha:
           type: string
+        deletable:
+          type: boolean
         description:
           type: string
         editable:
@@ -3805,6 +3807,7 @@ components:
           type: string
       required:
       - editable
+      - deletable
       - orgId
       - name
       - kind
@@ -3819,6 +3822,8 @@ components:
       properties:
         contentSha:
           type: string
+        deletable:
+          type: boolean
         description:
           type: string
         editable:
@@ -3833,6 +3838,7 @@ components:
       - description
       - contentSha
       - editable
+      - deletable
       type: object
     SkillSummaryList:
       additionalProperties: false

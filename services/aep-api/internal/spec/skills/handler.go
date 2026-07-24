@@ -74,6 +74,7 @@ func (h *Handler) ListSkills(ctx context.Context, _ gen.ListSkillsRequestObject)
 			Description: sum.Description,
 			ContentSha:  sum.ContentSHA,
 			Editable:    sum.Editable,
+			Deletable:   sum.Deletable,
 		})
 	}
 	return gen.ListSkills200JSONResponse(out), nil
@@ -93,7 +94,10 @@ func (h *Handler) CreateSkill(ctx context.Context, request gen.CreateSkillReques
 	if err != nil {
 		return nil, mapSkillError(err)
 	}
-	return gen.CreateSkill201JSONResponse(skillDetailBody(sk, true)), nil
+	// A freshly created skill can never be platform-seeded — Create's own
+	// collision check already rejects any name a visible skill (including a
+	// platform-seeded one) already uses — so it is always deletable.
+	return gen.CreateSkill201JSONResponse(skillDetailBody(sk, true, true)), nil
 }
 
 func (h *Handler) ImportSkill(ctx context.Context, request gen.ImportSkillRequestObject) (gen.ImportSkillResponseObject, error) {
@@ -163,7 +167,11 @@ func (h *Handler) GetSkill(ctx context.Context, request gen.GetSkillRequestObjec
 	if sk == nil {
 		return nil, apierr.NotFound("skill not found")
 	}
-	return gen.GetSkill200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind))), nil
+	deletable, err := h.skills.SkillDeletable(ctx, org, sk.Name, sk.Kind)
+	if err != nil {
+		return nil, mapSkillError(err)
+	}
+	return gen.GetSkill200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind), deletable)), nil
 }
 
 func (h *Handler) UpdateSkill(ctx context.Context, request gen.UpdateSkillRequestObject) (gen.UpdateSkillResponseObject, error) {
@@ -182,7 +190,13 @@ func (h *Handler) UpdateSkill(ctx context.Context, request gen.UpdateSkillReques
 	if err != nil {
 		return nil, mapSkillError(err)
 	}
-	return gen.UpdateSkill200JSONResponse(skillDetailBody(sk, true)), nil
+	// Update preserves kind and the manifest baseline, so the pre-existing
+	// platform-seeded status still governs deletability post-write.
+	deletable, err := h.skills.SkillDeletable(ctx, org, sk.Name, sk.Kind)
+	if err != nil {
+		return nil, mapSkillError(err)
+	}
+	return gen.UpdateSkill200JSONResponse(skillDetailBody(sk, true, deletable)), nil
 }
 
 func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillRequestObject) (gen.DeleteSkillResponseObject, error) {
@@ -202,9 +216,9 @@ func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillReques
 	}), nil
 }
 
-// skillDetailBody projects a resolved Skill + the derived editable flag onto
-// the contract's SkillDetailBody (the full single-skill response).
-func skillDetailBody(sk *spec.Skill, editable bool) gen.SkillDetailBody {
+// skillDetailBody projects a resolved Skill + the derived editable/deletable
+// flags onto the contract's SkillDetailBody (the full single-skill response).
+func skillDetailBody(sk *spec.Skill, editable, deletable bool) gen.SkillDetailBody {
 	return gen.SkillDetailBody{
 		OrgID:         sk.OrgID,
 		Name:          sk.Name,
@@ -217,6 +231,7 @@ func skillDetailBody(sk *spec.Skill, editable bool) gen.SkillDetailBody {
 		Compatibility: sk.Compatibility,
 		UpdatedAt:     sk.UpdatedAt,
 		Editable:      editable,
+		Deletable:     deletable,
 	}
 }
 

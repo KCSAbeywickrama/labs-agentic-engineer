@@ -943,6 +943,7 @@ type SaveValuesBody struct {
 type SkillDetailBody struct {
 	Compatibility string            `json:"compatibility,omitempty"`
 	ContentSha    string            `json:"contentSha"`
+	Deletable     bool              `json:"deletable"`
 	Description   string            `json:"description"`
 	Editable      bool              `json:"editable"`
 	Kind          string            `json:"kind"`
@@ -957,6 +958,7 @@ type SkillDetailBody struct {
 // SkillSummary defines model for SkillSummary.
 type SkillSummary struct {
 	ContentSha  string `json:"contentSha"`
+	Deletable   bool   `json:"deletable"`
 	Description string `json:"description"`
 	Editable    bool   `json:"editable"`
 	Kind        string `json:"kind"`
