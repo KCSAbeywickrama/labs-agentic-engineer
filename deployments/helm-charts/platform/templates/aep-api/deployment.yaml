@@ -23,6 +23,10 @@ spec:
         # Shared workspaces PVC is handed to the pod's fsGroup so the
         # non-root runtime user (uid 1000) can write it.
         fsGroup: 1000
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres.{{ .Release.Namespace }}.svc.cluster.local 5432; do sleep 2; done']
       containers:
         - name: aep-api
           image: "{{ .Values.aepApi.image.repository }}:{{ .Values.aepApi.image.tag }}"
@@ -122,10 +126,12 @@ spec:
             - name: CLUSTER_GATEWAY_PROXY_URL
               value: {{ .Values.codingAgentDispatch.clusterGatewayProxy.url | quote }}
             {{- end }}
-            # secret-manager-api: when set, enables the full proxy DISPATCH path
-            # (per-run ExternalSecrets). Left empty locally so dispatch uses the
-            # direct K8s Job path. Set to the real sm-api endpoint in prod.
-            {{- if .Values.codingAgentDispatch.secretManagerApi.url }}
+            # secret-manager-api: enables external-resource secret staging (StageSecrets).
+            # Local → in-cluster stub Service; prod → the real managed sm-api URL.
+            {{- if .Values.codingAgentDispatch.localStubs.enabled }}
+            - name: SECRET_MANAGER_API_URL
+              value: "http://secret-manager-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.codingAgentDispatch.secretManagerApi.port }}"
+            {{- else if .Values.codingAgentDispatch.secretManagerApi.url }}
             - name: SECRET_MANAGER_API_URL
               value: {{ .Values.codingAgentDispatch.secretManagerApi.url | quote }}
             {{- end }}
@@ -165,7 +171,7 @@ spec:
                   name: postgres-secrets
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}"
+              value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}?sslmode=disable"
             {{- if .Values.temporal.enabled }}
             # Temporal (devflow workflows). Points the in-process worker at the
             # in-cluster temporal-frontend Service. Plain host:port — CoreDNS
