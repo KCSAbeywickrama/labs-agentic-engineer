@@ -1,18 +1,54 @@
-# AEP — v1 local setup (pure OpenChoreo + Docker Compose)
+# AEP — v1 local setup (pure OpenChoreo)
 
-A lighter alternative to `deployments-v2/` (which uses WSO2 Cloud's Flux/kustomize layered model). v1 runs the same code, but:
+A lighter alternative to `deployments-v2/` (which uses WSO2 Cloud's Flux/kustomize
+layered model). v1 runs the same code, with OpenChoreo + Thunder + OpenBao + ESO
++ kgateway installed via direct `helm install`s (no Flux).
 
-- **Long-lived services** (BFF, agents, console, postgres, smee-client) run in `docker compose`.
-- **Coding-agent** runs as one-shot pods via the same `aep-coding-agent` ClusterWorkflow as v2 (`manifests/aep-coding-agent.yaml`).
-- **Builds** use the `dockerfile-builder` ClusterWorkflow (`manifests/docker-build-workflow.yaml`); the build pod's `generate-workload-cr` step exchanges OAuth tokens at Thunder via the `openchoreo-workload-publisher-client` we bootstrap.
-- **OpenChoreo + Thunder + OpenBao + ESO + kgateway** are installed via direct `helm install`s — no Flux.
+## Two local-dev options (both supported)
 
-This setup mirrors `agent-manager`'s docker-compose pattern (`/Users/wso2/repos/agent-manager/deployments/docker-compose.yml`) where it can; departures are commented in the manifests.
+There are **two ways** to run the AEP services locally. Both share the same k3d
+cluster + OpenChoreo install (`scripts/setup.sh`); they differ only in how the
+long-lived AEP services (BFF, agents, console, collab, postgres, smee-client) run.
 
-## Quick start
+| | **Skaffold + k3d** (recommended) | **Docker Compose** (legacy) |
+|---|---|---|
+| Where services run | in-cluster (Helm + Skaffold) | host containers (`docker compose`) |
+| Entry point | `make setup-local` → `make dev-cluster` | `bash scripts/start.sh` |
+| Inner loop | Skaffold rebuilds + redeploys on file change | rebuild + `docker compose up` |
+| Status | actively developed | maintained until everyone migrates |
+
+> **Compose is being phased out** in favour of the in-cluster Skaffold flow. It
+> remains here so in-flight work keeps running; new work should prefer Skaffold.
+> Pick one — don't run both against the same cluster at once.
+
+Common to both: **coding-agent** runs as one-shot pods via the `aep-coding-agent`
+ClusterWorkflow (`manifests/aep-coding-agent.yaml`); **builds** use the
+`dockerfile-builder` ClusterWorkflow (`manifests/docker-build-workflow.yaml`),
+whose `generate-workload-cr` step exchanges OAuth tokens at Thunder via the
+`openchoreo-workload-publisher-client` bootstrapped during setup.
+
+### Option A — Skaffold + k3d (recommended)
 
 ```bash
 # 1. One-shot bring-up — k3d cluster + prereqs + OpenChoreo + Thunder + AEP infra
+bash scripts/setup.sh
+
+# 2. Register secrets + Thunder clients + resource-type catalog (idempotent)
+ANTHROPIC_API_KEY=sk-... make setup-local
+
+# 3. Inner dev loop — build images, load into k3d, deploy via Helm, watch
+make dev-cluster
+# Console: http://console.openchoreo.localhost:8080 · aep-api: http://localhost:9090
+```
+
+To trigger component builds on PR merge, copy
+`helm-charts/platform/values.local.dev.yaml.example` to `values.local.dev.yaml`
+(git-ignored) and set a smee.io `webhook.deliveryURL` — see that file's comments.
+
+### Option B — Docker Compose (legacy)
+
+```bash
+# 1. One-shot bring-up (same as above)
 bash scripts/setup.sh
 
 # 2. Edit .env to set ANTHROPIC_API_KEY (and optional GITHUB_APP_* values)
@@ -23,7 +59,7 @@ bash scripts/start.sh
 # → http://localhost:8090 (admin / admin)
 ```
 
-## Architecture (host-side compose ↔ in-cluster OC)
+## Compose architecture (host-side compose ↔ in-cluster OC)
 
 ```
 ┌─────────────────────── docker compose ───────────────────────┐
@@ -64,8 +100,12 @@ Key wiring:
 | `scripts/setup-prerequisites.sh` | cert-manager + ESO + kgateway + OpenBao |
 | `scripts/setup-openchoreo.sh` | Control Plane + Data Plane + Workflow Plane + Thunder |
 | `scripts/setup-aep.sh` | ClusterWorkflows + ClusterComponentTypes + Environment + AuthzRoleBindings + `.env` |
-| `scripts/start.sh` | Refresh DNS, seed kubeconfig, `docker compose up` |
-| `scripts/stop.sh` | `docker compose down` (cluster stays) |
+| `scripts/setup-local.sh` | **(Skaffold)** K8s Secrets + Thunder clients + resource-type catalog + thunder-app operator (`make setup-local`) |
+| `../skaffold.yaml` | **(Skaffold)** in-cluster build/deploy for `make dev-cluster` |
+| `helm-charts/platform/values.local.dev.yaml.example` | **(Skaffold)** per-developer override template (webhook/smee, etc.) |
+| `scripts/start.sh` | **(Compose, legacy)** Refresh DNS, seed kubeconfig, `docker compose up` |
+| `scripts/stop.sh` | **(Compose, legacy)** `docker compose down` (cluster stays) |
+| `docker-compose.yml` | **(Compose, legacy)** long-lived host services |
 | `manifests/docker-build-workflow.yaml` | `dockerfile-builder` ClusterWorkflow (Argo CWTs) |
 | `manifests/aep-coding-agent.yaml` | Coding-agent one-shot pod template (mirrors v2 exactly) |
 | `single-cluster/values-thunder.yaml` | Thunder helm values + bootstrap scripts (users, OAuth apps) |
@@ -115,6 +155,7 @@ gotcha — that document is the actual deliverable of this branch.
 ## Tear down
 
 ```bash
-bash scripts/stop.sh                # stops compose; cluster stays
+# Skaffold: Ctrl-C the `make dev-cluster` watch (it cleans up its deploys)
+bash scripts/stop.sh                # Compose: stops compose; cluster stays
 k3d cluster delete openchoreo       # destroy cluster (loses all OC state)
 ```
