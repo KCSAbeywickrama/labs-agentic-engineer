@@ -16,21 +16,12 @@
  * under the License.
  */
 
-export { ValidationView } from "./ValidationView.js";
-export type { ValidationViewProps } from "./ValidationView.js";
-export { parseValidationCriteria } from "./parse.js";
-export type {
-  Criterion,
-  CriterionMethod,
-  Requirement,
-  ValidationCriteria,
-  ParseError,
-  ParseResult,
-} from "./parse.js";
-export { parseValidationReport } from "./report.js";
-export type {
-  CriterionReport,
-  CriterionRunState,
-  ValidationReport,
-  ReportParseResult,
-} from "./report.js";
+import { projectKeys } from "../../projects/api/keys";
+
+export const validationKeys = {
+  // A validation artifact's content, keyed by (path, version): the dev spec
+  // version advances on each merged validation run, so it doubles as the
+  // cache-buster that invalidates a stale criteria/report read.
+  file: (name: string, path: string, version: string) =>
+    [...projectKeys.detail(name), "validation", "file", path, version] as const,
+};

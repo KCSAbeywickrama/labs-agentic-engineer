@@ -71,3 +71,21 @@ func validatePath(p string) error {
 	}
 	return nil
 }
+
+// readAllowList holds explicit non-specs/ paths the Files API may READ at HEAD.
+// It is a read-only escape hatch: the validation report is a runner-authored
+// artifact outside specs/, surfaced by the console's Validation page. The write
+// path (Apply) is never widened — validatePath stays specs/-only.
+var readAllowList = map[string]bool{
+	"tests/validation/report.json": true,
+}
+
+// validateReadPath gates the read side: an exact readAllowList entry passes,
+// otherwise it defers to the specs/-only validatePath. Exact-match is
+// traversal-safe — a path bearing ".." can never equal a literal allow-list key.
+func validateReadPath(p string) error {
+	if readAllowList[p] {
+		return nil
+	}
+	return validatePath(p)
+}

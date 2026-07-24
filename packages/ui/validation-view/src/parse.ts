@@ -25,10 +25,11 @@
  * `statement`/`must`) are skipped, and a malformed file degrades to a
  * ParseError the view shows as an alert instead of throwing.
  *
- * `covered` is written back by the e2e validation runner AFTER a run and is
- * only ever present on `e2e` criteria — it is modelled as optional and never
- * assumed present. The authored shape is defined server-side by `criteriaDoc`
- * in services/aep-api/internal/feature/validation/criteria.go.
+ * The oracle is READ-ONLY: per-criterion run outcomes are NOT written back into
+ * it. Coverage/pass/fail lives in the runner's separate report
+ * (tests/validation/report.json — see report.ts), which the view joins onto
+ * this structure by criterion id. The authored shape is defined server-side by
+ * `criteriaDoc` in services/aep-api/internal/delivery/validation/criteria.go.
  */
 
 /** One of e2e | scenario | manual; kept as a raw string so an unknown method
@@ -40,8 +41,6 @@ export interface Criterion {
   must: string;
   /** Kept as a raw string so an unknown method still renders. */
   method: CriterionMethod | string;
-  /** Runner-written, e2e-only — present only after a validation run. */
-  covered?: boolean;
 }
 
 export interface Requirement {
@@ -64,9 +63,6 @@ export type ParseResult = ValidationCriteria | ParseError;
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
-function optBool(v: unknown): boolean | undefined {
-  return typeof v === "boolean" ? v : undefined;
-}
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -80,14 +76,11 @@ function parseCriteria(v: unknown): Criterion[] {
     const must = str(item.must);
     // A criterion is only meaningful with an id and its assertion.
     if (!id || !must) continue;
-    const criterion: Criterion = {
+    out.push({
       id,
       must,
       method: str(item.method) || "unknown",
-    };
-    const covered = optBool(item.covered);
-    if (covered !== undefined) criterion.covered = covered;
-    out.push(criterion);
+    });
   }
   return out;
 }
