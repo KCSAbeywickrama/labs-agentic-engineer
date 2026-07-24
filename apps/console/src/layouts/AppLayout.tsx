@@ -33,6 +33,7 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   CircleAlert,
+  CircleCheck,
   FileText,
   FolderOpen,
   LayoutDashboard,
@@ -57,6 +58,7 @@ import { useSession } from "../auth/SessionContext";
 import { OrgSwitcher, ProjectSwitcher } from "./HeaderSwitchers";
 import { AlertsNotificationPanel, NotificationButton } from "./NotificationBell";
 import { AgentChatPanel } from "../features/agent-chat/components/AgentChatPanel";
+import { useHasPendingSeed } from "../features/agent-chat/useHasPendingSeed";
 
 // Footer links (grilled 2026-07-12): the repo is the only real destination
 // today — /tree/HEAD/docs follows the default branch.
@@ -73,6 +75,7 @@ function activeItemFor(pathname: string, inProject: boolean): string {
     case "spec":
     case "builds":
     case "deployments":
+    case "validation":
     case "issues":
       return section;
     default:
@@ -130,6 +133,17 @@ export function AppLayout() {
       replace: true,
     });
   }, [navigate, projectName]);
+
+  // "Resolve via chat" (#252 Task 5): the dep card / drawer / build drawer
+  // (Task 9) seeds a message into chatStore's pendingSeed slot from a
+  // subtree that doesn't share this component's chatOpen state — open the
+  // panel reactively the moment a seed appears, same shape as the ?generate=
+  // effect above. AgentChatPanel (once mounted) consumes the seed exactly
+  // once and auto-sends it.
+  const hasPendingSeed = useHasPendingSeed(orgHandle ?? "default", projectName);
+  useEffect(() => {
+    if (hasPendingSeed && projectName) setChatOpen(true);
+  }, [hasPendingSeed, projectName]);
 
   return (
     <AppShell initialCollapsed={false} collapseOnSelectOnMobile>
@@ -252,6 +266,20 @@ export function AppLayout() {
                     <Rocket />
                   </Sidebar.ItemIcon>
                   <Sidebar.ItemLabel>Deployments</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="validation"
+                  link={
+                    <Link
+                      to="/projects/$projectName/validation"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <CircleCheck />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Validation</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 <Sidebar.Item
                   id="issues"

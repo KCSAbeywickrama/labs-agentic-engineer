@@ -14,27 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package cmd
+package dependencies
 
-import (
-	"fmt"
-
-	"github.com/spf13/cobra"
-)
-
-var updateServiceCmd = &cobra.Command{
-	Use:   "service [name]",
-	Short: "Update one or all services",
-	Args:  cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			fmt.Println("all services updated")
-			return
-		}
-		fmt.Printf("service %s updated\n", args[0])
-	},
-}
-
-func init() {
-	updateCmd.AddCommand(updateServiceCmd)
+// ExternalResourceConsumer is one component that depends on a resource,
+// identified by the project and component that declares it. It is the value
+// type the cross-project committed-design consumer scans return (both the
+// external-resource and platform-resource "used by" sweeps) — AEP keeps no
+// consumer table; consumers are derived by scanning design.json.
+type ExternalResourceConsumer struct {
+	ProjectID     string `json:"projectId"`
+	ComponentName string `json:"componentName"`
 }

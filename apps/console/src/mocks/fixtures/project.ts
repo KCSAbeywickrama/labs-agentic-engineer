@@ -674,9 +674,9 @@ const validationPlan = `# Demo Shop — Validation plan
 - Each service exposes /healthz returning 200.
 `;
 
-// The acceptance oracle authored by the validation-criteria skill — rendered
-// by the read-only "Validation Criteria" view. Mixes the three methods and a
-// runner-written `covered` flag (e2e only) so the view exercises every arm.
+// The acceptance oracle authored by the validation-criteria skill — the
+// read-only structure the "Validation Criteria" view renders. Mixes the three
+// methods; per-criterion outcomes live in the run report below, not here.
 const validationCriteriaJson = JSON.stringify(
   {
     requirements: [
@@ -689,13 +689,11 @@ const validationCriteriaJson = JSON.stringify(
             id: "AC-001-a",
             must: "A shopper can search products by name and see matching results",
             method: "e2e",
-            covered: true,
           },
           {
             id: "AC-001-b",
             must: "A shopper can filter the catalog by category",
             method: "e2e",
-            covered: false,
           },
         ],
       },
@@ -707,7 +705,6 @@ const validationCriteriaJson = JSON.stringify(
             id: "AC-002-a",
             must: "A cart's contents survive a browser restart for the same shopper",
             method: "e2e",
-            covered: false,
           },
           {
             id: "AC-002-b",
@@ -725,7 +722,6 @@ const validationCriteriaJson = JSON.stringify(
             id: "AC-003-a",
             must: "Completing checkout creates an order visible in order history",
             method: "e2e",
-            covered: false,
           },
           {
             id: "AC-003-b",
@@ -733,6 +729,93 @@ const validationCriteriaJson = JSON.stringify(
             method: "manual",
           },
         ],
+      },
+    ],
+  },
+  null,
+  2,
+);
+
+// The runner's committed run report (tests/validation/report.json, schemaVersion
+// 1) joined onto the oracle by criterion id — exercises every state chip
+// (pass / fail / not_run / not_validated / manual) plus the flaky, healed, and
+// failure-detail arms of the view.
+const validationReportJson = JSON.stringify(
+  {
+    schemaVersion: 1,
+    issue: 30,
+    commit: "a1b2c3d",
+    generatedAt: "2026-07-20T10:00:00.000Z",
+    playwrightVersion: "1.55.0",
+    totals: {
+      e2e: { total: 4, pass: 2, fail: 1, notRun: 1 },
+      manual: 1,
+      scenario: 1,
+    },
+    criteria: [
+      {
+        id: "AC-001-a",
+        requirementId: "REQ-001",
+        must: "A shopper can search products by name and see matching results",
+        method: "e2e",
+        status: "pass",
+        spec: "tests/e2e/specs/AC-001-a.spec.ts",
+        healed: false,
+        flaky: false,
+        durationMs: 1840,
+        failure: null,
+      },
+      {
+        id: "AC-001-b",
+        requirementId: "REQ-001",
+        must: "A shopper can filter the catalog by category",
+        method: "e2e",
+        status: "fail",
+        spec: "tests/e2e/specs/AC-001-b.spec.ts",
+        healed: false,
+        flaky: true,
+        durationMs: 2600,
+        failure:
+          "TimeoutError: locator.click: Timeout 5000ms exceeded.\n  waiting for getByRole('option', { name: 'Accessories' })",
+      },
+      {
+        id: "AC-002-a",
+        requirementId: "REQ-002",
+        must: "A cart's contents survive a browser restart for the same shopper",
+        method: "e2e",
+        status: "not_run",
+        spec: null,
+        healed: false,
+        flaky: false,
+        durationMs: 0,
+        failure: null,
+      },
+      {
+        id: "AC-002-b",
+        requirementId: "REQ-002",
+        must: "The cart total updates promptly as items are added or removed",
+        method: "scenario",
+        status: "not_validated",
+      },
+      {
+        id: "AC-003-a",
+        requirementId: "REQ-003",
+        must: "Completing checkout creates an order visible in order history",
+        method: "e2e",
+        status: "pass",
+        spec: "tests/e2e/specs/AC-003-a.spec.ts",
+        healed: true,
+        healAttempts: 1,
+        flaky: false,
+        durationMs: 3120,
+        failure: null,
+      },
+      {
+        id: "AC-003-b",
+        requirementId: "REQ-003",
+        must: "Payment details are transmitted over an encrypted connection",
+        method: "manual",
+        status: "manual",
       },
     ],
   },
@@ -780,6 +863,8 @@ const fullFiles: MockSpecFile[] = [
     path: "specs/validation/validation-criteria.json",
     content: validationCriteriaJson,
   },
+  // Runner artifact outside specs/ — reachable via the read-file allow-list.
+  { path: "tests/validation/report.json", content: validationReportJson },
 ];
 
 export const projectSpecFiles: Record<

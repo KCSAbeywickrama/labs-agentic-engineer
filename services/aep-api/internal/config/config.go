@@ -58,6 +58,15 @@ type Config struct {
 	// local dev. Read from PLAYGROUND_TOKEN_ENABLED.
 	PlaygroundTokenEnabled bool
 
+	// AutoMergeCodingPRs gates auto-merge of coding-agent pull requests: when
+	// true, a coding-agent PR is squash-merged the moment it opens, removing the
+	// human review gate and letting the path-based build fan-out deploy the fix
+	// end-to-end without a human. Defaults FALSE (secure default): auto-merge
+	// deploys UNREVIEWED agent-authored code, which is not guaranteed correct, so
+	// a deployment must opt in explicitly (set it in that deployment's config,
+	// e.g. docker-compose). Read from AUTO_MERGE_CODING_PRS.
+	AutoMergeCodingPRs bool
+
 	// TenantGateMode controls the central per-route tenant gate (§6.1b).
 	// ENFORCE BY DEFAULT (zero-config): "enforce" 404s a path-vs-JWT org
 	// mismatch (closes IDOR-1..5). Set TENANT_GATE_MODE=log to downgrade to
