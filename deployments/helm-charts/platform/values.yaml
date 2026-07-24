@@ -141,13 +141,13 @@ codingAgentDispatch:
     image: "ghcr.io/wso2/aep/cluster-gateway-proxy:latest"
     port: 8085
   secretManagerApi:
-    # Base URL of the secret-manager-api. Empty (local) → coding dispatch uses
-    # the direct K8s Job path, which writes the Anthropic Secret straight into
-    # the runner namespace (no OpenBao/ESO/sm-api). In prod, set this to the
-    # real sm-api endpoint to enable the full proxy dispatch path. No local stub
-    # is shipped for sm-api (the hardened install revokes the OpenBao root token
-    # the stub would need).
+    # Base URL aep-api uses to reach the secret-manager-api. When
+    # localStubs.enabled and this is empty, the chart wires the in-cluster stub
+    # Service DNS automatically. In prod, set this to the real sm-api endpoint.
     url: ""
+    # Stub image + port — only used when localStubs.enabled.
+    image: "ghcr.io/wso2/aep/secret-manager-api:latest"
+    port: 8082
 
 # GitHub webhook delivery. GitHub delivers pull_request/push/issues events to
 # deliveryURL, which aep-api registers on each repo; the events drive task state

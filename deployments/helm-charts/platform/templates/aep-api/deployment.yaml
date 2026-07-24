@@ -126,10 +126,12 @@ spec:
             - name: CLUSTER_GATEWAY_PROXY_URL
               value: {{ .Values.codingAgentDispatch.clusterGatewayProxy.url | quote }}
             {{- end }}
-            # secret-manager-api: when set, enables the full proxy DISPATCH path
-            # (per-run ExternalSecrets). Left empty locally so dispatch uses the
-            # direct K8s Job path. Set to the real sm-api endpoint in prod.
-            {{- if .Values.codingAgentDispatch.secretManagerApi.url }}
+            # secret-manager-api: enables external-resource secret staging (StageSecrets).
+            # Local → in-cluster stub Service; prod → the real managed sm-api URL.
+            {{- if .Values.codingAgentDispatch.localStubs.enabled }}
+            - name: SECRET_MANAGER_API_URL
+              value: "http://secret-manager-api.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.codingAgentDispatch.secretManagerApi.port }}"
+            {{- else if .Values.codingAgentDispatch.secretManagerApi.url }}
             - name: SECRET_MANAGER_API_URL
               value: {{ .Values.codingAgentDispatch.secretManagerApi.url | quote }}
             {{- end }}
