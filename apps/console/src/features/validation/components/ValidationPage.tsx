@@ -37,7 +37,8 @@ import { PageHeader, type PageHeaderStatus } from "../../../components/PageHeade
 import { EmptyState } from "../../../components/EmptyState";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useTask } from "../../tasks/api/queries";
-import { TaskLogStream } from "../../tasks/components/TaskLogStream";
+import { useTaskLog } from "../../tasks/hooks/useTaskLog";
+import { TaskLogView } from "../../tasks/components/TaskLogView";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
 
 // Header status chip for the coarse validation state. Mirrors the labels the
@@ -98,6 +99,41 @@ function ValidationLinks({
         </Tooltip>
       )}
     </>
+  );
+}
+
+// The validation run's live log. Mounted only in the logs branch so the SSE
+// stream (useTaskLog) opens only when logs are shown — hence a component rather
+// than a top-level hook call. Feeds the shared, pure TaskLogView directly; the
+// tail is a minimal phase hint (no idle-timer reassurance).
+function ValidationLog({
+  projectName,
+  issueNumber,
+}: {
+  projectName: string;
+  issueNumber: number;
+}) {
+  const log = useTaskLog(projectName, issueNumber);
+  let tail: string | undefined;
+  if (log.phase === "connecting") {
+    tail = "· attaching to the validation log…";
+  } else if (log.phase === "reconnecting") {
+    tail = "· connection lost — reconnecting…";
+  } else if (log.phase === "ended") {
+    tail = `· validation settled${log.settledStatus ? ` — ${log.settledStatus}` : ""}`;
+  }
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        // Fill the remaining page height so the log gets a real scroll area.
+        minHeight: 480,
+        height: "calc(100vh - 320px)",
+      }}
+    >
+      <TaskLogView lines={log.lines} {...(tail ? { tail } : {})} />
+    </Box>
   );
 }
 
@@ -217,7 +253,7 @@ export function ValidationPage({
     return (
       <>
         {header}
-        <TaskLogStream projectName={projectName} issueNumber={issue} />
+        <ValidationLog projectName={projectName} issueNumber={issue} />
       </>
     );
   }

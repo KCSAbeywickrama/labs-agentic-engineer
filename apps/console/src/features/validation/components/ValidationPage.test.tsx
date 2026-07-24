@@ -27,12 +27,21 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
 }));
 
-// The live log box is out of scope here — stub it to a marker so we can assert
-// which lifecycle states show the log vs. the report.
-vi.mock("../../tasks/components/TaskLogStream", () => ({
-  TaskLogStream: ({ issueNumber }: { issueNumber: number }) => (
-    <div data-testid="log-stream">log stream #{issueNumber}</div>
-  ),
+// The live log is rendered by the pure TaskLogView fed from the useTaskLog SSE
+// hook. Both are out of scope here: stub TaskLogView to a marker so we can
+// assert which lifecycle states show the log vs. the report, and make
+// useTaskLog inert so no stream opens.
+vi.mock("../../tasks/components/TaskLogView", () => ({
+  TaskLogView: () => <div data-testid="log-view">log view</div>,
+}));
+vi.mock("../../tasks/hooks/useTaskLog", () => ({
+  useTaskLog: () => ({
+    lines: [],
+    phase: "live",
+    executions: [],
+    settledStatus: undefined,
+    task: undefined,
+  }),
 }));
 
 // get-task feeds only the header issue/PR links here.
@@ -139,21 +148,21 @@ describe("ValidationPage lifecycle", () => {
     mockValidation = "none";
     renderPage(undefined);
     expect(screen.getByText(/No validation has run yet/)).toBeInTheDocument();
-    expect(screen.queryByTestId("log-stream")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("log-view")).not.toBeInTheDocument();
   });
 
   it("shows the inline log box while a run is in progress", () => {
     mockValidation = "running";
     mockIssue = 30;
     renderPage(undefined);
-    expect(screen.getByTestId("log-stream")).toHaveTextContent("log stream #30");
+    expect(screen.getByTestId("log-view")).toBeInTheDocument();
   });
 
   it("shows the inline log box for a mechanically failed run", () => {
     mockValidation = "failed";
     mockIssue = 30;
     renderPage(undefined);
-    expect(screen.getByTestId("log-stream")).toBeInTheDocument();
+    expect(screen.getByTestId("log-view")).toBeInTheDocument();
   });
 
   it("renders the joined report when a run completed", () => {
@@ -164,7 +173,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     // The report, not the log.
-    expect(screen.queryByTestId("log-stream")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("log-view")).not.toBeInTheDocument();
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
     // Per-criterion state chips from the join.
     expect(screen.getByText("Passed")).toBeInTheDocument();
@@ -194,7 +203,7 @@ describe("ValidationPage lifecycle", () => {
     mockReport.data = { content: REPORT };
     const onViewChange = renderPage("logs");
 
-    expect(screen.getByTestId("log-stream")).toBeInTheDocument();
+    expect(screen.getByTestId("log-view")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /View report/ }));
     expect(onViewChange).toHaveBeenCalledWith(undefined);
   });
