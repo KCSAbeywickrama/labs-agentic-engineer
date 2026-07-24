@@ -64,12 +64,12 @@ func runSreStatus(cmd *cobra.Command, args []string) error {
 		for _, r := range allReleases {
 			byName[r.Name] = r
 		}
-		fmt.Fprintf(w, "  NAME\tSTATUS\tCHART\n")
+		_, _ = fmt.Fprintf(w, "  NAME\tSTATUS\tCHART\n")
 		for _, name := range knownReleases {
 			if r, ok := byName[name]; ok {
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, r.Status, r.Chart)
+				_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\n", r.Name, r.Status, r.Chart)
 			} else {
-				fmt.Fprintf(w, "  %s\tnot installed\t\n", name)
+				_, _ = fmt.Fprintf(w, "  %s\tnot installed\t\n", name)
 			}
 		}
 		_ = w.Flush()
@@ -84,10 +84,10 @@ func runSreStatus(cmd *cobra.Command, args []string) error {
 	} else if len(deps.Items) == 0 {
 		fmt.Println("  (none found)")
 	} else {
-		fmt.Fprintf(w, "  NAME\tAVAILABLE\tAGE\n")
+		_, _ = fmt.Fprintf(w, "  NAME\tAVAILABLE\tAGE\n")
 		for _, d := range deps.Items {
 			avail := fmt.Sprintf("%d/%d", d.Status.AvailableReplicas, *d.Spec.Replicas)
-			fmt.Fprintf(w, "  %s\t%s\t%s\n", d.Name, avail, statusFmtAge(d.CreationTimestamp.Time))
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\n", d.Name, avail, statusFmtAge(d.CreationTimestamp.Time))
 		}
 		_ = w.Flush()
 	}
@@ -122,10 +122,10 @@ func runSreStatus(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Pods (%s)   %d/%d ready\n", sreStatusObsNamespace, readyPods, total)
 		if total > 0 {
-			fmt.Fprintf(w, "  NAME\tREADY\tSTATUS\tRESTARTS\tAGE\n")
+			_, _ = fmt.Fprintf(w, "  NAME\tREADY\tSTATUS\tRESTARTS\tAGE\n")
 			for _, p := range pods.Items {
 				rc, tc := statusReadyContainers(p.Status.ContainerStatuses)
-				fmt.Fprintf(w, "  %s\t%d/%d\t%s\t%d\t%s\n",
+				_, _ = fmt.Fprintf(w, "  %s\t%d/%d\t%s\t%d\t%s\n",
 					p.Name, rc, tc, string(p.Status.Phase),
 					statusSumRestarts(p.Status.ContainerStatuses),
 					statusFmtAge(p.CreationTimestamp.Time))

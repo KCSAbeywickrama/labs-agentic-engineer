@@ -78,9 +78,9 @@ func runPlatformStatus(cmd *cobra.Command, args []string) error {
 	} else if len(releases) == 0 {
 		fmt.Printf("  %s: not installed\n", platformStatusRelease)
 	} else {
-		fmt.Fprintf(w, "  NAME\tSTATUS\tCHART\tUPDATED\n")
+		_, _ = fmt.Fprintf(w, "  NAME\tSTATUS\tCHART\tUPDATED\n")
 		for _, r := range releases {
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, r.Status, r.Chart, r.Updated)
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n", r.Name, r.Status, r.Chart, r.Updated)
 		}
 		_ = w.Flush()
 	}
@@ -99,10 +99,10 @@ func runPlatformStatus(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Pods (%s)   %d/%d ready\n", platformStatusNamespace, readyPods, total)
 		if total > 0 {
-			fmt.Fprintf(w, "  NAME\tREADY\tSTATUS\tRESTARTS\tAGE\n")
+			_, _ = fmt.Fprintf(w, "  NAME\tREADY\tSTATUS\tRESTARTS\tAGE\n")
 			for _, p := range pods.Items {
 				rc, tc := statusReadyContainers(p.Status.ContainerStatuses)
-				fmt.Fprintf(w, "  %s\t%d/%d\t%s\t%d\t%s\n",
+				_, _ = fmt.Fprintf(w, "  %s\t%d/%d\t%s\t%d\t%s\n",
 					p.Name, rc, tc, string(p.Status.Phase),
 					statusSumRestarts(p.Status.ContainerStatuses),
 					statusFmtAge(p.CreationTimestamp.Time))
