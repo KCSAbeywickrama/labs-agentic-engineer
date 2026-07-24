@@ -18,11 +18,13 @@ package cmd
 
 import "github.com/spf13/cobra"
 
-var thunderCmd = &cobra.Command{
-	Use:   "thunder",
-	Short: "Manage Thunder IDP configuration for AEP",
+var platformCmd = &cobra.Command{
+	Use:   "platform",
+	Short: "Manage the AEP platform installation",
+	Long: `Commands for installing, configuring, updating, and removing the AEP
+platform on a Kubernetes cluster.`,
 }
 
 func init() {
-	rootCmd.AddCommand(thunderCmd)
+	rootCmd.AddCommand(platformCmd)
 }

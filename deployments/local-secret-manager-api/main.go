@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// local-secret-manager-api is a docker-compose-only stand-in for the
+// local-secret-manager-api is a local dev stand-in for the
 // wso2cloud secret-manager-api (sm-api). It exists so the public
 // aep repo can run the full local setup WITHOUT a private
 // `wso2cloud` checkout — the real sm-api builds from
@@ -112,7 +112,7 @@ type config struct {
 func loadConfig() config {
 	return config{
 		listenAddr:      envOr("LISTEN_ADDR", ":8082"),
-		openbaoAddr:     strings.TrimRight(envOr("OPENBAO_ADDR", "http://host.docker.internal:8200"), "/"),
+		openbaoAddr:     strings.TrimRight(envOr("OPENBAO_ADDR", "http://openbao.openbao.svc:8200"), "/"),
 		openbaoToken:    envOr("OPENBAO_TOKEN", "root"),
 		vaultPathPrefix: envOr("VAULT_PATH_PREFIX", "user-app-secrets"),
 		secretRefPrefix: envOr("SECRET_REF_PREFIX", "cred-"),
@@ -627,7 +627,6 @@ func sortedKeys(m map[string]string) []string {
 func randomHex12() string {
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
-		// rand.Read never fails on supported platforms; fall back to time.
 		return hex.EncodeToString([]byte(fmt.Sprintf("%012d", time.Now().UnixNano()))[:6])
 	}
 	return hex.EncodeToString(b)

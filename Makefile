@@ -46,7 +46,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint typecheck license license-check tools clean cover build-validation-runner deadcode-ts deadcode-ts-check
+.PHONY: install gen build dev test lint typecheck license license-check tools clean eval cover build-validation-runner deadcode-ts deadcode-ts-check setup-local dev-cluster deploy-local
 
 install:
 	$(PNPM) install
@@ -113,6 +113,33 @@ deadcode-ts-check:
 # rebuild after changing Dockerfile.validation — `make build-validation-runner FORCE=1`.
 build-validation-runner:
 	FORCE=$(FORCE) bash deployments/scripts/build-validation-runner.sh
+
+# ── Local in-cluster dev (Skaffold + k3d) ────────────────────────────────────
+# Run once per cluster after setup-k3d.sh. Creates K8s Secrets and registers
+# AEP OAuth clients in Thunder. Idempotent.
+#   Requires: ANTHROPIC_API_KEY env var
+setup-local:
+	bash deployments/scripts/setup-local.sh
+
+# values.local.dev.yaml holds per-developer chart overrides (git-ignored; copy
+# from values.local.dev.yaml.example). Ensure an empty stub exists so skaffold
+# never fails when a developer hasn't created one or on a fresh checkout.
+LOCAL_DEV_VALUES := deployments/helm-charts/platform/values.local.dev.yaml
+define ensure_local_dev_values
+	@test -f $(LOCAL_DEV_VALUES) || printf '# Per-developer overrides (git-ignored). See values.local.dev.yaml.example.\n{}\n' > $(LOCAL_DEV_VALUES)
+endef
+
+# Inner dev loop: build images, load into k3d, deploy via Helm, watch for changes.
+# Console: http://console.openchoreo.localhost:8080
+# aep-api: http://localhost:9090 (port-forwarded by Skaffold)
+dev-cluster:
+	$(ensure_local_dev_values)
+	skaffold dev --kube-context k3d-openchoreo -f skaffold.yaml
+
+# One-shot build + deploy (no watch). Useful for CI smoke tests or resetting state.
+deploy-local:
+	$(ensure_local_dev_values)
+	skaffold run --kube-context k3d-openchoreo -f skaffold.yaml
 
 clean:
 	$(TURBO) run build --force >/dev/null 2>&1 || true
