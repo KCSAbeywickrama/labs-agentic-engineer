@@ -221,10 +221,20 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	for _, sk := range skills {
 		byName[sk.Name] = sk
 	}
-	// The full embedded library is back (11) plus the preserved custom skill,
-	// minus nothing — react-webapp is user-owned now. retired is purged.
-	if len(skills) != 12 {
-		t.Fatalf("catalog size after migration = %d, want 12: %+v", len(skills), skillKeysOf(byName))
+	// Platform-kind embedded skills are always managed, so all of them come
+	// back regardless of prior presence; org-kind embedded defaults absent
+	// from this (legacy) repo are opt-in on ongoing sync (this Reconcile call
+	// is NOT first-creation) and are NOT resurrected here — only the org-kind
+	// names already present (go, react-webapp) are migrated/preserved. Plus
+	// the preserved custom skill (mine) — minus nothing else. retired is
+	// purged.
+	for _, absentOrgDefault := range []string{"api-management", "thunder-authentication"} {
+		if _, ok := byName[absentOrgDefault]; ok {
+			t.Fatalf("absent org-kind default %q must stay opt-in on ongoing sync, got resurrected: %+v", absentOrgDefault, skillKeysOf(byName))
+		}
+	}
+	if len(skills) != 10 {
+		t.Fatalf("catalog size after migration = %d, want 10: %+v", len(skills), skillKeysOf(byName))
 	}
 	if _, ok := byName["retired"]; ok {
 		t.Fatalf("retired legacy builtin must be purged")

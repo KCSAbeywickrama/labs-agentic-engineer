@@ -296,6 +296,10 @@ func TestFreshOrgProvisioning_SeedsEmbeddedLibrary(t *testing.T) {
 	}
 }
 
+// PLATFORM-kind builtins are always managed, so ongoing sync restores a
+// deleted one. (An org-kind builtin like `go` is opt-in on ongoing sync — see
+// TestReconcile_OngoingSync_DoesNotReAddDeletedOrgSkill in
+// reconcile_manifest_test.go — so this test targets a platform-kind name.)
 func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStore(t)
@@ -303,19 +307,20 @@ func TestReconcile_RewritesMissingBuiltin(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil { // triggers seed
 		t.Fatalf("seed: %v", err)
 	}
-	// Simulate the `go` built-in being deleted from the repo.
-	host.removeAtHead("org1", skillRepoPath("go"))
+	// Simulate the `high-level-architecture` platform builtin being deleted
+	// from the repo.
+	host.removeAtHead("org1", skillRepoPath("high-level-architecture"))
 
 	n, err := svc.Reconcile(ctx, "org1")
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("Reconcile wrote %d, want 1 (only `go` was missing)", n)
+		t.Fatalf("Reconcile wrote %d, want 1 (only `high-level-architecture` was missing)", n)
 	}
 	got, _ := svc.List(ctx, "org1")
-	if _, ok := nameSet(got)["go"]; !ok {
-		t.Fatalf("`go` should be restored after reconcile")
+	if _, ok := nameSet(got)["high-level-architecture"]; !ok {
+		t.Fatalf("`high-level-architecture` should be restored after reconcile")
 	}
 }
 

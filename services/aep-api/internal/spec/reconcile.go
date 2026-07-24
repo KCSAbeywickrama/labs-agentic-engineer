@@ -95,7 +95,7 @@ func (s *SkillService) ensureSkillsRepo(ctx context.Context, orgID string) (*sou
 	if err != nil {
 		return nil, err
 	}
-	if n, serr := s.reconcileEmbedded(ctx, orgID, repo); serr != nil {
+	if n, serr := s.reconcileEmbedded(ctx, orgID, repo, true); serr != nil {
 		slog.WarnContext(ctx, "skills: seed embedded skills failed (repo provisioned)", "org", orgID, "error", serr)
 	} else {
 		slog.InfoContext(ctx, "skills: seeded embedded skills into new repo", "org", orgID, "count", n)
@@ -121,7 +121,7 @@ func (s *SkillService) Reconcile(ctx context.Context, orgID string) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	return s.reconcileEmbedded(ctx, orgID, repo)
+	return s.reconcileEmbedded(ctx, orgID, repo, false)
 }
 
 // isUserKind reports whether a kind is user-owned (never touched by
@@ -153,12 +153,19 @@ func (s *SkillService) isPlatformSeeded(ctx context.Context, orgID, name string)
 
 // reconcileEmbedded drives the whole repo to the desired flat state in ONE
 // commit, deciding each embedded skill's fate with the three-way compare
-// (decideReconcile, §3) against its skills-manifest.json baseline:
+// (decideReconcile, §3) against its skills-manifest.json baseline. Ownership
+// gates seeding: platform-kind is always managed, but an org-kind default
+// absent from the repo (never had it, or the org deleted it) is only seeded
+// when seedOrgDefaults is true — first creation seeds the starter set;
+// ongoing Sync leaves an absent org default alone (opt-in). A PRESENT org
+// skill is unaffected by seedOrgDefaults and still gets the full three-way
+// below.
 //
 //   - every embedded skill absent from the repo, or clean with the platform
 //     moved, is (re)written flat and its baseline advanced — unless a user
 //     kind owns the name (the user copy wins, the embedded skill is
-//     skipped);
+//     skipped), or an org-kind default is absent and seedOrgDefaults is
+//     false (opt-in on ongoing sync — see above);
 //   - a repo copy the org diverged (with the platform not moving, or a
 //     conflict where both moved) is left alone — reconcile never clobbers an
 //     org edit;
@@ -182,7 +189,7 @@ func (s *SkillService) isPlatformSeeded(ctx context.Context, orgID, name string)
 // linger. Returns the number of skills written + migrated + purged (the
 // manifest-only stamp of a backfill is not counted, but still committed).
 // §6.2.
-func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository) (int, error) {
+func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo *sourcecontrol.GitRepository, seedOrgDefaults bool) (int, error) {
 	embedded, err := loadLibrary(s.library)
 	if err != nil {
 		return 0, err
@@ -235,6 +242,14 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		cur, ok := current[b.Name]
 		if ok && isUserKind(cur.Kind) {
 			continue // an imported copy owns this name — never touch it
+		}
+		// Org-kind skills are opt-in on ongoing sync: seed them only at first
+		// creation. A brand-new or org-deleted org default stays out until an
+		// add-surface (deferred UI) brings it in. Platform-kind is always
+		// managed; a PRESENT org skill (ok==true) still gets the full
+		// three-way below.
+		if b.Kind == SkillKindOrg && !ok && !seedOrgDefaults {
+			continue
 		}
 		var entry *ManifestEntry
 		if e, has := manifest[b.Name]; has {

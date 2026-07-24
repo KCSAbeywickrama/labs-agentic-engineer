@@ -38,6 +38,33 @@ func demoMD(body string) string {
 	return "---\nname: demo\ndescription: Three-way reconcile fixture.\n---\n\n# Demo\n\n" + body + "\n"
 }
 
+// orgLib returns a one-skill ORG-kind library (no metadata.aep.kind ->
+// frontmatterKind defaults to org).
+func orgLib(name, body string) fstest.MapFS {
+	md := "---\nname: " + name + "\ndescription: Kind-split fixture.\n---\n\n# " + name + "\n\n" + body + "\n"
+	return fstest.MapFS{name + "/SKILL.md": &fstest.MapFile{Data: []byte(md)}}
+}
+
+// orgLib2 returns a two-skill ORG-kind library.
+func orgLib2(name1, body1, name2, body2 string) fstest.MapFS {
+	out := fstest.MapFS{}
+	for k, v := range orgLib(name1, body1) {
+		out[k] = v
+	}
+	for k, v := range orgLib(name2, body2) {
+		out[k] = v
+	}
+	return out
+}
+
+// platformLib returns a one-skill PLATFORM-kind library (metadata.aep.kind:
+// platform stamped into frontmatter) — always managed, never opt-in.
+func platformLib(name, body string) fstest.MapFS {
+	md := "---\nname: " + name + "\ndescription: Kind-split fixture.\nmetadata:\n  aep:\n    kind: platform\n---\n\n# " +
+		name + "\n\n" + body + "\n"
+	return fstest.MapFS{name + "/SKILL.md": &fstest.MapFile{Data: []byte(md)}}
+}
+
 func TestReconcile_SeedWritesManifestSameCommit(t *testing.T) {
 	t.Parallel()
 	svc, host := newTestStoreWithLibrary(t, libWith("v1"))
@@ -206,6 +233,77 @@ func TestReconcile_UserAuthoredOrgSkillUntouched(t *testing.T) {
 	m := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
 	if _, ok := m["acme"]; ok {
 		t.Fatal("user-authored org skill must have no manifest entry")
+	}
+}
+
+// A NEW org-kind default the org has never had is NOT auto-added on ongoing
+// Sync (opt-in). Only first-creation seeds org defaults.
+func TestReconcile_OngoingSync_DoesNotAddNewOrgSkill(t *testing.T) {
+	t.Parallel()
+	// library v1 ships only "demo" (org kind). Seed a repo with it.
+	svc, host := newTestStoreWithLibrary(t, orgLib("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // first-creation seed
+		t.Fatalf("seed: %v", err)
+	}
+	// Platform now also ships "rust" (org kind). Ongoing Sync must NOT add it.
+	svc.SwapLibrary(orgLib2("demo", "v1", "rust", "v1"))
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("rust")); got != "" {
+		t.Fatalf("ongoing sync auto-added a new org default: %q", got)
+	}
+}
+
+// A DELETED org default stays gone across ongoing Sync (opt-in; not re-seeded).
+func TestReconcile_OngoingSync_DoesNotReAddDeletedOrgSkill(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLib("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Simulate the org deleting "demo": remove its file AND its manifest entry.
+	host.removeAtHead("org1", skillRepoPath("demo"))
+	host.writeAtHead("org1", skillsManifestPath, "{}")
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); got != "" {
+		t.Fatalf("ongoing sync resurrected a deleted org skill: %q", got)
+	}
+}
+
+// First-creation DOES seed org defaults (new orgs get the starter set).
+func TestReconcile_FirstCreation_SeedsOrgDefaults(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLib("demo", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil { // triggers ensureSkillsRepo first-seed
+		t.Fatalf("seed: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); got == "" {
+		t.Fatal("first-creation did not seed the org default")
+	}
+}
+
+// A PLATFORM-kind skill is always ensured present, even on ongoing sync
+// (needed for flow). Guard against the kind-split accidentally skipping it.
+func TestReconcile_OngoingSync_StillManagesPlatformSkill(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, platformLib("flow-guide", "v1"))
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Delete the platform skill's file, then ongoing sync must restore it.
+	host.removeAtHead("org1", skillRepoPath("flow-guide"))
+	if _, err := svc.Reconcile(ctx, "org1"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("flow-guide")); got == "" {
+		t.Fatal("ongoing sync failed to restore a platform-kind skill")
 	}
 }
 
