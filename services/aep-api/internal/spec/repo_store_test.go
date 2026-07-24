@@ -416,16 +416,17 @@ func TestCreateOrgSkill_EditableAndDeletable(t *testing.T) {
 		t.Fatalf("user-authored org skill should appear in summaries as editable AND deletable; got %+v", found)
 	}
 
-	// A platform-seeded org skill (go) is editable in place but must never be
-	// deletable — deletability is decoupled from editability (§ isPlatformSeeded).
+	// A platform-seeded org skill (go) is editable in place AND deletable —
+	// deletable = editable (Task 2); reconcile no longer re-seeds a deleted
+	// platform default, so the delete sticks.
 	var goSum *SkillSummary
 	for i := range summaries {
 		if summaries[i].Name == "go" {
 			goSum = &summaries[i]
 		}
 	}
-	if goSum == nil || !goSum.Editable || goSum.Deletable {
-		t.Fatalf("platform-seeded org skill %q should be editable but NOT deletable; got %+v", "go", goSum)
+	if goSum == nil || !goSum.Editable || !goSum.Deletable {
+		t.Fatalf("platform-seeded org skill %q should be editable AND deletable; got %+v", "go", goSum)
 	}
 
 	// Duplicate create → collision.
@@ -452,8 +453,11 @@ func TestDeleteBuiltinIsForbidden(t *testing.T) {
 	if _, err := svc.List(ctx, "org1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := mut.Delete(ctx, "org1", "tester", "go"); err != ErrSkillNotEditable {
-		t.Fatalf("delete builtin err = %v, want ErrSkillNotEditable", err)
+	// Platform-kind skills stay undeletable (never editable). A
+	// platform-SEEDED ORG-kind skill like "go" is deletable now — see
+	// TestDelete_SeededOrgSkill_NowDeletable in skill_mutation_more_test.go.
+	if err := mut.Delete(ctx, "org1", "tester", "task-planning"); err != ErrSkillNotEditable {
+		t.Fatalf("delete platform-kind skill err = %v, want ErrSkillNotEditable", err)
 	}
 }
 

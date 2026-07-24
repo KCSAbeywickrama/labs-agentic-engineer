@@ -470,9 +470,12 @@ func TestSkillsComponent_Delete_Builtin_403(t *testing.T) {
 	t.Parallel()
 	h, _ := newHarness(t)
 
-	resp := h.AsOrg("acme").Delete(base + "/go")
+	// Platform-kind skills are never editable, hence never deletable
+	// (deletable = editable). A platform-SEEDED ORG-kind skill like "go" is
+	// deletable now — see TestSkillsComponent_Delete_SeededOrgSkillNowDeletable.
+	resp := h.AsOrg("acme").Delete(base + "/task-planning")
 	if resp.Code != 403 {
-		t.Fatalf("delete builtin: want 403, got %d body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("delete platform-kind skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -497,10 +500,12 @@ func TestSkillsComponent_Delete_OrgSkillRoundTrips(t *testing.T) {
 	}
 }
 
-// TestSkillsComponent_Delete_SeededOrgSkillForbidden pins the flip side: a
-// platform-seeded org skill ("go") stays undeletable even though it is
-// editable — the manifest's platform-origin entry is what tells it apart
-// from a user-authored org skill at the same kind.
+// TestSkillsComponent_Delete_SeededOrgSkillForbidden pins the surviving
+// undeletable case: a platform-KIND skill ("task-planning") stays
+// undeletable — it is never editable, and deletable = editable (Task 2).
+// (Previously this pinned a platform-SEEDED ORG-kind skill, "go", as
+// forbidden; #310's seeded-org gate is gone — such a skill is deletable now,
+// see TestSkillsComponent_Delete_SeededOrgSkillNowDeletable below.)
 func TestSkillsComponent_Delete_SeededOrgSkillForbidden(t *testing.T) {
 	t.Parallel()
 	h, _ := newHarness(t)
@@ -508,12 +513,31 @@ func TestSkillsComponent_Delete_SeededOrgSkillForbidden(t *testing.T) {
 	if resp := h.AsOrg("acme").Get(base); resp.Code != 200 { // seed + stamp baseline
 		t.Fatalf("seed: %d %s", resp.Code, resp.Body.String())
 	}
-	resp := h.AsOrg("acme").Delete(base + "/go")
+	resp := h.AsOrg("acme").Delete(base + "/task-planning")
 	if resp.Code != 403 {
-		t.Fatalf("delete platform-seeded org skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
+		t.Fatalf("delete platform-kind skill: want 403, got %d body=%s", resp.Code, resp.Body.String())
 	}
-	if resp := h.AsOrg("acme").Get(base + "/go"); resp.Code != 200 {
+	if resp := h.AsOrg("acme").Get(base + "/task-planning"); resp.Code != 200 {
 		t.Fatalf("after forbidden delete: want 200 (still present), got %d", resp.Code)
+	}
+}
+
+// TestSkillsComponent_Delete_SeededOrgSkillNowDeletable is the flip side:
+// a platform-seeded org skill ("go") is now deletable — reconcile (Task 1)
+// no longer re-adds a deleted org skill, so the delete sticks.
+func TestSkillsComponent_Delete_SeededOrgSkillNowDeletable(t *testing.T) {
+	t.Parallel()
+	h, _ := newHarness(t)
+
+	if resp := h.AsOrg("acme").Get(base); resp.Code != 200 { // seed + stamp baseline
+		t.Fatalf("seed: %d %s", resp.Code, resp.Body.String())
+	}
+	resp := h.AsOrg("acme").Delete(base + "/go")
+	if resp.Code != 200 {
+		t.Fatalf("delete platform-seeded org skill: want 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp := h.AsOrg("acme").Get(base + "/go"); resp.Code != 404 {
+		t.Fatalf("after delete: want 404 (gone), got %d", resp.Code)
 	}
 }
 

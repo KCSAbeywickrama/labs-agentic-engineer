@@ -195,15 +195,19 @@ func TestDelete_UserAuthoredOrgSkill_RoundTrips(t *testing.T) {
 	if _, err := mut.Create(ctx, "org1", "tester", CreateSkillInput{Name: "acme-notes", SkillMD: create}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if deletable, err := svc.SkillDeletable(ctx, "org1", "acme-notes", SkillKindOrg); err != nil || !deletable {
-		t.Fatalf("SkillDeletable(acme-notes) = %v, %v — want true, nil", deletable, err)
+	if !SkillDeletable(SkillKindOrg) {
+		t.Fatal("SkillDeletable(org) = false, want true")
 	}
 	if err := mut.Delete(ctx, "org1", "tester", "acme-notes"); err != nil {
 		t.Fatalf("user-authored org skill must be deletable: %v", err)
 	}
 }
 
-// A platform-seeded org skill (go) is editable but NOT deletable.
+// A platform-kind skill is never editable, and therefore never deletable —
+// deletable = editable (Task 2), so this is the only kind that stays
+// forbidden. (Previously this pinned a platform-SEEDED ORG-kind skill as
+// forbidden; #310's seeded-org gate is gone — see
+// TestDelete_SeededOrgSkill_NowDeletable below.)
 func TestDelete_SeededOrgSkill_Forbidden(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestStore(t)
@@ -212,32 +216,43 @@ func TestDelete_SeededOrgSkill_Forbidden(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	mut := NewSkillMutationService(svc)
-	if err := mut.Delete(ctx, "org1", "tester", "go"); err == nil {
-		t.Fatal("a platform-seeded org skill must not be deletable")
+	if err := mut.Delete(ctx, "org1", "tester", "task-planning"); !errors.Is(err, ErrSkillNotEditable) {
+		t.Fatalf("delete platform-kind skill err = %v, want ErrSkillNotEditable", err)
 	}
 
-	// The single-skill projection (SkillService.SkillDeletable, feeding the
-	// GetSkill/Update detail response) must agree with Delete's own guard —
-	// editable in place, never deletable.
-	deletable, err := svc.SkillDeletable(ctx, "org1", "go", SkillKindOrg)
-	if err != nil {
-		t.Fatalf("SkillDeletable: %v", err)
+	// The pure projection (spec.SkillDeletable, feeding the GetSkill/Update
+	// detail response) must agree with Delete's own guard.
+	if SkillDeletable(SkillKindPlatform) {
+		t.Fatal("SkillDeletable(platform) = true, want false — platform kind is never editable/deletable")
 	}
-	if deletable {
-		t.Fatal("SkillDeletable(go) = true, want false — platform-seeded org skill")
+	if SkillEditable(SkillKindPlatform) {
+		t.Fatal("platform kind must never be editable")
 	}
-	if !SkillEditable(SkillKindOrg) {
-		t.Fatal("org kind must remain editable even though this instance is platform-seeded")
-	}
+}
 
-	// A platform kind (never editable) is never deletable either, regardless
-	// of seeded status.
-	platDeletable, err := svc.SkillDeletable(ctx, "org1", "task-planning", SkillKindPlatform)
-	if err != nil {
-		t.Fatalf("SkillDeletable(platform): %v", err)
+// A platform-seeded org skill (demo) is now deletable — Task 1's reconcile
+// change means the delete sticks (no auto-re-add on the next reconcile).
+func TestDelete_SeededOrgSkill_NowDeletable(t *testing.T) {
+	t.Parallel()
+	svc, host := newTestStoreWithLibrary(t, orgLib("demo", "v1")) // demo = seeded org
+	ctx := context.Background()
+	if _, err := svc.List(ctx, "org1"); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	if platDeletable {
-		t.Fatal("SkillDeletable(task-planning) = true, want false — platform kind is never editable/deletable")
+	// baseline: manifest has demo (origin platform)
+	if parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"].Origin == "" {
+		t.Fatal("precondition: demo should have a manifest entry")
+	}
+	mut := NewSkillMutationService(svc)
+	if err := mut.Delete(ctx, "org1", "tester", "demo"); err != nil {
+		t.Fatalf("a seeded org skill must now be deletable: %v", err)
+	}
+	if got := host.readAtHead("org1", skillRepoPath("demo")); got != "" {
+		t.Fatalf("delete did not remove files: %q", got)
+	}
+	// files AND manifest entry gone.
+	if _, ok := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))["demo"]; ok {
+		t.Fatal("delete must drop the manifest entry")
 	}
 }
 

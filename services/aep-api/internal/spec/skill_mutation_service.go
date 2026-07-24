@@ -221,12 +221,12 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 	return newSkillValue(orgID, existing.Kind, name, stamped, refs, fm), nil
 }
 
-// Delete removes an editable skill that is not platform-seeded (deletes the
-// skill's directory and commits). Platform-kind skills, and org-kind skills
-// the manifest tracks as platform-seeded (kind alone can't tell those apart
-// from a user-authored org skill — the manifest baseline can), return
-// ErrSkillNotEditable. The prior IMPORTED_SKILL_IN_USE guard is dropped —
-// with HEAD reads and no snapshots there are no rows to protect
+// Delete removes an editable skill (deletes the skill's directory and
+// commits). Platform-kind skills return ErrSkillNotEditable — everything
+// else, including a platform-seeded org skill (e.g. "go"), is deletable;
+// reconcile (see reconcile.go) no longer re-seeds a deleted platform
+// default, so the delete sticks. The prior IMPORTED_SKILL_IN_USE guard is
+// dropped — with HEAD reads and no snapshots there are no rows to protect
 // (docs/design/skills-repo-storage.md §9); an in-flight task simply reads
 // HEAD without the deleted skill.
 func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name string) error {
@@ -242,13 +242,6 @@ func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name st
 	}
 	if !SkillEditable(existing.Kind) {
 		return ErrSkillNotEditable // platform is reconcile-managed
-	}
-	seeded, err := m.skills.isPlatformSeeded(ctx, orgID, name)
-	if err != nil {
-		return fmt.Errorf("platform-seeded check %q: %w", name, err)
-	}
-	if seeded {
-		return ErrSkillNotEditable // platform-seeded org skill is reconcile-managed
 	}
 
 	msg := fmt.Sprintf("chore(skills): delete %s skill %q\n\nby %s", existing.Kind, name, actor)

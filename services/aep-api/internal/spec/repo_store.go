@@ -176,68 +176,22 @@ func (s *SkillService) List(ctx context.Context, orgID string) ([]Skill, error) 
 // ListSummaries is the skills-page projection: every kind, projected to
 // (name, kind, description, ...). Platform skills list READ-ONLY (the page
 // shows the generation-flow guidance for inspection); org + imported are
-// editable per SkillEditable — editability is decoupled from ownership, so a
-// platform-seeded org skill (e.g. "go") is editable in place even though
-// reconcile still manages its baseline (and therefore never deletable — see
-// SkillDeletable). The manifest is loaded ONCE for the whole page via
-// catalogWithManifest, not per-skill — isPlatformSeeded's full manifest read
-// would otherwise run once per row.
+// editable and deletable per SkillEditable/SkillDeletable — both are pure
+// kind checks, so a single catalog() read is enough; no manifest load.
 func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]SkillSummary, error) {
-	entries, manifest := s.catalogWithManifest(ctx, orgID)
-	out := make([]SkillSummary, 0, len(entries))
-	for _, e := range entries {
-		sk := e.Skill
-		editable := SkillEditable(sk.Kind)
-		seeded := manifest[sk.Name].Origin == ManifestOriginPlatform
+	skills := s.catalog(ctx, orgID)
+	out := make([]SkillSummary, 0, len(skills))
+	for _, sk := range skills {
 		out = append(out, SkillSummary{
 			Name:        sk.Name,
 			Kind:        sk.Kind,
 			Description: sk.Description,
 			ContentSHA:  sk.ContentSHA,
-			Editable:    editable,
-			Deletable:   SkillDeletable(sk.Kind, seeded),
+			Editable:    SkillEditable(sk.Kind),
+			Deletable:   SkillDeletable(sk.Kind),
 		})
 	}
 	return out, nil
-}
-
-// catalogWithManifest is catalog() plus the skills-manifest.json baseline,
-// read from the SAME ref in one bundle read (loadEntriesAndManifest) —
-// degrades to (nil, nil) on any git/provisioning failure, same posture as
-// catalog (§12). Callers that need per-skill platform-seeded status for the
-// WHOLE catalog (ListSummaries) should use this instead of calling
-// isPlatformSeeded per skill, which would reload the manifest every time.
-func (s *SkillService) catalogWithManifest(ctx context.Context, orgID string) ([]catalogEntry, SkillsManifest) {
-	if s == nil || s.git == nil || s.repos == nil || orgID == "" {
-		return nil, nil
-	}
-	repo, err := s.ensureSkillsRepo(ctx, orgID)
-	if err != nil {
-		slog.WarnContext(ctx, "skills: ensure repo failed — serving empty", "org", orgID, "error", err)
-		return nil, nil
-	}
-	entries, manifest, err := s.loadEntriesAndManifest(ctx, orgID, repo)
-	if err != nil {
-		slog.WarnContext(ctx, "skills: load catalog failed — serving empty", "org", orgID, "error", err)
-		return nil, nil
-	}
-	return entries, manifest
-}
-
-// SkillDeletable reports whether the named skill (already resolved, at kind)
-// can be deleted — the single-skill counterpart to the per-row check inside
-// ListSummaries, used by GetSkill/Create/Update to fill the detail
-// response's deletable field. Mirrors SkillMutationService.Delete's own
-// guard exactly (SkillEditable(kind) && !isPlatformSeeded).
-func (s *SkillService) SkillDeletable(ctx context.Context, orgID, name, kind string) (bool, error) {
-	if !SkillEditable(kind) {
-		return false, nil
-	}
-	seeded, err := s.isPlatformSeeded(ctx, orgID, name)
-	if err != nil {
-		return false, err
-	}
-	return SkillDeletable(kind, seeded), nil
 }
 
 // RepoWebURL returns the HTML URL of the org's skills repo — the stored clone

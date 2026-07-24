@@ -167,11 +167,7 @@ func (h *Handler) GetSkill(ctx context.Context, request gen.GetSkillRequestObjec
 	if sk == nil {
 		return nil, apierr.NotFound("skill not found")
 	}
-	deletable, err := h.skills.SkillDeletable(ctx, org, sk.Name, sk.Kind)
-	if err != nil {
-		return nil, mapSkillError(err)
-	}
-	return gen.GetSkill200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind), deletable)), nil
+	return gen.GetSkill200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind), spec.SkillDeletable(sk.Kind))), nil
 }
 
 func (h *Handler) UpdateSkill(ctx context.Context, request gen.UpdateSkillRequestObject) (gen.UpdateSkillResponseObject, error) {
@@ -190,13 +186,8 @@ func (h *Handler) UpdateSkill(ctx context.Context, request gen.UpdateSkillReques
 	if err != nil {
 		return nil, mapSkillError(err)
 	}
-	// Update preserves kind and the manifest baseline, so the pre-existing
-	// platform-seeded status still governs deletability post-write.
-	deletable, err := h.skills.SkillDeletable(ctx, org, sk.Name, sk.Kind)
-	if err != nil {
-		return nil, mapSkillError(err)
-	}
-	return gen.UpdateSkill200JSONResponse(skillDetailBody(sk, true, deletable)), nil
+	// Update preserves kind, and deletability is a pure kind check.
+	return gen.UpdateSkill200JSONResponse(skillDetailBody(sk, true, spec.SkillDeletable(sk.Kind))), nil
 }
 
 func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillRequestObject) (gen.DeleteSkillResponseObject, error) {

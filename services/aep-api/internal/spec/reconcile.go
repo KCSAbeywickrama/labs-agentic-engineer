@@ -134,23 +134,6 @@ func isUserKind(kind string) bool {
 	return kind == SkillKindImported
 }
 
-// isPlatformSeeded reports whether the org's copy of name carries a
-// platform-origin manifest entry — i.e. the platform seeded it and tracks a
-// baseline for it. Such skills are read-through-editable (override) but must
-// NOT be deletable; a name with no entry (user-authored) or an imported entry
-// is the org's to remove.
-func (s *SkillService) isPlatformSeeded(ctx context.Context, orgID, name string) (bool, error) {
-	repo, err := s.ensureSkillsRepo(ctx, orgID)
-	if err != nil {
-		return false, err
-	}
-	_, manifest, err := s.loadEntriesAndManifest(ctx, orgID, repo)
-	if err != nil {
-		return false, err
-	}
-	return manifest[name].Origin == ManifestOriginPlatform, nil
-}
-
 // reconcileEmbedded drives the whole repo to the desired flat state in ONE
 // commit, deciding each embedded skill's fate with the three-way compare
 // (decideReconcile, §3) against its skills-manifest.json baseline. Ownership
