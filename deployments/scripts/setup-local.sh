@@ -478,6 +478,30 @@ kubectl --context "${CLUSTER_CONTEXT}" apply \
   -f "${SCRIPT_DIR}/../single-cluster/resource-types/postgres/resourcetype.yaml"
 log_ok "ClusterResourceType 'postgres'"
 
+# ── Let Helm adopt setup-aep.sh's cluster-scoped resources ───────────────────
+# setup.sh → setup-aep.sh creates these BEFORE the platform Helm chart is
+# installed (they are shared with the Compose flow, which never installs the
+# chart). On the Skaffold flow the chart ALSO defines them, so `helm install`
+# aborts with "invalid ownership metadata ... must be set to Helm" unless the
+# existing objects carry Helm's ownership labels/annotations. Stamp them so the
+# chart adopts (and reconciles) them instead of failing. Idempotent.
+step "Adopting setup-aep resources into the aep-platform Helm release"
+adopt_for_helm() {
+  local rn="$1"
+  kubectl --context "${CLUSTER_CONTEXT}" get "$rn" >/dev/null 2>&1 || { return 0; }
+  kubectl --context "${CLUSTER_CONTEXT}" annotate "$rn" --overwrite \
+    meta.helm.sh/release-name=aep-platform \
+    meta.helm.sh/release-namespace="${AEP_NS}" >/dev/null
+  kubectl --context "${CLUSTER_CONTEXT}" label "$rn" --overwrite \
+    app.kubernetes.io/managed-by=Helm >/dev/null
+  log "adopted ${rn}"
+}
+adopt_for_helm clusterauthzrolebinding/aep-api-client-binding
+adopt_for_helm clustertrait/api-configuration
+adopt_for_helm componenttype/web-application
+adopt_for_helm componenttype/service
+log_ok "setup-aep resources adopted"
+
 echo
 echo "✅ Local setup complete. Run: make dev-cluster"
 echo
