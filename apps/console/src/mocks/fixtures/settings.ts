@@ -147,12 +147,13 @@ export const skillsSyncError: ApiError = {
 // Covers all three kinds (org | platform | imported — the BE's real
 // vocabulary; custom/builtin/flow are retired) so the catalogue's kind chips,
 // read-only vs editable vs deletable actions, and the updates-available list
-// all exercise. deletable is decoupled from editable per the real BE
-// contract: platform-seeded org skills (go, react-webapp, node-service,
-// python-service, postgres-schema) are editable:true, deletable:false (an
-// override that never unlocks delete); user-authored org
-// (acme-deploy-checklist, acme-api-style) and imported (find-skills,
-// commit-conventions) skills are editable:true, deletable:true — both Delete
+// all exercise. deletable = editable per the real BE contract: org-kind
+// skills — whether platform-seeded (go, react-webapp, node-service,
+// python-service, postgres-schema), user-authored (acme-deploy-checklist,
+// acme-api-style), or imported (find-skills, commit-conventions) — are
+// editable:true, deletable:true; platform-kind skills (high-level-
+// architecture, task-breakdown, wireframes, validation-files) are always
+// managed by reconcile and are editable:false, deletable:false. Both Delete
 // states render in mock mode. More than one page of skills (10/page, issue
 // #172) so the flat list's pagination is exercisable in mock mode.
 export const seedSkills: SkillDetailBody[] = [
@@ -160,10 +161,11 @@ export const seedSkills: SkillDetailBody[] = [
     orgId: "org-1",
     name: "go",
     kind: "org",
-    // Platform-seeded org skill: editable in place (override), never
-    // deletable — reconcile still manages its baseline.
+    // Platform-seeded org skill: editable and deletable like any org skill
+    // (deletable = editable) — reconcile only re-seeds it on ongoing sync if
+    // it's absent, never overwrites a present copy.
     editable: true,
-    deletable: false,
+    deletable: true,
     description:
       "How to build a Go service on the platform — layout, port 9090, multi-stage Dockerfile.",
     skillMd: `---
@@ -190,9 +192,9 @@ Expose \`GET /health\` for liveness on port **9090**.`,
     orgId: "org-1",
     name: "react-webapp",
     kind: "org",
-    // Platform-seeded org skill: editable in place, never deletable.
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
-    deletable: false,
+    deletable: true,
     description:
       "How to build a React SPA on the platform — Vite layout, nginx runtime, window._env_ config.",
     skillMd: `---
@@ -288,9 +290,9 @@ Search the registry, read the SKILL.md, and check the declared license.`,
     orgId: "org-1",
     name: "node-service",
     kind: "org",
-    // Platform-seeded org skill: editable in place, never deletable.
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
-    deletable: false,
+    deletable: true,
     description: "How to build a Node.js service on the platform.",
     skillMd: `---
 name: node-service
@@ -306,9 +308,9 @@ Pin the LTS base image; expose \`GET /health\` on port **9090**.`,
     orgId: "org-1",
     name: "python-service",
     kind: "org",
-    // Platform-seeded org skill: editable in place, never deletable.
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
-    deletable: false,
+    deletable: true,
     description: "How to build a Python service on the platform.",
     skillMd: `---
 name: python-service
@@ -324,9 +326,9 @@ Use \`uv\` for dependency management; expose \`GET /health\` on port **9090**.`,
     orgId: "org-1",
     name: "postgres-schema",
     kind: "org",
-    // Platform-seeded org skill: editable in place, never deletable.
+    // Platform-seeded org skill: editable and deletable (deletable = editable).
     editable: true,
-    deletable: false,
+    deletable: true,
     description: "Schema and migration conventions for platform databases.",
     skillMd: `---
 name: postgres-schema

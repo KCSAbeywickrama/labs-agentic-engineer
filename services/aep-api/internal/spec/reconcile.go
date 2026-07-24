@@ -20,15 +20,23 @@ package spec
 // ships in the BFF container as on-disk files (config.SkillsDir, read at
 // runtime; platform + org kinds, kind in frontmatter) and is seeded +
 // reconciled into each org's skills repo (the live store) under the FLAT
-// layout skills/<name>/. Reconcile is a THREE-WAY compare per skill against
-// skills-manifest.json (§3), the org's baseline of what a platform-managed
-// skill was last handed at: did the org's copy move off the baseline, and did
-// the platform's move off the baseline? absent repo copy → seed; org clean +
-// platform moved → refresh (and advance the baseline); org moved + platform
-// clean → leave the override alone (never touched); both moved → leave it
-// alone as a conflict, surfaced by /updates, UNLESS the two copies converged
-// on identical content, which auto-resolves clean; a pre-manifest repo copy
-// is backfilled (baseline stamped so future compares work, a divergent copy
+// layout skills/<name>/. Seeding is split by ownership: platform-kind
+// defaults are always managed (seeded on first creation AND on every
+// ongoing sync); org-kind defaults are seeded only at first creation — an
+// org-kind default absent on an ongoing sync (never had it, or the org
+// deleted it) stays out until an explicit opt-in adds it back. A PRESENT
+// org-kind skill is unaffected by that gate and still gets the full
+// three-way below on every reconcile, including ongoing sync, so a clean
+// copy keeps auto-refreshing. Reconcile is a THREE-WAY compare per skill
+// against skills-manifest.json (§3), the org's baseline of what a
+// platform-managed skill was last handed at: did the org's copy move off
+// the baseline, and did the platform's move off the baseline? absent repo
+// copy → seed (subject to the ownership gate above); org clean + platform
+// moved → refresh (and advance the baseline); org moved + platform clean →
+// leave the override alone (never touched); both moved → leave it alone as
+// a conflict, surfaced by /updates, UNLESS the two copies converged on
+// identical content, which auto-resolves clean; a pre-manifest repo copy is
+// backfilled (baseline stamped so future compares work, a divergent copy
 // treated as an override and never clobbered). The manifest is rewritten in
 // the SAME commit as any file changes it reflects. A name owned by the user
 // kind (imported) never carries a platform manifest entry, so it is

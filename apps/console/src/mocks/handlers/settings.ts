@@ -287,15 +287,14 @@ export const settingsHandlers = [
         existing.updatedAt = new Date().toISOString();
       } else {
         // A synced-in skill the repo didn't have yet. Unmarked frontmatter is
-        // an `org` skill, matching the BE's frontmatterKind default — it is
-        // platform-seeded (it came off the updates list), so editable in
-        // place but never deletable.
+        // an `org` skill, matching the BE's frontmatterKind default —
+        // deletable = editable for org-kind skills.
         skills.push({
           orgId: "org-1",
           name: t.name,
           kind: "org",
           editable: true,
-          deletable: false,
+          deletable: true,
           description: `${t.name} (platform-shipped)`,
           skillMd: `---\nname: ${t.name}\ndescription: ${t.name} (platform-shipped)\n---\n\nPlatform-shipped skill body.`,
           references: {},
@@ -341,10 +340,8 @@ export const settingsHandlers = [
       orgId: "org-1",
       name: body.name,
       kind: "org",
+      // A freshly created skill is always org-kind, so deletable = editable.
       editable: true,
-      // A freshly created skill can never be platform-seeded (the collision
-      // check above already rejects any name a visible skill — including a
-      // platform-seeded one — already uses), so it is always deletable.
       deletable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
@@ -404,8 +401,8 @@ export const settingsHandlers = [
         404,
       );
     }
-    // Mirrors the real BE guard: editable does not imply deletable — a
-    // platform-seeded org skill is editable in place but reconcile-managed.
+    // Mirrors the real BE guard: deletable = editable — a platform-kind
+    // skill (always reconcile-managed) is neither.
     if (!skill.deletable) {
       return errorJson(
         { code: "forbidden", message: "built-in skills are read-only" },
