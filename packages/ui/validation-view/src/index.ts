@@ -27,3 +27,10 @@ export type {
   ParseError,
   ParseResult,
 } from "./parse.js";
+export { parseValidationReport } from "./report.js";
+export type {
+  CriterionReport,
+  CriterionRunState,
+  ValidationReport,
+  ReportParseResult,
+} from "./report.js";

@@ -44,8 +44,12 @@ func (s *fakeStore) TryAdmit(_ context.Context, e *delivery.Execution) (bool, *d
 		e.Status = string(taskmeta.ExecQueued)
 	}
 	for _, r := range s.rows {
+		// Mirrors the real ux_executions_admission_component partial unique index:
+		// at most one active Execution per (repo, issue, kind, component). Component
+		// is part of the key so the path-based build fan-out can admit one active
+		// build per component under a single merge.
 		if r.Repo == e.Repo && r.IssueNumber == e.IssueNumber && r.Kind == e.Kind &&
-			taskmeta.ExecutionStatus(r.Status).IsActive() {
+			r.Component == e.Component && taskmeta.ExecutionStatus(r.Status).IsActive() {
 			return false, nil, nil
 		}
 	}
@@ -209,13 +213,19 @@ func hasAllLabels(have, want []string) bool {
 	return true
 }
 
-// fakePRReader serves scripted live PR states by number.
+// fakePRReader serves scripted live PR states by number, and optional scripted
+// changed-file lists (for the path-based build fan-out).
 type fakePRReader struct {
 	states map[int]*sourcecontrol.PullRequestState
+	files  map[int][]string
 }
 
 func (f fakePRReader) GetPullRequestState(_ context.Context, _, _ string, number int) (*sourcecontrol.PullRequestState, error) {
 	return f.states[number], nil
+}
+
+func (f fakePRReader) ListPullRequestFiles(_ context.Context, _, _ string, number int) ([]string, error) {
+	return f.files[number], nil
 }
 
 // fakeRepos resolves any repo full name to one org/project.
@@ -225,16 +235,35 @@ func (f fakeRepos) ByFullName(context.Context, string) (string, string, error) {
 	return f.orgID, f.projectID, nil
 }
 
+// fakeMerger records the PR number it was asked to merge (0 = none).
+type fakeMerger struct {
+	merged int
+	err    error
+}
+
+func (f *fakeMerger) MergePullRequest(_ context.Context, _, _ string, number int) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.merged = number
+	return nil
+}
+
 // fakeDesign returns a fixed component-name set and optional per-component
 // provisioning + org-service deps.
 type fakeDesign struct {
 	names         map[string]bool
+	paths         map[string]string
 	provisionDep  map[string][]string
 	orgServiceDep map[string][]string
 }
 
 func (f fakeDesign) ComponentNames(context.Context, string, string) (map[string]bool, error) {
 	return f.names, nil
+}
+
+func (f fakeDesign) ComponentPaths(context.Context, string, string) (map[string]string, error) {
+	return f.paths, nil
 }
 
 func (f fakeDesign) ProvisionDepNames(context.Context, string, string) (map[string][]string, error) {
