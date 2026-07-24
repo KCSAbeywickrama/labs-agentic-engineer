@@ -1385,13 +1385,14 @@ paths:
         schema:
           description: Project name (DNS-label slug)
           type: string
-      - description: 'File path under specs/ (trailing wildcard: may span multiple segments, i.e. contain
-          slashes)'
+      - description: 'Repo-relative file path (trailing wildcard: may span multiple segments, i.e. contain
+          slashes). Reads are scoped to specs/ plus a small read-only allow-list — currently the
+          runner-authored validation report at tests/validation/report.json.'
         in: path
         name: path
         required: true
         schema:
-          description: File path under specs/
+          description: Repo-relative file path — specs/ or an allow-listed read-only path (tests/validation/report.json)
           type: string
       responses:
         '200':
@@ -1408,7 +1409,7 @@ paths:
           description: Error
       security:
       - userJWT: []
-      summary: Read a spec file at HEAD
+      summary: Read a spec file (or an allow-listed read-only artifact) at HEAD
       tags:
       - Files
   /projects/{projectName}/issues:
@@ -3948,6 +3949,17 @@ components:
     SkillDetailBody:
       additionalProperties: false
       properties:
+        binaryReferences:
+          description: |-
+            Sorted paths of aux files whose content is NOT valid UTF-8 (e.g.
+            images, other binaries). Their bytes are never inlined into
+            `references` — encoding/json silently replaces invalid UTF-8 with
+            U+FFFD rather than erroring, so inlining would corrupt the file
+            content without any visible failure. The console renders these
+            entries name-only.
+          items:
+            type: string
+          type: array
         compatibility:
           type: string
         contentSha:
@@ -3981,6 +3993,7 @@ components:
       - description
       - skillMd
       - references
+      - binaryReferences
       - contentSha
       - updatedAt
       type: object

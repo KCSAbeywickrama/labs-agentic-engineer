@@ -229,8 +229,10 @@ func (s *service) List(ctx context.Context, orgID, projectID, prefix string) ([]
 }
 
 // Read returns the content + blob sha of a single file at the branch tip.
+// It gates on validateReadPath, which permits specs/ plus a small read-only
+// allow-list (the validation report); writes stay specs/-only via validatePath.
 func (s *service) Read(ctx context.Context, orgID, projectID, path string) (*FileContent, error) {
-	if err := validatePath(path); err != nil {
+	if err := validateReadPath(path); err != nil {
 		return nil, err
 	}
 	ref, err := s.resolveRef(ctx, orgID, projectID)

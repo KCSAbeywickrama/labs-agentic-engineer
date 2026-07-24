@@ -620,7 +620,15 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
 	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService).
 		WithWorkflowSignaler(devflowSignaler).
-		WithTaskNotifier(taskStreamHub)
+		WithTaskNotifier(taskStreamHub).
+		// Path-based build fan-out: a merged PR rebuilds every component whose
+		// appPath its diff touched (issueService lists the PR's changed files;
+		// designComponents maps appPaths → components), not just the Task's own.
+		WithDesignReader(designComponents{store: artifactStore}).
+		// Flag-gated auto-merge (AUTO_MERGE_CODING_PRS, default false): when on,
+		// squash-merge a coding-agent PR on open so the fix deploys end-to-end
+		// without a human. Off by default — it auto-deploys unreviewed code.
+		WithAutoMerge(cfg.AutoMergeCodingPRs, repoLocator{db: db}, issueService)
 	execEvents.RegisterHandlers(registerWebhook)
 	webhook.RegisterInstallationHandlers(webhookRouter, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)

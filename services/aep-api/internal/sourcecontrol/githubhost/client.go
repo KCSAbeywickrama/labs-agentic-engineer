@@ -422,6 +422,31 @@ func (c *Client) MergePullRequest(ctx context.Context, owner, repo string, cred 
 	return err
 }
 
+// ListPullRequestFiles returns the paths of every file changed by a pull request
+// (GET /pulls/{n}/files, paginated 100/page). The path-based build trigger maps
+// these paths onto the components whose source directory they touched, so a
+// merged PR rebuilds every affected component — not just the one the Task was
+// bound to (docs: tasks-github-native.md; the merge webhook carries no file list).
+func (c *Client) ListPullRequestFiles(ctx context.Context, owner, repo string, cred secrets.Credential, number int) ([]string, error) {
+	var files []string
+	for page := 1; ; page++ {
+		url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/pulls/%d/files?per_page=100&page=%d", owner, repo, number, page)
+		var raw []struct {
+			Filename string `json:"filename"`
+		}
+		if err := c.getJSON(ctx, url, cred, &raw); err != nil {
+			return nil, err
+		}
+		for _, f := range raw {
+			files = append(files, f.Filename)
+		}
+		if len(raw) < 100 {
+			break // last (short) page
+		}
+	}
+	return files, nil
+}
+
 func (c *Client) CommentIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int, body string) error {
 	payload := map[string]string{"body": body}
 	reqBody, err := json.Marshal(payload)

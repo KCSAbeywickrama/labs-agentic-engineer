@@ -233,6 +233,42 @@ func TestReadAtHead(t *testing.T) {
 	}
 }
 
+// TestReadAtHead_ValidationReportAllowListed pins the read-only escape hatch:
+// tests/validation/report.json (a non-specs/ path) is READABLE, but any other
+// non-specs/ path stays 400, and WRITING the report is still rejected — the
+// write path is never widened.
+func TestReadAtHead_ValidationReportAllowListed(t *testing.T) {
+	report := `{"schemaVersion":1,"criteria":[]}`
+	r := newFilesRig(t, map[string]string{
+		"tests/validation/report.json": report,
+		"README.md":                    "root",
+	})
+
+	// The one allow-listed non-specs/ path reads at HEAD.
+	rec := r.get(apiBase + "/tests/validation/report.json")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read report: code %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var fc spec.FileContent
+	_ = json.Unmarshal(rec.Body.Bytes(), &fc)
+	if fc.Content != report || fc.Path != "tests/validation/report.json" || fc.SHA == "" {
+		t.Fatalf("read report wrong: %+v", fc)
+	}
+
+	// A different non-specs/ path is still forbidden (allow-list is exact).
+	if bad := r.get(apiBase + "/README.md"); bad.Code != http.StatusBadRequest {
+		t.Errorf("read README.md: code %d, want 400 (%s)", bad.Code, bad.Body.String())
+	}
+
+	// The write path is NOT widened: applying to the allow-listed path is 400.
+	writeReport := mustJSON(t, spec.ApplyRequest{
+		Writes: []spec.WriteOp{{Path: "tests/validation/report.json", Content: report}},
+	})
+	if w := r.apply(writeReport); w.Code != http.StatusBadRequest {
+		t.Errorf("apply report write: code %d, want 400 (%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestApply_MultiWriteAndDelete_SingleCommit(t *testing.T) {
 	r := newFilesRig(t, map[string]string{
 		"specs/requirements/requirements.md": "old",

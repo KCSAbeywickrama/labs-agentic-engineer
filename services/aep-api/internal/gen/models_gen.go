@@ -963,17 +963,24 @@ type SaveValuesBody struct {
 
 // SkillDetailBody defines model for SkillDetailBody.
 type SkillDetailBody struct {
-	Compatibility string            `json:"compatibility,omitempty"`
-	ContentSha    string            `json:"contentSha"`
-	Description   string            `json:"description"`
-	Editable      bool              `json:"editable"`
-	Kind          string            `json:"kind"`
-	License       string            `json:"license,omitempty"`
-	Name          string            `json:"name"`
-	OrgID         string            `json:"orgId"`
-	References    map[string]string `json:"references"`
-	SkillMd       string            `json:"skillMd"`
-	UpdatedAt     time.Time         `json:"updatedAt"`
+	// BinaryReferences Sorted paths of aux files whose content is NOT valid UTF-8 (e.g.
+	// images, other binaries). Their bytes are never inlined into
+	// `references` — encoding/json silently replaces invalid UTF-8 with
+	// U+FFFD rather than erroring, so inlining would corrupt the file
+	// content without any visible failure. The console renders these
+	// entries name-only.
+	BinaryReferences []string          `json:"binaryReferences"`
+	Compatibility    string            `json:"compatibility,omitempty"`
+	ContentSha       string            `json:"contentSha"`
+	Description      string            `json:"description"`
+	Editable         bool              `json:"editable"`
+	Kind             string            `json:"kind"`
+	License          string            `json:"license,omitempty"`
+	Name             string            `json:"name"`
+	OrgID            string            `json:"orgId"`
+	References       map[string]string `json:"references"`
+	SkillMd          string            `json:"skillMd"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
 }
 
 // SkillSummary defines model for SkillSummary.

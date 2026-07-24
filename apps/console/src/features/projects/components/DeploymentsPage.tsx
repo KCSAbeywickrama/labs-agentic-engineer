@@ -185,8 +185,6 @@ function BoardColumn({
   projectName,
   version,
   validation,
-  validationIssue,
-  validationUrl,
 }: {
   title: string;
   column: string;
@@ -195,11 +193,8 @@ function BoardColumn({
   projectName: string;
   version?: string;
   // The whole-project validation run state for this environment (dev only).
-  // null = nothing to show. With the issue number the chip opens the internal
-  // validation log page; the external PR/issue URL is only a fallback.
+  // null = nothing to show; otherwise the chip opens the Validation page.
   validation?: ReturnType<typeof validationView>;
-  validationIssue?: number;
-  validationUrl?: string;
 }) {
   // Capitalize the shared lowercase label for the chip ("validating" → "Validating").
   const validationLabel = validation
@@ -230,40 +225,20 @@ function BoardColumn({
                 title="Spec version live in this environment"
               />
             )}
-            {validation &&
-              (validationIssue ? (
-                <LinkChip
-                  label={validationLabel}
-                  size="small"
-                  color={validation.tone as "info" | "success" | "error"}
-                  variant="outlined"
-                  clickable
-                  to="/projects/$projectName/deployments/validation/$issueNumber"
-                  params={{ projectName, issueNumber: validationIssue }}
-                  title="Open the validation log"
-                />
-              ) : validationUrl ? (
-                <Chip
-                  label={validationLabel}
-                  size="small"
-                  color={validation.tone as "info" | "success" | "error"}
-                  variant="outlined"
-                  clickable
-                  component="a"
-                  href={validationUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Open the validation PR"
-                />
-              ) : (
-                <Chip
-                  label={validationLabel}
-                  size="small"
-                  color={validation.tone as "info" | "success" | "error"}
-                  variant="outlined"
-                  title="Validation status"
-                />
-              ))}
+            {validation && (
+              // Opens the top-level Validation page, which owns the report, the
+              // run log, and the issue/PR links across every lifecycle state.
+              <LinkChip
+                label={validationLabel}
+                size="small"
+                color={validation.tone as "info" | "success" | "error"}
+                variant="outlined"
+                clickable
+                to="/projects/$projectName/validation"
+                params={{ projectName }}
+                title="Open validation"
+              />
+            )}
           </>
         }
       >
@@ -300,14 +275,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const status = useProjectStatus(projectName);
   const devVersion = status.data?.deploy.version || undefined;
   // Whole-project validation runs against dev after components deploy; surface
-  // its coarse state on the Development column header. The chip always opens the
-  // internal validation log page (via the issue number) — live progress while it
-  // runs, the historical runner log once it finished; the page itself links out
-  // to the issue and PR. The external URL is only the fallback when the status
-  // payload carries no issue number.
+  // its coarse state on the Development column header. The chip opens the
+  // top-level Validation page, which owns the report, the run log, and the
+  // issue/PR links across every lifecycle state.
   const devValidation = validationView(status.data?.deploy.validation ?? "");
-  const devValidationIssue = status.data?.deploy.validationIssue || undefined;
-  const devValidationUrl = status.data?.deploy.validationUrl || undefined;
 
   // Unconditional, like Builds (Task 5): the back link and project status
   // stay reachable through every state below, not just the loaded board.
@@ -392,8 +363,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           projectName={projectName}
           {...(devVersion && { version: devVersion })}
           validation={devValidation}
-          {...(devValidationIssue && { validationIssue: devValidationIssue })}
-          {...(devValidationUrl && { validationUrl: devValidationUrl })}
         />
         <BoardColumn
           title="Production"
