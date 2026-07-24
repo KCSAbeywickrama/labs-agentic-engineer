@@ -220,10 +220,10 @@ func skillDetailBody(sk *spec.Skill, editable bool) gen.SkillDetailBody {
 	}
 }
 
-// skillEditable mirrors the skills feature's user-kind rule: only user-owned
-// kinds (custom/imported) are editable — org + platform are reconcile-managed.
+// skillEditable is a thin call to the package spec's single editability seam
+// — org + imported are editable, platform is reconcile-managed and read-only.
 func skillEditable(kind string) bool {
-	return kind == spec.SkillKindCustom || kind == spec.SkillKindImported
+	return spec.SkillEditable(kind)
 }
 
 // requireSlug validates a single DNS-label slug path param, returning a 400

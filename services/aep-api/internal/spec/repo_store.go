@@ -66,8 +66,20 @@ const (
 var legacyKindDirs = map[string]string{
 	"builtin":  SkillKindOrg,
 	"flow":     SkillKindPlatform,
-	"custom":   SkillKindCustom,
+	"custom":   SkillKindOrg,
 	"imported": SkillKindImported,
+}
+
+// legacyUserDirs are the legacy dirs that were never platform output —
+// "custom" (now folded into the org kind) and "imported". Reconcile's legacy
+// migration keys off this set, not the mapped kind, to tell a user-authored
+// legacy skill (must survive migration) apart from a retired platform one
+// living in "builtin"/"flow" (must fall to the wholesale legacy-dir purge):
+// since the fold, both the user and platform legacy dirs can map to the same
+// kind (org), so kind alone no longer carries that distinction.
+var legacyUserDirs = map[string]bool{
+	"custom":   true,
+	"imported": true,
 }
 
 // SkillService is the repo-backed read/reconcile surface for skills. It also
@@ -163,8 +175,10 @@ func (s *SkillService) List(ctx context.Context, orgID string) ([]Skill, error) 
 
 // ListSummaries is the skills-page projection: every kind, projected to
 // (name, kind, description, ...). Platform skills list READ-ONLY (the page
-// shows the generation-flow guidance for inspection); only user-owned kinds
-// are editable — org + platform are reconcile-managed.
+// shows the generation-flow guidance for inspection); org + imported are
+// editable per SkillEditable — editability is decoupled from ownership, so a
+// platform-seeded org skill (e.g. "go") is editable in place even though
+// reconcile still manages its baseline.
 func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]SkillSummary, error) {
 	skills := s.catalog(ctx, orgID)
 	out := make([]SkillSummary, 0, len(skills))
@@ -174,7 +188,7 @@ func (s *SkillService) ListSummaries(ctx context.Context, orgID string) ([]Skill
 			Kind:        sk.Kind,
 			Description: sk.Description,
 			ContentSHA:  sk.ContentSHA,
-			Editable:    sk.Kind == SkillKindCustom || sk.Kind == SkillKindImported,
+			Editable:    SkillEditable(sk.Kind),
 		})
 	}
 	return out, nil
@@ -541,21 +555,20 @@ func (s *SkillService) deleteSkillDir(ctx context.Context, orgID, name, message 
 
 // ---- helpers ---------------------------------------------------------------
 
-// kindRank orders org < platform < custom < imported. The dedup rule keeps the
-// HIGHER rank, so a custom/imported skill owns its name over a same-named
-// platform-shipped skill (the legacy shadow semantics, "org wins").
+// kindRank orders org < platform < imported. The dedup rule keeps the HIGHER
+// rank, so an imported skill owns its name over a same-named platform-shipped
+// skill (the legacy shadow semantics, "org wins"). The retired custom kind
+// shared org's rank and folds into it.
 func kindRank(kind string) int {
 	switch kind {
 	case SkillKindOrg:
 		return 0
 	case SkillKindPlatform:
 		return 1
-	case SkillKindCustom:
-		return 2
 	case SkillKindImported:
-		return 3
+		return 2
 	default:
-		return 4
+		return 3
 	}
 }
 

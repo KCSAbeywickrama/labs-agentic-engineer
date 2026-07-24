@@ -124,9 +124,14 @@ func (s *SkillService) Reconcile(ctx context.Context, orgID string) (int, error)
 	return s.reconcileEmbedded(ctx, orgID, repo)
 }
 
-// isUserKind reports whether a kind is user-owned (never touched by reconcile).
+// isUserKind reports whether a kind is user-owned (never touched by
+// reconcile). Org is no longer a user-owned kind here: a platform-seeded org
+// skill and a user-authored one share the org kind, and reconcile tells them
+// apart via the skills-manifest.json baseline (an org skill with no manifest
+// entry is org-authored and reconcile's embedded-skill loop never visits an
+// unrelated name, so it is never touched either).
 func isUserKind(kind string) bool {
-	return kind == SkillKindCustom || kind == SkillKindImported
+	return kind == SkillKindImported
 }
 
 // reconcileEmbedded drives the whole repo to the desired flat state in ONE
@@ -254,9 +259,18 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		}
 	}
 
-	// Legacy migration of user-kind skills: unchanged from today.
+	// Legacy migration of user-authored skills living in a legacy USER dir
+	// (skills/custom/<name>/, skills/imported/<name>/) that the embedded loop
+	// above didn't already claim. isUserKind(cur.Kind) alone can no longer
+	// select these: org is no longer user-owned by kind, and the retired
+	// "custom" dir now folds to the SAME kind (org) as the retired "builtin"
+	// dir, so kind can't tell a user-authored legacy skill (must survive
+	// migration) from a retired platform one (must fall to the wholesale
+	// legacy-dir purge below, same as pre-fold). The legacy dir NAME still
+	// carries that distinction — legacyUserDirs are the dirs that were never
+	// platform output.
 	for name, cur := range current {
-		if isUserKind(cur.Kind) && cur.legacyDir != "" {
+		if legacyUserDirs[cur.legacyDir] && !embeddedNames[name] {
 			migrated++
 			stamped, serr := stampFrontmatterKind(cur.SkillMD, cur.Kind)
 			if serr != nil {

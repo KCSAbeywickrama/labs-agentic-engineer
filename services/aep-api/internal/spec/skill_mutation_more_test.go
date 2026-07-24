@@ -52,8 +52,8 @@ func TestUpdate_HappyAndGuards(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		if sk == nil || sk.Kind != "custom" || sk.Description != "revised." {
-			t.Fatalf("updated skill = %+v, want the revised custom content", sk)
+		if sk == nil || sk.Kind != SkillKindOrg || sk.Description != "revised." {
+			t.Fatalf("updated skill = %+v, want the revised org-kind content", sk)
 		}
 		got, _ := svc.Resolve(ctx, "org1", "my-skill")
 		if got == nil || got.Description != "revised." {
@@ -67,10 +67,24 @@ func TestUpdate_HappyAndGuards(t *testing.T) {
 		assertIssueCode(t, err, "NAME_IMMUTABLE")
 	})
 
-	t.Run("updating a builtin is forbidden", func(t *testing.T) {
+	t.Run("updating an org skill (platform-seeded) is now allowed", func(t *testing.T) {
+		// Editability is decoupled from ownership: "go" is a platform-seeded
+		// org skill, and org is editable per SkillEditable — editing it keeps
+		// its kind org (an override reconcile will leave alone).
 		body := "---\nname: go\ndescription: d.\nmetadata:\n  aep.version: \"1\"\n---\n\nbody\n"
-		if _, err := mut.Update(ctx, "org1", "tester", "go", UpdateSkillInput{SkillMD: body}); !errors.Is(err, ErrSkillNotEditable) {
-			t.Fatalf("update builtin err = %v, want ErrSkillNotEditable", err)
+		sk, err := mut.Update(ctx, "org1", "tester", "go", UpdateSkillInput{SkillMD: body})
+		if err != nil {
+			t.Fatalf("Update go: %v", err)
+		}
+		if sk.Kind != SkillKindOrg {
+			t.Fatalf("updated go kind = %q, want org (kind preserved)", sk.Kind)
+		}
+	})
+
+	t.Run("updating a platform skill is forbidden", func(t *testing.T) {
+		body := "---\nname: task-planning\ndescription: d.\nmetadata:\n  aep.version: \"1\"\n---\n\nbody\n"
+		if _, err := mut.Update(ctx, "org1", "tester", "task-planning", UpdateSkillInput{SkillMD: body}); !errors.Is(err, ErrSkillNotEditable) {
+			t.Fatalf("update platform skill err = %v, want ErrSkillNotEditable", err)
 		}
 	})
 
@@ -82,7 +96,7 @@ func TestUpdate_HappyAndGuards(t *testing.T) {
 	})
 }
 
-func TestUpdate_ImportedNotUpdatable(t *testing.T) {
+func TestUpdate_ImportedIsUpdatable(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
@@ -92,8 +106,8 @@ func TestUpdate_ImportedNotUpdatable(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Import a skill, then attempt to PUT it — imported skills are replaced via
-	// re-import, not update, so the service reports it as not-found.
+	// Import a skill, then PUT it — imported is editable per SkillEditable, and
+	// Update preserves the kind (imported stays imported).
 	tgz := makeTarGz(t, map[string]string{
 		"imp-skill/":         "",
 		"imp-skill/SKILL.md": skillMDNamed("imp-skill", ""),
@@ -102,8 +116,12 @@ func TestUpdate_ImportedNotUpdatable(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 	body := skillMDNamed("imp-skill", "")
-	if _, err := mut.Update(ctx, "org1", "tester", "imp-skill", UpdateSkillInput{SkillMD: body}); !errors.Is(err, ErrSkillNotFound) {
-		t.Fatalf("update imported err = %v, want ErrSkillNotFound", err)
+	sk, err := mut.Update(ctx, "org1", "tester", "imp-skill", UpdateSkillInput{SkillMD: body})
+	if err != nil {
+		t.Fatalf("update imported err = %v, want success", err)
+	}
+	if sk.Kind != SkillKindImported {
+		t.Fatalf("updated imported kind = %q, want imported (kind preserved)", sk.Kind)
 	}
 }
 

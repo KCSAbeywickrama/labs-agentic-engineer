@@ -372,7 +372,7 @@ func TestReconcile_NoopWhenUpToDate(t *testing.T) {
 	}
 }
 
-func TestCreateAndDeleteCustomSkill(t *testing.T) {
+func TestCreateOrgSkill_EditableNotDeletable(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestStore(t)
 	mut := NewSkillMutationService(svc)
@@ -392,8 +392,8 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created == nil || created.Kind != "custom" {
-		t.Fatalf("created skill = %+v, want kind=custom", created)
+	if created == nil || created.Kind != SkillKindOrg {
+		t.Fatalf("created skill = %+v, want kind=org", created)
 	}
 
 	resolved, err := svc.Resolve(ctx, "org1", "payments-pci")
@@ -408,7 +408,7 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 		}
 	}
 	if found == nil || !found.Editable {
-		t.Fatalf("custom skill should appear in summaries as editable; got %+v", found)
+		t.Fatalf("org skill should appear in summaries as editable; got %+v", found)
 	}
 
 	// Duplicate create → collision.
@@ -416,13 +416,12 @@ func TestCreateAndDeleteCustomSkill(t *testing.T) {
 		t.Fatalf("duplicate create err = %v, want ErrSkillNameCollision", err)
 	}
 
-	// Delete → gone.
-	if err := mut.Delete(ctx, "org1", "tester", "payments-pci"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	gone, _ := svc.Resolve(ctx, "org1", "payments-pci")
-	if gone != nil {
-		t.Fatalf("skill should be gone after delete, got %+v", gone)
+	// Delete is scoped to imported skills only (Delete's gate is isUserKind,
+	// unchanged by the fold) — an org skill, user-authored or platform-seeded,
+	// cannot be told apart from a same-kind mutation call, so it is not
+	// deletable through this path even though it is editable.
+	if err := mut.Delete(ctx, "org1", "tester", "payments-pci"); !errors.Is(err, ErrSkillNotEditable) {
+		t.Fatalf("delete org skill err = %v, want ErrSkillNotEditable", err)
 	}
 }
 
@@ -485,8 +484,9 @@ func TestRead_SeesExternalOriginCommitImmediately(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	// An external writer commits a flat, custom-stamped skill (the layout the
-	// service itself writes).
+	// An external writer commits a flat skill stamped with the retired
+	// "custom" kind (back-compat: a stored skill predating the fold still
+	// reads back as org).
 	external := mkSkillMD("external-skill", "custom", "external body")
 	host.writeAtHead("org1", skillRepoPath("external-skill"), external)
 
@@ -495,7 +495,7 @@ func TestRead_SeesExternalOriginCommitImmediately(t *testing.T) {
 		t.Fatalf("List 2: %v", err)
 	}
 	sk, ok := nameSet(got)["external-skill"]
-	if !ok || sk.Kind != SkillKindCustom {
+	if !ok || sk.Kind != SkillKindOrg {
 		t.Fatalf("externally committed skill not visible on next read: %v", skillKeysOf(nameSet(got)))
 	}
 }

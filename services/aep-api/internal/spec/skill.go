@@ -33,7 +33,7 @@ import (
 type Skill struct {
 	OrgID         string            `json:"orgId"`
 	Name          string            `json:"name"`
-	Kind          string            `json:"kind"` // platform | org | custom | imported
+	Kind          string            `json:"kind"` // platform | org | imported
 	Description   string            `json:"description"`
 	SkillMD       string            `json:"skillMd"`
 	References    map[string]string `json:"references"`
@@ -46,19 +46,28 @@ type Skill struct {
 // Skill kinds. A SKILL.md declares its kind in frontmatter `metadata.aep.kind`;
 // absent means
 // SkillKindOrg. platform + org are platform-shipped and reconciled from the
-// embedded library; custom + imported are user-owned and stamped on write.
+// embedded library (org is also the kind a newly-authored skill is stamped
+// with — a user-created skill and a platform-seeded one share the org kind;
+// reconcile tells them apart via the skills-manifest.json baseline, not the
+// kind); imported is user-owned and stamped on write. The retired
+// SkillKindCustom kind has folded into org (frontmatterKind reads a stored
+// "custom" back as org for back-compat).
 const (
 	// SkillKindPlatform — generation-flow guidance; hidden from the skills
 	// page and the updates badge (was kind "flow").
 	SkillKindPlatform = "platform"
-	// SkillKindOrg — the org-visible stack skills; read-only on the skills
-	// page, feeds coding-runner skillsApplied (was kind "builtin").
+	// SkillKindOrg — the org-visible stack skills, platform-seeded or
+	// user-authored; feeds coding-runner skillsApplied (was kind "builtin").
 	SkillKindOrg = "org"
-	// SkillKindCustom — user-authored via create/update; editable.
-	SkillKindCustom = "custom"
 	// SkillKindImported — imported from an AgentSkills tarball; editable.
 	SkillKindImported = "imported"
 )
+
+// SkillEditable is the single editability rule, decoupled from ownership so
+// platform-seeded skills can be edited without changing kind. Today: org +
+// imported are editable, the AE-owned platform (agent-workflow/generation
+// guidance) kind is read-only.
+func SkillEditable(kind string) bool { return kind != SkillKindPlatform }
 
 // SkillsRepoSentinelProjectID and SkillsRepoDirName re-export the canonical
 // gitfs constants (§11.3 — the workspace-naming vocabulary lives in the package

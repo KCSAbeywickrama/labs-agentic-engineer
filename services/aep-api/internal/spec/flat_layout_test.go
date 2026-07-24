@@ -46,7 +46,7 @@ func TestStampFrontmatterKind(t *testing.T) {
 	t.Run("stamps an unmarked skill", func(t *testing.T) {
 		t.Parallel()
 		in := mkSkillMD("alpha", "", "BODY-α")
-		out, err := stampFrontmatterKind(in, SkillKindCustom)
+		out, err := stampFrontmatterKind(in, SkillKindOrg)
 		if err != nil {
 			t.Fatalf("stamp: %v", err)
 		}
@@ -54,8 +54,8 @@ func TestStampFrontmatterKind(t *testing.T) {
 		if err != nil {
 			t.Fatalf("re-parse: %v", err)
 		}
-		if got := frontmatterKind(fm); got != SkillKindCustom {
-			t.Fatalf("kind after stamp = %q, want custom", got)
+		if got := frontmatterKind(fm); got != SkillKindOrg {
+			t.Fatalf("kind after stamp = %q, want org", got)
 		}
 		if fm.Name != "alpha" || fm.Description == "" {
 			t.Fatalf("stamp lost frontmatter fields: %+v", fm)
@@ -67,8 +67,8 @@ func TestStampFrontmatterKind(t *testing.T) {
 
 	t.Run("idempotent for an already-stamped kind", func(t *testing.T) {
 		t.Parallel()
-		in := mkSkillMD("alpha", "custom", "BODY")
-		out, err := stampFrontmatterKind(in, SkillKindCustom)
+		in := mkSkillMD("alpha", "org", "BODY")
+		out, err := stampFrontmatterKind(in, SkillKindOrg)
 		if err != nil {
 			t.Fatalf("stamp: %v", err)
 		}
@@ -79,9 +79,9 @@ func TestStampFrontmatterKind(t *testing.T) {
 
 	t.Run("overrides a spoofed kind", func(t *testing.T) {
 		t.Parallel()
-		// A create/import must not let user content claim platform/org status.
-		in := mkSkillMD("alpha", "org", "BODY")
-		out, err := stampFrontmatterKind(in, SkillKindCustom)
+		// A create/import must not let user content claim platform status.
+		in := mkSkillMD("alpha", "platform", "BODY")
+		out, err := stampFrontmatterKind(in, SkillKindOrg)
 		if err != nil {
 			t.Fatalf("stamp: %v", err)
 		}
@@ -89,8 +89,8 @@ func TestStampFrontmatterKind(t *testing.T) {
 		if err != nil {
 			t.Fatalf("re-parse: %v", err)
 		}
-		if got := frontmatterKind(fm); got != SkillKindCustom {
-			t.Fatalf("kind after stamp = %q, want custom (spoof must not survive)", got)
+		if got := frontmatterKind(fm); got != SkillKindOrg {
+			t.Fatalf("kind after stamp = %q, want org (spoof must not survive)", got)
 		}
 	})
 
@@ -229,21 +229,20 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	if _, ok := byName["retired"]; ok {
 		t.Fatalf("retired legacy builtin must be purged")
 	}
-	// Preserved custom skill: flat, stamped, references intact, editable kind.
+	// Preserved custom skill: flat, references intact. The retired "custom"
+	// legacy dir now folds to org (legacyKindDirs["custom"] == SkillKindOrg).
 	mine := byName["mine"]
-	if mine.Kind != SkillKindCustom {
-		t.Fatalf("mine kind = %q, want custom", mine.Kind)
+	if mine.Kind != SkillKindOrg {
+		t.Fatalf("mine kind = %q, want org (custom folds into org)", mine.Kind)
 	}
 	if mine.References["references/r.md"] != "my ref" {
 		t.Fatalf("mine references lost: %v", mine.References)
 	}
-	if !strings.Contains(origin.FileAt(t, "main", "skills/mine/SKILL.md"), "kind: custom") {
-		t.Fatalf("migrated custom skill must be stamped")
-	}
-	// Shadow: the user copy owns the name; the embedded org skill is skipped.
+	// Shadow: the user's diverged content is preserved as an override, not
+	// clobbered back to the embed's content.
 	rw := byName["react-webapp"]
-	if rw.Kind != SkillKindCustom || !strings.Contains(rw.SkillMD, "user shadow") {
-		t.Fatalf("shadow must resolve custom-wins, got kind=%q body=%q", rw.Kind, rw.SkillMD)
+	if rw.Kind != SkillKindOrg || !strings.Contains(rw.SkillMD, "user shadow") {
+		t.Fatalf("shadow must preserve the user's content, got kind=%q body=%q", rw.Kind, rw.SkillMD)
 	}
 	// Divergent legacy copies of embedded names predate the manifest, so under
 	// the three-way reconcile they are pre-manifest backfill-overrides: moved
@@ -257,14 +256,18 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 		t.Fatalf("divergent pre-manifest legacy copy of task-planning must be preserved as an override, not rewritten from the embed")
 	}
 
-	// The badge must not offer an "update" for a user-owned name.
+	// react-webapp is now an org-kind override of an embedded name (org is no
+	// longer user-owned by kind post-fold), so it correctly surfaces on the
+	// badge as "overridden" rather than being skipped outright — the badge
+	// must never offer it as an "update" (never propose clobbering the org's
+	// content back to the embed).
 	ups, err := c.Svc.UpdatesAvailable(ctx, "org1")
 	if err != nil {
 		t.Fatalf("UpdatesAvailable: %v", err)
 	}
 	for _, u := range ups {
-		if u.Name == "react-webapp" {
-			t.Fatalf("user-owned name must not surface on the updates badge: %+v", ups)
+		if u.Name == "react-webapp" && u.State != "overridden" {
+			t.Fatalf("react-webapp must surface as overridden, not %q: %+v", u.State, ups)
 		}
 	}
 
