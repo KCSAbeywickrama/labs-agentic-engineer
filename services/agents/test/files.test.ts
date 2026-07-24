@@ -47,8 +47,9 @@ const loadSkillExec = (skills: SkillSourceArg): LoadSkillExec =>
 test("buildFileTools omits loadSkill when no skills are supplied (skill-free = today)", () => {
   const tools = buildFileTools(new FileBundle({}));
   assert.equal(LOAD_SKILL in tools, false);
-  // The file-mutation tools are always present, in declaration order.
-  assert.deepEqual(Object.keys(tools), ["addFile", "editFile", "removeFile"]);
+  // The file-mutation tools plus the always-registered HITL question tools
+  // (console ADR-0012 / #270), in declaration order.
+  assert.deepEqual(Object.keys(tools), ["addFile", "editFile", "removeFile", "ask_question", "ask_questions"]);
 });
 
 test("buildFileTools registers loadSkill when skills are supplied", () => {
