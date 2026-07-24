@@ -49,17 +49,21 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   the org-skills repo, `AgentTurn` (turn lifecycle) + the resumable-turn SSE broker (in-memory seam).
 - **The Skill library.** One flat authored library at repo-root `skills/` (`<name>/SKILL.md` +
   `references/`), COPY'd into the image and read at runtime from `config.SkillsDir` (default `/app/skills`)
-  — not go:embed'd. Kind (`platform | org | custom | imported`) lives in frontmatter `metadata.aep.kind`,
-  absent ⇒ `org`: platform/org are library-shipped + reconcile-managed (read-only), custom/imported are
-  user-owned + editable. Each org's flat `org-skills` repo is reconciled THREE-WAY against a
-  `skills-manifest.json` baseline (`{name: {kind, source?, baseHash}}`) written in the same commit as any
-  skill files: clean copy + platform moved → refresh and advance the baseline; org moved → override, left
-  alone; both moved → conflict, left alone and surfaced by `/updates` (states `update` / `overridden` /
-  `conflict`); both moved but converged on identical content → auto-resolves clean. A pre-manifest repo
-  copy is backfilled (baseline stamped; a divergent copy is treated as an override, never clobbered).
-  Names with no manifest entry are org-authored and never touched. Purge only retires manifest-tracked
-  platform entries with a clean copy; an overridden retiree keeps its files and just loses the entry,
-  becoming a plain org skill.
+  — not go:embed'd. Kind (`platform | org | imported`) lives in frontmatter `metadata.aep.kind`, absent ⇒
+  `org` (a stored legacy `custom` also reads back as `org`). Kind is an ownership label, not the
+  editability switch: `SkillEditable(kind)` is the single seam — org + imported are editable, platform
+  is read-only — so a platform-seeded skill can be unlocked for editing without reclassifying it. Each
+  org's flat `org-skills` repo is reconciled THREE-WAY against a `skills-manifest.json` baseline
+  (`{name: {origin, source?, baseHash}}`, `origin` = `platform`) written in the same commit as any skill
+  files: reconcile keys off manifest presence/origin, never off the skill's `kind` — clean copy + platform
+  moved → refresh and advance the baseline; org moved → override, left alone; both moved → conflict, left
+  alone and surfaced by `/updates` (states `update` / `overridden` / `conflict`); both moved but converged
+  on identical content → auto-resolves clean. A pre-manifest repo copy is backfilled (baseline stamped; a
+  divergent copy is treated as an override, never clobbered). Names with no manifest entry are org-authored
+  and never touched — this is what lets a user-authored `org`-kind skill coexist with platform-seeded
+  `org`-kind skills without reconcile confusing the two. Purge only retires manifest-tracked platform
+  entries with a clean copy; an overridden retiree keeps its files and just loses the entry, becoming a
+  plain org skill.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.

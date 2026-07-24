@@ -144,8 +144,8 @@ export const skillsSyncError: ApiError = {
   message: "Failed to create the skills repository on GitHub",
 };
 
-// Covers all four kinds (org | platform | custom | imported — the BE's real
-// vocabulary; builtin/flow are retired) so the catalogue's kind chips,
+// Covers all three kinds (org | platform | imported — the BE's real
+// vocabulary; custom/builtin/flow are retired) so the catalogue's kind chips,
 // read-only vs editable actions, and the updates-available list all exercise.
 // More than one page of skills (10/page, issue #172) so the flat list's
 // pagination is exercisable in mock mode.
@@ -232,7 +232,7 @@ Break the approved design into a sequence of buildable tasks.`,
   {
     orgId: "org-1",
     name: "acme-deploy-checklist",
-    kind: "custom",
+    kind: "org",
     editable: true,
     description: "Acme's internal pre-deploy checklist.",
     skillMd: `---
@@ -350,7 +350,7 @@ Every requirement gets at least one validation criterion.`,
   {
     orgId: "org-1",
     name: "acme-api-style",
-    kind: "custom",
+    kind: "org",
     editable: true,
     description: "Acme's REST API naming and versioning conventions.",
     skillMd: `---

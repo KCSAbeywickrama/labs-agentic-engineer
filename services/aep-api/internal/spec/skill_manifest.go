@@ -19,9 +19,10 @@ package spec
 // skills-manifest.json — the per-org baseline memory (spec §3). A
 // platform-managed sidecar at the org-skills repo ROOT recording, per
 // non-org-authored skill, the content it was last handed at: platform-shipped
-// skills get kind "platform" (whatever their frontmatter kind — the manifest
-// kind is provenance, the frontmatter kind is a human label), imports get
-// "imported" + their source. baseHash is contentSHA output (bare hex). A
+// skills get origin "platform" (whatever their frontmatter kind — the manifest
+// origin is provenance, the frontmatter kind is a human ownership label),
+// imports get origin "imported" + their source. baseHash is contentSHA output
+// (bare hex). A
 // skill with NO entry is org-authored: reconcile never touches it. Parsing
 // is tolerant — a corrupt manifest must never brick reads; the next
 // reconcile rewrites it. Rendering is deterministic (encoding/json sorts map

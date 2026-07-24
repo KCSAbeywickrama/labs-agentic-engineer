@@ -30,8 +30,8 @@ package spec
 // on identical content, which auto-resolves clean; a pre-manifest repo copy
 // is backfilled (baseline stamped so future compares work, a divergent copy
 // treated as an override and never clobbered). The manifest is rewritten in
-// the SAME commit as any file changes it reflects. A name owned by a user
-// kind (custom/imported) never carries a platform manifest entry, so it is
+// the SAME commit as any file changes it reflects. A name owned by the user
+// kind (imported) never carries a platform manifest entry, so it is
 // skipped outright — the user copy always wins. Names the manifest still
 // tracks as platform-shipped that the embed no longer ships are purged: a
 // clean copy's files are deleted; an overridden copy's files are kept and
@@ -234,7 +234,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		embeddedNames[b.Name] = true
 		cur, ok := current[b.Name]
 		if ok && isUserKind(cur.Kind) {
-			continue // a custom/imported copy owns this name — never touch it
+			continue // an imported copy owns this name — never touch it
 		}
 		var entry *ManifestEntry
 		if e, has := manifest[b.Name]; has {

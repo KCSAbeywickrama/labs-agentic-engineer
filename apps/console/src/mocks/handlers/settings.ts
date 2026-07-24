@@ -335,7 +335,7 @@ export const settingsHandlers = [
     const created: SkillDetailBody = {
       orgId: "org-1",
       name: body.name,
-      kind: "custom",
+      kind: "org",
       editable: true,
       description: extractDescription(body.skillMd),
       skillMd: body.skillMd,
