@@ -174,7 +174,7 @@ func TestImport_WritesManifestEntry(t *testing.T) {
 
 	m := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
 	e, ok := m[res.Name]
-	if !ok || e.Kind != ManifestKindImported || e.BaseHash == "" {
+	if !ok || e.Origin != ManifestOriginImported || e.BaseHash == "" {
 		t.Fatalf("imported manifest entry missing/wrong: %#v", m)
 	}
 

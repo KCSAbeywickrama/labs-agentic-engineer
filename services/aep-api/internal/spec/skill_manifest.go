@@ -36,20 +36,42 @@ import (
 // deliberately OUTSIDE skills/ so isCatalogPath never surfaces it as a skill.
 const skillsManifestPath = "skills-manifest.json"
 
-// Manifest provenance kinds. Distinct vocabulary from the frontmatter skill
+// Manifest provenance origins. Distinct vocabulary from the frontmatter skill
 // kinds: "platform" covers every embedded-library skill (frontmatter platform
 // AND org kinds alike).
 const (
-	ManifestKindPlatform = "platform"
-	ManifestKindImported = "imported"
+	ManifestOriginPlatform = "platform"
+	ManifestOriginImported = "imported"
 )
 
 // ManifestEntry is one skill's baseline: what it is, where it came from, and
 // the contentSHA it was last handed at.
 type ManifestEntry struct {
-	Kind     string `json:"kind"`
+	Origin   string `json:"origin"`
 	Source   string `json:"source,omitempty"`
 	BaseHash string `json:"baseHash"`
+}
+
+// UnmarshalJSON tolerates the pre-rename "kind" field (manifests written
+// before the origin rename) by mapping it onto Origin when "origin" is
+// absent.
+func (e *ManifestEntry) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Origin   string `json:"origin"`
+		Kind     string `json:"kind"`
+		Source   string `json:"source"`
+		BaseHash string `json:"baseHash"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	e.Origin = raw.Origin
+	if e.Origin == "" {
+		e.Origin = raw.Kind // legacy
+	}
+	e.Source = raw.Source
+	e.BaseHash = raw.BaseHash
+	return nil
 }
 
 // SkillsManifest maps skill name → baseline entry.
@@ -113,7 +135,7 @@ func decideReconcile(embeddedSHA, repoSHA string, repoExists bool, entry *Manife
 		}
 		return actionBackfillOverride
 	}
-	if entry.Kind != ManifestKindPlatform {
+	if entry.Origin != ManifestOriginPlatform {
 		return actionSkip // imported-owned name: reconcile never manages it
 	}
 	orgMoved := repoSHA != entry.BaseHash

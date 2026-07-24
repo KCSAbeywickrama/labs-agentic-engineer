@@ -47,7 +47,7 @@ func TestReconcile_SeedWritesManifestSameCommit(t *testing.T) {
 	}
 	raw := host.readAtHead("org1", skillsManifestPath)
 	m := parseSkillsManifest([]byte(raw))
-	if m["demo"].Kind != ManifestKindPlatform || m["demo"].BaseHash == "" {
+	if m["demo"].Origin != ManifestOriginPlatform || m["demo"].BaseHash == "" {
 		t.Fatalf("seed manifest entry missing/wrong: %q -> %#v", raw, m)
 	}
 }

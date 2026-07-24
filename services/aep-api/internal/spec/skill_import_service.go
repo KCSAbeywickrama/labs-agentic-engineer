@@ -104,7 +104,7 @@ func (s *SkillImportService) Import(ctx context.Context, orgID, actor string, r 
 	}
 
 	entry := &ManifestEntry{
-		Kind:     ManifestKindImported,
+		Origin:   ManifestOriginImported,
 		BaseHash: contentSHA(stamped, normalizeRefs(refs)),
 		// Source stays empty for tarball imports — there is no upstream to
 		// check; a future URL-based import flow fills it (spec §3:

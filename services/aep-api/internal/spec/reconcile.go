@@ -200,7 +200,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 		}
 	}
 	setBase := func(name, sha string) {
-		want := ManifestEntry{Kind: ManifestKindPlatform, BaseHash: sha}
+		want := ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: sha}
 		if manifest[name] != want {
 			manifest[name] = want
 			manifestDirty = true
@@ -272,7 +272,7 @@ func (s *SkillService) reconcileEmbedded(ctx context.Context, orgID string, repo
 	// drop the entry (divergence = ownership, it becomes a plain org skill).
 	// Names with no manifest entry are org-authored and never touched.
 	for name, entry := range manifest {
-		if entry.Kind != ManifestKindPlatform || embeddedNames[name] {
+		if entry.Origin != ManifestOriginPlatform || embeddedNames[name] {
 			continue
 		}
 		purged++

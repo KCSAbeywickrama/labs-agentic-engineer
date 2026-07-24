@@ -22,14 +22,15 @@ package spec
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
 func TestSkillsManifest_ParseRenderRoundTrip(t *testing.T) {
 	t.Parallel()
 	m := SkillsManifest{
-		"go":            {Kind: ManifestKindPlatform, BaseHash: "ab12"},
-		"agent-browser": {Kind: ManifestKindImported, Source: "vercel-labs/agent-browser", BaseHash: "cd34"},
+		"go":            {Origin: ManifestOriginPlatform, BaseHash: "ab12"},
+		"agent-browser": {Origin: ManifestOriginImported, Source: "vercel-labs/agent-browser", BaseHash: "cd34"},
 	}
 	raw := renderSkillsManifest(m)
 	got := parseSkillsManifest(raw)
@@ -61,7 +62,7 @@ func TestSkillsManifest_ParseTolerant(t *testing.T) {
 
 func TestDecideReconcile(t *testing.T) {
 	t.Parallel()
-	plat := func(base string) *ManifestEntry { return &ManifestEntry{Kind: ManifestKindPlatform, BaseHash: base} }
+	plat := func(base string) *ManifestEntry { return &ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: base} }
 	cases := []struct {
 		name       string
 		embedded   string
@@ -87,7 +88,7 @@ func TestDecideReconcile(t *testing.T) {
 		// content) → auto-resolve: stamp the base, no conflict.
 		{"converged", "E2", "E2", true, plat("E1"), actionBackfill},
 		// A non-platform entry never participates (imported name — defensive).
-		{"imported entry", "E1", "X9", true, &ManifestEntry{Kind: ManifestKindImported, BaseHash: "X9"}, actionSkip},
+		{"imported entry", "E1", "X9", true, &ManifestEntry{Origin: ManifestOriginImported, BaseHash: "X9"}, actionSkip},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -95,5 +96,23 @@ func TestDecideReconcile(t *testing.T) {
 				t.Fatalf("decideReconcile(%s) = %v, want %v", c.name, got, c.want)
 			}
 		})
+	}
+}
+
+func TestSkillsManifest_ReadsLegacyKindField(t *testing.T) {
+	t.Parallel()
+	// A manifest written before the rename uses "kind"; it must read as origin.
+	raw := []byte(`{"go":{"kind":"platform","baseHash":"ab12"}}`)
+	m := parseSkillsManifest(raw)
+	if m["go"].Origin != ManifestOriginPlatform || m["go"].BaseHash != "ab12" {
+		t.Fatalf("legacy kind field not read as origin: %#v", m["go"])
+	}
+}
+
+func TestSkillsManifest_RendersOriginField(t *testing.T) {
+	t.Parallel()
+	raw := renderSkillsManifest(SkillsManifest{"go": {Origin: ManifestOriginPlatform, BaseHash: "ab12"}})
+	if !strings.Contains(string(raw), `"origin": "platform"`) || strings.Contains(string(raw), `"kind"`) {
+		t.Fatalf("render must emit origin, not kind: %s", raw)
 	}
 }

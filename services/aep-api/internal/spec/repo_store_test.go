@@ -619,10 +619,10 @@ func TestCommitFiles_ManifestMergeSurvivesCASRetry(t *testing.T) {
 			// A concurrent writer lands entry "A" on origin, advancing main
 			// past the base this attempt built on → forces the CAS retry.
 			competitor := parseSkillsManifest([]byte(host.readAtHead("org1", skillsManifestPath)))
-			competitor["A"] = ManifestEntry{Kind: ManifestKindImported, BaseHash: "aaa"}
+			competitor["A"] = ManifestEntry{Origin: ManifestOriginImported, BaseHash: "aaa"}
 			host.writeAtHead("org1", skillsManifestPath, string(renderSkillsManifest(competitor)))
 		}
-		m["B"] = ManifestEntry{Kind: ManifestKindImported, BaseHash: "bbb"}
+		m["B"] = ManifestEntry{Origin: ManifestOriginImported, BaseHash: "bbb"}
 		return m
 	}
 
