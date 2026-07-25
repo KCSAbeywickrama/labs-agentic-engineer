@@ -90,6 +90,36 @@ describe("QuestionCard — single", () => {
   });
 });
 
+describe("QuestionCard — multiSelect", () => {
+  const multi = (): QuestionMessage => ({
+    id: "q3",
+    role: "question",
+    turnId: "t1",
+    toolCallId: "tc-3",
+    questions: [
+      {
+        question: "Which platforms?",
+        multiSelect: true,
+        options: [{ label: "Web" }, { label: "Mobile" }, { label: "Desktop" }],
+      },
+    ],
+  });
+
+  it("allows several selections plus an 'Other' free-text note", () => {
+    const onAnswer = renderCard(multi(), true);
+    fireEvent.click(screen.getByText("Web"));
+    fireEvent.click(screen.getByText("Mobile"));
+    // The "Other…" row must be offered on a multi-select question too — the
+    // answer model carries freeText for any question (ADR-0012).
+    fireEvent.change(screen.getByPlaceholderText("Other / add a note…"), {
+      target: { value: "CLI" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Answer" }));
+    const [, answers] = onAnswer.mock.calls[0]!;
+    expect(answers).toEqual([{ selected: ["Web", "Mobile"], freeText: "CLI" }]);
+  });
+});
+
 describe("QuestionCard — batch (ask_questions)", () => {
   it("renders each question and requires all answered before submit", () => {
     const onAnswer = renderCard(batch(), true);

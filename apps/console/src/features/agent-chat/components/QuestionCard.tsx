@@ -126,7 +126,7 @@ function OneQuestion({
               Note: {note}
             </Typography>
           )
-        : !multi && (
+        : (
             <TextField
               fullWidth
               size="small"
