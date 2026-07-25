@@ -29,6 +29,8 @@
 //   unset            — unchanged: empty rehydrate, no active turn.
 
 import { http, HttpResponse } from "msw";
+import { ANSWER_PREFIX, ANSWERS_PREFIX } from "@aep/agent-stream";
+import { GRILLING_DIRECTIVE } from "@aep/contracts/prompts";
 import {
   activeTeammateTurn,
   multiuserHistory,
@@ -93,12 +95,89 @@ export const agentChatHandlers = [
 
   http.get("*/api/v1/projects/:projectName/turns/:turnId/stream", ({ params }) => {
     const turnId = String(params.turnId);
-    const failing = (turnInstruction.get(turnId) ?? "").includes("fail");
+    const instruction = turnInstruction.get(turnId) ?? "";
+    const failing = instruction.includes("fail");
     if (failing) {
       return sse([
         { type: "text-delta", delta: "Let me try that…" },
         { type: "turn-failed", message: "Mock turn failure (instruction contained 'fail')." },
       ]);
+    }
+    // Grilling scenarios (ADR-0012 / #270) — keyed on the shared directive or a
+    // typed trigger, never on a mere mention of "grill" in an edit instruction.
+    // An answer turn (instruction begins with the shared answer prefix) falls
+    // through to the normal generation stream below.
+    const isAnswer =
+      instruction.startsWith(ANSWER_PREFIX) || instruction.startsWith(ANSWERS_PREFIX);
+    if (!isAnswer) {
+      const grillSingle =
+        instruction.includes(GRILLING_DIRECTIVE) || /\bgrill me\b/i.test(instruction);
+      const grillBatch = /\ball at once\b|\bask me everything\b/i.test(instruction);
+      if (grillBatch) {
+        const input = {
+          questions: [
+            {
+              question: "Who is the primary user of this app?",
+              options: [
+                { label: "Individual consumers", description: "Self-serve signup", recommended: true },
+                { label: "Internal teams", description: "SSO, org-managed access" },
+              ],
+            },
+            {
+              question: "Which platform matters most first?",
+              options: [
+                { label: "Web", recommended: true },
+                { label: "Mobile" },
+                { label: "Both" },
+              ],
+            },
+            {
+              question: "Which capabilities are in scope for v1?",
+              multiSelect: true,
+              options: [
+                { label: "Accounts" },
+                { label: "Payments" },
+                { label: "Notifications" },
+              ],
+            },
+          ],
+        };
+        return sse([
+          { type: "text-delta", delta: "Let me pin the idea down — a few questions:" },
+          { type: "tool-call", toolCallId: "mock-qs-1", toolName: "ask_questions", input },
+          {
+            type: "tool-result",
+            toolName: "ask_questions",
+            toolCallId: "mock-qs-1",
+            input,
+            output: { status: "awaiting_user_response" },
+          },
+          { type: "turn-committed", noChanges: true },
+        ]);
+      }
+      if (grillSingle) {
+        const input = {
+          question: "Who is the primary user of this app?",
+          options: [
+            { label: "Individual consumers", description: "Self-serve signup, personal workspaces", recommended: true },
+            { label: "Internal teams", description: "SSO, org-managed access" },
+            { label: "Both from day one", description: "Two onboarding paths — more scope" },
+          ],
+          multiSelect: false,
+        };
+        return sse([
+          { type: "text-delta", delta: "Before I write anything, let me pin the idea down." },
+          { type: "tool-call", toolCallId: "mock-q-1", toolName: "ask_question", input },
+          {
+            type: "tool-result",
+            toolName: "ask_question",
+            toolCallId: "mock-q-1",
+            input,
+            output: { status: "awaiting_user_response", question: input.question },
+          },
+          { type: "turn-committed", noChanges: true },
+        ]);
+      }
     }
     return sse([
       { type: "text-delta", delta: "Joining the spec workspace… " },
