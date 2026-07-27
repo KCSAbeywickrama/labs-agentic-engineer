@@ -82,6 +82,11 @@ const SUGGESTIONS = [
 const clampWidth = (n: number): number =>
   Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(n)));
 
+// Question ids we've already auto-navigated to the spec form for. Module-level,
+// NOT a ref: this panel unmounts whenever the user collapses it, so a ref would
+// reset and re-navigate on every reopen while a question is still pending.
+const autoOpenedQuestions = new Set<string>();
+
 function initialOf(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
@@ -186,6 +191,26 @@ export function AgentChatPanel({
       params: { projectName },
     });
   }, [navigate, projectName]);
+
+  // A LIST of questions is answered on the spec view (the form takes over the
+  // body), so take the user there the moment one arrives — otherwise the agent
+  // is blocked on an answer the user can't see from wherever they are. Fires
+  // exactly ONCE per question: after that the user is free to navigate away
+  // (and to reopen this panel) without being yanked back.
+  const pendingBatchId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!;
+      if (m.role === "question" && (m.questions?.length ?? 0) > 1 && answerableIds.has(m.id)) {
+        return m.id;
+      }
+    }
+    return null;
+  }, [messages, answerableIds]);
+  useEffect(() => {
+    if (!pendingBatchId || autoOpenedQuestions.has(pendingBatchId)) return;
+    autoOpenedQuestions.add(pendingBatchId);
+    openSpec();
+  }, [pendingBatchId, openSpec]);
 
   // --- Drag-to-resize (persisted) --------------------------------------
   const [width, setWidth] = useState<number>(() => {
