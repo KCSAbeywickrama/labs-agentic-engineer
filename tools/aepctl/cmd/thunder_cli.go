@@ -35,7 +35,7 @@ import (
 )
 
 // registerThunderFlags adds Thunder connection flags to cmd and binds each one
-// to its corresponding Viper key. Precedence: flag > ~/.aep/config.yaml > default.
+// to its corresponding Viper key. Precedence: flag > AEP_* env var > cluster ConfigMap > default.
 func registerThunderFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.String("thunder-namespace", "", "Kubernetes namespace where Thunder is installed")
@@ -43,7 +43,6 @@ func registerThunderFlags(cmd *cobra.Command) {
 	f.String("thunder-config-map", "", "Name of Thunder's runtime ConfigMap")
 	f.String("thunder-deployment", "", "Name of Thunder's Deployment")
 	f.String("thunder-admin-client-id", "", "Thunder admin OAuth client ID")
-	f.String("thunder-admin-client-secret", "", "Thunder admin OAuth client secret")
 	f.String("thunder-public-url", "", "Public URL of Thunder — must match the JWT issuer configured in Thunder")
 
 	_ = viper.BindPFlag("thunder.namespace", f.Lookup("thunder-namespace"))
@@ -51,7 +50,6 @@ func registerThunderFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("thunder.config_map", f.Lookup("thunder-config-map"))
 	_ = viper.BindPFlag("thunder.deployment", f.Lookup("thunder-deployment"))
 	_ = viper.BindPFlag("thunder.admin_client_id", f.Lookup("thunder-admin-client-id"))
-	_ = viper.BindPFlag("thunder.admin_client_secret", f.Lookup("thunder-admin-client-secret"))
 	_ = viper.BindPFlag("thunder.public_url", f.Lookup("thunder-public-url"))
 }
 

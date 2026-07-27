@@ -65,4 +65,37 @@ describe("projectableHistory", () => {
       { id: "", role: "assistant", turnId: "history", content: "hi there" },
     ]);
   });
+
+  it("reconstructs a question card from an ask_question tool-call (ADR-0012)", () => {
+    const q = { question: "Who is the user?", options: [{ label: "A" }, { label: "B" }] };
+    const history: ConversationMessage[] = [
+      { role: "user", content: "grill me" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "one question:" },
+          { type: "tool-call", toolName: "ask_question", toolCallId: "tc-9", input: q },
+        ],
+      },
+    ];
+    const out = projectableHistory(history);
+    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "question"]);
+    expect(out[2]).toMatchObject({ role: "question", toolCallId: "tc-9", questions: [q] });
+  });
+
+  it("reconstructs a batch form from an ask_questions tool-call, even with no narration text", () => {
+    const input = {
+      questions: [
+        { question: "Q1", options: [{ label: "A" }] },
+        { question: "Q2", options: [{ label: "X" }] },
+      ],
+    };
+    const history: ConversationMessage[] = [
+      { role: "assistant", content: [{ type: "tool-call", toolName: "ask_questions", toolCallId: "tc-b", input }] },
+    ];
+    const out = projectableHistory(history);
+    expect(out).toEqual([
+      { id: "", role: "question", turnId: "history", toolCallId: "tc-b", questions: input.questions },
+    ]);
+  });
 });

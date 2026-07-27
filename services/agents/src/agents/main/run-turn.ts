@@ -54,8 +54,8 @@ export interface RunTurnInput {
   prompt: string;
   /**
    * Stop conditions; defaults to `[isStepCount(maxSteps ?? 20)]`. Stays generic
-   * — the main wiring passes `[isStepCount(n), hasToolCall('ask_question')]`
-   * without runTurn ever knowing a tool name.
+   * — the main wiring passes `[isStepCount(n), hasToolCall('ask_question'),
+   * hasToolCall('ask_questions')]` without runTurn ever knowing a tool name.
    */
   stopWhen?: StopCondition<ToolSet>[];
   onEvent?: (part: StreamPart) => void;

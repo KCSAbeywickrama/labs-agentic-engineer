@@ -174,3 +174,60 @@ env-var bindings the way the stack skill describes — read injected values from
 env var **names**, never hardcode an upstream URL. In local mode there is no
 platform to resolve real addresses; use the design's dependency names for the
 env-var naming and sensible localhost defaults.
+
+## ClusterResourceType authoring — rendering context rules
+
+When a task asks you to author or edit an OpenChoreo `ClusterResourceType`
+manifest (the YAML that defines a platform resource such as `postgres-cnpg`
+or `thunder-app`), the template rendering context is **not** the same as the
+component `ReleaseBinding` rendering context. Getting this wrong causes the
+controller to fail with a CEL compilation error at reconcile time, which
+leaves every `ResourceReleaseBinding` that references this type permanently
+stuck in `Building`.
+
+### Available variables in resource rendering context
+
+These variables are in scope when templates inside a `ClusterResourceType`
+are evaluated (e.g. `resourceTypeEnvironmentConfigs`, `includeWhen`
+expressions, Helm value templates):
+
+| Variable | What it holds |
+|---|---|
+| `metadata` | The `Resource`/`ResourceRelease` object metadata |
+| `parameters` | The resource's static parameters (from the `Resource` spec) |
+| `environmentConfigs` | The per-env values from the `ResourceReleaseBinding` |
+| `applied` | The current applied state returned by the data-plane operator |
+| `dataplane` | Data-plane-specific outputs (e.g. connection strings) |
+
+### Variables that are NOT available
+
+| Variable | Why it is absent |
+|---|---|
+| `gateway` | Component-level only — present in `ReleaseBinding` (workload rendering), never in `ResourceReleaseBinding` (resource rendering) |
+| `workload` | Component-level only |
+| `dependencies` | Component-level only |
+
+**`gateway` is the most common mistake.** It exists in the component's
+`ReleaseBinding` rendering context (where ingress, routes, and TLS are
+available), but it is completely absent from the `ResourceReleaseBinding`
+rendering context used by `ClusterResourceType` templates.
+
+### `includeWhen` CEL is compiled at reconcile time
+
+CEL expressions in `includeWhen` fields are **compiled and type-checked
+when the controller reconciles the binding**, not when they evaluate to
+`true`. A false-guarding condition does NOT prevent compilation:
+
+```yaml
+# WRONG — fails with CEL type error even though `adminEnabled` is false,
+# because `gateway` is not in scope and CEL validates all references
+includeWhen: '${environmentConfigs.adminEnabled && has(gateway.ingress.external)}'
+
+# CORRECT — only reference variables that exist in resource rendering context
+includeWhen: '${environmentConfigs.adminEnabled}'
+```
+
+If you need to conditionally include a resource that also requires gateway
+routing (e.g. an admin UI), that admin UI must be implemented as a **separate
+component** (with its own `workload.yaml` and `ReleaseBinding`) — it cannot
+be embedded inside the `ClusterResourceType` template.

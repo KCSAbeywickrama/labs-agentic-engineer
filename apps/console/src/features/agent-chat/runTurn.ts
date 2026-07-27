@@ -31,9 +31,11 @@ import {
   appendAssistantText,
   addMessage,
   upsertToolMessage,
+  upsertQuestionMessage,
   setTurnStatus,
   notifyTurnEnd,
 } from "./chatStore.js";
+import { isQuestionTool, parseQuestionsInput } from "./questionCards.js";
 import { getTurn, openTurnStream } from "./api/turns.js";
 
 const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
@@ -89,6 +91,21 @@ export async function attachAndFoldTurn(
         }
         break;
       }
+      case "tool-call": {
+        // ask_question / ask_questions (ADR-0012): the COMPLETE call renders as
+        // a question card — no progressive render off partial input deltas.
+        // Malformed input → no card (the agent's prose still carries it).
+        if (!isQuestionTool(part.toolName)) break;
+        const questions = parseQuestionsInput(part.toolName!, part.input);
+        if (!questions) break;
+        upsertQuestionMessage(chatKey, {
+          role: "question",
+          turnId,
+          toolCallId: part.toolCallId ?? "",
+          questions,
+        });
+        break;
+      }
       case "tool-result": {
         if (!part.toolName || !FILE_TOOLS.has(part.toolName)) break;
         const change = toChange(part);
@@ -132,7 +149,7 @@ export async function attachAndFoldTurn(
         });
         break;
       default:
-        break; // start/finish/tool-input-end/tool-call plumbing — nothing to render
+        break; // start/finish/tool-input-end plumbing — nothing to render
     }
   };
 
