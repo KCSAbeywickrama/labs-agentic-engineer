@@ -205,11 +205,11 @@ export const agentChatHandlers = [
         };
         return sse([
           { type: "text-delta", delta: "Let me pin the idea down — a few questions:" },
-          { type: "tool-call", toolCallId: "mock-qs-1", toolName: "ask_questions", input },
+          { type: "tool-call", toolCallId: `qs-${turnId}`, toolName: "ask_questions", input },
           {
             type: "tool-result",
             toolName: "ask_questions",
-            toolCallId: "mock-qs-1",
+            toolCallId: `qs-${turnId}`,
             input,
             output: { status: "awaiting_user_response" },
           },
@@ -228,11 +228,11 @@ export const agentChatHandlers = [
         };
         return sse([
           { type: "text-delta", delta: "Before I write anything, let me pin the idea down." },
-          { type: "tool-call", toolCallId: "mock-q-1", toolName: "ask_question", input },
+          { type: "tool-call", toolCallId: `q-${turnId}`, toolName: "ask_question", input },
           {
             type: "tool-result",
             toolName: "ask_question",
-            toolCallId: "mock-q-1",
+            toolCallId: `q-${turnId}`,
             input,
             output: { status: "awaiting_user_response", question: input.question },
           },

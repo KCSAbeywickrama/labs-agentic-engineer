@@ -24,6 +24,7 @@
 import { useEffect, useState } from "react";
 import type { Doc } from "yjs";
 import { getMessages } from "./chatStore.js";
+import { answerableQuestionIds } from "./questionCards.js";
 import { useCurrentAuthor } from "./currentUser.js";
 import {
   mirrorQuestion,
@@ -56,9 +57,16 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
   // later). Acceptable for a dev-only setup.
   useEffect(() => {
     if (!doc) return;
-    for (const m of getMessages(chatKey)) {
+    const messages = getMessages(chatKey);
+    // Only questions the log still considers ANSWERABLE (no later delivered
+    // user message). The room's `submitted` flag lives in an ephemeral doc
+    // (rooms unload when empty), but the submitted/skipped answer persists in
+    // the log as the user message right after the question — so this check is
+    // what stops a fresh doc from resurrecting an already-answered form.
+    const answerable = answerableQuestionIds(messages);
+    for (const m of messages) {
       if (m.role !== "question" || !m.questions?.length) continue;
-      if (!m.toolCallId) continue;
+      if (!m.toolCallId || !answerable.has(m.id)) continue;
       mirrorQuestion(doc, {
         toolCallId: m.toolCallId,
         questions: m.questions,
