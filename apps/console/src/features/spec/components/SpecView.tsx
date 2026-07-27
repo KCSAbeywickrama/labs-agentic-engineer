@@ -50,7 +50,7 @@ import { UsageChip } from "../../usage/components/UsageChip";
 import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
-import { SpecQuestionBanner } from "./SpecQuestionBanner";
+import { SpecQuestionOverlay } from "./SpecQuestionOverlay";
 import { setQuestionDoc } from "../../agent-chat/questionRoom";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
@@ -703,17 +703,6 @@ export function SpecView({ projectName }: { projectName: string }) {
           </Alert>
         )}
 
-        {/* Collab question cards spike: agent question surfaced to the whole
-            room on the main panel, answered together. chatKey uses the
-            "default" org fallback (matching the chat panel), not the room's. */}
-        {roomDoc && (
-          <SpecQuestionBanner
-            doc={roomDoc}
-            org={orgHandle ?? "default"}
-            projectName={projectName}
-          />
-        )}
-
         {/* Body: grouped file list + file content */}
         {spec.isPending ? (
           <Box
@@ -739,7 +728,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             </Alert>
           </Box>
         ) : (
-          <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex" }}>
+          <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex", position: "relative" }}>
             <Box
               sx={{
                 width: 280,
@@ -930,6 +919,17 @@ export function SpecView({ projectName }: { projectName: string }) {
                 </Typography>
               )}
             </Box>
+            {/* Collab question cards spike: the agent's question, surfaced to
+                the whole room as a floating overlay over the content pane and
+                answered together. chatKey uses the "default" org fallback
+                (matching the chat panel), not the collab room's. */}
+            {roomDoc && (
+              <SpecQuestionOverlay
+                doc={roomDoc}
+                org={orgHandle ?? "default"}
+                projectName={projectName}
+              />
+            )}
           </Box>
         )}
       </Box>
