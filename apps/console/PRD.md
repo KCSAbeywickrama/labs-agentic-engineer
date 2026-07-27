@@ -92,7 +92,7 @@ that's a stalled feature — investigate, don't ignore.
   [#270](https://github.com/wso2/labs-agentic-engineer/issues/270)
 - Usage & cost — org-wide agent spend on a dedicated **Settings → Usage**
   page: one card per project (incl. deleted projects) with a folded USD cost
-  chip, click to expand the input/output/cache token breakdown; USD-only
+  as a plain value, hover for the input/output/cache token breakdown; USD-only
   primary, actuals only. Supersedes the scattered per-phase chips of #245
   (Builds task/build chips + Spec drafting-cycle chip, all removed). Costs
   are **stamped at capture time** from **DB-backed model rates**, so a rate

@@ -66,7 +66,7 @@ function phasesOf(u: Usage): PhaseUsage {
 }
 
 describe("UsageSection", () => {
-  it("renders one card per project with the USD figure on the cost chip", () => {
+  it("renders one card per project with the USD figure as a plain value", () => {
     mockResult = {
       isPending: false,
       isError: false,
@@ -117,7 +117,38 @@ describe("UsageSection", () => {
     expect(screen.getByText("1.4M tok")).toBeTruthy();
   });
 
-  it("expands the token breakdown when the cost chip is clicked", () => {
+  it("reveals the token breakdown on hover, not as inline text", async () => {
+    mockResult = {
+      isPending: false,
+      isError: false,
+      data: {
+        projects: [
+          {
+            projectName: "storefront-webapp",
+            displayName: "Storefront Webapp",
+            deleted: false,
+            usage: usage(12.34),
+            phases: phasesOf(usage(12.34)),
+          },
+        ],
+      },
+    };
+    const { container } = render(<UsageSection />);
+
+    const figure = screen.getByText("$12.34");
+    // A plain value, not a chip — the review asked for the frame to go (#300).
+    expect(container.querySelector(".MuiChip-root")).toBeNull();
+    // The detail stays hidden until hover.
+    expect(screen.queryByText("Cache read")).toBeNull();
+
+    fireEvent.mouseOver(figure);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Agent spend — Storefront Webapp");
+    expect(tooltip).toHaveTextContent("Cache read");
+    expect(tooltip).toHaveTextContent("1.0M tok");
+  });
+
+  it("keeps the figure focusable so the breakdown is not hover-only", () => {
     mockResult = {
       isPending: false,
       isError: false,
@@ -134,13 +165,12 @@ describe("UsageSection", () => {
       },
     };
     render(<UsageSection />);
-    fireEvent.click(screen.getByText("$12.34"));
-    expect(screen.getByText("Agent spend — Storefront Webapp")).toBeTruthy();
-    expect(screen.getByText("Cache read")).toBeTruthy();
-    expect(screen.getByText("1.0M tok")).toBeTruthy();
+    // Hover-only detail would strand keyboard users. We own the tab stop;
+    // MUI opens the tooltip itself once that element takes :focus-visible.
+    expect(screen.getByText("$12.34").getAttribute("tabindex")).toBe("0");
   });
 
-  it("shows the per-phase cost split in the expanded breakdown", () => {
+  it("shows the per-phase cost split in the hover breakdown", async () => {
     mockResult = {
       isPending: false,
       isError: false,
@@ -161,14 +191,15 @@ describe("UsageSection", () => {
       },
     };
     render(<UsageSection />);
-    fireEvent.click(screen.getByText("$12.34"));
-    expect(screen.getByText("Cost by phase")).toBeTruthy();
-    expect(screen.getByText("Spec / design")).toBeTruthy();
-    expect(screen.getByText("$2")).toBeTruthy();
-    expect(screen.getByText("Build")).toBeTruthy();
-    expect(screen.getByText("$9")).toBeTruthy();
-    expect(screen.getByText("Validation")).toBeTruthy();
-    expect(screen.getByText("$1.34")).toBeTruthy();
+    fireEvent.mouseOver(screen.getByText("$12.34"));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Cost by phase");
+    expect(tooltip).toHaveTextContent("Spec / design");
+    expect(tooltip).toHaveTextContent("$2");
+    expect(tooltip).toHaveTextContent("Build");
+    expect(tooltip).toHaveTextContent("$9");
+    expect(tooltip).toHaveTextContent("Validation");
+    expect(tooltip).toHaveTextContent("$1.34");
   });
 
   it("renders an idle live project as a $0 card (not hidden)", () => {

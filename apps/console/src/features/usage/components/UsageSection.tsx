@@ -29,13 +29,13 @@ import {
 } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
 import { useProjectUsageList } from "../api/queries";
-import { UsageChip } from "./UsageChip";
+import { UsageFigure } from "./UsageFigure";
 
 type ProjectUsageCard = components["schemas"]["ProjectUsageCard"];
 
 // Settings → Usage (#291): the org's per-project agent spend, one card per
-// project that ever recorded usage. The cost chip is the same folded figure
-// used across the console — USD primary, click for the token breakdown.
+// project that ever recorded usage. The cost figure is the same folded value
+// used across the console — USD primary, hover for the token breakdown.
 // Cards for deleted projects stay (their spend was real) but render greyed.
 export function UsageSection() {
   const usageList = useProjectUsageList();
@@ -107,7 +107,7 @@ function ProjectCard({ card }: { card: ProjectUsageCard }) {
           <Chip size="small" variant="outlined" label="Deleted project" />
         )}
         <Box sx={{ flexGrow: 1 }} />
-        <UsageChip
+        <UsageFigure
           usage={card.usage}
           phases={card.phases}
           context={`Agent spend — ${card.displayName}`}
