@@ -24,7 +24,7 @@ import { InMemoryConversationStore } from "../src/store/memory-store.js";
 import type { Conversation } from "../src/store/conversation-store.js";
 import type { RoomPeer } from "../src/collab/room-peer.js";
 import { SEED_FILES } from "./seed-files.js";
-import type { StreamPart } from "@aep/agent-stream";
+import { buildAnswerInstruction, buildAnswersInstruction, type StreamPart } from "@aep/agent-stream";
 import { sha256Hex } from "../src/shared/hash.js";
 import { mockModel, type MockStep } from "../src/shared/mock-model.js";
 import { testSkillSource } from "./skill-source.js";
@@ -196,6 +196,151 @@ test("toolset task-plan runs planTask over the read-only snapshot (no file mutat
   assert.match(JSON.stringify(planned.output), /"ok":true/);
   // No file mutation tool ever ran.
   assert.equal(events.some((e) => e.toolName === "addFile" || e.toolName === "editFile"), false);
+});
+
+// --- HITL question tools (ask_question / ask_questions, console ADR-0012 / #270) ---
+
+const A_QUESTION = "Who are the primary users?";
+
+test("ask_question: turn ends awaiting-human with a fully-resolved transcript", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  // ONE scripted step: the tool-call. The paired hasToolCall stop condition ends
+  // the turn at the call — no follow-up text step is ever requested.
+  const model = mockModel([
+    {
+      kind: "toolCall",
+      toolCallId: "q1",
+      toolName: "ask_question",
+      input: {
+        question: A_QUESTION,
+        options: [
+          { label: "Individual consumers", recommended: true },
+          { label: "Enterprise teams", description: "B2B buyers" },
+        ],
+      },
+    },
+  ]);
+
+  const conv = await runConversationTurn({
+    id: "q",
+    instruction: "grill me about the spec",
+    files: SEED_FILES,
+    model,
+    store,
+    guard,
+    onEvent,
+  });
+
+  assert.equal(conv.status, "awaiting-human");
+
+  // The tool-call streamed AND its placeholder execute resolved — no dangling
+  // tool_use, so a replay carries no MissingToolResultsError.
+  const call = events.find((e) => e.type === "tool-call" && e.toolName === "ask_question");
+  assert.ok(call, "ask_question tool-call streamed");
+  assert.match(JSON.stringify(call.input), /Individual consumers/);
+  const result = events.find((e) => e.type === "tool-result" && e.toolName === "ask_question");
+  assert.ok(result, "placeholder result resolved the tool-call");
+  assert.match(JSON.stringify(result.output), /awaiting_user_response/);
+
+  // The resolved transcript persists (an assistant tool-call AND a tool result).
+  const stored = (await store.get("q"))!;
+  assert.ok(stored.messages.some((m) => m.role === "tool"), "tool result persisted");
+  // A manifest is still the terminal event (nothing to commit → empty).
+  assert.equal(events.at(-1)?.type, "manifest");
+});
+
+test("ask_question: a follow-up turn carries the answer as a plain user message", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { onEvent } = collector();
+
+  await runConversationTurn({
+    id: "q2",
+    instruction: "grill me",
+    files: SEED_FILES,
+    model: mockModel([
+      {
+        kind: "toolCall",
+        toolCallId: "q1",
+        toolName: "ask_question",
+        input: { question: A_QUESTION, options: [{ label: "Individual consumers" }] },
+      },
+    ]),
+    store,
+    guard,
+    onEvent,
+  });
+  assert.equal((await store.get("q2"))!.status, "awaiting-human");
+
+  // The answer returns as the NEXT turn's ordinary instruction — no new channel.
+  await runConversationTurn({
+    id: "q2",
+    instruction: buildAnswerInstruction(A_QUESTION, ["Individual consumers"], "mobile-first"),
+    files: SEED_FILES,
+    model: textModel("understood"),
+    store,
+    guard,
+    onEvent,
+  });
+
+  const after = (await store.get("q2"))!;
+  assert.equal(after.status, "done", "answering resumes the conversation");
+  // The last user message is the serialized answer (a plain instruction).
+  const lastUser = [...after.messages].reverse().find((m) => m.role === "user");
+  const text = typeof lastUser?.content === "string" ? lastUser.content : JSON.stringify(lastUser?.content);
+  assert.match(text, /Answer to "Who are the primary users\?": Individual consumers — mobile-first/);
+});
+
+test("ask_questions: a batch (form) call also ends awaiting-human and resolves", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const { events, onEvent } = collector();
+
+  const conv = await runConversationTurn({
+    id: "qs",
+    instruction: "ask me everything at once",
+    files: SEED_FILES,
+    model: mockModel([
+      {
+        kind: "toolCall",
+        toolCallId: "qs1",
+        toolName: "ask_questions",
+        input: {
+          questions: [
+            { question: A_QUESTION, options: [{ label: "Consumers" }, { label: "Teams" }] },
+            { question: "Platform?", options: [{ label: "Web" }, { label: "Mobile" }], multiSelect: true },
+          ],
+        },
+      },
+    ]),
+    store,
+    guard,
+    onEvent,
+  });
+
+  assert.equal(conv.status, "awaiting-human");
+  const result = events.find((e) => e.type === "tool-result" && e.toolName === "ask_questions");
+  assert.ok(result, "ask_questions resolved to a placeholder result");
+
+  // The batch answer serializes to the `Answers:` bullet list on the next turn.
+  await runConversationTurn({
+    id: "qs",
+    instruction: buildAnswersInstruction([
+      { question: A_QUESTION, selected: ["Consumers"] },
+      { question: "Platform?", selected: ["Web", "Mobile"] },
+    ]),
+    files: SEED_FILES,
+    model: textModel("ok"),
+    store,
+    guard,
+    onEvent,
+  });
+  const after = (await store.get("qs"))!;
+  assert.equal(after.status, "done");
+  assert.match(JSON.stringify(after.messages), /Answers:/);
 });
 
 // --- The terminal manifest (D14) ---------------------------------------------

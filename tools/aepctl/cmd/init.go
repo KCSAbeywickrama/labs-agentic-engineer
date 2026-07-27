@@ -30,11 +30,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/wso2/aep/aepctl/internal/adminpb"
+	"github.com/wso2/aep/aepctl/internal/config"
 	k8s "github.com/wso2/aep/aepctl/internal/kubernetes"
 )
 
@@ -55,22 +57,25 @@ var (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init",
+	Use:   "install",
 	Short: "Provision OpenBao, install the platform, and configure Thunder",
-	Long: `Full AEP initialisation in one command:
+	Long: `Full AEP platform installation in one command:
   1. Waits for the OpenBao pod to be ready
   2. Provisions OpenBao and generates all secrets
   3. Installs the platform Helm chart
   4. Waits for all platform pods to be ready
   5. Registers AEP OAuth clients in Thunder
+  6. Writes cluster config to the aep-cli-config ConfigMap
 
-Configure the server URL first:
-  aep connect --server http://aep-server.openchoreo.localhost:8080`,
-	RunE: runAEPInit,
+Pass the server URL via the --server flag:
+  aep platform install --server http://aep-server.openchoreo.localhost:8080 [flags]`,
+	// skipClusterConfig: the ConfigMap does not exist before this command runs.
+	Annotations: map[string]string{"skipClusterConfig": "true"},
+	RunE:        runAEPInit,
 }
 
 func init() {
-	rootCmd.AddCommand(initCmd)
+	platformCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&initPlatformChart, "platform-chart", "", "Local path to the platform Helm chart (for local/dev installs; takes precedence over --platform-version)")
 	initCmd.Flags().StringVar(&initPlatformVersion, "platform-version", "latest", "Platform version to pull from GHCR (ignored when --platform-chart is set)")
 	initCmd.Flags().StringVar(&initPlatformRelease, "platform-release", "aep-platform", "Helm release name for the platform chart")
@@ -83,10 +88,16 @@ func init() {
 	initCmd.Flags().StringVar(&initRegistryService, "registry-service", "registry", "Name of the build-plane image registry Service (the coding-agent build pushes/pulls here)")
 	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "openchoreo-system", "Namespace where OpenChoreo control-plane is installed")
 	initCmd.Flags().BoolVar(&initSkipOCVersionCheck, "skip-oc-version-check", false, "Skip the OpenChoreo minimum version check (not recommended)")
-	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API (overrides config file)")
+	initCmd.Flags().String("oc-api-url", "", "In-cluster URL of the OpenChoreo platform API")
 	_ = viper.BindPFlag("oc.api_url", initCmd.Flags().Lookup("oc-api-url"))
-	initCmd.Flags().String("server", "", "AEP server gRPC URL (overrides config file)")
+	initCmd.Flags().String("server", "", "AEP server gRPC URL")
 	_ = viper.BindPFlag("server", initCmd.Flags().Lookup("server"))
+	initCmd.Flags().String("webhook-delivery-url", "", "Public URL registered on each repo's webhook (e.g. https://webhook.example.com/api/v1/webhooks/github)")
+	_ = viper.BindPFlag("webhook.delivery_url", initCmd.Flags().Lookup("webhook-delivery-url"))
+	initCmd.Flags().String("cluster-gateway-proxy-url", "", "URL of the managed cluster-gateway-proxy service (production; omit to deploy the local stub)")
+	_ = viper.BindPFlag("codingagent.cluster_gateway_proxy.url", initCmd.Flags().Lookup("cluster-gateway-proxy-url"))
+	initCmd.Flags().String("secret-manager-api-url", "", "URL of the managed secret-manager API service (production; omit to deploy the local stub)")
+	_ = viper.BindPFlag("codingagent.secret_manager_api.url", initCmd.Flags().Lookup("secret-manager-api-url"))
 	registerThunderFlags(initCmd)
 }
 
@@ -97,9 +108,16 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("helm is required but was not found in PATH\nInstall it from https://helm.sh/docs/intro/install/ and try again")
 	}
 
-	k8sClient, err := k8s.NewClient("")
+	k8sClient, err := k8s.NewClient(kubeconfig)
 	if err != nil {
 		return fmt.Errorf("connect to cluster: %w", err)
+	}
+
+	// 0. Warn if a ConfigMap already exists — re-running install will overwrite it.
+	_, cmErr := k8sClient.CoreV1().ConfigMaps(initPlatformNamespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
+	if cmErr == nil {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: existing %s found — re-running install will overwrite it.\n", config.ConfigMapName)
+		_, _ = fmt.Fprintf(os.Stderr, "  Export your config first with: aep platform config export\n")
 	}
 
 	// 0a. Prerequisite guard — verify the OpenChoreo version meets the minimum
@@ -134,6 +152,19 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 	if anthropicKey == "" {
 		return fmt.Errorf("an Anthropic API key is required")
+	}
+
+	// Prompt for Thunder admin client secret unless already supplied via the
+	// AEP_THUNDER_ADMIN_CLIENT_SECRET env var (CI / non-interactive installs).
+	// Press Enter to use the Thunder default (openchoreo-system-app-secret).
+	if os.Getenv("AEP_THUNDER_ADMIN_CLIENT_SECRET") == "" {
+		thunderSecret, err := readMaskedInput("Thunder admin client secret (Enter = use Thunder default)")
+		if err != nil {
+			return fmt.Errorf("read Thunder admin client secret: %w", err)
+		}
+		if thunderSecret != "" {
+			viper.Set("thunder.admin_client_secret", thunderSecret)
+		}
 	}
 
 	// 3. Provision OpenBao via the management server.
@@ -191,8 +222,9 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		// Local chart path — used for dev/local testing.
 		helmArgs = append([]string{helmArgs[0], helmArgs[1], initPlatformChart}, helmArgs[2:]...)
 	} else {
-		// Pull chart from GHCR.
-		helmArgs = append([]string{helmArgs[0], helmArgs[1], "oci://ghcr.io/wso2/aep/charts/platform"}, helmArgs[2:]...)
+		// Pull chart from GHCR. The OCI artifact is named after the chart's
+		// `name:` (aep-platform), not the directory (platform).
+		helmArgs = append([]string{helmArgs[0], helmArgs[1], "oci://ghcr.io/wso2/aep/charts/aep-platform"}, helmArgs[2:]...)
 		if initPlatformVersion != "latest" {
 			helmArgs = append(helmArgs, "--version", initPlatformVersion)
 		}
@@ -203,7 +235,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	// Coding-agent dispatch: deploy the local cluster-gateway-proxy stub (reads
 	// pod logs/job status for live streaming + JobWatcher) unless disabled. Prod
 	// installs set codingagent.local_stubs.enabled=false and supply the real
-	// endpoint URLs — see ~/.aep/config.yaml.
+	// endpoint URLs instead (set them via flags or AEP_* env vars).
 	helmArgs = append(helmArgs, "--set",
 		fmt.Sprintf("codingAgentDispatch.localStubs.enabled=%t", viper.GetBool("codingagent.local_stubs.enabled")))
 	if u := viper.GetString("codingagent.cluster_gateway_proxy.url"); u != "" {
@@ -255,8 +287,45 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// 7. Persist non-sensitive config into the in-cluster ConfigMap so
+	// subsequent aep commands can load it without any local config file.
+	if err := writeClusterConfig(ctx, k8sClient, initPlatformNamespace); err != nil {
+		return fmt.Errorf("write cluster config: %w", err)
+	}
+
 	_, _ = fmt.Fprintln(os.Stdout, "\nAEP is ready. Open the console to get started.")
 	return nil
+}
+
+// writeClusterConfig creates or updates the aep-cli-config ConfigMap with the
+// non-sensitive viper values set during this init run. Sensitive values (e.g.
+// thunder.admin_client_secret) are intentionally excluded — they are read at
+// runtime from the ESO-synced aep-thunder-secrets Secret.
+func writeClusterConfig(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+	data := make(map[string]string, len(config.ConfigMapKeys))
+	for _, k := range config.ConfigMapKeys {
+		data[k] = viper.GetString(k)
+	}
+
+	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, config.ConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get %s: %w", config.ConfigMapName, err)
+		}
+		_, err = client.CoreV1().ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      config.ConfigMapName,
+				Namespace: namespace,
+				Labels:    map[string]string{"app.kubernetes.io/managed-by": "aepctl"},
+			},
+			Data: data,
+		}, metav1.CreateOptions{})
+		return err
+	}
+
+	existing.Data = data
+	_, err = client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{})
+	return err
 }
 
 // checkOCVersion fails fast when the installed OpenChoreo version is below the

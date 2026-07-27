@@ -35,6 +35,7 @@ import {
 } from "./engine/compose.js";
 import { designGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
+import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
 import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
 import { runCodingAgent } from "./engine/coding-run.js";
 import { SKILLS_DIR } from "./engine/session.js";
@@ -295,11 +296,22 @@ export function undoCommand(projectDir: string, opts: PhaseOptions): PhaseOutcom
   return { ok: true };
 }
 
-/** One free-chat turn in the project's `general` conversation (shared session). */
-export async function chatTurn(session: PlaygroundSession, text: string, opts: PhaseOptions): Promise<PhaseOutcome> {
+/**
+ * One free-chat turn in the project's `general` conversation (shared session).
+ * When the agent ends the turn on a HITL question tool-call (console ADR-0012 /
+ * #270), `pending` carries the structured questions so the caller (the chat
+ * screen) can prompt for an answer and continue with it.
+ */
+export async function chatTurn(
+  session: PlaygroundSession,
+  text: string,
+  opts: PhaseOptions,
+): Promise<PhaseOutcome & { pending?: PendingQuestions }> {
   const onPart = onPartFor(opts);
   const result = await runSpecTurn(session, composeSpecInstruction(text, opts.target), {
     ...(onPart ? { onPart } : {}),
   });
-  return report(result, opts);
+  const outcome = report(result, opts);
+  const pending = pendingQuestions(result.toolCalls);
+  return pending ? { ...outcome, pending } : outcome;
 }

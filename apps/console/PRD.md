@@ -83,6 +83,13 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
+- Agent chat — structured question cards: `ask_question` (single) +
+  `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
+  in the activity stream (answer returns as the next turn's plain text);
+  grilling interview auto-started on the spec-generation CTA; tool-call-as-UI
+  convention in ADR-0012. FE mock-verified; agents-service + platform grilling
+  skill via [#271](https://github.com/wso2/labs-agentic-engineer/issues/271) —
+  [#270](https://github.com/wso2/labs-agentic-engineer/issues/270)
 - Usage & cost — org-wide agent spend on a dedicated **Settings → Usage**
   page: one card per project (incl. deleted projects) with a folded USD cost
   chip, click to expand the input/output/cache token breakdown; USD-only

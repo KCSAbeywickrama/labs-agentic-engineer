@@ -112,6 +112,102 @@ export interface RemoveFileInput {
   path: string;
 }
 
+// --- ask_question / ask_questions (HITL, console ADR-0012 / #270) ------------
+//
+// The structured human-in-the-loop questions the main agent asks. Two tools:
+//   `ask_question`  — ONE question (a single card).
+//   `ask_questions` — a LIST of questions answered together (a form card).
+// Both ride the ordinary `tool-call` frame — no dedicated event kind — and the
+// console renders them as native question cards. The turn ENDS at the call
+// (`hasToolCall` stop condition); the user's answer(s) return as the NEXT turn's
+// plain-text instruction (`buildAnswerInstruction` / `buildAnswersInstruction`),
+// never a new channel.
+
+/** The wire tool NAMES — as much contract as the input shapes. One definition
+ *  here so a rename cannot silently split producer (agents) and renderer
+ *  (console). */
+export const ASK_QUESTION_TOOL = "ask_question" as const;
+export const ASK_QUESTIONS_TOOL = "ask_questions" as const;
+
+/** The answer instructions' leading markers (consumers may detect answers by them). */
+export const ANSWER_PREFIX = 'Answer to "' as const;
+export const ANSWERS_PREFIX = "Answers:" as const;
+
+/** One candidate answer on a question. */
+export interface AskQuestionOption {
+  /** Short display text — the value echoed back in the serialized answer. */
+  label: string;
+  /** What choosing this option means or implies. */
+  description?: string;
+  /** At most ONE option per question carries this — the agent's recommendation. */
+  recommended?: boolean;
+}
+
+/**
+ * The `ask_question` tool input — a single structured question. WIRE source of
+ * truth; drift-guarded against the agents-service Zod schema.
+ */
+export interface AskQuestionInput {
+  question: string;
+  /** 1–5 options; labels must be unique (they are the selection identity). */
+  options: AskQuestionOption[];
+  /** True → several options may be chosen together (checkboxes, not radios). */
+  multiSelect?: boolean;
+}
+
+/**
+ * The `ask_questions` tool input — a LIST of questions answered as one form.
+ * Each entry is a full `AskQuestionInput`.
+ */
+export interface AskQuestionsInput {
+  /** 1–8 questions rendered together; each answered independently. */
+  questions: AskQuestionInput[];
+}
+
+/** One question's answer: the chosen option labels plus an optional free-text note. */
+export interface QuestionAnswer {
+  selected: string[];
+  freeText?: string;
+}
+
+function serializeBody(selected: string[], freeText?: string): string {
+  const labels = selected.join(", ");
+  const note = freeText?.trim() ?? "";
+  return labels && note ? `${labels} — ${note}` : labels || note;
+}
+
+/**
+ * Serialize a SINGLE question's answer into the next turn's instruction:
+ * `Answer to "<question>": <label>[, <label>] — <note>`. Selection and note
+ * combine; a free-text-only answer omits the labels.
+ */
+export function buildAnswerInstruction(
+  question: string,
+  selected: string[],
+  freeText?: string,
+): string {
+  return `${ANSWER_PREFIX}${question}": ${serializeBody(selected, freeText)}`;
+}
+
+/**
+ * Serialize a BATCH of answers (one per question) into the next turn's
+ * instruction:
+ *
+ *   Answers:
+ *   - "<q1>": <label>[, <label>] — <note>
+ *   - "<q2>": <label>
+ *
+ * The agent reads it as an ordinary user message — no structured channel.
+ */
+export function buildAnswersInstruction(
+  answers: Array<{ question: string; selected: string[]; freeText?: string }>,
+): string {
+  const lines = answers.map(
+    (a) => `- "${a.question}": ${serializeBody(a.selected, a.freeText)}`,
+  );
+  return `${ANSWERS_PREFIX}\n${lines.join("\n")}`;
+}
+
 // --- Skills (progressive disclosure, ADR-0002) ------------------------------
 //
 // Skills are GUIDANCE, not code, and they never travel on the wire: the turn's

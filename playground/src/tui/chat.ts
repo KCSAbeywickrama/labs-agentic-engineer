@@ -25,7 +25,9 @@
 
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { withGrillingInterview } from "@aep/contracts/prompts";
 import { chatTurn, type PhaseOptions } from "../commands.js";
+import { collectAnswers } from "./questions.js";
 import type { PlaygroundSession } from "../engine/session.js";
 
 /** The per-project chat loop. Returns when the user goes back to the menu or quits. */
@@ -49,10 +51,33 @@ export async function chatLoop(session: PlaygroundSession, opts: PhaseOptions): 
       if (line === "/quit") return "quit";
       if (line === "/menu" || line === "/threads") return "menu";
       if (line === "/help") {
-        output.write("  commands: /menu, /quit, /help\n");
+        output.write("  commands: /menu, /quit, /grill [idea], /help\n");
         continue;
       }
-      const outcome = await chatTurn(session, line, opts);
+
+      // `/grill [idea]` opts this turn into the interview-first directive (#270),
+      // mirroring the console's Generate-spec-with-grilling CTA: the agent asks
+      // structured questions before generating. A plain line is an ordinary chat
+      // turn (the agent may still ask a question if it needs a decision).
+      const instruction = line.startsWith("/grill")
+        ? withGrillingInterview(
+            line.slice("/grill".length).trim() ||
+              "Help me pin down this project's requirements before generating anything.",
+          )
+        : line;
+
+      // HITL loop (console ADR-0012 / #270): while the agent ends a turn on a
+      // question card, prompt for the answer and continue with it as the next
+      // instruction. `/skip` (or Ctrl-D at the prompt) drops back to free chat.
+      let outcome = await chatTurn(session, instruction, opts);
+      while (outcome.ok && outcome.pending) {
+        const answer = await collectAnswers(rl, outcome.pending);
+        if (answer === null) {
+          output.write("  (question skipped)\n");
+          break;
+        }
+        outcome = await chatTurn(session, answer, opts);
+      }
       if (!outcome.ok) output.write(`\n[turn failed] ${outcome.detail ?? "unknown error"}\n`);
     }
   } finally {

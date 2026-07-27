@@ -38,6 +38,8 @@ function inputLabel(input: unknown): string {
   if (typeof v.path === "string") return v.path;
   if (Array.isArray(v.names)) return v.names.filter((n) => typeof n === "string").join(", ");
   if (typeof v.name === "string") return v.name;
+  if (typeof v.question === "string") return v.question; // ask_question
+  if (Array.isArray(v.questions)) return `${v.questions.length} question(s)`; // ask_questions
   return "";
 }
 
