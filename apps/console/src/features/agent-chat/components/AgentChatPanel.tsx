@@ -59,6 +59,7 @@ import { ChatInput } from "./ChatInput";
 import {
   buildDesignGenerationInstruction,
   buildSpecGenerationInstruction,
+  slashSkillInstruction,
   withGrillingInterview,
 } from "@aep/contracts/prompts";
 import { readCreatePrompt } from "../../projects/lib/promptStore";
@@ -292,7 +293,11 @@ export function AgentChatPanel({
 
   const submit = () => {
     if (!draft.trim() || inputDisabled) return;
-    send(draft);
+    // `/<skill> [text]` is a shortcut for "load a skill and follow it" (e.g.
+    // /spec, /design) — the same channel the tasks phase uses. A plain message
+    // is sent verbatim; unknown skills surface as the agent's loadSkill
+    // not-found (client-side validation is parked, #325).
+    send(slashSkillInstruction(draft) ?? draft);
     setDraft("");
   };
 

@@ -88,3 +88,36 @@ export function buildDesignGenerationInstruction(): string {
     "criteria."
   );
 }
+
+/**
+ * The chat-composer slash-command expander: a `/<skill>` message is a keyboard
+ * shortcut for "load a skill and follow it", the same channel the tasks phase
+ * already uses (`Load the task-planning skill and follow it`). It turns
+ * `/<token> [text]` into an ordinary turn instruction the agent loads the skill
+ * from its catalog to satisfy; anything else returns `null` (an ordinary chat
+ * line the caller sends verbatim).
+ *
+ * ONE source for every client that exposes the shortcut (the console composer
+ * and the playground chat surfaces), so there is no drift to guard — it is a
+ * pure text→text function, no catalog lookup: an unknown `<token>` simply has
+ * the agent's `loadSkill` report not-found (client-side validation/autocomplete
+ * is parked, wso2/labs-agentic-engineer#325). The server and the turn engine are
+ * untouched — this is a composer-side rewrite of the user's text, nothing more.
+ *
+ * Grammar (deliberately narrow, so real chat is never eaten): a single leading
+ * `/`, then a skill-name token (`[a-z0-9-]+`) that must end at whitespace or the
+ * message end, optionally followed by free text that rides after a blank line.
+ * A bare `/`, a mid-message slash (`fix the /spec route`), `//spec`, or a
+ * trailing-punctuation token (`/spec.`) are all left as literal chat. Callers
+ * MUST resolve their own reserved control words (the playground's `/menu`,
+ * `/quit`, `/grill`, …) BEFORE calling this — those are surface-specific and not
+ * skill loads.
+ */
+export function slashSkillInstruction(line: string): string | null {
+  const m = /^\/([a-z0-9-]+)(?:\s+([\s\S]+))?$/.exec(line.trim());
+  if (!m) return null;
+  const token = m[1];
+  const rest = m[2]?.trim();
+  const base = `Load the ${token} skill and follow it.`;
+  return rest ? `${base}\n\n${rest}` : base;
+}

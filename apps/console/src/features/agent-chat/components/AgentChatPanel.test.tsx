@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentChatPanel } from "./AgentChatPanel";
 import { chatKeyFor, consumePendingSeed, setPendingSeed } from "../chatStore";
@@ -120,5 +120,37 @@ describe("AgentChatPanel — pendingSeed + turn-end wiring (#252 Task 5)", () =>
   it("wires the universal turn-end freshness fallback with this project's chat key", () => {
     renderPanel();
     expect(mockUseTurnEndDependencyRefresh).toHaveBeenCalledWith(KEY, PROJECT);
+  });
+});
+
+// The `/<skill>` composer shortcut: a leading /token is expanded to a
+// "load the skill and follow it" turn before send; plain chat is verbatim.
+describe("AgentChatPanel — /<skill> composer shortcut", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consumePendingSeed(KEY);
+  });
+
+  function typeAndSubmit(text: string) {
+    renderPanel();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+  }
+
+  it("expands /spec with follow-up text into a skill-load instruction", () => {
+    typeAndSubmit("/spec an expense tracker");
+    expect(mockSend).toHaveBeenCalledWith(
+      "Load the spec skill and follow it.\n\nan expense tracker",
+    );
+  });
+
+  it("expands a bare /design into just the load directive", () => {
+    typeAndSubmit("/design");
+    expect(mockSend).toHaveBeenCalledWith("Load the design skill and follow it.");
+  });
+
+  it("sends a plain chat message verbatim", () => {
+    typeAndSubmit("please regenerate the design");
+    expect(mockSend).toHaveBeenCalledWith("please regenerate the design");
   });
 });
