@@ -114,6 +114,7 @@ export const agentChatHandlers = [
         instruction.includes(GRILLING_DIRECTIVE) || /\bgrill me\b/i.test(instruction);
       const grillBatch = /\ball at once\b|\bask me everything\b/i.test(instruction);
       if (grillBatch) {
+        // A full interview — long enough to exercise the form's scrolling.
         const input = {
           questions: [
             {
@@ -121,6 +122,7 @@ export const agentChatHandlers = [
               options: [
                 { label: "Individual consumers", description: "Self-serve signup", recommended: true },
                 { label: "Internal teams", description: "SSO, org-managed access" },
+                { label: "Both from day one", description: "Two onboarding paths — more scope" },
               ],
             },
             {
@@ -138,6 +140,65 @@ export const agentChatHandlers = [
                 { label: "Accounts" },
                 { label: "Payments" },
                 { label: "Notifications" },
+                { label: "Search" },
+              ],
+            },
+            {
+              question: "How should users sign in?",
+              options: [
+                { label: "Email + password" },
+                { label: "Social login", recommended: true },
+                { label: "SSO only" },
+              ],
+            },
+            {
+              question: "What is the pricing model?",
+              options: [
+                { label: "Free", recommended: true },
+                { label: "Subscription" },
+                { label: "One-off purchase" },
+              ],
+            },
+            {
+              question: "Where does the data live?",
+              options: [
+                { label: "Managed Postgres", recommended: true },
+                { label: "SQLite per tenant" },
+                { label: "Third-party BaaS" },
+              ],
+            },
+            {
+              question: "Which integrations matter?",
+              multiSelect: true,
+              options: [
+                { label: "Slack" },
+                { label: "Email" },
+                { label: "Calendar" },
+                { label: "None yet", recommended: true },
+              ],
+            },
+            {
+              question: "What is the launch timeline?",
+              options: [
+                { label: "2 weeks" },
+                { label: "1 month", recommended: true },
+                { label: "A quarter" },
+              ],
+            },
+            {
+              question: "How important is offline support?",
+              options: [
+                { label: "Not needed", recommended: true },
+                { label: "Nice to have" },
+                { label: "Critical" },
+              ],
+            },
+            {
+              question: "Who administers the workspace?",
+              options: [
+                { label: "A single owner", recommended: true },
+                { label: "Multiple admins" },
+                { label: "No admin concept" },
               ],
             },
           ],

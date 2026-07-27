@@ -19,23 +19,11 @@
 import { Fragment, type ReactNode } from "react";
 import { alpha, Box, Link, Stack, Typography } from "@wso2/oxygen-ui";
 import { Check, CircleQuestionMark, Sparkles, X as XIcon } from "@wso2/oxygen-ui-icons-react";
-import type { QuestionAnswer } from "@aep/agent-stream";
 import { MarkdownView } from "../../../components/MarkdownView";
 import type { ChatItem } from "../toolGrouping";
 import type { FeedBlock } from "../feed";
 import { ActivityStep } from "./ActivityStep";
-import { QuestionCard, type QuestionMessage } from "./QuestionCard";
 import { WorkingIndicator } from "./WorkingIndicator";
-
-/** How a turn's question cards are wired to the composer/log — threaded from
- *  AgentChatPanel through MessageList so a card knows if it's still live. */
-export interface QuestionCardProps {
-  /** Ids of question messages that still accept input (from answerableQuestionIds). */
-  answerableIds: Set<string>;
-  /** A turn is in flight — cards stay visible but hold submissions. */
-  busy: boolean;
-  onAnswer: (msg: QuestionMessage, answers: QuestionAnswer[]) => void;
-}
 
 // One agent turn in the activity stream (task 3): the "✦ Agent" header with
 // teammate attribution, narration (markdown), tool steps on a vertical rail,
@@ -102,9 +90,7 @@ function TurnFooter({
   );
 }
 
-/** Render the turn body items in order, batching consecutive tool steps onto
- *  one continuous rail while narration/errors stay flush-left. */
-/** A LIST of questions lives in the spec body's form — chat just points at it. */
+/** Questions live in the spec body's shared form — chat just points at them. */
 function QuestionsPointer({ count, onOpen }: { count: number; onOpen: () => void }) {
   return (
     <Box
@@ -133,28 +119,28 @@ function QuestionsPointer({ count, onOpen }: { count: number; onOpen: () => void
       <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
         <CircleQuestionMark size={16} />
         <Typography variant="body2" sx={{ fontWeight: 600, flexGrow: 1 }}>
-          The agent has {count} questions
+          {count === 1 ? "The agent has a question" : `The agent has ${count} questions`}
         </Typography>
         <Typography variant="caption" color="primary" sx={{ fontWeight: 600 }}>
-          Answer them →
+          {count === 1 ? "Answer it →" : "Answer them →"}
         </Typography>
       </Stack>
     </Box>
   );
 }
 
+/** Render the turn body items in order, batching consecutive tool steps onto
+ *  one continuous rail while narration/errors stay flush-left. */
 function TurnBody({
   items,
   expandedGroups,
   onToggleGroup,
   onOpenSpec,
-  questionCard,
 }: {
   items: ChatItem[];
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
   onOpenSpec: () => void;
-  questionCard: QuestionCardProps;
 }) {
   const out: ReactNode[] = [];
   let rail: ReactNode[] = [];
@@ -205,21 +191,11 @@ function TurnBody({
         out.push(<MarkdownView key={msg.id}>{msg.content}</MarkdownView>);
       }
     } else if (msg.role === "question" && msg.questions?.length) {
-      // One question answers fine inline; a LIST of them gets a full-panel
-      // form in the spec body (shared with the room) — the chat only points
-      // at it, so the thread stays readable.
+      // EVERY question is answered on the spec body's shared form — one place,
+      // one interaction, visible to the whole room. The chat only points at it
+      // so the thread stays readable.
       out.push(
-        msg.questions.length > 1 ? (
-          <QuestionsPointer key={msg.id} count={msg.questions.length} onOpen={onOpenSpec} />
-        ) : (
-          <QuestionCard
-            key={msg.id}
-            msg={msg as QuestionMessage}
-            answerable={questionCard.answerableIds.has(msg.id)}
-            busy={questionCard.busy}
-            onAnswer={questionCard.onAnswer}
-          />
-        ),
+        <QuestionsPointer key={msg.id} count={msg.questions.length} onOpen={onOpenSpec} />,
       );
     }
   });
@@ -232,13 +208,11 @@ export function TurnBlock({
   expandedGroups,
   onToggleGroup,
   onOpenSpec,
-  questionCard,
 }: {
   turn: TurnFeedBlock;
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
   onOpenSpec: () => void;
-  questionCard: QuestionCardProps;
 }) {
   return (
     <Box data-testid="turn-block">
@@ -262,7 +236,6 @@ export function TurnBlock({
         expandedGroups={expandedGroups}
         onToggleGroup={onToggleGroup}
         onOpenSpec={onOpenSpec}
-        questionCard={questionCard}
       />
       <TurnFooter status={turn.status} onOpenSpec={onOpenSpec} />
     </Box>

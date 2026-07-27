@@ -9,6 +9,24 @@
         "export PATH=\"$HOME/.nvm/versions/node/v22.16.0/bin:$PATH\" && pnpm --filter @aep/console dev --port 8091"
       ],
       "port": 8091
+    },
+    {
+      "name": "console-collab",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.nvm/versions/node/v22.16.0/bin:$PATH\" && pnpm --filter @aep/console dev --port 8094 --strictPort"
+      ],
+      "port": 8094
+    },
+    {
+      "name": "console-usage291",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"$HOME/.nvm/versions/node/v22.16.0/bin:$PATH\" && cd /Users/anjanash/Desktop/Office/labs-aep-usage300 && pnpm --filter @aep/console dev --port 8092 --strictPort"
+      ],
+      "port": 8092
     }
   ]
 }

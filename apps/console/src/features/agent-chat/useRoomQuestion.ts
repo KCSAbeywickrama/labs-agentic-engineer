@@ -32,16 +32,11 @@ import {
   type RoomQuestion,
 } from "./questionRoom.js";
 
-/** Only a LIST of questions takes over the panel; a single one stays in chat. */
-export function isBatch(entry: { questions: unknown[] }): boolean {
-  return entry.questions.length > 1;
-}
-
-/** The newest un-submitted multi-question entry in the room, if any. */
-function pendingBatch(all: RoomQuestion[]): RoomQuestion | undefined {
+/** The newest still-open question entry in the room, if any. */
+function pendingQuestion(all: RoomQuestion[]): RoomQuestion | undefined {
   for (let i = all.length - 1; i >= 0; i--) {
     const e = all[i]!;
-    if (!e.submitted && isBatch(e)) return e;
+    if (!e.submitted) return e;
   }
   return undefined;
 }
@@ -57,8 +52,7 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
   useEffect(() => {
     if (!doc) return;
     for (const m of getMessages(chatKey)) {
-      if (m.role !== "question" || !m.questions?.length || m.questions.length < 2) continue;
-      if (m.answers) continue; // already answered in chat
+      if (m.role !== "question" || !m.questions?.length) continue;
       if (!m.toolCallId) continue;
       mirrorQuestion(doc, {
         toolCallId: m.toolCallId,
@@ -73,7 +67,7 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
       setEntry(undefined);
       return;
     }
-    const read = () => setEntry(pendingBatch(readRoomQuestions(doc)));
+    const read = () => setEntry(pendingQuestion(readRoomQuestions(doc)));
     read();
     return observeRoomQuestions(doc, read);
   }, [doc]);

@@ -42,7 +42,7 @@ export interface RoomQuestion {
   ownerId: string;
   /** The shared draft answer, co-edited by the room; null until first touched. */
   answers: QuestionAnswer[] | null;
-  /** Set once the owner submits to the agent — the card goes read-only for all. */
+  /** Set once the asker submits or skips — the form closes for the whole room. */
   submitted?: boolean;
 }
 
@@ -99,8 +99,12 @@ export function setRoomAnswer(doc: Doc, toolCallId: string, answers: QuestionAns
   map.set(toolCallId, { ...existing, answers });
 }
 
-/** Mark a card submitted (owner only) — it renders read-only for the whole room. */
-export function markRoomQuestionSubmitted(doc: Doc, toolCallId: string): void {
+/**
+ * Close a question for the WHOLE room — used both when the asker submits the
+ * answers and when they skip the questions. The form disappears for everyone
+ * and the spec body returns to the files.
+ */
+export function closeRoomQuestion(doc: Doc, toolCallId: string): void {
   const map = questionsMap(doc);
   const existing = map.get(toolCallId);
   if (!existing) return;

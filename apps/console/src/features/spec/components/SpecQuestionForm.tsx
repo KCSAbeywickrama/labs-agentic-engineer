@@ -16,15 +16,15 @@
  * under the License.
  */
 
-// Collab question FORM (2026-07-23 spike): when the agent asks a LIST of
-// questions (`ask_questions`), the chat panel only points at it and the spec
-// body is taken over by this full-panel form — the shape a multi-question
-// interview actually needs. A single question stays inline in the chat instead.
+// Collab question FORM (2026-07-23 spike): EVERY agent question — one or many —
+// is answered here. The chat panel only points at it and the spec body is taken
+// over by this full-panel form, so questions always appear in one consistent
+// place instead of splitting between two surfaces.
 //
 // The form is driven by the room's shared Yjs `questions` map, so EVERY collab
 // participant sees the questions and each other's selections live. Only the
-// user who triggered the turn (`ownerId`) can submit — they hold the SSE stream
-// back to the agent; everyone else co-authors.
+// user who triggered the turn (`ownerId`) can submit or skip — they hold the
+// SSE stream back to the agent; everyone else co-authors.
 
 import { Box, Button, Checkbox, Chip, Stack, TextField, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
@@ -34,7 +34,7 @@ import { serializeQuestionAnswer } from "../../agent-chat/questionCards";
 import { chatKeyFor, setPendingSeed } from "../../agent-chat/chatStore";
 import { useCurrentAuthor } from "../../agent-chat/currentUser";
 import {
-  markRoomQuestionSubmitted,
+  closeRoomQuestion,
   setRoomAnswer,
   type RoomQuestion,
 } from "../../agent-chat/questionRoom";
@@ -117,7 +117,7 @@ export function SpecQuestionForm({
 }: {
   /** The live room Y.Doc — selections write straight into its shared map. */
   doc: Doc;
-  /** The pending multi-question entry from the room. */
+  /** The pending question entry from the room (one question or many). */
   entry: RoomQuestion;
   org: string;
   projectName: string;
@@ -163,7 +163,19 @@ export function SpecQuestionForm({
       ...(a.freeText?.trim() ? { freeText: a.freeText.trim() } : {}),
     }));
     setPendingSeed(chatKeyFor(org, projectName), serializeQuestionAnswer(entry.questions, cleaned));
-    markRoomQuestionSubmitted(doc, entry.toolCallId);
+    closeRoomQuestion(doc, entry.toolCallId);
+  };
+
+  // Skip: close the form for the WHOLE room and tell the agent to stop asking
+  // and proceed — otherwise the turn sits waiting on an answer that isn't
+  // coming. Gated to the asker, same as submit (only they can drive the agent).
+  const skip = () => {
+    if (!isOwner) return;
+    setPendingSeed(
+      chatKeyFor(org, projectName),
+      "Skip these questions — stop interviewing and proceed with your best assumptions, stating them.",
+    );
+    closeRoomQuestion(doc, entry.toolCallId);
   };
 
   return (
@@ -220,6 +232,9 @@ export function SpecQuestionForm({
             Your picks are shared live — only the person who asked can send them.
           </Typography>
         )}
+        <Button variant="text" color="inherit" disabled={!isOwner} onClick={skip}>
+          Skip questions
+        </Button>
         <Button variant="contained" disabled={!canSubmit} onClick={submit}>
           Continue
         </Button>
