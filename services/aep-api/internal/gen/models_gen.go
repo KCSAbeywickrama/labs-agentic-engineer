@@ -396,7 +396,7 @@ type BuildSummary struct {
 	Tag       string             `json:"tag"`
 	Tasks     BuildTally         `json:"tasks"`
 
-	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 	Usage Usage `json:"usage,omitempty"`
 }
 
@@ -763,6 +763,18 @@ type OrganizationView struct {
 	UUID        uuid.UUID `json:"uuid"`
 }
 
+// PhaseUsage A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns; build covers the build + coding executions; validation covers the validation executions. Each is a full Usage so a phase can degrade to tokens when its rows are unstamped.
+type PhaseUsage struct {
+	// Build Actual token usage for one unit of agent work or an aggregate (#245,
+	Build Usage `json:"build"`
+
+	// Spec Actual token usage for one unit of agent work or an aggregate (#245,
+	Spec Usage `json:"spec"`
+
+	// Validation Actual token usage for one unit of agent work or an aggregate (#245,
+	Validation Usage `json:"validation"`
+}
+
 // PlatformResourceTypeDTO defines model for PlatformResourceTypeDTO.
 type PlatformResourceTypeDTO struct {
 	Consumers   []ConsumerDTO          `json:"consumers,omitempty"`
@@ -865,19 +877,27 @@ type ProjectStatus struct {
 	SpecStatus string `json:"specStatus"`
 }
 
-// ProjectUsage Per-phase actual usage for a project (#245). All figures derive from persisted per-run token records (ADR-0011); costUsd is computed at read time from the configured model rates.
-type ProjectUsage struct {
-	// Build Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Build Usage `json:"build"`
+// ProjectUsageCard One project's lifetime agent usage (#291). Identity comes from the usage rows' stored project slug, so a card survives its project's deletion.
+type ProjectUsageCard struct {
+	// Deleted True when no live project matches the slug — rendered as a greyed card.
+	Deleted bool `json:"deleted"`
 
-	// DraftCycle Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	DraftCycle Usage `json:"draftCycle"`
+	// DisplayName The live project's display name; falls back to the slug for deleted projects.
+	DisplayName string `json:"displayName"`
 
-	// Spec Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Spec Usage `json:"spec"`
+	// Phases A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns; build covers the build + coding executions; validation covers the validation executions. Each is a full Usage so a phase can degrade to tokens when its rows are unstamped.
+	Phases PhaseUsage `json:"phases"`
 
-	// Validation Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Validation Usage `json:"validation"`
+	// ProjectName Project name (DNS-label slug) as stored on the usage rows.
+	ProjectName string `json:"projectName"`
+
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
+	Usage Usage `json:"usage"`
+}
+
+// ProjectUsageList Org-wide usage roll-up (#291), tiered — stamped-cost projects first (costUsd desc), then projects with usage the platform could not price (by tokens), then idle $0 projects last.
+type ProjectUsageList struct {
+	Projects []ProjectUsageCard `json:"projects"`
 }
 
 // PromoteFromIssueRequest defines model for PromoteFromIssueRequest.
@@ -943,17 +963,24 @@ type SaveValuesBody struct {
 
 // SkillDetailBody defines model for SkillDetailBody.
 type SkillDetailBody struct {
-	Compatibility string            `json:"compatibility,omitempty"`
-	ContentSha    string            `json:"contentSha"`
-	Description   string            `json:"description"`
-	Editable      bool              `json:"editable"`
-	Kind          string            `json:"kind"`
-	License       string            `json:"license,omitempty"`
-	Name          string            `json:"name"`
-	OrgID         string            `json:"orgId"`
-	References    map[string]string `json:"references"`
-	SkillMd       string            `json:"skillMd"`
-	UpdatedAt     time.Time         `json:"updatedAt"`
+	// BinaryReferences Sorted paths of aux files whose content is NOT valid UTF-8 (e.g.
+	// images, other binaries). Their bytes are never inlined into
+	// `references` — encoding/json silently replaces invalid UTF-8 with
+	// U+FFFD rather than erroring, so inlining would corrupt the file
+	// content without any visible failure. The console renders these
+	// entries name-only.
+	BinaryReferences []string          `json:"binaryReferences"`
+	Compatibility    string            `json:"compatibility,omitempty"`
+	ContentSha       string            `json:"contentSha"`
+	Description      string            `json:"description"`
+	Editable         bool              `json:"editable"`
+	Kind             string            `json:"kind"`
+	License          string            `json:"license,omitempty"`
+	Name             string            `json:"name"`
+	OrgID            string            `json:"orgId"`
+	References       map[string]string `json:"references"`
+	SkillMd          string            `json:"skillMd"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
 }
 
 // SkillSummary defines model for SkillSummary.
@@ -1097,7 +1124,7 @@ type TaskView struct {
 	Rationale string `json:"rationale,omitempty"`
 	Title     string `json:"title"`
 
-	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 	Usage Usage `json:"usage,omitempty"`
 }
 
@@ -1190,12 +1217,12 @@ type UpdateSkillInput struct {
 	SkillMd    string            `json:"skillMd"`
 }
 
-// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 type Usage struct {
 	CacheCreationTokens int64 `json:"cacheCreationTokens"`
 	CacheReadTokens     int64 `json:"cacheReadTokens"`
 
-	// CostUsd Catalog-derived USD; null when pricing is unavailable for the model.
+	// CostUsd Write-time-stamped USD (sum, for aggregates); null when no stamp exists.
 	CostUsd     *float64 `json:"costUsd"`
 	InputTokens int64    `json:"inputTokens"`
 

@@ -14,27 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package cmd
+package spec
 
-import (
-	"fmt"
-
-	"github.com/spf13/cobra"
-)
-
-var updateServiceCmd = &cobra.Command{
-	Use:   "service [name]",
-	Short: "Update one or all services",
-	Args:  cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			fmt.Println("all services updated")
-			return
-		}
-		fmt.Printf("service %s updated\n", args[0])
-	},
-}
-
-func init() {
-	updateCmd.AddCommand(updateServiceCmd)
+// ResolveAutoRCAEnabled reports whether the platform should auto-provision the
+// default "error → RCA" observability-alert-rule trait for this component.
+//
+// Sensible defaults: service components only (an error-log alert on a
+// web-app / library is meaningless — their container logs are a static
+// file server, not the application code that would log an error), and
+// opt-out per component via the design.json `disableAutoRca: true` key.
+func ResolveAutoRCAEnabled(comp DesignComponent) bool {
+	return comp.ComponentType == ComponentTypeService && !comp.DisableAutoRca
 }

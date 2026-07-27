@@ -35,14 +35,14 @@
  *    truly lazy, and D4 immutability makes the mid-turn reads race-free.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 // Reuse the bundle's single frontmatter grammar + LF canonicalizer so SKILL.md
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
 // the caller-side skill resolver the playground uses to materialize the mount).
 import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
-import type { SkillCatalogEntry, SkillSource, LoadedSkillBody } from "../agents/main/skill-source.js";
+import type { SkillCatalogEntry, SkillSource, LoadedSkillBody, LoadedReference } from "../agents/main/skill-source.js";
 
 // --- The repo snapshot → `files` map -----------------------------------------
 
@@ -150,14 +150,38 @@ function parseSkillMd(raw: string): { name?: string; description: string; body: 
   };
 }
 
-/** Sorted `references/<file>.md` paths for one skill dir (readdir at call time — D4-immutable). */
+/**
+ * Sorted relative paths of every aux file under one skill dir (readdir at call
+ * time — D4-immutable): the Agent Skills standard structure carries SKILL.md
+ * plus ANY supporting files — `references/*.md`, `scripts/*`, `assets/*`, or
+ * arbitrary extras nested arbitrarily deep. Recurses the whole skill dir,
+ * skipping the top-level SKILL.md and dot-entries (files and dirs, at any
+ * depth) — the same skip rule the Go-side scan applies.
+ */
 function listReferences(skillDir: string): string[] {
-  const refsDir = join(skillDir, "references");
-  if (!existsSync(refsDir)) return [];
-  return readdirSync(refsDir, { withFileTypes: true })
-    .filter((f) => f.isFile() && f.name.endsWith(".md") && !f.name.startsWith("."))
-    .map((f) => `references/${f.name}`)
-    .sort();
+  const out: string[] = [];
+  const walkAux = (dir: string, rel: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // vanished mid-scan — impossible for an immutable snapshot, but stay honest
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue; // dot-entries (files and dirs) skipped
+      if (rel === "" && e.name === "SKILL.md") continue; // the skill body itself, not an aux file
+      const abs = join(dir, e.name);
+      const key = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walkAux(abs, key);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      out.push(key);
+    }
+  };
+  walkAux(skillDir, "");
+  return out.sort();
 }
 
 interface CatalogRow extends SkillCatalogEntry {
@@ -196,17 +220,24 @@ export class SnapshotSkillSource implements SkillSource {
     return { content: parseSkillMd(raw).body.trim(), references: listReferences(row.dir) };
   }
 
-  loadReference(name: string, path: string): string | undefined {
+  loadReference(name: string, path: string): LoadedReference {
     const row = this.byName.get(name);
     if (row === undefined) return undefined;
     // Fence-by-allowlist: the model-supplied path must be one of the LISTED
     // reference paths (never resolved raw against the fs).
     if (!listReferences(row.dir).includes(path)) return undefined;
+    let buf: Buffer;
     try {
-      return readFileSync(join(row.dir, path), "utf8");
+      buf = readFileSync(join(row.dir, path));
     } catch {
       return undefined;
     }
+    // Cheap UTF-8 validity check: re-encode the decoded text and compare bytes
+    // — a mismatch means the file isn't valid UTF-8 text (binary), and
+    // model-context surfaces must never inline binary.
+    const text = buf.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(buf)) return { binary: true };
+    return { content: text };
   }
 }
 

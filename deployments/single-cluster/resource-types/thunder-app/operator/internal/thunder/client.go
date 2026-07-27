@@ -286,10 +286,8 @@ func (c *client) getDefaultOUID(ctx context.Context, token string) (string, erro
 // -- app lookup + pagination ---------------------------------------------
 
 // thunderAppSummary is the flattened entry Thunder's list endpoint returns
-// per application — clientId is surfaced at the top level there (Thunder
-// 0.34 includes it in the list view) even though on a full GET/PUT it
-// lives nested under inboundAuthConfig[0].config.clientId. Mirrors
-// thundersvc's thunderApp struct.
+// per application. Thunder 0.34 uses camelCase keys throughout (list and
+// create/update payloads alike).
 type thunderAppSummary struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`

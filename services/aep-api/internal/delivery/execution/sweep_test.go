@@ -41,6 +41,10 @@ func (f *countingPRReader) GetPullRequestState(_ context.Context, _, _ string, n
 	return f.states[number], nil
 }
 
+func (f *countingPRReader) ListPullRequestFiles(_ context.Context, _, _ string, _ int) ([]string, error) {
+	return nil, nil
+}
+
 func oneRepo() fakeRepoLister {
 	return fakeRepoLister{repos: []RepoRef{{OrgID: "org1", ProjectID: "proj1", FullName: "o/r"}}}
 }

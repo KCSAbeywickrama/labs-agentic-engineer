@@ -33,6 +33,7 @@ import {
 } from "@wso2/oxygen-ui";
 import {
   CircleAlert,
+  CircleCheck,
   FileText,
   FolderOpen,
   LayoutDashboard,
@@ -74,6 +75,7 @@ function activeItemFor(pathname: string, inProject: boolean): string {
     case "spec":
     case "builds":
     case "deployments":
+    case "validation":
     case "issues":
       return section;
     default:
@@ -264,6 +266,20 @@ export function AppLayout() {
                     <Rocket />
                   </Sidebar.ItemIcon>
                   <Sidebar.ItemLabel>Deployments</Sidebar.ItemLabel>
+                </Sidebar.Item>
+                <Sidebar.Item
+                  id="validation"
+                  link={
+                    <Link
+                      to="/projects/$projectName/validation"
+                      params={{ projectName }}
+                    />
+                  }
+                >
+                  <Sidebar.ItemIcon>
+                    <CircleCheck />
+                  </Sidebar.ItemIcon>
+                  <Sidebar.ItemLabel>Validation</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 <Sidebar.Item
                   id="issues"

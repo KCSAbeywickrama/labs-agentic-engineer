@@ -103,7 +103,7 @@ vi.mock("../api/queries", () => ({
 }));
 
 describe("DeploymentsPage — validation chip", () => {
-  it("routes a RUNNING validation to the internal log page", () => {
+  it("routes a RUNNING validation to the Validation page", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -116,15 +116,12 @@ describe("DeploymentsPage — validation chip", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     const chip = screen.getByRole("link", { name: /Validating/ });
-    expect(chip).toHaveAttribute(
-      "href",
-      "/projects/acme/deployments/validation/30",
-    );
+    expect(chip).toHaveAttribute("href", "/projects/acme/validation");
     // Internal navigation, not a new-tab external link.
     expect(chip).not.toHaveAttribute("target");
   });
 
-  it("routes a FAILED validation to the internal log page", () => {
+  it("routes a FAILED validation to the Validation page", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -137,17 +134,14 @@ describe("DeploymentsPage — validation chip", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     const chip = screen.getByRole("link", { name: /Validation failed/ });
-    expect(chip).toHaveAttribute(
-      "href",
-      "/projects/acme/deployments/validation/30",
-    );
+    expect(chip).toHaveAttribute("href", "/projects/acme/validation");
     expect(chip).not.toHaveAttribute("target");
   });
 
-  it("routes a COMPLETED validation to the internal log page", () => {
-    // Even after the run finished the chip opens the internal log view (the
-    // historical runner log); the page itself links out to the PR. The PR
-    // URL is present but must NOT win over the issue-number route.
+  it("routes a COMPLETED validation to the Validation page", () => {
+    // The chip opens the Validation page in every state; that page owns the
+    // report, the run log, and the issue/PR links — so no external URL and no
+    // issue number are needed on the chip itself.
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -160,14 +154,11 @@ describe("DeploymentsPage — validation chip", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     const chip = screen.getByRole("link", { name: /Validation report/ });
-    expect(chip).toHaveAttribute(
-      "href",
-      "/projects/acme/deployments/validation/30",
-    );
+    expect(chip).toHaveAttribute("href", "/projects/acme/validation");
     expect(chip).not.toHaveAttribute("target");
   });
 
-  it("shows a PR-linked chip when validation has run", () => {
+  it("opens the Validation page even with no issue number on the status", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -179,8 +170,8 @@ describe("DeploymentsPage — validation chip", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     const chip = screen.getByRole("link", { name: /Validation report/ });
-    expect(chip).toHaveAttribute("href", "https://github.com/acme/demo/pull/42");
-    expect(chip).toHaveAttribute("target", "_blank");
+    expect(chip).toHaveAttribute("href", "/projects/acme/validation");
+    expect(chip).not.toHaveAttribute("target");
   });
 
   it("renders no validation chip when there is nothing to validate", () => {

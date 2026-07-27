@@ -25,15 +25,15 @@ const FULL = JSON.stringify({
       id: "REQ-001",
       statement: "The system supports multiple structured risk registers.",
       criteria: [
-        { id: "AC-001-a", must: "A user can create a Cloud register", method: "e2e", covered: false },
-        { id: "AC-001-b", must: "A user can create a Security register", method: "e2e", covered: true },
+        { id: "AC-001-a", must: "A user can create a Cloud register", method: "e2e" },
+        { id: "AC-001-b", must: "A user can create a Security register", method: "e2e" },
       ],
     },
     {
       id: "REQ-013",
       statement: "The system provides dashboards.",
       criteria: [
-        { id: "AC-013-a", must: "A dashboard shows overall posture", method: "e2e", covered: false },
+        { id: "AC-013-a", must: "A dashboard shows overall posture", method: "e2e" },
         { id: "AC-013-b", must: "A dashboard highlights recurring areas", method: "scenario" },
       ],
     },
@@ -59,22 +59,19 @@ describe("parseValidationCriteria", () => {
       "The system supports multiple structured risk registers.",
     );
     expect(req1.criteria).toHaveLength(2);
-    const covered = req1.criteria.find((c) => c.id === "AC-001-b")!;
-    expect(covered.method).toBe("e2e");
-    expect(covered.covered).toBe(true);
+    const e2e = req1.criteria.find((c) => c.id === "AC-001-b")!;
+    expect(e2e.method).toBe("e2e");
   });
 
-  it("keeps `covered` only when it is a boolean (scenario/manual have none)", () => {
+  it("preserves each method (e2e / scenario / manual)", () => {
     const d = parseValidationCriteria(FULL);
     if ("kind" in d) throw new Error("unexpected parse error");
     const scenario = d.requirements[1]!.criteria.find(
       (c) => c.id === "AC-013-b",
     )!;
     expect(scenario.method).toBe("scenario");
-    expect(scenario.covered).toBeUndefined();
     const manual = d.requirements[2]!.criteria[0]!;
     expect(manual.method).toBe("manual");
-    expect(manual.covered).toBeUndefined();
   });
 
   it("skips requirements missing an id or statement", () => {

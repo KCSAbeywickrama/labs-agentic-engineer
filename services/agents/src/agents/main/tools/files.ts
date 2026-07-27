@@ -37,7 +37,11 @@ import type { Tool } from "ai";
 import { z } from "zod";
 import {
   FileBundle,
+  ASK_QUESTION_TOOL,
+  ASK_QUESTIONS_TOOL,
   type AddFileInput,
+  type AskQuestionInput,
+  type AskQuestionsInput,
   type EditFileInput,
   type Equal,
   type RemoveFileInput,
@@ -48,8 +52,12 @@ import type { SkillSource } from "../skill-source.js";
 export const ADD_FILE = "addFile" as const;
 export const EDIT_FILE = "editFile" as const;
 export const REMOVE_FILE = "removeFile" as const;
-/** A tool for human-in-the-loop questions — implemented, but disabled. */
-export const ASK_QUESTION = "ask_question" as const;
+
+// The HITL question tools' NAMES are owned by the wire contract
+// (@aep/agent-stream) so the producer (this service) and the renderers
+// (console, playground) can never split on a rename. Re-exported so the call
+// site's `hasToolCall` stop conditions read one definition.
+export { ASK_QUESTION_TOOL, ASK_QUESTIONS_TOOL } from "@aep/agent-stream";
 
 // Re-export the shared skill-loader names so existing importers keep one entry point.
 export { LOAD_SKILL, LOAD_SKILL_REFERENCE } from "./skill-tools.js";
@@ -76,6 +84,52 @@ export const removeFileInputSchema = z.object({
   path: z.string().describe("Existing bundle path to delete."),
 });
 
+// --- ask_question / ask_questions (HITL, console ADR-0012 / #270) -------------
+// Structured multiple-choice questions the agent asks when it needs a human
+// decision. Each tool HAS an execute() returning a RESOLVED placeholder, so the
+// turn ends fully-resolved (no dangling tool_use → no MissingToolResultsError on
+// persist/replay). Registered on the `files` tool set (see buildFileTools) and
+// paired with a `hasToolCall` stop condition at the call site
+// (run-conversation-turn.ts) so the turn ENDS at the call; the user's answer
+// arrives as the NEXT turn's plain user message (`buildAnswerInstruction` /
+// `buildAnswersInstruction`). PROPERTY ORDER is load-bearing: `question` first so
+// a consumer can render the card header the instant it resolves; the `options`
+// list streams after.
+//
+// The description keeps the tool RESTRICTIVE ("only when you cannot proceed
+// safely") for ordinary generation turns; the platform `grilling` skill loosens
+// that during interviews. Always registered — no per-turn gating (#270 decision 6).
+
+const askQuestionOptionSchema = z.object({
+  label: z.string().describe("Short display text for this choice — the exact value echoed back in the answer. Keep labels unique within a question."),
+  description: z.string().optional().describe("What choosing this option means or implies."),
+  recommended: z.boolean().optional().describe("Mark the ONE option you recommend (at most one per question)."),
+});
+
+export const askQuestionInputSchema = z.object({
+  question: z.string().describe("The clarifying question to ask the user."),
+  options: z
+    .array(askQuestionOptionSchema)
+    .min(1)
+    .max(5)
+    .refine((opts) => opts.filter((o) => o.recommended).length <= 1, {
+      message: "At most one option may be marked recommended.",
+    })
+    .describe("1–5 answer options the user picks from; labels are the selection identity."),
+  multiSelect: z
+    .boolean()
+    .optional()
+    .describe("True → the user may pick several options together (checkboxes). Defaults to false (a single choice)."),
+});
+
+export const askQuestionsInputSchema = z.object({
+  questions: z
+    .array(askQuestionInputSchema)
+    .min(1)
+    .max(8)
+    .describe("1–8 questions rendered together as one form; each answered independently."),
+});
+
 // --- Drift guard: Zod schema ⇄ sse-events wire type -------------------------
 // Compile-time only. If a schema's inferred input diverges from its wire type,
 // the corresponding `true` is no longer assignable and this fails to compile,
@@ -84,27 +138,29 @@ const _drift: [
   Equal<z.infer<typeof addFileInputSchema>, AddFileInput>,
   Equal<z.infer<typeof editFileInputSchema>, EditFileInput>,
   Equal<z.infer<typeof removeFileInputSchema>, RemoveFileInput>,
-] = [true, true, true];
+  Equal<z.infer<typeof askQuestionInputSchema>, AskQuestionInput>,
+  Equal<z.infer<typeof askQuestionsInputSchema>, AskQuestionsInput>,
+] = [true, true, true, true, true];
 void _drift;
 
-// --- ask_question (HITL, Option B) — implemented but NOT registered ----------
-// HAS an execute() returning a RESOLVED placeholder, so the transcript ends
-// fully-resolved (no dangling tool_use → no MissingToolResultsError on
-// persist/replay). Enabling HITL = uncomment the registration line in
-// buildFileTools AND the paired `hasToolCall("ask_question")` stop condition at
-// the call site. The user's answer arrives as the NEXT turn's plain user message.
-// No test covers this path while disabled (§5).
-export const askQuestionInputSchema = z.object({
-  question: z.string().describe("The clarifying question to ask the user."),
-});
-
-/** @knipkeep Unwired HITL tool — enabled by uncommenting its registration in buildFileTools (see the note above). */
+/** Ask ONE structured question (a single card); ends the turn (HITL). */
 export const askQuestionTool: Tool = tool({
   description:
-    "Ask the user a clarifying question when the instruction is ambiguous and you cannot proceed safely. " +
+    "Ask the user ONE structured multiple-choice question when you cannot proceed safely without their decision. " +
+    "Give 1–5 options (mark at most one recommended); set multiSelect when several may apply together. " +
     "Ends your turn; the user's answer arrives as the next message.",
   inputSchema: askQuestionInputSchema,
-  execute: async ({ question }) => ({ status: "awaiting_user_response" as const, question }),
+  execute: async (input) => ({ status: "awaiting_user_response" as const, ...input }),
+});
+
+/** Ask a LIST of structured questions answered as one form; ends the turn (HITL). */
+export const askQuestionsTool: Tool = tool({
+  description:
+    "Ask the user SEVERAL structured questions at once, rendered as a single form — use it when you have multiple " +
+    "independent decisions to gather in one round instead of asking them one turn at a time. Each entry is a full " +
+    "question (1–5 options, optional recommended, optional multiSelect). Ends your turn; the answers arrive as the next message.",
+  inputSchema: askQuestionsInputSchema,
+  execute: async (input) => ({ status: "awaiting_user_response" as const, ...input }),
 });
 
 /**
@@ -141,10 +197,11 @@ export function buildFileTools(bundle: FileBundle, skills?: SkillSource): Record
       execute: async ({ path }) => bundle.removeFile(path),
     }),
 
-    // ask_question — human-in-the-loop follow-up. Implemented (Phase 5) but NOT
-    // registered: enabling HITL = uncomment the line below AND the paired
-    // hasToolCall("ask_question") stop condition at the call site. See §5/§10.
-    // [ASK_QUESTION]: askQuestionTool,
+    // Human-in-the-loop questions (console ADR-0012 / #270). Registered on the
+    // `files` set only; the call site pairs each with a `hasToolCall` stop
+    // condition so the turn ends awaiting the user's answer.
+    [ASK_QUESTION_TOOL]: askQuestionTool,
+    [ASK_QUESTIONS_TOOL]: askQuestionsTool,
   };
 
   return { ...tools, ...buildSkillTools(skills) };

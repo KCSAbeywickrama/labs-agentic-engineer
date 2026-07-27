@@ -115,7 +115,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// bootstrap: built-ins seed/reconcile into each org's repo on demand.
 
 	// Repositories
-	executionRepo := delivery.NewExecutionRepository(db)
+	executionRepo := delivery.NewExecutionRepository(db, in.RateStamper)
 	configRepo := projects.NewConfigRepository(db)
 	repoRepo := sourcecontrol.NewRepoRepository(db)
 	workflowRunRepo := delivery.NewWorkflowRunRepository(db)
@@ -368,7 +368,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 		}
 		return repoService.GetRepo(ctx, orgID, spec.SkillsRepoSentinelProjectID)
 	}
-	turnRepo := spec.NewTurnRepository(db)
+	turnRepo := spec.NewTurnRepository(db, in.RateStamper)
 	turnBroker := spec.NewTurnBroker()
 	genaiDeps := spec.ServiceDeps{
 		Repos:      repoService,
@@ -620,7 +620,15 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// PRs; in App mode the runner's PR opens as <slug>[bot] and must be acted on).
 	execEvents := execution.NewEvents(executionRepo, funnel, registry, issueService).
 		WithWorkflowSignaler(devflowSignaler).
-		WithTaskNotifier(taskStreamHub)
+		WithTaskNotifier(taskStreamHub).
+		// Path-based build fan-out: a merged PR rebuilds every component whose
+		// appPath its diff touched (issueService lists the PR's changed files;
+		// designComponents maps appPaths → components), not just the Task's own.
+		WithDesignReader(designComponents{store: artifactStore}).
+		// Flag-gated auto-merge (AUTO_MERGE_CODING_PRS, default false): when on,
+		// squash-merge a coding-agent PR on open so the fix deploys end-to-end
+		// without a human. Off by default — it auto-deploys unreviewed code.
+		WithAutoMerge(cfg.AutoMergeCodingPRs, repoLocator{db: db}, issueService)
 	execEvents.RegisterHandlers(registerWebhook)
 	webhook.RegisterInstallationHandlers(webhookRouter, credService, issueService, trashWorkspaceOrg)
 	webhookCtrl := webhook.NewWebhookController(webhookVerifier, deliveryStore, webhookRouter, routingLookup, routingCache)
@@ -824,10 +832,40 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// CRUD + status, the component read + build + deploy surface, and the
 	// component env-var config. Its slice handlers embed straight into the edge's
 	// composite; the edge holds no project/component/config service.
+	// Settings → Usage (#291): fold spec-turn + coding-execution per-project
+	// usage, labelled by the org's live projects (a usage slug with no live
+	// project is a since-deleted project, shown greyed).
+	usageService := projects.NewUsageService(
+		turnRepo.SumUsageByProject,
+		executionRepo.SumUsageByProjectPhase,
+		func(ctx context.Context, orgID string) (map[string]string, error) {
+			names := map[string]string{}
+			list, err := projectService.ListProjects(ctx, orgID, 100, "", "")
+			if err != nil {
+				return nil, err
+			}
+			for _, p := range list.Items {
+				display := p.DisplayName
+				if display == "" {
+					display = p.Name
+				}
+				names[p.Name] = display
+			}
+			// no-silent-caps: an org with >100 projects would drop the overflow
+			// from the live-name lookup (they'd render as "deleted"). Log so the
+			// truncation is visible rather than a silent mislabel.
+			if list.NextCursor != "" {
+				slog.Warn("usage roll-up: live-project name lookup truncated at 100; extra projects will render as deleted", "org", orgID)
+			}
+			return names, nil
+		},
+	)
+
 	projectsHandlers, err := projectshttpapi.New(projects.Deps{
 		ProjectSvc:   projectService,
 		ComponentSvc: componentService,
 		ConfigSvc:    configService,
+		UsageSvc:     usageService,
 		ActivitySvc:  activitySvc,
 	})
 	if err != nil {
