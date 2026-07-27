@@ -56,14 +56,50 @@ else
     echo "✅ validation runner image already present ($IMAGE) — skipping build (FORCE=1 to rebuild)"
 fi
 
+# Pin the imported image against the kubelet's image garbage collector. Once the
+# node's image filesystem crosses imageGCHighThresholdPercent (85%), the kubelet
+# deletes UNUSED images until usage drops to 80% — largest-and-coldest first,
+# which is exactly this 1.5GB tag between validation runs. It is local-only, so
+# there is nothing to re-pull: the next dispatch sits in ImagePullBackOff until
+# someone re-imports by hand (observed 2026-07-24 and 2026-07-27, both times
+# minutes after a successful import). containerd surfaces the pinned label
+# through CRI and the kubelet skips pinned images when it collects.
+#
+# Note this treats the symptom. The cause is a full node filesystem — if GC is
+# firing, `docker builder prune` on the host is the actual fix; check
+# `docker exec k3d-<cluster>-server-0 df -h /` against the 85% threshold.
+pin_against_image_gc() {
+    local node="$1" ref
+    # Resolve the containerd ref rather than assuming docker.io/library/<tag>:
+    # VALIDATION_RUNNER_IMAGE may carry its own registry prefix.
+    ref="$(docker exec "$node" ctr -n k8s.io images ls -q 2>/dev/null | grep -E -- "(^|/)${IMAGE}\$" | head -1)"
+    if [ -z "$ref" ]; then
+        echo "⚠️  $node: $IMAGE absent from containerd — cannot pin (image GC may evict it)"
+        return
+    fi
+    if docker exec "$node" ctr -n k8s.io images label "$ref" io.cri-containerd.pinned=pinned >/dev/null 2>&1; then
+        echo "📌 pinned $ref in $node — kubelet image GC will skip it"
+    else
+        echo "⚠️  $node: could not pin $ref (image GC may evict it)"
+    fi
+}
+
 # Import into the k3d node so the runner Job can start without a cold registry
 # pull (the :dev tag is local-only ⇒ imagePullPolicy IfNotPresent). Mirrors the
 # coding-runner pre-import in setup-aep.sh. Skipped (with a note) when k3d or the
 # cluster isn't up — e.g. building the image ahead of cluster setup.
 if command -v k3d &>/dev/null && k3d cluster list "$CLUSTER_NAME" &>/dev/null; then
-    k3d image import "$IMAGE" -c "$CLUSTER_NAME" \
-        && echo "✅ imported $IMAGE into k3d cluster '$CLUSTER_NAME'" \
-        || echo "⚠️  k3d image import failed; first validation dispatch may cold-pull"
+    if k3d image import "$IMAGE" -c "$CLUSTER_NAME"; then
+        echo "✅ imported $IMAGE into k3d cluster '$CLUSTER_NAME'"
+        # Only server/agent nodes run containerd — the serverlb proxy and the
+        # transient tools node do not.
+        for node in $(docker ps --filter "name=k3d-${CLUSTER_NAME}-" --format '{{.Names}}' \
+                | grep -E -- '-(server|agent)-[0-9]+$' || true); do
+            pin_against_image_gc "$node"
+        done
+    else
+        echo "⚠️  k3d image import failed; first validation dispatch may cold-pull"
+    fi
 else
     echo "ℹ️  k3d cluster '$CLUSTER_NAME' not found — built the image only; setup-aep.sh imports it at cluster setup."
 fi
