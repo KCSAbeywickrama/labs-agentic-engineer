@@ -68,3 +68,9 @@ docs/design/draft/
 
 # Per-developer local chart overrides (copy from values.local.dev.yaml.example)
 deployments/helm-charts/platform/values.local.dev.yaml
+
+# Local PR-evidence screenshots (attached to PRs by hand, never committed)
+/.screenshots-*/
+# Local session artifacts — dev-tool config and working notes, not repo content
+/.agents/launch.json
+/docs/superpowers/
