@@ -105,3 +105,30 @@ export function reconcileDir(
 
   return changes;
 }
+
+/**
+ * Reconcile a SINGLE path from `before`→`after` content and write it under
+ * `root` — the per-tool-call sibling of `reconcileDir`, used by the engine loop
+ * to fold each streamed tool-call to disk the moment it arrives (§5) instead of
+ * batching the whole turn. `after === undefined` means the file was removed.
+ * Returns the change, or `null` when nothing changed (e.g. a rejected op left
+ * the bundle byte-for-byte unchanged).
+ */
+export function reconcileFile(
+  root: string,
+  path: string,
+  before: string | undefined,
+  after: string | undefined,
+): FileChange | null {
+  const absRoot = resolve(root);
+  if (after !== undefined) {
+    if (before === after) return null; // unchanged / rejected op
+    const abs = resolveWithin(absRoot, path);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, after, "utf8");
+    return { kind: before === undefined ? "add" : "edit", path };
+  }
+  if (before === undefined) return null; // nothing to remove
+  rmSync(resolveWithin(absRoot, path), { force: true });
+  return { kind: "remove", path };
+}
