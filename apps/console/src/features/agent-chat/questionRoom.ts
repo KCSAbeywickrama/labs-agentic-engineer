@@ -16,16 +16,11 @@
  * under the License.
  */
 
-// Collab question cards spike (2026-07-23): bridge + shared state for rendering
-// agent question cards on the MAIN spec panel via the project's Yjs room, so all
-// participants see and co-author them.
-//
-// The chat fold (runTurn.ts) receives the SSE ask_question tool-call, but the
-// live Y.Doc is owned solely by SpecView (useCollabSpec) — a sibling subtree
-// with no shared React reference. This module singleton is the bridge: SpecView
-// publishes the live doc while it is mounted; the fold reads it to mirror a
-// question into the shared `questions` map. Mirrors the existing chatStore
-// module-store pattern. Null while the spec route isn't mounted (mirror no-ops).
+// Collab question cards spike (2026-07-23): the shared `questions` map on the
+// project's Yjs room — how agent questions surface on the MAIN spec panel for
+// every participant to see and co-author. Written by useRoomQuestion (which
+// mirrors this client's chat log into the doc) and by the form's answer/skip
+// actions; observed by the form for live updates.
 
 import type { Doc, Map as YMap } from "yjs";
 import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
@@ -44,28 +39,6 @@ export interface RoomQuestion {
   answers: QuestionAnswer[] | null;
   /** Set once the asker submits or skips — the form closes for the whole room. */
   submitted?: boolean;
-}
-
-// --- Doc bridge (SpecView publishes → the chat fold reads) ------------------
-
-let liveDoc: Doc | null = null;
-const listeners = new Set<() => void>();
-
-/** SpecView publishes the live room doc on mount, and `null` on unmount. */
-export function setQuestionDoc(doc: Doc | null): void {
-  if (liveDoc === doc) return;
-  liveDoc = doc;
-  for (const fn of listeners) fn();
-}
-
-/** The live room doc, or null when the spec route isn't mounted. */
-export function getQuestionDoc(): Doc | null {
-  return liveDoc;
-}
-
-export function subscribeQuestionDoc(fn: () => void): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
 }
 
 // --- Shared `questions` map helpers ----------------------------------------

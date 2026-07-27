@@ -36,7 +36,6 @@ import {
   notifyTurnEnd,
 } from "./chatStore.js";
 import { isQuestionTool, parseQuestionsInput } from "./questionCards.js";
-import { getQuestionDoc, mirrorQuestion } from "./questionRoom.js";
 import { getTurn, openTurnStream } from "./api/turns.js";
 
 const FILE_TOOLS = new Set(["addFile", "editFile", "removeFile"]);
@@ -55,9 +54,6 @@ export async function attachAndFoldTurn(
   turnId: string,
   signal: AbortSignal,
   onCommitted?: () => void,
-  /** Local user id of the turn-owner — stamped on questions mirrored into the
-   *  collab room so only the owner can submit them (collab spike). */
-  ownerId?: string,
 ): Promise<void> {
   let sawTerminal = false;
   // Per tool call: accumulate its streamed input args so the path can be read as
@@ -102,16 +98,16 @@ export async function attachAndFoldTurn(
         if (!isQuestionTool(part.toolName)) break;
         const questions = parseQuestionsInput(part.toolName!, part.input);
         if (!questions) break;
-        const toolCallId = part.toolCallId ?? "";
-        upsertQuestionMessage(chatKey, { role: "question", turnId, toolCallId, questions });
-        // Collab spike: EVERY question — one or many — is answered on the main
-        // spec panel by the whole room, so mirror it onto the shared map. No-op
-        // when the spec route (which owns the doc) isn't mounted;
-        // useRoomQuestion back-fills from the chat log on navigating there.
-        const doc = getQuestionDoc();
-        if (doc && ownerId && toolCallId) {
-          mirrorQuestion(doc, { toolCallId, questions, ownerId });
-        }
+        // Landing in the chat log is ALSO what surfaces the question on the
+        // spec panel: useRoomQuestion subscribes to this log and mirrors
+        // answerable questions into the room's shared Yjs map (single path —
+        // no doc-publication race here).
+        upsertQuestionMessage(chatKey, {
+          role: "question",
+          turnId,
+          toolCallId: part.toolCallId ?? "",
+          questions,
+        });
         break;
       }
       case "tool-result": {

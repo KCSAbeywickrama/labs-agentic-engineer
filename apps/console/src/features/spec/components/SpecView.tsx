@@ -48,7 +48,6 @@ import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
 import { SpecQuestionForm } from "./SpecQuestionForm";
-import { setQuestionDoc } from "../../agent-chat/questionRoom";
 import { useRoomQuestion } from "../../agent-chat/useRoomQuestion";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
@@ -91,18 +90,12 @@ export function SpecView({ projectName }: { projectName: string }) {
   // Rooms are org-scoped (`spec-<org>-<project>`); without an org claim fall
   // back to the collab mock BFF's default org so mock mode keeps working.
   const collab = useCollabSpec(projectName, user, orgHandle ?? "acme");
-  // Collab question cards spike: publish the live room doc so the chat fold (a
-  // sibling subtree) can mirror agent questions into it while this view is
-  // mounted; clear on unmount. The banner below reads the same doc directly.
-  const roomDoc = collab.doc;
-  useEffect(() => {
-    setQuestionDoc(roomDoc);
-    return () => setQuestionDoc(null);
-  }, [roomDoc]);
-  // A pending LIST of agent questions takes over the body with a full-panel
-  // form, shared live with everyone in the room (a single question stays in
-  // the chat panel instead). chatKey uses the "default" org fallback matching
+  // Collab question cards spike: a pending agent question (one or many) takes
+  // over the body with a full-panel form, shared live with everyone in the
+  // room. useRoomQuestion mirrors this client's chat log into the room doc and
+  // observes the shared map. chatKey uses the "default" org fallback matching
   // the chat panel, not the collab room's "acme".
+  const roomDoc = collab.doc;
   const roomQuestion = useRoomQuestion(roomDoc, chatKeyFor(orgHandle ?? "default", projectName));
   // Chat-path turn-end flush (#252 Task 5): the chat panel's chatKey uses a
   // DIFFERENT fallback ("default", matching AppLayout/AgentChatPanel) than

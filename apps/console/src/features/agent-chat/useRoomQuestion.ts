@@ -16,14 +16,15 @@
  * under the License.
  */
 
-// The pending multi-question entry for the spec body's question form (spike):
-// observes the room's shared `questions` map, and back-fills it from this
-// client's own chat log so a question that arrived while the user was off the
-// spec route still surfaces when they navigate to it.
+// The pending question entry for the spec body's question form (spike):
+// observes the room's shared `questions` map, and mirrors this client's own
+// chat log into it — LIVE (subscribed to the log), so a question surfaces no
+// matter when it arrives relative to the doc's lifecycle: mid-stream on this
+// route, while the user was on another page, or after a reload.
 
 import { useEffect, useState } from "react";
 import type { Doc } from "yjs";
-import { getMessages } from "./chatStore.js";
+import { getMessages, subscribe } from "./chatStore.js";
 import { answerableQuestionIds } from "./questionCards.js";
 import { useCurrentAuthor } from "./currentUser.js";
 import {
@@ -46,33 +47,34 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
   const me = useCurrentAuthor();
   const [entry, setEntry] = useState<RoomQuestion | undefined>(undefined);
 
-  // Back-fill: mirror any question from this client's own chat log into the
-  // room (idempotent by toolCallId). Covers the case where the question
-  // streamed in while the spec route — which owns the doc — was not mounted,
-  // so the fold had nowhere to mirror it. The `ownerId: me.id` claim assumes
-  // "my log ⇒ my turn", which holds across real users (separate browsers don't
-  // share localStorage) but NOT across two tabs of one browser with different
-  // `aep:mock:user` identities — there, whichever tab back-fills first claims
-  // ownership (mirrorQuestion is first-writer-wins, so it can't be stolen
-  // later). Acceptable for a dev-only setup.
+  // Mirror this client's chat log into the room — initially AND on every log
+  // change (subscribed), so the fold appending a question mid-stream reaches
+  // the doc without racing the doc's publication. Idempotent by toolCallId.
+  // Only questions the log still considers ANSWERABLE mirror (no later
+  // delivered user message): the room's `submitted` flag lives in an ephemeral
+  // doc (rooms unload when empty), but the submitted/skipped answer persists
+  // in the log right after the question — that check is what stops a fresh doc
+  // from resurrecting an already-answered form. The `ownerId: me.id` claim
+  // assumes "my log ⇒ my turn", which holds across real users (separate
+  // browsers don't share localStorage); two same-browser tabs with different
+  // `aep:mock:user` identities race for it (first-writer-wins — dev-only).
   useEffect(() => {
     if (!doc) return;
-    const messages = getMessages(chatKey);
-    // Only questions the log still considers ANSWERABLE (no later delivered
-    // user message). The room's `submitted` flag lives in an ephemeral doc
-    // (rooms unload when empty), but the submitted/skipped answer persists in
-    // the log as the user message right after the question — so this check is
-    // what stops a fresh doc from resurrecting an already-answered form.
-    const answerable = answerableQuestionIds(messages);
-    for (const m of messages) {
-      if (m.role !== "question" || !m.questions?.length) continue;
-      if (!m.toolCallId || !answerable.has(m.id)) continue;
-      mirrorQuestion(doc, {
-        toolCallId: m.toolCallId,
-        questions: m.questions,
-        ownerId: me.id, // it's this client's log, so this client ran the turn
-      });
-    }
+    const backfill = () => {
+      const messages = getMessages(chatKey);
+      const answerable = answerableQuestionIds(messages);
+      for (const m of messages) {
+        if (m.role !== "question" || !m.questions?.length) continue;
+        if (!m.toolCallId || !answerable.has(m.id)) continue;
+        mirrorQuestion(doc, {
+          toolCallId: m.toolCallId,
+          questions: m.questions,
+          ownerId: me.id, // it's this client's log, so this client ran the turn
+        });
+      }
+    };
+    backfill();
+    return subscribe(chatKey, backfill);
   }, [doc, chatKey, me.id]);
 
   useEffect(() => {

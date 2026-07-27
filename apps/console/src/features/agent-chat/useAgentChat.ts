@@ -97,7 +97,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setActiveTurnId(active.turnId);
       dropTurnOutput(chatKey, active.turnId); // replay-from-0 re-adds it all
       try {
-        await attachAndFoldTurn(chatKey, projectName, active.turnId, ac.signal, onTurnCommitted, author.id);
+        await attachAndFoldTurn(chatKey, projectName, active.turnId, ac.signal, onTurnCommitted);
       } catch {
         // surfaced by the fold's error handling; the view just settles
       } finally {
@@ -112,7 +112,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
       setIsSending(false);
       setActiveTurnId(undefined);
     };
-  }, [chatKey, org, projectName, onTurnCommitted, author.id]);
+  }, [chatKey, org, projectName, onTurnCommitted]);
 
   const send = useCallback(
     (instruction: string) => {
@@ -150,7 +150,7 @@ export function useAgentChat(org: string, projectName: string): AgentChat {
         });
         const signal = abortRef.current?.signal ?? new AbortController().signal;
         try {
-          await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted, author.id);
+          await attachAndFoldTurn(chatKey, projectName, turnId, signal, onTurnCommitted);
         } catch {
           if (!signal.aborted) {
             setTurnStatus(chatKey, turnId, "failed");
