@@ -50,8 +50,9 @@ import { UsageChip } from "../../usage/components/UsageChip";
 import { toSpecEntry } from "../api/mapping";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
-import { SpecQuestionOverlay } from "./SpecQuestionOverlay";
+import { SpecQuestionForm } from "./SpecQuestionForm";
 import { setQuestionDoc } from "../../agent-chat/questionRoom";
+import { useRoomQuestion } from "../../agent-chat/useRoomQuestion";
 import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
@@ -101,6 +102,11 @@ export function SpecView({ projectName }: { projectName: string }) {
     setQuestionDoc(roomDoc);
     return () => setQuestionDoc(null);
   }, [roomDoc]);
+  // A pending LIST of agent questions takes over the body with a full-panel
+  // form, shared live with everyone in the room (a single question stays in
+  // the chat panel instead). chatKey uses the "default" org fallback matching
+  // the chat panel, not the collab room's "acme".
+  const roomQuestion = useRoomQuestion(roomDoc, chatKeyFor(orgHandle ?? "default", projectName));
   // Chat-path turn-end flush (#252 Task 5): the chat panel's chatKey uses a
   // DIFFERENT fallback ("default", matching AppLayout/AgentChatPanel) than
   // the collab room's org scoping above ("acme") — these are unrelated
@@ -727,8 +733,18 @@ export function SpecView({ projectName }: { projectName: string }) {
                 : ""}
             </Alert>
           </Box>
+        ) : roomQuestion && roomDoc ? (
+          /* Collab question form (spike): a LIST of agent questions takes over
+             the body — every room participant sees it and co-authors; only the
+             user who asked can submit. */
+          <SpecQuestionForm
+            doc={roomDoc}
+            entry={roomQuestion}
+            org={orgHandle ?? "default"}
+            projectName={projectName}
+          />
         ) : (
-          <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex", position: "relative" }}>
+          <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex" }}>
             <Box
               sx={{
                 width: 280,
@@ -919,17 +935,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                 </Typography>
               )}
             </Box>
-            {/* Collab question cards spike: the agent's question, surfaced to
-                the whole room as a floating overlay over the content pane and
-                answered together. chatKey uses the "default" org fallback
-                (matching the chat panel), not the collab room's. */}
-            {roomDoc && (
-              <SpecQuestionOverlay
-                doc={roomDoc}
-                org={orgHandle ?? "default"}
-                projectName={projectName}
-              />
-            )}
           </Box>
         )}
       </Box>

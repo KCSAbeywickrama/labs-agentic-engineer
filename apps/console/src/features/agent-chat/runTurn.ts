@@ -104,11 +104,15 @@ export async function attachAndFoldTurn(
         if (!questions) break;
         const toolCallId = part.toolCallId ?? "";
         upsertQuestionMessage(chatKey, { role: "question", turnId, toolCallId, questions });
-        // Collab spike: also mirror onto the shared room map so all
-        // participants see the question on the main spec panel. No-op when the
-        // spec route (which owns the doc) isn't mounted, or with no owner id.
+        // Collab spike: a LIST of questions is answered on the main spec panel
+        // by the whole room, so mirror it onto the shared map (a single
+        // question stays inline in this chat panel). No-op when the spec route
+        // — which owns the doc — isn't mounted; useRoomQuestion back-fills
+        // from the chat log when the user navigates there.
         const doc = getQuestionDoc();
-        if (doc && ownerId && toolCallId) mirrorQuestion(doc, { toolCallId, questions, ownerId });
+        if (questions.length > 1 && doc && ownerId && toolCallId) {
+          mirrorQuestion(doc, { toolCallId, questions, ownerId });
+        }
         break;
       }
       case "tool-result": {

@@ -17,8 +17,8 @@
  */
 
 import { Fragment, type ReactNode } from "react";
-import { Box, Link, Stack, Typography } from "@wso2/oxygen-ui";
-import { Check, Sparkles, X as XIcon } from "@wso2/oxygen-ui-icons-react";
+import { alpha, Box, Link, Stack, Typography } from "@wso2/oxygen-ui";
+import { Check, CircleQuestionMark, Sparkles, X as XIcon } from "@wso2/oxygen-ui-icons-react";
 import type { QuestionAnswer } from "@aep/agent-stream";
 import { MarkdownView } from "../../../components/MarkdownView";
 import type { ChatItem } from "../toolGrouping";
@@ -104,15 +104,56 @@ function TurnFooter({
 
 /** Render the turn body items in order, batching consecutive tool steps onto
  *  one continuous rail while narration/errors stay flush-left. */
+/** A LIST of questions lives in the spec body's form — chat just points at it. */
+function QuestionsPointer({ count, onOpen }: { count: number; onOpen: () => void }) {
+  return (
+    <Box
+      data-testid="questions-pointer"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      sx={{
+        my: 0.5,
+        px: 1.5,
+        py: 1,
+        borderRadius: 1.5,
+        border: 1,
+        borderColor: "primary.main",
+        bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+        cursor: "pointer",
+        "&:hover": { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.14) },
+      }}
+    >
+      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+        <CircleQuestionMark size={16} />
+        <Typography variant="body2" sx={{ fontWeight: 600, flexGrow: 1 }}>
+          The agent has {count} questions
+        </Typography>
+        <Typography variant="caption" color="primary" sx={{ fontWeight: 600 }}>
+          Answer them →
+        </Typography>
+      </Stack>
+    </Box>
+  );
+}
+
 function TurnBody({
   items,
   expandedGroups,
   onToggleGroup,
+  onOpenSpec,
   questionCard,
 }: {
   items: ChatItem[];
   expandedGroups: Set<string>;
   onToggleGroup: (id: string) => void;
+  onOpenSpec: () => void;
   questionCard: QuestionCardProps;
 }) {
   const out: ReactNode[] = [];
@@ -164,14 +205,21 @@ function TurnBody({
         out.push(<MarkdownView key={msg.id}>{msg.content}</MarkdownView>);
       }
     } else if (msg.role === "question" && msg.questions?.length) {
+      // One question answers fine inline; a LIST of them gets a full-panel
+      // form in the spec body (shared with the room) — the chat only points
+      // at it, so the thread stays readable.
       out.push(
-        <QuestionCard
-          key={msg.id}
-          msg={msg as QuestionMessage}
-          answerable={questionCard.answerableIds.has(msg.id)}
-          busy={questionCard.busy}
-          onAnswer={questionCard.onAnswer}
-        />,
+        msg.questions.length > 1 ? (
+          <QuestionsPointer key={msg.id} count={msg.questions.length} onOpen={onOpenSpec} />
+        ) : (
+          <QuestionCard
+            key={msg.id}
+            msg={msg as QuestionMessage}
+            answerable={questionCard.answerableIds.has(msg.id)}
+            busy={questionCard.busy}
+            onAnswer={questionCard.onAnswer}
+          />
+        ),
       );
     }
   });
@@ -213,6 +261,7 @@ export function TurnBlock({
         items={turn.items}
         expandedGroups={expandedGroups}
         onToggleGroup={onToggleGroup}
+        onOpenSpec={onOpenSpec}
         questionCard={questionCard}
       />
       <TurnFooter status={turn.status} onOpenSpec={onOpenSpec} />
