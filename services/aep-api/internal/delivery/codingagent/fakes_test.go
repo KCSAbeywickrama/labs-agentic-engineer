@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
@@ -174,6 +175,12 @@ func (f *fakeExecRepo) get(id string) *delivery.Execution {
 		return &cp
 	}
 	return nil
+}
+
+func (f *fakeExecRepo) RecordUsage(context.Context, string, contracts.TokenUsage) error { return nil }
+
+func (f *fakeExecRepo) SumUsageByProjectPhase(context.Context, string) (map[string]contracts.StampedUsage, map[string]contracts.StampedUsage, error) {
+	return nil, nil, nil
 }
 
 func (f *fakeExecRepo) ListActive(context.Context) ([]delivery.Execution, error) {

@@ -403,6 +403,7 @@ func (e *Events) admitAndDispatchBuild(ctx context.Context, facts delivery.TaskF
 		Kind:        string(taskmeta.KindBuild),
 		Status:      string(taskmeta.ExecQueued),
 		DesignTag:   facts.DesignTag,
+		SpecTag:     facts.SpecTag,
 		Component:   facts.Component,
 		// Pin the build to the merge commit so a git-auth retry can re-trigger the
 		// same build after re-minting the clone credential (§7).
@@ -491,6 +492,7 @@ func (e *Events) recordRejection(ctx context.Context, repo string, issueNumber i
 		Kind:        string(taskmeta.KindCoding),
 		Status:      string(taskmeta.ExecQueued),
 		DesignTag:   facts.DesignTag,
+		SpecTag:     facts.SpecTag,
 		Component:   facts.Component,
 	}
 	admitted, adRow, err := e.store.TryAdmit(ctx, row)

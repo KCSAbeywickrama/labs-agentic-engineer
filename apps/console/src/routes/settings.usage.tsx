@@ -16,6 +16,9 @@
  * under the License.
  */
 
-export const usageKeys = {
-  projects: () => ["usage", "projects"] as const,
-};
+import { createFileRoute } from "@tanstack/react-router";
+import { UsageSection } from "../features/usage/components/UsageSection";
+
+export const Route = createFileRoute("/settings/usage")({
+  component: UsageSection,
+});
