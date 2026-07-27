@@ -39,6 +39,11 @@ import {
 } from "../fixtures/chat";
 
 let turnCounter = 0;
+// Distinguishes this page instance's turns from another client's in the same
+// collab room: real turn ids are server-minted uuids, but this counter starts
+// at 1 in every tab — colliding ids would merge distinct questions in the
+// shared Yjs map (and a closed one would suppress a fresh ask).
+const instanceId = Math.random().toString(36).slice(2, 8);
 const turnInstruction = new Map<string, string>();
 
 function chatScenario(): ChatScenario | null {
@@ -70,7 +75,7 @@ export const agentChatHandlers = [
   http.post("*/api/v1/projects/:projectName/agents/:conversationId/messages", async ({ request }) => {
     const body = (await request.json()) as { instruction?: string };
     turnCounter += 1;
-    const turnId = `mock-turn-${turnCounter}`;
+    const turnId = `mock-turn-${instanceId}-${turnCounter}`;
     turnInstruction.set(turnId, body.instruction ?? "");
     return HttpResponse.json({ turnId }, { status: 202 });
   }),
