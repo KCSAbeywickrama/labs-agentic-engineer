@@ -77,7 +77,9 @@ function questionsMap(doc: Doc): YMap<RoomQuestion> {
 /**
  * Mirror a parsed question into the room's shared map (idempotent by
  * toolCallId — a re-fold overwrites the same key, preserving any co-edited
- * answers already present). Called by the turn-owner's chat fold.
+ * answers already present). Ownership is FIRST-writer-wins: a re-mirror (a
+ * replay, or another tab's back-fill from a shared chat log) must never
+ * reassign `ownerId`, or a teammate could steal the submit right.
  */
 export function mirrorQuestion(
   doc: Doc,
@@ -87,7 +89,9 @@ export function mirrorQuestion(
   const existing = map.get(entry.toolCallId);
   map.set(entry.toolCallId, {
     ...entry,
+    ownerId: existing?.ownerId ?? entry.ownerId,
     answers: existing?.answers ?? null,
+    ...(existing?.submitted ? { submitted: true } : {}),
   });
 }
 

@@ -195,8 +195,9 @@ export function SpecQuestionForm({
           <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", mb: 4 }}>
             <Users size={14} />
             <Typography variant="body2" color="text.secondary">
-              Everyone on this project can answer together —{" "}
-              {isOwner ? "you" : "whoever asked the agent"} submits.
+              {isOwner
+                ? "Everyone on this project can answer together — you'll send the answers."
+                : `Everyone on this project can answer together — ${entry.ownerId} sends them.`}
             </Typography>
           </Stack>
 

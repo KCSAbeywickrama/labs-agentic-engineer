@@ -45,10 +45,15 @@ export function useRoomQuestion(doc: Doc | null, chatKey: string): RoomQuestion 
   const me = useCurrentAuthor();
   const [entry, setEntry] = useState<RoomQuestion | undefined>(undefined);
 
-  // Back-fill: mirror any unanswered batch question from this client's own chat
-  // log into the room (idempotent by toolCallId). Covers the case where the
-  // question streamed in while the spec route — which owns the doc — was not
-  // mounted, so the fold had nowhere to mirror it.
+  // Back-fill: mirror any question from this client's own chat log into the
+  // room (idempotent by toolCallId). Covers the case where the question
+  // streamed in while the spec route — which owns the doc — was not mounted,
+  // so the fold had nowhere to mirror it. The `ownerId: me.id` claim assumes
+  // "my log ⇒ my turn", which holds across real users (separate browsers don't
+  // share localStorage) but NOT across two tabs of one browser with different
+  // `aep:mock:user` identities — there, whichever tab back-fills first claims
+  // ownership (mirrorQuestion is first-writer-wins, so it can't be stolen
+  // later). Acceptable for a dev-only setup.
   useEffect(() => {
     if (!doc) return;
     for (const m of getMessages(chatKey)) {
