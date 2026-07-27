@@ -121,9 +121,21 @@ else
     T_GEN="$(first_match "$RE_GEN")";         [ -n "$T_GEN" ]     && NEED_GEN=1     || NEED_GEN=0
     T_AEP="$(first_match "$RE_AEP")";         [ -n "$T_AEP" ]     && NEED_AEP=1     || NEED_AEP=0
 
-    # Validation runner: any runners/remote-worker/ change EXCEPT plugin/ (that is
-    # a live hostPath overlay — skill edits are picked up on the next dispatch).
-    T_VRUN="$(grep -E '^runners/remote-worker/' <<<"$CHANGED" | grep -vE '^runners/remote-worker/plugin/' | head -1 || true)"
+    # Validation runner: ANY runners/remote-worker/ change, plugin/ included.
+    #
+    # plugin/ was excluded here on the premise that it is a live hostPath
+    # overlay needing no rebuild. That holds only for the coding-agent
+    # ClusterWorkflow, which bind-mounts the host plugin dir into the runner pod
+    # (manifests/aep-coding-agent.dev-patch.yaml → /aep-dev/plugin). Validation
+    # dispatches exclusively through the cluster-gateway-proxy path, whose Job
+    # mounts nothing but emptyDirs, so it runs the plugin BAKED into
+    # aep-validation-runner:dev — skipping the rebuild leaves validation running
+    # stale skills with no signal that anything is wrong.
+    #
+    # Rebuilding is cheap: the plugin sits in the image's final COPY layer, so a
+    # skills-only change re-does that layer and the import, not the chromium
+    # download.
+    T_VRUN="$(grep -E '^runners/remote-worker/' <<<"$CHANGED" | head -1 || true)"
     [ -n "$T_VRUN" ] && NEED_VRUN=1 || NEED_VRUN=0
 fi
 

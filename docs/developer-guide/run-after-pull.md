@@ -62,12 +62,22 @@ and builds + imports the validation runner image if it is missing.
 bash deployments/scripts/setup-aep.sh
 ```
 
-### 4. Rebuild the validation runner image if its Dockerfile/toolchain changed
+### 4. Rebuild the validation runner image if anything under `runners/remote-worker/` changed
 
-The validation runner's skills are baked into `aep-validation-runner:dev`. If
-`runners/remote-worker/Dockerfile.validation` or the runner's TS/toolchain
-changed in the pull, force a rebuild. (Skill-only edits are picked up live via
-the plugin hostPath overlay and do **not** need this.)
+The validation runner's skills are baked into `aep-validation-runner:dev`, so
+force a rebuild whenever the pull touches that directory — the
+`Dockerfile.validation`, the runner's TS/toolchain, **or** `plugin/` skills.
+
+The plugin hostPath overlay does not save you here: it is wired by the
+coding-agent ClusterWorkflow (`deployments/manifests/aep-coding-agent.dev-patch.yaml`
+mounts the host dir at `/aep-dev/plugin`), while validation dispatches
+exclusively through the cluster-gateway-proxy path, whose Job mounts nothing but
+emptyDirs. Skip the rebuild after a skills change and validation keeps running
+the stale baked copy without any signal that it is doing so.
+
+The rebuild is incremental — `plugin/` lands in the image's final COPY layer, so
+a skills-only change re-does that layer and the k3d import, not the chromium
+download.
 
 ```bash
 make build-validation-runner FORCE=1
