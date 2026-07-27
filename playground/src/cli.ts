@@ -19,20 +19,23 @@
 /**
  * Entry point (docs/design/playground.md §7):
  *
- *   pnpm play                                → project picker → phase menu
- *   pnpm play <dir>                          → phase menu
+ *   pnpm play                                → print usage help (bare invocation)
+ *   pnpm play menu                           → project picker → phase menu
+ *   pnpm play <dir>                          → chat home (slash commands run phases; /menu for the dashboard)
  *   pnpm play <dir> requirements|design|chat → run one phase; exit code = result
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
- * Flags: --idea "<text>", --target "<x>", --fresh, --silent.
+ * Flags: --idea "<text>", --target "<x>", --fresh, --silent, --restore, --yes,
+ * -h/--help.
  */
 
 import "./devtools-default.js"; // MUST be first: sets AGENT_DEVTOOLS before the agents config loads
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
+import { slashSkillInstruction } from "@aep/contracts/prompts";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
@@ -54,8 +57,42 @@ import { pickProject } from "./tui/picker.js";
 import { phaseMenu, type MenuAction } from "./tui/phase-menu.js";
 import { chatLoop } from "./tui/chat.js";
 import { tasksScreen } from "./tui/tasks.js";
+import { ensureProjectDir } from "./tui/ensure-dir.js";
+import { confirmCodingDir } from "./tui/consent.js";
 
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "menu"]);
+
+/** Bare `play`, `play help`, or `-h/--help` → the one-screen command reference. */
+function printUsage(): void {
+  output.write(
+    [
+      "AEP playground — spec-driven SDLC, one project at a time.",
+      "",
+      "Usage:",
+      "  pnpm play                                 show this help",
+      "  pnpm play menu                            pick a project, then the phase menu",
+      "  pnpm play <dir>                           open <dir> in chat (created if missing; /menu for the dashboard)",
+      "  pnpm play <dir> requirements|design       generate or refine the spec",
+      "  pnpm play <dir> tasks|code|check|undo      run a later step of the impl plan",
+      '  pnpm play <dir> chat "<message>"          one-shot headless chat turn',
+      "",
+      "Flags:",
+      '  --idea "<text>"   seed/replace the create prompt (requirements)',
+      '  --target "<x>"    narrow the phase to one component/target',
+      "  --fresh           reset the conversation before the run",
+      "  --silent          suppress live turn rendering",
+      "  --restore         restore the latest undo snapshot before the run",
+      "  --yes             headless consent for the coding agent (bypass-permissions)",
+      "  -h, --help        show this help",
+      "",
+      "Tracing: AI SDK DevTools is on by default — run `npx @ai-sdk/devtools` (port 4983).",
+      "",
+      "Example:",
+      '  pnpm play .projects/expense-app requirements --idea "Expense claim tracking app"',
+      "",
+    ].join("\n"),
+  );
+}
 
 async function askIdea(): Promise<string | null> {
   const idea = await clack.text({
@@ -63,16 +100,6 @@ async function askIdea(): Promise<string | null> {
     placeholder: "An online store for handmade ceramics",
   });
   return clack.isCancel(idea) ? null : idea;
-}
-
-function confirmCodingDir(projectDir: string): () => Promise<boolean> {
-  return async () => {
-    if (!process.stdin.isTTY) return false;
-    const ok = await clack.confirm({
-      message: `The coding agent runs with permissions BYPASSED and will write inside ${projectDir}. A restorable undo snapshot is taken first. Continue?`,
-    });
-    return !clack.isCancel(ok) && ok;
-  };
 }
 
 function printCheckFindings(projectDir: string): boolean {
@@ -121,7 +148,10 @@ async function runHeadless(
       }
       const session = await openSession(projectDir, opts);
       try {
-        outcome = await chatTurn(session, commandArg, opts);
+        // Same `/<skill>` shortcut as the interactive chat loop (e.g.
+        // `play <dir> chat "/spec an expense app"`); a plain message rides
+        // through verbatim. No reserved control words in the one-shot verb.
+        outcome = await chatTurn(session, slashSkillInstruction(commandArg) ?? commandArg, opts);
       } finally {
         await session.close();
       }
@@ -139,6 +169,18 @@ async function runHeadless(
   }
   output.write(`✓ ${command} done\n`);
   return 0;
+}
+
+/** Chat home: open the session, run the chat loop, hand off to the menu on `/menu`. */
+async function runChat(projectDir: string, opts: PhaseOptions): Promise<number> {
+  const session = await openSession(projectDir, opts);
+  let next: "menu" | "quit";
+  try {
+    next = await chatLoop(session, opts);
+  } finally {
+    await session.close();
+  }
+  return next === "quit" ? 0 : runMenu(projectDir, opts);
 }
 
 async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> {
@@ -190,9 +232,17 @@ async function main(): Promise<number> {
       silent: { type: "boolean" },
       restore: { type: "boolean" },
       yes: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
   });
+
+  // Bare `play` (no positionals), `play help`, or `-h/--help` → usage help.
+  // The interactive project picker now lives behind `play menu`.
+  if (values.help || positionals.length === 0 || positionals[0] === "help") {
+    printUsage();
+    return 0;
+  }
 
   const opts: CodeOptions = {
     ...(values.idea ? { idea: values.idea } : {}),
@@ -216,11 +266,17 @@ async function main(): Promise<number> {
   // and inside the repo only the gitignored playground/projects/ subtree is
   // a legal project home.
   let projectDir = dirArg ? expandProjectPath(dirArg) : null;
-  if (projectDir && (!existsSync(projectDir) || !statSync(projectDir).isDirectory())) {
-    output.write(`not a directory: ${projectDir}\n`);
-    return 1;
-  }
-  if (!projectDir) {
+  if (projectDir) {
+    // A directly-supplied dir is fenced and created here: TTY prompts before
+    // creating a missing dir; headless refuses (it can't ask). Non-directories
+    // and illegal in-repo paths are rejected with the helper's message.
+    const ensured = await ensureProjectDir(projectDir, { interactive: process.stdin.isTTY });
+    if (!ensured.ok) {
+      output.write(`${ensured.message}\n`);
+      return 1;
+    }
+    projectDir = ensured.path;
+  } else {
     if (command && !process.stdin.isTTY) {
       output.write("a project directory is required in headless mode\n");
       return 1;
@@ -228,16 +284,19 @@ async function main(): Promise<number> {
     projectDir = await pickProject();
     if (!projectDir) return 0;
   }
-  // Fence EVERY resolved project dir — CLI argument or picker result (stale
-  // recents could carry a pre-fence path).
+  // Re-fence the resolved dir: ensureProjectDir already fenced a supplied path,
+  // but a picker recent can carry a stale pre-fence path.
   const fenceError = projectDirError(projectDir);
   if (fenceError) {
     output.write(`${fenceError}\n`);
     return 1;
   }
 
-  if (command && command !== "menu") return runHeadless(command, projectDir, opts, commandArg);
-  return runMenu(projectDir, opts);
+  // Chat is the home surface: `play <dir>` drops straight in; `play menu` opens
+  // the dashboard; any other verb runs headless.
+  if (command === "menu") return runMenu(projectDir, opts);
+  if (command) return runHeadless(command, projectDir, opts, commandArg);
+  return runChat(projectDir, opts);
 }
 
 main().then(

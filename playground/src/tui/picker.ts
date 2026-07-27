@@ -26,10 +26,11 @@
  * offered for creation.
  */
 
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import * as clack from "@clack/prompts";
 import { listRecentProjects } from "../state/project.js";
 import { defaultProjectDir, expandProjectPath, projectDirError } from "../paths.js";
+import { ensureProjectDir } from "./ensure-dir.js";
 
 const OPEN = "\0open";
 const QUIT = "\0quit";
@@ -66,11 +67,10 @@ export async function pickProject(): Promise<string | null> {
   if (clack.isCancel(dir)) return null;
   const path = expandProjectPath(dir.trim());
 
-  if (!existsSync(path)) {
-    const create = await clack.confirm({ message: `${path} does not exist. Create it?` });
-    if (clack.isCancel(create) || !create) return null;
-    mkdirSync(path, { recursive: true });
-  }
+  // Fence + create (the shared step; the validate() above already surfaced a
+  // fence error inline, so here it only does the missing-dir prompt + mkdir).
+  const ensured = await ensureProjectDir(path, { interactive: true });
+  if (!ensured.ok) return null;
 
   const confirmed = await clack.confirm({
     message: `The agents will read and WRITE inside ${path}. Continue?`,

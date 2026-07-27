@@ -9,13 +9,22 @@ copy → rerun one phase → observe. No git, no GitHub, no Postgres, no cluster
 ## Run
 
 ```
-pnpm play                              # picker → phase menu
-pnpm play <dir>                        # phase menu
+pnpm play                              # usage help (bare invocation)
+pnpm play menu                         # picker → phase menu
+pnpm play <dir>                        # chat home (dir created if missing; /menu for the dashboard)
 pnpm play <dir> requirements --idea "…"
 pnpm play <dir> design | tasks | check | undo
 pnpm play <dir> code [--yes]           # the WHOLE plan, one go, dependency order
 pnpm play <dir> code issues/3.md [--restore] [--yes]   # one run (honing loop)
+pnpm play help | -h | --help           # same usage help
 ```
+
+`play <dir>` drops straight into **chat** — the home surface. A directly-named
+dir is created after a prompt (headless refuses a missing dir rather than
+creating silently). In chat, slash commands drive every phase without leaving:
+`/spec` `/design` `/<skill>` load a working-tree skill and follow it (the same
+channel `PLAN_INSTRUCTION` uses); `/task` `/code` `/validate` `/undo` run the
+existing phase engines; `/menu` opens the status dashboard, `/help` the guide.
 
 No review/browse affordances: the playground auto-writes files and the user's
 editor (VS Code) is where browsing, diffs, and hand-edits happen — including
