@@ -382,6 +382,16 @@ func (s *SkillService) UpdatesAvailable(ctx context.Context, orgID string) ([]Sk
 		if ok && isUserKind(cur.Kind) {
 			continue
 		}
+		// Org-kind defaults are opt-in on ongoing sync: an ABSENT org skill
+		// (org-deleted, or a newly-shipped default not yet added) is NOT an
+		// available update — Reconcile won't seed it (mirrors the same
+		// org-kind-absent skip in reconcileEmbedded). Surfacing it here would
+		// advertise an update that a subsequent Sync just no-ops. It belongs
+		// to the separate "available to add" surface, not the updates badge.
+		// Platform-kind absents ARE always managed, so they still report.
+		if b.Kind == SkillKindOrg && !ok {
+			continue
+		}
 		var entry *ManifestEntry
 		if e, has := manifest[b.Name]; has {
 			entry = &e

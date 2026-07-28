@@ -166,27 +166,29 @@ func TestUpdatesAvailable_ReportsStaleAndAbsent(t *testing.T) {
 		}
 	})
 
-	t.Run("absent built-in surfaces on the badge", func(t *testing.T) {
+	t.Run("absent org-kind default does NOT surface (opt-in)", func(t *testing.T) {
 		t.Parallel()
 		svc, host := newTestStore(t)
 		ctx := context.Background()
 		if _, err := svc.List(ctx, "org1"); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
+		// go is org-kind. An absent org-kind default (org-deleted, or a
+		// newly-shipped default not yet added) is OPT-IN on ongoing sync:
+		// Reconcile won't seed it, so UpdatesAvailable must NOT advertise it
+		// as an "update" (mirrors reconcileEmbedded's org-kind-absent skip).
+		// It belongs to the separate "available to add" surface, not the
+		// updates badge — otherwise the badge invites a sync that no-ops.
 		host.removeAtHead("org1", skillRepoPath("go"))
 
 		ups, err := svc.UpdatesAvailable(ctx, "org1")
 		if err != nil {
 			t.Fatalf("UpdatesAvailable: %v", err)
 		}
-		var found bool
 		for i := range ups {
 			if ups[i].Name == "go" {
-				found = true
+				t.Fatalf("absent org-kind default must NOT surface on the updates badge, got %+v", ups)
 			}
-		}
-		if !found {
-			t.Fatalf("absent go must surface on the badge, got %+v", ups)
 		}
 	})
 
