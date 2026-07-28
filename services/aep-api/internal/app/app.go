@@ -198,7 +198,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 
 	// SM-API / secrets provider (ADR-0002). When seam.SecretsProvider is set,
-	// use it (Phase 03 plugs an alternate backend without changing Assemble).
+	// use it (an overlay module may inject an alternate backend without
+	// changing Assemble).
 	// When nil, today's default: construct SM-API from SECRET_MANAGER_API_URL,
 	// or leave unset when the URL is empty (downstream callers handle absence).
 	var smClient secretmanagersvc.SecretManagementClient

@@ -49,6 +49,7 @@ type Options struct {
 	// SecretsProvider, when non-nil, is used instead of constructing the
 	// default SM-API provider from SECRET_MANAGER_API_URL.
 	// Nil = today's default construction (SM-API when URL configured).
-	// Phase 03 plugs a different provider here without changing Run's signature.
+	// An overlay module may inject an alternate provider without changing
+	// Run's signature.
 	SecretsProvider secretmanagersvc.Provider
 }
