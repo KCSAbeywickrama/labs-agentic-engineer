@@ -11,15 +11,18 @@ cmd/aep-api (OSS)          overlay module main
         \                     /
          \                   /
           v                 v
-     app.Run(cfg, Options)     ← public package github.com/wso2/aep/aep-api/app
-              |
+     app.Run(Options)     ← public github.com/wso2/aep/aep-api/app
+              |               (+ ocauth contracts for strategies)
               v
-     internal/app.Resolve → Assemble(Seam) → HTTP + watchers + shutdown
+     config.Load → Resolve → Assemble(Seam) → HTTP + watchers + shutdown
 ```
 
-`Run` owns resolve → assemble → degradation logs → HTTP serve (existing
-timeouts) → background watchers under `async.Go` → signal shutdown. Callers do
-not open the DB or wire the domain graph themselves.
+`Run` owns config load → resolve → assemble → degradation logs → HTTP serve
+(existing timeouts) → background watchers under `async.Go` → signal shutdown.
+Callers do not open the DB or wire the domain graph themselves. Seam types
+(`AuthProvider`, `RequestAuthStrategy`, `AuthMode`) and context helpers live in
+public `github.com/wso2/aep/aep-api/ocauth` so an overlay module never imports
+`internal/`.
 
 ## `Options` (the seam)
 
@@ -34,7 +37,7 @@ cleanly, never panic, never silently swap credential class.
 | `ImpersonateOrgResolverBuilder` | Late-bound resolver after `Resolve` opens the DB; ignored if the resolver is already set |
 | `SecretsProvider` | When non-nil, replaces default SM-API construction from `SECRET_MANAGER_API_URL` |
 
-Compile-time `var _ openchoreo.RequestAuthStrategy = …` assertions keep seam
+Compile-time `var _ ocauth.RequestAuthStrategy = …` assertions keep seam
 implementations honest.
 
 ## OpenChoreo transport
@@ -46,7 +49,7 @@ strategies must not retry with a different credential class.
 
 ## Direct-OC mode (OSS)
 
-`cmd/aep-api` wires:
+`cmd/aep-api` calls `app.NewOSSOptions()` then `app.Run`:
 
 - M2M `AuthProvider` when service-auth env is configured (else nil)
 - `app.DirectOCStrategy{}` — always `AuthModeServiceM2M`

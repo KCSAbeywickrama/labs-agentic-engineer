@@ -21,12 +21,13 @@ import (
 	"testing"
 
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
 // fixedAuthStrategy returns a constant AuthMode — test seam only.
-type fixedAuthStrategy struct{ mode AuthMode }
+type fixedAuthStrategy struct{ mode ocauth.AuthMode }
 
-func (f fixedAuthStrategy) Decide(context.Context) AuthMode { return f.mode }
+func (f fixedAuthStrategy) Decide(context.Context) ocauth.AuthMode { return f.mode }
 
 // dualModeAuthStrategy mirrors today's inlined dual-mode decision for tests
 // that still need PAS-style user-JWT pass-through vs service-identity M2M.
@@ -34,11 +35,11 @@ func (f fixedAuthStrategy) Decide(context.Context) AuthMode { return f.mode }
 // that off-switch is Config.RequestAuthStrategy == nil → always M2M.
 type dualModeAuthStrategy struct{}
 
-func (dualModeAuthStrategy) Decide(ctx context.Context) AuthMode {
+func (dualModeAuthStrategy) Decide(ctx context.Context) ocauth.AuthMode {
 	if authn.IsServiceIdentity(ctx) || authn.GetAuthToken(ctx) == "" {
-		return AuthModeServiceM2M
+		return ocauth.AuthModeServiceM2M
 	}
-	return AuthModeUserJWT
+	return ocauth.AuthModeUserJWT
 }
 
 func TestNilStrategy_IsAllM2M(t *testing.T) {
@@ -84,7 +85,7 @@ func TestInjectedUserJWTStrategy_PassThrough(t *testing.T) {
 	c, err := newGenClient(Config{
 		BaseURL:             srv.URL,
 		AuthProvider:        fakeAuthProvider{tok: "m2m-token"},
-		RequestAuthStrategy: fixedAuthStrategy{mode: AuthModeUserJWT},
+		RequestAuthStrategy: fixedAuthStrategy{mode: ocauth.AuthModeUserJWT},
 		ImpersonateOrgResolver: func(_ context.Context, _ string) (string, error) {
 			resolverCalled = true
 			return "org-uuid-123", nil
@@ -117,7 +118,7 @@ func TestInjectedM2MStrategy_UsesProviderAndResolver(t *testing.T) {
 	c, err := newGenClient(Config{
 		BaseURL:             srv.URL,
 		AuthProvider:        fakeAuthProvider{tok: "m2m-token"},
-		RequestAuthStrategy: fixedAuthStrategy{mode: AuthModeServiceM2M},
+		RequestAuthStrategy: fixedAuthStrategy{mode: ocauth.AuthModeServiceM2M},
 		ImpersonateOrgResolver: func(_ context.Context, ns string) (string, error) {
 			if ns == "wc-abc" {
 				return "org-uuid-123", nil

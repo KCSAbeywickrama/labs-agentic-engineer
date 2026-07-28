@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
 func TestDirectOCStrategy_AlwaysM2M(t *testing.T) {
 	ctx := authn.WithAuthToken(context.Background(), "user-jwt")
-	if got := (DirectOCStrategy{}).Decide(ctx); got != openchoreo.AuthModeServiceM2M {
+	if got := (DirectOCStrategy{}).Decide(ctx); got != ocauth.AuthModeServiceM2M {
 		t.Fatalf("got %v", got)
 	}
 }

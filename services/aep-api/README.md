@@ -77,9 +77,11 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
 ## Composition seam (`app.Run(Options)`)
 
 Process lifecycle lives in the importable package
-`github.com/wso2/aep/aep-api/app`. Callers load config, build `Options`, and call
-`Run`. Domain graph assembly stays in `internal/app`; only the composition
-**seam** is exported.
+`github.com/wso2/aep/aep-api/app`. Callers build `Options` (via
+`NewOSSOptions` or an overlay's own wiring) and call `Run`, which loads config.
+Auth seam contracts live in public `github.com/wso2/aep/aep-api/ocauth`. Domain
+graph assembly stays in `internal/app`; only the composition **seam** is
+exported.
 
 **Nil `Options` fields are feature off-switches** — they disable a capability
 cleanly, never panic, and never silently pick a different OpenChoreo credential

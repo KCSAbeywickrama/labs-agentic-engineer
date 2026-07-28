@@ -17,42 +17,25 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/wso2/aep/aep-api/app"
-	"github.com/wso2/aep/aep-api/internal/clients/oauth"
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/config"
 )
 
-// main is the OSS process entry point: load+validate config, wire direct-OC
-// Options (M2M AuthProvider when configured, DirectOCStrategy, no impersonation),
-// then hand process lifecycle to app.Run. All service-graph wiring lives in
-// internal/app.Assemble so it is reachable from a test with faked deps.
+// main is the OSS process entry point: NewOSSOptions wires direct-OC Options
+// (M2M AuthProvider when configured, DirectOCStrategy, no impersonation),
+// then hand process lifecycle to app.Run (which owns config load). All
+// service-graph wiring lives in internal/app.Assemble so it is reachable from
+// a test with faked deps.
 func main() {
-	cfg, err := config.Load()
+	opts, err := app.NewOSSOptions()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		slog.Error("failed to build OSS options", "error", err)
 		os.Exit(1)
 	}
 
-	var authProvider openchoreo.AuthProvider
-	if cfg.ServiceAuth.TokenURL != "" && cfg.ServiceAuth.ClientID != "" {
-		authProvider = oauth.NewTokenProvider(
-			cfg.ServiceAuth.TokenURL,
-			cfg.ServiceAuth.ClientID,
-			cfg.ServiceAuth.ClientSecret,
-			cfg.ServiceAuth.HostHeader,
-		)
-	}
-
-	if err := app.Run(cfg, app.Options{
-		AuthProvider:           authProvider,
-		RequestAuthStrategy:    app.DirectOCStrategy{}, // all-M2M
-		ImpersonateOrgResolver: nil,                    // no X-Impersonate-Org
-	}); err != nil {
+	if err := app.Run(opts); err != nil {
 		slog.Error("aep-api exited", "error", err)
 		os.Exit(1)
 	}

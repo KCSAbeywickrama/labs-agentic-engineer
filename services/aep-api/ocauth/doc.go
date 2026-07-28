@@ -14,8 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package app is the public composition seam for aep-api process lifecycle.
-// Callers (OSS main, private overlay) build Options and call Run — Run owns
-// config load + validate. Nil Option fields are feature off-switches — never
-// panic, never silently degrade into a different credential path.
-package app
+// Package ocauth is the public OpenChoreo auth seam for aep-api.
+//
+// Overlay modules and OSS main implement RequestAuthStrategy and supply
+// AuthProvider without importing internal/ clients or platform packages.
+// Context helpers (IsServiceIdentity, GetAuthToken, ClaimsFromContext,
+// ResolveOuHandle) wrap the inbound auth context for PAS strategies and
+// impersonation resolvers.
+//
+// This package must not import openchoreo or app (no import cycle).
+package ocauth

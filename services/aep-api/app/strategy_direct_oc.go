@@ -19,16 +19,16 @@ package app
 import (
 	"context"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
 // DirectOCStrategy always returns AuthModeServiceM2M — the OSS / direct-OC
 // default that never passes through a user JWT.
 type DirectOCStrategy struct{}
 
-// Decide implements openchoreo.RequestAuthStrategy.
-func (DirectOCStrategy) Decide(context.Context) openchoreo.AuthMode {
-	return openchoreo.AuthModeServiceM2M
+// Decide implements ocauth.RequestAuthStrategy.
+func (DirectOCStrategy) Decide(context.Context) ocauth.AuthMode {
+	return ocauth.AuthModeServiceM2M
 }
 
-var _ openchoreo.RequestAuthStrategy = DirectOCStrategy{}
+var _ ocauth.RequestAuthStrategy = DirectOCStrategy{}

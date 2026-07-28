@@ -29,28 +29,20 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
 	"github.com/wso2/aep/aep-api/internal/clients/requests"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
-
-// AuthProvider is the auth-token contract the OC client depends on. Lets us
-// swap `*oauth.TokenProvider` (the only production impl) for a fake in
-// tests without touching the oauth package. Method signatures intentionally
-// match `*oauth.TokenProvider` so it satisfies the interface as-is.
-type AuthProvider interface {
-	Token() (string, error)
-	Invalidate()
-}
 
 // Config drives the OpenChoreo client construction.
 type Config struct {
 	BaseURL      string
 	HostHeader   string
-	AuthProvider AuthProvider
+	AuthProvider ocauth.AuthProvider
 	RetryConfig  requests.RequestRetryConfig
 
 	// RequestAuthStrategy selects the credential class per OC request.
 	// nil means AuthModeServiceM2M (direct-OC / all-M2M off-switch: never
 	// pass through an inbound user JWT).
-	RequestAuthStrategy RequestAuthStrategy
+	RequestAuthStrategy ocauth.RequestAuthStrategy
 
 	// ImpersonateOrgResolver, when set, maps the namespace in a request URL
 	// (".../namespaces/{namespace}/...") to the org UUID sent as the
@@ -136,13 +128,13 @@ func authRequestEditor(cfg Config) func(ctx context.Context, req *http.Request) 
 		}
 		req.Header.Set("X-Use-OpenAPI", "true")
 
-		mode := AuthModeServiceM2M
+		mode := ocauth.AuthModeServiceM2M
 		if cfg.RequestAuthStrategy != nil {
 			mode = cfg.RequestAuthStrategy.Decide(ctx)
 		}
 
 		switch mode {
-		case AuthModeUserJWT:
+		case ocauth.AuthModeUserJWT:
 			userJWT := auth.GetAuthToken(ctx)
 			if userJWT == "" {
 				return fmt.Errorf("openchoreo: AuthModeUserJWT selected but no user JWT in context")
@@ -152,7 +144,7 @@ func authRequestEditor(cfg Config) func(ctx context.Context, req *http.Request) 
 			req.Header.Set("Authorization", "Bearer "+userJWT)
 			return nil
 
-		case AuthModeServiceM2M:
+		case ocauth.AuthModeServiceM2M:
 			if cfg.ImpersonateOrgResolver != nil {
 				if ns := namespaceFromPath(req.URL.Path); ns != "" {
 					orgUUID, err := cfg.ImpersonateOrgResolver(ctx, ns)

@@ -73,6 +73,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	spechttpapi "github.com/wso2/aep/aep-api/internal/spec/httpapi"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
 // Watcher is a long-running background loop. Every watcher blocks on its
@@ -99,11 +100,11 @@ type App struct {
 type Seam struct {
 	// AuthProvider attaches a bearer on AuthModeServiceM2M OC (and CGW) calls.
 	// Nil = no bearer attached (feature off).
-	AuthProvider openchoreo.AuthProvider
+	AuthProvider ocauth.AuthProvider
 
 	// RequestAuthStrategy decides credential class per OC request.
 	// Nil = all-M2M / never pass-through (openchoreo transport default).
-	RequestAuthStrategy openchoreo.RequestAuthStrategy
+	RequestAuthStrategy ocauth.RequestAuthStrategy
 
 	// ImpersonateOrgResolver sets X-Impersonate-Org on M2M OC calls.
 	// Nil = no impersonation header.
@@ -243,7 +244,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var cgwClient *clustergatewayproxy.Client
 	if cfg.ClusterGatewayProxyURL != "" {
 		cgwCfg := clustergatewayproxy.Config{BaseURL: cfg.ClusterGatewayProxyURL}
-		// openchoreo.AuthProvider is a Token()+Invalidate() superset of the
+		// ocauth.AuthProvider is a Token()+Invalidate() superset of the
 		// proxy's Token()-only AuthProvider; bridge via dynamic type assert.
 		if seam.AuthProvider != nil {
 			if ap, ok := seam.AuthProvider.(clustergatewayproxy.AuthProvider); ok {

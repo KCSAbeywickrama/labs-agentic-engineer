@@ -17,15 +17,13 @@
 package app
 
 import (
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
 // Compile-time smoke: Options nil-semantics and seam interface satisfaction.
 // A zero Options value is a valid "all features off" input — never panic.
 var (
-	_ Options                        = Options{}
-	_ openchoreo.RequestAuthStrategy = DirectOCStrategy{}
-	_ openchoreo.AuthProvider        = (openchoreo.AuthProvider)(nil)
-	_ secretmanagersvc.Provider      = (secretmanagersvc.Provider)(nil)
+	_ Options                  = Options{}
+	_ ocauth.RequestAuthStrategy = DirectOCStrategy{}
+	_ ocauth.AuthProvider        = (ocauth.AuthProvider)(nil)
 )

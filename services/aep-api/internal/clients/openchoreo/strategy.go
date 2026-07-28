@@ -16,20 +16,6 @@
 
 package openchoreo
 
-import "context"
-
-// AuthMode is the credential class the OC transport applies to one request.
-// Strategies must not suggest retrying with a different class.
-type AuthMode int
-
-const (
-	AuthModeNone AuthMode = iota
-	AuthModeUserJWT    // pass through inbound user JWT; no impersonation header
-	AuthModeServiceM2M // AuthProvider token; impersonation header iff resolver non-nil
-)
-
-// RequestAuthStrategy decides which credential class to use for an OC request.
-// Decide is pure: no I/O. Called once per OC request from context.
-type RequestAuthStrategy interface {
-	Decide(ctx context.Context) AuthMode
-}
+// AuthMode, RequestAuthStrategy, and AuthProvider live in the public
+// ocauth package so overlay modules can implement them without importing
+// this internal client. Config below consumes ocauth types directly.

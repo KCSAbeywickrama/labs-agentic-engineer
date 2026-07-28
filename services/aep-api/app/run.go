@@ -27,15 +27,21 @@ import (
 	"time"
 
 	intapp "github.com/wso2/aep/aep-api/internal/app"
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/platform/async"
 	"github.com/wso2/aep/aep-api/internal/platform/obs"
 )
 
-// Run owns resolve → assemble → HTTP serve → watchers → signal shutdown.
-// opts nil-fields are feature off-switches (see Options); they never panic and
-// never silently pick a different credential path.
-func Run(cfg config.Config, opts Options) error {
+// Run owns config load → resolve → assemble → HTTP serve → watchers → signal
+// shutdown. opts nil-fields are feature off-switches (see Options); they never
+// panic and never silently pick a different credential path.
+func Run(opts Options) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
 	setupLogger(cfg.LogLevel)
 
 	infra, err := intapp.Resolve(context.Background(), cfg)
@@ -48,11 +54,16 @@ func Run(cfg config.Config, opts Options) error {
 		resolver = opts.ImpersonateOrgResolverBuilder(infra.DB)
 	}
 
+	secretsProvider, err := adaptSecretsProvider(opts.SecretsProvider)
+	if err != nil {
+		return err
+	}
+
 	application, err := intapp.Assemble(cfg, infra, intapp.Seam{
 		AuthProvider:           opts.AuthProvider,
 		RequestAuthStrategy:    opts.RequestAuthStrategy,
 		ImpersonateOrgResolver: resolver,
-		SecretsProvider:        opts.SecretsProvider,
+		SecretsProvider:        secretsProvider,
 	})
 	if err != nil {
 		return fmt.Errorf("app init failed: %w", err)
@@ -101,6 +112,17 @@ func Run(cfg config.Config, opts Options) error {
 	}
 	slog.Info("server stopped")
 	return nil
+}
+
+func adaptSecretsProvider(v any) (secretmanagersvc.Provider, error) {
+	if v == nil {
+		return nil, nil
+	}
+	p, ok := v.(secretmanagersvc.Provider)
+	if !ok {
+		return nil, fmt.Errorf("Options.SecretsProvider does not implement secretmanagersvc.Provider")
+	}
+	return p, nil
 }
 
 func setupLogger(level string) {

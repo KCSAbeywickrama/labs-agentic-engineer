@@ -21,8 +21,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
 // Options are the injectable composition-root seams for Run.
@@ -31,11 +30,11 @@ import (
 type Options struct {
 	// AuthProvider attaches a bearer on AuthModeServiceM2M OC calls.
 	// Nil = no bearer attached (feature off).
-	AuthProvider openchoreo.AuthProvider
+	AuthProvider ocauth.AuthProvider
 
 	// RequestAuthStrategy decides credential class per OC request.
 	// Nil = all-M2M / never pass-through (direct-OC default).
-	RequestAuthStrategy openchoreo.RequestAuthStrategy
+	RequestAuthStrategy ocauth.RequestAuthStrategy
 
 	// ImpersonateOrgResolver sets X-Impersonate-Org on M2M calls.
 	// Nil = no impersonation header (direct-OC default).
@@ -43,13 +42,14 @@ type Options struct {
 
 	// ImpersonateOrgResolverBuilder, when non-nil, is invoked after Resolve
 	// opens the DB and before Assemble — late-binding for resolvers that need
-	// infra (research 04 §1.4). Ignored when ImpersonateOrgResolver is already set.
+	// infra. Ignored when ImpersonateOrgResolver is already set.
 	ImpersonateOrgResolverBuilder func(db *gorm.DB) func(context.Context, string) (string, error)
 
 	// SecretsProvider, when non-nil, is used instead of constructing the
 	// default SM-API provider from SECRET_MANAGER_API_URL.
 	// Nil = today's default construction (SM-API when URL configured).
-	// An overlay module may inject an alternate provider without changing
-	// Run's signature.
-	SecretsProvider secretmanagersvc.Provider
+	// Typed as any so the public Options surface does not name an internal
+	// package; the value must satisfy secretmanagersvc.Provider (NewClient /
+	// ValidateConfig / Capabilities). Run adapts before Assemble.
+	SecretsProvider any
 }
