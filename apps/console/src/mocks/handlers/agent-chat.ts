@@ -124,86 +124,238 @@ export const agentChatHandlers = [
           questions: [
             {
               question: "Who is the primary user of this app?",
+              detail:
+                "This shapes onboarding, permissions, and how much admin tooling the spec needs — it's the single biggest scope decision, so I'm asking it first.",
               options: [
-                { label: "Individual consumers", description: "Self-serve signup", recommended: true },
-                { label: "Internal teams", description: "SSO, org-managed access" },
-                { label: "Both from day one", description: "Two onboarding paths — more scope" },
+                {
+                  label: "Individual consumers",
+                  description:
+                    "People sign themselves up and get a personal workspace. Onboarding stays lightweight (email or social login, no org setup), but every account manages itself — there is no central admin who can provision or remove users.",
+                  recommended: true,
+                },
+                {
+                  label: "Internal teams",
+                  description:
+                    "An organization rolls the app out to its staff. That means SSO, org-managed access, and an admin who controls membership — more setup work up front, but access control and offboarding come for free.",
+                },
+                {
+                  label: "Both from day one",
+                  description:
+                    "Two onboarding paths, two permission models, and pricing that has to serve both. Roughly doubles the v1 scope; usually only worth it when both audiences are already committed.",
+                },
               ],
             },
             {
               question: "Which platform matters most first?",
+              detail:
+                "The first platform decides the UI stack and review/release process; the others can follow later without rework if we pick one now.",
               options: [
-                { label: "Web", recommended: true },
-                { label: "Mobile" },
-                { label: "Both" },
+                {
+                  label: "Web",
+                  description:
+                    "Ships fastest: one responsive app, instant updates, no store review. Works on phones through the browser, though without push notifications or offline polish.",
+                  recommended: true,
+                },
+                {
+                  label: "Mobile",
+                  description:
+                    "Native iOS/Android first. Best for push notifications, camera/location use, and on-the-go sessions — but store review slows iteration and it needs its own release pipeline.",
+                },
+                {
+                  label: "Both",
+                  description:
+                    "Web and mobile in parallel. Every feature is designed, built, and tested twice, so v1 takes noticeably longer — choose this only if mobile-only users are core to launch.",
+                },
               ],
             },
             {
               question: "Which capabilities are in scope for v1?",
+              detail:
+                "Everything selected here becomes a section of the requirements spec; anything unselected is explicitly deferred so the first release stays small.",
               multiSelect: true,
               options: [
-                { label: "Accounts" },
-                { label: "Payments" },
-                { label: "Notifications" },
-                { label: "Search" },
+                {
+                  label: "Accounts",
+                  description:
+                    "User registration, profiles, and session handling. Almost every other capability builds on this, so leaving it out only makes sense for a fully anonymous tool.",
+                },
+                {
+                  label: "Payments",
+                  description:
+                    "Checkout, receipts, and a payment provider integration (e.g. Stripe). Brings compliance and refund flows with it — the most expensive item on this list.",
+                },
+                {
+                  label: "Notifications",
+                  description:
+                    "Email or in-app alerts when something needs the user's attention. Cheap to add once accounts exist; pointless before there are events worth notifying about.",
+                },
+                {
+                  label: "Search",
+                  description:
+                    "Full-text search across the app's content. Valuable once data volume grows, but v1 can usually ship with simple filtering instead.",
+                },
               ],
             },
             {
               question: "How should users sign in?",
+              detail:
+                "Sign-in method affects both the signup conversion rate and how much credential handling the backend has to own.",
               options: [
-                { label: "Email + password" },
-                { label: "Social login", recommended: true },
-                { label: "SSO only" },
+                {
+                  label: "Email + password",
+                  description:
+                    "Works for everyone with no third-party dependency, but we own password reset, breach protection, and rate limiting ourselves.",
+                },
+                {
+                  label: "Social login",
+                  description:
+                    "Sign in with Google/GitHub — no passwords to store and the fastest signup flow. Users without those accounts are locked out unless we add email later.",
+                  recommended: true,
+                },
+                {
+                  label: "SSO only",
+                  description:
+                    "Enterprise identity providers (SAML/OIDC) only. Right when an organization mandates it; wrong for self-serve consumers, who can't sign up at all.",
+                },
               ],
             },
             {
               question: "What is the pricing model?",
+              detail:
+                "Pricing decides whether billing infrastructure is in the v1 spec at all, and how accounts and limits are modeled.",
               options: [
-                { label: "Free", recommended: true },
-                { label: "Subscription" },
-                { label: "One-off purchase" },
+                {
+                  label: "Free",
+                  description:
+                    "No billing code in v1 — the whole payments surface disappears from scope. Monetization can be layered on later once usage proves out.",
+                  recommended: true,
+                },
+                {
+                  label: "Subscription",
+                  description:
+                    "Recurring plans with trials, upgrades, and dunning. Predictable revenue, but it drags billing, plan gating, and invoicing into the first release.",
+                },
+                {
+                  label: "One-off purchase",
+                  description:
+                    "Pay once per item or unlock. Simpler than subscriptions, but still needs checkout, receipts, and refund handling in v1.",
+                },
               ],
             },
             {
               question: "Where does the data live?",
+              detail:
+                "The storage choice fixes the backup, migration, and multi-tenancy story — it's hard to reverse once real data exists.",
               options: [
-                { label: "Managed Postgres", recommended: true },
-                { label: "SQLite per tenant" },
-                { label: "Third-party BaaS" },
+                {
+                  label: "Managed Postgres",
+                  description:
+                    "One relational database run by a cloud provider. Boring, well-understood, easy to hire for, and scales past v1 without a rewrite.",
+                  recommended: true,
+                },
+                {
+                  label: "SQLite per tenant",
+                  description:
+                    "Each customer gets an isolated file database. Great isolation and trivially cheap at small scale, but cross-tenant reporting and migrations get harder.",
+                },
+                {
+                  label: "Third-party BaaS",
+                  description:
+                    "Firebase/Supabase-style hosted backend. Fastest to a demo, but data model and auth become coupled to the vendor — migrating away later is real work.",
+                },
               ],
             },
             {
               question: "Which integrations matter?",
+              detail:
+                "Each integration adds an external dependency to the spec — credentials, webhooks, and failure handling — so only pick the ones launch actually needs.",
               multiSelect: true,
               options: [
-                { label: "Slack" },
-                { label: "Email" },
-                { label: "Calendar" },
-                { label: "None yet", recommended: true },
+                {
+                  label: "Slack",
+                  description: "Post updates into channels. Needs a Slack app + OAuth install flow.",
+                },
+                {
+                  label: "Email",
+                  description: "Transactional mail (invites, digests) through a provider like SES or Resend.",
+                },
+                {
+                  label: "Calendar",
+                  description: "Create/read Google or Outlook events; the heaviest of the three to get right.",
+                },
+                {
+                  label: "None yet",
+                  description:
+                    "Ship self-contained and add integrations when users ask — keeps v1 free of external moving parts.",
+                  recommended: true,
+                },
               ],
             },
             {
               question: "What is the launch timeline?",
+              detail:
+                "The timeline calibrates how aggressively the spec cuts scope — a shorter runway means fewer capabilities make the v1 list.",
               options: [
-                { label: "2 weeks" },
-                { label: "1 month", recommended: true },
-                { label: "A quarter" },
+                {
+                  label: "2 weeks",
+                  description: "A demo-quality slice: one happy path, mocked edges, no polish. Good for validating interest only.",
+                },
+                {
+                  label: "1 month",
+                  description:
+                    "A real but minimal product: the core flow production-ready, secondary features stubbed or deferred.",
+                  recommended: true,
+                },
+                {
+                  label: "A quarter",
+                  description:
+                    "Room for the full selected scope plus polish — at the cost of three months before any user feedback arrives.",
+                },
               ],
             },
             {
               question: "How important is offline support?",
+              detail:
+                "Offline changes the data architecture fundamentally (local store + sync + conflict resolution), so it must be decided before the design phase, not after.",
               options: [
-                { label: "Not needed", recommended: true },
-                { label: "Nice to have" },
-                { label: "Critical" },
+                {
+                  label: "Not needed",
+                  description: "The app assumes a connection; a dropped network just shows a retry state. Simplest by far.",
+                  recommended: true,
+                },
+                {
+                  label: "Nice to have",
+                  description:
+                    "Read-only caching of recently viewed data — useful on flaky connections without full sync complexity.",
+                },
+                {
+                  label: "Critical",
+                  description:
+                    "Full offline editing with background sync and conflict resolution. Roughly doubles the data-layer work; only pick if users routinely work disconnected.",
+                },
               ],
             },
             {
               question: "Who administers the workspace?",
+              detail:
+                "The admin model decides whether v1 needs a roles/permissions system or can treat every user the same.",
               options: [
-                { label: "A single owner", recommended: true },
-                { label: "Multiple admins" },
-                { label: "No admin concept" },
+                {
+                  label: "A single owner",
+                  description:
+                    "The creator holds all admin rights — invite, remove, configure. No roles UI needed in v1.",
+                  recommended: true,
+                },
+                {
+                  label: "Multiple admins",
+                  description:
+                    "Owners can grant admin to others, which means a roles model, permission checks, and an audit story.",
+                },
+                {
+                  label: "No admin concept",
+                  description:
+                    "Every member is equal. Fine for small trusted groups; risky once anyone can delete shared data.",
+                },
               ],
             },
           ],
@@ -224,10 +376,25 @@ export const agentChatHandlers = [
       if (grillSingle) {
         const input = {
           question: "Who is the primary user of this app?",
+          detail:
+            "This shapes onboarding, permissions, and how much admin tooling the spec needs — it's the single biggest scope decision, so I'm asking it first.",
           options: [
-            { label: "Individual consumers", description: "Self-serve signup, personal workspaces", recommended: true },
-            { label: "Internal teams", description: "SSO, org-managed access" },
-            { label: "Both from day one", description: "Two onboarding paths — more scope" },
+            {
+              label: "Individual consumers",
+              description:
+                "People sign themselves up and get a personal workspace. Onboarding stays lightweight (email or social login, no org setup), but every account manages itself — there is no central admin who can provision or remove users.",
+              recommended: true,
+            },
+            {
+              label: "Internal teams",
+              description:
+                "An organization rolls the app out to its staff. That means SSO, org-managed access, and an admin who controls membership — more setup work up front, but access control and offboarding come for free.",
+            },
+            {
+              label: "Both from day one",
+              description:
+                "Two onboarding paths, two permission models, and pricing that has to serve both. Roughly doubles the v1 scope; usually only worth it when both audiences are already committed.",
+            },
           ],
           multiSelect: false,
         };

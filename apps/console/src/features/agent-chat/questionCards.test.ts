@@ -52,6 +52,12 @@ describe("parseQuestionsInput — ask_question (single)", () => {
     expect(parseQuestionsInput(ASK_QUESTION_TOOL, { ...SINGLE, multiSelect: "yes" })![0]!.multiSelect).toBeUndefined();
   });
 
+  it("keeps detail only when a non-empty string", () => {
+    expect(parseQuestionsInput(ASK_QUESTION_TOOL, { ...SINGLE, detail: "Why I ask." })![0]!.detail).toBe("Why I ask.");
+    expect(parseQuestionsInput(ASK_QUESTION_TOOL, { ...SINGLE, detail: "" })![0]!.detail).toBeUndefined();
+    expect(parseQuestionsInput(ASK_QUESTION_TOOL, { ...SINGLE, detail: 42 })![0]!.detail).toBeUndefined();
+  });
+
   it.each([
     ["missing question", { options: SINGLE.options }],
     ["empty options", { question: "q", options: [] }],
