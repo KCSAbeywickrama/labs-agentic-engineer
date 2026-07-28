@@ -43,6 +43,17 @@ func GetAuthToken(ctx context.Context) string {
 	return auth.GetAuthToken(ctx)
 }
 
+// WithAuthToken stores an inbound Bearer token in context (test / overlay helpers).
+func WithAuthToken(ctx context.Context, token string) context.Context {
+	return auth.WithAuthToken(ctx, token)
+}
+
+// WithServiceIdentity marks ctx as an orchestration / async call that must use
+// the BFF's own service identity (M2M), even when a user JWT is also present.
+func WithServiceIdentity(ctx context.Context) context.Context {
+	return auth.WithServiceIdentity(ctx)
+}
+
 // ClaimsFromContext retrieves the verified JWT claims stored in context.
 func ClaimsFromContext(ctx context.Context) *Claims {
 	c := auth.ClaimsFromContext(ctx)
