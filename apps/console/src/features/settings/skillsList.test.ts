@@ -69,10 +69,10 @@ describe("paginateSkills", () => {
     expect(
       paginateSkills(catalogue, "imported", 1, 10).rows.map((s) => s.name),
     ).toEqual(["find-skills"]);
-    // The chip reads "Built-in" — that is what people will type. All three
+    // The chip reads "Org" — that is what people will type. All three
     // "org" rows match (custom folds into org, so acme is one of them too).
     expect(
-      paginateSkills(catalogue, "built-in", 1, 10).rows.map((s) => s.name),
+      paginateSkills(catalogue, "org", 1, 10).rows.map((s) => s.name),
     ).toEqual(["acme-deploy-checklist", "go", "react-webapp"]);
   });
 

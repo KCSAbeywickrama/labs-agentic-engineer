@@ -38,7 +38,7 @@ export function SyncUpdatesControl({
       <Chip
         size="small"
         color="warning"
-        label={`${count} built-in update${count === 1 ? "" : "s"} available`}
+        label={`${count} org skill update${count === 1 ? "" : "s"} available`}
       />
       <Button
         variant="outlined"
@@ -48,7 +48,7 @@ export function SyncUpdatesControl({
         onClick={onSync}
         disabled={pending}
       >
-        {pending ? "Syncing…" : "Sync built-in skills"}
+        {pending ? "Syncing…" : "Sync org skills"}
       </Button>
     </>
   );

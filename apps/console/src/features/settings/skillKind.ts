@@ -45,9 +45,10 @@ export function kindLabel(kind: SkillKind): string {
     // "org" now covers both platform-shipped, org-visible stack skills (go,
     // react-webapp, ...) and org-authored copies (legacy "custom" folds in
     // here too) — the BE's `editable` flag, not the kind, says which is
-    // which. "Built-in" avoids implying every org skill was authored by us.
+    // which. "Org" = the organization's skills (platform-provided defaults
+    // plus ones the org added) — the tooltip clarifies that scope.
     case "org":
-      return "Built-in";
+      return "Org";
     case "platform":
       return "Platform";
     case "imported":
@@ -77,7 +78,7 @@ export function kindChipTone(kind: SkillKind): StatusTone {
 export function kindBlurb(kind: SkillKind): string {
   switch (kind) {
     case "org":
-      return "Shipped with the platform; you can edit your copy — the platform can still offer updates.";
+      return "Your organization's skills — platform-provided defaults plus ones you've added. Editable; the platform can still offer updates.";
     case "platform":
       return "Generation-flow guidance the platform agents follow (design, tasks, wireframes). Read-only.";
     case "imported":

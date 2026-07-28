@@ -197,17 +197,6 @@ export function SkillsSection() {
         <Box
           sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}
         >
-          {conflicted.length > 0 && (
-            <Tooltip title="The platform shipped updates for skills you have customized. Sync leaves your versions untouched; reviewing and applying them is coming soon.">
-              {/* Box holds the ref Tooltip needs — StatusChip doesn't forward one. */}
-              <Box sx={{ display: "inline-flex" }}>
-                <StatusChip
-                  tone="info"
-                  label={`${conflicted.length} customized skill${conflicted.length === 1 ? " has" : "s have"} platform updates`}
-                />
-              </Box>
-            </Tooltip>
-          )}
           <SyncUpdatesControl
             count={applicable.length}
             pending={syncSkills.isPending}
@@ -230,8 +219,8 @@ export function SkillsSection() {
           onClose={() => syncSkills.reset()}
         >
           {syncedCount > 0
-            ? `Synced ${syncedCount} built-in skill${syncedCount === 1 ? "" : "s"} to the latest content.`
-            : "Built-in skills are already up to date."}
+            ? `Synced ${syncedCount} org skill${syncedCount === 1 ? "" : "s"} to the latest content.`
+            : "Org skills are already up to date."}
         </Alert>
       )}
       {syncSkills.isError && (
@@ -297,12 +286,12 @@ export function SkillsSection() {
                             <StatusChip label="update available" tone="warning" />
                           )}
                           {conflictedNames.has(skill.name) && (
-                            <Tooltip title="You customized this skill and the platform has since updated it. Sync won't overwrite your version.">
+                            <Tooltip title="The platform shipped a newer version of this skill after you customized it — the two changes conflict. Your version is kept; review to reconcile with the platform's.">
                               {/* Box holds the ref Tooltip needs — StatusChip
                                   doesn't forward one. */}
                               <Box sx={{ display: "inline-flex" }}>
                                 <StatusChip
-                                  label="platform update — customized"
+                                  label="Conflicting platform update"
                                   tone="info"
                                 />
                               </Box>
