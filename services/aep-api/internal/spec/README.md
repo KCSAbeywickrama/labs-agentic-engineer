@@ -42,6 +42,7 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `resourceMarkerCatalog` (returns `CRTMarkers`) | needs | `dependencies` — the PE-authored CRT marker vocabulary, projected at the root |
 | `AnthropicKeyResolver` · git-token `Resolver` | needs | `platform/secrets` — per-org keys + sealed git tokens |
 | `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` — design reads, spec-save, status snapshots |
+| `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | build/devflow (SpecTagger, validation criteria) |
 
 ## Owns
@@ -64,6 +65,15 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   files are therefore delivery-only over the JSON API — their content never round-trips through a
   GET→edit→PUT cycle — and stay durable only via the embedded library or tarball import, which carry
   the bytes directly rather than through `binaryReferences`.
+- **The project descriptor** (`specs/.agentic-engineer.toml`, `descriptor.go`) — the marker identifying a
+  repo as an Agentic Engineer project, carrying the idea the user gave at creation. Written by `projects`
+  at create through the `DescriptorWriter` port (best-effort: a failed write never fails the create) and
+  read back here to enrich `/start`. TOML rather than the YAML/JSON used elsewhere because its one
+  load-bearing field is a paragraph of free text a user typed — a real encoder keeps quotes, backslashes
+  and newlines intact.
+- **The `/start` command** (`start_command.go`) — the ONE slash command the server expands. Every other
+  `/<skill>` is rewritten client-side by `slashSkillInstruction` before the turn is sent; `/start` arrives
+  verbatim because only the server can enrich it with the descriptor's idea.
 - **Persistence**: the `agent_turns` gorm lives in this domain (`repository_turn.go` over the
   `agent_turn.go` entity), single write-authority. Spec content itself is not gorm — it lives in git,
   reached through sourcecontrol's `Workspace`/gitfs engine.
@@ -81,3 +91,10 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   commit; a mismatch rejects the turn and leaves `main` untouched.
 - **Skill read-only is enforced by the mutation guards, not by visibility.** `Resolve`/`List` return every
   kind — platform skills list read-only on the skills page; reserved names/prefixes block name collisions.
+- **The descriptor is unreadable by the agent, structurally.** Its dot-led segment is stripped from every
+  turn snapshot (`agentfold.InTurnSnapshot` and its TS mirror), and `.toml` is not an admitted extension
+  either — so the captured idea reaches a turn ONLY via the `/start` expansion, never by the model opening
+  the file. Do not "fix" this by widening the snapshot filter.
+- **The kickoff is never signalled through `useCase`.** That field is part of the conversation identity
+  (`namespacedID`), so keying `/start` on it would put the turn in a different conversation from the chat
+  around it — and `/start` runs an interview whose answers arrive as ordinary chat turns.

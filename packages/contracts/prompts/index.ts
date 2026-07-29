@@ -113,6 +113,40 @@ export function buildDesignGenerationInstruction(): string {
  * `/quit`, `/grill`, …) BEFORE calling this — those are surface-specific and not
  * skill loads.
  */
+/**
+ * `/start` — the project kickoff, and the ONE slash command the SERVER expands
+ * rather than the client (services/aep-api internal/spec/start_command.go).
+ *
+ * Every other `/<skill>` is rewritten here before the turn is sent. `/start`
+ * must NOT be: only the server can enrich it with the idea captured in
+ * `specs/.agentic-engineer.toml` — a file no client parses and the agent cannot
+ * read. So callers send it through VERBATIM and let the server do the work.
+ *
+ * Note what this deliberately is NOT: a `useCase`. That field is part of the
+ * conversation identity, so signalling the kickoff through it would put the
+ * turn in a different conversation from the chat around it — and `/start` runs
+ * an interview whose answers are ordinary chat turns, which would then land
+ * somewhere the questions were never asked.
+ */
+export const START_COMMAND = "/start";
+
+/**
+ * Parse `/start [idea]`. Returns the inline idea (`""` when the command was
+ * bare), or null when the line is not the command at all.
+ *
+ * The grammar mirrors Go's `parseStartCommand` and is deliberately narrow — the
+ * exact token, alone or followed by whitespace — so prose that merely mentions
+ * "/start" is never eaten.
+ */
+export function parseStartCommand(line: string): { inlineIdea: string } | null {
+  const trimmed = line.trim();
+  if (trimmed === START_COMMAND) return { inlineIdea: "" };
+  if (trimmed.startsWith(START_COMMAND + " ")) {
+    return { inlineIdea: trimmed.slice(START_COMMAND.length + 1).trim() };
+  }
+  return null;
+}
+
 export function slashSkillInstruction(line: string): string | null {
   const m = /^\/([a-z0-9-]+)(?:\s+([\s\S]+))?$/.exec(line.trim());
   if (!m) return null;

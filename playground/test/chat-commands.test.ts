@@ -99,7 +99,9 @@ test("ensureProjectDir accepts an existing directory", async () => {
   const dir = mkdtempSync(join(tmpdir(), "aep-ensure-"));
   try {
     const r = await ensureProjectDir(dir, { interactive: false });
-    assert.deepEqual(r, { ok: true, path: dir });
+    // `created: false` — it was already there, so the caller must NOT prompt
+    // for the project's idea; only a freshly-created project captures one.
+    assert.deepEqual(r, { ok: true, path: dir, created: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

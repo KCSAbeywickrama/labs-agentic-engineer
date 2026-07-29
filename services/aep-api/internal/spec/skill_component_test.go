@@ -212,8 +212,8 @@ func TestSkillsComponent_PlatformSkillsReadOnlySurface(t *testing.T) {
 			}
 		}
 	}
-	if platform != 8 {
-		t.Fatalf("want 8 platform skills in the list, got %d: %s", platform, resp.Body.String())
+	if platform != 9 {
+		t.Fatalf("want 9 platform skills in the list, got %d: %s", platform, resp.Body.String())
 	}
 
 	// Resolvable read-only…

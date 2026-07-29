@@ -45,6 +45,7 @@ function statusLine(projectDir: string): string {
 export function commandGuide(): string {
   return [
     "  Commands:",
+    "    /start [idea]          kick off the project — interview, then requirements",
     "    /spec /design [text]   generate the spec / design (load a skill and follow it)",
     "    /<skill> [text]        load any working-tree skill and follow it (e.g. /grilling)",
     "    /task                  plan implementation tasks",

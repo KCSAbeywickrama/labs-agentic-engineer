@@ -43,6 +43,9 @@ function inputLabel(input: unknown): string {
   return "";
 }
 
+/** The status the HITL question tools resolve with (services/agents tools/files.ts). */
+const AWAITING_USER_RESPONSE = "awaiting_user_response";
+
 interface ResultShape {
   ok?: boolean;
   op?: string;
@@ -68,6 +71,13 @@ export function renderPart(part: StreamPart): void {
       if (typeof r === "string") {
         const preview = r.replace(/\s+/g, " ").trim();
         stdout.write(`  ${green("✓")} ${dim(preview.length > 80 ? `${preview.slice(0, 80)}…` : preview)}\n`);
+      } else if (r?.status === AWAITING_USER_RESPONSE) {
+        // The HITL question tools (ask_question / ask_questions) resolve to a
+        // PLACEHOLDER carrying no `ok` — the turn ends here and the answer
+        // arrives as the next message. Without this branch the fall-through
+        // below rendered every question card as a red "✗ error", which is what
+        // a `/start` interview shows on its very first turn.
+        stdout.write(`  ${dim("…")} awaiting your answer\n`);
       } else if (r?.ok) stdout.write(`  ${green("✓")} ${r.op ?? "loaded"} ${dim(r.status ?? "")}\n`);
       else if (r) stdout.write(`  ${red("✗")} ${r.code ?? "error"}${r.message ? `: ${r.message}` : ""}\n`);
       break;

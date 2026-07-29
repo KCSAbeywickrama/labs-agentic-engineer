@@ -35,8 +35,14 @@ import { ensureProjectDir } from "./ensure-dir.js";
 const OPEN = "\0open";
 const QUIT = "\0quit";
 
+/** A picked project, plus whether this call created it (the caller captures the idea only then). */
+export interface PickedProject {
+  path: string;
+  created: boolean;
+}
+
 /** Pick a project dir, or null to exit. First run confirms the exact directory (§12). */
-export async function pickProject(): Promise<string | null> {
+export async function pickProject(): Promise<PickedProject | null> {
   const recents = listRecentProjects();
   if (recents.length > 0) {
     const choice = await clack.select({
@@ -48,7 +54,7 @@ export async function pickProject(): Promise<string | null> {
       ],
     });
     if (clack.isCancel(choice) || choice === QUIT) return null;
-    if (choice !== OPEN) return choice;
+    if (choice !== OPEN) return { path: choice, created: false }; // a recent always exists already
   }
 
   const dir = await clack.text({
@@ -76,5 +82,5 @@ export async function pickProject(): Promise<string | null> {
     message: `The agents will read and WRITE inside ${path}. Continue?`,
   });
   if (clack.isCancel(confirmed) || !confirmed) return null;
-  return path;
+  return { path, created: ensured.created };
 }

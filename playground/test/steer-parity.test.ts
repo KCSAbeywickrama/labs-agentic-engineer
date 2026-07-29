@@ -34,7 +34,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GENERAL_STEER, COLLAB_DEPS_STEER, PLAN_INSTRUCTION } from "../src/engine/compose.js";
+import {
+  GENERAL_STEER,
+  COLLAB_DEPS_STEER,
+  PLAN_INSTRUCTION,
+  START_INSTRUCTION,
+  IDEA_STEER_PREFIX,
+} from "../src/engine/compose.js";
+import { slashSkillInstruction } from "@aep/contracts/prompts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -62,6 +69,23 @@ test("GENERAL_STEER + COLLAB_DEPS_STEER appear verbatim in genai/steering.go", (
 test("PLAN_INSTRUCTION appears verbatim in task/plan.go", () => {
   const joined = joinedGoLiterals("services/aep-api/internal/delivery/task/plan.go");
   assert.ok(joined.includes(PLAN_INSTRUCTION), "PLAN_INSTRUCTION drifted from planInstruction");
+});
+
+// `/start` is expanded on BOTH sides — by aep-api for console turns, and here
+// for playground turns (which never call aep-api). Three copies of the same
+// two strings, so all three are pinned together.
+test("START_INSTRUCTION + IDEA_STEER_PREFIX appear verbatim in their Go sources", () => {
+  const startGo = joinedGoLiterals("services/aep-api/internal/spec/start_command.go");
+  assert.ok(startGo.includes(START_INSTRUCTION), "START_INSTRUCTION drifted from spec.StartInstruction");
+  const descriptorGo = joinedGoLiterals("services/aep-api/internal/spec/descriptor.go");
+  assert.ok(descriptorGo.includes(IDEA_STEER_PREFIX), "IDEA_STEER_PREFIX drifted from ideaSteer");
+});
+
+// The server's expansion must equal what the shared client-side expander would
+// have produced for `/start`, so the one command the server owns still reads
+// identically to every other `/<skill>` shortcut.
+test("START_INSTRUCTION matches slashSkillInstruction('/start')", () => {
+  assert.equal(START_INSTRUCTION, slashSkillInstruction("/start"));
 });
 
 test("targetSuffix + renderPlanContext shapes appear in their Go sources", () => {

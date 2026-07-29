@@ -35,7 +35,8 @@ import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
-import { slashSkillInstruction } from "@aep/contracts/prompts";
+import { parseStartCommand, slashSkillInstruction } from "@aep/contracts/prompts";
+import { startInstruction } from "./engine/compose.js";
 import { loadDotenv } from "@aep/agents/shared/env";
 import {
   chatTurn,
@@ -58,6 +59,7 @@ import { phaseMenu, type MenuAction } from "./tui/phase-menu.js";
 import { chatLoop } from "./tui/chat.js";
 import { tasksScreen } from "./tui/tasks.js";
 import { ensureProjectDir } from "./tui/ensure-dir.js";
+import { readIdea, writeDescriptor } from "./state/descriptor.js";
 import { confirmCodingDir } from "./tui/consent.js";
 
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "menu"]);
@@ -77,7 +79,7 @@ function printUsage(): void {
       '  pnpm play <dir> chat "<message>"          one-shot headless chat turn',
       "",
       "Flags:",
-      '  --idea "<text>"   seed/replace the create prompt (requirements)',
+      '  --idea "<text>"   the project idea — captured into specs/.agentic-engineer.toml',
       '  --target "<x>"    narrow the phase to one component/target',
       "  --fresh           reset the conversation before the run",
       "  --silent          suppress live turn rendering",
@@ -96,10 +98,28 @@ function printUsage(): void {
 
 async function askIdea(): Promise<string | null> {
   const idea = await clack.text({
-    message: "What should this project be? (the create prompt)",
+    message: "What are you building?",
     placeholder: "An online store for handmade ceramics",
   });
   return clack.isCancel(idea) ? null : idea;
+}
+
+/**
+ * Capture the project's idea AT CREATION — the same moment the console's create
+ * form captures it — and write `specs/.agentic-engineer.toml`. `--idea` supplies
+ * it non-interactively; otherwise a TTY is asked once, here, so `/start` never
+ * has to.
+ *
+ * Only on creation: opening an existing project never prompts. A project that
+ * ends up with no descriptor (headless creation, or a cancelled prompt) is fine
+ * — the start skill opens by asking for the idea instead.
+ */
+async function captureIdeaOnCreate(projectDir: string, idea: string | undefined): Promise<void> {
+  if (readIdea(projectDir)) return;
+  let text = idea?.trim() ?? "";
+  if (!text && process.stdin.isTTY) text = (await askIdea())?.trim() ?? "";
+  if (!text) return;
+  writeDescriptor(projectDir, projectSlug(projectDir), text);
 }
 
 function printCheckFindings(projectDir: string): boolean {
@@ -151,7 +171,15 @@ async function runHeadless(
         // Same `/<skill>` shortcut as the interactive chat loop (e.g.
         // `play <dir> chat "/spec an expense app"`); a plain message rides
         // through verbatim. No reserved control words in the one-shot verb.
-        outcome = await chatTurn(session, slashSkillInstruction(commandArg) ?? commandArg, opts);
+        //
+        // `/start` is expanded HERE rather than sent verbatim: production
+        // relies on aep-api to expand it, but the playground talks to the
+        // agents service directly, so it does the server's job itself.
+        const start = parseStartCommand(commandArg);
+        const instruction = start
+          ? startInstruction(start.inlineIdea || readIdea(projectDir))
+          : (slashSkillInstruction(commandArg) ?? commandArg);
+        outcome = await chatTurn(session, instruction, opts);
       } finally {
         await session.close();
       }
@@ -266,6 +294,7 @@ async function main(): Promise<number> {
   // and inside the repo only the gitignored playground/projects/ subtree is
   // a legal project home.
   let projectDir = dirArg ? expandProjectPath(dirArg) : null;
+  let createdProject = false;
   if (projectDir) {
     // A directly-supplied dir is fenced and created here: TTY prompts before
     // creating a missing dir; headless refuses (it can't ask). Non-directories
@@ -276,13 +305,16 @@ async function main(): Promise<number> {
       return 1;
     }
     projectDir = ensured.path;
+    createdProject = ensured.created;
   } else {
     if (command && !process.stdin.isTTY) {
       output.write("a project directory is required in headless mode\n");
       return 1;
     }
-    projectDir = await pickProject();
-    if (!projectDir) return 0;
+    const picked = await pickProject();
+    if (!picked) return 0;
+    projectDir = picked.path;
+    createdProject = picked.created;
   }
   // Re-fence the resolved dir: ensureProjectDir already fenced a supplied path,
   // but a picker recent can carry a stale pre-fence path.
@@ -291,6 +323,10 @@ async function main(): Promise<number> {
     output.write(`${fenceError}\n`);
     return 1;
   }
+
+  // A brand-new project captures its idea now, before any surface opens, so
+  // both the chat `/start` and the headless `requirements` verb find it.
+  if (createdProject) await captureIdeaOnCreate(projectDir, values.idea);
 
   // Chat is the home surface: `play <dir>` drops straight in; `play menu` opens
   // the dashboard; any other verb runs headless.

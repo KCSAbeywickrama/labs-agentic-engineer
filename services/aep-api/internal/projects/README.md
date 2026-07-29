@@ -46,6 +46,7 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 |---|---|---|
 | repo/workspace bootstrap · repo-name conflict | needs | `sourcecontrol` — on project create/delete |
 | design read · spec-stage snapshot | needs | `spec` — the Stage aggregate's spec column + component OpenAPI source |
+| `descriptorWriter` | needs | `spec` — stamps `specs/.agentic-engineer.toml` on create (best-effort; nil is a no-op) |
 | build/exec status (`SetStageSources` port) | needs | `delivery` — the build/deploy columns of the Stage aggregate, wired at the root |
 | OC `Project`/`Component`/`ReleaseBinding` CRUD | needs | `openchoreo` client — OC is the store |
 | `Service` · `ComponentService` · `ConfigService` | offers | the edge (the 14 public ops) |
@@ -57,6 +58,11 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   over `component_config.go`), single write-authority.
 
 ## Invariants — don't break
+- **Everything after the OC project + repo is best-effort.** Skills provisioning, the webhook, and the
+  project descriptor are each logged-and-continued on failure: none of them may destroy a creation the
+  user already committed to. The one exception stays the repo-NAME conflict, which can never succeed on
+  retry and so compensates the project away and fails. A missing descriptor costs the user one question
+  from the `/start` skill, nothing more.
 - **Slug guards run before any service touch.** projectName/componentName/buildName path params are validated
   as DNS-label slugs (`RequireSlug`) and 400 on malformed BEFORE the OC client / repo is reached.
 - **The wire quirks the contract-first cutover pinned stay pinned**: get-component-config returns a literal

@@ -21,10 +21,21 @@ pnpm play help | -h | --help           # same usage help
 
 `play <dir>` drops straight into **chat** — the home surface. A directly-named
 dir is created after a prompt (headless refuses a missing dir rather than
-creating silently). In chat, slash commands drive every phase without leaving:
-`/spec` `/design` `/<skill>` load a working-tree skill and follow it (the same
-channel `PLAN_INSTRUCTION` uses); `/task` `/code` `/validate` `/undo` run the
-existing phase engines; `/menu` opens the status dashboard, `/help` the guide.
+creating silently), and a NEWLY created project captures its idea right there —
+from `--idea`, or by asking once. In chat, slash commands drive every phase
+without leaving: `/start [idea]` kicks the project off (interview →
+requirements); `/spec` `/design` `/<skill>` load a working-tree skill and follow
+it (the same channel `PLAN_INSTRUCTION` uses); `/task` `/code` `/validate`
+`/undo` run the existing phase engines; `/menu` opens the status dashboard,
+`/help` the guide.
+
+The idea lives in `<project>/specs/.agentic-engineer.toml` — the **project
+descriptor**, identical to what aep-api commits on project create. It marks the
+directory as an Agentic Engineer project and carries the idea `/start` builds
+requirements from. Being dot-prefixed it is stripped from every turn snapshot,
+so the agent can never read it: the idea reaches a turn ONLY through the
+`/start` expansion in `engine/compose.ts`, mirroring the server
+(`spec.StartInstruction` + `ideaSteer`, both pinned by `steer-parity.test.ts`).
 
 No review/browse affordances: the playground auto-writes files and the user's
 editor (VS Code) is where browsing, diffs, and hand-edits happen — including
@@ -96,5 +107,7 @@ also a headless verb in `src/commands.ts`. `test/` — mock-model phase tests
 (no tokens) + the parity pins.
 
 A playground project keeps its state in `<project>/.aep-playground/`
-(conversations, runs, undo snapshots, prompt.md, project.json) — a dot-dir,
-so engineering-agent turns never see it.
+(conversations, runs, undo snapshots, project.json) — a dot-dir, so
+engineering-agent turns never see it. The project's idea is NOT there: it lives
+in `specs/.agentic-engineer.toml`, which is project content committed in
+production, not playground-local state.

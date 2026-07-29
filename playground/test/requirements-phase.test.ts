@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import { mockModel } from "@aep/agents/shared/mock-model";
 import { requirementsCommand, chatTurn } from "../src/commands.js";
 import { openSession } from "../src/engine/session.js";
-import { readPrompt } from "../src/state/project.js";
+import { readIdea } from "../src/state/descriptor.js";
 
 function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "aep-play-test-"));
@@ -44,7 +44,7 @@ function tempSkills(): string {
   return dir;
 }
 
-test("requirements phase: idea → folded requirements.md + stored prompt + persisted conversation", async () => {
+test("requirements phase: idea → folded requirements.md + captured descriptor + persisted conversation", async () => {
   const projectDir = tempProject();
   const skillsDir = tempSkills();
   try {
@@ -61,7 +61,8 @@ test("requirements phase: idea → folded requirements.md + stored prompt + pers
     assert.equal(outcome.ok, true, outcome.detail);
 
     assert.match(readFileSync(join(projectDir, "specs/requirements/requirements.md"), "utf8"), /ceramics catalog/);
-    assert.equal(readPrompt(projectDir), "An online ceramics store");
+    // --idea is CAPTURED into the descriptor, so a later /start carries the same idea.
+    assert.equal(readIdea(projectDir), "An online ceramics store");
     assert.ok(existsSync(join(projectDir, ".aep-playground/conversations/general.json")), "general conversation persisted");
     assert.ok(existsSync(join(projectDir, ".aep-playground/project.json")), "project state persisted");
   } finally {

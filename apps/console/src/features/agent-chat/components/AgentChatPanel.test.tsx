@@ -18,8 +18,10 @@
 
 // @vitest-environment jsdom
 
+import type { ComponentProps } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildDesignGenerationInstruction } from "@aep/contracts/prompts";
 import { AgentChatPanel } from "./AgentChatPanel";
 import { chatKeyFor, consumePendingSeed, setPendingSeed } from "../chatStore";
 
@@ -73,10 +75,14 @@ vi.mock("../useTurnEndDependencyRefresh", () => ({
     mockUseTurnEndDependencyRefresh(...args),
 }));
 
-function renderPanel() {
-  return render(
-    <AgentChatPanel org={ORG} projectName={PROJECT} onClose={() => {}} />,
-  );
+type PanelProps = ComponentProps<typeof AgentChatPanel>;
+
+function panelProps(overrides: Partial<PanelProps> = {}): PanelProps {
+  return { org: ORG, projectName: PROJECT, onClose: () => {}, ...overrides };
+}
+
+function renderPanel(overrides: Partial<PanelProps> = {}) {
+  return render(<AgentChatPanel {...panelProps(overrides)} />);
 }
 
 describe("AgentChatPanel — pendingSeed + turn-end wiring (#252 Task 5)", () => {
@@ -152,5 +158,45 @@ describe("AgentChatPanel — /<skill> composer shortcut", () => {
   it("sends a plain chat message verbatim", () => {
     typeAndSubmit("please regenerate the design");
     expect(mockSend).toHaveBeenCalledWith("please regenerate the design");
+  });
+
+  // `/start` is the ONE command the server expands: only it can append the idea
+  // captured at project creation, which the browser never reads or parses. If
+  // the composer expanded it here, the server would see prose instead of the
+  // command and the idea would silently never arrive.
+  it("sends /start UNEXPANDED so the server can attach the captured idea", () => {
+    typeAndSubmit("/start");
+    expect(mockSend).toHaveBeenCalledWith("/start");
+  });
+
+  it("sends /start with an inline idea unexpanded too", () => {
+    typeAndSubmit("/start a rota planner for nurses");
+    expect(mockSend).toHaveBeenCalledWith("/start a rota planner for nurses");
+  });
+});
+
+// The generation CTAs (#150 spec / #159 design). Requirements go through
+// `/start` — the console composes nothing and reads no local copy of the idea,
+// so a different browser, device or teammate kicks off identically.
+describe("AgentChatPanel — generation CTAs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consumePendingSeed(KEY);
+  });
+
+  it("auto-sends /start for the requirements signal", () => {
+    renderPanel({ autoGenerate: "requirements" });
+    expect(mockSend).toHaveBeenCalledWith("/start");
+  });
+
+  it("auto-sends the design instruction for the design signal", () => {
+    renderPanel({ autoGenerate: "design" });
+    expect(mockSend).toHaveBeenCalledWith(buildDesignGenerationInstruction());
+  });
+
+  it("fires the signal exactly once", () => {
+    const { rerender } = renderPanel({ autoGenerate: "requirements" });
+    rerender(<AgentChatPanel {...panelProps({ autoGenerate: "requirements" })} />);
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });

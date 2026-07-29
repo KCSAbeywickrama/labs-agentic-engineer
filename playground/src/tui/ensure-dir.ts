@@ -36,7 +36,8 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import * as clack from "@clack/prompts";
 import { projectDirError } from "../paths.js";
 
-export type EnsureResult = { ok: true; path: string } | { ok: false; message: string };
+/** `created` distinguishes "we just made this project" from "it was already here" — the caller captures the project's idea only on creation. */
+export type EnsureResult = { ok: true; path: string; created: boolean } | { ok: false; message: string };
 
 /** Fence, then ensure `abs` (an already-expanded absolute path) exists as a directory. */
 export async function ensureProjectDir(abs: string, opts: { interactive: boolean }): Promise<EnsureResult> {
@@ -44,7 +45,9 @@ export async function ensureProjectDir(abs: string, opts: { interactive: boolean
   if (fence) return { ok: false, message: fence };
 
   if (existsSync(abs)) {
-    return statSync(abs).isDirectory() ? { ok: true, path: abs } : { ok: false, message: `not a directory: ${abs}` };
+    return statSync(abs).isDirectory()
+      ? { ok: true, path: abs, created: false }
+      : { ok: false, message: `not a directory: ${abs}` };
   }
 
   if (!opts.interactive) {
@@ -53,5 +56,5 @@ export async function ensureProjectDir(abs: string, opts: { interactive: boolean
   const create = await clack.confirm({ message: `${abs} does not exist. Create it?` });
   if (clack.isCancel(create) || !create) return { ok: false, message: "aborted — directory not created" };
   mkdirSync(abs, { recursive: true });
-  return { ok: true, path: abs };
+  return { ok: true, path: abs, created: true };
 }

@@ -32,13 +32,14 @@
  * task-plan phase rather than becoming "Load the task skill and follow it".
  */
 
-import { slashSkillInstruction } from "@aep/contracts/prompts";
+import { parseStartCommand, slashSkillInstruction } from "@aep/contracts/prompts";
 
 export type PhaseName = "task" | "code" | "validate" | "undo";
 
 export type ChatIntent =
   | { kind: "control"; name: "menu" | "quit" | "help" }
   | { kind: "phase"; name: PhaseName; arg?: string }
+  | { kind: "start"; inlineIdea?: string }
   | { kind: "turn"; instruction: string };
 
 const PHASES = new Set<PhaseName>(["task", "code", "validate", "undo"]);
@@ -52,6 +53,14 @@ export function classifyChatInput(line: string): ChatIntent {
   if (trimmed === "/menu" || trimmed === "/threads") return { kind: "control", name: "menu" };
   if (trimmed === "/quit") return { kind: "control", name: "quit" };
   if (trimmed === "/help") return { kind: "control", name: "help" };
+
+  // `/start` is resolved before the generic skill loader because its
+  // instruction is not a plain skill load: the captured idea has to be appended
+  // to it, and that read is I/O this pure classifier must not do. The caller
+  // (chat.ts) resolves the idea and composes via `startInstruction`. The
+  // grammar itself is shared with the console via @aep/contracts/prompts.
+  const start = parseStartCommand(trimmed);
+  if (start) return start.inlineIdea ? { kind: "start", inlineIdea: start.inlineIdea } : { kind: "start" };
 
   // A phase-runner is `/<name>` with an optional argument, where <name> is one
   // of the reserved phases (pure letters, so `/code-all` is NOT a phase — it
