@@ -72,47 +72,11 @@ export function resolveWithin(root: string, key: string): string {
 }
 
 /**
- * Diff `before` (read at turn start) against `after` (the agent's reconstructed
- * snapshot) and, unless `dryRun`, write the changes to disk under `root`:
- * new/edited files written, vanished files deleted. Returns the change list
- * either way.
- */
-export function reconcileDir(
-  root: string,
-  before: Record<string, string>,
-  after: Record<string, string>,
-  dryRun: boolean,
-): FileChange[] {
-  const absRoot = resolve(root);
-  const changes: FileChange[] = [];
-
-  for (const [path, content] of Object.entries(after)) {
-    if (!(path in before)) changes.push({ kind: "add", path });
-    else if (before[path] !== content) changes.push({ kind: "edit", path });
-    else continue; // unchanged
-    if (!dryRun) {
-      const abs = resolveWithin(absRoot, path);
-      mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, content, "utf8");
-    }
-  }
-
-  for (const path of Object.keys(before)) {
-    if (path in after) continue;
-    changes.push({ kind: "remove", path });
-    if (!dryRun) rmSync(resolveWithin(absRoot, path), { force: true });
-  }
-
-  return changes;
-}
-
-/**
  * Reconcile a SINGLE path from `before`→`after` content and write it under
- * `root` — the per-tool-call sibling of `reconcileDir`, used by the engine loop
- * to fold each streamed tool-call to disk the moment it arrives (§5) instead of
- * batching the whole turn. `after === undefined` means the file was removed.
- * Returns the change, or `null` when nothing changed (e.g. a rejected op left
- * the bundle byte-for-byte unchanged).
+ * `root` — the engine loop folds each streamed tool-call to disk the moment it
+ * arrives (§5) rather than batching a whole turn's diff. `after === undefined`
+ * means the file was removed. Returns the change, or `null` when nothing
+ * changed (e.g. a rejected op left the bundle byte-for-byte unchanged).
  */
 export function reconcileFile(
   root: string,
