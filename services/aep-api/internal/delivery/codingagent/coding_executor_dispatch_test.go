@@ -23,7 +23,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -82,10 +81,16 @@ func (f fakeGitHubCreds) Tx(context.Context, func(organization.OrgCredentialTx) 
 
 func fullSecretRefs() (*organization.OrgAnthropicCredential, *organization.OrgCredential) {
 	return &organization.OrgAnthropicCredential{
+			SecretRefName:      strPtr("acme-anthropic-secrets"),
+			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
+			SecretRefProperty:  strPtr("api-key"),
 			SMAPISecretRefName: strPtr("acme-anthropic-secrets"),
 			SMAPIKVPath:        strPtr("user-app-secrets/wc-acme/acme-anthropic-secrets"),
 			SMAPIProperty:      strPtr("api-key"),
 		}, &organization.OrgCredential{
+			SecretRefName:      strPtr("acme-github-pat-secrets"),
+			SecretRefKVPath:    strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
+			SecretRefProperty:  strPtr("token"),
 			SMAPISecretRefName: strPtr("acme-github-pat-secrets"),
 			SMAPIKVPath:        strPtr("user-app-secrets/wc-acme/acme-github-pat-secrets"),
 			SMAPIProperty:      strPtr("token"),
@@ -100,7 +105,7 @@ func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, g
 		fakeIdentities{},
 		nil,
 		fakeTokens{},
-		newFakeExecRepo(&delivery.Execution{ID: "exec-1", OrgID: "acme", ProjectID: "widgets", Component: "svc", Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecQueued)}),
+		newFakeExecRepo(),
 		"http://git",
 		"http://platform",
 		fakeOrgRepo{org: &organization.Organization{Name: "acme", UUID: orgUUID}},
@@ -119,19 +124,23 @@ func newCodingDispatchExecutor(anthropic *organization.OrgAnthropicCredential, g
 	return e
 }
 
-func codingDispatchReq() delivery.DispatchRequest {
-	return delivery.DispatchRequest{
-		Execution: &delivery.Execution{ID: "exec-1", OrgID: "acme", ProjectID: "widgets", Component: "svc", Kind: string(taskmeta.KindCoding), Status: string(taskmeta.ExecQueued)},
-		Task:      delivery.TaskFacts{OrgID: "acme", ProjectID: "widgets", Component: "svc", IssueURL: "https://github.com/acme/widgets/issues/1", IssueNumber: 1},
+func codingMilestoneDispatch() delivery.MilestoneDispatch {
+	return delivery.MilestoneDispatch{
+		OrgID: "acme", ProjectID: "widgets",
+		MilestoneNumber: 1, MilestoneTitle: "v1",
+		Kind:    delivery.CycleKindCoding,
+		RunID:   "run-1",
+		CycleID: "11111111-1111-1111-1111-111111111111",
 	}
 }
 
-func TestRunCoding_ProxyConfigured_MissingAnthropicRef_ErrorsNoFallback(t *testing.T) {
+func TestDispatch_ProxyConfigured_MissingAnthropicRef_ErrorsNoFallback(t *testing.T) {
 	anthropic, github := fullSecretRefs()
+	anthropic.SecretRefKVPath = nil
 	anthropic.SMAPIKVPath = nil
 	e := newCodingDispatchExecutor(anthropic, github, &K8sJobDispatcher{}, true)
 
-	err := e.Run(context.Background(), codingDispatchReq())
+	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
 		t.Fatal("expected error when anthropic secret ref is missing")
 	}
@@ -140,12 +149,13 @@ func TestRunCoding_ProxyConfigured_MissingAnthropicRef_ErrorsNoFallback(t *testi
 	}
 }
 
-func TestRunCoding_ProxyConfigured_MissingGitHubRef_ErrorsNoFallback(t *testing.T) {
+func TestDispatch_ProxyConfigured_MissingGitHubRef_ErrorsNoFallback(t *testing.T) {
 	anthropic, github := fullSecretRefs()
+	github.SecretRefName = nil
 	github.SMAPISecretRefName = nil
 	e := newCodingDispatchExecutor(anthropic, github, &K8sJobDispatcher{}, true)
 
-	err := e.Run(context.Background(), codingDispatchReq())
+	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
 		t.Fatal("expected error when github secret ref is missing")
 	}
@@ -154,13 +164,13 @@ func TestRunCoding_ProxyConfigured_MissingGitHubRef_ErrorsNoFallback(t *testing.
 	}
 }
 
-func TestRunCoding_K8sJobOnly_ErrorsSecretDeliveryRemoved(t *testing.T) {
+func TestDispatch_K8sJobOnly_ErrorsSecretDeliveryRemoved(t *testing.T) {
 	anthropic, github := fullSecretRefs()
 	rec := newRecordingK8sClient()
 	k8s := NewK8sJobDispatcher(rec, "http://platform", "runner:1")
 	e := newCodingDispatchExecutor(anthropic, github, k8s, false)
 
-	err := e.Run(context.Background(), codingDispatchReq())
+	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
 		t.Fatal("expected error when only k8s-job path is configured")
 	}
