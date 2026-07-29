@@ -38,7 +38,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
-	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc/providers/secretmanagerapi"
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -111,9 +110,8 @@ type Seam struct {
 	// Nil = no impersonation header.
 	ImpersonateOrgResolver func(ctx context.Context, namespace string) (string, error)
 
-	// SecretsProvider, when non-nil, is used instead of constructing the
-	// default SM-API provider from SECRET_MANAGER_API_URL.
-	// Nil = today's default construction (SM-API when URL configured).
+	// SecretsProvider is the write-only secrets delivery channel.
+	// Nil = delivery off (no secret writes, no external-secret cleanup).
 	SecretsProvider secretmanagersvc.Provider
 }
 
@@ -129,7 +127,7 @@ type Seam struct {
 func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var err error
 	db := in.DB
-	credStore := in.CredStore
+	credStore := in.CredentialStore
 	minter := in.Minter
 	appClientSecret := in.AppClientSecret
 	wpClient := in.K8sClient
@@ -147,9 +145,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	milestoneRunRepo := delivery.NewMilestoneRunRepository(db)
 	runCycleRepo := delivery.NewRunCycleRepository(db, in.RateStamper)
 	orgRepo := organization.NewOrganizationRepository(db)
-	orgCredRepo := organization.NewOrgCredentialRepository(db)
+	orgCredRepo := organization.NewOrgCredentialRepository(db, in.ColumnCipher)
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
-	idpRepo := organization.NewIDPRepository(db)
+	idpRepo := organization.NewIDPRepository(db, in.ColumnCipher)
 	codingAgentLogRepo := delivery.NewCodingAgentLogRepository(db)
 	runCycleLogRepo := delivery.NewRunCycleLogRepository(db)
 	activityRepo := projects.NewActivityEventRepository(db)
@@ -199,46 +197,45 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("Observability API", "baseURL", cfg.Observability.BaseURL)
 	}
 
-	// SM-API / secrets provider (ADR-0002). When seam.SecretsProvider is set,
-	// use it (an overlay module may inject an alternate backend without
-	// changing Assemble).
-	// When nil, today's default: construct SM-API from SECRET_MANAGER_API_URL,
-	// or leave unset when the URL is empty (downstream callers handle absence).
+	// Secrets delivery client. Built only when seam.SecretsProvider is set
+	// (OSS OpenBao-direct or overlay-injected provider). Nil provider =
+	// delivery off — no construction from URL, no plaintext substitute.
 	var smClient secretmanagersvc.SecretManagementClient
-	switch {
-	case seam.SecretsProvider != nil:
-		smClient, err = secretmanagersvc.NewSecretManagementClient(&secretmanagersvc.StoreConfig{
-			Provider: "injected",
-		}, seam.SecretsProvider)
+	if provider := seam.SecretsProvider; provider != nil {
+		cfgStore := &secretmanagersvc.StoreConfig{Provider: "injected"}
+		if ob := deliveryOpenBaoConfigFromAppConfig(cfg); ob != nil {
+			cfgStore.OpenBao = ob
+		}
+		var ocSR secretmanagersvc.OpenChoreoSecretReferenceClient
+		managesRefs := false
+		if m, ok := provider.(secretmanagersvc.SecretReferenceManager); ok {
+			managesRefs = m.ManagesSecretReferences()
+		}
+		if !managesRefs {
+			ocSR = openchoreo.NewSecretReferenceClient(ocConfig)
+		}
+		smClient, err = secretmanagersvc.NewSecretManagementClientWithConfig(secretmanagersvc.SecretManagementClientConfig{
+			StoreConfig: cfgStore,
+			Provider:    provider,
+			OCClient:    ocSR,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("secrets provider client init: %w", err)
 		}
-		slog.Info("secrets client", "provider", "injected")
-	case cfg.SecretManagerAPIURL != "":
-		smProvider := secretmanagerapi.NewProvider(secretmanagerapi.Config{
-			BaseURL: cfg.SecretManagerAPIURL,
-			Timeout: cfg.SecretManagerAPITimeout,
-		})
-		smClient, err = secretmanagersvc.NewSecretManagementClient(&secretmanagersvc.StoreConfig{
-			Provider: secretmanagerapi.ProviderName,
-		}, smProvider)
-		if err != nil {
-			return nil, fmt.Errorf("sm-api client init: %w", err)
-		}
-		slog.Info("sm-api client", "baseURL", cfg.SecretManagerAPIURL, "timeout", cfg.SecretManagerAPITimeout)
-	default:
-		slog.Warn("SECRET_MANAGER_API_URL not set — Phase 1 secret writes disabled")
+		slog.Info("secrets client", "provider", "injected", "managesRefs", managesRefs)
+	} else {
+		slog.Warn("secrets provider not injected — secrets delivery disabled")
 	}
-	_ = smClient // consumed via smWriter below.
+	_ = smClient // consumed via secretRefWriter below.
 
-	// SM-API mirror writer. Constructed ahead of the credential / IDP service
-	// constructors so all consumers can attach via WithSMAPIWriter (the no-op
+	// Secret-ref mirror writer. Constructed ahead of the credential / IDP service
+	// constructors so all consumers can attach via WithSecretRefWriter (the no-op
 	// case when smClient is nil is fine).
-	smWriter := organization.NewSMAPIWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
+	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
 
 	// cluster-gateway-proxy client. Used for reading coding-agent pod logs +
-	// job status (streaming feed + JobWatcher) and, when sm-api is also
-	// configured, for the full proxy DISPATCH path. When CLUSTER_GATEWAY_PROXY_URL
+	// job status (streaming feed + JobWatcher) and, when secrets delivery is
+	// also configured, for the full proxy DISPATCH path. When CLUSTER_GATEWAY_PROXY_URL
 	// is empty none of those are wired and dispatch uses the direct
 	// K8sJobDispatcher with no live streaming. In a local install this points at
 	// the in-cluster cluster-gateway-proxy stub (reads only).
@@ -255,7 +252,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		cgwClient = clustergatewayproxy.New(cgwCfg)
 		slog.Info("cluster-gateway-proxy client", "baseURL", cfg.ClusterGatewayProxyURL, "authenticated", cgwCfg.AuthProvider != nil)
 	} else {
-		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — coding-agent live streaming + JobWatcher disabled; dispatch uses the direct K8s Job path")
+		slog.Warn("CLUSTER_GATEWAY_PROXY_URL not set — coding-agent live streaming + JobWatcher + proxy dispatch disabled; direct k8s-job secret delivery is disabled (configure cluster-gateway-proxy + secret refs)")
 	}
 
 	// Credentials + git-service services and controllers. The credential store,
@@ -326,10 +323,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Warn("BFF_TASK_SIGNING_KEY not set — task dispatch will fail")
 	}
 
-	// SM-API mirror writer wired into both credential services. nil-safe via
+	// Secret-ref mirror writer wired into both credential services. nil-safe via
 	// the Enabled() check.
-	credService.WithSMAPIWriter(smWriter)
-	anthropicCredService.WithSMAPIWriter(smWriter)
+	credService.WithSecretRefWriter(secretRefWriter)
+	anthropicCredService.WithSecretRefWriter(secretRefWriter)
 	// Push the org's Anthropic key to a consumer's ExternalSecret on every
 	// successful Connect (both first-time connect and later rotation) — see
 	// AnthropicCredentialService.pushExternalSecret. nil-safe: disabled
@@ -533,14 +530,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		organizationService.SetOUValidator(thunderAdminClient)
 		slog.Info("org OU validation wired — JWT ouId is validated against Thunder before the org→OU mapping is (over)written")
 	}
-	// WithSMAPIWriter mirrors per-org publisher client_secret to SM-API on
+	// WithSecretRefWriter mirrors per-org publisher client_secret to SM-API on
 	// EnsureOrgPublisher / RegenerateClientSecret so the dispatcher's
 	// PUBLISHER_CLIENT_SECRET ExternalSecret can materialise it into runner
 	// pods without the BFF holding the plaintext.
 	idpService := organization.NewIDPService(idpRepo, orgRepo, thunderAdminClient, organization.PlatformIDPConfig{
 		Issuer:  cfg.PlatformIDP.Issuer,
 		JWKSURL: cfg.PlatformIDP.JWKSURL,
-	}).WithSMAPIWriter(smWriter)
+	}).WithSecretRefWriter(secretRefWriter)
 	// Make idpService available to trait_sync so first-protected-deploy
 	// provisions the publisher app lazily.
 	traitSyncService.SetIDPService(idpService)
@@ -590,29 +587,30 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// genai + task-plan turns use for their SkillsRef).
 	codingExecutor.WithSkillsRepo(skillsRepoForTurns)
 	// The cluster-gateway-proxy DISPATCH path (per-org NS + per-run
-	// ExternalSecrets + a K8s Job via the proxy) requires sm-api: the per-run
-	// ExternalSecrets source their values (Anthropic key, etc.) from it. So this
-	// path is gated on BOTH the proxy AND sm-api being configured — the cloud/prod
-	// posture. In a local install the proxy stub is present for reads (streaming +
-	// JobWatcher, both keyed on cgwClient below) but sm-api is not, so dispatch
-	// falls through to the direct K8sJobDispatcher, which writes the Anthropic
-	// Secret straight into the runner namespace (no OpenBao/ESO/sm-api).
-	if cgwClient != nil && cfg.SecretManagerAPIURL != "" {
+	// ExternalSecrets + a K8s Job via the proxy) requires secrets delivery:
+	// the per-run ExternalSecrets source their values from SecretReferences
+	// authored via the injected provider. Gated on BOTH the proxy AND a
+	// secrets client — cloud/prod posture. Locally the proxy stub is present
+	// for reads (streaming + JobWatcher) even when delivery is off; then
+	// dispatch falls through to the direct K8sJobDispatcher.
+	if cgwClient != nil && smClient != nil {
 		codingExecutor.WithProxy(codingagent.New(cgwClient), idpService, cfg.AgentRunnerImage, cfg.AgentClusterSecretStore)
-		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled (proxy + sm-api)",
+		slog.Info("coding executor: cluster-gateway-proxy dispatch path enabled (proxy + secrets delivery)",
 			"runnerImage", cfg.AgentRunnerImage, "clusterSecretStore", cfg.AgentClusterSecretStore)
 	}
-	// Direct K8s Job fallback: no cluster-gateway-proxy or SM-API needed.
-	// Enabled when the in-cluster client, runner image, and platform URL are all set.
+	// Direct K8s Job dispatcher remains constructible for a future Job path,
+	// but is not reported as an available coding capability: secret delivery
+	// requires cluster-gateway-proxy + secret refs. Wire only so fail-closed
+	// Dispatch surfaces a clear error when the proxy path is absent.
 	if wpClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != "" {
 		k8sJobDispatcher := codingagent.NewK8sJobDispatcher(
 			wpClient,
-			anthropicKeyReaderAdapter{svc: anthropicCredService},
 			cfg.AgentPlatformURL,
 			cfg.AgentRunnerImage,
 		)
 		codingExecutor.WithK8sJobDispatch(k8sJobDispatcher)
-		slog.Info("coding executor: direct k8s-job dispatch path enabled", "runnerImage", cfg.AgentRunnerImage)
+		slog.Info("coding executor: direct k8s-job dispatcher wired (secret delivery unavailable; configure cluster-gateway-proxy + secret refs)",
+			"runnerImage", cfg.AgentRunnerImage, "configured", k8sJobDispatcher.Configured())
 	}
 	// Build-secret staging so the post-merge build clones a PRIVATE project repo
 	// (the local plane sets GITHUB_REPO_VISIBILITY=private). Reuses the same
@@ -960,7 +958,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// wired into provisioningSvc below (Deps.Design) — ResolveRunnerSecrets
 	// classifies secret-vs-plain config keys from the project's committed
 	// design.json, never the org catalog (parity with the build path).
-	externalProvisioner := dependencies.NewExternalResourceProvisioner(designComponents{store: artifactStore}, resourceClient, smWriter)
+	externalProvisioner := dependencies.NewExternalResourceProvisioner(designComponents{store: artifactStore}, resourceClient, secretRefWriter)
 	// The public build surface: its InputsCoordinator runs the drawer inputs'
 	// pre-tag work (collect external specs, derive end-user auth) and stages
 	// external-config secrets to SM-API through externalProvisioner before the
@@ -1196,12 +1194,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			WithCycleLogCapture(runCycleRepo, runCycleLogRepo)
 		// Per-run ExternalSecret teardown applies only to the proxy dispatch
 		// path (which stages them); the direct K8s-Job path creates none.
-		if cfg.SecretManagerAPIURL != "" {
+		if smClient != nil {
 			jobWatcher.WithExternalSecretCleanup()
 		}
 		watchers = append(watchers, jobWatcher)
 		slog.Info("codingagent.JobWatcher: enabled (cluster-gateway-proxy configured)",
-			"externalSecretCleanup", cfg.SecretManagerAPIURL != "")
+			"externalSecretCleanup", smClient != nil)
 	}
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a
@@ -1233,7 +1231,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	return &App{
 		Handler:      handler,
 		Watchers:     watchers,
-		degradations: computeDegradations(cfg, in),
+		degradations: computeDegradations(cfg, in, smClient != nil),
 	}, nil
 }
 
@@ -1252,7 +1250,7 @@ type Degradation struct {
 // config.Validate boot-fails on it, so it can never be a degradation here.
 func (a *App) Degradations() []Degradation { return a.degradations }
 
-func computeDegradations(cfg config.Config, in Infra) []Degradation {
+func computeDegradations(cfg config.Config, in Infra, secretsDelivery bool) []Degradation {
 	var d []Degradation
 	off := func(capability, reason string) { d = append(d, Degradation{capability, reason}) }
 
@@ -1262,8 +1260,8 @@ func computeDegradations(cfg config.Config, in Infra) []Degradation {
 	if cfg.Observability.BaseURL == "" {
 		off("build-logs", "OBSERVABILITY_API_URL not set — build logs disabled")
 	}
-	if cfg.SecretManagerAPIURL == "" {
-		off("sm-api-secret-writes", "SECRET_MANAGER_API_URL not set — Phase-1 secret writes + external-secret cleanup disabled")
+	if !secretsDelivery {
+		off("secrets-delivery", "SecretsProvider not injected — secret writes + external-secret cleanup disabled")
 	}
 	if cfg.ClusterGatewayProxyURL == "" {
 		off("cluster-gateway-proxy", "CLUSTER_GATEWAY_PROXY_URL not set — coding-agent live streaming + JobWatcher disabled")
@@ -1281,20 +1279,21 @@ func computeDegradations(cfg config.Config, in Infra) []Degradation {
 	if cfg.OAuthStateSigningKey == "" {
 		off("connect-oauth-state", "OAUTH_STATE_SIGNING_KEY not set — GitHub App connect-state JWTs will fail to mint")
 	}
-	// Dispatch paths: the cloud proxy path needs cluster-gateway-proxy + SM-API;
-	// the direct K8s-Job path needs the in-cluster client + runner image + platform
-	// URL. Neither wired ⇒ the undocumented no-dispatch-path state: coding /
-	// validation runs cannot be launched at all.
-	proxyDispatch := cfg.ClusterGatewayProxyURL != "" && cfg.SecretManagerAPIURL != ""
-	k8sDispatch := in.K8sClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != ""
+	// Working dispatch requires cluster-gateway-proxy + secrets delivery
+	// (refs-only ExternalSecrets). Direct k8s-job secret delivery is disabled
+	// even when the in-cluster client / runner image / platform URL are set.
+	proxyDispatch := cfg.ClusterGatewayProxyURL != "" && secretsDelivery
+	k8sWired := in.K8sClient != nil && cfg.AgentRunnerImage != "" && cfg.AgentPlatformURL != ""
 	if !proxyDispatch {
-		off("coding-dispatch-proxy", "cluster-gateway-proxy + SM-API not both set — cloud proxy dispatch path off")
+		off("coding-dispatch-proxy", "cluster-gateway-proxy + secrets delivery not both set — cloud proxy dispatch path off")
 	}
-	if !k8sDispatch {
-		off("coding-dispatch-k8s", "in-cluster k8s client / AGENT_RUNNER_IMAGE / AGENT_PLATFORM_URL not all set — direct K8s-Job dispatch off")
+	if !k8sWired {
+		off("coding-dispatch-k8s", "in-cluster k8s client / AGENT_RUNNER_IMAGE / AGENT_PLATFORM_URL not all set — direct K8s-Job dispatcher not wired")
+	} else {
+		off("coding-dispatch-k8s", "direct k8s-job secret delivery is disabled; configure cluster-gateway-proxy + secret refs")
 	}
-	if !proxyDispatch && !k8sDispatch {
-		off("coding-dispatch-any", "NO dispatch path wired — coding/validation runs cannot be launched")
+	if !proxyDispatch {
+		off("coding-dispatch-any", "NO working dispatch path — coding/validation runs require cluster-gateway-proxy + secret refs")
 	}
 	if cfg.RCAAgentAnthropicPushNamespace == "" || cfg.RCAAgentAnthropicPushSecretName == "" {
 		off("rca-agent-key-push", "RCA_AGENT_ANTHROPIC_PUSH_* not set — org Anthropic key not pushed to a consumer ExternalSecret")
@@ -1338,5 +1337,18 @@ func buildGitHost(cfg config.Config) (sourcecontrol.Host, error) {
 		return githubclient.NewClient(), nil
 	default:
 		return nil, fmt.Errorf("unknown GIT_PROVIDER %q — supported: github", cfg.GitProvider)
+	}
+}
+
+// deliveryOpenBaoConfigFromAppConfig maps local OPENBAO_* config onto the
+// provider-neutral StoreConfig.OpenBao shape. Nil when addr is unset.
+func deliveryOpenBaoConfigFromAppConfig(cfg config.Config) *secretmanagersvc.OpenBaoConfig {
+	if cfg.OpenBaoAddr == "" {
+		return nil
+	}
+	return &secretmanagersvc.OpenBaoConfig{
+		Server: cfg.OpenBaoAddr,
+		Path:   "secret",
+		Auth:   &secretmanagersvc.OpenBaoAuth{Token: cfg.OpenBaoToken},
 	}
 }

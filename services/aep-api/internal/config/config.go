@@ -36,13 +36,13 @@ type Config struct {
 	// Defaults false, so the surface is absent in every real env.
 	TestMode bool
 
-	// LocalOpenBaoRepairEnabled gates the /_dev/v1/sm-api-resync endpoint —
-	// distinct from TestMode because the resync surface emits decrypted per-org
-	// plaintext (Anthropic API keys, GitHub PATs), and TestMode is also true on
-	// the shared wso2cloud dev release binding. Splitting the two means the
-	// resync route only mounts where deployments/docker-compose.yml explicitly
-	// opts in; cloud release bindings never set this var so the route never
-	// registers in deployed environments.
+	// LocalOpenBaoRepairEnabled gates POST /_dev/v1/secret-ref-resync — the
+	// in-process SecretRefWriter resync helper (status-only response; no secret
+	// material on the wire). Distinct from TestMode because TestMode is also
+	// true on the shared wso2cloud dev release binding. Splitting the two means
+	// the resync route only mounts where deployments/docker-compose.yml
+	// explicitly opts in; cloud release bindings never set this var so the route
+	// never registers in deployed environments.
 	LocalOpenBaoRepairEnabled bool
 
 	// DeploymentTier guards dev-only destructive migrations and seed paths.
@@ -170,7 +170,9 @@ type Config struct {
 	// used to encrypt per-org credentials at rest in org_secrets.
 	CredentialEncryptionKey string
 
-	// OpenBaoAddr / OpenBaoToken — OpenBao address and token.
+	// OpenBaoAddr / OpenBaoToken — local-only OpenBao connection for the
+	// in-process OpenBao-direct secrets provider (NewOSSOptions). Empty
+	// leaves SecretsProvider nil (delivery off). Never set in cloud.
 	OpenBaoAddr  string
 	OpenBaoToken string
 
@@ -183,15 +185,6 @@ type Config struct {
 	// CredentialValidatorInterval is the periodic credential-validator
 	// sweep interval. Default 24h.
 	CredentialValidatorInterval time.Duration
-
-	// Secret Manager API + cluster-gateway-proxy.
-	// SM-API URL the binary writes per-org credentials to (the `sm-api`
-	// secretmanagersvc provider). Empty disables the provider — the legacy
-	// `org_secrets` DB path keeps working but the dispatch + cascade flows
-	// that depend on SecretReference / ESO will 503. ADR-0002: same provider
-	// in local + cloud.
-	SecretManagerAPIURL     string
-	SecretManagerAPITimeout time.Duration
 
 	// Cluster-gateway-proxy URL the BFF POSTs Job + ExternalSecret manifests
 	// to on dispatch (ou-service shape; un-authed today). Empty disables the

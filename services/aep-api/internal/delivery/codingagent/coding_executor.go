@@ -45,7 +45,8 @@ import (
 //     K8s Job), used when the proxy dispatcher + the org's SM-API triplets are
 //     configured — this is what the cloud / local-proxy plane exercises (`ca-…` jobs);
 //   - the direct K8s Job fallback (K8sJobDispatcher) when the proxy path is not
-//     configured — the aep-init local-install path.
+//     configured — constructible, but Dispatch fails closed (direct k8s-job
+//     secret delivery is disabled; configure cluster-gateway-proxy + secret refs).
 type CodingExecutor struct {
 	oc            openchoreo.ComponentClient
 	repos         ProjectRepos
@@ -133,9 +134,10 @@ func (e *CodingExecutor) WithProxy(proxy *Dispatcher, idp OrgPublisherProvisione
 	return e
 }
 
-// WithK8sJobDispatch enables the direct K8s Job dispatch path. The org UUID
+// WithK8sJobDispatch wires the direct K8s Job dispatch path. The org UUID
 // lookup (needed to derive the data-plane namespace) reads through the org
-// repository wired at construction.
+// repository wired at construction. Direct k8s-job secret delivery is disabled
+// — Dispatch fails closed; use WithProxy for refs-only ExternalSecrets.
 func (e *CodingExecutor) WithK8sJobDispatch(d *K8sJobDispatcher) *CodingExecutor {
 	e.k8sJob = d
 	return e
@@ -281,9 +283,10 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 		return "", fmt.Errorf("dispatch kind %q requires the cluster-gateway-proxy path; the direct K8s Job fallback carries no AEP_TASK_KIND or deadline override", in.shape.taskKind)
 	}
 
-	// Direct K8s Job path: creates the org's data-plane namespace, SA, Anthropic
-	// secret, and Job directly via the in-cluster client. No cluster-gateway-proxy
-	// or SM-API needed — the sole fallback for aep-init local installs.
+	// Direct K8s Job path: Dispatch fails closed — secret delivery requires
+	// cluster-gateway-proxy + secret refs (no Secret/ExternalSecret writes
+	// here). Missing refs on the proxy path already errored above; this branch
+	// only runs when the proxy path was not configured.
 	if e.k8sJob != nil {
 		orgUUID, uuidErr := e.lookupOrgUUID(ctx, in.orgID)
 		if uuidErr != nil {
@@ -323,19 +326,9 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, r
 	if e.proxy == nil || e.runnerImage == "" || e.clusterSecretStore == "" {
 		return false, "", nil
 	}
-	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, in.orgID)
-	if err != nil || anthropicRow == nil {
-		slog.InfoContext(ctx, "proxy dispatch: anthropic row missing; falling back", "org", in.orgID, "error", err)
-		return false, "", nil
-	}
-	githubRow, err := e.githubCreds.GetByOrg(ctx, in.orgID)
-	if err != nil || githubRow == nil {
-		slog.InfoContext(ctx, "proxy dispatch: github row missing; falling back", "org", in.orgID, "error", err)
-		return false, "", nil
-	}
-	if anthropicRow.SMAPIKVPath == nil || githubRow.SMAPIKVPath == nil {
-		slog.InfoContext(ctx, "proxy dispatch: SM-API triplet missing; falling back", "org", in.orgID)
-		return false, "", nil
+	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID)
+	if err != nil {
+		return false, "", err
 	}
 
 	// Publisher cc (cloud gateway only). Best-effort provision + SM-API triplet.
@@ -349,11 +342,11 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, r
 		}
 	}
 	if idpRow, err := e.idpProfiles.GetProfileByOrgID(ctx, in.orgID); err == nil && idpRow != nil {
-		if idpRow.SMAPIKVPath != nil && idpRow.SMAPISecretRefName != nil {
+		if idpRow.ResolvedSecretRefKVPath() != nil && idpRow.ResolvedSecretRefName() != nil {
 			publisherSR = &SecretRef{
-				SecretRefName: derefStr(idpRow.SMAPISecretRefName),
-				KVPath:        derefStr(idpRow.SMAPIKVPath),
-				Property:      derefStr(idpRow.SMAPIProperty),
+				SecretRefName: derefStr(idpRow.ResolvedSecretRefName()),
+				KVPath:        derefStr(idpRow.ResolvedSecretRefKVPath()),
+				Property:      derefStr(idpRow.ResolvedSecretRefProperty()),
 			}
 			publisherTokenURL = deriveTokenURLFromJWKS(idpRow.JWKSURL)
 			if publisherTokenURL == "" {
@@ -415,8 +408,8 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, r
 	rn, err := e.proxy.Dispatch(ctx, Inputs{
 		OrgUUID:                orgUUID,
 		Job:                    job,
-		AnthropicSR:            SecretRef{SecretRefName: derefStr(anthropicRow.SMAPISecretRefName), KVPath: derefStr(anthropicRow.SMAPIKVPath), Property: derefStr(anthropicRow.SMAPIProperty)},
-		GitHubSR:               SecretRef{SecretRefName: derefStr(githubRow.SMAPISecretRefName), KVPath: derefStr(githubRow.SMAPIKVPath), Property: derefStr(githubRow.SMAPIProperty)},
+		AnthropicSR:            anthropicSR,
+		GitHubSR:               githubSR,
 		PublisherSR:            publisherSR,
 		ExternalResourceSRs:    extResSRs,
 		ClusterSecretStoreName: e.clusterSecretStore,
@@ -480,6 +473,54 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 		return "", fmt.Errorf("retry-auth-failed: trigger build: %w", err)
 	}
 	return run.Name, nil
+}
+
+func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string) (SecretRef, SecretRef, error) {
+	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, orgID)
+	if err != nil {
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: anthropic credentials for org %q: %w", orgID, err)
+	}
+	if anthropicRow == nil {
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: anthropic secret reference missing for org %q: org_anthropic_credentials row not found", orgID)
+	}
+	anthropicSR := SecretRef{
+		SecretRefName: derefStr(anthropicRow.ResolvedSecretRefName()),
+		KVPath:        derefStr(anthropicRow.ResolvedSecretRefKVPath()),
+		Property:      derefStr(anthropicRow.ResolvedSecretRefProperty()),
+	}
+	if err := validateSecretRefTriplet("anthropic", orgID, anthropicSR); err != nil {
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
+	}
+
+	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)
+	if err != nil {
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: github credentials for org %q: %w", orgID, err)
+	}
+	if githubRow == nil {
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: github secret reference missing for org %q: org_credentials row not found", orgID)
+	}
+	githubSR := SecretRef{
+		SecretRefName: derefStr(githubRow.ResolvedSecretRefName()),
+		KVPath:        derefStr(githubRow.ResolvedSecretRefKVPath()),
+		Property:      derefStr(githubRow.ResolvedSecretRefProperty()),
+	}
+	if err := validateSecretRefTriplet("github", orgID, githubSR); err != nil {
+		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
+	}
+	return anthropicSR, githubSR, nil
+}
+
+func validateSecretRefTriplet(credential, orgID string, ref SecretRef) error {
+	if ref.SecretRefName == "" {
+		return fmt.Errorf("%s secret reference missing for org %q: secret_ref_name not populated", credential, orgID)
+	}
+	if ref.KVPath == "" {
+		return fmt.Errorf("%s secret reference missing for org %q: secret_ref_kv_path not populated", credential, orgID)
+	}
+	if ref.Property == "" {
+		return fmt.Errorf("%s secret reference missing for org %q: secret_ref_property not populated", credential, orgID)
+	}
+	return nil
 }
 
 func (e *CodingExecutor) lookupOrgUUID(ctx context.Context, ocOrgID string) (string, error) {
