@@ -475,12 +475,6 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 	return run.Name, nil
 }
 
-func (e *CodingExecutor) startRun(ctx context.Context, id, runName string) {
-	if _, err := e.execRows.StartWithRun(ctx, id, runName); err != nil {
-		slog.WarnContext(ctx, "coding executor: StartWithRun failed", "execution", id, "run", runName, "error", err)
-	}
-}
-
 func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string) (SecretRef, SecretRef, error) {
 	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, orgID)
 	if err != nil {

@@ -125,16 +125,6 @@ type SecretManagementClientConfig struct {
 	RefreshInterval string
 }
 
-// NewSecretManagementClient constructs a client with the default
-// managed-by tag and no OCClient — appropriate for the SM-API provider
-// in both local and cloud.
-func NewSecretManagementClient(cfg *StoreConfig, provider Provider) (SecretManagementClient, error) {
-	return NewSecretManagementClientWithConfig(SecretManagementClientConfig{
-		StoreConfig: cfg,
-		Provider:    provider,
-	})
-}
-
 // NewSecretManagementClientWithConfig is the full-control constructor.
 func NewSecretManagementClientWithConfig(cfg SecretManagementClientConfig) (SecretManagementClient, error) {
 	if cfg.StoreConfig == nil {
