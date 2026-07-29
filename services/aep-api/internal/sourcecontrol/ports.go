@@ -54,7 +54,9 @@ type RepoAdmin interface {
 	CreateOrgRepo(ctx context.Context, cred secrets.Credential, req CreateOrgRepoRequest) (cloneURL string, err error)
 }
 
-// IssueOps is the issue surface (create / list / close / comment / labels).
+// IssueOps is the issue surface (create / list / close / comment / labels) plus
+// the pull-request and milestone ops that are issue-shaped on the host side —
+// GitHub serves pull requests and milestone membership through the issues API.
 // Consumed by issueService.
 type IssueOps interface {
 	CreateIssue(ctx context.Context, owner, repo string, cred secrets.Credential, req CreateIssueRequest) (*IssueResult, error)
@@ -82,13 +84,16 @@ type IssueOps interface {
 	// and aep:attention flags.
 	AddIssueLabels(ctx context.Context, owner, repo string, cred secrets.Credential, number int, labels []string) error
 	// RemoveIssueLabel removes one label from an issue. A 404 (already absent)
-	// is treated as success. Used to consume the aep:execute command label and
-	// clear stale aep:status/* projections.
+	// is treated as success.
 	RemoveIssueLabel(ctx context.Context, owner, repo string, cred secrets.Credential, number int, label string) error
 	// SetIssueLabels replaces the issue's entire label set (labels absent from
 	// the slice are removed). Used by block-repair projection when the full set
 	// must be authoritative.
 	SetIssueLabels(ctx context.Context, owner, repo string, cred secrets.Credential, number int, labels []string) error
+	// SetIssueMilestone assigns an existing issue to a milestone by NUMBER
+	// (PATCH /issues/{number}). Adoption's write: a bare issue handed to the
+	// coding agent joins the deployed version's milestone.
+	SetIssueMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number, milestoneNumber int) error
 	// GetPullRequest returns a pull request's live state (open/closed + merged +
 	// merge SHA) for the sweep's PR-state reconciliation (§5).
 	GetPullRequest(ctx context.Context, owner, repo string, cred secrets.Credential, number int) (*PullRequestState, error)
@@ -101,6 +106,28 @@ type IssueOps interface {
 	// request. The path-based build trigger maps these onto the components whose
 	// source they touched so a merged PR rebuilds every affected component.
 	ListPullRequestFiles(ctx context.Context, owner, repo string, cred secrets.Credential, number int) ([]string, error)
+
+	// CreateMilestone creates a milestone and returns its number, minting it or
+	// adopting an existing one with that title. Implementations MUST be
+	// idempotent and MUST enforce case-insensitive title uniqueness: the host's
+	// own uniqueness check is case-sensitive while its title filters are not,
+	// so a case-twin pair would silently merge on every subsequent read.
+	CreateMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, req CreateMilestoneRequest) (*MilestoneResult, error)
+	// CloseMilestone closes a milestone. Display only — member issues are
+	// untouched, and a closed milestone still accepts new ones.
+	CloseMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
+	// ListMilestones returns every milestone in the given state
+	// ("open" | "closed" | "all"; empty ⇒ "all"). The list must be complete,
+	// not a first page — CreateMilestone's uniqueness pre-check reads it.
+	ListMilestones(ctx context.Context, owner, repo string, cred secrets.Credential, state string) ([]Milestone, error)
+	// ListMilestoneIssues returns a milestone's issues, filtered by state and
+	// label. Addressed by milestone NUMBER. Pull requests are excluded.
+	ListMilestoneIssues(ctx context.Context, owner, repo string, cred secrets.Credential, filter MilestoneIssuesFilter) ([]IssueInfo, error)
+	// MilestoneIssueCounts returns a milestone's open-issue populations — gates,
+	// working set and total — in ONE call, the run supervisor's dispatch
+	// predicate input. Returns ErrMilestoneNotFound when no milestone carries
+	// that number.
+	MilestoneIssueCounts(ctx context.Context, owner, repo string, cred secrets.Credential, number int) (*MilestoneIssueCounts, error)
 }
 
 // WebhookOps is the repo-webhook surface. Consumed by webhookService.

@@ -27,10 +27,11 @@ import (
 	githubclient "github.com/wso2/aep/aep-api/internal/sourcecontrol/githubhost"
 )
 
-// newIssueSvcOnStub wires a REAL issueService (and REAL REST client) at the
-// stub. The repo resolves (org1, proj1) → github.com/acme/widgets, so every
-// GitHub call lands under /repos/acme/widgets on the stub. Tasks are plain
-// GitHub issues now (Projects v2 dropped) — no board ops on creation.
+// newIssueSvcOnStub wires a REAL issueService (and REAL client) at the stub.
+// The repo resolves (org1, proj1) → github.com/acme/widgets, so every REST call
+// lands under /repos/acme/widgets on the stub; GraphQL lands on the single
+// POST /graphql route. Tasks are plain GitHub issues now (Projects v2 dropped)
+// — no board ops on creation.
 func newIssueSvcOnStub(t *testing.T, stub *gittest.Stub) sourcecontrol.IssueService {
 	t.Helper()
 	repo := newFakeRepoRepo()
@@ -38,7 +39,11 @@ func newIssueSvcOnStub(t *testing.T, stub *gittest.Stub) sourcecontrol.IssueServ
 		OrgID: "org1", ProjectID: "proj1",
 		RepoURL: "https://github.com/acme/widgets",
 	})
-	return sourcecontrol.NewIssueService(repo, githubclient.NewClient(githubclient.WithAPIBase(stub.URL)), fakeResolver{})
+	client := githubclient.NewClient(
+		githubclient.WithAPIBase(stub.URL),
+		githubclient.WithGraphQLEndpoint(stub.URL+"/graphql"),
+	)
+	return sourcecontrol.NewIssueService(repo, client, fakeResolver{})
 }
 
 func TestCreateIssue_SendsTitleBodyLabelsAndParsesResult(t *testing.T) {
@@ -226,6 +231,39 @@ func TestEditIssueBody_PatchesBody(t *testing.T) {
 	decodeBody(t, req.Body, &b)
 	if b.Body != "replacement body" {
 		t.Fatalf("edit body = %q", b.Body)
+	}
+}
+
+// TestSetIssueMilestone_PatchesTheNumber pins adoption's write: the milestone
+// travels as a NUMBER (GitHub 422s a title here, and the number is the only
+// stable key), on the ordinary issue PATCH route.
+func TestSetIssueMilestone_PatchesTheNumber(t *testing.T) {
+	t.Parallel()
+	stub := gittest.NewStub(t)
+	stub.On(http.MethodPatch, "/repos/acme/widgets/issues/7", http.StatusOK, `{}`)
+	svc := newIssueSvcOnStub(t, stub)
+
+	if err := svc.SetIssueMilestone(testContext(), "org1", "proj1", 7, 3); err != nil {
+		t.Fatalf("SetIssueMilestone: %v", err)
+	}
+	req := onlyRequest(t, stub.Requests(), http.MethodPatch, "/repos/acme/widgets/issues/7")
+	var b struct{ Milestone int }
+	decodeBody(t, req.Body, &b)
+	if b.Milestone != 3 {
+		t.Fatalf("milestone = %d, want 3", b.Milestone)
+	}
+}
+
+func TestSetIssueMilestone_NumberRequired(t *testing.T) {
+	t.Parallel()
+	stub := gittest.NewStub(t)
+	svc := newIssueSvcOnStub(t, stub)
+
+	if err := svc.SetIssueMilestone(testContext(), "org1", "proj1", 7, 0); err == nil {
+		t.Fatal("a zero milestone number must be refused before any request")
+	}
+	if len(stub.Requests()) != 0 {
+		t.Fatalf("nothing must be sent, got %v", stub.Requests())
 	}
 }
 

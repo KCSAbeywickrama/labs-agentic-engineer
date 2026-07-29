@@ -241,6 +241,9 @@ func (f *fakeIssueSvc) EditIssueBody(context.Context, string, string, int, strin
 func (f *fakeIssueSvc) EditIssueTitle(context.Context, string, string, int, string) error {
 	panic("fakeIssueSvc: EditIssueTitle not expected")
 }
+func (f *fakeIssueSvc) SetIssueMilestone(context.Context, string, string, int, int) error {
+	panic("fakeIssueSvc: SetIssueMilestone not expected")
+}
 func (f *fakeIssueSvc) AddLabels(context.Context, string, string, int, []string) error {
 	panic("fakeIssueSvc: AddLabels not expected")
 }
@@ -258,6 +261,21 @@ func (f *fakeIssueSvc) MergePullRequest(context.Context, string, string, int) er
 }
 func (f *fakeIssueSvc) ListPullRequestFiles(context.Context, string, string, int) ([]string, error) {
 	panic("fakeIssueSvc: ListPullRequestFiles not expected")
+}
+func (f *fakeIssueSvc) CreateMilestone(context.Context, string, string, sourcecontrol.CreateMilestoneRequest) (*sourcecontrol.MilestoneResult, error) {
+	panic("fakeIssueSvc: CreateMilestone not expected")
+}
+func (f *fakeIssueSvc) CloseMilestone(context.Context, string, string, int) error {
+	panic("fakeIssueSvc: CloseMilestone not expected")
+}
+func (f *fakeIssueSvc) ListMilestones(context.Context, string, string, string) ([]sourcecontrol.Milestone, error) {
+	panic("fakeIssueSvc: ListMilestones not expected")
+}
+func (f *fakeIssueSvc) ListMilestoneIssues(context.Context, string, string, sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
+	panic("fakeIssueSvc: ListMilestoneIssues not expected")
+}
+func (f *fakeIssueSvc) MilestoneIssueCounts(context.Context, string, string, int) (*sourcecontrol.MilestoneIssueCounts, error) {
+	panic("fakeIssueSvc: MilestoneIssueCounts not expected")
 }
 
 // credAESKey is a fixed 32-byte AES-256 key for the real credential store. The

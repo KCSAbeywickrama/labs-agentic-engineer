@@ -62,9 +62,10 @@ func BaseModels() []any {
 		&organization.Organization{},
 		&delivery.Execution{},
 		&spec.AgentTurn{},
-		&delivery.DevflowRun{},
 		&modelcost.ModelRate{},
 		&projects.ActivityEvent{},
+		&delivery.MilestoneRun{},
+		&delivery.RunCycle{},
 	}
 }
 
@@ -126,8 +127,10 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 		// no component_tasks ALTER (dependency gating lives on aep:provision GitHub
 		// issues + the funnel depsGate, not DB columns).
 		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
-		// workflow_runs (Temporal devflow lookup index, AutoMigrated from the
-		// model) gains its one-running-task-per-issue partial unique index.
+		// workflow_runs: the retired devflow lookup index. Its model is gone and
+		// nothing creates the table any more, so on a fresh schema this step is a
+		// no-op; it stays in the ordered list because the list is frozen and
+		// because an existing deployment's abandoned table keeps its index.
 		ctxStep("workflow_runs", RunWorkflowRuns),
 		// coding_agent_logs (GitHub-native): create the JobWatcher's final-log
 		// sidecar keyed to executions(id). Runs after `executions` (FK target) and
@@ -139,6 +142,15 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 		// (issues #154, #155, BE handshake #156). One idempotent CREATE TABLE
 		// + its (org_id, created_at) list index.
 		ctxStep("phase10_rca_agent_reports", RunPhase10RcaAgentReports),
+		// milestone_runs (AutoMigrated from the model) gains the spec-run mutex:
+		// a partial unique index admitting one non-terminal spec-build run per
+		// (org, project). Fresh schema — nothing to backfill from the legacy
+		// executions/workflow_runs tables.
+		ctxStep("milestone_runs", RunMilestoneRuns),
+		// run_cycle_logs: the cycle-keyed agent-log sidecar the run progress
+		// stream reads once the Job's pod is reaped. FK'd to run_cycles(id), so it
+		// follows milestone_runs.
+		ctxStep("run_cycle_logs", RunRunCycleLogs),
 		// model_rates seed (#291): the platform's active model at today's
 		// rates. AutoMigrate (BaseModels) creates the table; this idempotent
 		// step inserts the claude-sonnet-5 row so write-time USD stamping has

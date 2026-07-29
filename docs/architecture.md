@@ -26,8 +26,11 @@ compile error, not a runtime surprise.
 - Each service **owns** the OpenAPI it produces, stored under
   `packages/contracts/<service>/openapi.yaml`.
 - Internal events are JSON Schema under `packages/contracts/events/`.
-- Generated clients/servers are produced into gitignored `generated/` / `*.gen.go`
-  as a build/dev prestep — never hand-edited.
+- Generated clients/servers are never hand-edited. Whether they are committed
+  differs by consumer: aep-api's contract codegen (`internal/gen/`, `internal/igen/`)
+  and the OpenChoreo client are **committed**, with `make gen-api-check` as the CI
+  freshness gate; the console's `apps/console/src/generated/` is gitignored and
+  regenerated as a build prestep.
 
 ## Codegen pipeline
 
@@ -44,8 +47,20 @@ behind `gen`, and CI runs `gen` + `git diff --exit-code` to catch staleness. See
 
 - [`aep-api`](../services/aep-api/README.md) — Go BFF + GitHub webhook receiver
   (git ops folded in); domain-oriented modules + vertical slices.
-- `database` — Go data service.
 - `agents` — TS interactive spec agents (Vercel AI SDK).
 - `collab` — TS Yjs collaboration server.
-- `coding-agent` (runner) — TS Claude Agent SDK one-shot pod.
+- `aep-mcp-server` — MCP surface for the SRE/RCA handoff.
+- `remote-worker` (runner) — TS Claude Agent SDK one-shot pod; one image serves
+  both task kinds.
 - `console` (app) — React frontend.
+
+## How a version gets built
+
+A spec version is cut as a `v<N>` tag and executed as **one supervised run over
+one GitHub milestone**: the planner mints prose issues into it, one coding agent
+works the whole milestone per cycle, its pull request auto-merges, the merge
+fans out to a build per changed component, and the run settles when the working
+set is empty and validation has a verdict. The decision and its costs are
+[ADR-0011](decisions/ADR-0011-milestone-is-the-unit-of-execution.md); the
+mechanism is
+[`internal/delivery/README.md`](../services/aep-api/internal/delivery/README.md).

@@ -21,7 +21,7 @@
 // message often carries multiple tool_use content blocks). The caller
 // emits each returned event in order.
 
-import type { ProgressEventInput, TurnUsage } from "./schema.js";
+import type { ProgressEmitter, ProgressEventInput, TurnUsage } from "./schema.js";
 
 const MAX_SUMMARY = 200;
 
@@ -133,6 +133,16 @@ function assistantToolUseBlocks(message: unknown): Array<{ name: string; input: 
   return out;
 }
 
+// emitterOf attributes a message to the main agent or to a subagent. The SDK
+// sets `parent_tool_use_id` to the id of the Task tool call a message was
+// forwarded from, and leaves it null on the main conversation — so it IS the
+// main-vs-subagent discriminator, and no extra runner bookkeeping is needed.
+// "main" is left unstamped so the field only ever appears on subagent lines.
+function emitterOf(m: Record<string, unknown>): ProgressEmitter | undefined {
+  const parent = m.parent_tool_use_id;
+  return typeof parent === "string" && parent !== "" ? "subagent" : undefined;
+}
+
 export function progressFromSdkMessage(message: unknown): ProgressEventInput[] {
   if (!message || typeof message !== "object") return [];
   const m = message as Record<string, unknown>;
@@ -143,6 +153,7 @@ export function progressFromSdkMessage(message: unknown): ProgressEventInput[] {
   }
 
   if (type === "assistant") {
+    const emitter = emitterOf(m);
     const events: ProgressEventInput[] = [];
     for (const tu of assistantToolUseBlocks(m)) {
       if (tu.name === "Bash") {
@@ -162,7 +173,7 @@ export function progressFromSdkMessage(message: unknown): ProgressEventInput[] {
         summary: summaryFromInput(tu.name, tu.input),
       });
     }
-    return events;
+    return emitter ? events.map((e) => ({ ...e, emitter })) : events;
   }
 
   if (type === "result") {

@@ -18,7 +18,6 @@ package codingagent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -30,17 +29,18 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 )
 
-// CodingExecutor is the coding-class executor. Run dispatches the right OC work
-// for the Execution's kind (coding → coding-agent pod; build → build at the
-// merge SHA), then StartWithRun records the run on the row. The job/exec
-// watcher (and, for coding, the PR-opened webhook) Finish the row.
+// CodingExecutor launches the coding agent. Its one dispatch entry point is
+// Dispatch (milestone_dispatch.go), the run supervisor's
+// delivery.MilestoneDispatcher: one cycle of a milestone run, one agent pod. It
+// also owns the build-side retry the exec watcher asks for
+// (RetryAuthFailedBuild), which is why it still holds the build-secret stager
+// and the executions repository.
 //
-// Two coding-dispatch paths:
+// Two dispatch paths:
 //   - the cluster-gateway-proxy path (per-org NS + per-run ExternalSecrets + a
 //     K8s Job), used when the proxy dispatcher + the org's SM-API triplets are
 //     configured — this is what the cloud / local-proxy plane exercises (`ca-…` jobs);
@@ -75,25 +75,12 @@ type CodingExecutor struct {
 	runnerImage        string
 	clusterSecretStore string
 
-	// validationImage is the Playwright-capable runner image for ClassValidation
-	// tasks (Dockerfile.validation). Empty → validation dispatch fails loudly
-	// (the alpine coding image cannot run chromium). Set via WithValidationImage.
-	validationImage string
-
 	// Build-secret staging (nil → unauthenticated clone, correct for public
 	// repos). buildSecrets pre-stages the org's build git credential so a build's
 	// checkout-source step can clone a private repo; authRetryBudget bounds the
 	// git-clone-auth re-mint retries (§7).
 	buildSecrets    BuildSecretStager
 	authRetryBudget int
-
-	// components ensures the OpenChoreo Component CR exists as a coding-dispatch
-	// pre-flight, so the merged-PR build has a Component to build (nil → skipped).
-	components ComponentEnsurer
-
-	// wiring posts the ADR-0004 "Platform-resolved dependencies" comment on the
-	// coding issue at dispatch (nil → skipped). Best-effort — it never fails the run.
-	wiring DependencyWiring
 
 	// runnerSecrets resolves the component's external-resource secret bundles so
 	// the proxy dispatch mounts them into the runner (nil → none). Best-effort.
@@ -104,12 +91,6 @@ type CodingExecutor struct {
 	// clones it to resolve the design's applied skills locally (nil → the URL
 	// is not stamped and the runner degrades to the base plugin). Best-effort.
 	skillsRepo SkillsRepoResolver
-
-	// runtimeConfig emits env-config.js onto a web-app's ReleaseBindings at the
-	// component-ensure pre-flight (nil → skipped). Best-effort — a failure warns
-	// but never fails the dispatch. The web-app gate lives in the emitter, so a
-	// call for a non-web-app component is a self-no-op.
-	runtimeConfig ComponentRuntimeConfigEmitter
 }
 
 // SkillsRepoResolver ensures the org's skills repo exists and returns its row.
@@ -140,22 +121,15 @@ func NewCodingExecutor(
 }
 
 // WithProxy enables the cluster-gateway-proxy coding-agent dispatch path (the
-// `ca-…` Job path the local plane uses). idp may be nil (publisher-cc skipped —
-// required only on the cloud gateway, i.e. an https platform URL).
+// `ca-…` Job path the local plane uses). runnerImage is THE runner image — one
+// image serves both task kinds (it bakes Playwright + chromium), so nothing
+// swaps it per kind. idp may be nil (publisher-cc skipped — required only on
+// the cloud gateway, i.e. an https platform URL).
 func (e *CodingExecutor) WithProxy(proxy *Dispatcher, idp OrgPublisherProvisioner, runnerImage, clusterSecretStore string) *CodingExecutor {
 	e.proxy = proxy
 	e.idp = idp
 	e.runnerImage = runnerImage
 	e.clusterSecretStore = clusterSecretStore
-	return e
-}
-
-// WithValidationImage sets the Playwright-capable runner image used for
-// ClassValidation tasks (the same executor serves both classes; validation
-// swaps the image, sets AEP_TASK_KIND=validation, and skips the coding-only
-// component-ensure/wiring pre-flight). Returns the receiver for chaining.
-func (e *CodingExecutor) WithValidationImage(image string) *CodingExecutor {
-	e.validationImage = image
 	return e
 }
 
@@ -177,21 +151,6 @@ func (e *CodingExecutor) WithBuildSecrets(stager BuildSecretStager, authRetryBud
 		authRetryBudget = defaultBuildAuthRetryBudget
 	}
 	e.authRetryBudget = authRetryBudget
-	return e
-}
-
-// WithComponentEnsurer enables the coding-dispatch pre-flight that provisions the
-// OpenChoreo Component CR before the coding run, so the merged-PR build finds it.
-// Returns the receiver for chained construction.
-func (e *CodingExecutor) WithComponentEnsurer(c ComponentEnsurer) *CodingExecutor {
-	e.components = c
-	return e
-}
-
-// WithDependencyWiring enables the ADR-0004 declarative-wiring comment at coding
-// dispatch (nil → skipped). Returns the receiver for chained construction.
-func (e *CodingExecutor) WithDependencyWiring(w DependencyWiring) *CodingExecutor {
-	e.wiring = w
 	return e
 }
 
@@ -229,14 +188,6 @@ func (e *CodingExecutor) resolveSkillsRepoURL(ctx context.Context, orgID string)
 	return repo.RepoURL
 }
 
-// WithComponentRuntimeConfig enables best-effort env-config.js emission at the
-// component-ensure pre-flight (nil → skipped). Returns the receiver for chained
-// construction.
-func (e *CodingExecutor) WithComponentRuntimeConfig(r ComponentRuntimeConfigEmitter) *CodingExecutor {
-	e.runtimeConfig = r
-	return e
-}
-
 // AuthRetryBudget reports the configured git-clone-auth build retry budget
 // (default when unset). The ExecWatcher reads it to bound its retry loop.
 func (e *CodingExecutor) AuthRetryBudget() int {
@@ -246,139 +197,107 @@ func (e *CodingExecutor) AuthRetryBudget() int {
 	return e.authRetryBudget
 }
 
-// Compile-time proof the executor satisfies the funnel's port.
-var _ delivery.Executor = (*CodingExecutor)(nil)
+// agentLaunch is ONE runner-Job launch with the reason for it stripped out: the
+// image, namespace, secrets, tokens and dispatch chain are the same whatever
+// asked for the launch, and only the correlation id stamped on the pod and the
+// prompt shape differ.
+//
+// It performs NO state write: a cycle dispatch mints no execution row, because
+// the cycle record is the run supervisor'"'"'s own bookkeeping.
+type agentLaunch struct {
+	orgID     string
+	projectID string
 
-// Run dispatches one Execution attempt. On a launch failure it returns the error
-// (the funnel Finishes the row failed + flags attention).
-func (e *CodingExecutor) Run(ctx context.Context, req delivery.DispatchRequest) error {
-	switch req.Execution.Kind {
-	case string(taskmeta.KindCoding):
-		return e.runCoding(ctx, req)
-	case string(taskmeta.KindBuild):
-		return e.runBuild(ctx, req)
-	default:
-		return fmt.Errorf("coding executor: unsupported kind %q", req.Execution.Kind)
-	}
+	// correlationID is the platform id the pod carries: it is stamped as
+	// AEP_TASK_ID, seeds the `ca-…` run name, and is the subject of the runner
+	// bearer. It is the dispatching CYCLE'"'"'s id.
+	correlationID string
+
+	shape dispatchShape
+
+	// secretComponent, when non-empty, mounts that component'"'"'s external-resource
+	// secrets into the runner. It is always empty today: a cycle spans the whole
+	// milestone rather than one component, so there is no single component whose
+	// secrets to mount.
+	secretComponent string
+
+	// repo, when non-nil, is a repository row the caller already resolved (the
+	// milestone dispatch reads it to anchor a validation prompt at the issue
+	// URL), saving a second lookup. Nil means "resolve it here".
+	repo *sourcecontrol.GitRepository
 }
 
-func (e *CodingExecutor) runCoding(ctx context.Context, req delivery.DispatchRequest) error {
-	t := req.Task
-	isValidation := t.Class == taskmeta.ClassValidation
-
-	// Coding pre-flight (skipped for validation, which has no component to build):
-	// provision the OpenChoreo Component CR from the design facts BEFORE the coding
-	// run, so the PR it opens has a Component to build when it merges (otherwise
-	// the spawned build fails "Component not found"). A provisioning failure blocks
-	// dispatch — the funnel Finishes the row failed + flags attention.
-	if !isValidation && e.components != nil {
-		if err := e.components.EnsureComponent(ctx, t.OrgID, t.ProjectID, t.Component); err != nil {
-			return fmt.Errorf("ensure component pre-flight: %w", err)
+// launchAgent resolves the run's credentials and launches the runner Job,
+// returning the launched run name. It writes no platform state: everything it
+// touches is either a read or the cluster.
+func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (string, error) {
+	repo := in.repo
+	if repo == nil {
+		resolved, err := e.repos.GetRepo(ctx, in.orgID, in.projectID)
+		if err != nil || resolved == nil {
+			return "", fmt.Errorf("resolve project repo: %w", err)
 		}
+		repo = resolved
 	}
-	// Web-apps only: emit env-config.js so the SPA's `window._env_` is populated
-	// at request time (parity with the legacy dispatch service's ensureOCComponent
-	// hook). The emitter self-no-ops for non-web-app components, so this is safe to
-	// call unconditionally — the design/type read lives inside the emitter, keeping
-	// this feature free of an artifacts import. Best-effort: an emit failure warns
-	// but must never fail the coding dispatch (the deploy cascade re-fires it).
-	if e.runtimeConfig != nil {
-		if rcErr := e.runtimeConfig.EmitForComponent(ctx, t.OrgID, t.ProjectID, t.Component); rcErr != nil {
-			slog.WarnContext(ctx, "coding executor: env-config.js emit failed (best-effort)", "component", t.Component, "error", rcErr)
-		}
-	}
-	repo, err := e.repos.GetRepo(ctx, t.OrgID, t.ProjectID)
-	if err != nil || repo == nil {
-		return fmt.Errorf("resolve project repo: %w", err)
-	}
-	name, email, login, err := e.identities.IdentityFor(ctx, t.OrgID)
+	name, email, login, err := e.identities.IdentityFor(ctx, in.orgID)
 	if err != nil {
-		return fmt.Errorf("resolve git identity: %w", err)
+		return "", fmt.Errorf("resolve git identity: %w", err)
 	}
-	bearer, err := e.tokens.Issue(req.Execution.ID, t.OrgID, t.ProjectID)
+	bearer, err := e.tokens.Issue(in.correlationID, in.orgID, in.projectID)
 	if err != nil {
-		return fmt.Errorf("mint runner bearer: %w", err)
+		return "", fmt.Errorf("mint runner bearer: %w", err)
 	}
 	// Dedicated MCP identity token (aud aep-api-mcp): the runner bearer above
 	// (aud git-service) is pinned-rejected by the MCP verifier, so the pod needs
 	// a separate token to call the BFF's internal MCP surface (list endpoints /
 	// read remote file / search remote code). One token stamped at dispatch,
 	// TTL matching the runner bearer's 24h Job lifetime — no refresh route.
-	mcpToken, err := e.tokens.IssueServiceToken(auth.AudienceMCP, t.OrgID, 24*time.Hour)
+	mcpToken, err := e.tokens.IssueServiceToken(auth.AudienceMCP, in.orgID, 24*time.Hour)
 	if err != nil {
-		return fmt.Errorf("mint MCP token: %w", err)
+		return "", fmt.Errorf("mint MCP token: %w", err)
 	}
 	// Resolve the org's skills repo URL (provisioning on first touch) so the
 	// runner can clone it and resolve applied skills locally. Best-effort — ""
 	// on any failure, the runner then degrades to the base plugin.
-	skillsRepoURL := e.resolveSkillsRepoURL(ctx, t.OrgID)
-
-	// Per-class dispatch shape: validation swaps the Playwright image, the
-	// project-scoped component sentinel, AEP_TASK_KIND=validation, a longer
-	// deadline (browser boot + e2e authoring), and skips the coding-only wiring.
-	disp := dispatchShape{
-		prompt:        buildPrompt(t.IssueURL, t.IssueNumber),
-		componentName: t.Component,
-		image:         e.runnerImage,
-		taskKind:      "",
-		deadline:      0,
-	}
-	if isValidation {
-		disp = dispatchShape{
-			prompt:        buildValidationPrompt(t.IssueURL, t.IssueNumber),
-			componentName: validationComponentSentinel,
-			image:         e.validationImage,
-			taskKind:      string(taskmeta.ClassValidation),
-			deadline:      validationDeadlineSeconds,
-		}
-	} else if e.wiring != nil {
-		// ADR-0004 declarative wiring: post the "Platform-resolved dependencies"
-		// comment on the coding issue so the agent copies it into workload.yaml. The
-		// gate held this consumer until its deps deployed, so their targets/outputs
-		// resolve now. Best-effort — the platform never patches the CR, and a wiring
-		// failure must not fail the dispatch.
-		if werr := e.wiring.PostResolvedDeps(ctx, t.OrgID, t.ProjectID, t.IssueNumber, t.Component); werr != nil {
-			slog.WarnContext(ctx, "coding executor: post resolved-deps comment failed", "issue", t.IssueNumber, "error", werr)
-		}
-	}
+	skillsRepoURL := e.resolveSkillsRepoURL(ctx, in.orgID)
 
 	// Proxy path (cloud / local-proxy plane): per-org NS + per-run ExternalSecrets
 	// + K8s Job via the cluster-gateway-proxy. Falls back to the direct K8s Job
 	// path below when the proxy / SM-API is not configured.
-	used, runName, perr := e.dispatchViaProxy(ctx, req, repo, name, email, login, bearer, disp, mcpToken, skillsRepoURL)
+	used, runName, perr := e.dispatchViaProxy(ctx, in, repo, name, email, login, bearer, mcpToken, skillsRepoURL)
 	if perr != nil {
-		return perr
+		return "", perr
 	}
 	if used {
-		e.startRun(ctx, req.Execution.ID, runName)
-		return nil
+		return runName, nil
 	}
 
-	// Validation has no non-proxy fallback — it requires the proxy path
-	// (Playwright image + AEP_TASK_KIND). Fail loudly rather than launch a
-	// browserless coding agent via the K8s Job path.
-	if isValidation {
-		return fmt.Errorf("validation dispatch requires the cluster-gateway-proxy path and a VALIDATION_RUNNER_IMAGE; the direct K8s Job fallback does not support validation")
+	// Validation has no non-proxy fallback. The image is no longer the reason
+	// (one image serves both kinds); K8sJobInput is: it carries no TaskKind and
+	// no deadline override, so the direct path would launch a runner that never
+	// preloads the `aep-validation` skill and dies at the 1h default. Fail
+	// loudly rather than launch a run that cannot do the job.
+	if in.shape.taskKind != "" || in.shape.deadline != 0 {
+		return "", fmt.Errorf("dispatch kind %q requires the cluster-gateway-proxy path; the direct K8s Job fallback carries no AEP_TASK_KIND or deadline override", in.shape.taskKind)
 	}
 
 	// Direct K8s Job path: creates the org's data-plane namespace, SA, Anthropic
 	// secret, and Job directly via the in-cluster client. No cluster-gateway-proxy
 	// or SM-API needed — the sole fallback for aep-init local installs.
 	if e.k8sJob != nil {
-		orgUUID, uuidErr := e.lookupOrgUUID(ctx, t.OrgID)
+		orgUUID, uuidErr := e.lookupOrgUUID(ctx, in.orgID)
 		if uuidErr != nil {
-			return fmt.Errorf("k8s-job dispatch: lookup org UUID for %q: %w", t.OrgID, uuidErr)
+			return "", fmt.Errorf("k8s-job dispatch: lookup org UUID for %q: %w", in.orgID, uuidErr)
 		}
-		k8sRunName := codingAgentRunNameFor(req.Execution.ID)
 		rn, k8serr := e.k8sJob.Dispatch(ctx, K8sJobInput{
-			RunName:       k8sRunName,
-			OrgID:         t.OrgID,
+			RunName:       codingAgentRunNameFor(in.correlationID),
+			OrgID:         in.orgID,
 			OrgUUID:       orgUUID,
-			ProjectID:     t.ProjectID,
-			Component:     t.Component,
-			ExecutionID:   req.Execution.ID,
+			ProjectID:     in.projectID,
+			Component:     in.shape.componentName,
+			ExecutionID:   in.correlationID,
 			RepoURL:       repo.RepoURL,
-			Prompt:        disp.prompt,
+			Prompt:        in.shape.prompt,
 			IdentityName:  name,
 			IdentityEmail: email,
 			IdentityLogin: login,
@@ -386,38 +305,36 @@ func (e *CodingExecutor) runCoding(ctx context.Context, req delivery.DispatchReq
 			SkillsRepoURL: skillsRepoURL,
 		})
 		if k8serr != nil {
-			return k8serr
+			return "", k8serr
 		}
-		e.startRun(ctx, req.Execution.ID, rn)
-		return nil
+		return rn, nil
 	}
 
-	return fmt.Errorf("no coding-agent dispatch path configured: set CLUSTER_GATEWAY_PROXY_URL or ensure in-cluster client + AGENT_RUNNER_IMAGE + AGENT_PLATFORM_URL are set")
+	return "", fmt.Errorf("no coding-agent dispatch path configured: set CLUSTER_GATEWAY_PROXY_URL or ensure in-cluster client + AGENT_RUNNER_IMAGE + AGENT_PLATFORM_URL are set")
 }
 
-// dispatchViaProxy runs the cluster-gateway-proxy apply-chain for one coding
-// Execution — the same recipe as the legacy dispatch service's
-// tryDispatchViaProxy, re-keyed off the execution + Task facts. used=false ⇒ not
-// configured for the proxy path (fall back). The runner env AEP_TASK_ID carries
-// the EXECUTION id (JobInputs.TaskID) and the bearer's task claim is the
-// execution id — the re-keyed runner contract (§9.2).
-func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.DispatchRequest, repo *sourcecontrol.GitRepository, name, email, login, bearer string, disp dispatchShape, mcpToken, skillsRepoURL string) (bool, string, error) {
-	t := req.Task
-	if e.proxy == nil || disp.image == "" || e.clusterSecretStore == "" {
+// dispatchViaProxy runs the cluster-gateway-proxy apply-chain for one agent
+// launch — the same recipe as the legacy dispatch service's tryDispatchViaProxy.
+// used=false ⇒ not configured for the proxy path (fall back). The runner env
+// AEP_TASK_ID carries the launch's correlation id (JobInputs.TaskID) and so does
+// the bearer's task claim — the re-keyed runner contract (§9.2).
+func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository, name, email, login, bearer string, mcpToken, skillsRepoURL string) (bool, string, error) {
+	disp := in.shape
+	if e.proxy == nil || e.runnerImage == "" || e.clusterSecretStore == "" {
 		return false, "", nil
 	}
-	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, t.OrgID)
+	anthropicRow, err := e.anthropicCreds.GetByOrg(ctx, in.orgID)
 	if err != nil || anthropicRow == nil {
-		slog.InfoContext(ctx, "proxy dispatch: anthropic row missing; falling back", "org", t.OrgID, "error", err)
+		slog.InfoContext(ctx, "proxy dispatch: anthropic row missing; falling back", "org", in.orgID, "error", err)
 		return false, "", nil
 	}
-	githubRow, err := e.githubCreds.GetByOrg(ctx, t.OrgID)
+	githubRow, err := e.githubCreds.GetByOrg(ctx, in.orgID)
 	if err != nil || githubRow == nil {
-		slog.InfoContext(ctx, "proxy dispatch: github row missing; falling back", "org", t.OrgID, "error", err)
+		slog.InfoContext(ctx, "proxy dispatch: github row missing; falling back", "org", in.orgID, "error", err)
 		return false, "", nil
 	}
 	if anthropicRow.SMAPIKVPath == nil || githubRow.SMAPIKVPath == nil {
-		slog.InfoContext(ctx, "proxy dispatch: SM-API triplet missing; falling back", "org", t.OrgID)
+		slog.InfoContext(ctx, "proxy dispatch: SM-API triplet missing; falling back", "org", in.orgID)
 		return false, "", nil
 	}
 
@@ -427,11 +344,11 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.Disp
 		publisherTokenURL string
 	)
 	if e.idp != nil {
-		if _, _, _, perr := e.idp.EnsureOrgPublisher(ctx, t.OrgID, "dispatch"); perr != nil {
-			slog.ErrorContext(ctx, "proxy dispatch: EnsureOrgPublisher failed — runner cc may be invalid", "org", t.OrgID, "error", perr)
+		if _, _, _, perr := e.idp.EnsureOrgPublisher(ctx, in.orgID, "dispatch"); perr != nil {
+			slog.ErrorContext(ctx, "proxy dispatch: EnsureOrgPublisher failed — runner cc may be invalid", "org", in.orgID, "error", perr)
 		}
 	}
-	if idpRow, err := e.idpProfiles.GetProfileByOrgID(ctx, t.OrgID); err == nil && idpRow != nil {
+	if idpRow, err := e.idpProfiles.GetProfileByOrgID(ctx, in.orgID); err == nil && idpRow != nil {
 		if idpRow.SMAPIKVPath != nil && idpRow.SMAPISecretRefName != nil {
 			publisherSR = &SecretRef{
 				SecretRefName: derefStr(idpRow.SMAPISecretRefName),
@@ -447,25 +364,26 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.Disp
 	// On the cloud gateway (https) a per-task JWT is rejected — publisher cc is
 	// mandatory. Local k3d (http) keeps the bearer fallback.
 	if publisherSR == nil && isGatewayPlatformURL(e.platformURL) {
-		return false, "", fmt.Errorf("publisher cc not provisioned for org %q: the coding-agent runner cannot authenticate through the gateway", t.OrgID)
+		return false, "", fmt.Errorf("publisher cc not provisioned for org %q: the coding-agent runner cannot authenticate through the gateway", in.orgID)
 	}
 
-	orgUUID, err := e.lookupOrgUUID(ctx, t.OrgID)
+	orgUUID, err := e.lookupOrgUUID(ctx, in.orgID)
 	if err != nil {
-		slog.InfoContext(ctx, "proxy dispatch: org UUID not found; falling back", "org", t.OrgID, "error", err)
+		slog.InfoContext(ctx, "proxy dispatch: org UUID not found; falling back", "org", in.orgID, "error", err)
 		return false, "", nil
 	}
-	runName := codingAgentRunNameFor(req.Execution.ID)
+	runName := codingAgentRunNameFor(in.correlationID)
 	job := JobInputs{
 		RunName: runName,
 		// NAMING DEBT: JobInputs.TaskID → the Job's AEP_TASK_ID env carries the
-		// EXECUTION id (see the CodingAgentParams note in runCoding). Un-renamed
-		// this pass to avoid a cluster-workflow + runner rename before Phase 4.
-		TaskID:                req.Execution.ID,
-		OrgID:                 t.OrgID,
-		ProjectID:             t.ProjectID,
+		// launch's CORRELATION id (an execution id on the funnel path, a cycle id
+		// on the milestone-run path), never a Task id. Un-renamed to avoid a
+		// cluster-workflow + runner rename.
+		TaskID:                in.correlationID,
+		OrgID:                 in.orgID,
+		ProjectID:             in.projectID,
 		ComponentName:         disp.componentName,
-		RunnerImage:           disp.image,
+		RunnerImage:           e.runnerImage,
 		TaskKind:              disp.taskKind,
 		ActiveDeadlineSeconds: disp.deadline,
 		RepoURL:               repo.RepoURL,
@@ -484,12 +402,12 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.Disp
 	// materialises each into a per-run ExternalSecret the runner mounts (the agent
 	// integration-tests against the live service). Best-effort: on failure the run
 	// dispatches without them (identical to no secret-bearing external deps).
-	// Component tasks only — a validation task is project-scoped (no component,
-	// no component-bound external resources).
+	// Component launches only — a validation task and a milestone cycle are
+	// project-scoped (no single component, no component-bound external resources).
 	var extResSRs []ExternalResourceSecretInputs
-	if e.runnerSecrets != nil && t.Component != "" {
-		if srs, rerr := e.runnerSecrets.ResolveRunnerSecrets(ctx, t.OrgID, t.ProjectID, t.Component, openchoreo.DevEnvironmentName); rerr != nil {
-			slog.WarnContext(ctx, "coding executor: resolve external-resource runner secrets failed — dispatching without", "component", t.Component, "error", rerr)
+	if e.runnerSecrets != nil && in.secretComponent != "" {
+		if srs, rerr := e.runnerSecrets.ResolveRunnerSecrets(ctx, in.orgID, in.projectID, in.secretComponent, openchoreo.DevEnvironmentName); rerr != nil {
+			slog.WarnContext(ctx, "coding executor: resolve external-resource runner secrets failed — dispatching without", "component", in.secretComponent, "error", rerr)
 		} else {
 			extResSRs = srs
 		}
@@ -509,40 +427,13 @@ func (e *CodingExecutor) dispatchViaProxy(ctx context.Context, req delivery.Disp
 	return true, rn, nil
 }
 
-func (e *CodingExecutor) runBuild(ctx context.Context, req delivery.DispatchRequest) error {
-	t := req.Task
-	if req.MergeSHA == "" {
-		return fmt.Errorf("build execution has no merge SHA")
-	}
-	runName := openchoreo.NewBuildRunName(t.ProjectID, t.Component)
-	secretRef, err := e.stageBuildSecret(ctx, t.OrgID, t.ProjectID, runName)
-	if err != nil {
-		return err
-	}
-	run, err := e.oc.TriggerBuildAtCommit(ctx, t.OrgID, t.ProjectID, t.Component, req.MergeSHA, secretRef, runName)
-	if err != nil {
-		if errors.Is(err, openchoreo.ErrNotFound) {
-			// The Component CR is missing — the coding-dispatch pre-flight
-			// (ensureComponent) never provisioned it. The build path does NOT
-			// upsert (the legacy build path didn't either); surface a clear,
-			// actionable error so a human re-runs the coding delivery.
-			return fmt.Errorf("trigger build: OpenChoreo Component for %q (%s/%s) not found — its coding execution must run first to provision the Component (re-execute the Task); %w",
-				t.Component, t.OrgID, t.ProjectID, err)
-		}
-		return fmt.Errorf("trigger build: %w", err)
-	}
-	e.startRun(ctx, req.Execution.ID, run.Name)
-	return nil
-}
-
 // stageBuildSecret pre-stages the org's build git credential and returns the
 // secretRef to pass to the build WorkflowRun (its checkout-source step clones
 // the project repo). Mirrors feature/component's TriggerBuild staging: no stager
 // wired or no repo slug → clone unauthenticated (empty secretRef, correct for
 // public repos); an ownership/disconnect/transient staging error blocks the
-// build (returned to the funnel, which Finishes the row failed + flags
-// attention). The local plane sets GITHUB_REPO_VISIBILITY=private, so this is
-// what makes project builds clone at all.
+// retry. The local plane sets GITHUB_REPO_VISIBILITY=private, so this is what
+// makes project builds clone at all.
 func (e *CodingExecutor) stageBuildSecret(ctx context.Context, orgID, projectID, runName string) (string, error) {
 	if e.buildSecrets == nil {
 		return "", nil
@@ -589,12 +480,6 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 		return "", fmt.Errorf("retry-auth-failed: trigger build: %w", err)
 	}
 	return run.Name, nil
-}
-
-func (e *CodingExecutor) startRun(ctx context.Context, id, runName string) {
-	if _, err := e.execRows.StartWithRun(ctx, id, runName); err != nil {
-		slog.WarnContext(ctx, "coding executor: StartWithRun failed", "execution", id, "run", runName, "error", err)
-	}
 }
 
 func (e *CodingExecutor) lookupOrgUUID(ctx context.Context, ocOrgID string) (string, error) {
@@ -667,10 +552,14 @@ func deriveTokenURLFromJWKS(jwksURL string) string {
 	return strings.TrimSuffix(j, suffix) + "/oauth2/token"
 }
 
-// buildPrompt is the coding-agent directive: work the issue and open a PR that
-// closes it (so the pull_request webhook links the PR back to the Task).
-func buildPrompt(issueURL string, issueNumber int) string {
-	return fmt.Sprintf("Work on this GitHub issue: %s\n\nWhen you open the pull request, include `Closes #%d` in its body so the platform links the PR back to this task. The full workflow, constraints, and deny-list are in the `aep` skill loaded in your session.", issueURL, issueNumber)
+// buildPrompt is the coding-agent directive (§9): a MILESTONE REFERENCE and
+// nothing else. The agent discovers its own working set from the live issues
+// API and follows the versioned `aep` skill for ordering, fan-out, branch
+// identity, verification and the PR contract — the platform deliberately
+// carries no procedure in the prompt, so the workflow versions with the skill
+// rather than with the BFF binary.
+func buildPrompt(milestoneNumber int, milestoneTitle string) string {
+	return fmt.Sprintf("Work the issues for milestone %d (%q). Follow the `aep` skill loaded in your session — it defines discovery, ordering, fan-out, branch identity, verification, the PR contract and the deny-list.", milestoneNumber, milestoneTitle)
 }
 
 // validationComponentSentinel is the AEP_COMPONENT_NAME a validation Job carries.
@@ -678,17 +567,20 @@ func buildPrompt(issueURL string, issueNumber int) string {
 // value the Job/pod is stamped with.
 const validationComponentSentinel = "aep-validation"
 
+// validationTaskKind is the runner's AEP_TASK_KIND for a validation cycle: it
+// is what makes the runner preload the `aep-validation` skill instead of `aep`.
+const validationTaskKind = "validation"
+
 // validationDeadlineSeconds bounds a validation run (2h): browser boot + live
 // exploration + authoring/healing e2e specs is longer than a coding run.
 const validationDeadlineSeconds int64 = 7200
 
 // dispatchShape carries the per-class knobs runCoding hands to the proxy
-// dispatch: the coding class and the validation class share the executor and
-// the proxy plumbing, differing only in these values.
+// dispatch: the coding class and the validation class share the executor, the
+// proxy plumbing AND the runner image, differing only in these values.
 type dispatchShape struct {
 	prompt        string
 	componentName string
-	image         string
 	taskKind      string // "" (coding) | "validation"
 	deadline      int64  // 0 → job_template's 1h default
 }

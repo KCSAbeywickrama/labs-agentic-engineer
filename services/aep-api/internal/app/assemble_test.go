@@ -61,8 +61,9 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 }
 
 // TestAssemble_WatcherRegistration pins the two conditional watchers: the
-// JobWatcher rides on CLUSTER_GATEWAY_PROXY_URL, and the devflow worker rides on
-// TEMPORAL_HOSTPORT. The base is 7.
+// JobWatcher rides on CLUSTER_GATEWAY_PROXY_URL, and the run-supervisor worker
+// rides on TEMPORAL_HOSTPORT. The base is 7 — the event plane's reconcile sweep
+// is unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -73,7 +74,7 @@ func TestAssemble_WatcherRegistration(t *testing.T) {
 		{"+cluster-gateway-proxy adds JobWatcher", func(c *config.Config) {
 			c.ClusterGatewayProxyURL = "http://cgw"
 		}, 8},
-		{"+temporal adds the devflow worker", func(c *config.Config) {
+		{"+temporal adds the run worker", func(c *config.Config) {
 			c.Temporal.HostPort = "temporal:7233"
 		}, 8},
 		{"+both", func(c *config.Config) {
@@ -121,7 +122,7 @@ func TestAssemble_Degradations(t *testing.T) {
 			"m2m-service-auth", "build-logs", "sm-api-secret-writes",
 			"cluster-gateway-proxy", "mcp-discovery", "idp-mutations",
 			"connect-oauth-state", "coding-dispatch-proxy", "coding-dispatch-k8s",
-			"coding-dispatch-any", "rca-agent-key-push", "devflow-temporal",
+			"coding-dispatch-any", "rca-agent-key-push", "run-temporal",
 		} {
 			if !hasCapability(degs, want) {
 				t.Errorf("minimal config: expected degradation %q, missing from %+v", want, degs)
@@ -160,8 +161,8 @@ func TestAssemble_Degradations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}
-		if hasCapability(app.Degradations(), "devflow-temporal") {
-			t.Errorf("with TEMPORAL_HOSTPORT set, devflow-temporal must not be degraded")
+		if hasCapability(app.Degradations(), "run-temporal") {
+			t.Errorf("with TEMPORAL_HOSTPORT set, run-temporal must not be degraded")
 		}
 	})
 }

@@ -208,22 +208,17 @@ type Config struct {
 	RCAAgentAnthropicPushNamespace  string
 	RCAAgentAnthropicPushSecretName string
 
-	// AgentRunnerImage is the docker image the per-task coding-agent
-	// Job uses. Pinned at deploy time; `:latest` is OK in dev but the
-	// cloud release-binding should resolve to a digest.
+	// AgentRunnerImage is the docker image the runner Job uses — ONE image
+	// for BOTH task kinds (implementation and validation; it bakes
+	// Playwright + chromium). Pinned at deploy time, no built-in default;
+	// `:latest` is OK in dev but the cloud release-binding should resolve to
+	// a digest. Empty ⇒ dispatch is off and fails loudly.
 	AgentRunnerImage string
 
 	// Temporal holds the workflow-engine connection settings for the devflow
 	// feature. Enabled iff HostPort is set — unset leaves aep-api fully
 	// functional with the workflow endpoints answering 503.
 	Temporal TemporalConfig
-
-	// AgentValidationRunnerImage is the docker image a VALIDATION Job uses:
-	// the Playwright-capable runner variant (Dockerfile.validation — Debian
-	// base + baked chromium + playwright-cli). Empty disables validation
-	// dispatch (the validation executor fails loudly), since the alpine coding
-	// image cannot run chromium.
-	AgentValidationRunnerImage string
 
 	// AgentClusterSecretStore is the ESO ClusterSecretStore that backs
 	// per-run ExternalSecret reads in the remote-worker NS on DP.
@@ -357,10 +352,10 @@ type PlatformAPIConfig struct {
 	HostHeader string
 }
 
-// TemporalConfig holds connection settings for the Temporal server that
-// drives the devflow workflows (internal/delivery/devflow). HostPort empty ⇒
-// the feature is disabled: no worker starts and the devflow endpoints
-// return 503 temporal_unavailable.
+// TemporalConfig holds connection settings for the Temporal server that runs
+// the milestone run supervisor (internal/delivery/run). HostPort empty ⇒ no
+// worker starts, so a claimed version's run settles itself with a plan-failed
+// reason rather than waiting for a supervisor that will never arrive.
 type TemporalConfig struct {
 	HostPort  string // TEMPORAL_HOSTPORT, e.g. host.docker.internal:7233
 	Namespace string // TEMPORAL_NAMESPACE, default "default"

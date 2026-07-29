@@ -160,8 +160,8 @@ importers:
         specifier: ^5.2.0
         version: 5.2.0(eslint@9.39.4(jiti@2.7.0))
       jsdom:
-        specifier: ^29.1.1
-        version: 29.1.1
+        specifier: 26.1.0
+        version: 26.1.0
       msw:
         specifier: ^2.12.0
         version: 2.14.6(@types/node@25.9.4)(typescript@5.9.3)
@@ -179,7 +179,7 @@ importers:
         version: 7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       y-protocols:
         specifier: 1.0.7
         version: 1.0.7(yjs@13.6.31)
@@ -377,14 +377,14 @@ importers:
         specifier: 0.11.0
         version: 0.11.0(react@19.2.3)
       jsdom:
-        specifier: ^29.1.1
-        version: 29.1.1
+        specifier: 26.1.0
+        version: 26.1.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/ui/excalidraw-view:
     dependencies:
@@ -3965,6 +3965,15 @@ packages:
       canvas:
         optional: true
 
+  jsdom@26.1.0:
+    resolution: {integrity: sha512-Cvc9WUhxSMEo4McES3P7oK3QaXldCfNWp7pl2NNeiIFlCoLr3kfq9kb1fxftiwk1FLV7CvpvDfonxtzUDeSOPg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      canvas: ^3.0.0
+    peerDependenciesMeta:
+      canvas:
+        optional: true
+
   jsdom@29.1.1:
     resolution: {integrity: sha512-ECi4Fi2f7BdJtUKTflYRTiaMxIB0O6zfR1fX0GXpUrf6flp8QIYn1UT20YQqdSOfk2dfkCwS8LAFoJDEppNK5Q==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24.0.0}
@@ -5586,6 +5595,7 @@ snapshots:
       '@csstools/css-color-parser': 4.1.9(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
+    optional: true
 
   '@asamuzakjp/dom-selector@7.1.1':
     dependencies:
@@ -5594,10 +5604,13 @@ snapshots:
       bidi-js: 1.0.3
       css-tree: 3.2.1
       is-potential-custom-element-name: 1.0.1
+    optional: true
 
-  '@asamuzakjp/generational-cache@1.0.1': {}
+  '@asamuzakjp/generational-cache@1.0.1':
+    optional: true
 
-  '@asamuzakjp/nwsapi@2.3.9': {}
+  '@asamuzakjp/nwsapi@2.3.9':
+    optional: true
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -5721,6 +5734,7 @@ snapshots:
   '@bramus/specificity@2.4.2':
     dependencies:
       css-tree: 3.2.1
+    optional: true
 
   '@chevrotain/cst-dts-gen@11.0.3':
     dependencies:
@@ -5755,7 +5769,8 @@ snapshots:
 
   '@csstools/color-helpers@5.1.0': {}
 
-  '@csstools/color-helpers@6.1.0': {}
+  '@csstools/color-helpers@6.1.0':
+    optional: true
 
   '@csstools/css-calc@2.1.4(@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4))(@csstools/css-tokenizer@3.0.4)':
     dependencies:
@@ -5766,6 +5781,7 @@ snapshots:
     dependencies:
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
+    optional: true
 
   '@csstools/css-color-parser@3.1.0(@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4))(@csstools/css-tokenizer@3.0.4)':
     dependencies:
@@ -5780,6 +5796,7 @@ snapshots:
       '@csstools/css-calc': 3.2.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-parser-algorithms': 4.0.0(@csstools/css-tokenizer@4.0.0)
       '@csstools/css-tokenizer': 4.0.0
+    optional: true
 
   '@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4)':
     dependencies:
@@ -5788,14 +5805,17 @@ snapshots:
   '@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0)':
     dependencies:
       '@csstools/css-tokenizer': 4.0.0
+    optional: true
 
   '@csstools/css-syntax-patches-for-csstree@1.1.6(css-tree@3.2.1)':
     optionalDependencies:
       css-tree: 3.2.1
+    optional: true
 
   '@csstools/css-tokenizer@3.0.4': {}
 
-  '@csstools/css-tokenizer@4.0.0': {}
+  '@csstools/css-tokenizer@4.0.0':
+    optional: true
 
   '@dagrejs/dagre@1.1.8':
     dependencies:
@@ -6079,7 +6099,8 @@ snapshots:
 
   '@excalidraw/random-username@1.1.0': {}
 
-  '@exodus/bytes@1.15.1': {}
+  '@exodus/bytes@1.15.1':
+    optional: true
 
   '@floating-ui/core@1.7.5':
     dependencies:
@@ -7665,7 +7686,7 @@ snapshots:
       '@vitest/mocker': 4.1.10(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       playwright: 1.61.1
       tinyrainbow: 3.1.0
-      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
     transitivePeerDependencies:
       - bufferutil
       - msw
@@ -7681,7 +7702,7 @@ snapshots:
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.1.0
-      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
@@ -7891,6 +7912,7 @@ snapshots:
   bidi-js@1.0.3:
     dependencies:
       require-from-string: 2.0.2
+    optional: true
 
   binary-extensions@2.3.0: {}
 
@@ -8097,6 +8119,7 @@ snapshots:
     dependencies:
       mdn-data: 2.27.1
       source-map-js: 1.2.1
+    optional: true
 
   css.escape@1.5.1: {}
 
@@ -8302,6 +8325,7 @@ snapshots:
       whatwg-url: 16.0.1
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   date-fns@4.1.0: {}
 
@@ -8368,7 +8392,8 @@ snapshots:
 
   entities@6.0.1: {}
 
-  entities@8.0.0: {}
+  entities@8.0.0:
+    optional: true
 
   error-ex@1.3.4:
     dependencies:
@@ -8761,6 +8786,7 @@ snapshots:
       '@exodus/bytes': 1.15.1
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   html-to-image@1.11.13: {}
 
@@ -8932,6 +8958,33 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  jsdom@26.1.0:
+    dependencies:
+      cssstyle: 4.6.0
+      data-urls: 5.0.0
+      decimal.js: 10.6.0
+      html-encoding-sniffer: 4.0.0
+      http-proxy-agent: 7.0.2
+      https-proxy-agent: 7.0.6(supports-color@10.2.2)
+      is-potential-custom-element-name: 1.0.1
+      nwsapi: 2.2.24
+      parse5: 7.3.0
+      rrweb-cssom: 0.8.0
+      saxes: 6.0.0
+      symbol-tree: 3.2.4
+      tough-cookie: 5.1.2
+      w3c-xmlserializer: 5.0.0
+      webidl-conversions: 7.0.0
+      whatwg-encoding: 3.1.1
+      whatwg-mimetype: 4.0.0
+      whatwg-url: 14.2.0
+      ws: 8.21.0
+      xml-name-validator: 5.0.0
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+
   jsdom@29.1.1:
     dependencies:
       '@asamuzakjp/css-color': 5.1.11
@@ -8957,6 +9010,7 @@ snapshots:
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   jsesc@3.1.0: {}
 
@@ -9060,7 +9114,8 @@ snapshots:
 
   lru-cache@10.4.3: {}
 
-  lru-cache@11.5.2: {}
+  lru-cache@11.5.2:
+    optional: true
 
   lru-cache@5.1.1:
     dependencies:
@@ -9171,7 +9226,8 @@ snapshots:
     dependencies:
       '@types/mdast': 4.0.4
 
-  mdn-data@2.27.1: {}
+  mdn-data@2.27.1:
+    optional: true
 
   media-typer@1.1.0: {}
 
@@ -9538,6 +9594,7 @@ snapshots:
   parse5@8.0.1:
     dependencies:
       entities: 8.0.0
+    optional: true
 
   parseurl@1.3.3: {}
 
@@ -10179,6 +10236,7 @@ snapshots:
   tr46@6.0.0:
     dependencies:
       punycode: 2.3.1
+    optional: true
 
   trim-lines@3.0.1: {}
 
@@ -10254,7 +10312,8 @@ snapshots:
 
   undici-types@7.24.6: {}
 
-  undici@7.28.0: {}
+  undici@7.28.0:
+    optional: true
 
   unified@11.0.5:
     dependencies:
@@ -10397,6 +10456,36 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
+  vitest@4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)):
+    dependencies:
+      '@vitest/expect': 4.1.10
+      '@vitest/mocker': 4.1.10(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      '@vitest/pretty-format': 4.1.10
+      '@vitest/runner': 4.1.10
+      '@vitest/snapshot': 4.1.10
+      '@vitest/spy': 4.1.10
+      '@vitest/utils': 4.1.10
+      es-module-lexer: 2.3.0
+      expect-type: 1.4.0
+      magic-string: 0.30.21
+      obug: 2.1.3
+      pathe: 2.0.3
+      picomatch: 4.0.4
+      std-env: 4.1.0
+      tinybench: 2.9.0
+      tinyexec: 1.2.4
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.0
+      vite: 7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 25.9.4
+      '@vitest/browser-playwright': 4.1.10(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(playwright@1.61.1)(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))(vitest@4.1.10)
+      jsdom: 26.1.0
+    transitivePeerDependencies:
+      - msw
+
   vitest@4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.10
@@ -10454,7 +10543,8 @@ snapshots:
 
   webidl-conversions@7.0.0: {}
 
-  webidl-conversions@8.0.1: {}
+  webidl-conversions@8.0.1:
+    optional: true
 
   webpack-virtual-modules@0.6.2: {}
 
@@ -10466,7 +10556,8 @@ snapshots:
 
   whatwg-mimetype@4.0.0: {}
 
-  whatwg-mimetype@5.0.0: {}
+  whatwg-mimetype@5.0.0:
+    optional: true
 
   whatwg-url@14.2.0:
     dependencies:
@@ -10480,6 +10571,7 @@ snapshots:
       webidl-conversions: 8.0.1
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   which@2.0.2:
     dependencies:
