@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// The assembly-test tier: proves app.Assemble(cfg, Fake()) builds the real
+// The assembly-test tier: proves app.Assemble(cfg, Fake(), Seam{}) builds the real
 // service graph in-process, with zero I/O, in milliseconds. This is what makes
 // the composition root's "the harness can build the same graph with faked deps"
 // promise true — Build's ~1,000 lines were previously exercised by nothing but a
@@ -43,7 +43,7 @@ func baseCfg() config.Config {
 }
 
 func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
-	app, err := Assemble(baseCfg(), Fake())
+	app, err := Assemble(baseCfg(), Fake(), Seam{})
 	if err != nil {
 		t.Fatalf("Assemble(minimal, Fake()) = %v, want nil", err)
 	}
@@ -85,7 +85,7 @@ func TestAssemble_WatcherRegistration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := baseCfg()
 			tt.mutate(&cfg)
-			app, err := Assemble(cfg, Fake())
+			app, err := Assemble(cfg, Fake(), Seam{})
 			if err != nil {
 				t.Fatalf("Assemble = %v", err)
 			}
@@ -110,7 +110,7 @@ func hasCapability(degs []Degradation, capability string) bool {
 // capability/Profile abstraction.
 func TestAssemble_Degradations(t *testing.T) {
 	t.Run("minimal config reports the full degraded set", func(t *testing.T) {
-		app, err := Assemble(baseCfg(), Fake())
+		app, err := Assemble(baseCfg(), Fake(), Seam{})
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}
@@ -133,7 +133,7 @@ func TestAssemble_Degradations(t *testing.T) {
 		cfg := baseCfg()
 		cfg.ClusterGatewayProxyURL = "http://cgw"
 		cfg.SecretManagerAPIURL = "http://sm-api"
-		app, err := Assemble(cfg, Fake())
+		app, err := Assemble(cfg, Fake(), Seam{})
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}
@@ -156,7 +156,7 @@ func TestAssemble_Degradations(t *testing.T) {
 	t.Run("temporal enabled clears the devflow degradation", func(t *testing.T) {
 		cfg := baseCfg()
 		cfg.Temporal.HostPort = "temporal:7233"
-		app, err := Assemble(cfg, Fake())
+		app, err := Assemble(cfg, Fake(), Seam{})
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}

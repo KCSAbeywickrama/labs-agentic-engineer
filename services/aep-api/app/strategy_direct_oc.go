@@ -14,29 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package main
+package app
 
 import (
-	"log/slog"
-	"os"
+	"context"
 
-	"github.com/wso2/aep/aep-api/app"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
-// main is the OSS process entry point: NewOSSOptions wires direct-OC Options
-// (M2M AuthProvider when configured, DirectOCStrategy, no impersonation),
-// then hand process lifecycle to app.Run (which owns config load). All
-// service-graph wiring lives in internal/app.Assemble so it is reachable from
-// a test with faked deps.
-func main() {
-	opts, err := app.NewOSSOptions()
-	if err != nil {
-		slog.Error("failed to build OSS options", "error", err)
-		os.Exit(1)
-	}
+// DirectOCStrategy always returns AuthModeServiceM2M — the OSS / direct-OC
+// default that never passes through a user JWT.
+type DirectOCStrategy struct{}
 
-	if err := app.Run(opts); err != nil {
-		slog.Error("aep-api exited", "error", err)
-		os.Exit(1)
-	}
+// Decide implements ocauth.RequestAuthStrategy.
+func (DirectOCStrategy) Decide(context.Context) ocauth.AuthMode {
+	return ocauth.AuthModeServiceM2M
 }
+
+var _ ocauth.RequestAuthStrategy = DirectOCStrategy{}

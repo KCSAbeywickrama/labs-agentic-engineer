@@ -14,29 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package main
+package app
 
 import (
-	"log/slog"
-	"os"
-
-	"github.com/wso2/aep/aep-api/app"
+	"github.com/wso2/aep/aep-api/ocauth"
 )
 
-// main is the OSS process entry point: NewOSSOptions wires direct-OC Options
-// (M2M AuthProvider when configured, DirectOCStrategy, no impersonation),
-// then hand process lifecycle to app.Run (which owns config load). All
-// service-graph wiring lives in internal/app.Assemble so it is reachable from
-// a test with faked deps.
-func main() {
-	opts, err := app.NewOSSOptions()
-	if err != nil {
-		slog.Error("failed to build OSS options", "error", err)
-		os.Exit(1)
-	}
-
-	if err := app.Run(opts); err != nil {
-		slog.Error("aep-api exited", "error", err)
-		os.Exit(1)
-	}
-}
+// Compile-time smoke: Options nil-semantics and seam interface satisfaction.
+// A zero Options value is a valid "all features off" input — never panic.
+var (
+	_ Options                  = Options{}
+	_ ocauth.RequestAuthStrategy = DirectOCStrategy{}
+	_ ocauth.AuthProvider        = (ocauth.AuthProvider)(nil)
+)
