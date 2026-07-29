@@ -63,6 +63,8 @@ var goldenStepOrder = []string{
 	"workflow_runs",
 	"coding_agent_logs",
 	"phase10_rca_agent_reports",
+	"milestone_runs",
+	"run_cycle_logs",
 	"model_rates_seed",
 }
 

@@ -77,7 +77,7 @@ type ProvisionFailure struct {
 // definition (name + description + config schema) is built straight off the
 // project's committed design (authorExternalWithRef) — the external dep need
 // not be separately registered anywhere.
-func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, projectID, tag string, inputs []BuildProvisionInput) ([]ProvisionFailure, error) {
+func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, projectID, tag string, milestoneNumber int, inputs []BuildProvisionInput) ([]ProvisionFailure, error) {
 	// Mint gates only when the drawer carried inputs. A not-ready dependency is
 	// always surfaced in the build drawer, so a build with no inputs needs no new
 	// gate — and a pure re-build must not churn a fresh gate for every already-ready
@@ -91,7 +91,7 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	var gateByDep map[string]int
 	if len(inputs) > 0 {
 		var err error
-		gateByDep, err = s.EnsureProvisionIssues(ctx, orgID, projectID, tag)
+		gateByDep, err = s.EnsureProvisionIssues(ctx, orgID, projectID, tag, milestoneNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +212,7 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 	if _, serr := s.execs.StartWithRun(ctx, row.ID, ref); serr != nil {
 		slog.WarnContext(ctx, "provisioning: start settle provision run failed", "execution", row.ID, "error", serr)
 	}
-	s.completeProvisionRow(ctx, orgID, projectID, issueNumber, row.ID,
+	s.completeProvisionRow(ctx, orgID, projectID, depName, issueNumber, row.ID,
 		fmt.Sprintf("Dependency `%s` already provisioned (OC binding Ready) — gate settled.", depName))
 	return nil
 }
@@ -286,7 +286,7 @@ func (s *Service) authorExternalWithRef(ctx context.Context, orgID, ocOrgID, pro
 		if _, serr := s.execs.StartWithRun(ctx, execID, ref); serr != nil {
 			slog.WarnContext(ctx, "provisioning: start external provision run failed", "execution", execID, "error", serr)
 		}
-		s.completeProvisionRow(ctx, orgID, projectID, issueNumber, execID,
+		s.completeProvisionRow(ctx, orgID, projectID, in.Dependency, issueNumber, execID,
 			fmt.Sprintf("External resource `%s` configured (OC binding `%s`).", in.Dependency, ref))
 	}
 	return nil

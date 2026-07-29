@@ -47,12 +47,14 @@ type IssueService interface {
 	// EditIssueTitle replaces the issue's title. Used by the plan tap on a
 	// planned-Task rename (updateTask set.title).
 	EditIssueTitle(ctx context.Context, orgID, projectID string, number int, title string) error
+	// SetIssueMilestone assigns an existing issue to a milestone by NUMBER —
+	// adoption moving a bare issue into the deployed version's milestone.
+	SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error
 	// AddLabels adds labels to an existing issue (merges; a present label is a
 	// no-op). Ensures each label exists in the repo first. Used by the platform
 	// to stamp aep:status/* and aep:attention projections.
 	AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error
 	// RemoveLabel removes one label from an issue (404 = already absent = ok).
-	// Used to consume the aep:execute command label after dispatch.
 	RemoveLabel(ctx context.Context, orgID, projectID string, number int, label string) error
 	// SetLabels replaces the issue's entire label set. Used when the projection
 	// must be authoritative (clearing stale aep:status/* in one call).
@@ -67,6 +69,25 @@ type IssueService interface {
 	// request — the path-based build trigger's input for mapping a merged PR's
 	// diff onto the components whose source it touched.
 	ListPullRequestFiles(ctx context.Context, orgID, projectID string, number int) ([]string, error)
+
+	// The milestone surface — one spec version's delivery increment and ledger.
+	// Implementations in milestone_ops.go.
+
+	// CreateMilestone creates the version's milestone idempotently, returning
+	// its number and whether this call minted it.
+	CreateMilestone(ctx context.Context, orgID, projectID string, req CreateMilestoneRequest) (*MilestoneResult, error)
+	// CloseMilestone closes a milestone at settle. Display only.
+	CloseMilestone(ctx context.Context, orgID, projectID string, number int) error
+	// ListMilestones returns the project's milestones in the given state
+	// ("open" | "closed" | "all"; empty ⇒ "all").
+	ListMilestones(ctx context.Context, orgID, projectID, state string) ([]Milestone, error)
+	// ListMilestoneIssues returns a milestone's issues, filtered by state and
+	// label — the version ledger's read. Excludes pull requests.
+	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter MilestoneIssuesFilter) ([]IssueInfo, error)
+	// MilestoneIssueCounts returns a milestone's open-issue populations — gates,
+	// working set and total — in ONE call, the run supervisor's dispatch
+	// predicate input.
+	MilestoneIssueCounts(ctx context.Context, orgID, projectID string, number int) (*MilestoneIssueCounts, error)
 }
 
 type issueService struct {
@@ -86,6 +107,16 @@ type issueService struct {
 	// map stays bounded by concurrent dedup creates rather than growing once per
 	// distinct repo this long-lived process has ever served.
 	createLocks keyedMutex
+	// ensuredLabels memoises the (repo, label, colour) triples this process has
+	// already created, so a batch that stamps the SAME label on every issue
+	// pays for it once instead of once per issue.
+	//
+	// It is a rate-limit property, not an optimisation: a plan mints N issues
+	// all labelled `aep` against a budget of 80 content-generating requests per
+	// minute, and without the memo that batch costs 2N requests rather than N.
+	// Skipping a repeat is safe because label creation is monotone — nothing in
+	// the platform deletes a label — and a process restart re-ensures anyway.
+	ensuredLabels sync.Map // "owner/repo\x00name\x00color" → struct{}
 }
 
 // keyedMutex is a per-key mutex pool that deletes a key's entry once no
@@ -178,17 +209,30 @@ func (s *issueService) CreateIssue(ctx context.Context, orgID, projectID string,
 
 	// Ensure all requested labels exist in the repo before creating the issue.
 	// GitHub silently drops labels that don't exist, so we create them up-front.
-	for _, label := range req.Labels {
-		color := labelColor(label)
-		if ensureErr := s.github.EnsureLabel(ctx, owner, repoName, cred, label, color); ensureErr != nil {
-			// Non-fatal: log and continue; the issue will be created without the missing label.
-			slog.WarnContext(ctx, "ensure github label failed", "label", label, "error", ensureErr)
-		}
-	}
+	s.ensureLabels(ctx, owner, repoName, cred, req.Labels)
 
 	// GitHub Projects v2 is dropped (tasks-github-native §4): no lazy board
 	// create/link/add on issue creation. Tasks are plain GitHub issues.
 	return s.github.CreateIssue(ctx, owner, repoName, cred, req)
+}
+
+// ensureLabels pre-creates every label that this process has not already
+// created on this repo, because GitHub silently DROPS labels that do not exist.
+// A failure is non-fatal and unmemoised: the issue lands without that label and
+// the next call tries again.
+func (s *issueService) ensureLabels(ctx context.Context, owner, repoName string, cred secrets.Credential, labels []string) {
+	for _, label := range labels {
+		color := labelColor(label)
+		key := owner + "/" + repoName + "\x00" + label + "\x00" + color
+		if _, done := s.ensuredLabels.Load(key); done {
+			continue
+		}
+		if ensureErr := s.github.EnsureLabel(ctx, owner, repoName, cred, label, color); ensureErr != nil {
+			slog.WarnContext(ctx, "ensure github label failed", "label", label, "error", ensureErr)
+			continue
+		}
+		s.ensuredLabels.Store(key, struct{}{})
+	}
 }
 
 // lockRepoCreates acquires the per-repo creation lock and returns its release
@@ -294,6 +338,17 @@ func (s *issueService) EditIssueTitle(ctx context.Context, orgID, projectID stri
 	return s.github.EditIssueTitle(ctx, owner, repoName, cred, number, title)
 }
 
+func (s *issueService) SetIssueMilestone(ctx context.Context, orgID, projectID string, number, milestoneNumber int) error {
+	if milestoneNumber <= 0 {
+		return fmt.Errorf("milestone number is required")
+	}
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
+	return s.github.SetIssueMilestone(ctx, owner, repoName, cred, number, milestoneNumber)
+}
+
 func (s *issueService) AddLabels(ctx context.Context, orgID, projectID string, number int, labels []string) error {
 	if len(labels) == 0 {
 		return nil
@@ -303,11 +358,7 @@ func (s *issueService) AddLabels(ctx context.Context, orgID, projectID string, n
 		return err
 	}
 	// Ensure each label exists first — GitHub silently drops unknown labels.
-	for _, label := range labels {
-		if ensureErr := s.github.EnsureLabel(ctx, owner, repoName, cred, label, labelColor(label)); ensureErr != nil {
-			slog.WarnContext(ctx, "ensure github label failed", "label", label, "error", ensureErr)
-		}
-	}
+	s.ensureLabels(ctx, owner, repoName, cred, labels)
 	return s.github.AddIssueLabels(ctx, owner, repoName, cred, number, labels)
 }
 
@@ -324,11 +375,7 @@ func (s *issueService) SetLabels(ctx context.Context, orgID, projectID string, n
 	if err != nil {
 		return err
 	}
-	for _, label := range labels {
-		if ensureErr := s.github.EnsureLabel(ctx, owner, repoName, cred, label, labelColor(label)); ensureErr != nil {
-			slog.WarnContext(ctx, "ensure github label failed", "label", label, "error", ensureErr)
-		}
-	}
+	s.ensureLabels(ctx, owner, repoName, cred, labels)
 	return s.github.SetIssueLabels(ctx, owner, repoName, cred, number, labels)
 }
 
@@ -403,10 +450,22 @@ func ParseOwnerRepo(cloneURL string) (owner, repo string, err error) {
 
 // labelColor returns a hex color (without #) for well-known AEP labels,
 // falling back to a neutral grey for anything else (e.g. phase-N labels).
+//
+// Every label in the platform's vocabulary belongs here: the create / add / set
+// paths pre-create each label through EnsureLabel before use because GitHub
+// silently DROPS labels that do not exist, so an unlisted label still lands —
+// just in the default grey. A missing entry is a colour bug, never a
+// correctness one.
 func labelColor(name string) string {
 	switch name {
 	case "aep":
-		return "0075ca" // blue
+		return "0075ca" // blue — agent work
+	case "aep:provision":
+		return "d93f0b" // red-orange — a gate holding dispatch
+	case "aep:validation":
+		return "0e8a16" // green — the validation cycle
+	case "aep:codingagent":
+		return "5319e7" // violet — the GitHub-side adoption trigger
 	case "implementation":
 		return "7057ff" // purple
 	case "pending":

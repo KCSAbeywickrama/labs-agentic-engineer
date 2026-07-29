@@ -135,12 +135,121 @@ type AgentProgressReader struct {
 	proxy *clustergatewayproxy.Client
 	logs  delivery.CodingAgentLogRepository
 	orgs  organization.OrganizationRepository
+
+	// cycleLogs is the milestone-run half's snapshot store (run_cycle_logs).
+	// Nil → CycleProgress live-tails only.
+	cycleLogs delivery.RunCycleLogRepository
 }
 
 // NewAgentProgressReader wires the reader. proxy/logs may be nil in degraded
 // boot (AgentProgress then returns an empty, non-final response).
 func NewAgentProgressReader(proxy *clustergatewayproxy.Client, logs delivery.CodingAgentLogRepository, orgs organization.OrganizationRepository) *AgentProgressReader {
 	return &AgentProgressReader{proxy: proxy, logs: logs, orgs: orgs}
+}
+
+// WithCycleLogs enables the milestone-run snapshot read (run_cycle_logs), the
+// source CycleProgress prefers once a cycle's Job has been captured. Optional —
+// without it a finished cycle's log dies with its pod. Returns the receiver.
+func (r *AgentProgressReader) WithCycleLogs(logs delivery.RunCycleLogRepository) *AgentProgressReader {
+	r.cycleLogs = logs
+	return r
+}
+
+// CycleProgress returns one run CYCLE's agent activity, filtered to events
+// strictly newer than sinceMillis.
+//
+// It is the milestone-run twin of AgentProgress and reads the same two sources
+// in the same order — the captured snapshot first (Final=true: the complete log,
+// still readable long after the pod is gone), else a live tail of the pod. The
+// keys differ, and that is the whole point: a cycle has no execution row, so its
+// snapshot is keyed by the CYCLE id in run_cycle_logs rather than by an
+// execution id in coding_agent_logs.
+//
+// A cycle whose Job never launched, an unresolvable namespace, or a pod that has
+// not produced output yet all return an empty non-final response rather than an
+// error — the caller keeps polling.
+func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery.RunCycle, sinceMillis int64) (*contracts.ProgressResponse, error) {
+	resp := &contracts.ProgressResponse{
+		SchemaVersion: progressSchemaVersion,
+		Lines:         []contracts.ProgressEvent{},
+		CursorMillis:  sinceMillis,
+		Final:         false,
+	}
+	if r == nil || cycle == nil || cycle.JobRef == "" {
+		return resp, nil
+	}
+	cycleUUID, err := uuid.Parse(cycle.ID)
+	if err != nil {
+		return nil, fmt.Errorf("parse cycle id: %w", err)
+	}
+
+	// Snapshot path: the watcher captured the terminal pod's whole log.
+	if r.cycleLogs != nil {
+		snap, serr := r.cycleLogs.GetByRun(ctx, cycleUUID, cycle.JobRef)
+		if serr != nil {
+			return nil, fmt.Errorf("read run_cycle_logs: %w", serr)
+		}
+		if snap != nil {
+			resp.Lines, resp.Truncated, _ = pageEvents(snap.LogText, sinceMillis)
+			if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
+				resp.CursorMillis = cur
+			}
+			if capturedMs := snap.CapturedAt.UnixMilli(); capturedMs > resp.CursorMillis {
+				resp.CursorMillis = capturedMs
+			}
+			resp.Final = true
+			return resp, nil
+		}
+	}
+	if r.proxy == nil {
+		return resp, nil
+	}
+
+	// Live tail: the Job is still running, or the watcher has not captured yet.
+	// A CLOSED cycle narrates nothing — its stream is settled by the run's state,
+	// and the bootstrap lines below only mean something while a Job is pending.
+	live := cycle.EndedAt == nil
+	ns, ok := resolveRemoteWorkerNS(ctx, r.orgs, cycle.OrgID)
+	if !ok {
+		return resp, nil
+	}
+	pod, err := r.proxy.GetJobPod(ctx, ns, cycle.JobRef)
+	if err != nil {
+		if errors.Is(err, clustergatewayproxy.ErrNotFound) {
+			if live {
+				resp.Lines = []contracts.ProgressEvent{bootstrapEvent(false, "", "")}
+			}
+			return resp, nil
+		}
+		return nil, fmt.Errorf("get cycle job pod: %w", err)
+	}
+	body, err := r.proxy.TailPodLog(ctx, ns, pod.Name, clustergatewayproxy.PodLogOptions{
+		Timestamps: true,
+		LimitBytes: logPageBytes,
+	})
+	if err != nil {
+		if errors.Is(err, clustergatewayproxy.ErrNotFound) || errors.Is(err, clustergatewayproxy.ErrPodNotReady) {
+			if live {
+				resp.Lines = []contracts.ProgressEvent{bootstrapEvent(true, pod.Phase, pod.WaitingReason)}
+			}
+			return resp, nil
+		}
+		return nil, fmt.Errorf("tail cycle pod log: %w", err)
+	}
+	lines, truncated, hadOutput := pageEvents(string(body), sinceMillis)
+	resp.Lines, resp.Truncated = lines, truncated
+	// Only a pod that has said NOTHING is still booting. A tail that holds output
+	// the caller has already seen means the agent is mid-thought, and narrating
+	// the dark zone there would inject "Starting the agent…" into the middle of a
+	// running stream — where the console's stable-seq dedup then pins it forever.
+	if !hadOutput && live {
+		resp.Lines = []contracts.ProgressEvent{bootstrapEvent(true, "Running", "")}
+		return resp, nil
+	}
+	if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
+		resp.CursorMillis = cur
+	}
+	return resp, nil
 }
 
 // AgentProgress returns the coding execution's activity, filtered to events
@@ -170,7 +279,7 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 	snap, err := r.logs.GetByRun(ctx, execUUID, row.RunName)
 	switch {
 	case err == nil && snap != nil:
-		resp.Lines, resp.Truncated = pageEvents(snap.LogText, sinceMillis)
+		resp.Lines, resp.Truncated, _ = pageEvents(snap.LogText, sinceMillis)
 		if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
 			resp.CursorMillis = cur
 		}
@@ -232,8 +341,8 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 		}
 		return nil, fmt.Errorf("tail pod log: %w", err)
 	}
-	all, truncated := textToProgressEvents(string(body))
-	if len(all) == 0 {
+	lines, truncated, hadOutput := pageEvents(string(body), sinceMillis)
+	if !hadOutput {
 		// Container is up but the runner hasn't emitted its first line yet (token
 		// mint / node boot). Name the wait rather than showing nothing.
 		if live {
@@ -241,12 +350,7 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 		}
 		return resp, nil
 	}
-	newer := filterEventsAfter(all, sinceMillis)
-	if len(newer) > defaultProgressLimit {
-		newer = newer[:defaultProgressLimit]
-		truncated = true
-	}
-	resp.Lines, resp.Truncated = newer, truncated
+	resp.Lines, resp.Truncated = lines, truncated
 	// Advance the cursor only as far as actually-emitted content reaches (NOT
 	// now()), so the next poll's window never skips late-arriving lines.
 	if cur := lastEventMillis(resp.Lines); cur > resp.CursorMillis {
@@ -258,14 +362,20 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 // pageEvents parses a raw pod-log page into events newer than sinceMillis,
 // capped at defaultProgressLimit. truncated is true when the raw page exceeded
 // the cap (oldest lines dropped) or the post-filter set still exceeds it.
-func pageEvents(text string, sinceMillis int64) ([]contracts.ProgressEvent, bool) {
+//
+// hadOutput reports whether the page held ANY lines before the cursor filter —
+// the distinction that decides whether a caller may narrate the dark zone. An
+// empty result means "nothing new since your cursor" (the agent is thinking),
+// which is emphatically not "the runner hasn't spoken yet"; conflating the two
+// replays a bootstrap line into the middle of a live stream.
+func pageEvents(text string, sinceMillis int64) (lines []contracts.ProgressEvent, truncated, hadOutput bool) {
 	all, truncated := textToProgressEvents(text)
 	newer := filterEventsAfter(all, sinceMillis)
 	if len(newer) > defaultProgressLimit {
 		newer = newer[:defaultProgressLimit]
 		truncated = true
 	}
-	return newer, truncated
+	return newer, truncated, len(all) > 0
 }
 
 // resolveRemoteWorkerNS maps an OC org handle to its remote-worker namespace
@@ -298,6 +408,11 @@ func textToProgressEvents(text string) ([]contracts.ProgressEvent, bool) {
 	if text == "" {
 		return []contracts.ProgressEvent{}, false
 	}
+	// Single choke point for the console feed: both callers reach the UI through
+	// here, so redacting the raw pod output once covers wrapped `log` lines and
+	// structured envelope fields alike. See redact.go for why this runs even
+	// though the runner already scrubs at the source.
+	text = redactSecrets(text)
 	out := make([]contracts.ProgressEvent, 0, 256)
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	// Allow long lines — agent output occasionally dumps long JSON blobs that

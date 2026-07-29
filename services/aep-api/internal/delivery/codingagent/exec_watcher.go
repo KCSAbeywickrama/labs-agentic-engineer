@@ -51,7 +51,6 @@ type BuildRetrier interface {
 type ExecWatcher struct {
 	oc        openchoreo.ComponentClient
 	execRows  delivery.ExecutionRepository
-	reeval    Reevaluator
 	asService func(ctx context.Context) context.Context
 	tick      time.Duration
 
@@ -64,19 +63,23 @@ type ExecWatcher struct {
 	// provisioning feature can grant pending cross-project access (nil → skipped).
 	deployObserver DeployObserver
 
-	// signaler feeds build + deploy terminals to a waiting devflow TaskFlow
-	// workflow. Nil-safe: a nil signaler is a no-op, so the watcher behaves
-	// exactly as before when no workflow is driving.
-	signaler *delivery.Signaler
+	// buildObserver receives every BUILD terminal this watcher settles, through
+	// the root port. It is how the event plane learns a build finished without
+	// either package importing the other: this watcher stays here (it shares
+	// the run-classification helpers with the executor next to it) and reports
+	// outwards. Nil-safe.
+	buildObserver delivery.BuildTerminalObserver
+
 	// notifier wakes any attached task-log stream on a build/deploy terminal.
 	// Nil-safe.
 	notifier *delivery.TaskStreamHub
 }
 
-// WithWorkflowSignaler wires the devflow signaler so build/deploy terminals
-// reach a waiting TaskFlow workflow. Optional. Returns the receiver.
-func (w *ExecWatcher) WithWorkflowSignaler(s *delivery.Signaler) *ExecWatcher {
-	w.signaler = s
+// WithBuildObserver wires the build-terminal observer (the event plane) so a
+// component's build outcome reaches the milestone-run loop. Optional —
+// nil-safe. Returns the receiver.
+func (w *ExecWatcher) WithBuildObserver(o delivery.BuildTerminalObserver) *ExecWatcher {
+	w.buildObserver = o
 	return w
 }
 
@@ -89,11 +92,11 @@ func (w *ExecWatcher) WithTaskNotifier(h *delivery.TaskStreamHub) *ExecWatcher {
 
 // NewExecWatcher wires the watcher. asService may be nil (tests); tick defaults
 // to 10s.
-func NewExecWatcher(oc openchoreo.ComponentClient, execRows delivery.ExecutionRepository, reeval Reevaluator, asService func(ctx context.Context) context.Context, tick time.Duration) *ExecWatcher {
+func NewExecWatcher(oc openchoreo.ComponentClient, execRows delivery.ExecutionRepository, asService func(ctx context.Context) context.Context, tick time.Duration) *ExecWatcher {
 	if tick <= 0 {
 		tick = 10 * time.Second
 	}
-	return &ExecWatcher{oc: oc, execRows: execRows, reeval: reeval, asService: asService, tick: tick}
+	return &ExecWatcher{oc: oc, execRows: execRows, asService: asService, tick: tick}
 }
 
 // WithBuildRetrier enables the git-clone-auth build retry loop. budget ≤0 uses
@@ -172,13 +175,6 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *delivery.Execution, ru
 			if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
 				slog.WarnContext(ctx, "exec watcher: finish coding failed", "execution", row.ID, "error", err)
 			}
-			// Tell any waiting TaskFlow workflow the coding attempt failed (success
-			// rides the PR-opened webhook, not this watcher).
-			w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, delivery.SigJobStatus, delivery.RunStatusSignal{
-				ExecutionID: row.ID,
-				Phase:       delivery.PhaseFailed,
-				Message:     workflowReason(run),
-			})
 			w.notifier.Notify(row.Repo, row.IssueNumber)
 		}
 		// A succeeded coding run rides the pull_request-opened webhook — no action.
@@ -188,17 +184,6 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *delivery.Execution, ru
 				slog.WarnContext(ctx, "exec watcher: finish build succeeded", "execution", row.ID, "error", err)
 				return
 			}
-			if w.reeval != nil {
-				// A dependency just deployed — release any Task queued on it (§5).
-				if rerr := w.reeval.Reevaluate(ctx); rerr != nil {
-					slog.WarnContext(ctx, "exec watcher: reevaluate after build success failed", "error", rerr)
-				}
-			}
-			// The build succeeded — tell any waiting TaskFlow workflow.
-			w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, delivery.SigBuildStatus, delivery.RunStatusSignal{
-				ExecutionID: row.ID,
-				Phase:       delivery.PhaseSucceeded,
-			})
 			if w.deployObserver != nil {
 				// The component deployed — grant any pending cross-project access
 				// request targeting it (best-effort; the grant read no-ops otherwise).
@@ -206,15 +191,8 @@ func (w *ExecWatcher) reconcile(ctx context.Context, row *delivery.Execution, ru
 					slog.WarnContext(ctx, "exec watcher: deploy observer failed", "component", row.Component, "error", derr)
 				}
 			}
-			// Deploy is observed as part of build success in this topology (the
-			// build produces the ReleaseBinding that deploys). Signal deploy-ready
-			// keyed by the build row's issue — the one place the issue is known,
-			// so the TaskFlow workflow needs no component→issue resolution.
-			w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, delivery.SigDeployStatus, delivery.RunStatusSignal{
-				ExecutionID: row.ID,
-				Phase:       delivery.PhaseSucceeded,
-			})
 			w.notifier.Notify(row.Repo, row.IssueNumber)
+			w.notifyBuildTerminal(ctx, row, true, "")
 			return
 		}
 		w.reconcileBuildFailure(ctx, row, run)
@@ -232,10 +210,8 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.E
 		if _, err := w.execRows.Finish(ctx, row.ID, string(taskmeta.ExecFailed), workflowReason(run)); err != nil {
 			slog.WarnContext(ctx, "exec watcher: finish build failed", "execution", row.ID, "error", err)
 		}
-		w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, delivery.SigBuildStatus, delivery.RunStatusSignal{
-			ExecutionID: row.ID, Phase: delivery.PhaseFailed, Message: workflowReason(run),
-		})
 		w.notifier.Notify(row.Repo, row.IssueNumber)
+		w.notifyBuildTerminal(ctx, row, false, workflowReason(run))
 		return
 	}
 	attempt := parseBuildAuthRetryAttempt(row.Reason)
@@ -245,10 +221,8 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.E
 		} else {
 			slog.WarnContext(ctx, "exec watcher: build git-auth retry budget exhausted", "execution", row.ID, "attempts", attempt, "budget", w.authBudget)
 		}
-		w.signaler.SignalTask(ctx, row.Repo, row.IssueNumber, delivery.SigBuildStatus, delivery.RunStatusSignal{
-			ExecutionID: row.ID, Phase: delivery.PhaseFailed, Message: buildAuthRetryExceededReason,
-		})
 		w.notifier.Notify(row.Repo, row.IssueNumber)
+		w.notifyBuildTerminal(ctx, row, false, buildAuthRetryExceededReason)
 		return
 	}
 	newRun, err := w.buildRetrier.RetryAuthFailedBuild(ctx, row)
@@ -266,6 +240,33 @@ func (w *ExecWatcher) reconcileBuildFailure(ctx context.Context, row *delivery.E
 		return
 	}
 	slog.InfoContext(ctx, "exec watcher: re-minted + re-triggered build after git-auth failure", "execution", row.ID, "newRun", newRun, "attempt", attempt+1)
+}
+
+// notifyBuildTerminal reports a settled BUILD to the event plane through the
+// root port. Best-effort: the observer's job is to advance a milestone run,
+// and a run that misses one terminal re-derives from OpenChoreo at its next
+// cycle boundary — whereas an error propagated here would abort the rest of
+// the watcher's sweep over unrelated executions.
+//
+// Only builds are reported. A coding terminal is the runner's business and
+// reaches the loop as a pull request.
+func (w *ExecWatcher) notifyBuildTerminal(ctx context.Context, row *delivery.Execution, succeeded bool, reason string) {
+	if w.buildObserver == nil {
+		return
+	}
+	err := w.buildObserver.OnBuildTerminal(ctx, delivery.BuildTerminal{
+		OrgID:     row.OrgID,
+		ProjectID: row.ProjectID,
+		Component: row.Component,
+		CommitSHA: row.CommitSHA,
+		RunName:   row.RunName,
+		Succeeded: succeeded,
+		Reason:    reason,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "exec watcher: build-terminal observer failed",
+			"execution", row.ID, "component", row.Component, "error", err)
+	}
 }
 
 // workflowReason returns a short reason string for a terminal WorkflowRun.

@@ -105,25 +105,18 @@ function StageCard({
               variant={view.version ? "filled" : "outlined"}
             />
           </Stack>
-          <Stack direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
-            <Typography
-              variant="body2"
-              color={
-                view.tone === "error"
-                  ? "error.main"
-                  : ghost
-                    ? "text.disabled"
-                    : "text.secondary"
-              }
-            >
-              {view.line}
-            </Typography>
-            {view.failed !== undefined && view.failed > 0 && (
-              <Typography variant="body2" color="error.main" sx={{ fontWeight: 600 }}>
-                {view.failed} failed
-              </Typography>
-            )}
-          </Stack>
+          <Typography
+            variant="body2"
+            color={
+              view.tone === "error"
+                ? "error.main"
+                : ghost
+                  ? "text.disabled"
+                  : "text.secondary"
+            }
+          >
+            {view.line}
+          </Typography>
         </CardContent>
       </CardActionArea>
     </Card>

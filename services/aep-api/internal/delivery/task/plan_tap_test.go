@@ -26,24 +26,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 func newTestTap(issues IssueClient) *planTap {
-	return &planTap{
-		ctx:            context.Background(),
-		orgID:          "org1",
-		projectID:      "proj1",
-		specTag:        "req-v1",
-		designTag:      "design-v1",
-		issues:         issues,
-		state:          map[int]taskState{},
-		existingKeys:   map[string]bool{},
-		contextNumbers: map[int]bool{},
-		titleToNumber:  map[string]int{},
-		createdKeys:    map[string]bool{},
-	}
+	tap := newPlanTap(context.Background(), "org1", "proj1", issues)
+	// Every plan turn the build click drives plans INTO a milestone; 5 is this
+	// version's.
+	tap.milestone = 5
+	tap.appPaths = map[string]string{"order-service": "src/order-service"}
+	return tap
 }
 
 func toolResult(output string) string {
@@ -70,7 +63,11 @@ type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("client gone") }
 
-func TestPlanTap_PlanCreatesIssueWithLabelsAndBlock(t *testing.T) {
+// A planned Task is ONE call: prose body, the `aep` working-set label, and the
+// milestone assigned at creation. Nothing structured is written into the body —
+// the milestone is the version pin and the label is the population marker, so a
+// machine block would be a second source of truth nobody reads.
+func TestPlanTap_PlanMintsProseIssueIntoTheMilestone(t *testing.T) {
 	issues := newFakeIssues()
 	tap := newTestTap(issues)
 	var buf bytes.Buffer
@@ -84,26 +81,50 @@ func TestPlanTap_PlanCreatesIssueWithLabelsAndBlock(t *testing.T) {
 		t.Fatalf("expected 1 issue created, got %d", len(issues.created))
 	}
 	got := issues.created[0]
-	// Labels: marker + class + origin + the spec-version lineage label.
-	for _, want := range []string{taskmeta.LabelMarker, taskmeta.LabelCoding, taskmeta.OriginLabel(taskmeta.OriginSpecPlan), taskmeta.SpecTagLabel("req-v1")} {
-		if !issueHasAll(got.Labels, []string{want}) {
-			t.Errorf("expected label %q, got %v", want, got.Labels)
+	if len(got.Labels) != 1 || got.Labels[0] != delivery.LabelAgentWork {
+		t.Errorf("labels = %v, want exactly [%s]", got.Labels, delivery.LabelAgentWork)
+	}
+	if got.Milestone == nil || *got.Milestone != 5 {
+		t.Errorf("milestone = %v, want 5 assigned at creation (1+N, not create-then-patch)", got.Milestone)
+	}
+	if strings.Contains(got.Body, "aep:task/v1") {
+		t.Errorf("created body still carries a machine block — bodies are prose:\n%s", got.Body)
+	}
+	for _, want := range []string{"**Component:** `order-service`", "**App Path:** `src/order-service`", "do it"} {
+		if !strings.Contains(got.Body, want) {
+			t.Errorf("body missing %q:\n%s", want, got.Body)
 		}
 	}
-	// Body must carry a well-formed machine block with the component + lineage.
-	block, _, err := taskmeta.ParseBody(got.Body)
-	if err != nil {
-		t.Fatalf("created body has no valid block: %v", err)
-	}
-	if block.Component != "order-service" || block.DesignTag != "design-v1" || block.SpecTag != "req-v1" {
-		t.Errorf("block facts wrong: %+v", block)
-	}
-	if block.Key == "" {
-		t.Errorf("expected idempotency key on created block")
+	// user-service has no issue yet (forward reference) — the dependency is
+	// named rather than dropped.
+	if !strings.Contains(got.Body, "Depends on the `user-service` task") {
+		t.Errorf("body lost its unresolved dependency line:\n%s", got.Body)
 	}
 	// The stream must have been forwarded verbatim.
 	if !strings.Contains(buf.String(), "[DONE]") {
 		t.Errorf("stream not forwarded verbatim")
+	}
+}
+
+// A dependency whose own Task was planned earlier in the SAME turn resolves to
+// a real issue number — the reference the agent follows.
+func TestPlanTap_DependsOnResolvesToIssueNumber(t *testing.T) {
+	issues := newFakeIssues()
+	tap := newTestTap(issues)
+	var buf bytes.Buffer
+
+	tap.Stream(stream(
+		toolResult(planOK("user-service", "Implement user-service", nil)),
+		toolResult(planOK("order-service", "Implement order-service", []string{"user-service"})),
+		"data: [DONE]\n\n",
+	), &buf, func() {})
+
+	if len(issues.created) != 2 {
+		t.Fatalf("expected 2 issues, got %d", len(issues.created))
+	}
+	want := fmt.Sprintf("Depends on #%d", issues.byNumber[100].Number)
+	if !strings.Contains(issues.created[1].Body, want) {
+		t.Errorf("body missing %q:\n%s", want, issues.created[1].Body)
 	}
 }
 
@@ -177,17 +198,18 @@ func TestPlanTap_UpdateByTitle_SetsBody(t *testing.T) {
 	if !strings.Contains(body, "Write the order service.") {
 		t.Errorf("expected body updated via updateTask by title, got %q", body)
 	}
-	// The block must still be present and canonical after the body patch.
-	if _, _, err := taskmeta.ParseBody(body); err != nil {
-		t.Errorf("updated body lost its block: %v", err)
+	// The whole body is re-rendered from the tracked facts, so the platform
+	// parts survive the patch rather than being overwritten by it.
+	if !strings.Contains(body, "**Component:** `order-service`") {
+		t.Errorf("patched body lost its component line: %q", body)
 	}
 }
 
 func TestPlanTap_UpdateByIssueNumber_PreExisting(t *testing.T) {
 	issues := newFakeIssues()
-	issues.seed(gitrepoIssue(42, "user-service", "design-v1"))
+	issues.seed(agentIssue(42, "Implement user-service", "brief"))
 	tap := newTestTap(issues)
-	tap.state[42] = taskState{block: taskmeta.Block{Component: "user-service", Origin: taskmeta.OriginSpecPlan, DesignTag: "design-v1"}, human: taskmeta.Human{Rationale: "orig"}}
+	tap.state[42] = plannedTask{Component: "user-service", Rationale: "orig"}
 	tap.contextNumbers[42] = true // #42 was preloaded into the turn's context
 	var buf bytes.Buffer
 
@@ -272,15 +294,42 @@ func TestPlanTap_Dedupe_SamePlanTwice(t *testing.T) {
 	), &buf, func() {})
 
 	if len(issues.created) != 1 {
-		t.Fatalf("duplicate planTask (same key) must dedupe to one create, got %d", len(issues.created))
+		t.Fatalf("duplicate planTask (same title slug) must dedupe to one create, got %d", len(issues.created))
 	}
 }
 
-func TestPlanTap_WriteFailure_FlagsAttention(t *testing.T) {
+// Re-plan reconcile is ADDITIVE-ONLY: a title already in the milestone is
+// skipped whatever punctuation or casing the planner emits it with, and
+// anything new is minted.
+func TestPlanTap_DedupesAgainstTheMilestonesExistingTitles(t *testing.T) {
 	issues := newFakeIssues()
-	issues.seed(gitrepoIssue(42, "user-service", "design-v1"))
 	tap := newTestTap(issues)
-	tap.state[42] = taskState{block: taskmeta.Block{Component: "user-service", Origin: taskmeta.OriginSpecPlan, DesignTag: "design-v1"}}
+	tap.existingSlugs[titleSlug("Implement order-service")] = true
+	var buf bytes.Buffer
+
+	tap.Stream(stream(
+		toolResult(planOK("order-service", "  implement ORDER-service!  ", nil)),
+		toolResult(planOK("user-service", "Implement user-service", nil)),
+		"data: [DONE]\n\n",
+	), &buf, func() {})
+
+	if len(issues.created) != 1 {
+		t.Fatalf("want exactly the ONE new Task minted, got %d: %+v", len(issues.created), issues.created)
+	}
+	if issues.created[0].Title != "Implement user-service" {
+		t.Errorf("created %q, want the only title the milestone did not already hold", issues.created[0].Title)
+	}
+}
+
+// A write the tap could not land is recorded twice: as a comment on the issue
+// whose brief is now incomplete, and in the failure count the plan path reads
+// back — a short plan settles the run it was filling rather than supervising a
+// milestone that is missing work.
+func TestPlanTap_WriteFailure_CommentsAndCounts(t *testing.T) {
+	issues := newFakeIssues()
+	issues.seed(agentIssue(42, "Implement user-service", "brief"))
+	tap := newTestTap(issues)
+	tap.state[42] = plannedTask{Component: "user-service"}
 	tap.contextNumbers[42] = true // in-context; the failure is at the GitHub write
 	issues.failEditBody = true
 	var buf bytes.Buffer
@@ -290,8 +339,8 @@ func TestPlanTap_WriteFailure_FlagsAttention(t *testing.T) {
 		"data: [DONE]\n\n",
 	), &buf, func() {})
 
-	if !issueHasAll(issues.labelsOf(42), []string{taskmeta.LabelAttention}) {
-		t.Errorf("expected aep:attention flagged on write failure, got %v", issues.labelsOf(42))
+	if len(issues.comments[42]) != 1 || !strings.Contains(issues.comments[42][0], "failed to apply") {
+		t.Errorf("expected one write-failure comment on the issue, got %v", issues.comments[42])
 	}
 	if tap.failures != 1 {
 		t.Errorf("expected 1 recorded failure, got %d", tap.failures)
@@ -360,36 +409,5 @@ func TestPlanTap_IdleDeadline_AbortsHungDrain(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "aep-plan-write-failures 1") {
 		t.Errorf("expected terminal in-band failure surface, got %q", buf.String())
-	}
-}
-
-// gitrepoIssue builds a seeded pre-existing Task issue with a valid block.
-func gitrepoIssue(number int, component, designTag string) sourcecontrol.IssueInfo {
-	block := taskmeta.Block{Component: component, Origin: taskmeta.OriginSpecPlan, DesignTag: designTag}
-	body := taskmeta.ComposeBody(block, taskmeta.Human{Rationale: "orig"})
-	return sourcecontrol.IssueInfo{
-		Number: number,
-		Title:  "Implement " + component,
-		Body:   body,
-		State:  "open",
-		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginSpecPlan),
-	}
-}
-
-// taggedIssue builds a seeded Task issue stamped with a spec version, exactly as
-// plan_tap writes it: the aep:spec/<tag> label plus the specTag in its machine
-// block.
-func taggedIssue(number int, component, specTag string) sourcecontrol.IssueInfo {
-	block := taskmeta.Block{Component: component, Origin: taskmeta.OriginSpecPlan, SpecTag: specTag, DesignTag: "design-v1"}
-	body := taskmeta.ComposeBody(block, taskmeta.Human{Rationale: "orig"})
-	labels := append(taskmeta.NewTaskLabels(taskmeta.ClassCoding, taskmeta.OriginSpecPlan), taskmeta.SpecTagLabel(specTag))
-	return sourcecontrol.IssueInfo{
-		Number: number,
-		Title:  "Implement " + component,
-		Body:   body,
-		State:  "open",
-		URL:    fmt.Sprintf("https://github.com/o/r/issues/%d", number),
-		Labels: labels,
 	}
 }
