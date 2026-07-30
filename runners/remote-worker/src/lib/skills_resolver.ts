@@ -43,7 +43,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { cloneWithToken } from "./git_clone.js";
+import { type CloneAuth, cloneWithHelper } from "./git_clone.js";
 import type { SkillKind, SkillResolution } from "./skills_materializer.js";
 
 const SKILLS_ROOT = "skills";
@@ -76,14 +76,19 @@ export interface ResolveTaskSkillsArgs {
   scope: SkillsScope;
   /** AEP_SKILLS_REPO_URL — the org's `org-skills` clone URL. */
   skillsRepoURL: string;
-  /** Org-wide GitHub PAT (x-access-token) for the clone. */
-  pat: string;
+  /**
+   * How the clone authenticates: the workspace's credential helper and bearer.
+   * The refresh endpoint returns an org/installation-wide token, so the same
+   * helper serves both the project repo and org-skills. Both fields empty for an
+   * unauthenticated origin (the local harness and tests).
+   */
+  cloneAuth: CloneAuth;
   /** Scratch dir to clone org-skills into — MUST be outside `workspace`. */
   scratchDir: string;
   /** Per-line log sink; defaults to console.log. */
   log?: (line: string) => void;
   /** Injected for tests; defaults to the real `git clone --depth 1`. */
-  clone?: (repoURL: string, pat: string, destDir: string) => Promise<void>;
+  clone?: (repoURL: string, auth: CloneAuth, destDir: string) => Promise<void>;
 }
 
 /**
@@ -105,7 +110,7 @@ export async function resolveTaskSkills(args: ResolveTaskSkillsArgs): Promise<Sk
   }
 
   const clone = args.clone ?? cloneSkillsRepo;
-  await clone(args.skillsRepoURL, args.pat, args.scratchDir);
+  await clone(args.skillsRepoURL, args.cloneAuth, args.scratchDir);
 
   return resolveSkillsFromClone(args.scratchDir, names, log);
 }
@@ -223,22 +228,18 @@ export async function resolveSkillsFromClone(
   return out;
 }
 
-// cloneSkillsRepo shallow-clones the org-skills repo into destDir, authing with
-// the org-wide PAT via the askpass shim (file:// origins — tests — pass an empty
-// token and clone unauthed). Wipes destDir first so a resumed pod's stale dir
-// never blocks `git clone`.
-async function cloneSkillsRepo(repoURL: string, pat: string, destDir: string): Promise<void> {
+// cloneSkillsRepo shallow-clones the org-skills repo into destDir, authing
+// through the workspace's credential helper (file:// origins — tests — pass an
+// empty CloneAuth and clone unauthed). Wipes destDir first so a resumed pod's
+// stale dir never blocks `git clone`.
+async function cloneSkillsRepo(
+  repoURL: string,
+  auth: CloneAuth,
+  destDir: string,
+): Promise<void> {
   await fs.promises.rm(destDir, { recursive: true, force: true });
   await fs.promises.mkdir(path.dirname(destDir), { recursive: true });
-  await cloneWithToken({
-    repoUrl: repoURL,
-    destDir,
-    token: pat,
-    // Sibling of the clone target, inside the caller's scratch dir — never the
-    // work tree, and removed with the scratch dir.
-    shimDir: path.dirname(destDir),
-    depth1: true,
-  });
+  await cloneWithHelper({ repoUrl: repoURL, destDir, ...auth, depth1: true });
 }
 
 // readReferences recursively walks the full skill dir (any depth) and returns

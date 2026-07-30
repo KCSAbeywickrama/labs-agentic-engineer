@@ -16,6 +16,10 @@
  * under the License.
  */
 
+// The clone's credential wiring. That the helper git is pointed at actually
+// speaks git's protocol is covered by credhelper.test.ts, which drives it with
+// real git; these tests cover the invocation this module builds.
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -23,41 +27,65 @@ import os from "node:os";
 import path from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { CLONE_TOKEN_ENV } from "./credhelper.js";
-import { buildCloneInvocation, cloneWithToken, writeAskpassShim } from "./git_clone.js";
+import { buildCloneInvocation, cloneCredentialScope, cloneWithHelper } from "./git_clone.js";
 import { shellQuote } from "./shell.js";
 
 const execAsync = promisify(exec);
 
-// A realistically-shaped token. Shape matters for one test only (the scrubber
-// covers shapes independently); every other assertion here must hold for a
-// credential of ANY shape, which is the point of keeping it out of argv.
-const TOKEN = "github_pat_11TESTONLY_abcdefghijklmnopqrstuvwxyz0123456789";
+const HELPER = "/home/aep/aep-workspace/default/store/abc.stage/credhelper.sh";
+const BEARER_FILE = "/home/aep/aep-workspace/default/store/abc.stage/bearer";
 
 async function tmpDir(): Promise<string> {
   return fs.promises.mkdtemp(path.join(os.tmpdir(), "aep-clone-test-"));
 }
 
+// ---- cloneCredentialScope ---------------------------------------------------
+
+test("cloneCredentialScope: scheme + host, so the helper is offered to one origin", () => {
+  assert.equal(
+    cloneCredentialScope("https://github.com/asdlc-repos/store.git"),
+    "https://github.com",
+  );
+  // Host-scoped rather than a bare credential.helper: a redirect to another host
+  // cannot draw the credential out of the helper.
+  assert.equal(cloneCredentialScope("https://ghe.corp.example/o/r.git"), "https://ghe.corp.example");
+  assert.equal(cloneCredentialScope("http://127.0.0.1:8080/o/r.git"), "http://127.0.0.1:8080");
+});
+
+test("cloneCredentialScope: undefined for origins that need no credential", () => {
+  assert.equal(cloneCredentialScope("/tmp/origin.git"), undefined);
+  assert.equal(cloneCredentialScope("file:///tmp/origin.git"), undefined);
+  assert.equal(cloneCredentialScope("git@github.com:o/r.git"), undefined);
+});
+
 // ---- buildCloneInvocation (pure seam) ---------------------------------------
 
-test("buildCloneInvocation: token is in the env, never in the command", () => {
+test("buildCloneInvocation: wires the helper in, carries no credential anywhere", () => {
   const { cmd, env } = buildCloneInvocation({
     repoUrl: "https://github.com/asdlc-repos/store-handmade-ceramics.git",
     destDir: "/home/aep/aep-workspace/default/store/abc",
-    token: TOKEN,
-    askpassPath: "/stage/askpass.sh",
+    helperPath: HELPER,
+    bearerFile: BEARER_FILE,
     baseEnv: {},
   });
 
-  assert.ok(!cmd.includes(TOKEN), "command must not contain the token");
-  assert.ok(!cmd.includes("x-access-token"), "command must not carry URL userinfo");
+  // `git -c` BEFORE the subcommand: applies to this command only, and is not
+  // written into the cloned repo's config (`git clone -c` would persist it).
+  //
+  // The empty `credential.helper=` must come FIRST. Git takes the first helper
+  // that answers, so a helper inherited from system config (Homebrew's git ships
+  // `credential.helper=osxkeychain`) would authenticate the clone instead of
+  // ours, and would be handed our token by git's post-success `store`.
   assert.equal(
     cmd,
-    "git clone 'https://github.com/asdlc-repos/store-handmade-ceramics.git' " +
+    `git -c credential.helper= -c 'credential.https://github.com.helper=${HELPER}' ` +
+      "clone 'https://github.com/asdlc-repos/store-handmade-ceramics.git' " +
       "'/home/aep/aep-workspace/default/store/abc'",
   );
-  assert.equal(env[CLONE_TOKEN_ENV], TOKEN);
-  assert.equal(env.GIT_ASKPASS, "/stage/askpass.sh");
+  assert.ok(!cmd.includes("x-access-token"), "command must not carry URL userinfo");
+
+  // The bearer travels as a PATH, never a value: the helper reads the file.
+  assert.equal(env.AEP_BEARER_FILE, BEARER_FILE);
   assert.equal(env.GIT_TERMINAL_PROMPT, "0");
 });
 
@@ -65,24 +93,39 @@ test("buildCloneInvocation: --depth 1 when requested", () => {
   const { cmd } = buildCloneInvocation({
     repoUrl: "https://github.com/acme/org-skills.git",
     destDir: "/tmp/skills",
-    token: TOKEN,
-    askpassPath: "/tmp/askpass.sh",
+    helperPath: HELPER,
+    bearerFile: BEARER_FILE,
     depth1: true,
     baseEnv: {},
   });
-  assert.equal(cmd, "git clone --depth 1 'https://github.com/acme/org-skills.git' '/tmp/skills'");
+  assert.ok(cmd.startsWith("git -c credential.helper= -c "), cmd);
+  assert.match(cmd, /clone --depth 1 'https:\/\/github\.com\/acme\/org-skills\.git' '\/tmp\/skills'$/);
 });
 
-test("buildCloneInvocation: an empty token configures no askpass at all", () => {
-  const { env } = buildCloneInvocation({
-    repoUrl: "/tmp/origin.git",
+test("buildCloneInvocation: no helperPath configures no helper at all", () => {
+  // So a genuinely missing credential surfaces as git's own error rather than as
+  // a helper that answers with nothing.
+  const { cmd, env } = buildCloneInvocation({
+    repoUrl: "https://github.com/o/r.git",
     destDir: "/tmp/dest",
-    token: "",
-    askpassPath: "/tmp/askpass.sh",
+    helperPath: "",
+    bearerFile: "",
     baseEnv: {},
   });
-  assert.equal(env.GIT_ASKPASS, undefined);
-  assert.equal(env[CLONE_TOKEN_ENV], undefined);
+  assert.equal(cmd, "git clone 'https://github.com/o/r.git' '/tmp/dest'");
+  assert.equal(env.AEP_BEARER_FILE, undefined);
+});
+
+test("buildCloneInvocation: an origin needing no credential gets no helper", () => {
+  const { cmd, env } = buildCloneInvocation({
+    repoUrl: "/tmp/origin.git",
+    destDir: "/tmp/dest",
+    helperPath: HELPER,
+    bearerFile: BEARER_FILE,
+    baseEnv: {},
+  });
+  assert.equal(cmd, "git clone '/tmp/origin.git' '/tmp/dest'");
+  assert.equal(env.AEP_BEARER_FILE, undefined);
 });
 
 test("buildCloneInvocation: does not mutate the caller's base env", () => {
@@ -90,68 +133,43 @@ test("buildCloneInvocation: does not mutate the caller's base env", () => {
   buildCloneInvocation({
     repoUrl: "https://example.invalid/r.git",
     destDir: "/tmp/d",
-    token: TOKEN,
-    askpassPath: "/tmp/a.sh",
+    helperPath: HELPER,
+    bearerFile: BEARER_FILE,
     baseEnv,
   });
   assert.deepEqual(baseEnv, { PATH: "/usr/bin" });
 });
 
-// ---- writeAskpassShim -------------------------------------------------------
-
-test("writeAskpassShim: writes an executable shim that holds no secret", async () => {
-  const dir = await tmpDir();
-  const shim = await writeAskpassShim(dir);
-  const body = await fs.promises.readFile(shim, "utf-8");
-
-  assert.ok(!body.includes(TOKEN));
-  // It reads the token from the environment rather than baking one in.
-  assert.match(body, new RegExp(`\\$${CLONE_TOKEN_ENV}`));
-  const mode = (await fs.promises.stat(shim)).mode & 0o777;
-  assert.equal(mode, 0o700, `expected 0700, got ${mode.toString(8)}`);
-});
-
-test("writeAskpassShim: answers the username prompt and the password prompt", async () => {
-  const dir = await tmpDir();
-  const shim = await writeAskpassShim(dir);
-  const env = { ...process.env, [CLONE_TOKEN_ENV]: TOKEN };
-
-  const user = await execAsync(`${shellQuote(shim)} "Username for 'https://github.com': "`, { env });
-  assert.equal(user.stdout.trim(), "x-access-token");
-
-  const pass = await execAsync(`${shellQuote(shim)} "Password for 'https://github.com': "`, { env });
-  assert.equal(pass.stdout.trim(), TOKEN);
-});
-
 // ---- the reported leak ------------------------------------------------------
 
-test("cloneWithToken: a failed clone's error message carries no token", async () => {
+test("cloneWithHelper: a failed clone's error message carries no credential", async () => {
   // Regression for the credential leak: the runner logs this error and the BFF
   // forwards it into the console build log. `.invalid` is reserved and never
   // resolves, reproducing the exact "Could not resolve host" failure that
-  // surfaced the token.
+  // surfaced the token. With the helper doing the exchange there is no token in
+  // the process at all, but the command must still be safe to print verbatim.
   const dir = await tmpDir();
   await assert.rejects(
-    cloneWithToken({
+    cloneWithHelper({
       repoUrl: "https://aep-does-not-exist.invalid/asdlc-repos/store.git",
       destDir: path.join(dir, "dest"),
-      token: TOKEN,
-      shimDir: path.join(dir, "stage"),
+      helperPath: path.join(dir, "credhelper.sh"),
+      bearerFile: path.join(dir, "bearer"),
     }),
     (err: unknown) => {
       const text = err instanceof Error ? `${err.stack ?? ""}${err.message}` : String(err);
-      assert.ok(text.includes("git clone"), `expected the clone command in the error, got: ${text}`);
-      assert.ok(!text.includes(TOKEN), `clone error leaked the token: ${text}`);
+      assert.ok(text.includes("git "), `expected the clone command in the error, got: ${text}`);
       assert.ok(!text.includes("x-access-token"), `clone error leaked URL userinfo: ${text}`);
       return true;
     },
   );
 });
 
-test("cloneWithToken: a successful clone leaves no token at rest in the work tree", async () => {
-  // The .git/config analogue of gitfs/hygiene_test.go: git preserves URL
-  // userinfo verbatim, so an authenticated clone URL would persist the
-  // credential in the cloned tree for the whole run.
+test("cloneWithHelper: a successful clone leaves no credential at rest", async () => {
+  // The .git/config analogue of gitfs/hygiene_test.go. Two things are asserted:
+  // the clone works, and `git -c` did NOT persist the helper into the cloned
+  // config — workspace.ts installs the durable one itself, pointed at the
+  // helper's FINAL path, not the staging path used here.
   const dir = await tmpDir();
   const origin = path.join(dir, "origin.git");
   const seed = path.join(dir, "seed");
@@ -170,35 +188,27 @@ test("cloneWithToken: a successful clone leaves no token at rest in the work tre
   await execAsync(`git -C ${shellQuote(origin)} symbolic-ref HEAD refs/heads/main`);
 
   const dest = path.join(dir, "clone");
-  await cloneWithToken({
+  const stageHelper = path.join(dir, "stage", "credhelper.sh");
+  await cloneWithHelper({
     repoUrl: origin,
     destDir: dest,
-    token: TOKEN,
-    shimDir: path.join(dir, "stage"),
+    helperPath: stageHelper,
+    bearerFile: path.join(dir, "stage", "bearer"),
   });
 
   assert.ok(fs.existsSync(path.join(dest, "README.md")), "clone should have checked out the tree");
 
-  // runner.ts spreads process.env into the agent's child env, so a token that
-  // ever landed there would reach the agent and everything it spawns.
+  // runner.ts spreads process.env into the agent's child env, so anything the
+  // clone needed must have stayed on the child's env object.
   assert.equal(
-    process.env[CLONE_TOKEN_ENV],
+    process.env.AEP_BEARER_FILE,
     undefined,
-    "clone token must never be written to process.env",
+    "the clone's bearer path must never be written to process.env",
   );
 
-  const offenders: string[] = [];
-  const walk = async (d: string): Promise<void> => {
-    for (const e of await fs.promises.readdir(d, { withFileTypes: true })) {
-      const full = path.join(d, e.name);
-      if (e.isDirectory()) {
-        await walk(full);
-      } else if (e.isFile()) {
-        const body = await fs.promises.readFile(full);
-        if (body.includes(TOKEN)) offenders.push(full);
-      }
-    }
-  };
-  await walk(dest);
-  assert.deepEqual(offenders, [], `token found at rest in: ${offenders.join(", ")}`);
+  const clonedConfig = await fs.promises.readFile(path.join(dest, ".git", "config"), "utf-8");
+  assert.ok(
+    !clonedConfig.includes(stageHelper),
+    `git -c leaked the staging helper into the cloned config:\n${clonedConfig}`,
+  );
 });

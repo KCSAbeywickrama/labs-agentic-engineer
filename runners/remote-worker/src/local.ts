@@ -170,10 +170,11 @@ async function main(): Promise<number> {
         // union of every component's skillsApplied, never one componentName.
         scope: { kind: "project" },
         skillsRepoURL: "local:working-tree",
-        pat: "",
+        // No git, no platform: the clone below is a working-tree copy.
+        cloneAuth: { helperPath: "", bearerFile: "" },
         scratchDir: path.join(run.runDir, "skills-clone"),
         log: (l) => console.log(l),
-        clone: (_url, _pat, dest) => copyLocalSkillLibrary(skillsDir, dest),
+        clone: (_url, _auth, dest) => copyLocalSkillLibrary(skillsDir, dest),
       });
       // Materialize under the run dir — never inside the user's project tree.
       const result = await materializeSkills(run.runDir, resolutions);

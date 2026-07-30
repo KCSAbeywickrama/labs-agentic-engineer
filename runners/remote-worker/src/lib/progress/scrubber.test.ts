@@ -172,9 +172,9 @@ test("scrub: redacts a token inside a failed `git clone` command string", () => 
 });
 
 test("scrub: redacts an enrolled token whose shape no pattern matches", () => {
-  // Shape-independence: refreshGitToken enrolls whatever the credential
-  // endpoint returns, so a classic 40-hex PAT or an opaque App token is
-  // covered without the denylist knowing its prefix.
+  // Shape-independence: an enrolled literal is redacted whatever it looks like,
+  // so a classic 40-hex PAT or an opaque App token is covered without the
+  // denylist knowing its prefix.
   const s = fresh();
   const opaque = "aQ7fL2mZ9xR4tY6uP1sD3gH5jK8nB0vC";
   s.addLiteral(opaque);
