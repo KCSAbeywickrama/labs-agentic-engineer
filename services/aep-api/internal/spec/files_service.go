@@ -162,6 +162,12 @@ type FilesGitGateway interface {
 type FilesService interface {
 	List(ctx context.Context, orgID, projectID, prefix string) ([]FileMeta, error)
 	Read(ctx context.Context, orgID, projectID, path string) (*FileContent, error)
+	// ReadAt is Read pinned to one commit (`at` empty means the branch tip). The
+	// validation report needs it: the report lives at a fixed path that every run
+	// overwrites, so reading it at the branch tip returns the NEWEST run's results
+	// no matter which run you asked about. Pinning to the run's own merge commit is
+	// what makes a per-run report addressable at all.
+	ReadAt(ctx context.Context, orgID, projectID, path, at string) (*FileContent, error)
 	Apply(ctx context.Context, orgID, projectID string, req ApplyRequest) (*ApplyResult, []Conflict, error)
 }
 
@@ -232,21 +238,44 @@ func (s *service) List(ctx context.Context, orgID, projectID, prefix string) ([]
 // It gates on validateReadPath, which permits specs/ plus a small read-only
 // allow-list (the validation report); writes stay specs/-only via validatePath.
 func (s *service) Read(ctx context.Context, orgID, projectID, path string) (*FileContent, error) {
+	return s.ReadAt(ctx, orgID, projectID, path, "")
+}
+
+// ReadAt is Read pinned to a commit. `at` empty reads the branch tip, so Read is
+// exactly this call with no pin; the gitfs layer already takes the commit, so the
+// value is threaded straight through rather than resolved here.
+//
+// Both gates apply: validateReadPath decides WHICH paths are readable at all, and
+// validateCommit bounds the pin to a full commit sha so the parameter cannot
+// become a revision-expression browser over the repo's history.
+func (s *service) ReadAt(ctx context.Context, orgID, projectID, path, at string) (*FileContent, error) {
 	if err := validateReadPath(path); err != nil {
+		return nil, err
+	}
+	if err := validateCommit(at); err != nil {
 		return nil, err
 	}
 	ref, err := s.resolveRef(ctx, orgID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	content, blobSHA, err := s.git.Workspace().ReadFile(ctx, ref, "", path)
+	content, blobSHA, err := s.git.Workspace().ReadFile(ctx, ref, at, path)
 	if err != nil {
 		if errors.Is(err, sourcecontrol.ErrPathNotFound) {
 			return nil, ErrFileNotFound
 		}
-		return nil, fmt.Errorf("read %s at head: %w", path, err)
+		return nil, fmt.Errorf("read %s at %s: %w", path, commitLabel(at), err)
 	}
 	return &FileContent{Path: path, Content: string(content), SHA: blobSHA}, nil
+}
+
+// commitLabel names the pin for an error message: "head" reads better than an
+// empty string in "read X at : ...".
+func commitLabel(at string) string {
+	if at == "" {
+		return "head"
+	}
+	return at
 }
 
 // Apply validates + commits a batch atomically: one Workspace.Mutate whose fn

@@ -121,19 +121,24 @@ func (a *Activities) BumpRunBudget(ctx context.Context, in BumpRunBudgetInput) e
 	return a.runs.BumpBudget(ctx, in.RunID, delivery.RunBudget(in.Counter))
 }
 
-// SetValidationVerdictInput records the validation cycle's outcome.
+// SetValidationVerdictInput records the validation cycle's outcome and the issue
+// it came from. Issue is 0 when there is no validation issue to name (an incident
+// run, or a skip decided before minting).
 type SetValidationVerdictInput struct {
 	RunID   string `json:"runId"`
 	Verdict string `json:"verdict"`
+	Issue   int    `json:"issue,omitempty"`
 }
 
 // SetValidationVerdict writes the verdict onto the run. It is a RUN property,
-// not a per-issue one — the deployment surface reads it from here.
+// not a per-issue one — the deployment surface reads it from here. The issue
+// number rides along because it is only otherwise in live workflow state, and a
+// verdict nobody can trace back to its criteria is not much of an answer.
 func (a *Activities) SetValidationVerdict(ctx context.Context, in SetValidationVerdictInput) error {
 	if a.runs == nil {
 		return errNotConfigured
 	}
-	return a.runs.SetValidationVerdict(ctx, in.RunID, in.Verdict)
+	return a.runs.SetValidationVerdict(ctx, in.RunID, in.Verdict, in.Issue)
 }
 
 // ---- cycle record ----------------------------------------------------------
@@ -348,21 +353,27 @@ func (a *Activities) EnsureValidationIssue(ctx context.Context, in MilestoneRef)
 	return a.validation.EnsureValidationIssue(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber)
 }
 
-// ProjectRef identifies a project for the verdict read.
-type ProjectRef struct {
+// ValidationReportRef identifies the report to read: the project, plus the commit
+// to read it at. At is the validation cycle's merge SHA, which is what makes the
+// report belong to THIS run rather than to whichever run last overwrote the path.
+type ValidationReportRef struct {
 	OrgID     string `json:"orgId"`
 	ProjectID string `json:"projectId"`
+	At        string `json:"at,omitempty"`
 }
 
-// ReadValidationVerdict reads the runner's committed report and returns one of
-// the delivery.ValidationVerdict* values. A missing or unreadable report is
-// "skipped", not "failed" — the run landed its work either way, and calling an
-// absent report a failure would make the report's own plumbing a quality gate.
-func (a *Activities) ReadValidationVerdict(ctx context.Context, in ProjectRef) (string, error) {
+// ReadValidationVerdict reads the runner's committed report at the cycle's merge
+// commit and returns one of the delivery.ValidationVerdict* values.
+//
+// An unwired coordinator yields "skipped" — there is genuinely no validation in
+// that configuration. A report that is absent AT THAT COMMIT is a different
+// matter and yields "unreported", which fails the run: the read is pinned, so an
+// absence is a fact about this run rather than a propagation artifact.
+func (a *Activities) ReadValidationVerdict(ctx context.Context, in ValidationReportRef) (string, error) {
 	if a.validation == nil {
 		return delivery.ValidationVerdictSkipped, nil
 	}
-	return a.validation.Verdict(ctx, in.OrgID, in.ProjectID)
+	return a.validation.Verdict(ctx, in.OrgID, in.ProjectID, in.At)
 }
 
 // ---- dispatch --------------------------------------------------------------

@@ -316,8 +316,14 @@ func (l *loop) runValidation(ctx workflow.Context) (settled bool, res RunResult,
 	if err := l.setVerdict(ctx, verdict); err != nil {
 		return true, l.result(), err
 	}
-	if verdict == delivery.ValidationVerdictFailed {
-		res, err = l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonValidationFailed)
+	// Which verdicts are fatal, and under which reason, is delivery's to say — one
+	// definition so the supervisor and the read model cannot disagree about whether
+	// a version settled green. `failed` is a real assertion loss; `unreported` is
+	// an agent that merged a pull request and delivered no report at its own merge
+	// commit. `partial` and `inconclusive` are honest reports of incomplete
+	// evidence, not defects, so they fall through.
+	if reason, fatal := delivery.ValidationVerdictFailsRun(verdict); fatal {
+		res, err = l.settle(ctx, delivery.RunStateFailed, reason)
 		return true, res, err
 	}
 	// A validation cycle closes no working-set issue and mints none, so the
@@ -450,9 +456,15 @@ func (l *loop) bump(ctx workflow.Context, counter delivery.RunBudget) error {
 		BumpRunBudgetInput{RunID: l.in.RunID, Counter: string(counter)}).Get(ctx, nil)
 }
 
+// setVerdict records the verdict and the issue that produced it in one write. The
+// issue is persisted because it otherwise lives only here, in workflow state — so
+// once Temporal retention lapses a settled run would carry a verdict with no way
+// back to the criteria, the pull request, or the runner's own summary.
 func (l *loop) setVerdict(ctx workflow.Context, verdict string) error {
 	if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).SetValidationVerdict,
-		SetValidationVerdictInput{RunID: l.in.RunID, Verdict: verdict}).Get(ctx, nil); err != nil {
+		SetValidationVerdictInput{
+			RunID: l.in.RunID, Verdict: verdict, Issue: l.st.ValidationIssue,
+		}).Get(ctx, nil); err != nil {
 		return err
 	}
 	l.st.ValidationVerdict = verdict
@@ -469,10 +481,14 @@ func (l *loop) ensureValidationIssue(ctx workflow.Context) (int, error) {
 	return issue, err
 }
 
+// readVerdict reads the report the validation cycle just merged, pinned to that
+// cycle's own merge commit (l.mergeSHA, learned from the polled PR facts). Without
+// the pin the read would follow the branch tip and a later run's report could
+// answer for this one.
 func (l *loop) readVerdict(ctx workflow.Context) (string, error) {
 	var verdict string
 	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).ReadValidationVerdict,
-		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, &verdict)
+		ValidationReportRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, At: l.mergeSHA}).Get(ctx, &verdict)
 	return verdict, err
 }
 

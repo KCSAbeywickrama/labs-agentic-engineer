@@ -49,13 +49,13 @@ const (
 	deployDeployed  = "deployed"
 	deployFailed    = "failed"
 
-	// Coarse validation state (the deploy.validation contract enum): none (the
-	// run has not reached validation, or the project has no acceptance
-	// criteria), running, completed, failed.
-	validationNone      = "none"
-	validationRunning   = "running"
-	validationCompleted = "completed"
-	validationFailed    = "failed"
+	// Validation state (the deploy.validation contract enum). Only the two
+	// LIFECYCLE values live here — the rest of the enum is the run's verdict
+	// verbatim (delivery.ValidationVerdict*), because a fold would have to discard
+	// `partial`, `inconclusive` and `unreported` at the one surface that needs
+	// them, and `completed` never said whether anything passed.
+	validationNone    = "none"
+	validationRunning = "running"
 )
 
 // milestoneRunRows is the narrow port over the milestone_runs index: the status
@@ -66,6 +66,11 @@ type milestoneRunRows interface {
 	// ListByProject returns the project's runs newest-first.
 	ListByProject(ctx context.Context, orgID, projectID string) ([]delivery.MilestoneRun, error)
 	DeleteByProject(ctx context.Context, orgID, projectID string) error
+	// LatestCycle returns the newest cycle record for a run, or (nil, nil) when it
+	// has dispatched none. The validation chip needs it: loop position is never a
+	// stored enum (a fix or conflict cycle re-enters an earlier phase), so "a
+	// validation cycle is in flight" is knowable only from the latest cycle.
+	LatestCycle(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error)
 }
 
 // bindingsReader is the narrow status-read port over OpenChoreo release
@@ -171,11 +176,12 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		latest = &runs[0]
 		status.Build.Version = latest.MilestoneTitle
 		status.Build.Status = buildStageStatus(latest.State)
-		// A failed VALIDATION cycle is not a build failure: every coding cycle
-		// landed and the failure already rides deploy.validation=failed below.
-		// Without this the overview says "build failed" while the validation chip
-		// contradicts it.
-		if latest.TerminalReason == delivery.RunReasonValidationFailed {
+		// A VALIDATING-phase failure is not a build failure: every coding cycle
+		// landed and the failure already rides deploy.validation below. Without this
+		// the overview says "build failed" while the validation chip contradicts it.
+		// Covers every reason the phase can settle under, not just a red suite — an
+		// unreported run is equally not a build failure.
+		if delivery.IsValidationTerminalReason(latest.TerminalReason) {
 			status.Build.Status = buildSucceeded
 		}
 	}
@@ -203,35 +209,64 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// per-cycle detail behind it, live on the version'"'"'s run story
 	// (list-build-runs), which is where the console'"'"'s validation surface reads
 	// them; validationUrl/validationIssue are therefore no longer served here.
-	status.Deploy.Validation = gen.DeployStageValidation(validationStageStatus(latest))
+	state, err := s.validationStage(ctx, orgName, latest)
+	if err != nil {
+		return err
+	}
+	status.Deploy.Validation = gen.DeployStageValidation(state)
 	return nil
 }
 
-// validationStageStatus maps the newest run'"'"'s validation verdict onto the
-// deploy.validation enum.
+// validationStage resolves the deploy.validation value, reading the run's latest
+// cycle ONLY when the verdict alone cannot answer.
 //
-// The verdict is written exactly once, when the validation cycle settles, so an
-// empty verdict on a LIVE run means the run has not reached validation yet
-// (running), and an empty verdict on a settled run means it never got there —
-// which reads as none, the same as a project with no acceptance criteria.
-// A skipped verdict (no criteria, or a cycle that merged without a report) is
-// also none: nothing was validated, and nothing failed.
-func validationStageStatus(run *delivery.MilestoneRun) string {
+// That conditional read is the whole point of the split: once a verdict exists it
+// is the answer, and a settled run without one never reached validation — both
+// decided from the row already in hand. The extra query happens only for a LIVE
+// run with no verdict yet, which is precisely the case the old code got wrong by
+// calling every such run "validating".
+func (s *Service) validationStage(ctx context.Context, orgID string, run *delivery.MilestoneRun) (string, error) {
+	state, decided := validationStageFromRun(run)
+	if decided {
+		return state, nil
+	}
+	cycle, err := s.runReader.LatestCycle(ctx, orgID, run.ID)
+	if err != nil {
+		return "", fmt.Errorf("latest cycle for run %s: %w", run.ID, err)
+	}
+	if cycle != nil && cycle.Kind == delivery.CycleKindValidation && cycle.EndedAt == nil {
+		return validationRunning, nil
+	}
+	// A live run whose current cycle is coding, fixing or resolving a conflict has
+	// nothing to say about validation yet. Saying "validating" here was wrong for
+	// most of every run's life.
+	return validationNone, nil
+}
+
+// validationStageFromRun answers deploy.validation from the run row alone,
+// reporting decided=false when only the run's latest cycle can settle it.
+//
+// The verdict is MIRRORED, not folded: it is written exactly once, when the
+// validation cycle settles, and it is the thing a reader wants to know. Folding it
+// into a coarser word is how "completed" came to mean "passed" without saying so,
+// and it would discard partial, inconclusive and unreported entirely.
+//
+// Undecided means: a live run with no verdict yet. Whether a validation cycle is
+// actually in flight is not on this row — loop position is never a stored enum,
+// because a fix or conflict cycle re-enters an earlier phase and a flat enum would
+// lie mid-loop.
+func validationStageFromRun(run *delivery.MilestoneRun) (state string, decided bool) {
 	if run == nil {
-		return validationNone
+		return validationNone, true
 	}
-	switch run.ValidationVerdict {
-	case delivery.ValidationVerdictPassed:
-		return validationCompleted
-	case delivery.ValidationVerdictFailed:
-		return validationFailed
-	case delivery.ValidationVerdictSkipped:
-		return validationNone
+	if run.ValidationVerdict != "" {
+		return run.ValidationVerdict, true
 	}
+	// Settled without ever recording a verdict: the run never reached validation.
 	if delivery.IsTerminalRunState(run.State) {
-		return validationNone
+		return validationNone, true
 	}
-	return validationRunning
+	return "", false
 }
 
 // applyFlatArtifactFields recomputes the pre-#184 flat fields from the

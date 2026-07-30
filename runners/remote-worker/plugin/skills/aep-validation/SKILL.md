@@ -228,17 +228,22 @@ means a contract violation: spec titles that don't map to criterion ids
 (fix titles, re-run tests from step 7), a spec file missing its
 `// spec:` header (add the header, regenerate — no test re-run needed),
 or a pre-existing spec modified without a heal-log entry (record the
-heal per `references/healing.md`). Commit the report and tests together.
+heal per `references/healing.md`).
 
-If `$AEP_PLATFORM_URL` is set, also push the report to the platform
-(best-effort — do not fail the task if this call fails):
+**`tests/validation/report.json` is REQUIRED. Commit it with the tests.**
 
-```bash
-curl -sf -X POST "$AEP_PLATFORM_URL/internal/v1/executions/$AEP_TASK_ID/validation-report" \
-  -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" \
-  -H "Content-Type: application/json" \
-  --data-binary @tests/validation/report.json || true
-```
+The platform reads it at your pull request's merge commit to decide the
+run's verdict. A merged PR without it fails the whole run with
+`validation-unreported` — the platform cannot tell "nothing was wrong"
+from "nobody looked", so it assumes nothing was learned. This is not
+best-effort.
+
+So on exit code 2: fix the violation and regenerate. Never open the PR
+without the report, and never hand-write one to get past the error —
+a fabricated report is worse than a failed run.
+
+A **failing criterion is different**: that is report *content*, it
+belongs in the report, and you still open the PR (step 10).
 
 ### 10. PR
 

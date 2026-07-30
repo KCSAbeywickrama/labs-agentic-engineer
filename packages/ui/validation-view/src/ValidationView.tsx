@@ -151,9 +151,11 @@ function CriterionRow({
           method badge) so a long trace never crowds the assertion. */}
       {failed && (report?.spec || report?.failure) && (
         <Box sx={{ mt: 0.75, ml: "108px" }}>
-          {report?.spec && (
+          {/* Prefer the reporter's `<file>:<line>`, which points at the failing
+              assertion rather than merely the spec that contains it. */}
+          {(report?.failureLocation || report?.spec) && (
             <Typography variant="caption" color="text.secondary" sx={mono}>
-              {report.spec}
+              {report.failureLocation || report.spec}
             </Typography>
           )}
           {report?.failure && (

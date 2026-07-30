@@ -161,7 +161,7 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deployed",
       components: { total: 3, ready: 3 },
-      validation: "completed",
+      validation: "passed",
     },
   },
   // v1 build done but the dev deployment failed.
@@ -968,8 +968,13 @@ const validationReportJson = JSON.stringify(
         healed: false,
         flaky: true,
         durationMs: 2600,
-        failure:
-          "TimeoutError: locator.click: Timeout 5000ms exceeded.\n  waiting for getByRole('option', { name: 'Accessories' })",
+        // The real shape the runner writes: an object, not a bare string. A
+        // string-shaped mock is what let the view's dead failure block look fine.
+        failure: {
+          message:
+            "TimeoutError: locator.click: Timeout 5000ms exceeded.\n  waiting for getByRole('option', { name: 'Accessories' })",
+          location: "tests/e2e/specs/AC-001-b.spec.ts:31",
+        },
       },
       {
         id: "AC-002-a",

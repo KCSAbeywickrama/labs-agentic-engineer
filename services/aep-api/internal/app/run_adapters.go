@@ -75,8 +75,8 @@ func (a runRuns) BumpBudget(ctx context.Context, id string, counter delivery.Run
 	return err
 }
 
-func (a runRuns) SetValidationVerdict(ctx context.Context, id, verdict string) error {
-	_, err := a.runs.SetValidationVerdict(ctx, id, verdict)
+func (a runRuns) SetValidationVerdict(ctx context.Context, id, verdict string, issue int) error {
+	_, err := a.runs.SetValidationVerdict(ctx, id, verdict, issue)
 	return err
 }
 
@@ -169,14 +169,15 @@ func (a runValidation) EnsureValidationIssue(ctx context.Context, orgID, project
 	return number, nil
 }
 
-func (a runValidation) Verdict(ctx context.Context, orgID, projectID string) (string, error) {
-	fc, err := a.files.Read(ctx, orgID, projectID, validation.ReportFilePath)
+func (a runValidation) Verdict(ctx context.Context, orgID, projectID, at string) (string, error) {
+	fc, err := a.files.ReadAt(ctx, orgID, projectID, validation.ReportFilePath, at)
 	if err != nil {
 		if errors.Is(err, spec.ErrFileNotFound) {
-			// The validation cycle merged but committed no report. Skipped, not
-			// failed: an absent report is a gap in reporting, not evidence that the
-			// deployment is broken.
-			return delivery.ValidationVerdictSkipped, nil
+			// The validation cycle merged but committed no report AT ITS OWN MERGE
+			// COMMIT, so this is a fact about this run and not a stale read: the
+			// agent shipped a pull request and reported nothing. VerdictFromReport
+			// maps the empty case to `unreported`, which fails the run.
+			return validation.VerdictFromReport(nil), nil
 		}
 		return "", err
 	}

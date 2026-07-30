@@ -67,7 +67,10 @@ func (h *Handler) ReadFile(ctx context.Context, request gen.ReadFileRequestObjec
 	if request.Path == "" {
 		return nil, apierr.BadRequest("path is required")
 	}
-	fc, err := h.files.Read(ctx, org, request.ProjectName, request.Path)
+	// `ref` pins the read to one commit; empty reads the branch tip, which is what
+	// every caller but the validation report wants. The service validates its
+	// shape — an object name, never a revision expression.
+	fc, err := h.files.ReadAt(ctx, org, request.ProjectName, request.Path, request.Params.Ref)
 	if err != nil {
 		return nil, mapFilesError(err)
 	}

@@ -91,7 +91,17 @@ export function ValidationPage({
   // at HEAD to read. Hooks stay unconditional; `enabled` gates them.
   const settled = verdict !== null && verdict.label !== "Validation skipped";
   const criteria = useValidationCriteria(projectName, version, settled);
-  const report = useValidationReport(projectName, version, settled, reportPath);
+  // Pinned to THIS run's validation-cycle merge commit. Reading the branch tip
+  // would show whichever run last overwrote the path — so an older run in the story
+  // would display the newest run's results, and a run that committed no report
+  // would silently inherit its predecessor's.
+  const report = useValidationReport(
+    projectName,
+    version,
+    settled,
+    reportPath,
+    validationCycle?.mergeSha,
+  );
 
   // Body rule: the log shows while there is no report to show (running, failed
   // mechanically, nothing settled yet) OR the user toggled ?view=logs.
