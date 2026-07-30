@@ -1213,12 +1213,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			PRs:        issueService,
 			Design:     designComponents{store: artifactStore},
 			Builds:     runBuilds{oc: componentClient},
-			Validation: runValidation{
-				svc:       validationSvc,
-				art:       artifactSvcGit,
-				files:     filesSvc,
-				milestone: issueService,
-			},
+			Validation: runValidation{svc: validationSvc, files: filesSvc},
 			// The coding executor launches the cycle's runner Job and answers with
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.

@@ -15,8 +15,15 @@
 // under the License.
 
 // Package validation owns the VALIDATION phase's platform side: it mints the
-// single project-scoped validation issue (aep:validation) that the milestone
-// run's validation cycle is dispatched at.
+// validation issue (aep:validation) that the milestone run's validation cycle is
+// dispatched at.
+//
+// ONE issue per VERSION, filed into that version's milestone by the create
+// itself. The milestone is the version pin — there is no version label, and no
+// follow-up patch, so the issue is never versionless. Per version rather than per
+// project because the issue body embeds the acceptance criteria as they stood at
+// mint time: reusing the previous version's issue would hand this version's agent
+// the previous version's oracle.
 //
 // The run supervisor mints it at DEPLOYED-GREEN, not at plan time: an issue
 // that nothing can work until every component is deployed would otherwise sit

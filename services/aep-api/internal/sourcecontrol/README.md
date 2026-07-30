@@ -62,6 +62,11 @@ and installation lifecycle.*
   issue must carry all of them); the GraphQL `labels:` above is OR. Two APIs over one resource, two
   rules — carrying an assumption from one to the other silently empties the working set, and the
   fakes on both sides model their own rule so a test cannot hide it.
+- **A write's own result is the only reliable read of it.** GitHub's issue indexes lag a create by a
+  beat, so `CreateIssue`'s number is authoritative while a label-filtered list moments later may not
+  show the issue at all. Callers key on the returned number — `Deduped` names the case where that
+  number is an existing issue's. Re-discovering a just-written issue by listing is how the run
+  supervisor came to report a version `skipped` over an acceptance oracle it had itself just filed.
 - Ports here are **nil-tolerant**: an unwired service answers 503, never panics — the component harness
   wires only the feature under test, and `edge`'s `sourceControlOrEmpty` preserves that for an unwired
   domain.
