@@ -33,7 +33,7 @@
 
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { chatTurn, codeAllCommand, codeCommand, tasksCommand, undoCommand, type PhaseOptions } from "../commands.js";
+import { chatTurn, codeCommand, tasksCommand, undoCommand, type PhaseOptions } from "../commands.js";
 import { checkProject } from "../engine/check.js";
 import { loadRepoSkills } from "../kit/skills.js";
 import { collectAnswers } from "./questions.js";
@@ -68,11 +68,14 @@ async function runPhase(session: PlaygroundSession, intent: Extract<ChatIntent, 
       return;
     }
     case "code": {
-      // One issue (honing loop) when given, else the whole plan in dependency
-      // order — mirrors the CLI verb. Consent + undo snapshot ride inside.
-      const outcome = intent.arg
-        ? await codeCommand(dir, intent.arg, opts, confirmCodingDir(dir))
-        : await codeAllCommand(dir, opts, confirmCodingDir(dir));
+      // ONE session works the whole project (ADR-0001) — the `aep` skill picks
+      // its own working set, so a per-issue argument has nothing to steer.
+      // Consent + undo snapshot ride inside.
+      if (intent.arg) {
+        output.write("  ✗ /code takes no argument — one session works the whole plan (the agent picks its own working set)\n");
+        return;
+      }
+      const outcome = await codeCommand(dir, opts, confirmCodingDir(dir));
       if (!outcome.ok) output.write(`  ✗ code: ${outcome.detail ?? "failed"}\n`);
       return;
     }

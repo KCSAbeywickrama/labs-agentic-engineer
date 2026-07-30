@@ -22,6 +22,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wso2/aep/aep-api/ocauth"
+	"github.com/wso2/aep/aep-api/secretsprovider"
 )
 
 // Options are the injectable composition-root seams for Run.
@@ -45,11 +46,9 @@ type Options struct {
 	// infra. Ignored when ImpersonateOrgResolver is already set.
 	ImpersonateOrgResolverBuilder func(db *gorm.DB) func(context.Context, string) (string, error)
 
-	// SecretsProvider, when non-nil, is used instead of constructing the
-	// default SM-API provider from SECRET_MANAGER_API_URL.
-	// Nil = today's default construction (SM-API when URL configured).
-	// Typed as any so the public Options surface does not name an internal
-	// package; the value must satisfy secretmanagersvc.Provider (NewClient /
-	// ValidateConfig / Capabilities). Run adapts before Assemble.
-	SecretsProvider any
+	// SecretsProvider is the write-only secrets delivery channel
+	// (KV → SecretReference → ESO). OSS NewOSSOptions injects OpenBao-direct
+	// when OPENBAO_ADDR is set; an overlay may inject its own provider.
+	// Nil = secrets delivery off (degrade cleanly; no plaintext substitute).
+	SecretsProvider secretsprovider.Provider
 }

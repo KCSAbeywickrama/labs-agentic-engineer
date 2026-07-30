@@ -36,13 +36,13 @@ type Config struct {
 	// Defaults false, so the surface is absent in every real env.
 	TestMode bool
 
-	// LocalOpenBaoRepairEnabled gates the /_dev/v1/sm-api-resync endpoint —
-	// distinct from TestMode because the resync surface emits decrypted per-org
-	// plaintext (Anthropic API keys, GitHub PATs), and TestMode is also true on
-	// the shared wso2cloud dev release binding. Splitting the two means the
-	// resync route only mounts where deployments/docker-compose.yml explicitly
-	// opts in; cloud release bindings never set this var so the route never
-	// registers in deployed environments.
+	// LocalOpenBaoRepairEnabled gates POST /_dev/v1/secret-ref-resync — the
+	// in-process SecretRefWriter resync helper (status-only response; no secret
+	// material on the wire). Distinct from TestMode because TestMode is also
+	// true on the shared wso2cloud dev release binding. Splitting the two means
+	// the resync route only mounts where deployments/docker-compose.yml
+	// explicitly opts in; cloud release bindings never set this var so the route
+	// never registers in deployed environments.
 	LocalOpenBaoRepairEnabled bool
 
 	// DeploymentTier guards dev-only destructive migrations and seed paths.
@@ -170,7 +170,9 @@ type Config struct {
 	// used to encrypt per-org credentials at rest in org_secrets.
 	CredentialEncryptionKey string
 
-	// OpenBaoAddr / OpenBaoToken — OpenBao address and token.
+	// OpenBaoAddr / OpenBaoToken — local-only OpenBao connection for the
+	// in-process OpenBao-direct secrets provider (NewOSSOptions). Empty
+	// leaves SecretsProvider nil (delivery off). Never set in cloud.
 	OpenBaoAddr  string
 	OpenBaoToken string
 
@@ -183,15 +185,6 @@ type Config struct {
 	// CredentialValidatorInterval is the periodic credential-validator
 	// sweep interval. Default 24h.
 	CredentialValidatorInterval time.Duration
-
-	// Secret Manager API + cluster-gateway-proxy.
-	// SM-API URL the binary writes per-org credentials to (the `sm-api`
-	// secretmanagersvc provider). Empty disables the provider — the legacy
-	// `org_secrets` DB path keeps working but the dispatch + cascade flows
-	// that depend on SecretReference / ESO will 503. ADR-0002: same provider
-	// in local + cloud.
-	SecretManagerAPIURL     string
-	SecretManagerAPITimeout time.Duration
 
 	// Cluster-gateway-proxy URL the BFF POSTs Job + ExternalSecret manifests
 	// to on dispatch (ou-service shape; un-authed today). Empty disables the
@@ -208,22 +201,17 @@ type Config struct {
 	RCAAgentAnthropicPushNamespace  string
 	RCAAgentAnthropicPushSecretName string
 
-	// AgentRunnerImage is the docker image the per-task coding-agent
-	// Job uses. Pinned at deploy time; `:latest` is OK in dev but the
-	// cloud release-binding should resolve to a digest.
+	// AgentRunnerImage is the docker image the runner Job uses — ONE image
+	// for BOTH task kinds (implementation and validation; it bakes
+	// Playwright + chromium). Pinned at deploy time, no built-in default;
+	// `:latest` is OK in dev but the cloud release-binding should resolve to
+	// a digest. Empty ⇒ dispatch is off and fails loudly.
 	AgentRunnerImage string
 
 	// Temporal holds the workflow-engine connection settings for the devflow
 	// feature. Enabled iff HostPort is set — unset leaves aep-api fully
 	// functional with the workflow endpoints answering 503.
 	Temporal TemporalConfig
-
-	// AgentValidationRunnerImage is the docker image a VALIDATION Job uses:
-	// the Playwright-capable runner variant (Dockerfile.validation — Debian
-	// base + baked chromium + playwright-cli). Empty disables validation
-	// dispatch (the validation executor fails loudly), since the alpine coding
-	// image cannot run chromium.
-	AgentValidationRunnerImage string
 
 	// AgentClusterSecretStore is the ESO ClusterSecretStore that backs
 	// per-run ExternalSecret reads in the remote-worker NS on DP.
@@ -357,10 +345,10 @@ type PlatformAPIConfig struct {
 	HostHeader string
 }
 
-// TemporalConfig holds connection settings for the Temporal server that
-// drives the devflow workflows (internal/delivery/devflow). HostPort empty ⇒
-// the feature is disabled: no worker starts and the devflow endpoints
-// return 503 temporal_unavailable.
+// TemporalConfig holds connection settings for the Temporal server that runs
+// the milestone run supervisor (internal/delivery/run). HostPort empty ⇒ no
+// worker starts, so a claimed version's run settles itself with a plan-failed
+// reason rather than waiting for a supervisor that will never arrive.
 type TemporalConfig struct {
 	HostPort  string // TEMPORAL_HOSTPORT, e.g. host.docker.internal:7233
 	Namespace string // TEMPORAL_NAMESPACE, default "default"

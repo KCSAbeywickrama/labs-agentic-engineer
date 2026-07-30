@@ -55,6 +55,7 @@ function parseOneQuestion(value: unknown): AskQuestionInput | null {
   if (new Set(options.map((o) => o.label)).size !== options.length) return null;
   return {
     question: v.question,
+    ...(typeof v.detail === "string" && v.detail ? { detail: v.detail } : {}),
     options,
     ...(v.multiSelect === true ? { multiSelect: true } : {}),
   };

@@ -54,8 +54,8 @@ const credAESKey = "0123456789abcdef0123456789abcdef"
 
 const envWebhookSecret = "platform-webhook-secret"
 
-// newCredStore builds the real DB-backed, AES-GCM credential store.
-func newCredStore(t testing.TB, db *gorm.DB) secrets.OpenBaoStore {
+// newCredentialStore builds the real DB-backed, AES-GCM credential store.
+func newCredentialStore(t testing.TB, db *gorm.DB) secrets.CredentialStore {
 	t.Helper()
 	store, err := secrets.NewDBStore(db, []byte(credAESKey))
 	if err != nil {
@@ -68,14 +68,14 @@ func newCredStore(t testing.TB, db *gorm.DB) secrets.OpenBaoStore {
 // GitHub. minter is no-app mode (nil material), which is correct for the
 // PAT paths; the OAuth bind path is disabled (nil githubClient, empty client
 // id/secret). Returns the store too so tests can inspect the sealed PAT.
-func newCredSvcDB(t testing.TB, db *gorm.DB, gh *stubGitHub) (*organization.CredentialService, secrets.OpenBaoStore) {
+func newCredSvcDB(t testing.TB, db *gorm.DB, gh *stubGitHub) (*organization.CredentialService, secrets.CredentialStore) {
 	t.Helper()
-	store := newCredStore(t, db)
+	store := newCredentialStore(t, db)
 	minter, err := secrets.NewAppTokenMinter(nil)
 	if err != nil {
 		t.Fatalf("NewAppTokenMinter: %v", err)
 	}
-	svc := organization.NewCredentialService(organization.NewOrgCredentialRepository(db), store, minter, envWebhookSecret, "", "", nil).WithGitHubAPIBase(gh.URL)
+	svc := organization.NewCredentialService(organization.NewOrgCredentialRepository(db, nil), store, minter, envWebhookSecret, "", "", nil).WithGitHubAPIBase(gh.URL)
 	return svc, store
 }
 
@@ -635,26 +635,26 @@ func TestOrgIsolation_DB(t *testing.T) {
 }
 
 // ============================================================================
-// SM-API reseed bundle (no writer configured → idempotent no-op)
+// Secret-ref resync (no writer configured → idempotent no-op)
 // ============================================================================
 
-func TestPrepareSMAPISeed_NoTriplet_DB(t *testing.T) {
+func TestResyncSecretRef_NoTriplet_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	ctx := context.Background()
 	gh := patHappyGitHub(t, "ada", "Ada", "ada@x.io")
 	svc, _ := newCredSvcDB(t, db, gh)
 
-	// Absent org → (nil, nil).
-	if b, err := svc.PrepareSMAPISeed(ctx, "ghost"); b != nil || err != nil {
-		t.Fatalf("absent org: b=%v err=%v", b, err)
+	// Absent org → (false, nil).
+	if wrote, err := svc.ResyncSecretRef(ctx, "ghost"); wrote || err != nil {
+		t.Fatalf("absent org: wrote=%v err=%v", wrote, err)
 	}
-	// Connected PAT but no SM-API triplet stamped (writer disabled) → (nil, nil).
+	// Connected PAT but no secret-ref triplet stamped (writer disabled) → (false, nil).
 	if _, err := svc.Connect(ctx, "acme", organization.ConnectRequest{Kind: "user-pat", PAT: "ghp", GitHubLogin: "ada"}); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	if b, err := svc.PrepareSMAPISeed(ctx, "acme"); b != nil || err != nil {
-		t.Fatalf("no-triplet: b=%v err=%v", b, err)
+	if wrote, err := svc.ResyncSecretRef(ctx, "acme"); wrote || err != nil {
+		t.Fatalf("no-triplet: wrote=%v err=%v", wrote, err)
 	}
 }
 

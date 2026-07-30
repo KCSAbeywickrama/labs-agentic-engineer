@@ -62,9 +62,10 @@ func BaseModels() []any {
 		&organization.Organization{},
 		&delivery.Execution{},
 		&spec.AgentTurn{},
-		&delivery.DevflowRun{},
 		&modelcost.ModelRate{},
 		&projects.ActivityEvent{},
+		&delivery.MilestoneRun{},
+		&delivery.RunCycle{},
 	}
 }
 
@@ -72,9 +73,12 @@ func BaseModels() []any {
 // — nothing runs until database.Run applies the list — so TestStepOrderGolden
 // asserts the sequence without needing a database.
 //
+// credKey is the 32-byte AES-256 key for encrypt-in-place credential-column
+// migrations (phase12). Pass nil only for step-order tests that never Run.
+//
 // RunBootstrapGrants is NOT part of this list: it is a non-fatal self-grant the
 // caller runs before migrating.
-func Steps(db *gorm.DB, deploymentTier string) []database.Step {
+func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 	// dbStep: the migration takes only *gorm.DB and manages its own timeout.
 	dbStep := func(name string, fn func(*gorm.DB) error) database.Step {
 		return database.DBStep(name, db, fn)
@@ -126,8 +130,10 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 		// no component_tasks ALTER (dependency gating lives on aep:provision GitHub
 		// issues + the funnel depsGate, not DB columns).
 		ctxStep("phase9_dependency_mgmt", RunPhase9DependencyMgmt),
-		// workflow_runs (Temporal devflow lookup index, AutoMigrated from the
-		// model) gains its one-running-task-per-issue partial unique index.
+		// workflow_runs: the retired devflow lookup index. Its model is gone and
+		// nothing creates the table any more, so on a fresh schema this step is a
+		// no-op; it stays in the ordered list because the list is frozen and
+		// because an existing deployment's abandoned table keeps its index.
 		ctxStep("workflow_runs", RunWorkflowRuns),
 		// coding_agent_logs (GitHub-native): create the JobWatcher's final-log
 		// sidecar keyed to executions(id). Runs after `executions` (FK target) and
@@ -139,11 +145,28 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 		// (issues #154, #155, BE handshake #156). One idempotent CREATE TABLE
 		// + its (org_id, created_at) list index.
 		ctxStep("phase10_rca_agent_reports", RunPhase10RcaAgentReports),
+		// milestone_runs (AutoMigrated from the model) gains the spec-run mutex:
+		// a partial unique index admitting one non-terminal spec-build run per
+		// (org, project). Fresh schema — nothing to backfill from the legacy
+		// executions/workflow_runs tables.
+		ctxStep("milestone_runs", RunMilestoneRuns),
+		// run_cycle_logs: the cycle-keyed agent-log sidecar the run progress
+		// stream reads once the Job's pod is reaped. FK'd to run_cycles(id), so it
+		// follows milestone_runs.
+		ctxStep("run_cycle_logs", RunRunCycleLogs),
 		// model_rates seed (#291): the platform's active model at today's
 		// rates. AutoMigrate (BaseModels) creates the table; this idempotent
 		// step inserts the claude-sonnet-5 row so write-time USD stamping has
 		// a price card to resolve against. Ops-managed thereafter.
 		ctxStep("model_rates_seed", RunModelRatesSeed),
+		// EXPAND: provider-neutral secret_ref_* columns alongside sm_api_*
+		// (phase-03 item 14). CONTRACT (drop sm_api_*) waits for phase 09.
+		ctxStep("phase11_secret_ref_columns", RunPhase11SecretRefColumns),
+		// Encrypt publisher_client_secret + webhook_secrets in place
+		// (phase-03 items 15–16). Uses the same credential-encryption-key.
+		ctxStep("phase12_encrypt_credential_columns", func(ctx context.Context, db *gorm.DB) error {
+			return RunPhase12EncryptCredentialColumns(ctx, db, credKey)
+		}),
 	}
 }
 
@@ -151,7 +174,7 @@ func Steps(db *gorm.DB, deploymentTier string) []database.Step {
 // ordered list main used to inline as ~19 copy-pasted blocks (each with its own
 // context/os.Exit); the ordering constraints that lived in the comments between
 // those blocks are preserved on the steps in Steps. Fails fast on the first
-// error, naming the offending step.
-func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string) error {
-	return database.Run(ctx, Steps(db, deploymentTier))
+// error, naming the offending step. credKey must be 32 bytes for phase12.
+func RunAll(ctx context.Context, db *gorm.DB, deploymentTier string, credKey []byte) error {
+	return database.Run(ctx, Steps(db, deploymentTier, credKey))
 }

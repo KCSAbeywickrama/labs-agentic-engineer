@@ -41,8 +41,10 @@
  */
 export const GRILLING_DIRECTIVE =
   "Before writing any files, interview me about this idea with the ask_question / ask_questions tools: " +
-  "structured questions with candidate options and the one you recommend, " +
-  "working through the idea's ambiguities until the requirements are unambiguous. " +
+  "structured questions with candidate options and the one you recommend. Make every question decidable " +
+  "on its own — explain in its detail why you ask and what it affects, and in each option's description " +
+  "what choosing it means and its trade-offs. " +
+  "Work through the idea's ambiguities until the requirements are unambiguous. " +
   "If a grilling skill is available in your catalog, load it first and follow it. " +
   "If I ask you to skip ahead or just generate, stop interviewing and proceed on " +
   "stated assumptions. When the interview is done, proceed with the following. ";

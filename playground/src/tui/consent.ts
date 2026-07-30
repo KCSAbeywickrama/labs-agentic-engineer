@@ -26,7 +26,7 @@
 
 import * as clack from "@clack/prompts";
 
-/** A `confirmDir` callback for `codeCommand`/`codeAllCommand`. */
+/** A `confirmDir` callback for `codeCommand`. */
 export function confirmCodingDir(projectDir: string): () => Promise<boolean> {
   return async () => {
     if (!process.stdin.isTTY) return false;

@@ -22,7 +22,7 @@
  * load-bearing:
  *
  *   1. control words     — /menu, /quit, /help (the loop's own affordances)
- *   2. phase-runners      — /task, /code [issue], /validate, /undo (invoke the
+ *   2. phase-runners      — /task, /code, /validate, /undo (invoke the
  *                           existing engine commands, NOT chat turns)
  *   3. skill-load / chat  — /spec, /design, /grilling, /<skill> expand via the
  *                           shared `slashSkillInstruction`; anything else is a

@@ -74,25 +74,23 @@ services:
       SERVER_PORT: "9090"
       LOG_LEVEL: "debug"
       DATABASE_URL: "postgres://aep:aep@postgres:5432/aep?sslmode=disable"
-      # Empty ⇒ the loader's Docker-Hub default (docker.io/xlight05/aep-coding-
-      # agent-runner:v5, see config_loader.go). Verified (2026-07-08): no
-      # `related-issues` skill (skillPreload is just aep:aep, matching this
-      # repo's own current source), already uses the executions-keyed skills
-      # pull + credentials-refresh routes (tasks-github-native re-key — the
-      # old tasks-keyed routes are retired and would fail every git op), and
-      # pulls natively on arm64. No override needed. Set to a k3d-imported
-      # local tag (e.g. aep-coding-agent-runner:dev — never :latest, which
-      # flips imagePullPolicy to Always and forces a registry pull) to run a
-      # locally-built runner instead.
-      AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-}"
+      # The one runner image, used by BOTH task kinds (implementation and
+      # validation). Defaults to the locally-built aep-runner:dev, which
+      # setup-aep.sh builds + k3d-imports (`make build-runner`); it has no
+      # published counterpart on this branch, and there is no fallback — an
+      # unset/absent image makes coding dispatch fail loudly. Never :latest
+      # for a local tag (that flips imagePullPolicy to Always and forces a
+      # registry pull). Override to a published ghcr.io/wso2/aep/remote-worker
+      # tag in cloud release bindings.
+      AGENT_RUNNER_IMAGE: "${AGENT_RUNNER_IMAGE:-aep-runner:dev}"
       DEPLOYMENT_TIER: "${DEPLOYMENT_TIER:-dev}"
       # Central per-route tenant gate (§6.1b). ENFORCE by default (404s
       # cross-org); set TENANT_GATE_MODE=log for the observe-only canary
       # (emits [SHAKEOUT:would-deny] then passes through).
       TENANT_GATE_MODE: "${TENANT_GATE_MODE:-enforce}"
       TEST_MODE: "true"
-      # Gates the /_test/sm-api-resync endpoint, which emits decrypted
-      # per-org plaintext to repair OpenBao after a local cluster reseed.
+      # Gates POST /_dev/v1/secret-ref-resync — in-process SecretRefWriter
+      # resync after a local OpenBao reseed (status-only HTTP response).
       # Local-only by design — cloud release bindings never set this.
       # See deployments/scripts/repair-secrets.sh.
       LOCAL_OPENBAO_REPAIR: "true"
@@ -166,7 +164,11 @@ services:
       # values-thunder.yaml's 60-aep-system-role.sh bootstrap script.
       THUNDER_ADMIN_URL: "http://thunder.openchoreo.localhost:8080"
       THUNDER_SYSTEM_CLIENT_ID: "aep-system-client"
-      THUNDER_SYSTEM_CLIENT_SECRET: "aep-system-client-secret"
+      # After setup-local.sh, Thunder holds the random secret in
+      # aep-thunder-secrets/THUNDER_SYSTEM_CLIENT_SECRET — not the
+      # values-thunder.yaml bootstrap literal. Export from that K8s
+      # secret (or .env) before `compose up`, same as helm's secretKeyRef.
+      THUNDER_SYSTEM_CLIENT_SECRET: "${THUNDER_SYSTEM_CLIENT_SECRET:-aep-system-client-secret}"
       PLATFORM_IDP_ISSUER: "http://thunder.openchoreo.localhost:8080"
       PLATFORM_IDP_JWKS_URL: "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"
 
@@ -186,11 +188,13 @@ services:
       # pod and authenticates back to git-service with a per-task Task JWT.
       SERVICE_AUTH_TOKEN_URL: "http://k3d-openchoreo-serverlb:8080/oauth2/token"
       SERVICE_AUTH_CLIENT_ID: "aep-api-client"
-      SERVICE_AUTH_CLIENT_SECRET: "aep-api-client-secret"
+      # Matches setup-local's aep-thunder-secrets/AEP_API_CLIENT_SECRET
+      # (helm already secretKeyRefs it). Hardcoded bootstrap literal
+      # fails with Thunder 401 invalid_client after setup-local.
+      SERVICE_AUTH_CLIENT_SECRET: "${AEP_API_CLIENT_SECRET:-aep-api-client-secret}"
       SERVICE_AUTH_HOST_HEADER: "thunder.openchoreo.localhost"
       SERVICE_AUTH_GIT_TOKEN_URL: "http://k3d-openchoreo-serverlb:8080/oauth2/token"
       SERVICE_AUTH_GIT_CLIENT_ID: "${SERVICE_AUTH_GIT_CLIENT_ID:-aep-bff-to-git-service}"
-      SERVICE_AUTH_GIT_CLIENT_SECRET: "${SERVICE_AUTH_GIT_CLIENT_SECRET:-aep-bff-to-git-service-secret}"
       SERVICE_AUTH_GIT_HOST_HEADER: "thunder.openchoreo.localhost"
 
       # ── Task JWT signing — RS256, PEM read from a bind-mounted file.
@@ -213,17 +217,10 @@ services:
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
       GITHUB_APP_PRIVATE_KEY_PATH: "${GITHUB_APP_PRIVATE_KEY_PATH:-/etc/github-app/private-key.pem}"
 
-      # ── Phase 1 — sm-api + cluster-gateway-proxy. Compose-only stubs
-      # of the cloud services; same client surface in both build configs.
-      SECRET_MANAGER_API_URL: "http://secret-manager-api:8082"
+      # ── Secrets delivery + cluster-gateway-proxy. OPENBAO_* drives the
+      # in-process OpenBao-direct provider (local-only). CLUSTER_GATEWAY_PROXY_URL
+      # points at the compose stub for streaming + JobWatcher.
       CLUSTER_GATEWAY_PROXY_URL: "http://local-cluster-gateway-proxy:8085"
-      # Validation-runner image (Dockerfile.validation: Debian + Playwright
-      # browsers). Defaults to the locally-built aep-validation-runner:dev, which
-      # setup-aep.sh builds + k3d-imports (it has no published counterpart; the
-      # alpine coding image cannot run chromium, so there is no fallback — an
-      # unset/absent image makes validation dispatch fail loudly). Override to a
-      # published tag in cloud release bindings.
-      VALIDATION_RUNNER_IMAGE: "${VALIDATION_RUNNER_IMAGE:-aep-validation-runner:dev}"
       # Push target for AnthropicCredentialService.pushExternalSecret: on every
       # successful Connect (first-time connect AND rotation), aep-api applies
       # an ExternalSecret here via the proxy above, pointed at the freshly
@@ -366,52 +363,8 @@ services:
       - aep
 
   # ---------------------------------------------------------------------------
-  # secret-manager-api (Phase 1 — WS1.1) — in-repo local STUB of the cloud
-  # sm-api, built from `./local-secret-manager-api` (no wso2cloud checkout
-  # needed). Reproduces the sm-api HTTP contract the aep-service client
-  # calls (POST /secrets, GET /secrets?labelSelector=, DELETE /secrets/{id}):
-  # writes user secrets to OpenBao KV-v2 under `secret/data/user-app-secrets/
-  # <ns>/<ref>` AND creates the OpenChoreo `SecretReference` CR — full parity
-  # with the real service. See deployments/local-secret-manager-api/main.go
-  # for the mirrored-contract notes and docs/superpowers/plans/
-  # 2026-06-09-sm-api-local-stub.md.
-  #
-  # Unlike the real binary (ESO vault provider + k8s-SA auth), the stub
-  # writes OpenBao over plain HTTP with the root token — same KV result, so
-  # the in-cluster per-run ExternalSecrets (created by the dispatcher in
-  # `wc-…-remote-worker`, referencing the `default` CSS) read the same data.
-  # ---------------------------------------------------------------------------
-  secret-manager-api:
-    build:
-      context: ./local-secret-manager-api
-    container_name: aep-secret-manager-api
-    ports:
-      - "8082:8082"
-    environment:
-      LISTEN_ADDR: ":8082"
-      LOG_LEVEL: "debug"
-      # OpenBao is reached host-side (k3d exposes the NodePort on host 8200);
-      # the stub authenticates with the root token rather than the k8s-SA
-      # flow the real ESO provider uses.
-      OPENBAO_ADDR: "${OPENBAO_ADDR:-http://host.docker.internal:8200}"
-      OPENBAO_TOKEN: "${OPENBAO_TOKEN:-root}"
-      VAULT_PATH_PREFIX: "user-app-secrets"
-      SECRET_REF_PREFIX: "cred-"
-      SECRET_REF_REFRESH_INTERVAL: "15s"
-      # SecretReference CRs are created via the mounted kubeconfig.
-      KUBECONFIG: "/app/.kube/config"
-    volumes:
-      - ./.kube/config:/app/.kube/config:ro
-    networks:
-      - aep
-      - k3d-openchoreo
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "thunder.openchoreo.localhost:host-gateway"
-
-  # ---------------------------------------------------------------------------
-  # local-cluster-gateway-proxy (Phase 1 — WS1.2) — local stand-in for
-  # the cloud cluster-gateway-proxy. Serves `<verb>
+  # local-cluster-gateway-proxy — local stand-in for the cloud
+  # cluster-gateway-proxy. Serves `<verb>
   # /cloud-dp-cgw/<k8s path>` by forwarding to the local k3d k8s API
   # using the mounted kubeconfig. No mTLS to a remote cluster-gateway
   # (the cloud proxy bridges to a remote dataplane via the cluster-

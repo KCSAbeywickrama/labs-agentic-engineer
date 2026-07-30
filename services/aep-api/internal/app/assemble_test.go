@@ -24,9 +24,13 @@
 package app
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // baseCfg is the minimal config that Assemble accepts. GitProvider must be
@@ -41,6 +45,38 @@ func baseCfg() config.Config {
 	c.PlatformAPI.BaseURL = "http://openchoreo.test"
 	return c
 }
+
+// stubSecretsProvider is an injected Provider for assembly tests.
+// ManagesSecretReferences=true so Assemble does not need a live OC adapter.
+type stubSecretsProvider struct{}
+
+func (stubSecretsProvider) NewClient(*secretmanagersvc.StoreConfig) (secretmanagersvc.SecretsClient, error) {
+	return stubSecretsClient{}, nil
+}
+func (stubSecretsProvider) ValidateConfig(*secretmanagersvc.StoreConfig) error { return nil }
+func (stubSecretsProvider) Capabilities() secretmanagersvc.StoreCapabilities {
+	return secretmanagersvc.StoreCapabilityWriteOnly
+}
+func (stubSecretsProvider) ManagesSecretReferences() bool { return true }
+
+type stubSecretsClient struct{}
+
+func (stubSecretsClient) PushSecret(context.Context, secretmanagersvc.SecretLocation, []byte, *secretmanagersvc.SecretMetadata) (string, error) {
+	return "", nil
+}
+func (stubSecretsClient) PatchSecret(context.Context, secretmanagersvc.SecretLocation, []byte, *secretmanagersvc.SecretMetadata) (string, error) {
+	return "", nil
+}
+func (stubSecretsClient) DeleteSecret(context.Context, secretmanagersvc.SecretLocation, *secretmanagersvc.SecretMetadata) error {
+	return nil
+}
+func (stubSecretsClient) GetSecret(context.Context, secretmanagersvc.SecretLocation) (*secretmanagersvc.SecretInfo, error) {
+	return nil, nil
+}
+func (stubSecretsClient) GetSecretWithValue(context.Context, secretmanagersvc.SecretLocation) ([]byte, error) {
+	return nil, nil
+}
+func (stubSecretsClient) Close(context.Context) error { return nil }
 
 func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	app, err := Assemble(baseCfg(), Fake(), Seam{})
@@ -61,8 +97,9 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 }
 
 // TestAssemble_WatcherRegistration pins the two conditional watchers: the
-// JobWatcher rides on CLUSTER_GATEWAY_PROXY_URL, and the devflow worker rides on
-// TEMPORAL_HOSTPORT. The base is 7.
+// JobWatcher rides on CLUSTER_GATEWAY_PROXY_URL, and the run-supervisor worker
+// rides on TEMPORAL_HOSTPORT. The base is 7 — the event plane's reconcile sweep
+// is unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -73,7 +110,7 @@ func TestAssemble_WatcherRegistration(t *testing.T) {
 		{"+cluster-gateway-proxy adds JobWatcher", func(c *config.Config) {
 			c.ClusterGatewayProxyURL = "http://cgw"
 		}, 8},
-		{"+temporal adds the devflow worker", func(c *config.Config) {
+		{"+temporal adds the run worker", func(c *config.Config) {
 			c.Temporal.HostPort = "temporal:7233"
 		}, 8},
 		{"+both", func(c *config.Config) {
@@ -115,13 +152,13 @@ func TestAssemble_Degradations(t *testing.T) {
 			t.Fatalf("Assemble = %v", err)
 		}
 		degs := app.Degradations()
-		// Every optional capability is off, including the undocumented
-		// no-dispatch-path state (neither dispatch path wired).
+		// Every optional capability is off, including no working coding-dispatch
+		// path (proxy+secrets unset; k8s is not a secrets-capable path).
 		for _, want := range []string{
-			"m2m-service-auth", "build-logs", "sm-api-secret-writes",
+			"m2m-service-auth", "build-logs", "secrets-delivery",
 			"cluster-gateway-proxy", "mcp-discovery", "idp-mutations",
 			"connect-oauth-state", "coding-dispatch-proxy", "coding-dispatch-k8s",
-			"coding-dispatch-any", "rca-agent-key-push", "devflow-temporal",
+			"coding-dispatch-any", "rca-agent-key-push", "run-temporal",
 		} {
 			if !hasCapability(degs, want) {
 				t.Errorf("minimal config: expected degradation %q, missing from %+v", want, degs)
@@ -129,27 +166,55 @@ func TestAssemble_Degradations(t *testing.T) {
 		}
 	})
 
-	t.Run("cloud proxy dispatch clears the dispatch degradations", func(t *testing.T) {
+	t.Run("proxy + secrets provider clears the dispatch degradations", func(t *testing.T) {
 		cfg := baseCfg()
 		cfg.ClusterGatewayProxyURL = "http://cgw"
-		cfg.SecretManagerAPIURL = "http://sm-api"
-		app, err := Assemble(cfg, Fake(), Seam{})
+		app, err := Assemble(cfg, Fake(), Seam{SecretsProvider: stubSecretsProvider{}})
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}
 		degs := app.Degradations()
 		for _, gone := range []string{
-			"cluster-gateway-proxy", "sm-api-secret-writes",
+			"cluster-gateway-proxy", "secrets-delivery",
 			"coding-dispatch-proxy", "coding-dispatch-any",
 		} {
 			if hasCapability(degs, gone) {
-				t.Errorf("with proxy+sm-api: %q should NOT be degraded, got %+v", gone, degs)
+				t.Errorf("with proxy+secrets provider: %q should NOT be degraded, got %+v", gone, degs)
 			}
 		}
-		// The direct K8s path is still off (Fake has no in-cluster client), but a
-		// dispatch path exists, so the no-dispatch-path state is cleared.
+		// The direct K8s path is never a working secrets capability (refs-only
+		// via proxy). With a nil k8s client it stays degraded for "not wired".
 		if !hasCapability(degs, "coding-dispatch-k8s") {
 			t.Errorf("with a nil k8s client the direct-dispatch degradation should remain")
+		}
+	})
+
+	t.Run("k8s client wired still reports coding-dispatch-k8s unavailable for secrets", func(t *testing.T) {
+		cfg := baseCfg()
+		cfg.AgentRunnerImage = "runner:1"
+		cfg.AgentPlatformURL = "http://platform"
+		in := Fake()
+		in.K8sClient = fake.NewClientBuilder().Build()
+		app, err := Assemble(cfg, in, Seam{})
+		if err != nil {
+			t.Fatalf("Assemble = %v", err)
+		}
+		degs := app.Degradations()
+		var k8s Degradation
+		for _, d := range degs {
+			if d.Capability == "coding-dispatch-k8s" {
+				k8s = d
+				break
+			}
+		}
+		if k8s.Capability == "" {
+			t.Fatal("coding-dispatch-k8s must remain degraded when secret delivery is unavailable")
+		}
+		if !strings.Contains(k8s.Reason, "secret delivery is disabled") {
+			t.Fatalf("k8s degradation must say secret delivery disabled, got %q", k8s.Reason)
+		}
+		if !hasCapability(degs, "coding-dispatch-any") {
+			t.Error("without proxy+secrets, coding-dispatch-any must stay degraded (k8s is not a working path)")
 		}
 	})
 
@@ -160,8 +225,8 @@ func TestAssemble_Degradations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Assemble = %v", err)
 		}
-		if hasCapability(app.Degradations(), "devflow-temporal") {
-			t.Errorf("with TEMPORAL_HOSTPORT set, devflow-temporal must not be degraded")
+		if hasCapability(app.Degradations(), "run-temporal") {
+			t.Errorf("with TEMPORAL_HOSTPORT set, run-temporal must not be degraded")
 		}
 	})
 }

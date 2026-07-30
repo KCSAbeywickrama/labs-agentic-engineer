@@ -137,7 +137,10 @@ export const ANSWERS_PREFIX = "Answers:" as const;
 export interface AskQuestionOption {
   /** Short display text — the value echoed back in the serialized answer. */
   label: string;
-  /** What choosing this option means or implies. */
+  /**
+   * The full explanation of this choice, rendered on the option card: what it
+   * means, what it implies, and its trade-offs — enough for the user to decide.
+   */
   description?: string;
   /** At most ONE option per question carries this — the agent's recommendation. */
   recommended?: boolean;
@@ -149,6 +152,11 @@ export interface AskQuestionOption {
  */
 export interface AskQuestionInput {
   question: string;
+  /**
+   * Context rendered under the question heading: why the agent is asking, what
+   * the decision affects, and anything the user needs to answer well.
+   */
+  detail?: string;
   /** 1–5 options; labels must be unique (they are the selection identity). */
   options: AskQuestionOption[];
   /** True → several options may be chosen together (checkboxes, not radios). */

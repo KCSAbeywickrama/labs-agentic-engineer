@@ -102,12 +102,20 @@ export const removeFileInputSchema = z.object({
 
 const askQuestionOptionSchema = z.object({
   label: z.string().describe("Short display text for this choice — the exact value echoed back in the answer. Keep labels unique within a question."),
-  description: z.string().optional().describe("What choosing this option means or implies."),
+  description: z.string().optional().describe(
+    "The full explanation of this choice, shown on the option card. Write 2–4 sentences: what picking it " +
+    "means concretely, what it implies or rules out, and its trade-offs versus the other options — enough " +
+    "for a non-expert to decide confidently. Always provide it unless the label is truly self-explanatory.",
+  ),
   recommended: z.boolean().optional().describe("Mark the ONE option you recommend (at most one per question)."),
 });
 
 export const askQuestionInputSchema = z.object({
-  question: z.string().describe("The clarifying question to ask the user."),
+  question: z.string().describe("The clarifying question to ask the user — specific and self-contained, not a vague topic."),
+  detail: z.string().optional().describe(
+    "Context shown under the question: why you are asking, what part of the spec or design this decision " +
+    "affects, and any background the user needs to answer well. 1–3 sentences; plain language.",
+  ),
   options: z
     .array(askQuestionOptionSchema)
     .min(1)
@@ -147,8 +155,9 @@ void _drift;
 export const askQuestionTool: Tool = tool({
   description:
     "Ask the user ONE structured multiple-choice question when you cannot proceed safely without their decision. " +
-    "Give 1–5 options (mark at most one recommended); set multiSelect when several may apply together. " +
-    "Ends your turn; the user's answer arrives as the next message.",
+    "Make it decidable without prior context: put the why/what-it-affects in `detail`, and explain every option's " +
+    "meaning and trade-offs in its `description`. Give 1–5 options (mark at most one recommended); set multiSelect " +
+    "when several may apply together. Ends your turn; the user's answer arrives as the next message.",
   inputSchema: askQuestionInputSchema,
   execute: async (input) => ({ status: "awaiting_user_response" as const, ...input }),
 });

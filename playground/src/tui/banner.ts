@@ -31,12 +31,12 @@ function statusLine(projectDir: string): string {
   const req = requirementsStatus(projectDir);
   const design = designStatus(projectDir);
   const issues = listIssueSummaries(projectDir);
-  const deployed = issues.filter((i) => i.derivedStatus === "deployed").length;
+  const resolved = issues.filter((i) => i.resolved).length;
 
   const parts = [
     req.present ? "requirements ✓" : "requirements —",
     design.components.length > 0 ? `design ✓ (${design.components.length} component${design.components.length === 1 ? "" : "s"})` : "design —",
-    issues.length > 0 ? `tasks ✓ (${deployed}/${issues.length} deployed)` : "tasks —",
+    issues.length > 0 ? `tasks ✓ (${resolved}/${issues.length} resolved)` : "tasks —",
   ];
   return parts.join("  ·  ");
 }
@@ -49,7 +49,7 @@ export function commandGuide(): string {
     "    /spec /design [text]   generate the spec / design (load a skill and follow it)",
     "    /<skill> [text]        load any working-tree skill and follow it (e.g. /grilling)",
     "    /task                  plan implementation tasks",
-    "    /code [issues/N.md]    run the coding agent (whole plan, or one issue)",
+    "    /code                  run the coding agent (one session, whole plan)",
     "    /validate              check design artifacts against the schema",
     "    /undo                  restore the last pre-coding snapshot",
     "    /menu  /help  /quit    dashboard · this guide · leave",

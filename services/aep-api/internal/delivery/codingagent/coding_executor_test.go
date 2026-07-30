@@ -18,7 +18,7 @@ package codingagent
 
 import (
 	"context"
-	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -62,95 +62,14 @@ func buildRow(id string) *delivery.Execution {
 	}
 }
 
-func buildDispatch(row *delivery.Execution) delivery.DispatchRequest {
-	return delivery.DispatchRequest{
-		Execution: row,
-		Task:      delivery.TaskFacts{OrgID: "acme", ProjectID: "widgets", Component: "order-service"},
-		MergeSHA:  "deadbeef",
-	}
-}
-
 func newBuildExecutor(oc openchoreo.ComponentClient, repo *sourcecontrol.GitRepository, execRows *fakeExecRepo) *CodingExecutor {
 	return NewCodingExecutor(oc, fakeRepos{repo: repo}, nil, nil, nil, execRows, "http://git", "http://platform", nil, nil, nil, nil)
 }
 
-func TestRunBuild_StagesSecret_PassesRefToBuild(t *testing.T) {
-	cap := &buildTrigger{}
-	row := buildRow("e1")
-	repoRows := newFakeExecRepo(row)
-	stager := &fakeStager{ref: stagedRef}
-	e := newBuildExecutor(ocWithBuildCapture(cap), &sourcecontrol.GitRepository{RepoSlug: "acme-widgets"}, repoRows).
-		WithBuildSecrets(stager, 0)
-
-	if err := e.Run(context.Background(), buildDispatch(row)); err != nil {
-		t.Fatalf("Run(build): %v", err)
-	}
-	if !cap.called {
-		t.Fatal("TriggerBuildAtCommit was not called")
-	}
-	if cap.secretRef != stagedRef {
-		t.Errorf("build secretRef = %q, want the staged ref (private-repo clone)", cap.secretRef)
-	}
-	if cap.sha != "deadbeef" || cap.component != "order-service" {
-		t.Errorf("build args wrong: sha=%q component=%q", cap.sha, cap.component)
-	}
-	if stager.calls() != 1 {
-		t.Errorf("StageBuildSecret calls = %d, want 1", stager.calls())
-	}
-	// The row was Started with the returned run name (one discipline).
-	if got := repoRows.get("e1"); got.Status != string(taskmeta.ExecRunning) || got.RunName != cap.runName {
-		t.Errorf("row not started with run name: status=%q run=%q", got.Status, got.RunName)
-	}
-}
-
-func TestRunBuild_StagingRefusal_BlocksBuild(t *testing.T) {
-	cap := &buildTrigger{}
-	row := buildRow("e1")
-	stager := &fakeStager{err: errors.New("org disconnected")}
-	e := newBuildExecutor(ocWithBuildCapture(cap), &sourcecontrol.GitRepository{RepoSlug: "acme-widgets"}, newFakeExecRepo(row)).
-		WithBuildSecrets(stager, 0)
-
-	err := e.Run(context.Background(), buildDispatch(row))
-	if err == nil {
-		t.Fatal("staging refusal must block the build (returned nil)")
-	}
-	if cap.called {
-		t.Error("TriggerBuildAtCommit must not be called when staging is refused")
-	}
-}
-
-func TestRunBuild_NoStager_ClonesUnauthenticated(t *testing.T) {
-	cap := &buildTrigger{}
-	row := buildRow("e1")
-	// No WithBuildSecrets → public-repo path, empty secretRef.
-	e := newBuildExecutor(ocWithBuildCapture(cap), &sourcecontrol.GitRepository{RepoSlug: "acme-widgets"}, newFakeExecRepo(row))
-
-	if err := e.Run(context.Background(), buildDispatch(row)); err != nil {
-		t.Fatalf("Run(build): %v", err)
-	}
-	if !cap.called || cap.secretRef != "" {
-		t.Errorf("no stager → empty secretRef; got called=%v ref=%q", cap.called, cap.secretRef)
-	}
-}
-
-func TestRunBuild_NoRepoSlug_Degrades(t *testing.T) {
-	cap := &buildTrigger{}
-	row := buildRow("e1")
-	stager := &fakeStager{ref: "should-not-be-used"}
-	// Repo row present but no slug → cannot stage; degrade to unauthenticated.
-	e := newBuildExecutor(ocWithBuildCapture(cap), &sourcecontrol.GitRepository{RepoSlug: ""}, newFakeExecRepo(row)).
-		WithBuildSecrets(stager, 0)
-
-	if err := e.Run(context.Background(), buildDispatch(row)); err != nil {
-		t.Fatalf("Run(build): %v", err)
-	}
-	if cap.secretRef != "" {
-		t.Errorf("no repo slug → empty secretRef, got %q", cap.secretRef)
-	}
-	if stager.calls() != 0 {
-		t.Errorf("stager must not be called without a repo slug, got %d calls", stager.calls())
-	}
-}
+// The build path that survives the flip is the exec watcher's git-clone-auth
+// RETRY: the post-merge build itself is triggered by the event plane's fan-out,
+// but a build that died at clone-auth is re-minted and re-triggered here. The
+// tests below therefore cover the secret-staging ladder through the retry.
 
 func TestRetryAuthFailedBuild_ReMintsAndReTriggersAtCommit(t *testing.T) {
 	cap := &buildTrigger{}
@@ -172,6 +91,47 @@ func TestRetryAuthFailedBuild_ReMintsAndReTriggersAtCommit(t *testing.T) {
 	}
 	if stager.calls() != 1 {
 		t.Errorf("retry must re-mint the secret once, got %d", stager.calls())
+	}
+}
+
+// --- §9 runner contract: the milestone-keyed dispatch prompt ----------------
+
+// TestBuildPrompt_IsAMilestoneReferenceOnly pins the §9 contract: the dispatch
+// prompt names the milestone and defers EVERY step to the versioned `aep`
+// skill. It must not name an issue, a branch, or a PR-body token — those would
+// version with the BFF binary instead of with the skill.
+func TestBuildPrompt_IsAMilestoneReferenceOnly(t *testing.T) {
+	got := buildPrompt(12, "v3")
+
+	if !strings.Contains(got, "milestone 12") {
+		t.Errorf("prompt must name the milestone number, got %q", got)
+	}
+	if !strings.Contains(got, `"v3"`) {
+		t.Errorf("prompt must name the milestone title (quoted, as gh --milestone matches it), got %q", got)
+	}
+	if !strings.Contains(got, "`aep` skill") {
+		t.Errorf("prompt must defer the procedure to the aep skill, got %q", got)
+	}
+	for _, banned := range []string{"issue:", "issues/", "Closes #", "Resolves #", "git checkout", "gh pr create"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("prompt must carry no procedure/issue anchor, but contains %q: %q", banned, got)
+		}
+	}
+}
+
+// TestBuildValidationPrompt_StaysIssueAnchored pins the other half of §9: the
+// validation cycle stays issue-anchored — one validation issue, one run.
+func TestBuildValidationPrompt_StaysIssueAnchored(t *testing.T) {
+	got := buildValidationPrompt("https://github.com/acme/widgets/issues/9", 9)
+
+	if !strings.Contains(got, "https://github.com/acme/widgets/issues/9") {
+		t.Errorf("validation prompt must name its issue URL, got %q", got)
+	}
+	if !strings.Contains(got, "Closes #9") {
+		t.Errorf("validation prompt must keep its Closes #N link contract, got %q", got)
+	}
+	if strings.Contains(got, "milestone") {
+		t.Errorf("validation dispatch must stay issue-anchored, got %q", got)
 	}
 }
 

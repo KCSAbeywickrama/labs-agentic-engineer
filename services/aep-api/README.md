@@ -53,7 +53,7 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
 |---|---|---|---|
 | **organization** | tenant onboarding + every per-org config (GitHub / Anthropic / IDP), behind `/config` | flat-root | [→](internal/organization/README.md) |
 | **spec** | git-committed requirements+design spec, `v<N>` version tags, agent turns, the org Skill library | flat-root | [→](internal/spec/README.md) |
-| **delivery** | the one execution **funnel** + the Temporal build/task/validation/coding workflows | kernel-root | [→](internal/delivery/README.md) |
+| **delivery** | the version's **milestone run loop**: plan, dispatch the coding agent, merge, build, validate | kernel-root | [→](internal/delivery/README.md) |
 | **dependencies** | resource-type catalog + provisioning + runtime-config convergence | kernel-root | [→](internal/dependencies/README.md) |
 | **projects** | OpenChoreo `Project`/`Component` write-authority + the whole-pipeline Stage aggregate read | flat-root | [→](internal/projects/README.md) |
 | **sourcecontrol** | repos / issues / webhooks over a provider-neutral `Host`, + the bare-mirror workspace | flat-root | [→](internal/sourcecontrol/README.md) |
@@ -85,20 +85,23 @@ exported.
 
 **Nil `Options` fields are feature off-switches** — they disable a capability
 cleanly, never panic, and never silently pick a different OpenChoreo credential
-path:
+path or secrets backend:
 
 | Field | Nil means |
 |---|---|
 | `AuthProvider` | no bearer on M2M OC calls |
 | `RequestAuthStrategy` | all-M2M / never pass-through (**direct-OC mode**) |
 | `ImpersonateOrgResolver` (+ optional late-bound builder) | no `X-Impersonate-Org` |
-| `SecretsProvider` | construct the default SM-API provider when its URL is configured |
+| `SecretsProvider` | secrets delivery off (no KV writes / SecretReference authoring) |
 
 **OSS `cmd/aep-api`** runs in **direct-OC mode**: M2M `AuthProvider` when service
-auth is configured, `DirectOCStrategy` (always M2M), and a nil impersonation
-resolver. An **overlay module** is a separate process entry that imports the
-same `app` package and injects different `Options` — typically a **PAS strategy**
-that chooses pass-through user JWT vs M2M + impersonation per request. Detail →
+auth is configured, `DirectOCStrategy` (always M2M), a nil impersonation
+resolver, and an OpenBao-direct `SecretsProvider` when `OPENBAO_ADDR` is set.
+An **overlay module** is a separate process entry that imports the same `app`
+package and injects different `Options` — typically a **PAS strategy** for auth
+and an sm-api-backed `SecretsProvider` for cloud delivery. The sm-api client
+lives in the overlay (outside OSS CI); that is an accepted trade-off — public
+coverage never exercised it either. Detail →
 [`design/composition-seam.md`](design/composition-seam.md).
 
 ## Conventions
@@ -128,7 +131,7 @@ that chooses pass-through user JWT vs M2M + impersonation per request. Detail �
 | **kernel-root** | domain shape: root holds only shared types + ports; feature logic in sub-packages importing only the root |
 | **edge** | the surface composer / composition root — wires all domains, mounts surfaces, runs the tenant gate |
 | **aggregator** | a domain's `httpapi` package that embeds its slice handlers and declares no methods of its own |
-| **funnel** | delivery's single execution dispatch door — every execution (coding, build, validation, provisioning) is admitted / finished / re-evaluated through it |
+| **milestone run** | delivery's single dispatch door — one supervised loop over one GitHub milestone, dispatching the coding agent cycle by cycle until the version settles |
 | **seam / Options** | public `app.Options` injectables that are the only place deployment behaviour differs at process start |
 | **direct-OC mode** | OSS default: all-M2M OpenChoreo auth, never user-JWT pass-through, no impersonation header |
 | **PAS strategy** | overlay-supplied `RequestAuthStrategy` that decides pass-through vs M2M (+ impersonation) per OC request |
@@ -152,7 +155,9 @@ point at enforcement, they don't restate it.
 - A domain root never imports its own slices; a slice never imports a sibling →
   `TestDomainRootNeverImportsItsSlices` · `TestSliceNeverImportsSibling`
 - HTTP aggregators declare no methods → `TestAggregatorsDeclareNoMethods`
-- delivery's `task ⊥ execution` split → `TestTaskExecutionSplit`
+- delivery's `task ⊥ run` split — dispatch has exactly one door →
+  `TestTaskRunSplit`
+- the machine-block encoding stays a pure domain leaf → `TestTaskmetaIsPure`
 - The legacy flat layout is gone; all seven domains landed → `TestFlatPackagesDeleted` ·
   `TestAllDomainsLanded`
 - Secret-backend SDKs are fenced to `platform/secrets` → `TestImportFences`
@@ -178,6 +183,7 @@ point at enforcement, they don't restate it.
 - A domain's boundaries, ports, and local invariants → its README (table above).
 - Why a structural rule exists / how it's enforced → the named test in `internal/arch`,
   or the package's `doc.go`.
-- Subsystem designs → [`docs/design/`](../../docs/design/); decisions →
-  [`docs/decisions/`](../../docs/decisions/) (this ladder is
+- Decisions → [`docs/decisions/`](../../docs/decisions/) (this ladder is
   [ADR-0008](../../docs/decisions/ADR-0008-architecture-in-readme-ladder.md)).
+- Why delivery executes a version as one milestone run, and what that costs →
+  [ADR-0011](../../docs/decisions/ADR-0011-milestone-is-the-unit-of-execution.md).

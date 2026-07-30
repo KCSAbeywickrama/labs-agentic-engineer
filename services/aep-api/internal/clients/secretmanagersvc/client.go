@@ -37,7 +37,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
 const (
@@ -60,182 +61,6 @@ var ErrNotFound = errors.New("not found")
 // ErrConflict is returned by Create when a SecretReference with the same
 // (orgNS, name) already exists, signalling a race with another writer.
 var ErrConflict = errors.New("conflict")
-
-// SecretLocation identifies where a secret lives in the KV hierarchy.
-//
-// A coding-agent task is the smallest ownership unit: the dispatch path
-// mints one ExternalSecret per task per credential; per-env scoping (when
-// needed) happens at the SecretReference `environments:` slice on the OC
-// side, not in the KV path. SecretRefName is derived from `{task, entity}`
-// so two different tasks in the same project don't collide when both
-// consume the same upstream credential.
-//
-// All segments are validated against `/` to prevent traversal +
-// path collisions.
-type SecretLocation struct {
-	// OrgName is the OC org's namespace (e.g. `wc-<orgUUID8>-<orgHash8>`).
-	// Required.
-	OrgName string
-
-	// ProjectName is the OC Project handle. Optional — empty for
-	// org-scoped credentials (Anthropic platform key, App webhook
-	// secret).
-	ProjectName string
-
-	// TaskID is the ComponentTask UUID. Optional — empty for
-	// project-scoped credentials (per-org Anthropic key,
-	// per-org GitHub PAT) and org-scoped credentials.
-	TaskID string
-
-	// EntityName is the credential kind handle: `anthropic`,
-	// `github-pat`, `runner-thunder-client`, etc. Required —
-	// every secret has a kind so two unrelated credentials at the
-	// same scope don't collide.
-	EntityName string
-
-	// SecretKey is the field name inside the secret payload. Optional —
-	// when set the KVPath addresses a single value rather than the
-	// whole record.
-	SecretKey string
-}
-
-func sanitizeSegment(s string) (string, error) {
-	s = strings.TrimSpace(s)
-	if strings.Contains(s, "/") {
-		return "", fmt.Errorf("secret path segment %q contains invalid character '/'", s)
-	}
-	return s, nil
-}
-
-// KVPath builds the KV-store path from non-empty segments.
-//
-// Shapes (each ends with EntityName, optionally suffixed by SecretKey):
-//
-//	org/entity                          (org-scoped)
-//	org/entity/key                      (org-scoped + key)
-//	org/project/entity                  (project-scoped)
-//	org/project/entity/key              (project-scoped + key)
-//	org/project/task/entity             (task-scoped)
-//	org/project/task/entity/key         (task-scoped + key)
-func (l SecretLocation) KVPath() (string, error) {
-	if strings.TrimSpace(l.OrgName) == "" {
-		return "", fmt.Errorf("SecretLocation.OrgName is required")
-	}
-	if strings.TrimSpace(l.EntityName) == "" {
-		return "", fmt.Errorf("SecretLocation.EntityName is required")
-	}
-	if l.TaskID != "" && l.ProjectName == "" {
-		return "", fmt.Errorf("SecretLocation.TaskID requires ProjectName")
-	}
-
-	orgSeg, err := sanitizeSegment(l.OrgName)
-	if err != nil {
-		return "", fmt.Errorf("invalid OrgName: %w", err)
-	}
-	parts := []string{orgSeg}
-	if l.ProjectName != "" {
-		seg, err := sanitizeSegment(l.ProjectName)
-		if err != nil {
-			return "", fmt.Errorf("invalid ProjectName: %w", err)
-		}
-		parts = append(parts, seg)
-	}
-	if l.TaskID != "" {
-		seg, err := sanitizeSegment(l.TaskID)
-		if err != nil {
-			return "", fmt.Errorf("invalid TaskID: %w", err)
-		}
-		parts = append(parts, seg)
-	}
-	entitySeg, err := sanitizeSegment(l.EntityName)
-	if err != nil {
-		return "", fmt.Errorf("invalid EntityName: %w", err)
-	}
-	parts = append(parts, entitySeg)
-	if l.SecretKey != "" {
-		seg, err := sanitizeSegment(l.SecretKey)
-		if err != nil {
-			return "", fmt.Errorf("invalid SecretKey: %w", err)
-		}
-		parts = append(parts, seg)
-	}
-	return strings.Join(parts, "/"), nil
-}
-
-// SecretRefName derives the OC SecretReference name from the location.
-// Sanitized to a DNS-label (lowercase, max 63 chars). Includes TaskID
-// when set so per-task secrets don't collide with per-project ones.
-func (l SecretLocation) SecretRefName() string {
-	var name string
-	switch {
-	case l.TaskID != "":
-		name = fmt.Sprintf("%s-%s-secrets",
-			sanitizeForK8sName(l.TaskID),
-			sanitizeForK8sName(l.EntityName))
-	default:
-		name = fmt.Sprintf("%s-secrets", sanitizeForK8sName(l.EntityName))
-	}
-	if len(name) > 63 {
-		name = strings.TrimRight(name[:63], "-")
-	}
-	return name
-}
-
-func sanitizeForK8sName(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('-')
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
-
-// ParseKVPath inverts KVPath. Only the six legal shapes above are
-// recognized; anything else returns an error so callers don't have to
-// guess.
-func ParseKVPath(kvPath string) (SecretLocation, error) {
-	parts := strings.Split(kvPath, "/")
-	switch len(parts) {
-	case 2:
-		return SecretLocation{OrgName: parts[0], EntityName: parts[1]}, nil
-	case 3:
-		// Two legal shapes have 3 segments: org/entity/key and
-		// org/project/entity. Disambiguate by treating segment-2 as
-		// a key if it looks like one (lower-snake, short) — but
-		// there's no way to be sure without context, so we treat
-		// 3-segment paths as `org/project/entity` and require callers
-		// that want `org/entity/key` to use the explicit form
-		// `org//entity/key` (rejected by sanitizeSegment) or
-		// construct SecretLocation directly. ParseKVPath is
-		// best-effort for logging/introspection.
-		return SecretLocation{
-			OrgName:     parts[0],
-			ProjectName: parts[1],
-			EntityName:  parts[2],
-		}, nil
-	case 4:
-		return SecretLocation{
-			OrgName:     parts[0],
-			ProjectName: parts[1],
-			EntityName:  parts[2],
-			SecretKey:   parts[3],
-		}, nil
-	case 5:
-		return SecretLocation{
-			OrgName:     parts[0],
-			ProjectName: parts[1],
-			TaskID:      parts[2],
-			EntityName:  parts[3],
-			SecretKey:   parts[4],
-		}, nil
-	default:
-		return SecretLocation{}, fmt.Errorf("unrecognized KV path format: %s (expected 2-5 segments, got %d)", kvPath, len(parts))
-	}
-}
 
 // OpenChoreoSecretReferenceClient is the small slice of the OC client
 // that this package needs. It covers SecretReference CRUD only; the
@@ -282,6 +107,7 @@ type SecretManagementClient interface {
 }
 
 type secretManagementClient struct {
+	provider        Provider
 	lowLevelClient  SecretsClient
 	managedBy       string
 	ocClient        OpenChoreoSecretReferenceClient
@@ -299,16 +125,6 @@ type SecretManagementClientConfig struct {
 	RefreshInterval string
 }
 
-// NewSecretManagementClient constructs a client with the default
-// managed-by tag and no OCClient — appropriate for the SM-API provider
-// in both local and cloud.
-func NewSecretManagementClient(cfg *StoreConfig, provider Provider) (SecretManagementClient, error) {
-	return NewSecretManagementClientWithConfig(SecretManagementClientConfig{
-		StoreConfig: cfg,
-		Provider:    provider,
-	})
-}
-
 // NewSecretManagementClientWithConfig is the full-control constructor.
 func NewSecretManagementClientWithConfig(cfg SecretManagementClientConfig) (SecretManagementClient, error) {
 	if cfg.StoreConfig == nil {
@@ -322,6 +138,7 @@ func NewSecretManagementClientWithConfig(cfg SecretManagementClientConfig) (Secr
 		return nil, fmt.Errorf("failed to create secrets client: %w", err)
 	}
 	return &secretManagementClient{
+		provider:        cfg.Provider,
 		lowLevelClient:  lowLevelClient,
 		managedBy:       DefaultManagedBy,
 		ocClient:        cfg.OCClient,
@@ -329,10 +146,29 @@ func NewSecretManagementClientWithConfig(cfg SecretManagementClientConfig) (Secr
 	}, nil
 }
 
+// managesRefs reports whether the underlying provider owns SecretReference
+// CRUD (e.g. SM-API). When true the high-level client must not call OC.
+func (c *secretManagementClient) managesRefs() bool {
+	if m, ok := c.provider.(SecretReferenceManager); ok && m.ManagesSecretReferences() {
+		return true
+	}
+	return false
+}
+
+func (c *secretManagementClient) requireOCClient() error {
+	if c.ocClient == nil {
+		return fmt.Errorf("OCClient required when provider does not manage SecretReferences")
+	}
+	return nil
+}
+
 func (c *secretManagementClient) upsertSecretReference(ctx context.Context, location SecretLocation, kvPath string, secretKeys []string) (string, error) {
+	// D-SR-namespace: OrgName is the org UUID; OC calls need the derived
+	// k8s base namespace (wc-<ouId8>-<sha256[:8]>), not the raw UUID.
+	orgNS := tenant.OrgBaseNamespace(location.OrgName)
 	name := location.SecretRefName()
 	req := CreateSecretReferenceRequest{
-		Namespace:       location.OrgName,
+		Namespace:       orgNS,
 		Name:            name,
 		ProjectName:     location.ProjectName,
 		ComponentName:   location.EntityName,
@@ -340,14 +176,14 @@ func (c *secretManagementClient) upsertSecretReference(ctx context.Context, loca
 		SecretKeys:      secretKeys,
 		RefreshInterval: c.refreshInterval,
 	}
-	_, getErr := c.ocClient.GetSecretReference(ctx, location.OrgName, name)
+	_, getErr := c.ocClient.GetSecretReference(ctx, orgNS, name)
 	if getErr != nil {
 		if !errors.Is(getErr, ErrNotFound) {
 			return "", fmt.Errorf("check SecretReference: %w", getErr)
 		}
-		if _, createErr := c.ocClient.CreateSecretReference(ctx, location.OrgName, req); createErr != nil {
+		if _, createErr := c.ocClient.CreateSecretReference(ctx, orgNS, req); createErr != nil {
 			if errors.Is(createErr, ErrConflict) {
-				if _, updateErr := c.ocClient.UpdateSecretReference(ctx, location.OrgName, name, req); updateErr != nil {
+				if _, updateErr := c.ocClient.UpdateSecretReference(ctx, orgNS, name, req); updateErr != nil {
 					return "", fmt.Errorf("update after create conflict: %w", updateErr)
 				}
 			} else {
@@ -355,7 +191,7 @@ func (c *secretManagementClient) upsertSecretReference(ctx context.Context, loca
 			}
 		}
 	} else {
-		if _, updateErr := c.ocClient.UpdateSecretReference(ctx, location.OrgName, name, req); updateErr != nil {
+		if _, updateErr := c.ocClient.UpdateSecretReference(ctx, orgNS, name, req); updateErr != nil {
 			return "", fmt.Errorf("update SecretReference: %w", updateErr)
 		}
 	}
@@ -372,14 +208,17 @@ func (c *secretManagementClient) CreateSecret(ctx context.Context, location Secr
 	if err != nil {
 		return "", fmt.Errorf("upsert secret: %w", err)
 	}
-	if c.ocClient != nil {
-		keys := make([]string, 0, len(data))
-		for k := range data {
-			keys = append(keys, k)
-		}
-		return c.upsertSecretReference(ctx, location, secretRef, keys)
+	if c.managesRefs() {
+		return secretRef, nil
 	}
-	return secretRef, nil
+	if err := c.requireOCClient(); err != nil {
+		return "", err
+	}
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	return c.upsertSecretReference(ctx, location, secretRef, keys)
 }
 
 func (c *secretManagementClient) PatchSecret(ctx context.Context, location SecretLocation, data map[string]string, keysToDelete []string) (string, error) {
@@ -399,14 +238,17 @@ func (c *secretManagementClient) PatchSecret(ctx context.Context, location Secre
 	if err != nil {
 		return "", fmt.Errorf("patch secret: %w", err)
 	}
-	if c.ocClient != nil {
-		info, err := c.lowLevelClient.GetSecret(ctx, location)
-		if err != nil {
-			return "", fmt.Errorf("get secret keys after patch: %w", err)
-		}
-		return c.upsertSecretReference(ctx, location, secretRef, info.Keys)
+	if c.managesRefs() {
+		return secretRef, nil
 	}
-	return secretRef, nil
+	if err := c.requireOCClient(); err != nil {
+		return "", err
+	}
+	info, err := c.lowLevelClient.GetSecret(ctx, location)
+	if err != nil {
+		return "", fmt.Errorf("get secret keys after patch: %w", err)
+	}
+	return c.upsertSecretReference(ctx, location, secretRef, info.Keys)
 }
 
 func (c *secretManagementClient) DeleteSecret(ctx context.Context, location SecretLocation, secretRefName string) error {
@@ -414,8 +256,12 @@ func (c *secretManagementClient) DeleteSecret(ctx context.Context, location Secr
 	if err := c.lowLevelClient.DeleteSecret(ctx, location, metadata); err != nil {
 		return fmt.Errorf("delete secret: %w", err)
 	}
-	if c.ocClient != nil {
-		if err := c.ocClient.DeleteSecretReference(ctx, location.OrgName, secretRefName); err != nil {
+	if !c.managesRefs() {
+		if err := c.requireOCClient(); err != nil {
+			return err
+		}
+		orgNS := tenant.OrgBaseNamespace(location.OrgName)
+		if err := c.ocClient.DeleteSecretReference(ctx, orgNS, secretRefName); err != nil {
 			if !errors.Is(err, ErrNotFound) {
 				return fmt.Errorf("delete SecretReference: %w", err)
 			}
