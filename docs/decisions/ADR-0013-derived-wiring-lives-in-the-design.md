@@ -69,6 +69,22 @@ Three properties make this hold:
   (every design.json write passes `FileBundle.commit` → `checkComponentDesign`).
   Shipping only `aep-api` leaves the first re-generation over a stamped design
   failing `SCHEMA_VIOLATION`.
+- **A stamped `ref` always points at a Ready binding, and the dispatch predicate
+  is what guarantees it.** The agent now writes a resource entry unconditionally
+  rather than only for resolved dependencies, which would be a hazard if it could
+  reference a resource that does not exist yet. It cannot: a provision gate closes
+  exactly when its binding reports Ready, and no coding cycle dispatches while a
+  gate is open. A design that gains a resource dependency later gets a fresh gate
+  on its next build, so the invariant holds across versions too.
+- **`wiring` must round-trip through the on-disk codec, in both directions.**
+  `design.json` is written by an explicit codec (`dependencyJSON`) whose purpose is
+  that derived keys cannot leak into the file — `status`/`reason` are deliberately
+  absent from it. `wiring` is the exception that IS persisted, so it has to be
+  added there too. This shipped broken once: the field was in the model and all
+  three gates but not the codec, so every stamp was silently discarded on write and
+  a build produced a design.json with `exposesAPI.auth` set and no wiring at all.
+  Dropping it on READ is subtler — the derivation would see no prior value, so the
+  change detection would report a diff and commit on every save forever.
 - **The naming convention moved to the kernel** (`internal/platform/ocname`).
   `spec` now derives the same ref and env-var names `dependencies` injects, and it
   cannot import `dependencies` — `dependencies` already imports `spec` — so a
