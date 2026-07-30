@@ -419,6 +419,16 @@ export interface TurnRequest {
    * the tool map is byte-identical to a turn without it.
    */
   webSearch?: boolean;
+  /**
+   * Skill names whose guidance the service should inline into THIS turn's
+   * prompt up front (#335 latency): when the caller already knows a skill will
+   * be needed (the console's seeded grilling turn), inlining it saves the
+   * model's `loadSkill` round-trip — one full model step before any output.
+   * Bodies ride the per-turn user prompt, never the system prompt, so the
+   * cacheable instruction prefix is untouched. Unknown names are ignored; the
+   * catalog + lazy `loadSkill` remain for everything else (ADR-0002).
+   */
+  eagerSkills?: string[];
 }
 
 /** The registrable tool sets a turn may request (`TurnRequest.toolset`). */

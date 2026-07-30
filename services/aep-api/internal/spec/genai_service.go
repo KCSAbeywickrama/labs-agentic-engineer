@@ -154,6 +154,11 @@ type TurnInput struct {
 	// joins the project's spec room as a live Yjs peer with the prompting
 	// user's bearer, edits the shared doc, and nothing is committed to git.
 	Collab bool
+	// EagerSkills names skills the agents service inlines into this turn's
+	// prompt up front (#335 latency) — skips the model's loadSkill round-trip
+	// when the caller already knows a skill applies. Passed through verbatim;
+	// unknown names are ignored downstream.
+	EagerSkills []string
 }
 
 // TurnStatus is the read view of one turn (the status GET body).
@@ -420,6 +425,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		committer:        committer,
 		collabRoomID:     collabRoomID,
 		collabToken:      collabToken,
+		eagerSkills:      in.EagerSkills,
 	}
 	// Detached: the turn runs to completion (or a terminal failure) server-
 	// side regardless of the client connection (D16). runTurnSafe is the panic

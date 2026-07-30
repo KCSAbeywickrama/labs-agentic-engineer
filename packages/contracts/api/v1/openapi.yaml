@@ -4370,6 +4370,14 @@ components:
           description: 'Room-scoped turn (#86 phase 4): the agent joins the project''s spec collab room
             as a live peer, reads and edits the shared doc, and commits nothing to git.'
           type: boolean
+        eagerSkills:
+          description: 'Skill names whose guidance the agents service inlines into this turn''s prompt
+            up front (#335 latency) — skips the model''s loadSkill round-trip when the caller already
+            knows a skill applies (the seeded grilling turn). Unknown names are ignored.'
+          items:
+            type: string
+          maxItems: 8
+          type: array
         instruction:
           description: User message / generation directive
           type: string

@@ -45,7 +45,8 @@ export const GRILLING_DIRECTIVE =
   "on its own — explain in its detail why you ask and what it affects, and in each option's description " +
   "what choosing it means and its trade-offs. " +
   "Work through the idea's ambiguities until the requirements are unambiguous. " +
-  "If a grilling skill is available in your catalog, load it first and follow it. " +
+  "Follow the grilling skill: if its guidance is already included in this message, apply it directly; " +
+  "otherwise, if it is available in your catalog, load it first. " +
   "If I ask you to skip ahead or just generate, stop interviewing and proceed on " +
   "stated assumptions. When the interview is done, proceed with the following. ";
 

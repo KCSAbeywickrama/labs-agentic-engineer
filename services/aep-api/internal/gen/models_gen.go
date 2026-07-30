@@ -1170,6 +1170,9 @@ type TurnInputBody struct {
 	// Collab Room-scoped turn (#86 phase 4): the agent joins the project's spec collab room as a live peer, reads and edits the shared doc, and commits nothing to git.
 	Collab bool `json:"collab,omitempty"`
 
+	// EagerSkills Skill names whose guidance the agents service inlines into this turn's prompt up front (#335 latency) — skips the model's loadSkill round-trip when the caller already knows a skill applies (the seeded grilling turn). Unknown names are ignored.
+	EagerSkills []string `json:"eagerSkills,omitempty"`
+
 	// Instruction User message / generation directive
 	Instruction string `json:"instruction"`
 
