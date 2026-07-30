@@ -47,7 +47,7 @@ func TestStampFrontmatterKind(t *testing.T) {
 	t.Run("stamps an unmarked skill", func(t *testing.T) {
 		t.Parallel()
 		in := mkSkillMD("alpha", "", "BODY-α")
-		out, err := stampFrontmatterKind(in, SkillKindCustom)
+		out, err := stampFrontmatterKind(in, SkillKindOrg)
 		if err != nil {
 			t.Fatalf("stamp: %v", err)
 		}
@@ -55,8 +55,8 @@ func TestStampFrontmatterKind(t *testing.T) {
 		if err != nil {
 			t.Fatalf("re-parse: %v", err)
 		}
-		if got := frontmatterKind(fm); got != SkillKindCustom {
-			t.Fatalf("kind after stamp = %q, want custom", got)
+		if got := frontmatterKind(fm); got != SkillKindOrg {
+			t.Fatalf("kind after stamp = %q, want org", got)
 		}
 		if fm.Name != "alpha" || fm.Description == "" {
 			t.Fatalf("stamp lost frontmatter fields: %+v", fm)
@@ -68,8 +68,8 @@ func TestStampFrontmatterKind(t *testing.T) {
 
 	t.Run("idempotent for an already-stamped kind", func(t *testing.T) {
 		t.Parallel()
-		in := mkSkillMD("alpha", "custom", "BODY")
-		out, err := stampFrontmatterKind(in, SkillKindCustom)
+		in := mkSkillMD("alpha", "org", "BODY")
+		out, err := stampFrontmatterKind(in, SkillKindOrg)
 		if err != nil {
 			t.Fatalf("stamp: %v", err)
 		}
@@ -80,9 +80,9 @@ func TestStampFrontmatterKind(t *testing.T) {
 
 	t.Run("overrides a spoofed kind", func(t *testing.T) {
 		t.Parallel()
-		// A create/import must not let user content claim platform/org status.
-		in := mkSkillMD("alpha", "org", "BODY")
-		out, err := stampFrontmatterKind(in, SkillKindCustom)
+		// A create/import must not let user content claim platform status.
+		in := mkSkillMD("alpha", "platform", "BODY")
+		out, err := stampFrontmatterKind(in, SkillKindOrg)
 		if err != nil {
 			t.Fatalf("stamp: %v", err)
 		}
@@ -90,8 +90,8 @@ func TestStampFrontmatterKind(t *testing.T) {
 		if err != nil {
 			t.Fatalf("re-parse: %v", err)
 		}
-		if got := frontmatterKind(fm); got != SkillKindCustom {
-			t.Fatalf("kind after stamp = %q, want custom (spoof must not survive)", got)
+		if got := frontmatterKind(fm); got != SkillKindOrg {
+			t.Fatalf("kind after stamp = %q, want org (spoof must not survive)", got)
 		}
 	})
 
@@ -231,24 +231,33 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	for _, sk := range skills {
 		byName[sk.Name] = sk
 	}
-	// The full embedded library is back plus the preserved custom skill
-	// ("mine"), minus nothing — react-webapp is user-owned now. retired is
-	// purged. Derived from loadLibrary rather than a literal so this never
-	// needs bumping when a skill is added to or removed from skills/.
-	embedded, err := loadLibrary(testLibraryFS(t))
-	if err != nil {
-		t.Fatalf("loadLibrary: %v", err)
+	// Platform-kind embedded skills are always managed, so all of them come
+	// back regardless of prior presence; org-kind embedded defaults absent
+	// from this (legacy) repo are opt-in on ongoing sync (this Reconcile call
+	// is NOT first-creation) and are NOT resurrected here — only the org-kind
+	// names already present (go, react-webapp) are migrated/preserved. Plus
+	// the preserved custom skill (mine) — minus nothing else. retired is
+	// purged. The platform side is derived from the library rather than
+	// hardcoded, so this never needs bumping when a skill is added to or
+	// removed from skills/.
+	for _, absentOrgDefault := range []string{"api-management", "thunder-authentication"} {
+		if _, ok := byName[absentOrgDefault]; ok {
+			t.Fatalf("absent org-kind default %q must stay opt-in on ongoing sync, got resurrected: %+v", absentOrgDefault, skillKeysOf(byName))
+		}
 	}
-	if want := len(embedded) + 1; len(skills) != want {
+	// go + react-webapp (present org-kind names) + mine (preserved custom).
+	const nonPlatformAfterMigration = 3
+	if want := EmbeddedLibraryCount(t, SkillKindPlatform) + nonPlatformAfterMigration; len(skills) != want {
 		t.Fatalf("catalog size after migration = %d, want %d: %+v", len(skills), want, skillKeysOf(byName))
 	}
 	if _, ok := byName["retired"]; ok {
 		t.Fatalf("retired legacy builtin must be purged")
 	}
-	// Preserved custom skill: flat, stamped, references intact, editable kind.
+	// Preserved custom skill: flat, references intact. The retired "custom"
+	// legacy dir now folds to org (legacyKindDirs["custom"] == SkillKindOrg).
 	mine := byName["mine"]
-	if mine.Kind != SkillKindCustom {
-		t.Fatalf("mine kind = %q, want custom", mine.Kind)
+	if mine.Kind != SkillKindOrg {
+		t.Fatalf("mine kind = %q, want org (custom folds into org)", mine.Kind)
 	}
 	if mine.References["references/r.md"] != "my ref" {
 		t.Fatalf("mine references lost: %v", mine.References)
@@ -256,30 +265,42 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	if mine.References["scripts/s.sh"] != "#!/bin/sh\necho mine\n" {
 		t.Fatalf("mine scripts/s.sh lost: %v", mine.References)
 	}
-	if !strings.Contains(origin.FileAt(t, "main", "skills/mine/SKILL.md"), "kind: custom") {
-		t.Fatalf("migrated custom skill must be stamped")
+	// The migrated legacy-custom skill is stamped with its resolved kind, which
+	// under the fold is org (custom folds into org — legacyKindDirs["custom"]
+	// == SkillKindOrg), not the retired "custom".
+	if !strings.Contains(origin.FileAt(t, "main", "skills/mine/SKILL.md"), "kind: org") {
+		t.Fatalf("migrated legacy-custom skill must be stamped kind: org (custom folds into org)")
 	}
-	// Shadow: the user copy owns the name; the embedded org skill is skipped.
+	// Shadow: the user copy owns the name; its diverged content is preserved as
+	// an override, not clobbered back to the embedded org skill's content.
 	rw := byName["react-webapp"]
-	if rw.Kind != SkillKindCustom || !strings.Contains(rw.SkillMD, "user shadow") {
-		t.Fatalf("shadow must resolve custom-wins, got kind=%q body=%q", rw.Kind, rw.SkillMD)
+	if rw.Kind != SkillKindOrg || !strings.Contains(rw.SkillMD, "user shadow") {
+		t.Fatalf("shadow must preserve the user's content, got kind=%q body=%q", rw.Kind, rw.SkillMD)
 	}
-	// Drifted embedded skills were rewritten from the embed.
-	if strings.Contains(byName["go"].SkillMD, "OLD embedded go") {
-		t.Fatalf("embedded go must be rewritten from the embed")
+	// Divergent legacy copies of embedded names predate the manifest, so under
+	// the three-way reconcile they are pre-manifest backfill-overrides: moved
+	// flat and stamped, but their content is preserved, not clobbered back to
+	// the embed (spec §3 — same rule TestReconcile_BackfillStampsPreManifestRepo
+	// pins for the flat-layout case).
+	if !strings.Contains(byName["go"].SkillMD, "OLD embedded go") {
+		t.Fatalf("divergent pre-manifest legacy copy of go must be preserved as an override, not rewritten from the embed")
 	}
-	if strings.Contains(byName["task-planning"].SkillMD, "OLD flow body") {
-		t.Fatalf("embedded task-planning must be rewritten from the embed")
+	if !strings.Contains(byName["task-planning"].SkillMD, "OLD flow body") {
+		t.Fatalf("divergent pre-manifest legacy copy of task-planning must be preserved as an override, not rewritten from the embed")
 	}
 
-	// The badge must not offer an "update" for a user-owned name.
+	// react-webapp is now an org-kind override of an embedded name (org is no
+	// longer user-owned by kind post-fold), so it correctly surfaces on the
+	// badge as "overridden" rather than being skipped outright — the badge
+	// must never offer it as an "update" (never propose clobbering the org's
+	// content back to the embed).
 	ups, err := c.Svc.UpdatesAvailable(ctx, "org1")
 	if err != nil {
 		t.Fatalf("UpdatesAvailable: %v", err)
 	}
 	for _, u := range ups {
-		if u.Name == "react-webapp" {
-			t.Fatalf("user-owned name must not surface on the updates badge: %+v", ups)
+		if u.Name == "react-webapp" && u.State != "overridden" {
+			t.Fatalf("react-webapp must surface as overridden, not %q: %+v", u.State, ups)
 		}
 	}
 

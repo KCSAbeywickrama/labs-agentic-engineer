@@ -91,7 +91,7 @@ func validationErr(code, message, path string) *SkillValidationError {
 	return &SkillValidationError{Issues: []SkillValidationIssue{{Code: code, Message: message, Path: path}}}
 }
 
-// CreateSkillInput is the POST body for a custom skill. References is
+// CreateSkillInput is the POST body for a new org skill. References is
 // OPTIONAL — a skill without reference files is legitimate, and the console's
 // create dialog sends only {name, skillMd} (absent ≡ {}).
 type CreateSkillInput struct {
@@ -100,17 +100,22 @@ type CreateSkillInput struct {
 	References map[string]string `json:"references,omitempty"`
 }
 
-// UpdateSkillInput is the PUT body for a custom skill. References is OPTIONAL
-// (absent ≡ {}); an update without it prunes any existing reference files.
+// UpdateSkillInput is the PUT body for an editable skill (org or imported).
+// References is OPTIONAL (absent ≡ {}); an update without it prunes any
+// existing reference files.
 type UpdateSkillInput struct {
 	SkillMD    string            `json:"skillMd"`
 	References map[string]string `json:"references,omitempty"`
 }
 
 // SkillMutationService owns the org-editable write surface: create/update/
-// delete for custom skills, delete for imported skills, and the read-only
-// guard for builtins. Writes commit directly to the org's skills repo on
-// `main`. See docs/design/skills-repo-storage.md §9.
+// delete for org and imported skills, and the read-only guard for platform
+// skills. Delete additionally consults the reconcile-owned manifest — a
+// deletable (user-authored) org name is indistinguishable at the kind level
+// from a platform-seeded one, so the manifest's origin entry is what tells
+// them apart; a platform-seeded org skill stays undeletable even though it is
+// editable. Writes commit directly to the org's skills repo on `main`. See
+// docs/design/skills-repo-storage.md §9.
 type SkillMutationService struct {
 	skills *SkillService
 }
@@ -119,7 +124,7 @@ func NewSkillMutationService(skills *SkillService) *SkillMutationService {
 	return &SkillMutationService{skills: skills}
 }
 
-// Create validates and commits a new kind=custom skill for the org.
+// Create validates and commits a new kind=org skill for the org.
 func (m *SkillMutationService) Create(ctx context.Context, orgID, actor string, in CreateSkillInput) (*Skill, error) {
 	if m == nil || m.skills == nil {
 		return nil, fmt.Errorf("skill mutation service: not configured")
@@ -151,26 +156,30 @@ func (m *SkillMutationService) Create(ctx context.Context, orgID, actor string, 
 	}
 
 	// Stamp the kind into the stored file — the flat layout has no kind dirs,
-	// so an unstamped SKILL.md would read back as org (read-only) and be
-	// reconcile-purged. Stamping also defeats a spoofed platform/org marker.
-	stamped, err := stampFrontmatterKind(in.SkillMD, SkillKindCustom)
+	// so an unstamped SKILL.md would read back as org anyway, but stamping
+	// makes the file self-describing and defeats a spoofed platform marker. A
+	// newly authored skill is an org skill (reconcile never touches it: the
+	// embedded-skill loop only visits names it ships, and this name has no
+	// manifest entry).
+	stamped, err := stampFrontmatterKind(in.SkillMD, SkillKindOrg)
 	if err != nil {
 		return nil, validationErr("FRONTMATTER_INVALID", err.Error(), "skillMd")
 	}
 
 	refs := normalizeRefs(in.References)
-	msg := fmt.Sprintf("feat(skills): add custom skill %q\n\nby %s", name, actor)
-	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, false); err != nil {
-		return nil, fmt.Errorf("commit custom skill %q: %w", name, err)
+	msg := fmt.Sprintf("feat(skills): add org skill %q\n\nby %s", name, actor)
+	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, false, nil); err != nil {
+		return nil, fmt.Errorf("commit org skill %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill created", "orgID", orgID, "name", name, "actor", actor)
 	// Return the just-written skill from validated input — no read-back (a
 	// transient post-commit read could nil-panic the handler on a real success).
-	return newSkillValue(orgID, SkillKindCustom, name, stamped, refs, fm), nil
+	return newSkillValue(orgID, SkillKindOrg, name, stamped, refs, fm), nil
 }
 
-// Update rewrites an existing kind=custom skill. Returns ErrSkillNotEditable
-// for builtins, ErrSkillNotFound when the name is not an editable custom row.
+// Update rewrites an existing editable skill (org or imported) in place,
+// preserving its kind. Returns ErrSkillNotEditable for platform skills,
+// ErrSkillNotFound when the name resolves to no row at all.
 func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name string, in UpdateSkillInput) (*Skill, error) {
 	if m == nil || m.skills == nil {
 		return nil, fmt.Errorf("skill mutation service: not configured")
@@ -182,12 +191,8 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 	if existing == nil {
 		return nil, ErrSkillNotFound
 	}
-	if !isUserKind(existing.Kind) {
-		return nil, ErrSkillNotEditable // org + platform are reconcile-managed
-	}
-	if existing.Kind != SkillKindCustom {
-		// imported skills are replaced via re-import, not PUT.
-		return nil, ErrSkillNotFound
+	if !SkillEditable(existing.Kind) {
+		return nil, ErrSkillNotEditable // platform is reconcile-managed
 	}
 
 	fm, _, err := parseAndValidateSkillMD(in.SkillMD, in.References)
@@ -199,26 +204,55 @@ func (m *SkillMutationService) Update(ctx context.Context, orgID, actor, name st
 			"cannot rename a skill via update; frontmatter name must match the existing name", "name")
 	}
 
-	stamped, err := stampFrontmatterKind(in.SkillMD, SkillKindCustom)
+	// Preserve the existing kind — editing an org skill (platform-seeded or
+	// user-authored) keeps it org, editing an imported skill keeps it imported.
+	stamped, err := stampFrontmatterKind(in.SkillMD, existing.Kind)
 	if err != nil {
 		return nil, validationErr("FRONTMATTER_INVALID", err.Error(), "skillMd")
 	}
 
 	refs := normalizeRefs(in.References)
-	msg := fmt.Sprintf("chore(skills): update custom skill %q\n\nby %s", name, actor)
+
+	// Convergence-persist: if this edit brings a platform-managed org skill's
+	// content back to the platform's CURRENT embedded version, advance its
+	// manifest baseline to that version in the same commit. Otherwise the
+	// baseline stays frozen at the version the org last synced from, and the
+	// next platform release would read the now-identical copy as an org edit
+	// diverged from a stale base — a false conflict (skills-experience spec §3;
+	// the console counterpart of reconcile's converged-copy backfill). A
+	// divergent edit leaves the entry nil: the baseline stays frozen, which is
+	// the correct "override" posture. Only org-kind skills the platform
+	// actually ships can converge this way — a user-authored org skill (absent
+	// from the library) or an imported skill keeps its own manifest posture
+	// untouched.
+	var manifestEntry *ManifestEntry
+	if existing.Kind == SkillKindOrg {
+		embeddedSHA, shipped, serr := m.skills.embeddedContentSHA(name)
+		if serr != nil {
+			return nil, fmt.Errorf("embedded lookup for %q: %w", name, serr)
+		}
+		if shipped && contentSHA(stamped, refs) == embeddedSHA {
+			manifestEntry = &ManifestEntry{Origin: ManifestOriginPlatform, BaseHash: embeddedSHA}
+		}
+	}
+
+	msg := fmt.Sprintf("chore(skills): update %s skill %q\n\nby %s", existing.Kind, name, actor)
 	// pruneStaleRefs=true: an update may have removed reference files.
-	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, true); err != nil {
+	if err := m.skills.writeSkillFiles(ctx, orgID, name, stamped, refs, msg, true, manifestEntry); err != nil {
 		return nil, fmt.Errorf("commit update for %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill updated", "orgID", orgID, "name", name, "actor", actor)
-	return newSkillValue(orgID, SkillKindCustom, name, stamped, refs, fm), nil
+	return newSkillValue(orgID, existing.Kind, name, stamped, refs, fm), nil
 }
 
-// Delete removes a custom or imported skill (deletes the skill's directory and
-// commits). Builtins return ErrSkillNotEditable. The prior
-// IMPORTED_SKILL_IN_USE guard is dropped — with HEAD reads and no snapshots
-// there are no rows to protect (docs/design/skills-repo-storage.md §9); an
-// in-flight task simply reads HEAD without the deleted skill.
+// Delete removes an editable skill (deletes the skill's directory and
+// commits). Platform-kind skills return ErrSkillNotEditable — everything
+// else, including a platform-seeded org skill (e.g. "go"), is deletable;
+// reconcile (see reconcile.go) no longer re-seeds a deleted platform
+// default, so the delete sticks. The prior IMPORTED_SKILL_IN_USE guard is
+// dropped — with HEAD reads and no snapshots there are no rows to protect
+// (docs/design/skills-repo-storage.md §9); an in-flight task simply reads
+// HEAD without the deleted skill.
 func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name string) error {
 	if m == nil || m.skills == nil {
 		return fmt.Errorf("skill mutation service: not configured")
@@ -230,8 +264,8 @@ func (m *SkillMutationService) Delete(ctx context.Context, orgID, actor, name st
 	if existing == nil {
 		return ErrSkillNotFound
 	}
-	if !isUserKind(existing.Kind) {
-		return ErrSkillNotEditable // org + platform are reconcile-managed
+	if !SkillEditable(existing.Kind) {
+		return ErrSkillNotEditable // platform is reconcile-managed
 	}
 
 	msg := fmt.Sprintf("chore(skills): delete %s skill %q\n\nby %s", existing.Kind, name, actor)

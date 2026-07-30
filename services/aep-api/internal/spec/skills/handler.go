@@ -76,6 +76,7 @@ func (h *Handler) ListSkills(ctx context.Context, _ gen.ListSkillsRequestObject)
 			Description: sum.Description,
 			ContentSha:  sum.ContentSHA,
 			Editable:    sum.Editable,
+			Deletable:   sum.Deletable,
 		})
 	}
 	return gen.ListSkills200JSONResponse(out), nil
@@ -95,7 +96,10 @@ func (h *Handler) CreateSkill(ctx context.Context, request gen.CreateSkillReques
 	if err != nil {
 		return nil, mapSkillError(err)
 	}
-	return gen.CreateSkill201JSONResponse(skillDetailBody(sk, true)), nil
+	// A freshly created skill can never be platform-seeded — Create's own
+	// collision check already rejects any name a visible skill (including a
+	// platform-seeded one) already uses — so it is always deletable.
+	return gen.CreateSkill201JSONResponse(skillDetailBody(sk, true, true)), nil
 }
 
 func (h *Handler) ImportSkill(ctx context.Context, request gen.ImportSkillRequestObject) (gen.ImportSkillResponseObject, error) {
@@ -136,7 +140,7 @@ func (h *Handler) ListSkillUpdates(ctx context.Context, _ gen.ListSkillUpdatesRe
 		Count:   int64(len(updates)),
 	}
 	for _, u := range updates {
-		out.Updates = append(out.Updates, gen.SkillUpdate{Name: u.Name})
+		out.Updates = append(out.Updates, gen.SkillUpdate{Name: u.Name, State: gen.SkillUpdateState(u.State)})
 	}
 	return gen.ListSkillUpdates200JSONResponse(out), nil
 }
@@ -165,7 +169,7 @@ func (h *Handler) GetSkill(ctx context.Context, request gen.GetSkillRequestObjec
 	if sk == nil {
 		return nil, apierr.NotFound("skill not found")
 	}
-	return gen.GetSkill200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind))), nil
+	return gen.GetSkill200JSONResponse(skillDetailBody(sk, skillEditable(sk.Kind), spec.SkillDeletable(sk.Kind))), nil
 }
 
 func (h *Handler) UpdateSkill(ctx context.Context, request gen.UpdateSkillRequestObject) (gen.UpdateSkillResponseObject, error) {
@@ -184,7 +188,8 @@ func (h *Handler) UpdateSkill(ctx context.Context, request gen.UpdateSkillReques
 	if err != nil {
 		return nil, mapSkillError(err)
 	}
-	return gen.UpdateSkill200JSONResponse(skillDetailBody(sk, true)), nil
+	// Update preserves kind, and deletability is a pure kind check.
+	return gen.UpdateSkill200JSONResponse(skillDetailBody(sk, true, spec.SkillDeletable(sk.Kind))), nil
 }
 
 func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillRequestObject) (gen.DeleteSkillResponseObject, error) {
@@ -204,9 +209,12 @@ func (h *Handler) DeleteSkill(ctx context.Context, request gen.DeleteSkillReques
 	}), nil
 }
 
-// skillDetailBody projects a resolved Skill + the derived editable flag onto
-// the contract's SkillDetailBody (the full single-skill response).
-func skillDetailBody(sk *spec.Skill, editable bool) gen.SkillDetailBody {
+// skillDetailBody projects a resolved Skill + the derived editable/deletable
+// flags onto the contract's SkillDetailBody (the full single-skill response).
+// Binary aux files are pulled out of `references` and listed in
+// `binaryReferences` (see splitBinaryReferences) so invalid-UTF-8 content is
+// never mangled by the JSON encoder.
+func skillDetailBody(sk *spec.Skill, editable, deletable bool) gen.SkillDetailBody {
 	refs, binary := splitBinaryReferences(sk.References)
 	return gen.SkillDetailBody{
 		OrgID:            sk.OrgID,
@@ -221,6 +229,7 @@ func skillDetailBody(sk *spec.Skill, editable bool) gen.SkillDetailBody {
 		Compatibility:    sk.Compatibility,
 		UpdatedAt:        sk.UpdatedAt,
 		Editable:         editable,
+		Deletable:        deletable,
 	}
 }
 
@@ -244,10 +253,10 @@ func splitBinaryReferences(references map[string]string) (map[string]string, []s
 	return refs, binary
 }
 
-// skillEditable mirrors the skills feature's user-kind rule: only user-owned
-// kinds (custom/imported) are editable — org + platform are reconcile-managed.
+// skillEditable is a thin call to the package spec's single editability seam
+// — org + imported are editable, platform is reconcile-managed and read-only.
 func skillEditable(kind string) bool {
-	return kind == spec.SkillKindCustom || kind == spec.SkillKindImported
+	return spec.SkillEditable(kind)
 }
 
 // requireSlug validates a single DNS-label slug path param, returning a 400

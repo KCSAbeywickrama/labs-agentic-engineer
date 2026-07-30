@@ -134,7 +134,7 @@ func TestFrontmatterKind(t *testing.T) {
 	}{
 		{"platform", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: platform\n---\nbody", "platform"},
 		{"org explicit", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: org\n---\nbody", "org"},
-		{"custom stamped", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: custom\n---\nbody", "custom"},
+		{"custom stamped (retired, folds to org)", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: custom\n---\nbody", "org"},
 		{"imported stamped", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: imported\n---\nbody", "imported"},
 		{"absent metadata", "---\nname: s\ndescription: d.\n---\nbody", "org"},
 		{"empty kind", "---\nname: s\ndescription: d.\nmetadata:\n  aep:\n    kind: \"\"\n---\nbody", "org"},

@@ -29,7 +29,7 @@ const catalogue = [
   skill("react-webapp", "org", "How to build a React SPA on the platform."),
   skill("go", "org", "How to build a Go service on the platform."),
   skill("task-breakdown", "platform", "Breaks a design into buildable tasks."),
-  skill("acme-deploy-checklist", "custom", "Acme's internal checklist."),
+  skill("acme-deploy-checklist", "org", "Acme's internal checklist."),
   skill("find-skills", "imported", "Discover community AgentSkills."),
 ];
 
@@ -69,10 +69,11 @@ describe("paginateSkills", () => {
     expect(
       paginateSkills(catalogue, "imported", 1, 10).rows.map((s) => s.name),
     ).toEqual(["find-skills"]);
-    // The chip reads "Organization" — that is what people will type.
+    // The chip reads "Org" — that is what people will type. All three
+    // "org" rows match (custom folds into org, so acme is one of them too).
     expect(
-      paginateSkills(catalogue, "organization", 1, 10).rows.map((s) => s.name),
-    ).toEqual(["go", "react-webapp"]);
+      paginateSkills(catalogue, "org", 1, 10).rows.map((s) => s.name),
+    ).toEqual(["acme-deploy-checklist", "go", "react-webapp"]);
   });
 
   it("treats a blank or whitespace query as no filter", () => {

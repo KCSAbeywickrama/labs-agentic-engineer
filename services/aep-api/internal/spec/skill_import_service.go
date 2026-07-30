@@ -103,8 +103,15 @@ func (s *SkillImportService) Import(ctx context.Context, orgID, actor string, r 
 		return nil, validationErr("FRONTMATTER_INVALID", err.Error(), "skillMd")
 	}
 
+	entry := &ManifestEntry{
+		Origin:   ManifestOriginImported,
+		BaseHash: contentSHA(stamped, normalizeRefs(refs)),
+		// Source stays empty for tarball imports — there is no upstream to
+		// check; a future URL-based import flow fills it (spec §3:
+		// provenance is only as complete as the door the skill came through).
+	}
 	msg := fmt.Sprintf("feat(skills): import skill %q\n\nby %s", name, actor)
-	if err := s.skills.writeSkillFiles(ctx, orgID, name, stamped, normalizeRefs(refs), msg, false); err != nil {
+	if err := s.skills.writeSkillFiles(ctx, orgID, name, stamped, normalizeRefs(refs), msg, false, entry); err != nil {
 		return nil, fmt.Errorf("commit imported skill %q: %w", name, err)
 	}
 	slog.InfoContext(ctx, "skill imported", "orgID", orgID, "name", name, "actor", actor, "warnings", len(warnings))
