@@ -83,13 +83,23 @@ Features currently being built. One line each; **must be emptied on ship**
 (the line moves to the inventory below). If a line sits here for weeks,
 that's a stalled feature — investigate, don't ignore.
 
-- Cost visibility — actual USD spend for every unit of agentic work, per
-  phase (per task/build on the Builds page, drafting-cycle chip on the Spec
-  view; USD-only primary, token detail on expand, no overview surface);
-  actuals only — estimates and the model comparator are out of scope
-  (single-model platform); tokens stored, USD derived at read (ADR-0011) —
-  [#245](https://github.com/wso2/labs-agentic-engineer/issues/245)
-  (BE handshake: [#249](https://github.com/wso2/labs-agentic-engineer/issues/249))
+- Agent chat — structured question cards: `ask_question` (single) +
+  `ask_questions` (batch form) tool-calls rendered as native Oxygen UI cards
+  in the activity stream (answer returns as the next turn's plain text);
+  grilling interview auto-started on the spec-generation CTA; tool-call-as-UI
+  convention in ADR-0012. FE mock-verified; agents-service + platform grilling
+  skill via [#271](https://github.com/wso2/labs-agentic-engineer/issues/271) —
+  [#270](https://github.com/wso2/labs-agentic-engineer/issues/270)
+- Usage & cost — org-wide agent spend on a dedicated **Settings → Usage**
+  page: one card per project (incl. deleted projects) with a folded USD cost
+  as a plain value, hover for the input/output/cache token breakdown; USD-only
+  primary, actuals only. Supersedes the scattered per-phase chips of #245
+  (Builds task/build chips + Spec drafting-cycle chip, all removed). Costs
+  are **stamped at capture time** from **DB-backed model rates**, so a rate
+  change never rewrites history (ADR-0011 reversed) —
+  [#291](https://github.com/wso2/labs-agentic-engineer/issues/291)
+  (supersedes [#245](https://github.com/wso2/labs-agentic-engineer/issues/245);
+  BE handshake: [#299](https://github.com/wso2/labs-agentic-engineer/issues/299))
 - Deployments page — two-column board (Development / Production): one card
   per component × binding with status chip, release, endpoint URL,
   deployed-at; unbound components show greyed "Not deployed" cards in dev;
@@ -200,6 +210,8 @@ GitHub issue plus any ADRs it produced.
 
 | Feature | Shipped | Summary | Links |
 |---|---|---|---|
+| Build-session spine (run rail) | 2026-07-28 | A run renders as **one rail of staged sections**, and every applicable stage exists from the moment the run does — an unreached stage says what it waits for instead of being absent. **Provisioning** comes first (only when the milestone holds gates), as a run-level stage, because `OpenProvision == 0` is genuinely the dispatch predicate: each connection is listed with who is acting on it, which retires the gate branches of the hold notice. Then one **build session** (the console's name for a cycle) per dispatch, each a five-stage spine with a named actor — coding agent (runner) · pull request (agent) · merge (platform) · builds (platform) · deployment (cluster). The agent log lives inside the coding stage; issues appear on the provisioning and coding stages only, attributed from the merge policy's recorded matched set. **Deployment** replaces the cycle verdict: a statement plus a router link to the deployments board, with no cluster read — a `Deployment` carries no commit, so no rollout can be attributed to a session. A collapsed session shows a stage strip, so "which session broke" is answerable without opening anything; builds are read for the newest session always and older ones on expand, keeping the cluster-derived query bounded. `RunCycleView` gains `resolves[]` / `prDraft` / `mergeVerdict` / `mergeReason`, each a fact the event plane already computed and threw away — which is what finally gives the four silent stalls (draft PR, declined merge, refused merge, twice-red build) words on screen. | ADR-0014 |
+| Version run surface (Builds page rebuilt) | 2026-07-27 | The backend now executes a version as ONE supervised run over one GitHub milestone, so the Builds page becomes **one version's story, latest by default** — landing straight on the live run, never on a list. Choosing an older version stays a control on that page (the Version picker, `?tag=v<N>`); the overview's stage cards remain a read-only summary. Per run: state chip, origin, terminal reason as a sentence, budget counters, the cycle timeline (branch / PR / merge SHA, all learned from webhooks), prominent **Cancel** on a parked run, and the per-cycle agent feed as an accordion over one SSE stream with `subagent` emitter chips. Issue rows carry durable facts only and no longer navigate; an open dispatch gate renders as a **hold banner** deep-linking the connection drawer; bare human issues get a **Ledger** section. Validation re-keys to the run's verdict on the deployment surface. The run state is the page's only liveness driver — the ten-value derived-status algebra and its poll-stop are gone, and `ProjectStatus.build.tasks` / `deploy.validationIssue` / `deploy.validationUrl` leave the contract. | [#286](https://github.com/wso2/labs-agentic-engineer/issues/286), ADR-0013 |
 | Builds page (Tasks → Builds) | 2026-07-11 | Tasks section becomes the Builds page: current-build view (status, frozen task tally, timestamps) + Version autocomplete over built tags (`?tag=` search param, unknown tag falls back to newest), task list scoped server-side by lineage tag; `/tasks` routes redirect to `/builds`; page title inverts to "Builds" / project-name subtitle on this route only. Read-only v1 — builds start from the Spec view. New `GET /projects/{p}/builds` (one entry per built tag from `workflow_runs` dev rows); `list-tasks?tag=` now filters on the machine-block specTag so pre-#182 label-less tasks still scope. Incident tasks (no lineage) parked → [#190](https://github.com/wso2/labs-agentic-engineer/issues/190). | [#185](https://github.com/wso2/labs-agentic-engineer/issues/185) |
 | Legacy console retirement | 2026-07-10 | console-legacy deleted outright (directory, Makefile hooks, docker-compose service). apps/console takes over :8090/`aep-console` in both docker-compose and the OpenChoreo/Thunder cloud path (CORS allow-list, redirect URIs); the one-off `patch-thunder-new-console.sh` transition script is gone. | [#98](https://github.com/wso2/labs-agentic-engineer/issues/98) |
 | Tasks page + project-scoped left nav | 2026-07-10 | Sidebar swaps to Overview / Spec / Tasks / Deployments / Issues inside a project (full swap, no back-item; spec workspace auto-collapses it). Tasks: flat list with Pending/Ongoing/Done/Failed chips, 5s polling while active, per-task console-log page streaming `stream-task-log` (SSE) with per-attempt dividers. Issues ships as a placeholder (future SRE-agent issues surface); overview Build card renamed Tasks. No contract changes. Filtering deferred to [#177](https://github.com/wso2/labs-agentic-engineer/issues/177). | [#173](https://github.com/wso2/labs-agentic-engineer/issues/173), ADR-0010 |

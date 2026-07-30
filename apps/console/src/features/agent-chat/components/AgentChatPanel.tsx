@@ -53,11 +53,13 @@ import {
 import { useTurnEndDependencyRefresh } from "../useTurnEndDependencyRefresh";
 import { useCurrentAuthor } from "../currentUser";
 import { buildFeed, participantsOf, type FeedBlock } from "../feed";
+import { answerableQuestionIds } from "../questionCards";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import {
   buildDesignGenerationInstruction,
   buildSpecGenerationInstruction,
+  withGrillingInterview,
 } from "@aep/contracts/prompts";
 import { readCreatePrompt } from "../../projects/lib/promptStore";
 
@@ -80,12 +82,20 @@ const SUGGESTIONS = [
 const clampWidth = (n: number): number =>
   Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(n)));
 
+// Question ids we've already auto-navigated to the spec form for. Module-level,
+// NOT a ref: this panel unmounts whenever the user collapses it, so a ref would
+// reset and re-navigate on every reopen while a question is still pending.
+const autoOpenedQuestions = new Set<string>();
+
 function initialOf(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
 
 // The generation instruction for a one-shot signal: design is derived from the
-// current requirements; requirements are seeded from the stored create prompt.
+// current requirements; requirements are seeded from the stored create prompt
+// and wrapped with the grilling-interview directive (#270) — the console is the
+// interactive caller that opts in, so headless users of the same builders stay
+// one-shot.
 function instructionFor(
   signal: "requirements" | "design",
   org: string,
@@ -93,7 +103,7 @@ function instructionFor(
 ): string {
   return signal === "design"
     ? buildDesignGenerationInstruction()
-    : buildSpecGenerationInstruction(readCreatePrompt(org, projectName));
+    : withGrillingInterview(buildSpecGenerationInstruction(readCreatePrompt(org, projectName)));
 }
 
 // The project AI panel (#130), reworked into a multi-user activity stream
@@ -135,6 +145,10 @@ export function AgentChatPanel({
     () => participantsOf(messages, author.id),
     [messages, author.id],
   );
+  // A question is live only while unanswered and not superseded by a later
+  // delivered user message. One O(n) pass per log change.
+  const answerableIds = useMemo(() => answerableQuestionIds(messages), [messages]);
+  const awaiting = !isSending && answerableIds.size > 0;
 
   // A teammate's running turn locks the composer (a concurrent send 409s
   // anyway — this makes the lock legible rather than surprising).
@@ -149,7 +163,9 @@ export function AgentChatPanel({
   const inputDisabled = isSending || Boolean(teammateRunning);
   const hint = teammateRunning
     ? `Agent is working on ${teammateRunning}'s request…`
-    : null;
+    : awaiting
+      ? "Answer the agent's questions on the spec view, or type a reply…"
+      : null;
   // Before a turn has emitted anything it has no block yet — show a tail
   // "Working…" so a send never looks dropped.
   const showWorkingTail =
@@ -175,6 +191,24 @@ export function AgentChatPanel({
       params: { projectName },
     });
   }, [navigate, projectName]);
+
+  // Questions are answered on the spec view (the form takes over the body), so
+  // take the user there the moment one arrives — otherwise the agent is blocked
+  // on an answer they can't see from wherever they are. Fires exactly ONCE per
+  // question: after that the user is free to navigate away (and to reopen this
+  // panel) without being yanked back.
+  const pendingQuestionId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!;
+      if (m.role === "question" && m.questions?.length && answerableIds.has(m.id)) return m.id;
+    }
+    return null;
+  }, [messages, answerableIds]);
+  useEffect(() => {
+    if (!pendingQuestionId || autoOpenedQuestions.has(pendingQuestionId)) return;
+    autoOpenedQuestions.add(pendingQuestionId);
+    openSpec();
+  }, [pendingQuestionId, openSpec]);
 
   // --- Drag-to-resize (persisted) --------------------------------------
   const [width, setWidth] = useState<number>(() => {

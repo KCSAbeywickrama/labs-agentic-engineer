@@ -60,6 +60,22 @@ function freshKey(): string {
 beforeEach(() => localStorage.clear());
 
 describe("chatStore", () => {
+  it("drops a stale question message with no questions[] on load (schema guard)", () => {
+    const key = freshKey();
+    // A log written by an older build: a `question` message before the
+    // questions[] shape. Must not crash the card renderer on load.
+    localStorage.setItem(
+      key,
+      JSON.stringify([
+        { id: "m1", role: "user", content: "grill me", status: "completed" },
+        { id: "m2", role: "question", turnId: "t1", toolCallId: "tc", question: "old?", options: [{ label: "A" }] },
+        { id: "m3", role: "question", turnId: "t1", toolCallId: "tc2", questions: [{ question: "new?", options: [{ label: "B" }] }] },
+      ]),
+    );
+    const msgs = getMessages(key);
+    expect(msgs.map((m) => m.id)).toEqual(["m1", "m3"]); // legacy question dropped, valid one kept
+  });
+
   it("appends and notifies subscribers", () => {
     const key = freshKey();
     let notified = 0;

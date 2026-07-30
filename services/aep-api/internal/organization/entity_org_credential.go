@@ -50,8 +50,13 @@ type OrgCredential struct {
 	IdentityChangedAt *time.Time     `gorm:"column:identity_changed_at" json:"identityChangedAt,omitempty"`
 	PrevIdentityLogin *string        `gorm:"type:text;column:prev_identity_login" json:"prevIdentityLogin,omitempty"`
 
-	// SM-API triplet + write timestamp. See OrgAnthropicCredential for
-	// lifecycle. Four columns stamped atomically in the Connect tx.
+	// Secret-ref triplet + write timestamp. See OrgAnthropicCredential for
+	// lifecycle. secret_ref_* is the provider-neutral name (EXPAND);
+	// sm_api_* is kept for dual-write until phase 09 CONTRACT.
+	SecretRefName      *string    `gorm:"type:text;column:secret_ref_name" json:"-"`
+	SecretRefKVPath    *string    `gorm:"type:text;column:secret_ref_kv_path" json:"-"`
+	SecretRefProperty  *string    `gorm:"type:text;column:secret_ref_property" json:"-"`
+	SecretRefWrittenAt *time.Time `gorm:"column:secret_ref_written_at" json:"-"`
 	SMAPISecretRefName *string    `gorm:"type:text;column:sm_api_secret_ref_name" json:"-"`
 	SMAPIKVPath        *string    `gorm:"type:text;column:sm_api_kv_path" json:"-"`
 	SMAPIProperty      *string    `gorm:"type:text;column:sm_api_property" json:"-"`
@@ -108,7 +113,8 @@ func (l *JSONStringList) Scan(value any) error {
 
 // WebhookSecretEntry is one entry in the webhook_secrets JSONB list. The
 // list shape (rather than scalar) is what enables N-of-M rotation per
-// evolution-doc §7.6.
+// evolution-doc §7.6. Secret is AES-256-GCM sealed at rest (same framing
+// as org_secrets / publisher_client_secret).
 type WebhookSecretEntry struct {
 	Secret  string    `json:"secret"`
 	AddedAt time.Time `json:"added_at"`

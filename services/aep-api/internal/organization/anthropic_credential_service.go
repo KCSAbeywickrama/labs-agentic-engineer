@@ -60,13 +60,13 @@ import (
 // AnthropicCredentialService — see package doc.
 type AnthropicCredentialService struct {
 	repo         OrgAnthropicRepository
-	store        secrets.OpenBaoStore
+	store        secrets.CredentialStore
 	wpClient     client.Client
 	anthropicAPI string // "https://api.anthropic.com" by default; overridden in tests
 	httpClient   *http.Client
 
-	// smAPIWriter mirrors the key into SM-API on Connect. nil-safe.
-	smAPIWriter *SMAPIWriter
+	// secretRefWriter mirrors the key into SM-API on Connect. nil-safe.
+	secretRefWriter *SecretRefWriter
 
 	// cgwClient + pushNamespace/pushSecretName: when all three are set,
 	// Connect() pushes a fresh ExternalSecret to pushNamespace every time an
@@ -81,10 +81,10 @@ type AnthropicCredentialService struct {
 	pushSecretName string
 }
 
-// WithSMAPIWriter injects the SM-API writer; chainable. nil disables
+// WithSecretRefWriter injects the SM-API writer; chainable. nil disables
 // the mirror — the org_secrets path remains authoritative.
-func (s *AnthropicCredentialService) WithSMAPIWriter(w *SMAPIWriter) *AnthropicCredentialService {
-	s.smAPIWriter = w
+func (s *AnthropicCredentialService) WithSecretRefWriter(w *SecretRefWriter) *AnthropicCredentialService {
+	s.secretRefWriter = w
 	return s
 }
 
@@ -118,7 +118,7 @@ func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *Anthropi
 // BuildCredentialsService).
 func NewAnthropicCredentialService(
 	repo OrgAnthropicRepository,
-	store secrets.OpenBaoStore,
+	store secrets.CredentialStore,
 	wpClient client.Client,
 ) *AnthropicCredentialService {
 	return &AnthropicCredentialService{
@@ -229,12 +229,12 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 	// CredentialService.mirrorPATToSMAPI: org_secrets stays authoritative
 	// when SM-API is unavailable; the row's SM-API triplet stays NULL
 	// until the next successful Connect.
-	if s.smAPIWriter != nil && s.smAPIWriter.Enabled() {
-		if _, err := s.smAPIWriter.WriteAnthropic(ctx, ocOrgID, key); err != nil {
+	if s.secretRefWriter != nil && s.secretRefWriter.Enabled() {
+		if _, err := s.secretRefWriter.WriteAnthropic(ctx, ocOrgID, key); err != nil {
 			slog.WarnContext(ctx, "anthropic: SM-API mirror failed (legacy store still authoritative)",
 				"ocOrgId", ocOrgID, "error", err)
 		} else if s.pushEnabled() {
-			// The mirror just stamped a FRESH sm_api_kv_path/property onto the
+			// The mirror just stamped a FRESH secret_ref_kv_path/property onto the
 			// row (every WriteAnthropic call gets a brand-new random-suffixed
 			// vault path — never an in-place update of the previous one). Push
 			// an ExternalSecret pointing at that fresh path now, synchronously
@@ -264,8 +264,10 @@ func (s *AnthropicCredentialService) pushExternalSecret(ctx context.Context, ocO
 	if err != nil {
 		return fmt.Errorf("push external secret: reload row: %w", err)
 	}
-	if row.SMAPIKVPath == nil || row.SMAPIProperty == nil || *row.SMAPIKVPath == "" || *row.SMAPIProperty == "" {
-		return errors.New("push external secret: row has no SM-API triplet yet")
+	kvPath := row.ResolvedSecretRefKVPath()
+	prop := row.ResolvedSecretRefProperty()
+	if kvPath == nil || prop == nil || *kvPath == "" || *prop == "" {
+		return errors.New("push external secret: row has no secret-ref triplet yet")
 	}
 	manifest := map[string]any{
 		"apiVersion": "external-secrets.io/v1",
@@ -287,8 +289,8 @@ func (s *AnthropicCredentialService) pushExternalSecret(ctx context.Context, ocO
 				{
 					"secretKey": "RCA_LLM_API_KEY",
 					"remoteRef": map[string]any{
-						"key":      *row.SMAPIKVPath,
-						"property": *row.SMAPIProperty,
+						"key":      *kvPath,
+						"property": *prop,
 					},
 				},
 			},
@@ -518,38 +520,37 @@ func (s *AnthropicCredentialService) DeleteAnthropicSecret(ctx context.Context, 
 // helpers
 // ----------------------------------------------------------------------------
 
-// PrepareSMAPISeed returns the OpenBao reseed bundle for the org's
-// Anthropic key. Returns (nil, nil) when the org has no active row, the
-// SM-API triplet isn't populated, or the cred-store value is missing —
-// all idempotent no-op cases.
-//
-// Drives the local-dev repair path. See CredentialService.PrepareSMAPISeed
-// and deployments/scripts/repair-secrets.sh for the full flow.
-func (s *AnthropicCredentialService) PrepareSMAPISeed(ctx context.Context, ocOrgID string) (*SMAPISeedBundle, error) {
+// ResyncSecretRef re-pushes the org's Anthropic key through the in-process
+// SecretRefWriter (local OpenBao repair). Returns (false, nil) when there is
+// nothing to push. ctx must carry an ouId claim (repair injects thunder_org_uuid).
+func (s *AnthropicCredentialService) ResyncSecretRef(ctx context.Context, ocOrgID string) (bool, error) {
+	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
+		return false, nil
+	}
 	row, err := s.fetchRow(ctx, ocOrgID)
 	if err != nil {
 		var nf *NotFoundError
 		if errors.As(err, &nf) {
-			return nil, nil
+			return false, nil
 		}
-		return nil, fmt.Errorf("anthropic seed: load row: %w", err)
+		return false, fmt.Errorf("anthropic resync: load row: %w", err)
 	}
 	if row.Status != "active" {
-		return nil, nil
+		return false, nil
 	}
-	if row.SMAPIKVPath == nil || row.SMAPIProperty == nil ||
-		*row.SMAPIKVPath == "" || *row.SMAPIProperty == "" {
-		return nil, nil
+	kvPath := row.ResolvedSecretRefKVPath()
+	prop := row.ResolvedSecretRefProperty()
+	if kvPath == nil || prop == nil || *kvPath == "" || *prop == "" {
+		return false, nil
 	}
 	key, err := s.store.Get(ctx, ocOrgID, "anthropic/key")
 	if err != nil || len(key) == 0 {
-		return nil, nil
+		return false, nil
 	}
-	return &SMAPISeedBundle{
-		KVPath:   *row.SMAPIKVPath,
-		Property: *row.SMAPIProperty,
-		Value:    string(key),
-	}, nil
+	if _, err := s.secretRefWriter.WriteAnthropic(ctx, ocOrgID, string(key)); err != nil {
+		return false, fmt.Errorf("anthropic resync: write: %w", err)
+	}
+	return true, nil
 }
 
 func (s *AnthropicCredentialService) fetchRow(ctx context.Context, ocOrgID string) (*OrgAnthropicCredential, error) {

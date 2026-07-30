@@ -29,18 +29,25 @@
  * preserved across turns.
  */
 
-import { isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
-import { FileBundle, type McpConfig, type StreamPart, type Toolset } from "@aep/agent-stream";
+import { hasToolCall, isStepCount, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import {
+  FileBundle,
+  ASK_QUESTION_TOOL,
+  ASK_QUESTIONS_TOOL,
+  type McpConfig,
+  type StreamPart,
+  type Toolset,
+} from "@aep/agent-stream";
 import { DocFileBundle } from "../collab/doc-bundle.js";
 import { StreamingDocWriter } from "../collab/streaming-add.js";
 import type { RoomPeer } from "../collab/room-peer.js";
 import { runTurn } from "../agents/main/run-turn.js";
-import { buildFileTools, ASK_QUESTION } from "../agents/main/tools/files.js";
+import { buildFileTools } from "../agents/main/tools/files.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
 import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
-import { buildManifestPart } from "./manifest.js";
+import { buildManifestPart, toTurnUsage } from "./manifest.js";
 import { config } from "../shared/config.js";
 import { isAnthropicModel, modelProviderOptions, webSearchTool } from "../shared/model.js";
 import { loadMcpTools } from "../shared/mcp-client.js";
@@ -82,14 +89,21 @@ function freshConversation(id: string): Conversation {
 }
 
 /**
- * True when the turn ended on an `ask_question` tool-call (HITL). Scans only the
- * messages appended THIS turn. Dormant while `ask_question` is disabled (§5).
+ * True when the turn ended on a HITL question tool-call (`ask_question` or
+ * `ask_questions`, console ADR-0012 / #270). Scans only the messages appended
+ * THIS turn; the paired `hasToolCall` stop conditions guarantee such a call is
+ * the last step, so a match means the turn is awaiting the user's answer.
  */
 function endedAwaitingHuman(appended: ModelMessage[]): boolean {
   for (const m of appended) {
     if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
     for (const part of m.content) {
-      if (part.type === "tool-call" && part.toolName === ASK_QUESTION) return true;
+      if (
+        part.type === "tool-call" &&
+        (part.toolName === ASK_QUESTION_TOOL || part.toolName === ASK_QUESTIONS_TOOL)
+      ) {
+        return true;
+      }
     }
   }
   return false;
@@ -141,6 +155,13 @@ export interface RunConversationTurnInput {
   webSearch?: boolean;
   /** Injected at the composition root (createModel is called ONCE there, not per turn). */
   model: LanguageModel;
+  /**
+   * The resolved model id `model` was built with (`resolveModelId`, threaded
+   * from the composition root alongside the model — #249). Attributes the
+   * turn's token usage on the terminal manifest; absent (mock-model tests,
+   * evals) → the manifest usage carries `model: ""`.
+   */
+  modelId?: string;
   store: ConversationStore;
   guard: TurnGuard;
   onEvent: (p: StreamPart) => void;
@@ -163,8 +184,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 3. select the tool set from `toolset` (default `files`). Both build a
     //    throwaway per-turn accumulator from the passed snapshot; the skill
     //    catalog + `loadSkill` are registered identically (only when skills were
-    //    supplied, ADR-0002); ask_question stays DISABLED. The FileBundle is
-    //    held by name: it is the source of the terminal manifest (D14).
+    //    supplied, ADR-0002). The `files` set also carries the HITL question
+    //    tools (ask_question / ask_questions); `task-plan` does not. The
+    //    FileBundle is held by name: it is the source of the terminal manifest (D14).
     const toolset: Toolset = input.toolset ?? "files";
     const skills = input.skillSource;
     let bundle: FileBundle | undefined;
@@ -241,17 +263,26 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       prompt: note + buildPrompt(input.files, input.instruction),
       messages: conv.messages, // appended in place by runTurn
       tools,
-      stopWhen: [isStepCount(config.maxSteps) /*, hasToolCall("ask_question") */],
+      // End the turn at a HITL question call (the question tools live on the
+      // `files` set only, so these never fire on a task-plan turn).
+      stopWhen: [
+        isStepCount(config.maxSteps),
+        hasToolCall(ASK_QUESTION_TOOL),
+        hasToolCall(ASK_QUESTIONS_TOOL),
+      ],
       maxOutputTokens: config.maxOutputTokens,
       providerOptions: modelProviderOptions(),
       onEvent,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     });
 
-    // 5. set status (awaiting-human dormant while ask_question disabled)
+    // 5. set status: awaiting-human when the turn ended on a HITL question call.
     conv.status = endedAwaitingHuman(conv.messages.slice(startLen)) ? "awaiting-human" : "done";
 
-    // 6. observe per-turn spend (runTurn returns usage; today nothing keeps it)
+    // 6. per-turn spend (#249): project the whole-turn usage onto the pinned
+    //    wire shape; it rides the terminal manifest below so the aep-api fold
+    //    captures it alongside the file shas.
+    const usage = toTurnUsage(res.usage, input.modelId ?? "");
     if (config.logLevel === "debug") {
       process.stderr.write(
         `[turn ${conv.id}] finishReason=${res.finishReason} tokens in/out=` +
@@ -265,8 +296,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // 8. terminal manifest (D14) — emitted LAST, only on full success (any
     //    throw above skips it, so a severed/failed stream carries no manifest
     //    and the aep-api fold refuses to commit). Mutated-paths-only from the
-    //    turn's bundle; empty for chat-only and task-plan turns.
-    input.onEvent(buildManifestPart(bundle));
+    //    turn's bundle; empty for chat-only and task-plan turns. Carries the
+    //    turn's token usage (#249) — failed turns report none (v1).
+    input.onEvent(buildManifestPart(bundle, usage));
     return conv;
   } finally {
     // Drain the live-preview writer and undo any addFile body we streamed but that

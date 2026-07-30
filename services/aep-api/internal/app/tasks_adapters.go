@@ -20,11 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/internal/platform/gitfs/naming"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"gorm.io/gorm"
@@ -43,7 +41,7 @@ import (
 // thin projection — the features stay free of the concrete services these wrap.
 
 // repoLocator resolves a GitHub "owner/name" to the owning org + project.
-// Satisfies execution.RepoLookup and task.RepoLocator.
+// Satisfies eventcore.RepoLookup and provisioning.RepoLocator.
 type repoLocator struct{ db *gorm.DB }
 
 func (r repoLocator) ByFullName(_ context.Context, fullName string) (string, string, error) {
@@ -54,7 +52,7 @@ func (r repoLocator) ByFullName(_ context.Context, fullName string) (string, str
 // `task` frame: the full TaskDetail JSON (forwarded verbatim — the stream never
 // unmarshals it) plus the derived status the stream uses to detect settle. The
 // projection lives here at the composition root because execution never imports
-// feature/task (§1 split). Satisfies execution.TaskSnapshotReader.
+// the task read path. Satisfies execution.TaskSnapshotReader.
 type taskSnapshotAdapter struct{ reads *task.Reads }
 
 func (a taskSnapshotAdapter) TaskSnapshot(ctx context.Context, orgID, projectID string, issueNumber int) (*execution.TaskSnapshot, error) {
@@ -93,7 +91,7 @@ func (a executionsByIssueAdapter) ByIssue(ctx context.Context, orgID, projectID 
 }
 
 // designComponents exposes the design's component names at HEAD for the funnel's
-// dispatch-time re-verification. Satisfies execution.DesignReader.
+// dispatch-time re-verification. Satisfies eventcore.DesignReader.
 type designComponents struct{ store *spec.ArtifactStore }
 
 func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID string) (map[string]bool, error) {
@@ -114,7 +112,7 @@ func (d designComponents) ComponentNames(ctx context.Context, orgID, projectID s
 // ComponentPaths maps each design component's name (verbatim, as authored in
 // the design) to its source directory (appPath) for the path-based build
 // trigger. Callers match against these keys case-insensitively. Satisfies
-// execution.DesignReader.
+// eventcore.DesignReader.
 func (d designComponents) ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error) {
 	design, err := d.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
@@ -147,7 +145,7 @@ func (d designComponents) ReadDesignComponents(ctx context.Context, orgID, proje
 
 // ProvisionDepNames exposes each component's provisioning dependencies (external
 // + platform-resource) for the funnel's dependency-kind-aware gate. Satisfies
-// execution.DesignReader.
+// eventcore.DesignReader.
 func (d designComponents) ProvisionDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error) {
 	design, err := d.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
@@ -167,7 +165,7 @@ func (d designComponents) ProvisionDepNames(ctx context.Context, orgID, projectI
 
 // OrgServiceDepNames exposes each component's cross-project org-service
 // dependencies for the funnel's conditional org-service gate (issue #164, Task 4).
-// Satisfies execution.DesignReader.
+// Satisfies eventcore.DesignReader.
 func (d designComponents) OrgServiceDepNames(ctx context.Context, orgID, projectID string) (map[string][]string, error) {
 	design, err := d.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
@@ -285,26 +283,6 @@ func (p provisionProjects) ListProjects(ctx context.Context, orgID string) ([]pr
 	return out, nil
 }
 
-// repoLister enumerates ready project repos for the reconciliation sweep.
-// Satisfies execution.RepoLister.
-type repoLister struct{ repos sourcecontrol.RepoRepository }
-
-func (l repoLister) ListAll(ctx context.Context) ([]execution.RepoRef, error) {
-	rows, err := l.repos.ListAllReady(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]execution.RepoRef, 0, len(rows))
-	for i := range rows {
-		owner, name := naming.OwnerRepoFromURL(rows[i].RepoURL)
-		if owner == "" || name == "" {
-			continue
-		}
-		out = append(out, execution.RepoRef{OrgID: rows[i].OrgID, ProjectID: rows[i].ProjectID, FullName: owner + "/" + name})
-	}
-	return out, nil
-}
-
 // identities projects organization.CredentialService.IdentityFor onto the
 // codingagent.Identities port.
 type identities struct {
@@ -338,23 +316,6 @@ func (a anthropicProvisioner) ApplyWPSecret(ctx context.Context, ocOrgID string)
 		return "", nil
 	}
 	return res.SecretRefName, nil
-}
-
-// anthropicKeyReaderAdapter projects organization.AnthropicCredentialService.EffectiveKey
-// onto the codingagent.AnthropicKeyReader port used by the K8s Job dispatcher.
-type anthropicKeyReaderAdapter struct {
-	svc *organization.AnthropicCredentialService
-}
-
-func (a anthropicKeyReaderAdapter) AnthropicKeyFor(ctx context.Context, orgID string) (string, error) {
-	resp, err := a.svc.EffectiveKey(ctx, orgID)
-	if err != nil {
-		return "", fmt.Errorf("anthropic key for %q: %w", orgID, err)
-	}
-	if resp == nil || resp.Key == "" {
-		return "", fmt.Errorf("no anthropic key configured for org %q", orgID)
-	}
-	return resp.Key, nil
 }
 
 // githubBotLogin returns the platform's GitHub App bot login used for webhook

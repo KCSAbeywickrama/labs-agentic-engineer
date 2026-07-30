@@ -17,11 +17,13 @@
 // Package github is the GitHub implementation of gitrepo's provider ports.
 //
 // A single *Client satisfies sourcecontrol.Host — the REST surface (repo / issue /
-// pull-request / webhook / app-installation) in client.go. The git-object
-// (Git-Data) surface is gone: all repo content reads/writes run on the
-// disk-backed Workspace engine (internal/platform/gitfs).
+// milestone / pull-request / webhook / app-installation) in client.go and
+// milestones.go. The git-object (Git-Data) surface is gone: all repo content
+// reads/writes run on the disk-backed Workspace engine (internal/platform/gitfs).
 // GitHub Projects v2 is dropped (tasks-github-native §4): Tasks are plain
-// GitHub issues, so there is no GraphQL board surface.
+// GitHub issues, so there is no board surface. GraphQL (graphql.go) survives
+// only for the milestone dispatch predicate, which REST cannot answer in one
+// call — REST vs GraphQL never leaks past the port either way.
 //
 // This is the only place in the codebase that builds Authorization: Bearer
 // headers (authHeaders / the App-JWT and pat paths). Selected by GIT_PROVIDER
@@ -51,6 +53,11 @@ type Client struct {
 	// apiBase is the GitHub REST API root, default "https://api.github.com".
 	// Overridable only via WithAPIBase (a test seam).
 	apiBase string
+	// graphqlEndpoint is the GitHub GraphQL (v4) endpoint, default
+	// "https://api.github.com/graphql" — a separate host path, not derivable
+	// from apiBase. Overridable only via WithGraphQLEndpoint (a test seam).
+	// See graphql.go.
+	graphqlEndpoint string
 }
 
 // Option configures the client at construction. Production wiring passes no
@@ -69,8 +76,9 @@ func WithAPIBase(base string) Option {
 // NewClient builds the GitHub host client. Production wiring passes no options.
 func NewClient(opts ...Option) sourcecontrol.Host {
 	c := &Client{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		apiBase:    "https://api.github.com",
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		apiBase:         "https://api.github.com",
+		graphqlEndpoint: defaultGraphQLEndpoint,
 	}
 	for _, o := range opts {
 		o(c)
@@ -386,6 +394,15 @@ func (c *Client) EditIssueTitle(ctx context.Context, owner, repo string, cred se
 	return c.doJSON(ctx, http.MethodPatch, url, "issue title edit", cred, map[string]string{"title": title}, nil, http.StatusOK)
 }
 
+// SetIssueMilestone assigns an existing issue to a milestone via
+// PATCH /issues/{number}. The value is the milestone NUMBER — GitHub answers
+// 422 to a title here, and the number is the only stable key anyway. Used by
+// adoption, which moves a bare issue into the deployed version's milestone.
+func (c *Client) SetIssueMilestone(ctx context.Context, owner, repo string, cred secrets.Credential, number, milestoneNumber int) error {
+	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
+	return c.doJSON(ctx, http.MethodPatch, url, "issue milestone set", cred, map[string]int{"milestone": milestoneNumber}, nil, http.StatusOK)
+}
+
 // GetPullRequest returns the live state of a pull request (GET /pulls/{n}) — the
 // sweep's PR-state reconciliation input (docs/design/tasks-github-native.md §5:
 // PR state is native GitHub truth healed by the sweep when a webhook is missed).
@@ -584,9 +601,9 @@ func (c *Client) AddIssueLabels(ctx context.Context, owner, repo string, cred se
 
 // RemoveIssueLabel removes one label from an issue via DELETE
 // /repos/{owner}/{repo}/issues/{number}/labels/{name}. The label name is
-// path-escaped (aep:status/* contains ':' and '/'). A 404 is treated as success
-// — the label is already absent, which is the desired post-state (idempotent).
-// Used to consume the aep:execute command label and clear stale projections.
+// path-escaped (an aep: label contains ':' and may contain '/'). A 404 is
+// treated as success — the label is already absent, which is the desired
+// post-state (idempotent).
 func (c *Client) RemoveIssueLabel(ctx context.Context, owner, repo string, cred secrets.Credential, number int, label string) error {
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d/labels/%s", owner, repo, number, urlpkg.PathEscape(label))
 	// 404 is success: the label is already absent, the desired post-state.

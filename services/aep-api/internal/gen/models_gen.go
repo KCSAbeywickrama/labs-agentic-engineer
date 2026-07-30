@@ -40,30 +40,6 @@ func (e BuildInputItemKind) Valid() bool {
 	}
 }
 
-// Defines values for BuildStatusTaskStatus.
-const (
-	BuildStatusTaskStatusCompleted  BuildStatusTaskStatus = "completed"
-	BuildStatusTaskStatusFailed     BuildStatusTaskStatus = "failed"
-	BuildStatusTaskStatusInProgress BuildStatusTaskStatus = "in_progress"
-	BuildStatusTaskStatusStarted    BuildStatusTaskStatus = "started"
-)
-
-// Valid indicates whether the value is a known member of the BuildStatusTaskStatus enum.
-func (e BuildStatusTaskStatus) Valid() bool {
-	switch e {
-	case BuildStatusTaskStatusCompleted:
-		return true
-	case BuildStatusTaskStatusFailed:
-		return true
-	case BuildStatusTaskStatusInProgress:
-		return true
-	case BuildStatusTaskStatusStarted:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for BuildSummaryStatus.
 const (
 	BuildSummaryStatusCompleted  BuildSummaryStatus = "completed"
@@ -90,22 +66,70 @@ func (e BuildSummaryStatus) Valid() bool {
 
 // Defines values for DeployStageValidation.
 const (
-	Completed DeployStageValidation = "completed"
-	Failed    DeployStageValidation = "failed"
-	None      DeployStageValidation = "none"
-	Running   DeployStageValidation = "running"
+	DeployStageValidationCompleted DeployStageValidation = "completed"
+	DeployStageValidationFailed    DeployStageValidation = "failed"
+	DeployStageValidationNone      DeployStageValidation = "none"
+	DeployStageValidationRunning   DeployStageValidation = "running"
 )
 
 // Valid indicates whether the value is a known member of the DeployStageValidation enum.
 func (e DeployStageValidation) Valid() bool {
 	switch e {
-	case Completed:
+	case DeployStageValidationCompleted:
 		return true
-	case Failed:
+	case DeployStageValidationFailed:
 		return true
-	case None:
+	case DeployStageValidationNone:
 		return true
-	case Running:
+	case DeployStageValidationRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MilestoneRunViewOrigin.
+const (
+	IncidentAdoption MilestoneRunViewOrigin = "incident-adoption"
+	SpecBuild        MilestoneRunViewOrigin = "spec-build"
+)
+
+// Valid indicates whether the value is a known member of the MilestoneRunViewOrigin enum.
+func (e MilestoneRunViewOrigin) Valid() bool {
+	switch e {
+	case IncidentAdoption:
+		return true
+	case SpecBuild:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MilestoneRunViewState.
+const (
+	MilestoneRunViewStateCancelled MilestoneRunViewState = "cancelled"
+	MilestoneRunViewStateFailed    MilestoneRunViewState = "failed"
+	MilestoneRunViewStatePlanning  MilestoneRunViewState = "planning"
+	MilestoneRunViewStateRunning   MilestoneRunViewState = "running"
+	MilestoneRunViewStateSucceeded MilestoneRunViewState = "succeeded"
+	MilestoneRunViewStateWaiting   MilestoneRunViewState = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the MilestoneRunViewState enum.
+func (e MilestoneRunViewState) Valid() bool {
+	switch e {
+	case MilestoneRunViewStateCancelled:
+		return true
+	case MilestoneRunViewStateFailed:
+		return true
+	case MilestoneRunViewStatePlanning:
+		return true
+	case MilestoneRunViewStateRunning:
+		return true
+	case MilestoneRunViewStateSucceeded:
+		return true
+	case MilestoneRunViewStateWaiting:
 		return true
 	default:
 		return false
@@ -142,21 +166,165 @@ func (e PreflightItemKind) Valid() bool {
 	}
 }
 
+// Defines values for ProgressEventEmitter.
+const (
+	ProgressEventEmitterMain     ProgressEventEmitter = "main"
+	ProgressEventEmitterSubagent ProgressEventEmitter = "subagent"
+)
+
+// Valid indicates whether the value is a known member of the ProgressEventEmitter enum.
+func (e ProgressEventEmitter) Valid() bool {
+	switch e {
+	case ProgressEventEmitterMain:
+		return true
+	case ProgressEventEmitterSubagent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunCycleViewKind.
+const (
+	RunCycleViewKindCoding     RunCycleViewKind = "coding"
+	RunCycleViewKindConflict   RunCycleViewKind = "conflict"
+	RunCycleViewKindFix        RunCycleViewKind = "fix"
+	RunCycleViewKindValidation RunCycleViewKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the RunCycleViewKind enum.
+func (e RunCycleViewKind) Valid() bool {
+	switch e {
+	case RunCycleViewKindCoding:
+		return true
+	case RunCycleViewKindConflict:
+		return true
+	case RunCycleViewKindFix:
+		return true
+	case RunCycleViewKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunCycleViewMergeVerdict.
+const (
+	Declined RunCycleViewMergeVerdict = "declined"
+	Refused  RunCycleViewMergeVerdict = "refused"
+)
+
+// Valid indicates whether the value is a known member of the RunCycleViewMergeVerdict enum.
+func (e RunCycleViewMergeVerdict) Valid() bool {
+	switch e {
+	case Declined:
+		return true
+	case Refused:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunProgressEventType.
+const (
+	RunProgressEventTypeCycle RunProgressEventType = "cycle"
+	RunProgressEventTypeDone  RunProgressEventType = "done"
+	RunProgressEventTypeLine  RunProgressEventType = "line"
+)
+
+// Valid indicates whether the value is a known member of the RunProgressEventType enum.
+func (e RunProgressEventType) Valid() bool {
+	switch e {
+	case RunProgressEventTypeCycle:
+		return true
+	case RunProgressEventTypeDone:
+		return true
+	case RunProgressEventTypeLine:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunProgressLineEmitter.
+const (
+	RunProgressLineEmitterMain     RunProgressLineEmitter = "main"
+	RunProgressLineEmitterSubagent RunProgressLineEmitter = "subagent"
+)
+
+// Valid indicates whether the value is a known member of the RunProgressLineEmitter enum.
+func (e RunProgressLineEmitter) Valid() bool {
+	switch e {
+	case RunProgressLineEmitterMain:
+		return true
+	case RunProgressLineEmitterSubagent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunValidationVerdict.
+const (
+	RunValidationVerdictFailed  RunValidationVerdict = "failed"
+	RunValidationVerdictPassed  RunValidationVerdict = "passed"
+	RunValidationVerdictSkipped RunValidationVerdict = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the RunValidationVerdict enum.
+func (e RunValidationVerdict) Valid() bool {
+	switch e {
+	case RunValidationVerdictFailed:
+		return true
+	case RunValidationVerdictPassed:
+		return true
+	case RunValidationVerdictSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SkillUpdateState.
 const (
-	Conflict   SkillUpdateState = "conflict"
-	Overridden SkillUpdateState = "overridden"
-	Update     SkillUpdateState = "update"
+	SkillUpdateStateConflict   SkillUpdateState = "conflict"
+	SkillUpdateStateOverridden SkillUpdateState = "overridden"
+	SkillUpdateStateUpdate     SkillUpdateState = "update"
 )
 
 // Valid indicates whether the value is a known member of the SkillUpdateState enum.
 func (e SkillUpdateState) Valid() bool {
 	switch e {
-	case Conflict:
+	case SkillUpdateStateConflict:
 		return true
-	case Overridden:
+	case SkillUpdateStateOverridden:
 		return true
-	case Update:
+	case SkillUpdateStateUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskDetailExecutorClass.
+const (
+	TaskDetailExecutorClassCoding     TaskDetailExecutorClass = "coding"
+	TaskDetailExecutorClassLedger     TaskDetailExecutorClass = "ledger"
+	TaskDetailExecutorClassProvision  TaskDetailExecutorClass = "provision"
+	TaskDetailExecutorClassValidation TaskDetailExecutorClass = "validation"
+)
+
+// Valid indicates whether the value is a known member of the TaskDetailExecutorClass enum.
+func (e TaskDetailExecutorClass) Valid() bool {
+	switch e {
+	case TaskDetailExecutorClassCoding:
+		return true
+	case TaskDetailExecutorClassLedger:
+		return true
+	case TaskDetailExecutorClassProvision:
+		return true
+	case TaskDetailExecutorClassValidation:
 		return true
 	default:
 		return false
@@ -181,6 +349,48 @@ func (e TaskStreamEventType) Valid() bool {
 	case TaskStreamEventTypeLine:
 		return true
 	case TaskStreamEventTypeTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskViewExecutorClass.
+const (
+	TaskViewExecutorClassCoding     TaskViewExecutorClass = "coding"
+	TaskViewExecutorClassLedger     TaskViewExecutorClass = "ledger"
+	TaskViewExecutorClassProvision  TaskViewExecutorClass = "provision"
+	TaskViewExecutorClassValidation TaskViewExecutorClass = "validation"
+)
+
+// Valid indicates whether the value is a known member of the TaskViewExecutorClass enum.
+func (e TaskViewExecutorClass) Valid() bool {
+	switch e {
+	case TaskViewExecutorClassCoding:
+		return true
+	case TaskViewExecutorClassLedger:
+		return true
+	case TaskViewExecutorClassProvision:
+		return true
+	case TaskViewExecutorClassValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineEventEmitter.
+const (
+	TimelineEventEmitterMain     TimelineEventEmitter = "main"
+	TimelineEventEmitterSubagent TimelineEventEmitter = "subagent"
+)
+
+// Valid indicates whether the value is a known member of the TimelineEventEmitter enum.
+func (e TimelineEventEmitter) Valid() bool {
+	switch e {
+	case TimelineEventEmitterMain:
+		return true
+	case TimelineEventEmitterSubagent:
 		return true
 	default:
 		return false
@@ -334,7 +544,7 @@ type BuildInputItem struct {
 // BuildInputItemKind defines model for BuildInputItem.Kind.
 type BuildInputItemKind string
 
-// BuildList list-project-builds response — one entry per built spec version tag, newest first.
+// BuildList list-project-builds response — the version ledger, one entry per built spec version tag, newest first.
 type BuildList struct {
 	Builds []BuildSummary `json:"builds"`
 }
@@ -346,10 +556,15 @@ type BuildLogEntry struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
-// BuildLogs defines model for BuildLogs.
+// BuildLogs One read of a build's log. A build that is still running returns an incomplete response and the client re-reads from `nextCursor`; a terminal build returns everything it has in one call. A complete response carrying no entries is the honest "nothing retained" answer, not an error.
 type BuildLogs struct {
-	Logs       []BuildLogEntry `json:"logs"`
-	TotalCount int64           `json:"totalCount,omitempty"`
+	// Complete True when the build is terminal and this response carries everything there will ever be — the client stops polling. False means re-read from `nextCursor`.
+	Complete bool            `json:"complete"`
+	Logs     []BuildLogEntry `json:"logs"`
+
+	// NextCursor Epoch millis of the newest entry returned; pass back as `since`. Absent when nothing was returned, in which case the previous cursor stands.
+	NextCursor int64 `json:"nextCursor,omitempty"`
+	TotalCount int64 `json:"totalCount,omitempty"`
 }
 
 // BuildPreflight defines model for BuildPreflight.
@@ -369,68 +584,40 @@ type BuildResponse struct {
 	Tag      string         `json:"tag,omitempty"`
 }
 
-// BuildStage Build-stage aggregate on ProjectStatus (#184) — the tag being/last built and its task counts, so the overview needs no list-tasks read.
+// BuildRunList A version's milestone runs. `milestoneNumber` is the platform key the tag resolved to through the run rows; a tag with no run rows is a 404, not an empty list.
+type BuildRunList struct {
+	MilestoneNumber int64 `json:"milestoneNumber"`
+
+	// Runs Newest run first. A milestone sees SEQUENTIAL runs across its life — the spec build that created the version, then any later incident adoption into it.
+	Runs []MilestoneRunView `json:"runs"`
+	Tag  string             `json:"tag"`
+}
+
+// BuildStage Build-stage aggregate on ProjectStatus (#184) — the version the newest milestone run is working, and how that run is doing. Deliberately count-free - the only honest source of a per-version task tally is the version's milestone on GitHub, and this endpoint is polled at 5s. The console renders counts from the list-tasks response it already holds, on the surface that already pays for it.
 type BuildStage struct {
 	// Status idle (never built), running, failed, succeeded
 	Status string `json:"status"`
-
-	// Tasks Task counts bucketed from derivedStatus.
-	Tasks struct {
-		Active int64 `json:"active"`
-		Done   int64 `json:"done"`
-		Failed int64 `json:"failed"`
-		Total  int64 `json:"total"`
-	} `json:"tasks"`
 
 	// Version Spec tag the current/last build built; "" if never built.
 	Version string `json:"version"`
 }
 
-// BuildStatus defines model for BuildStatus.
-type BuildStatus struct {
-	// Reason Failure detail for a failed build (empty otherwise) — the devflow's recorded error, so the console can show WHY it failed.
-	Reason         string            `json:"reason,omitempty"`
-	Status         string            `json:"status"`
-	Tasks          []BuildStatusTask `json:"tasks,omitempty"`
-	WorkflowStatus string            `json:"workflow_status"`
-}
-
-// BuildStatusTask defines model for BuildStatusTask.
-type BuildStatusTask struct {
-	// IssueNumber GitHub issue number of the Task — links a build-status row to its issue (and to the task-log stream); replaces the old title-join.
-	IssueNumber int64                 `json:"issueNumber,omitempty"`
-	Status      BuildStatusTaskStatus `json:"status"`
-	Title       string                `json:"title"`
-}
-
-// BuildStatusTaskStatus defines model for BuildStatusTask.Status.
-type BuildStatusTaskStatus string
-
-// BuildSummary One entry of list-project-builds — a spec version tag's newest run. A list read has no live workflow query, so "started" never occurs here.
+// BuildSummary One entry of the version ledger — a spec version tag and the state of the newest milestone run that has worked it. A ledger read has no live workflow query, so "started" never occurs here.
 type BuildSummary struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 
-	// Reason Failure detail for a failed build (empty otherwise) — the devflow's recorded error, surfaced beside the Failed badge in the console.
+	// MilestoneNumber The GitHub milestone this version's work lives in — the platform key the tag resolves to, and the handle list-build-runs is read by.
+	MilestoneNumber int64 `json:"milestoneNumber"`
+
+	// Reason The run's terminal reason for a failed version (empty otherwise), surfaced beside the Failed badge in the console.
 	Reason    string             `json:"reason,omitempty"`
 	StartedAt time.Time          `json:"startedAt"`
 	Status    BuildSummaryStatus `json:"status"`
 	Tag       string             `json:"tag"`
-	Tasks     BuildTally         `json:"tasks"`
-
-	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Usage Usage `json:"usage,omitempty"`
 }
 
 // BuildSummaryStatus defines model for BuildSummary.Status.
 type BuildSummaryStatus string
-
-// BuildTally defines model for BuildTally.
-type BuildTally struct {
-	Active int64 `json:"active"`
-	Done   int64 `json:"done"`
-	Failed int64 `json:"failed"`
-	Total  int64 `json:"total"`
-}
 
 // ClientSecretOutputBody defines model for ClientSecretOutputBody.
 type ClientSecretOutputBody struct {
@@ -587,6 +774,26 @@ type CreateSkillInput struct {
 	SkillMd    string            `json:"skillMd"`
 }
 
+// CycleBuild One component's build at a cycle's merge SHA, derived from its OpenChoreo WorkflowRun. `status` and `completed` are that run's own pair, carried verbatim — OpenChoreo's status is a condition Reason string rather than a closed set, so `completed` is the terminal gate and `status` must never be parsed to decide anything.
+type CycleBuild struct {
+	// Attempt 1 for the fan-out's build; 2 for the single automatic re-trigger a red build gets. Read off the run name's trailing ordinal, which is where the attempt count lives.
+	Attempt int64 `json:"attempt"`
+
+	// BuildName The WorkflowRun's name — pass verbatim to get-build-logs as `buildName`.
+	BuildName string `json:"buildName"`
+	Completed bool   `json:"completed"`
+	Component string `json:"component"`
+	StartedAt string `json:"startedAt,omitempty"`
+
+	// Status The WorkflowRun's status, verbatim (`Pending`, `Running`, or the completion condition's Reason).
+	Status string `json:"status"`
+}
+
+// CycleBuildList defines model for CycleBuildList.
+type CycleBuildList struct {
+	Items []CycleBuild `json:"items"`
+}
+
 // DeleteOp defines model for DeleteOp.
 type DeleteOp struct {
 	BaseSha string `json:"baseSha,omitempty"`
@@ -615,20 +822,14 @@ type DeployStage struct {
 	} `json:"components"`
 	Status string `json:"status"`
 
-	// Validation Coarse validation-task run state for the latest build: none (not reached, or no acceptance criteria), running, completed (ran to completion; the pass/fail verdict lives in the report), failed (the validation run failed mechanically).
+	// Validation Coarse validation state of the newest milestone run, folded from that run's verdict: none (the run never reached validation, had no acceptance criteria, or skipped it), running, completed (the verdict is `passed`), failed. The verdict itself, the report path and the per-cycle detail behind it live on the version's run story (list-build-runs) — this field is only the overview's coarse chip.
 	Validation DeployStageValidation `json:"validation"`
-
-	// ValidationIssue Issue number of the project's validation task; absent when there is no validation run. The console uses it to open the internal validation log page (get-task / stream-task-log accept it).
-	ValidationIssue int64 `json:"validationIssue,omitempty"`
-
-	// ValidationURL Link to the associated validation PR (the validation issue as a fallback before a PR exists); "" when there is no validation.
-	ValidationURL string `json:"validationUrl,omitempty"`
 
 	// Version Spec tag live in dev; "" if nothing deployed.
 	Version string `json:"version"`
 }
 
-// DeployStageValidation Coarse validation-task run state for the latest build: none (not reached, or no acceptance criteria), running, completed (ran to completion; the pass/fail verdict lives in the report), failed (the validation run failed mechanically).
+// DeployStageValidation Coarse validation state of the newest milestone run, folded from that run's verdict: none (the run never reached validation, had no acceptance criteria, or skipped it), running, completed (the verdict is `passed`), failed. The verdict itself, the report path and the per-cycle detail behind it live on the version's run story (list-build-runs) — this field is only the overview's coarse chip.
 type DeployStageValidation string
 
 // Deployment defines model for Deployment.
@@ -769,6 +970,39 @@ type Lineage struct {
 	SpecTag   string `json:"specTag,omitempty"`
 }
 
+// MilestoneRunView One run of the milestone loop, with the cycle records that make up its timeline. Loop POSITION is deliberately absent — it renders from the latest cycle, because fix and conflict cycles re-enter earlier phases and a stored phase enum would lie mid-loop.
+type MilestoneRunView struct {
+	// Budgets The run's budget counters as the supervisor wrote them out. Read-model bookkeeping — the loop counts its own budgets and never reads these back.
+	Budgets   RunBudgets `json:"budgets"`
+	CreatedAt time.Time  `json:"createdAt"`
+
+	// Cycles Oldest first — one record per dispatch.
+	Cycles          []RunCycleView `json:"cycles"`
+	EndedAt         *time.Time     `json:"endedAt,omitempty"`
+	ID              string         `json:"id"`
+	MilestoneNumber int64          `json:"milestoneNumber"`
+
+	// MilestoneTitle The milestone's title at creation, equal to the spec tag. Display only — the number is the key.
+	MilestoneTitle string                 `json:"milestoneTitle"`
+	Origin         MilestoneRunViewOrigin `json:"origin"`
+	StartedAt      *time.Time             `json:"startedAt,omitempty"`
+
+	// State planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
+	State MilestoneRunViewState `json:"state"`
+
+	// TerminalReason Why a non-succeeded run stopped. Each value names exactly one failure class; empty while the run is non-terminal and on a succeeded run.
+	TerminalReason string `json:"terminalReason,omitempty"`
+
+	// Validation The run's validation outcome. The verdict is a RUN property, not a per-issue one, and this is where the deployment surface reads it.
+	Validation RunValidation `json:"validation"`
+}
+
+// MilestoneRunViewOrigin defines model for MilestoneRunView.Origin.
+type MilestoneRunViewOrigin string
+
+// MilestoneRunViewState planning is the fill window — the version's milestone is still being written (gates minted, then issues planned in). waiting is the unbounded wait between cycles, where something outside the platform is needed.
+type MilestoneRunViewState string
+
 // OrganizationList defines model for OrganizationList.
 type OrganizationList struct {
 	Items []OrganizationView `json:"items"`
@@ -782,6 +1016,18 @@ type OrganizationView struct {
 	Name        string    `json:"name"`
 	Status      string    `json:"status,omitempty"`
 	UUID        uuid.UUID `json:"uuid"`
+}
+
+// PhaseUsage A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns; build covers the build + coding executions; validation covers the validation executions. Each is a full Usage so a phase can degrade to tokens when its rows are unstamped.
+type PhaseUsage struct {
+	// Build Actual token usage for one unit of agent work or an aggregate (#245,
+	Build Usage `json:"build"`
+
+	// Spec Actual token usage for one unit of agent work or an aggregate (#245,
+	Spec Usage `json:"spec"`
+
+	// Validation Actual token usage for one unit of agent work or an aggregate (#245,
+	Validation Usage `json:"validation"`
 }
 
 // PlatformResourceTypeDTO defines model for PlatformResourceTypeDTO.
@@ -812,25 +1058,31 @@ type PreflightItemKind string
 
 // ProgressEvent defines model for ProgressEvent.
 type ProgressEvent struct {
-	Branch        string `json:"branch,omitempty"`
-	Command       string `json:"command,omitempty"`
-	CompletedAt   string `json:"completedAt,omitempty"`
-	Error         string `json:"error,omitempty"`
-	Files         int64  `json:"files,omitempty"`
-	Kind          string `json:"kind"`
-	Level         string `json:"level,omitempty"`
-	Message       string `json:"message,omitempty"`
-	Phase         string `json:"phase,omitempty"`
-	SchemaVersion int64  `json:"schemaVersion"`
-	Seq           int64  `json:"seq"`
-	Sha           string `json:"sha,omitempty"`
-	StartedAt     string `json:"startedAt,omitempty"`
-	Status        string `json:"status,omitempty"`
-	Step          string `json:"step,omitempty"`
-	Summary       string `json:"summary,omitempty"`
-	Tool          string `json:"tool,omitempty"`
-	TS            string `json:"ts"`
+	Branch      string `json:"branch,omitempty"`
+	Command     string `json:"command,omitempty"`
+	CompletedAt string `json:"completedAt,omitempty"`
+
+	// Emitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
+	Emitter       ProgressEventEmitter `json:"emitter,omitempty"`
+	Error         string               `json:"error,omitempty"`
+	Files         int64                `json:"files,omitempty"`
+	Kind          string               `json:"kind"`
+	Level         string               `json:"level,omitempty"`
+	Message       string               `json:"message,omitempty"`
+	Phase         string               `json:"phase,omitempty"`
+	SchemaVersion int64                `json:"schemaVersion"`
+	Seq           int64                `json:"seq"`
+	Sha           string               `json:"sha,omitempty"`
+	StartedAt     string               `json:"startedAt,omitempty"`
+	Status        string               `json:"status,omitempty"`
+	Step          string               `json:"step,omitempty"`
+	Summary       string               `json:"summary,omitempty"`
+	Tool          string               `json:"tool,omitempty"`
+	TS            string               `json:"ts"`
 }
+
+// ProgressEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
+type ProgressEventEmitter string
 
 // Project defines model for Project.
 type Project struct {
@@ -857,7 +1109,7 @@ type ProjectList struct {
 
 // ProjectStatus Computed SDLC phase and artifact states.
 type ProjectStatus struct {
-	// Build Build-stage aggregate on ProjectStatus (#184) — the tag being/last built and its task counts, so the overview needs no list-tasks read.
+	// Build Build-stage aggregate on ProjectStatus (#184) — the version the newest milestone run is working, and how that run is doing. Deliberately count-free - the only honest source of a per-version task tally is the version's milestone on GitHub, and this endpoint is polled at 5s. The console renders counts from the list-tasks response it already holds, on the surface that already pays for it.
 	Build BuildStage `json:"build"`
 
 	// Deploy Deploy-stage aggregate on ProjectStatus (#184) — what's live in dev and rollout progress.
@@ -869,7 +1121,7 @@ type ProjectStatus struct {
 	HasSpec      bool   `json:"hasSpec"`
 	HasTasks     bool   `json:"hasTasks"`
 
-	// Phase no-repo, repo-cloning, repo-error, prompt, spec, architecture, tasks, components
+	// Phase Repo and artifact rungs only: no-repo, repo-cloning, repo-error, prompt (no spec), spec (spec, no design), tasks (both). "tasks" is terminal — delivery state lives in the build and deploy aggregates, which is what a caller should render past the spec.
 	Phase string `json:"phase"`
 
 	// RepoErrorMessage Set when phase is repo-error.
@@ -886,19 +1138,27 @@ type ProjectStatus struct {
 	SpecStatus string `json:"specStatus"`
 }
 
-// ProjectUsage Per-phase actual usage for a project (#245). All figures derive from persisted per-run token records (ADR-0011); costUsd is computed at read time from the configured model rates.
-type ProjectUsage struct {
-	// Build Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Build Usage `json:"build"`
+// ProjectUsageCard One project's lifetime agent usage (#291). Identity comes from the usage rows' stored project slug, so a card survives its project's deletion.
+type ProjectUsageCard struct {
+	// Deleted True when no live project matches the slug — rendered as a greyed card.
+	Deleted bool `json:"deleted"`
 
-	// DraftCycle Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	DraftCycle Usage `json:"draftCycle"`
+	// DisplayName The live project's display name; falls back to the slug for deleted projects.
+	DisplayName string `json:"displayName"`
 
-	// Spec Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Spec Usage `json:"spec"`
+	// Phases A project's usage split by SDLC phase (#291). spec covers the spec/design agent turns; build covers the build + coding executions; validation covers the validation executions. Each is a full Usage so a phase can degrade to tokens when its rows are unstamped.
+	Phases PhaseUsage `json:"phases"`
 
-	// Validation Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
-	Validation Usage `json:"validation"`
+	// ProjectName Project name (DNS-label slug) as stored on the usage rows.
+	ProjectName string `json:"projectName"`
+
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
+	Usage Usage `json:"usage"`
+}
+
+// ProjectUsageList Org-wide usage roll-up (#291), tiered — stamped-cost projects first (costUsd desc), then projects with usage the platform could not price (by tokens), then idle $0 projects last.
+type ProjectUsageList struct {
+	Projects []ProjectUsageCard `json:"projects"`
 }
 
 // PromoteFromIssueRequest defines model for PromoteFromIssueRequest.
@@ -955,6 +1215,116 @@ type RcaAgentReportList struct {
 	// NextCursor Cursor for the next page; absent on the last page.
 	NextCursor string `json:"nextCursor,omitempty"`
 }
+
+// RunBudgets The run's budget counters as the supervisor wrote them out. Read-model bookkeeping — the loop counts its own budgets and never reads these back.
+type RunBudgets struct {
+	// BuildRetriggers Run-wide tally of automatic build re-triggers. The authoritative one-per-component-per-SHA guard is derived at the trigger site, not from this number.
+	BuildRetriggers int64 `json:"buildRetriggers"`
+	ConflictCycles  int64 `json:"conflictCycles"`
+
+	// CycleCeiling Snapshotted at start, so a config change cannot retroactively fail a live run.
+	CycleCeiling int64 `json:"cycleCeiling"`
+	CyclesTotal  int64 `json:"cyclesTotal"`
+	FixCycles    int64 `json:"fixCycles"`
+}
+
+// RunCycleView One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
+type RunCycleView struct {
+	// Attempts Dispatches of THIS cycle (the per-cycle re-dispatch budget, which resets at every cycle boundary).
+	Attempts  int64      `json:"attempts"`
+	Branch    string     `json:"branch,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	EndedAt   *time.Time `json:"endedAt,omitempty"`
+	ID        string     `json:"id"`
+
+	// JobRef The dispatched runner Job for the current attempt; replaced on re-dispatch.
+	JobRef string           `json:"jobRef,omitempty"`
+	Kind   RunCycleViewKind `json:"kind"`
+
+	// MergeReason The merge policy's own words for `mergeVerdict` — the auto-merge decision's reason, or the host's refusal. Written for a reader, not parsed.
+	MergeReason string `json:"mergeReason,omitempty"`
+	MergeSha    string `json:"mergeSha,omitempty"`
+
+	// MergeVerdict Why this cycle's pull request did NOT merge, when something decided so: `declined` is the auto-merge policy saying the pull request is not this run's work, `refused` is the host declining an open pull request (a conflict — a conflict issue is minted and the next cycle works it). Absent on a cycle whose merge was never decided against, which includes every cycle that merged: a merge is recorded by `mergeSha`, and each fresh decision overwrites this field, so a declined pull request that later merges does not keep the verdict.
+	MergeVerdict RunCycleViewMergeVerdict `json:"mergeVerdict,omitempty"`
+
+	// PrDraft Is the recorded pull request still a draft? A draft is the agent saying it is not finished, so nothing merges while this is true — recorded because a cycle sitting behind a draft is otherwise indistinguishable from one whose agent never opened a pull request.
+	PrDraft  bool  `json:"prDraft,omitempty"`
+	PrNumber int64 `json:"prNumber,omitempty"`
+
+	// PrURL The pull request's own page on the host, as the webhook reported it — never composed from a repo URL and a number, so a console link either is the host's own or is absent. Empty until a pull request is seen.
+	PrURL string `json:"prUrl,omitempty"`
+
+	// Resolves The milestone agent-work issues this cycle's pull request claims — the merge policy's matched set, which is what the merge closes. Recorded so a cycle's working set survives its issues being closed; empty until a pull request is seen.
+	Resolves []int64 `json:"resolves,omitempty"`
+}
+
+// RunCycleViewKind defines model for RunCycleView.Kind.
+type RunCycleViewKind string
+
+// RunCycleViewMergeVerdict Why this cycle's pull request did NOT merge, when something decided so: `declined` is the auto-merge policy saying the pull request is not this run's work, `refused` is the host declining an open pull request (a conflict — a conflict issue is minted and the next cycle works it). Absent on a cycle whose merge was never decided against, which includes every cycle that merged: a merge is recorded by `mergeSha`, and each fresh decision overwrites this field, so a declined pull request that later merges does not keep the verdict.
+type RunCycleViewMergeVerdict string
+
+// RunProgressEvent One SSE frame on the run progress stream. `type` discriminates the payload: `cycle` carries a RunCycleView (client upserts by id and renders one accordion section per cycle), `line` one RunProgressLine attributed to its cycle, and `done` the terminal run state (the server then closes the stream).
+type RunProgressEvent struct {
+	// Cycle One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
+	Cycle RunCycleView `json:"cycle,omitempty"`
+
+	// Line One line of a cycle's agent log: the runner's progress envelope (phase | tool_use | git_commit | git_push | gh_action | log | result) plus the attribution the console groups on — which cycle produced it, and whether the main agent or one of its Task subagents did.
+	Line RunProgressLine `json:"line,omitempty"`
+
+	// State Terminal run state — present only on the `done` frame.
+	State string               `json:"state,omitempty"`
+	Type  RunProgressEventType `json:"type"`
+}
+
+// RunProgressEventType defines model for RunProgressEvent.Type.
+type RunProgressEventType string
+
+// RunProgressLine One line of a cycle's agent log: the runner's progress envelope (phase | tool_use | git_commit | git_push | gh_action | log | result) plus the attribution the console groups on — which cycle produced it, and whether the main agent or one of its Task subagents did.
+type RunProgressLine struct {
+	Branch  string `json:"branch,omitempty"`
+	Command string `json:"command,omitempty"`
+
+	// CycleID Id of the cycle this line belongs to — the accordion section key.
+	CycleID string `json:"cycleId"`
+
+	// CycleIndex 1-based position of that cycle in the run, so the console can label a section without holding the whole cycle list.
+	CycleIndex int64 `json:"cycleIndex"`
+
+	// CycleKind Kind of that cycle (coding | conflict | fix | validation) — the section label.
+	CycleKind string `json:"cycleKind"`
+
+	// Emitter Who produced the line. The runner stamps `subagent` only on lines forwarded from inside a Task tool call; everything else is the main agent.
+	Emitter       RunProgressLineEmitter `json:"emitter"`
+	Error         string                 `json:"error,omitempty"`
+	Files         int64                  `json:"files,omitempty"`
+	Kind          string                 `json:"kind"`
+	Level         string                 `json:"level,omitempty"`
+	Phase         string                 `json:"phase,omitempty"`
+	SchemaVersion int64                  `json:"schemaVersion,omitempty"`
+	Seq           int64                  `json:"seq,omitempty"`
+	Sha           string                 `json:"sha,omitempty"`
+	Status        string                 `json:"status,omitempty"`
+	Summary       string                 `json:"summary,omitempty"`
+	Tool          string                 `json:"tool,omitempty"`
+	TS            string                 `json:"ts,omitempty"`
+}
+
+// RunProgressLineEmitter Who produced the line. The runner stamps `subagent` only on lines forwarded from inside a Task tool call; everything else is the main agent.
+type RunProgressLineEmitter string
+
+// RunValidation The run's validation outcome. The verdict is a RUN property, not a per-issue one, and this is where the deployment surface reads it.
+type RunValidation struct {
+	// ReportPath Repository path of the validation runner's committed report, present once a verdict exists. The console fetches it at HEAD through the files API — there is no dedicated validation endpoint.
+	ReportPath string `json:"reportPath,omitempty"`
+
+	// Verdict Empty until the validation cycle settles. `skipped` covers both "no acceptance criteria" and an incident run, which gets no validation cycle at all.
+	Verdict RunValidationVerdict `json:"verdict,omitempty"`
+}
+
+// RunValidationVerdict Empty until the validation cycle settles. `skipped` covers both "no acceptance criteria" and an incident run, which gets no validation cycle at all.
+type RunValidationVerdict string
 
 // SaveValuesBody defines model for SaveValuesBody.
 type SaveValuesBody struct {
@@ -1081,19 +1451,21 @@ type TaskDetail struct {
 	DerivedStatus    string                   `json:"derivedStatus"`
 	ExecutionHistory []ExecutionView          `json:"executionHistory"`
 	Executions       map[string]ExecutionView `json:"executions"`
-	ExecutorClass    string                   `json:"executorClass,omitempty"`
-	Hold             bool                     `json:"hold"`
-	IssueNumber      int64                    `json:"issueNumber"`
-	IssueURL         string                   `json:"issueUrl"`
-	Lineage          Lineage                  `json:"lineage"`
-	Operation        string                   `json:"operation,omitempty"`
-	Origin           string                   `json:"origin,omitempty"`
 
-	// PrURL Link to the task's pull request, recovered from the succeeded coding execution's "pr#N" reason; absent before a PR opens.
-	PrURL     string `json:"prUrl,omitempty"`
-	Rationale string `json:"rationale,omitempty"`
-	Title     string `json:"title"`
+	// ExecutorClass Label-derived kind of the issue, and the only classification the platform makes of one: `coding` for agent work (the `aep` label), `provision` for a dispatch gate (`aep:provision`), `validation` for the run's validation issue, `ledger` for a bare human issue that joined the milestone carrying none of them. Nothing here is parsed out of the body — issue bodies are prose the platform writes for the agent and never reads back.
+	ExecutorClass TaskDetailExecutorClass `json:"executorClass"`
+	Hold          bool                    `json:"hold"`
+	IssueNumber   int64                   `json:"issueNumber"`
+	IssueURL      string                  `json:"issueUrl"`
+	Lineage       Lineage                 `json:"lineage"`
+	Operation     string                  `json:"operation,omitempty"`
+	Origin        string                  `json:"origin,omitempty"`
+	Rationale     string                  `json:"rationale,omitempty"`
+	Title         string                  `json:"title"`
 }
+
+// TaskDetailExecutorClass Label-derived kind of the issue, and the only classification the platform makes of one: `coding` for agent work (the `aep` label), `provision` for a dispatch gate (`aep:provision`), `validation` for the run's validation issue, `ledger` for a bare human issue that joined the milestone carrying none of them. Nothing here is parsed out of the body — issue bodies are prose the platform writes for the agent and never reads back.
+type TaskDetailExecutorClass string
 
 // TaskStreamEvent One SSE frame on the task-log stream. `type` discriminates the payload: `task` carries the full TaskView (client upserts by issue), `execution` one ExecutionView (client upserts by id), `line` one TimelineEvent (client appends, deduped by executionId+seq), and `done` the settled derivedStatus (the server then closes the stream).
 type TaskStreamEvent struct {
@@ -1121,29 +1493,34 @@ type TaskView struct {
 	DependsOn     []string                 `json:"dependsOn"`
 	DerivedStatus string                   `json:"derivedStatus"`
 	Executions    map[string]ExecutionView `json:"executions"`
-	ExecutorClass string                   `json:"executorClass,omitempty"`
-	Hold          bool                     `json:"hold"`
-	IssueNumber   int64                    `json:"issueNumber"`
-	IssueURL      string                   `json:"issueUrl"`
-	Lineage       Lineage                  `json:"lineage"`
-	Operation     string                   `json:"operation,omitempty"`
-	Origin        string                   `json:"origin,omitempty"`
 
-	// PrURL Link to the task's pull request, recovered from the succeeded coding execution's "pr#N" reason; absent before a PR opens.
-	PrURL     string `json:"prUrl,omitempty"`
-	Rationale string `json:"rationale,omitempty"`
-	Title     string `json:"title"`
+	// ExecutorClass Label-derived kind of the issue, and the only classification the platform makes of one: `coding` for agent work (the `aep` label), `provision` for a dispatch gate (`aep:provision`), `validation` for the run's validation issue, `ledger` for a bare human issue that joined the milestone carrying none of them. Nothing here is parsed out of the body — issue bodies are prose the platform writes for the agent and never reads back.
+	ExecutorClass TaskViewExecutorClass `json:"executorClass"`
+	Hold          bool                  `json:"hold"`
+	IssueNumber   int64                 `json:"issueNumber"`
+	IssueURL      string                `json:"issueUrl"`
+	Lineage       Lineage               `json:"lineage"`
+	Operation     string                `json:"operation,omitempty"`
+	Origin        string                `json:"origin,omitempty"`
+	Rationale     string                `json:"rationale,omitempty"`
+	Title         string                `json:"title"`
 
-	// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+	// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 	Usage Usage `json:"usage,omitempty"`
 }
+
+// TaskViewExecutorClass Label-derived kind of the issue, and the only classification the platform makes of one: `coding` for agent work (the `aep` label), `provision` for a dispatch gate (`aep:provision`), `validation` for the run's validation issue, `ledger` for a bare human issue that joined the milestone carrying none of them. Nothing here is parsed out of the body — issue bodies are prose the platform writes for the agent and never reads back.
+type TaskViewExecutorClass string
 
 // TimelineEvent A unified-timeline entry: today's ProgressEvent (phase | tool_use | git_commit | git_push | gh_action | build_step | log | result) plus its attribution — which execution attempt it came from. This is the per-row shape the console renders; the FE groups rows by executionId/kind.
 type TimelineEvent struct {
 	Branch      string `json:"branch,omitempty"`
 	Command     string `json:"command,omitempty"`
 	CompletedAt string `json:"completedAt,omitempty"`
-	Error       string `json:"error,omitempty"`
+
+	// Emitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
+	Emitter TimelineEventEmitter `json:"emitter,omitempty"`
+	Error   string               `json:"error,omitempty"`
 
 	// ExecutionID Id of the execution attempt this line belongs to.
 	ExecutionID string `json:"executionId"`
@@ -1165,6 +1542,9 @@ type TimelineEvent struct {
 	Tool          string `json:"tool,omitempty"`
 	TS            string `json:"ts"`
 }
+
+// TimelineEventEmitter Who produced the line — `subagent` for work the main agent fanned out with the Task tool, absent for the main agent itself. Absence is a positive fact, not an unknown.
+type TimelineEventEmitter string
 
 // TurnConflict create-turn 409 body. turn_in_progress carries the active turn's id; requirements_missing means the design use-case has no requirements to work from.
 type TurnConflict struct {
@@ -1227,12 +1607,12 @@ type UpdateSkillInput struct {
 	SkillMd    string            `json:"skillMd"`
 }
 
-// Usage Actual token usage for one unit of agent work or an aggregate (#245). Tokens + model are the persisted truth; costUsd is derived at read time from the configured model rates (ADR-0011) and null when no rate is configured for the model.
+// Usage Actual token usage for one unit of agent work or an aggregate (#245,
 type Usage struct {
 	CacheCreationTokens int64 `json:"cacheCreationTokens"`
 	CacheReadTokens     int64 `json:"cacheReadTokens"`
 
-	// CostUsd Catalog-derived USD; null when pricing is unavailable for the model.
+	// CostUsd Write-time-stamped USD (sum, for aggregates); null when no stamp exists.
 	CostUsd     *float64 `json:"costUsd"`
 	InputTokens int64    `json:"inputTokens"`
 
@@ -1334,6 +1714,12 @@ type StreamActivityParams struct {
 	LastEventID string `json:"Last-Event-ID,omitempty"`
 }
 
+// GetBuildLogsParams defines parameters for GetBuildLogs.
+type GetBuildLogsParams struct {
+	// Since Return only entries stamped AFTER this epoch-millis cursor — feed back the previous response's `nextCursor`. Absent reads from the beginning. Millis rather than a line offset because the cursor must survive the hand-over from a live pod tail to the captured snapshot, where a line count is meaningless but a timestamp still orders correctly.
+	Since int64 `form:"since,omitempty" json:"since,omitempty"`
+}
+
 // GetDependencyStatusParams defines parameters for GetDependencyStatus.
 type GetDependencyStatusParams struct {
 	// Environment Environment (default: development)
@@ -1366,7 +1752,7 @@ type ListTasksParams struct {
 	// State Which Tasks to return (default open)
 	State ListTasksParamsState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Tag Filter to Tasks planned from this spec/build version tag (e.g. v3); empty returns all versions.
+	// Tag Filter to the Tasks of one spec/build version tag (e.g. v3). The tag is resolved to a milestone number through the platform's run rows and the filter is milestone MEMBERSHIP — never a title match against GitHub. Empty returns every version.
 	Tag string `form:"tag,omitempty" json:"tag,omitempty"`
 }
 

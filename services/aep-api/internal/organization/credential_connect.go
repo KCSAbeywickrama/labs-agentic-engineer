@@ -242,58 +242,48 @@ func (s *CredentialService) ValidatePAT(ctx context.Context, pat, githubLogin st
 // SM-API is down, so the user-facing Connect doesn't 5xx. The SM-API row
 // is created/refreshed on the next successful Connect.
 func (s *CredentialService) mirrorPATToSMAPI(ctx context.Context, ocOrgID, pat string) {
-	if s.smAPIWriter == nil || !s.smAPIWriter.Enabled() {
+	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
 		return
 	}
-	if _, err := s.smAPIWriter.WriteGitHubPAT(ctx, ocOrgID, pat); err != nil {
+	if _, err := s.secretRefWriter.WriteGitHubPAT(ctx, ocOrgID, pat); err != nil {
 		slog.WarnContext(ctx, "credentials: SM-API mirror failed (legacy store still authoritative)",
 			"ocOrgId", ocOrgID, "error", err)
 	}
 }
 
-// SMAPISeedBundle packages the data the repair script needs to reseed
-// OpenBao after a local cluster teardown. The BFF holds the plaintext
-// (encrypted at rest in the cred store); the shell script holds vault
-// access (via kubectl exec). Plaintext crosses the localhost boundary
-// once, via the TestMode-gated repair endpoint.
-type SMAPISeedBundle struct {
-	KVPath   string `json:"kvPath"`   // remoteRef.key from the dispatcher's ExternalSecret
-	Property string `json:"property"` // remoteRef.property — sub-field within the KV entry
-	Value    string `json:"value"`    // plaintext secret
-}
-
-// PrepareSMAPISeed returns the OpenBao reseed bundle for the org's PAT
-// credential. Returns (nil, nil) when the org has no active PAT row, the
-// SM-API triplet isn't populated (Connect ran with SM-API disabled), or
-// the cred-store value is missing — all idempotent no-op cases.
-// App-mode rows are skipped — App installations don't carry a long-lived
-// secret in OpenBao (per-request tokens are minted from the App private key).
+// ResyncSecretRef re-pushes the org's GitHub PAT through the in-process
+// SecretRefWriter (local OpenBao repair). Returns (false, nil) when there is
+// nothing to push (no active PAT row, no triplet, missing cred-store value, or
+// writer disabled). ctx must carry an ouId claim (repair injects thunder_org_uuid).
 //
-// Drives the local-dev repair path. See deployments/scripts/repair-secrets.sh.
-func (s *CredentialService) PrepareSMAPISeed(ctx context.Context, ocOrgID string) (*SMAPISeedBundle, error) {
+// Replaces the old PrepareSMAPISeed path that returned plaintext over HTTP.
+func (s *CredentialService) ResyncSecretRef(ctx context.Context, ocOrgID string) (bool, error) {
+	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
+		return false, nil
+	}
 	row, err := s.repo.GetByOrg(ctx, ocOrgID)
 	if err != nil {
-		return nil, fmt.Errorf("credentials seed: load row: %w", err)
+		return false, fmt.Errorf("credentials resync: load row: %w", err)
 	}
 	if row == nil {
-		return nil, nil
+		return false, nil
 	}
 	if row.Kind != "user-pat" || row.Status != "active" {
-		return nil, nil
+		return false, nil
 	}
-	if row.SMAPIKVPath == nil || row.SMAPIProperty == nil ||
-		*row.SMAPIKVPath == "" || *row.SMAPIProperty == "" {
-		return nil, nil
+	kvPath := row.ResolvedSecretRefKVPath()
+	prop := row.ResolvedSecretRefProperty()
+	if kvPath == nil || prop == nil || *kvPath == "" || *prop == "" {
+		return false, nil
 	}
 	pat, err := s.store.Get(ctx, ocOrgID, "github/pat")
 	if err != nil || len(pat) == 0 {
-		return nil, nil
+		return false, nil
 	}
-	return &SMAPISeedBundle{
-		KVPath:   *row.SMAPIKVPath,
-		Property: *row.SMAPIProperty,
-		Value:    string(pat),
-	}, nil
+	if _, err := s.secretRefWriter.WriteGitHubPAT(ctx, ocOrgID, string(pat)); err != nil {
+		return false, fmt.Errorf("credentials resync: write: %w", err)
+	}
+	return true, nil
 }
 
 // connectApp runs inside Connect's transaction (the org advisory lock is

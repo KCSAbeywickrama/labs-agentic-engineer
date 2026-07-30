@@ -87,20 +87,18 @@ addition.
 - **Client library:** `agent-platform/agent-manager-service/secrets/`
   (the Go HTTP client that the BFF calls).
 
-App-factory runs SM API in **both** local and cloud (deliberate divergence
-from agent-platform, which only runs SM API in cloud — see
-[[adr-local-sm-api-stub]]):
-- **Cloud:** `secret-manager-api.openchoreo.dp.${cloud_base_domain}` on
-  `cloud-dp-oc-cp`.
-- **Local:** a SM-API-compatible stub in the local docker-compose stack,
-  backed by local OpenBao for KV storage and the local OC API for SR
-  creation. The local stub preserves the WriteOnly + ManagesSecretReferences
-  contract.
+AEP selects one secrets provider per process (no fallback chain):
+- **Cloud / overlay:** SM-API HTTP client (`ManagesSecretReferences()=true`) —
+  the server owns `SecretReference` CR creation.
+- **Local / OSS:** in-process OpenBao-direct provider when `OPENBAO_ADDR` (and
+  `OPENBAO_TOKEN`) are set. The provider writes KV only
+  (`ManagesSecretReferences()=false`); the high-level client authors
+  `SecretReference` CRs via OpenChoreo. See `services/aep-api/design/composition-seam.md`.
 
 ### `OpenBao`
-HashiCorp Vault fork. Used as the **local** secret backend (ReadWrite) in
-the lab dev stack, behind the same `secretmanagersvc` abstraction as SM API.
-Phase 0 of the OC refactor ports the AM `openbao` provider.
+HashiCorp Vault fork. Local/OSS secret KV backend behind the
+`secretsprovider` / `secretmanagersvc` abstraction (OpenBao-direct provider).
+Cloud overlay may use a different backend via SM-API.
 
 ### `effective-key`
 The internal git-service HTTP endpoint that returns the org's Anthropic key
@@ -262,16 +260,84 @@ exact registered name. Values are per-project, per-environment; secret values
 live in OpenBao via SM-API (`extres-<name>-<env>` entities) and reach pods
 through ResourceReleaseBinding → ExternalSecret → env.
 
-### Gates and typed tasks
-`config-collection` and `resource-provisioning` SYSTEM rows gate component
-tasks (three `depends_on_*` JSONB columns). Completion is contract-event
-driven; a deploy cascades dispatch of held siblings. Recovery for a stuck
-provision is drawer re-provision (SYSTEM tasks are not retryable via the
-coding-agent path).
-
 ### Proceed-gate
 `design/save` refuses (409) while any dependency is unresolved, naming the
 component, dependency, and reason.
+
+---
+
+## Milestone execution
+
+> The decision and its costs:
+> [ADR-0011](decisions/ADR-0011-milestone-is-the-unit-of-execution.md). The
+> mechanism: `services/aep-api/internal/delivery/README.md`.
+
+### Milestone
+The GitHub milestone titled after a `v<N>` spec tag. It **is** the version:
+the delivery increment and the version's ledger both. Its **number** is the
+platform key everywhere — titles are renamable, and GitHub's title filters are
+case-insensitive while its create-uniqueness is not, so a `?tag=` query
+resolves number-through-run-rows and never matches a title.
+
+### Milestone run
+One supervised pass over one milestone — the platform's single dispatch door.
+Origin is `spec-build` or `incident-adoption`; state is
+`planning | waiting | running | succeeded | failed | cancelled`. `planning` is
+the fill window — the row is admitted (arming the mutex) before its milestone
+is written, so it names work the platform is doing; `waiting` is the unbounded
+wait, where something outside the platform is needed. A milestone sees
+**sequential** runs across its life, so the workflow id is reused.
+
+### Cycle
+One dispatch within a run: `coding | conflict | fix | validation`. The cycle
+record is where branch, PR number and merge SHA live, all **learned from
+webhooks** — the agent derives its own branch identity, so the platform is
+never told at dispatch. The run's loop POSITION is read from its latest cycle;
+it is never stored as a phase enum, because fix and conflict cycles re-enter
+earlier phases.
+
+The console calls one of these a **build session** — the same object, under a
+name that reads as a unit of work rather than as loop machinery. The rename is
+copy only: the model, the wire, the routes and the budgets all stay `cycle`
+(`RunCycle`, `cycleCeiling`, `cycle-ceiling`, `/cycles/{cycleId}/builds`). The
+bare word *session* never means this — that belongs to the spec-collaboration
+Room.
+
+A cycle also records what the merge policy decided about its pull request:
+`resolves` (the matched agent-work issues, i.e. what the merge closes — the only
+durable answer to "what did this cycle work", since the boundary read the
+supervisor dispatches on returns counts), and `mergeVerdict` +`mergeReason` when
+something decided against merging (`declined` by the policy, `refused` by the
+host).
+
+### Working set
+Open, `aep`-labelled issues in the milestone, excluding `aep:provision` gates
+and the `aep:validation` issue. A run settles when it is empty and validation
+has a verdict.
+
+### Dispatch gate
+An `aep:provision` issue. Never agent work — a **dispatch hold**: while one is
+open the run dispatches nothing, and a hand-filed one mid-run is a deliberate
+human brake. Gates are minted and resolved by `dependencies/provisioning`, and
+carry no `aep` label so they cannot hold the settle predicate open.
+
+### Ledger issue
+A bare human issue that joined a milestone carrying none of the platform's
+labels. Part of the version's record; never worked, never stalling settle.
+Labelling one `aep:codingagent` **adopts** it into the next cycle.
+
+### Terminal reason
+Why a non-succeeded run stopped. Each value names exactly ONE failure class —
+`redispatch-budget`, `build-retrigger-budget`, `fix-chain-budget`,
+`conflict-budget`, `no-progress`, `cycle-ceiling`, `validation-failed` — so a
+reason is an explanation rather than a label. A run that settles for anything
+outside this list is a bug in the loop, not a new state.
+
+### Supersede
+What the next build does to the previous version: close `v<N>`'s still-open
+issues with a `Superseded by v<N+1>` comment, then the milestone, then plan
+`v<N+1>` fresh from the new spec. It is also what keeps the reconcile sweep
+sound — a superseded milestone holds no open `aep` issue.
 
 ## aep-api platform concepts
 

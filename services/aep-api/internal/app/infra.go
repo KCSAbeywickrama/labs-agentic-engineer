@@ -31,6 +31,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/migrate"
 	"github.com/wso2/aep/aep-api/internal/platform/database"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/seed"
 )
@@ -42,11 +43,16 @@ import (
 // assembles deterministically in milliseconds.
 type Infra struct {
 	DB              *gorm.DB
-	CredStore       secrets.OpenBaoStore
+	CredentialStore secrets.CredentialStore
+	ColumnCipher    *secrets.ColumnCipher // same key as CredentialStore; seals column values
 	Minter          *secrets.AppTokenMinter
 	AppClientSecret string        // GitHub App OAuth client_secret ("" ⇒ bind path disabled)
 	K8sClient       client.Client // in-cluster client; nil ⇒ mint-build skips Secret writes
 	Workspace       *gitfs.Engine
+	// RateStamper prices captured agent usage at write time (#291), loaded once
+	// from model_rates after migration. Assemble threads it into the turn +
+	// execution repositories; nil ⇒ no stamping (cost_usd stays null).
+	RateStamper *modelcost.Stamper
 }
 
 // Resolve performs every boot side effect and returns the resolved Infra: it
@@ -58,26 +64,42 @@ type Infra struct {
 // touches the network, the clock, OpenBao, or the filesystem at boot — Assemble
 // is pure. Required infra errors; optional infra warns.
 func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
+	// Credential encryption key — needed for migrations (encrypt-in-place) and
+	// the CredentialStore / column cipher. Decoded once here.
+	credKey, err := base64.StdEncoding.DecodeString(cfg.CredentialEncryptionKey)
+	if err != nil || len(credKey) != 32 {
+		// config.Validate guarantees this decodes to 32 bytes; kept as defense.
+		return Infra{}, fmt.Errorf("CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key: %w", err)
+	}
+
 	// Database + first-boot schema. Opened here (not in main) so main is just
 	// Resolve → Assemble → serve, and Assemble never touches the DB at build time.
 	db, err := database.Open(cfg.DatabaseURL, migrate.BaseModels()...)
 	if err != nil {
 		return Infra{}, fmt.Errorf("database init: %w", err)
 	}
-	if err := Bootstrap(ctx, db, cfg); err != nil {
+	if err := Bootstrap(ctx, db, cfg, credKey); err != nil {
 		return Infra{}, err
 	}
 
-	// Credential store (AES-256-GCM over Postgres). Pure to construct, but the
-	// OpenBao loads + dev seed below depend on it, so it is resolved here.
-	credKey, err := base64.StdEncoding.DecodeString(cfg.CredentialEncryptionKey)
-	if err != nil || len(credKey) != 32 {
-		// config.Validate guarantees this decodes to 32 bytes; kept as defense.
-		return Infra{}, fmt.Errorf("CREDENTIAL_ENCRYPTION_KEY must be a base64-encoded 32-byte key: %w", err)
+	// Model pricing (#291): load the model_rates the seed migration wrote into
+	// an immutable in-memory Stamper. Boot-time and not per-capture because
+	// rates are ops-managed and change rarely — a rate edit takes effect on the
+	// next restart. Assemble injects it into the capture repositories.
+	rateRows, err := migrate.LoadModelRates(ctx, db)
+	if err != nil {
+		return Infra{}, fmt.Errorf("model rates load: %w", err)
 	}
+	rateStamper := modelcost.NewStamper(rateRows)
+
+	// Credential store (AES-256-GCM over Postgres) + column cipher (same key).
 	credStore, err := secrets.NewDBStore(db, credKey)
 	if err != nil {
 		return Infra{}, fmt.Errorf("credential store init: %w", err)
+	}
+	columnCipher, err := secrets.NewColumnCipher(credKey)
+	if err != nil {
+		return Infra{}, fmt.Errorf("column cipher init: %w", err)
 	}
 	slog.Info("credential store: postgres (aes-256-gcm)")
 
@@ -92,7 +114,7 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 	// answers in no-app mode; the connect surface lights up the App path lazily on
 	// first use.
 	loadCtx, cancelLoad := context.WithTimeout(ctx, 10*time.Second)
-	appKey, err := secrets.LoadAppKeyFromOpenBao(loadCtx, credStore)
+	appKey, err := secrets.LoadAppKey(loadCtx, credStore)
 	cancelLoad()
 	if err != nil {
 		slog.Warn("app key load failed; App-mode credentials will return ErrAppNotConfigured", "error", err)
@@ -102,7 +124,7 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 	if err != nil {
 		return Infra{}, fmt.Errorf("app token minter init: %w", err)
 	}
-	minter.WithOpenBao(credStore)
+	minter.WithCredentialStore(credStore)
 
 	// Dev-only app-platform seed (App private key + client_secret + webhook HMAC).
 	// No-op outside DEPLOYMENT_TIER=dev.
@@ -116,13 +138,13 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 	}
 	if appKey == nil {
 		retryCtx, cancelRetry := context.WithTimeout(ctx, 10*time.Second)
-		if reloaded, rerr := secrets.LoadAppKeyFromOpenBao(retryCtx, credStore); rerr == nil && reloaded != nil {
+		if reloaded, rerr := secrets.LoadAppKey(retryCtx, credStore); rerr == nil && reloaded != nil {
 			cancelRetry()
 			minter, err = secrets.NewAppTokenMinter(reloaded)
 			if err != nil {
 				return Infra{}, fmt.Errorf("app token minter re-init: %w", err)
 			}
-			minter.WithOpenBao(credStore)
+			minter.WithCredentialStore(credStore)
 			slog.Info("github app loaded post-seed", "appId", reloaded.AppID)
 		} else {
 			cancelRetry()
@@ -157,10 +179,12 @@ func Resolve(ctx context.Context, cfg config.Config) (Infra, error) {
 
 	return Infra{
 		DB:              db,
-		CredStore:       credStore,
+		CredentialStore: credStore,
+		ColumnCipher:    columnCipher,
 		Minter:          minter,
 		AppClientSecret: appClientSecret,
 		K8sClient:       wpClient,
 		Workspace:       workspaceEngine,
+		RateStamper:     rateStamper,
 	}, nil
 }

@@ -21,3 +21,12 @@ aepServer:
 
 console:
   publicURL: "http://console.openchoreo.localhost:8080"
+
+# LOCAL DEV ONLY. When enabled, aep-server's Init keeps the OpenBao root token
+# (does not revoke it) so the in-process OpenBao-direct secrets provider —
+# which authenticates with the root token — can write delivery secrets.
+# Must stay false in production, where the root token is always revoked.
+# Pair with the platform chart's codingAgentDispatch.localStubs.enabled=true
+# (which sets OPENBAO_* on aep-api).
+localStubs:
+  enabled: false

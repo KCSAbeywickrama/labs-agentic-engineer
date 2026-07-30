@@ -29,12 +29,20 @@ var invalidNameChars = regexp.MustCompile(`[^a-z0-9-]`)
 
 // ToK8sName converts a human-readable name to an RFC 1123 compliant k8s name.
 func ToK8sName(name string) string {
-	s := strings.ToLower(strings.TrimSpace(name))
-	s = strings.ReplaceAll(s, " ", "-")
-	s = invalidNameChars.ReplaceAllString(s, "")
-	s = strings.Trim(s, "-")
+	s := sanitize(name)
 	if s == "" {
 		s = "component"
 	}
 	return s
+}
+
+// sanitize is ToK8sName without the non-empty fallback: it reduces a name to
+// the RFC 1123 character set and nothing more. Bounded needs the unsubstituted
+// form so an empty segment contributes nothing to a composed name instead of
+// silently becoming the literal "component".
+func sanitize(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.ReplaceAll(s, " ", "-")
+	s = invalidNameChars.ReplaceAllString(s, "")
+	return strings.Trim(s, "-")
 }

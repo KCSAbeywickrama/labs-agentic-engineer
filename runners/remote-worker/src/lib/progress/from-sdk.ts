@@ -21,9 +21,40 @@
 // message often carries multiple tool_use content blocks). The caller
 // emits each returned event in order.
 
-import type { ProgressEventInput } from "./schema.js";
+import type { ProgressEmitter, ProgressEventInput, TurnUsage } from "./schema.js";
 
 const MAX_SUMMARY = 200;
+
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+// usageFromResult reads the SDK result message's token usage (#291). Tokens
+// come from `usage` (snake_case SDK fields); the model comes from `modelUsage`,
+// a record keyed by model id — a single key is the run's model, anything else
+// (multi-model, or none) reports "" so aep-api treats it as unpriceable/mixed,
+// matching contracts.TokenUsage semantics. Returns undefined when the result
+// carried no usage at all (older SDKs / nothing to stamp).
+function usageFromResult(m: Record<string, unknown>): TurnUsage | undefined {
+  const u = m.usage;
+  if (!u || typeof u !== "object") return undefined;
+  const usage = u as Record<string, unknown>;
+
+  let model = "";
+  const mu = m.modelUsage;
+  if (mu && typeof mu === "object") {
+    const models = Object.keys(mu as Record<string, unknown>);
+    if (models.length === 1) model = models[0];
+  }
+
+  return {
+    inputTokens: num(usage.input_tokens),
+    outputTokens: num(usage.output_tokens),
+    cacheReadTokens: num(usage.cache_read_input_tokens),
+    cacheCreationTokens: num(usage.cache_creation_input_tokens),
+    model,
+  };
+}
 
 function trimSummary(s: string): string {
   const collapsed = s.replace(/\s+/g, " ").trim();
@@ -102,6 +133,16 @@ function assistantToolUseBlocks(message: unknown): Array<{ name: string; input: 
   return out;
 }
 
+// emitterOf attributes a message to the main agent or to a subagent. The SDK
+// sets `parent_tool_use_id` to the id of the Task tool call a message was
+// forwarded from, and leaves it null on the main conversation — so it IS the
+// main-vs-subagent discriminator, and no extra runner bookkeeping is needed.
+// "main" is left unstamped so the field only ever appears on subagent lines.
+function emitterOf(m: Record<string, unknown>): ProgressEmitter | undefined {
+  const parent = m.parent_tool_use_id;
+  return typeof parent === "string" && parent !== "" ? "subagent" : undefined;
+}
+
 export function progressFromSdkMessage(message: unknown): ProgressEventInput[] {
   if (!message || typeof message !== "object") return [];
   const m = message as Record<string, unknown>;
@@ -112,6 +153,7 @@ export function progressFromSdkMessage(message: unknown): ProgressEventInput[] {
   }
 
   if (type === "assistant") {
+    const emitter = emitterOf(m);
     const events: ProgressEventInput[] = [];
     for (const tu of assistantToolUseBlocks(m)) {
       if (tu.name === "Bash") {
@@ -131,13 +173,14 @@ export function progressFromSdkMessage(message: unknown): ProgressEventInput[] {
         summary: summaryFromInput(tu.name, tu.input),
       });
     }
-    return events;
+    return emitter ? events.map((e) => ({ ...e, emitter })) : events;
   }
 
   if (type === "result") {
     const subtype = String(m.subtype ?? "");
+    const usage = usageFromResult(m);
     if (subtype === "success") {
-      return [{ kind: "result", status: "success" }];
+      return [{ kind: "result", status: "success", ...(usage ? { usage } : {}) }];
     }
     const errors = Array.isArray(m.errors) ? (m.errors as string[]).join(", ") : "";
     return [{

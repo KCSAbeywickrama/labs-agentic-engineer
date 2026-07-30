@@ -139,8 +139,16 @@ func TestProvision_SeedsFlatLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(skills) != 11 {
-		t.Fatalf("seeded catalog size = %d, want 11", len(skills))
+	// A freshly provisioned org's catalog is exactly the embedded library —
+	// nothing else has been added yet. Derived from loadLibrary over the same
+	// tree the seed read from, so this never needs bumping when a skill is
+	// added to or removed from skills/.
+	embedded, err := loadLibrary(testLibraryFS(t))
+	if err != nil {
+		t.Fatalf("loadLibrary: %v", err)
+	}
+	if len(skills) != len(embedded) {
+		t.Fatalf("seeded catalog size = %d, want %d (embedded library size)", len(skills), len(embedded))
 	}
 
 	paths := lsTree(t, c, "org1")
@@ -229,14 +237,18 @@ func TestReconcile_MigratesLegacyRepo(t *testing.T) {
 	// is NOT first-creation) and are NOT resurrected here — only the org-kind
 	// names already present (go, react-webapp) are migrated/preserved. Plus
 	// the preserved custom skill (mine) — minus nothing else. retired is
-	// purged.
+	// purged. The platform side is derived from the library rather than
+	// hardcoded, so this never needs bumping when a skill is added to or
+	// removed from skills/.
 	for _, absentOrgDefault := range []string{"api-management", "thunder-authentication"} {
 		if _, ok := byName[absentOrgDefault]; ok {
 			t.Fatalf("absent org-kind default %q must stay opt-in on ongoing sync, got resurrected: %+v", absentOrgDefault, skillKeysOf(byName))
 		}
 	}
-	if len(skills) != 10 {
-		t.Fatalf("catalog size after migration = %d, want 10: %+v", len(skills), skillKeysOf(byName))
+	// go + react-webapp (present org-kind names) + mine (preserved custom).
+	const nonPlatformAfterMigration = 3
+	if want := EmbeddedLibraryCount(t, SkillKindPlatform) + nonPlatformAfterMigration; len(skills) != want {
+		t.Fatalf("catalog size after migration = %d, want %d: %+v", len(skills), want, skillKeysOf(byName))
 	}
 	if _, ok := byName["retired"]; ok {
 		t.Fatalf("retired legacy builtin must be purged")

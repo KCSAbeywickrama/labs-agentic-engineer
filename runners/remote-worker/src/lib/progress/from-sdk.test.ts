@@ -32,6 +32,42 @@ test("from-sdk: result success → success result", () => {
   assert.deepEqual(events[0], { kind: "result", status: "success" });
 });
 
+test("from-sdk: result success with usage → result carries token usage + model", () => {
+  const events = progressFromSdkMessage({
+    type: "result",
+    subtype: "success",
+    usage: {
+      input_tokens: 12000,
+      output_tokens: 3400,
+      cache_read_input_tokens: 500000,
+      cache_creation_input_tokens: 80000,
+    },
+    modelUsage: { "claude-sonnet-5": { input_tokens: 12000 } },
+  });
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], {
+    kind: "result",
+    status: "success",
+    usage: {
+      inputTokens: 12000,
+      outputTokens: 3400,
+      cacheReadTokens: 500000,
+      cacheCreationTokens: 80000,
+      model: "claude-sonnet-5",
+    },
+  });
+});
+
+test("from-sdk: result usage with multiple models → model '' (mixed)", () => {
+  const events = progressFromSdkMessage({
+    type: "result",
+    subtype: "success",
+    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    modelUsage: { "claude-sonnet-5": {}, "claude-opus-4-8": {} },
+  });
+  assert.equal((events[0] as { usage: { model: string } }).usage.model, "");
+});
+
 test("from-sdk: result error → failure result with errors joined", () => {
   const events = progressFromSdkMessage({
     type: "result",
@@ -152,6 +188,35 @@ test("from-sdk: assistant with multiple tool_use blocks emits in order", () => {
   assert.equal(events.length, 2);
   assert.equal((events[0] as { summary: string }).summary, "a.go");
   assert.equal((events[1] as { summary: string }).summary, "b.go");
+});
+
+test("from-sdk: a main-agent message carries no emitter attribution", () => {
+  const events = progressFromSdkMessage({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "a.go" } }] },
+  });
+  assert.equal(events.length, 1);
+  assert.equal((events[0] as { emitter?: string }).emitter, undefined);
+});
+
+test("from-sdk: a forwarded subagent message is attributed to the subagent", () => {
+  const events = progressFromSdkMessage({
+    type: "assistant",
+    parent_tool_use_id: "toolu_01Task",
+    message: {
+      content: [
+        { type: "tool_use", name: "Read", input: { file_path: "a.go" } },
+        { type: "tool_use", name: "Bash", input: { command: "git commit -m \"x\"" } },
+      ],
+    },
+  });
+  assert.equal(events.length, 2);
+  // Every event derived from the message inherits the attribution, including
+  // the ones bashEvents rewrites into a different kind.
+  assert.equal((events[0] as { emitter?: string }).emitter, "subagent");
+  assert.equal(events[1].kind, "git_commit");
+  assert.equal((events[1] as { emitter?: string }).emitter, "subagent");
 });
 
 test("from-sdk: unknown message type → empty", () => {
