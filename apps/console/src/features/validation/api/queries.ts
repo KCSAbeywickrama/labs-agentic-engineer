@@ -16,14 +16,18 @@
  * under the License.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { client } from "../../../api/client";
+import { apiErrorMessage } from "../../../api/errors";
+import { projectKeys } from "../../projects/api/keys";
 import { fetchSpecFileContent } from "../../spec/api/queries";
 import { validationKeys } from "./keys";
 
-// The two files the Validation page joins, both read at HEAD via the Files API
-// (report.json is reachable through the read-only allow-list on read-file).
+// The acceptance oracle is authored under specs/ and read at HEAD via the Files
+// API. The run report is NOT a repo file — the runner posts it to the tag's
+// validation issue so successive runs stay individually addressable, and
+// get-validation-report serves it from there.
 export const CRITERIA_PATH = "specs/validation/validation-criteria.json";
-export const REPORT_PATH = "tests/validation/report.json";
 
 // Fetch one validation artifact's content at HEAD. Reuses the spec Files reader
 // (path-agnostic; `sha` only feeds its cache key, never the request — we key our
@@ -53,11 +57,66 @@ export function useValidationCriteria(
   return useValidationFile(projectName, CRITERIA_PATH, version, enabled);
 }
 
-/** The runner's run report (tests/validation/report.json). */
+/**
+ * The run report for a tag, read from that tag's validation issue.
+ *
+ * Retry is off: a 404 here means "no report was posted for this run", which is a
+ * deterministic answer the page renders as such — not a transient failure worth
+ * hammering.
+ */
 export function useValidationReport(
   projectName: string,
-  version: string,
+  tag: string,
   enabled: boolean,
 ) {
-  return useValidationFile(projectName, REPORT_PATH, version, enabled);
+  return useQuery({
+    queryKey: validationKeys.report(projectName, tag),
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/validation/report",
+        {
+          params: {
+            path: { projectName },
+            ...(tag ? { query: { tag } } : {}),
+          },
+        },
+      );
+      if (error || data === undefined) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to load the validation report"),
+        );
+      }
+      return data;
+    },
+  });
+}
+
+/**
+ * Record the human verdict on a run whose automatic verdict is awaiting_review.
+ *
+ * Only reachable from that state: an automatic pass or fail is final, and the
+ * server answers 409 otherwise, so "passed" can never mean a human clicked past a
+ * failing suite. Invalidates the project status, which is where the verdict is
+ * read from.
+ */
+export function useSetValidationVerdict(projectName: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { verdict: "pass" | "fail"; note?: string }) => {
+      const { error } = await client.PATCH(
+        "/projects/{projectName}/validation/verdict",
+        { params: { path: { projectName } }, body },
+      );
+      if (error) {
+        throw new Error(
+          apiErrorMessage(error, "Failed to record the validation verdict"),
+        );
+      }
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: projectKeys.detail(projectName) }),
+  });
 }

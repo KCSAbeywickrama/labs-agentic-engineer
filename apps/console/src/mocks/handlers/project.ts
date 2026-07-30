@@ -15,6 +15,7 @@ import {
   specFileContent,
   specFileMetas,
   specFileNotFound,
+  validationReportDocument,
   type ProjectScenario,
 } from "../fixtures/project";
 import {
@@ -197,4 +198,29 @@ export const projectHandlers = [
     }
     return HttpResponse.json(file);
   }),
+
+  // The run report, served from the tag's validation issue rather than the repo.
+  // The "fresh" scenario has never validated, so it 404s — which the page renders
+  // as a real state, not an error.
+  http.get("*/api/v1/projects/:projectName/validation/report", () => {
+    const s = scenario();
+    if (s === "error") {
+      return HttpResponse.json(projectSectionError, { status: 500 });
+    }
+    if (s === "fresh") {
+      return HttpResponse.json(
+        { code: "not_found", message: "no validation run for this project" },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json(validationReportDocument);
+  }),
+
+  // Recording a human verdict. 204 with no body; the page refetches the project
+  // status, which is where the verdict is read from.
+  http.patch("*/api/v1/projects/:projectName/validation/verdict", () =>
+    scenario() === "error"
+      ? HttpResponse.json(projectSectionError, { status: 500 })
+      : new HttpResponse(null, { status: 204 }),
+  ),
 ];

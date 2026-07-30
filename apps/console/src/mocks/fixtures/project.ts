@@ -158,7 +158,8 @@ export const projectStatuses: Record<
       version: "v1",
       status: "deployed",
       components: { total: 3, ready: 3 },
-      validation: "completed",
+      validation: "finished",
+      validationVerdict: "fail",
       validationIssue: 30,
       validationUrl: `${REPO_URL}/pull/42`,
     },
@@ -775,8 +776,11 @@ const validationReportJson = JSON.stringify(
         healed: false,
         flaky: true,
         durationMs: 2600,
-        failure:
-          "TimeoutError: locator.click: Timeout 5000ms exceeded.\n  waiting for getByRole('option', { name: 'Accessories' })",
+        failure: {
+          message:
+            "TimeoutError: locator.click: Timeout 5000ms exceeded.\n  waiting for getByRole('option', { name: 'Accessories' })",
+          location: "tests/e2e/specs/AC-001-b.spec.ts:31",
+        },
       },
       {
         id: "AC-002-a",
@@ -863,9 +867,17 @@ const fullFiles: MockSpecFile[] = [
     path: "specs/validation/validation-criteria.json",
     content: validationCriteriaJson,
   },
-  // Runner artifact outside specs/ — reachable via the read-file allow-list.
-  { path: "tests/validation/report.json", content: validationReportJson },
 ];
+
+// The run report is NOT a repo file: the runner posts it to the tag's validation
+// issue and get-validation-report serves it from there, so it is no longer part of
+// the Files API fixture.
+export const validationReportDocument = {
+  tag: "v1",
+  issueNumber: 30,
+  reportedAt: "2026-07-28T10:12:00Z",
+  content: validationReportJson,
+};
 
 export const projectSpecFiles: Record<
   Exclude<ProjectScenario, "error">,

@@ -97,18 +97,32 @@ func TestValidationTaskWorkflow_TimesOut(t *testing.T) {
 // acceptance criteria). The returned pointer captures the last
 // RecordWorkflowRun input so tests can pin the phase row's shape.
 func registerValidationFlowActivities(env *testsuite.TestWorkflowEnvironment, validationIssue int) *RecordWorkflowRunInput {
+	return registerValidationFlowActivitiesWithReport(env, validationIssue,
+		IngestValidationReportOutput{Verdict: delivery.ValidationVerdictPass})
+}
+
+// registerValidationFlowActivitiesWithReport is the same, with control over what
+// the report ingest returns — the seam for exercising a fail verdict and an
+// unreported run, which are the two states the phase could not express before.
+func registerValidationFlowActivitiesWithReport(
+	env *testsuite.TestWorkflowEnvironment, validationIssue int, ingest IngestValidationReportOutput,
+) *RecordWorkflowRunInput {
 	var acts *Activities
 	recorded := &RecordWorkflowRunInput{}
 	env.RegisterActivity(acts.RecordWorkflowRun)
 	env.RegisterActivity(acts.SetWorkflowRunStatus)
+	env.RegisterActivity(acts.SetValidationVerdict)
 	env.RegisterActivity(acts.ResolveValidationTask)
+	env.RegisterActivity(acts.IngestValidationReport)
 	env.RegisterActivity(acts.DispatchCoding)
 	env.RegisterActivity(acts.MergePR)
 	env.OnActivity(acts.RecordWorkflowRun, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) { *recorded = args.Get(1).(RecordWorkflowRunInput) }).
 		Return(nil)
 	env.OnActivity(acts.SetWorkflowRunStatus, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(acts.SetValidationVerdict, mock.Anything, mock.Anything).Return(nil)
 	env.OnActivity(acts.ResolveValidationTask, mock.Anything, mock.Anything).Return(validationIssue, nil)
+	env.OnActivity(acts.IngestValidationReport, mock.Anything, mock.Anything).Return(ingest, nil)
 	env.OnActivity(acts.DispatchCoding, mock.Anything, mock.Anything).Return("exec-e2e", nil)
 	env.OnActivity(acts.MergePR, mock.Anything, mock.Anything).Return(nil)
 	env.RegisterWorkflow(ValidationTaskWorkflow)
@@ -167,10 +181,102 @@ func TestValidationFlowWorkflow_HappyPath(t *testing.T) {
 	require.Equal(t, LaneE2E, res.Lanes[0].Kind)
 	require.Equal(t, 99, res.Lanes[0].Issue)
 	require.Equal(t, delivery.OutcomeSucceeded, res.Lanes[0].Outcome)
+	require.Equal(t, delivery.ValidationVerdictPass, res.Verdict)
 	// The phase row: kind=validation, the issue, parented to the DEV run.
 	require.Equal(t, delivery.WorkflowKindValidation, recorded.Kind)
 	require.Equal(t, 99, recorded.IssueNumber)
 	require.Equal(t, "devflow-org1-proj1-v1", recorded.ParentWorkflowID)
+}
+
+// A FAILING test suite still merges its PR and still SUCCEEDS the phase — the
+// verdict carries the bad news, not the lifecycle. This is the case the old
+// single-enum surface could not express at all: a red suite and a green suite
+// both rendered "completed" because pr-opened is the lane's success signal and
+// the runner opens its PR either way.
+func TestValidationFlowWorkflow_FailVerdictStillSucceedsThePhase(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerValidationFlowActivitiesWithReport(env, 99,
+		IngestValidationReportOutput{Verdict: delivery.ValidationVerdictFail})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(delivery.SigPROpened, delivery.PRSignal{Repo: "org1/proj1", Issue: 99, PRNumber: 55})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(delivery.SigPRMerged, delivery.PRSignal{Repo: "org1/proj1", Issue: 99, PRNumber: 55, MergeSHA: "abc"})
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(ValidationFlowWorkflow, ValidationFlowInput{
+		OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1",
+		DevWorkflowID: "devflow-org1-proj1-v1",
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res ValidationFlowResult
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, delivery.OutcomeSucceeded, res.Outcome, "a fail verdict is an ANSWER, not a broken run")
+	require.Equal(t, delivery.ValidationVerdictFail, res.Verdict)
+	require.Empty(t, res.FailureKind, "nothing about the machinery failed")
+}
+
+// An awaiting_review verdict behaves the same: the phase reached an answer, and
+// the answer is "a human must decide".
+func TestValidationFlowWorkflow_AwaitingReviewVerdict(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerValidationFlowActivitiesWithReport(env, 99,
+		IngestValidationReportOutput{Verdict: delivery.ValidationVerdictAwaitingReview})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(delivery.SigPROpened, delivery.PRSignal{Repo: "org1/proj1", Issue: 99, PRNumber: 55})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(delivery.SigPRMerged, delivery.PRSignal{Repo: "org1/proj1", Issue: 99, PRNumber: 55, MergeSHA: "abc"})
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(ValidationFlowWorkflow, ValidationFlowInput{
+		OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1",
+		DevWorkflowID: "devflow-org1-proj1-v1",
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	var res ValidationFlowResult
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, delivery.OutcomeSucceeded, res.Outcome)
+	require.Equal(t, delivery.ValidationVerdictAwaitingReview, res.Verdict)
+}
+
+// The runner opened its PR but never posted a report → the phase ERRORS with
+// report_missing, and the PR is NOT merged. Previously this passed silently as
+// "completed", which is also the crash-after-PR-opened hole: pr-opened finishes
+// the execution row, so the watcher stops watching and a later pod death emits
+// no signal at all.
+func TestValidationFlowWorkflow_ReportMissingErrorsBeforeMerge(t *testing.T) {
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	registerValidationFlowActivitiesWithReport(env, 99, IngestValidationReportOutput{
+		FailureKind: delivery.ValidationFailureReportMissing,
+		Error:       "no validation report was posted to issue #99 for tag \"v1\"",
+	})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(delivery.SigPROpened, delivery.PRSignal{Repo: "org1/proj1", Issue: 99, PRNumber: 55})
+	}, time.Second)
+
+	env.ExecuteWorkflow(ValidationFlowWorkflow, ValidationFlowInput{
+		OrgID: "org1", ProjectID: "proj1", Repo: "org1/proj1", Tag: "v1",
+		DevWorkflowID: "devflow-org1-proj1-v1",
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var res ValidationFlowResult
+	require.NoError(t, env.GetWorkflowResult(&res))
+	require.Equal(t, delivery.OutcomeFailed, res.Outcome)
+	require.Equal(t, delivery.ValidationFailureReportMissing, res.FailureKind)
+	require.Empty(t, res.Verdict, "no report means no verdict — never a default pass")
+	env.AssertNotCalled(t, "MergePR", mock.Anything, mock.Anything)
 }
 
 // A failed lane runner (job-status routed by ExecutionID, forwarded to the

@@ -25,6 +25,20 @@ type ProjectStatus = components["schemas"]["ProjectStatus"];
 // particular has no stored status: exists/version/dirty decide everything.
 export type StageTone = "ghost" | "neutral" | "info" | "warning" | "success" | "error";
 
+// StageTone → Oxygen/MUI Chip colour. Lives beside the tone union so every
+// consumer maps it the same way; "neutral"/"ghost" are ours, "default" is theirs.
+export const CHIP_COLOR: Record<
+  StageTone,
+  "default" | "info" | "warning" | "success" | "error"
+> = {
+  ghost: "default",
+  neutral: "default",
+  info: "info",
+  warning: "warning",
+  success: "success",
+  error: "error",
+};
+
 export interface StageView {
   /** Version chip text ("v1", "v1+"); "" renders an em-dash. */
   version: string;
@@ -88,7 +102,11 @@ export function deployStageView(status: ProjectStatus): StageView {
       // Validation runs after the components deploy, so its state is appended to
       // the live-in-dev line (deployed stays the deploy tone; validation is
       // informational text here — the deployments board carries the loud chip).
-      const v = validationView(status.deploy.validation);
+      const v = validationView(
+        status.deploy.validation,
+        status.deploy.validationVerdict,
+        status.deploy.validationFailureKind,
+      );
       return {
         version,
         line: v ? `live in dev · ${v.label}` : "live in dev",
@@ -102,29 +120,76 @@ export function deployStageView(status: ProjectStatus): StageView {
       // deploys, so a non-none validation state means it IS live in dev.
       // Surface it even when the binding read lags or returns nothing (a
       // transient/degraded deploy-status read must not hide validation).
-      const v = validationView(status.deploy.validation);
+      const v = validationView(
+        status.deploy.validation,
+        status.deploy.validationVerdict,
+        status.deploy.validationFailureKind,
+      );
       if (v) return { version, line: `live in dev · ${v.label}`, tone: v.tone };
       return { version: "", line: "nothing deployed", tone: "ghost" };
     }
   }
 }
 
-// validationView maps the coarse deploy.validation state to a label + tone,
-// shared by the overview deploy line (suffix) and the deployments board chip.
+// Human copy for each machine-readable failure cause. These describe the RUN
+// breaking, never the criteria failing — a failing suite is `finished` with a
+// `fail` verdict, so nothing in this map can be confused for a test result.
+const FAILURE_KIND_DETAIL: Record<string, string> = {
+  internal_error: "the platform hit an internal error",
+  gate_rejected: "a gate was declined",
+  dispatch_failed: "the validation runner never started",
+  runner_crashed: "the validation runner died mid-run",
+  timed_out: "the run timed out",
+  no_pr_opened: "the run opened no pull request",
+  report_missing: "the run never reported its results",
+  report_invalid: "the run's report could not be read",
+  merge_failed: "the validation pull request did not merge",
+};
+
+// validationView maps the validation LIFECYCLE state plus its verdict to a label
+// + tone, shared by the overview deploy line (suffix), the deployments board chip
+// and the Validation page header.
+//
+// The two axes are deliberate: `validation` says whether the run reached an
+// answer, `verdict` says what the answer was. That is why a failing test suite
+// reads "validation failed" from finished+fail, while a broken run reads
+// "validation errored" — previously both rendered the same word.
+//
 // null = nothing to show (no validation reached, or no acceptance criteria).
 export function validationView(
   validation: string,
-): { label: string; tone: StageTone } | null {
+  verdict?: string,
+  failureKind?: string,
+): { label: string; tone: StageTone; detail?: string } | null {
   switch (validation) {
     case "running":
       return { label: "validating", tone: "info" };
-    case "completed":
-      // "completed" means the run finished — the pass/fail verdict lives in
-      // the report (behind the PR), so the label makes no claim about the
-      // outcome and instead names what the chip opens.
-      return { label: "validation report", tone: "info" };
-    case "failed":
-      return { label: "validation failed", tone: "error" };
+    case "finished":
+      switch (verdict) {
+        case "pass":
+          return { label: "validation passed", tone: "success" };
+        case "fail":
+          return { label: "validation failed", tone: "error" };
+        case "awaiting_review":
+          // A human has to decide: manual/scenario criteria are present, or an
+          // e2e criterion produced no result. Warning, not error — nothing is
+          // broken and nothing has failed yet.
+          return { label: "awaiting review", tone: "warning" };
+        default:
+          // Finished with no verdict: a run that predates the verdict field.
+          // Name what the chip opens rather than guessing an outcome.
+          return { label: "validation report", tone: "info" };
+      }
+    case "errored": {
+      const detail = failureKind ? FAILURE_KIND_DETAIL[failureKind] : undefined;
+      return {
+        label: "validation errored",
+        tone: "error",
+        ...(detail ? { detail } : {}),
+      };
+    }
+    case "canceled":
+      return { label: "validation canceled", tone: "neutral" };
     default: // "none" | "" | unknown
       return null;
   }

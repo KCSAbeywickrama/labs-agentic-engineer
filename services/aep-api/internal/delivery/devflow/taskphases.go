@@ -191,10 +191,31 @@ func awaitRunStatus(ctx workflow.Context, ch workflow.ReceiveChannel, timeout ti
 // index (the workflow's own truth is Temporal; this keeps the DB index fresh
 // for signalers and the list endpoint).
 func markRunStatus(ctx workflow.Context, workflowID, statusStr, reason string) {
+	markRunStatusKind(ctx, workflowID, statusStr, reason, "")
+}
+
+// markRunStatusKind is markRunStatus plus the machine-readable failure cause.
+// Split out rather than adding a parameter to markRunStatus so the many
+// non-failure call sites do not carry a permanently empty argument.
+func markRunStatusKind(ctx workflow.Context, workflowID, statusStr, reason, failureKind string) {
 	_ = workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).SetWorkflowRunStatus, SetWorkflowRunStatusInput{
+		WorkflowID:  workflowID,
+		Status:      statusStr,
+		Reason:      reason,
+		FailureKind: failureKind,
+	}).Get(ctx, nil)
+}
+
+// markValidationVerdict best-effort records the validating phase's answer on its
+// run row. Written separately from the status because the two are orthogonal —
+// the status says an answer was reached, the verdict says what it was.
+func markValidationVerdict(ctx workflow.Context, workflowID, verdict string) {
+	if verdict == "" {
+		return
+	}
+	_ = workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).SetValidationVerdict, SetValidationVerdictInput{
 		WorkflowID: workflowID,
-		Status:     statusStr,
-		Reason:     reason,
+		Verdict:    verdict,
 	}).Get(ctx, nil)
 }
 

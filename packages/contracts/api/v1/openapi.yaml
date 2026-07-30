@@ -1386,8 +1386,8 @@ paths:
           description: Project name (DNS-label slug)
           type: string
       - description: 'Repo-relative file path (trailing wildcard: may span multiple segments, i.e. contain
-          slashes). Reads are scoped to specs/ plus a small read-only allow-list — currently the
-          runner-authored validation report at tests/validation/report.json.'
+          slashes). Reads are scoped to specs/; a read-only allow-list for non-specs/ paths exists
+          but is currently empty. Writes are always specs/-only.'
         in: path
         name: path
         required: true
@@ -1904,6 +1904,105 @@ paths:
       security:
       - userJWT: []
       summary: Get per-phase project usage
+      tags:
+      - Projects
+  /projects/{projectName}/validation/report:
+    get:
+      description: >-
+        The latest validation report for a design tag, read from the tag's
+        validation issue. The runner posts one marked comment per run; the newest
+        match wins. The report document itself stays opaque here — it is authored
+        by the runner's generate-report.mjs and parsed by the validation-view
+        package, so duplicating its schema in the contract would mean keeping two
+        definitions in step.
+      operationId: get-validation-report
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: >-
+          Design tag to read the report for. Defaults to the tag live in dev
+          (ProjectStatus.deploy.version) when omitted.
+        in: query
+        name: tag
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationReportDocument'
+          description: OK
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: No validation issue for the tag, or no report reported yet.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Get the latest validation report for a tag
+      tags:
+      - Projects
+  /projects/{projectName}/validation/verdict:
+    patch:
+      description: >-
+        Record the human verdict for a validation run whose automatic verdict is
+        awaiting_review. An automatic pass or fail is final — this rejects with
+        409 unless the current verdict is awaiting_review, so nobody can click
+        past a failing suite.
+      operationId: set-validation-verdict
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidationVerdictRequest'
+        required: true
+      responses:
+        '204':
+          description: Recorded — refetch project status for the new verdict.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: No validation run for the project's latest build.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: >-
+            The current verdict is not awaiting_review — it was decided
+            automatically, or a human already recorded it.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Record the human validation verdict
       tags:
       - Projects
   /rca-agent/reports:
@@ -3123,15 +3222,35 @@ components:
           x-go-type: string
         validation:
           description: >-
-            Coarse validation-task run state for the latest build: none (not
-            reached, or no acceptance criteria), running, completed (ran to
-            completion; the pass/fail verdict lives in the report), failed
-            (the validation run failed mechanically).
+            Lifecycle state of the latest build's validation run — whether an
+            answer was reached, never what the answer was. none (not reached, or
+            no acceptance criteria), running (lanes executing), finished (ran to
+            an answer — read validationVerdict), errored (the run itself broke —
+            read validationFailureKind), canceled (stopped by a human).
+            "finished" deliberately does not imply the criteria passed.
           enum:
           - none
           - running
-          - completed
-          - failed
+          - finished
+          - errored
+          - canceled
+          type: string
+        validationFailureKind:
+          description: >-
+            Machine-readable cause, present only when validation is "errored".
+            report_missing means the run opened its PR but never reported;
+            report_invalid means the report was unparseable or carried no
+            criteria. No retry policy consumes this yet.
+          enum:
+          - internal_error
+          - gate_rejected
+          - dispatch_failed
+          - runner_crashed
+          - timed_out
+          - no_pr_opened
+          - report_missing
+          - report_invalid
+          - merge_failed
           type: string
         validationIssue:
           description: >-
@@ -3140,10 +3259,28 @@ components:
             validation log page (get-task / stream-task-log accept it).
           format: int64
           type: integer
+        validationReason:
+          description: >-
+            Human-readable detail behind validationFailureKind; "" otherwise.
+            Shown as the subtitle under an errored chip.
+          type: string
         validationUrl:
           description: >-
             Link to the associated validation PR (the validation issue as a
             fallback before a PR exists); "" when there is no validation.
+          type: string
+        validationVerdict:
+          description: >-
+            Did the system under test pass? Present only when validation is
+            "finished". pass (every criterion is e2e and every one passed), fail
+            (an e2e criterion asserted and failed), awaiting_review (the
+            automatic path could not decide — a manual or scenario criterion is
+            present, or an e2e criterion produced no result — so a human records
+            the verdict). Rendered to humans as "Awaiting review".
+          enum:
+          - pass
+          - fail
+          - awaiting_review
           type: string
         version:
           description: Spec tag live in dev; "" if nothing deployed.
@@ -4472,6 +4609,51 @@ components:
         - cacheCreationTokens
         - model
         - costUsd
+      type: object
+    ValidationReportDocument:
+      additionalProperties: false
+      description: >-
+        One validation report plus the provenance that makes it addressable. The
+        report is carried as opaque text, not a modelled schema — it is authored by
+        the runner and parsed by the validation-view package.
+      properties:
+        content:
+          description: >-
+            The raw report JSON as posted by the runner. Parse with the
+            validation-view package's parseValidationReport.
+          type: string
+        issueNumber:
+          description: Validation issue the report was read from.
+          format: int64
+          type: integer
+        reportedAt:
+          description: RFC3339 timestamp of the comment the report was read from.
+          type: string
+        tag:
+          description: Design tag this report belongs to.
+          type: string
+      required:
+      - tag
+      - issueNumber
+      - reportedAt
+      - content
+      type: object
+    ValidationVerdictRequest:
+      additionalProperties: false
+      properties:
+        note:
+          description: Optional rationale, stored with the decision.
+          type: string
+        verdict:
+          description: >-
+            The human's decision. awaiting_review is not accepted — this endpoint
+            resolves that state, it cannot set it.
+          enum:
+          - pass
+          - fail
+          type: string
+      required:
+      - verdict
       type: object
     Warning:
       additionalProperties: false

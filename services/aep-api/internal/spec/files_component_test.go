@@ -233,34 +233,31 @@ func TestReadAtHead(t *testing.T) {
 	}
 }
 
-// TestReadAtHead_ValidationReportAllowListed pins the read-only escape hatch:
-// tests/validation/report.json (a non-specs/ path) is READABLE, but any other
-// non-specs/ path stays 400, and WRITING the report is still rejected — the
-// write path is never widened.
-func TestReadAtHead_ValidationReportAllowListed(t *testing.T) {
+// TestReadAtHead_NonSpecsPathsRejected pins the read fence now that the
+// allow-list is empty: EVERY non-specs/ path is 400 on read, and the write path
+// is specs/-only as it always was.
+//
+// tests/validation/report.json used to be the one allow-listed read. The report
+// is no longer committed — it is posted to the tag's validation issue and served
+// by get-validation-report — so nothing outside specs/ is readable here. A future
+// entry must come with its own case; this test failing means one was added
+// without one.
+func TestReadAtHead_NonSpecsPathsRejected(t *testing.T) {
 	report := `{"schemaVersion":1,"criteria":[]}`
 	r := newFilesRig(t, map[string]string{
 		"tests/validation/report.json": report,
 		"README.md":                    "root",
 	})
 
-	// The one allow-listed non-specs/ path reads at HEAD.
-	rec := r.get(apiBase + "/tests/validation/report.json")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("read report: code %d, want 200 (%s)", rec.Code, rec.Body.String())
+	// The formerly allow-listed path is now rejected like any other non-specs/ read.
+	if rec := r.get(apiBase + "/tests/validation/report.json"); rec.Code != http.StatusBadRequest {
+		t.Errorf("read report: code %d, want 400 (%s)", rec.Code, rec.Body.String())
 	}
-	var fc spec.FileContent
-	_ = json.Unmarshal(rec.Body.Bytes(), &fc)
-	if fc.Content != report || fc.Path != "tests/validation/report.json" || fc.SHA == "" {
-		t.Fatalf("read report wrong: %+v", fc)
-	}
-
-	// A different non-specs/ path is still forbidden (allow-list is exact).
 	if bad := r.get(apiBase + "/README.md"); bad.Code != http.StatusBadRequest {
 		t.Errorf("read README.md: code %d, want 400 (%s)", bad.Code, bad.Body.String())
 	}
 
-	// The write path is NOT widened: applying to the allow-listed path is 400.
+	// The write path is unchanged: non-specs/ writes stay 400.
 	writeReport := mustJSON(t, spec.ApplyRequest{
 		Writes: []spec.WriteOp{{Path: "tests/validation/report.json", Content: report}},
 	})

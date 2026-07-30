@@ -188,11 +188,12 @@ describe("deployStageView", () => {
           version: "v1",
           status: "deployed",
           components: { total: 5, ready: 5 },
-          validation: "completed",
+          validation: "finished",
+          validationVerdict: "pass",
         },
       }),
     );
-    expect(v.line).toBe("live in dev · validation report");
+    expect(v.line).toBe("live in dev · validation passed");
   });
   it("failed → error", () => {
     const v = deployStageView(
@@ -215,12 +216,13 @@ describe("deployStageView", () => {
           version: "v1",
           status: "none",
           components: { total: 1, ready: 0 },
-          validation: "completed",
+          validation: "finished",
+          validationVerdict: "pass",
         },
       }),
     );
-    expect(v.line).toBe("live in dev · validation report");
-    expect(v.tone).toBe("info");
+    expect(v.line).toBe("live in dev · validation passed");
+    expect(v.tone).toBe("success");
   });
   it("status none and no validation → nothing deployed", () => {
     const v = deployStageView(status({}));
@@ -241,16 +243,49 @@ describe("validationView", () => {
       tone: "info",
     });
   });
-  it("completed → validation report (neutral — the verdict lives in the report)", () => {
-    expect(validationView("completed")).toEqual({
-      label: "validation report",
-      tone: "info",
-    });
-  });
-  it("failed → validation failed (error)", () => {
-    expect(validationView("failed")).toEqual({
+  // The pair this whole state model exists for: a failing suite and a broken run
+  // used to render the same word. They must never share one now.
+  it("finished + fail → validation failed (error)", () => {
+    expect(validationView("finished", "fail")).toEqual({
       label: "validation failed",
       tone: "error",
+    });
+  });
+  it("errored → validation errored, with the cause (error)", () => {
+    expect(validationView("errored", undefined, "runner_crashed")).toEqual({
+      label: "validation errored",
+      tone: "error",
+      detail: "the validation runner died mid-run",
+    });
+  });
+  it("finished + pass → validation passed (success)", () => {
+    expect(validationView("finished", "pass")).toEqual({
+      label: "validation passed",
+      tone: "success",
+    });
+  });
+  it("finished + awaiting_review → awaiting review (warning, not error)", () => {
+    expect(validationView("finished", "awaiting_review")).toEqual({
+      label: "awaiting review",
+      tone: "warning",
+    });
+  });
+  it("canceled → its own label, never folded into errored", () => {
+    expect(validationView("canceled")).toEqual({
+      label: "validation canceled",
+      tone: "neutral",
+    });
+  });
+  it("errored with an unknown cause → no detail rather than a blank one", () => {
+    expect(validationView("errored", undefined, "something_new")).toEqual({
+      label: "validation errored",
+      tone: "error",
+    });
+  });
+  it("finished with no verdict → names what the chip opens, claims no outcome", () => {
+    expect(validationView("finished")).toEqual({
+      label: "validation report",
+      tone: "info",
     });
   });
 });

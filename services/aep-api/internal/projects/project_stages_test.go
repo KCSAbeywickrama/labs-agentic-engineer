@@ -157,14 +157,16 @@ func TestBuildStage_RowMapping(t *testing.T) {
 }
 
 // TestBuildStage_ValidationFailureAttribution pins the carve-out: a dev run
-// that failed BECAUSE its validation phase failed (every coding task done,
-// none failed, the validation child row failed) reports build=succeeded — the
-// failure belongs to validation and already rides deploy.validation=failed.
-// Every other failure shape keeps the raw failed mapping, including the
-// stale-row rebuild hazard: a same-tag rebuild reuses the dev workflow ID, so
-// an OLD failed validation row can match ValidationRunByParent while the
-// fresh execution failed in provisioning (tally 0/0/0) or coding
-// (TasksFailed > 0) — the tally guards defeat both.
+// that the workflow stamped DevFailureValidationPhase on reports build=succeeded
+// — the failure belongs to validation and already rides
+// deploy.validation=errored. Every other failure shape keeps the raw failed
+// mapping.
+//
+// Attribution reads the dev row's OWN recorded cause, so the validation child row
+// is irrelevant to it. That retires the tally-shape and recency guards this test
+// used to exercise: both existed only to work around a stale validation row
+// matching a same-tag rebuild, and a cause written by the execution that failed
+// cannot be stale.
 func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 	t.Parallel()
 	base := time.Unix(1700000000, 0)
@@ -175,9 +177,15 @@ func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 			CreatedAt: base,
 		}}
 	}
-	// child is THIS execution's validation row: recorded after the dev row
-	// (the child spawns mid-run). staleChild predates the dev row — a leftover
-	// from a previous same-tag execution (rebuilds reuse the dev workflow ID).
+	// attributed is a dev row the workflow stamped as validation-phase-failed.
+	attributed := func(total, done, failed int) []delivery.DevflowRun {
+		runs := devRun(delivery.WorkflowStatusFailed, total, done, failed)
+		runs[0].FailureKind = delivery.DevFailureValidationPhase
+		return runs
+	}
+	// childAt is a validation row at an arbitrary time. Attribution no longer
+	// reads it at all — the dev row carries its own cause — so these exist only to
+	// prove the child cannot sway the build status either way.
 	childAt := func(status string, createdAt time.Time) *delivery.DevflowRun {
 		return &delivery.DevflowRun{
 			Kind: delivery.WorkflowKindValidation,
@@ -196,28 +204,36 @@ func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 	}{
 		{
 			name: "validation-attributed failure → build succeeded",
-			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: child(delivery.WorkflowStatusFailed),
-			wantBuild: "succeeded", wantValidation: "failed",
+			runs: attributed(3, 3, 0), child: child(delivery.WorkflowStatusFailed),
+			wantBuild: "succeeded", wantValidation: "errored",
 		},
 		{
-			name: "coding failure (stale validation row) → build failed",
+			// The cause is stamped by the execution that failed, so a leftover
+			// validation row from a previous same-tag execution cannot change the
+			// answer. This case needed a recency guard before; now it is simply
+			// not a question the status builder asks.
+			name: "attributed failure with a stale validation row → still build succeeded",
+			runs: attributed(3, 3, 0), child: staleChild(delivery.WorkflowStatusFailed),
+			wantBuild: "succeeded", wantValidation: "errored",
+		},
+		{
+			// A coding failure carries no validation cause, so it is never carved
+			// out — regardless of what validation row happens to match.
+			name: "coding failure → build failed",
 			runs: devRun(delivery.WorkflowStatusFailed, 3, 1, 2), child: child(delivery.WorkflowStatusFailed),
-			wantBuild: "failed", wantValidation: "failed",
+			wantBuild: "failed", wantValidation: "errored",
 		},
 		{
-			name: "provisioning failure (stale validation row, empty tally) → build failed",
+			name: "provisioning failure (empty tally) → build failed",
 			runs: devRun(delivery.WorkflowStatusFailed, 0, 0, 0), child: child(delivery.WorkflowStatusFailed),
-			wantBuild: "failed", wantValidation: "failed",
+			wantBuild: "failed", wantValidation: "errored",
 		},
 		{
-			// A rebuild whose tasks all succeeded but which failed BETWEEN the
-			// quality bar and respawning validation (validate-gate rejection /
-			// consistency check): tally is green, but the failed validation row
-			// is the PREVIOUS execution's — only a child recorded after this
-			// dev row may attribute the failure.
-			name: "green tally with a stale validation row → build failed (recency guard)",
-			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: staleChild(delivery.WorkflowStatusFailed),
-			wantBuild: "failed", wantValidation: "failed",
+			// A green tally alone no longer attributes anything: without the
+			// stamped cause this is a run that failed somewhere else entirely.
+			name: "green tally but no recorded cause → build failed",
+			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: child(delivery.WorkflowStatusFailed),
+			wantBuild: "failed", wantValidation: "errored",
 		},
 		{
 			name: "failed without a validation child → build failed",
@@ -227,10 +243,10 @@ func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 		{
 			name: "canceled run is not carved out",
 			runs: devRun(delivery.WorkflowStatusCanceled, 3, 3, 0), child: child(delivery.WorkflowStatusFailed),
-			wantBuild: "failed", wantValidation: "failed",
+			wantBuild: "failed", wantValidation: "errored",
 		},
 		{
-			name: "validation still running → build failed (only a FAILED child attributes)",
+			name: "validation still running → build failed",
 			runs: devRun(delivery.WorkflowStatusFailed, 3, 3, 0), child: child(delivery.WorkflowStatusRunning),
 			wantBuild: "failed", wantValidation: "running",
 		},
@@ -408,24 +424,27 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 			wantIssue:  9,
 		},
 		{
-			name:       "completed with an open PR → completed, PR link",
+			name:       "completed with an open PR → finished, PR link",
 			child:      child(delivery.WorkflowStatusCompleted),
 			execs:      prExecs,
-			wantStatus: "completed",
+			wantStatus: "finished",
 			wantURL:    "https://github.com/o/r/pull/42",
 			wantIssue:  9,
 		},
 		{
-			name:       "failed → failed, issue link (no succeeded coding row)",
+			name:       "failed → errored, issue link (no succeeded coding row)",
 			child:      child(delivery.WorkflowStatusFailed),
-			wantStatus: "failed",
+			wantStatus: "errored",
 			wantURL:    "https://github.com/o/r/issues/9",
 			wantIssue:  9,
 		},
 		{
-			name:       "canceled → failed",
+			// Canceled is its own value now: a human stopping a run is not the
+			// machinery breaking, and folding it into errored would make a retry
+			// policy treat a deliberate stop as a fault.
+			name:       "canceled → canceled",
 			child:      child(delivery.WorkflowStatusCanceled),
-			wantStatus: "failed",
+			wantStatus: "canceled",
 			wantURL:    "https://github.com/o/r/issues/9",
 			wantIssue:  9,
 		},

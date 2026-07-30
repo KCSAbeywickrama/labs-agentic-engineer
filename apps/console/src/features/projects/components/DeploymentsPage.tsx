@@ -45,7 +45,7 @@ import {
   type DeploymentCard,
 } from "../lib/deploymentRows";
 import { phaseChip } from "../lib/phaseChip";
-import { validationView } from "../lib/pipeline";
+import { CHIP_COLOR, validationView } from "../lib/pipeline";
 
 const LinkChip = createLink(Chip);
 
@@ -231,12 +231,14 @@ function BoardColumn({
               <LinkChip
                 label={validationLabel}
                 size="small"
-                color={validation.tone as "info" | "success" | "error"}
+                color={CHIP_COLOR[validation.tone]}
                 variant="outlined"
                 clickable
                 to="/projects/$projectName/validation"
                 params={{ projectName }}
-                title="Open validation"
+                // The cause rides in the tooltip: an errored chip that says only
+                // "Validation errored" leaves the reader nowhere to go.
+                title={validation.detail ? `Open validation — ${validation.detail}` : "Open validation"}
               />
             )}
           </>
@@ -278,7 +280,11 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // its coarse state on the Development column header. The chip opens the
   // top-level Validation page, which owns the report, the run log, and the
   // issue/PR links across every lifecycle state.
-  const devValidation = validationView(status.data?.deploy.validation ?? "");
+  const devValidation = validationView(
+    status.data?.deploy.validation ?? "",
+    status.data?.deploy.validationVerdict,
+    status.data?.deploy.validationFailureKind,
+  );
 
   // Unconditional, like Builds (Task 5): the back link and project status
   // stay reachable through every state below, not just the loaded board.

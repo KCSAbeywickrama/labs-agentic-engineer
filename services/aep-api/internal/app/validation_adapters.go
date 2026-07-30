@@ -24,6 +24,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 
+	"github.com/wso2/aep/aep-api/internal/delivery/devflow"
 	"github.com/wso2/aep/aep-api/internal/delivery/validation"
 	"github.com/wso2/aep/aep-api/internal/gen"
 	authn "github.com/wso2/aep/aep-api/internal/platform/auth"
@@ -202,4 +203,26 @@ type devflowValidationResolver struct {
 func (r devflowValidationResolver) ResolveValidationTask(ctx context.Context, orgID, projectID string) (int, error) {
 	designTag := r.art.LatestDesignTag(ctx, orgID, projectID)
 	return r.svc.ResolveValidationTask(ctx, orgID, projectID, designTag)
+}
+
+// devflowReportIngestor adapts the validation service onto the devflow
+// ValidationReportIngestor port: read the runner's report off the validation
+// issue and compute the phase's verdict. The two field-identical result types
+// exist because devflow must not import the validation feature.
+type devflowReportIngestor struct {
+	svc *validation.Service
+}
+
+func (r devflowReportIngestor) IngestValidationReport(
+	ctx context.Context, orgID, projectID string, issue int, execution string,
+) (devflow.ValidationReportIngest, error) {
+	res, err := r.svc.IngestReport(ctx, orgID, projectID, issue, execution)
+	if err != nil {
+		return devflow.ValidationReportIngest{}, err
+	}
+	return devflow.ValidationReportIngest{
+		Verdict:     res.Verdict,
+		FailureKind: res.FailureKind,
+		Detail:      res.Detail,
+	}, nil
 }

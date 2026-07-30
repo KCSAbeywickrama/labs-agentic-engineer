@@ -90,22 +90,85 @@ func (e BuildSummaryStatus) Valid() bool {
 
 // Defines values for DeployStageValidation.
 const (
-	Completed DeployStageValidation = "completed"
-	Failed    DeployStageValidation = "failed"
-	None      DeployStageValidation = "none"
-	Running   DeployStageValidation = "running"
+	Canceled DeployStageValidation = "canceled"
+	Errored  DeployStageValidation = "errored"
+	Finished DeployStageValidation = "finished"
+	None     DeployStageValidation = "none"
+	Running  DeployStageValidation = "running"
 )
 
 // Valid indicates whether the value is a known member of the DeployStageValidation enum.
 func (e DeployStageValidation) Valid() bool {
 	switch e {
-	case Completed:
+	case Canceled:
 		return true
-	case Failed:
+	case Errored:
+		return true
+	case Finished:
 		return true
 	case None:
 		return true
 	case Running:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeployStageValidationFailureKind.
+const (
+	DispatchFailed DeployStageValidationFailureKind = "dispatch_failed"
+	GateRejected   DeployStageValidationFailureKind = "gate_rejected"
+	InternalError  DeployStageValidationFailureKind = "internal_error"
+	MergeFailed    DeployStageValidationFailureKind = "merge_failed"
+	NoPrOpened     DeployStageValidationFailureKind = "no_pr_opened"
+	ReportInvalid  DeployStageValidationFailureKind = "report_invalid"
+	ReportMissing  DeployStageValidationFailureKind = "report_missing"
+	RunnerCrashed  DeployStageValidationFailureKind = "runner_crashed"
+	TimedOut       DeployStageValidationFailureKind = "timed_out"
+)
+
+// Valid indicates whether the value is a known member of the DeployStageValidationFailureKind enum.
+func (e DeployStageValidationFailureKind) Valid() bool {
+	switch e {
+	case DispatchFailed:
+		return true
+	case GateRejected:
+		return true
+	case InternalError:
+		return true
+	case MergeFailed:
+		return true
+	case NoPrOpened:
+		return true
+	case ReportInvalid:
+		return true
+	case ReportMissing:
+		return true
+	case RunnerCrashed:
+		return true
+	case TimedOut:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeployStageValidationVerdict.
+const (
+	DeployStageValidationVerdictAwaitingReview DeployStageValidationVerdict = "awaiting_review"
+	DeployStageValidationVerdictFail           DeployStageValidationVerdict = "fail"
+	DeployStageValidationVerdictPass           DeployStageValidationVerdict = "pass"
+)
+
+// Valid indicates whether the value is a known member of the DeployStageValidationVerdict enum.
+func (e DeployStageValidationVerdict) Valid() bool {
+	switch e {
+	case DeployStageValidationVerdictAwaitingReview:
+		return true
+	case DeployStageValidationVerdictFail:
+		return true
+	case DeployStageValidationVerdictPass:
 		return true
 	default:
 		return false
@@ -199,6 +262,24 @@ func (e TurnInputBodyUseCase) Valid() bool {
 	case RequirementsChat:
 		return true
 	case RequirementsGenerate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ValidationVerdictRequestVerdict.
+const (
+	ValidationVerdictRequestVerdictFail ValidationVerdictRequestVerdict = "fail"
+	ValidationVerdictRequestVerdictPass ValidationVerdictRequestVerdict = "pass"
+)
+
+// Valid indicates whether the value is a known member of the ValidationVerdictRequestVerdict enum.
+func (e ValidationVerdictRequestVerdict) Valid() bool {
+	switch e {
+	case ValidationVerdictRequestVerdictFail:
+		return true
+	case ValidationVerdictRequestVerdictPass:
 		return true
 	default:
 		return false
@@ -594,21 +675,36 @@ type DeployStage struct {
 	} `json:"components"`
 	Status string `json:"status"`
 
-	// Validation Coarse validation-task run state for the latest build: none (not reached, or no acceptance criteria), running, completed (ran to completion; the pass/fail verdict lives in the report), failed (the validation run failed mechanically).
+	// Validation Lifecycle state of the latest build's validation run — whether an answer was reached, never what the answer was. none (not reached, or no acceptance criteria), running (lanes executing), finished (ran to an answer — read validationVerdict), errored (the run itself broke — read validationFailureKind), canceled (stopped by a human). "finished" deliberately does not imply the criteria passed.
 	Validation DeployStageValidation `json:"validation"`
+
+	// ValidationFailureKind Machine-readable cause, present only when validation is "errored". report_missing means the run opened its PR but never reported; report_invalid means the report was unparseable or carried no criteria. No retry policy consumes this yet.
+	ValidationFailureKind DeployStageValidationFailureKind `json:"validationFailureKind,omitempty"`
 
 	// ValidationIssue Issue number of the project's validation task; absent when there is no validation run. The console uses it to open the internal validation log page (get-task / stream-task-log accept it).
 	ValidationIssue int64 `json:"validationIssue,omitempty"`
 
+	// ValidationReason Human-readable detail behind validationFailureKind; "" otherwise. Shown as the subtitle under an errored chip.
+	ValidationReason string `json:"validationReason,omitempty"`
+
 	// ValidationURL Link to the associated validation PR (the validation issue as a fallback before a PR exists); "" when there is no validation.
 	ValidationURL string `json:"validationUrl,omitempty"`
+
+	// ValidationVerdict Did the system under test pass? Present only when validation is "finished". pass (every criterion is e2e and every one passed), fail (an e2e criterion asserted and failed), awaiting_review (the automatic path could not decide — a manual or scenario criterion is present, or an e2e criterion produced no result — so a human records the verdict). Rendered to humans as "Awaiting review".
+	ValidationVerdict DeployStageValidationVerdict `json:"validationVerdict,omitempty"`
 
 	// Version Spec tag live in dev; "" if nothing deployed.
 	Version string `json:"version"`
 }
 
-// DeployStageValidation Coarse validation-task run state for the latest build: none (not reached, or no acceptance criteria), running, completed (ran to completion; the pass/fail verdict lives in the report), failed (the validation run failed mechanically).
+// DeployStageValidation Lifecycle state of the latest build's validation run — whether an answer was reached, never what the answer was. none (not reached, or no acceptance criteria), running (lanes executing), finished (ran to an answer — read validationVerdict), errored (the run itself broke — read validationFailureKind), canceled (stopped by a human). "finished" deliberately does not imply the criteria passed.
 type DeployStageValidation string
+
+// DeployStageValidationFailureKind Machine-readable cause, present only when validation is "errored". report_missing means the run opened its PR but never reported; report_invalid means the report was unparseable or carried no criteria. No retry policy consumes this yet.
+type DeployStageValidationFailureKind string
+
+// DeployStageValidationVerdict Did the system under test pass? Present only when validation is "finished". pass (every criterion is e2e and every one passed), fail (an e2e criterion asserted and failed), awaiting_review (the automatic path could not decide — a manual or scenario criterion is present, or an e2e criterion produced no result — so a human records the verdict). Rendered to humans as "Awaiting review".
+type DeployStageValidationVerdict string
 
 // Deployment defines model for Deployment.
 type Deployment struct {
@@ -1211,6 +1307,33 @@ type Usage struct {
 	OutputTokens int64  `json:"outputTokens"`
 }
 
+// ValidationReportDocument One validation report plus the provenance that makes it addressable. The report is carried as opaque text, not a modelled schema — it is authored by the runner and parsed by the validation-view package.
+type ValidationReportDocument struct {
+	// Content The raw report JSON as posted by the runner. Parse with the validation-view package's parseValidationReport.
+	Content string `json:"content"`
+
+	// IssueNumber Validation issue the report was read from.
+	IssueNumber int64 `json:"issueNumber"`
+
+	// ReportedAt RFC3339 timestamp of the comment the report was read from.
+	ReportedAt string `json:"reportedAt"`
+
+	// Tag Design tag this report belongs to.
+	Tag string `json:"tag"`
+}
+
+// ValidationVerdictRequest defines model for ValidationVerdictRequest.
+type ValidationVerdictRequest struct {
+	// Note Optional rationale, stored with the decision.
+	Note string `json:"note,omitempty"`
+
+	// Verdict The human's decision. awaiting_review is not accepted — this endpoint resolves that state, it cannot set it.
+	Verdict ValidationVerdictRequestVerdict `json:"verdict"`
+}
+
+// ValidationVerdictRequestVerdict The human's decision. awaiting_review is not accepted — this endpoint resolves that state, it cannot set it.
+type ValidationVerdictRequestVerdict string
+
 // Warning defines model for Warning.
 type Warning struct {
 	Code    string `json:"code"`
@@ -1352,6 +1475,12 @@ type StreamTurnParams struct {
 	LastEventID string `json:"Last-Event-ID,omitempty"`
 }
 
+// GetValidationReportParams defines parameters for GetValidationReport.
+type GetValidationReportParams struct {
+	// Tag Design tag to read the report for. Defaults to the tag live in dev (ProjectStatus.deploy.version) when omitted.
+	Tag string `form:"tag,omitempty" json:"tag,omitempty"`
+}
+
 // ListRcaAgentReportsParams defines parameters for ListRcaAgentReports.
 type ListRcaAgentReportsParams struct {
 	// Cursor Opaque pagination cursor
@@ -1399,6 +1528,9 @@ type CreateIssueJSONRequestBody = CreateIssueRequest
 
 // PromoteTaskFromIssueJSONRequestBody defines body for PromoteTaskFromIssue for application/json ContentType.
 type PromoteTaskFromIssueJSONRequestBody = PromoteFromIssueRequest
+
+// SetValidationVerdictJSONRequestBody defines body for SetValidationVerdict for application/json ContentType.
+type SetValidationVerdictJSONRequestBody = ValidationVerdictRequest
 
 // CreateRcaAgentReportJSONRequestBody defines body for CreateRcaAgentReport for application/json ContentType.
 type CreateRcaAgentReportJSONRequestBody = CreateRcaAgentReportRequest

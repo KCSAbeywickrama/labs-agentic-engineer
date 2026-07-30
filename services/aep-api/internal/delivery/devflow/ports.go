@@ -31,7 +31,10 @@ import (
 // (and tests can fake it).
 type WorkflowRunStore interface {
 	Record(ctx context.Context, row *delivery.DevflowRun) error
-	SetStatus(ctx context.Context, workflowID, status, reason string) error
+	SetStatus(ctx context.Context, workflowID, status, reason, failureKind string) error
+	// SetValidationVerdict records the validation phase's answer once the
+	// report-ingest activity has computed it.
+	SetValidationVerdict(ctx context.Context, workflowID, verdict string) error
 	// SetTaskCounts writes the dev run's task tally as absolute values
 	// (idempotent under activity retry — never an increment), scoped to one
 	// execution so a same-tag rebuild cannot rewrite a prior run's frozen
@@ -82,6 +85,28 @@ type Validator interface {
 // over the validation service; devflow does not import the validation package.
 type ValidationResolver interface {
 	ResolveValidationTask(ctx context.Context, orgID, projectID string) (issue int, err error)
+}
+
+// ValidationReportIngest is one report-ingest outcome. Verdict is set when the
+// run reached an answer; FailureKind + Detail when it could not, and the two are
+// mutually exclusive. This is devflow's own type — the validation package defines
+// a field-identical twin (ReportIngest); the app-root adapter maps between them
+// (devflow does not import the validation package).
+type ValidationReportIngest struct {
+	Verdict     string
+	FailureKind string
+	Detail      string
+}
+
+// ValidationReportIngestor reads the runner's report off the validation issue and
+// computes the phase's verdict. Satisfied by an app-root adapter over the
+// validation service.
+//
+// A returned ERROR is a transport fault and retries the activity; a report that
+// is missing or unreadable comes back as DATA in FailureKind, because no number
+// of retries makes an unreadable report readable.
+type ValidationReportIngestor interface {
+	IngestValidationReport(ctx context.Context, orgID, projectID string, issue int, execution string) (ValidationReportIngest, error)
 }
 
 // BuildProvisioner authors the project's dependencies from the build drawer

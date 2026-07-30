@@ -19,6 +19,7 @@ package sourcecontrol
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 )
@@ -83,6 +84,19 @@ type IssueInfo struct {
 	URL    string
 	State  string
 	Labels []string
+}
+
+// IssueComment is one comment on an issue. GitHub models pull requests as
+// issues, so the same read serves either.
+//
+// CreatedAt is what a reader orders by when several comments carry the same
+// marker — the validation report ingest takes the newest match, so successive
+// runs against one issue append rather than overwrite.
+type IssueComment struct {
+	ID        int64
+	Body      string
+	Author    string
+	CreatedAt time.Time
 }
 
 // CompareResult is the per-file change summary between two refs the lineage

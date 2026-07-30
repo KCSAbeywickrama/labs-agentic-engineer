@@ -70,6 +70,11 @@ type IssueOps interface {
 	CloseIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int) error
 	// CommentIssue posts a comment on the issue.
 	CommentIssue(ctx context.Context, owner, repo string, cred secrets.Credential, number int, body string) error
+	// ListIssueComments returns an issue's comments oldest-first, paginated.
+	// The validation report ingest reads the runner's marked report comment
+	// through this — the report lives on the issue rather than in the repo so
+	// successive runs stay individually addressable.
+	ListIssueComments(ctx context.Context, owner, repo string, cred secrets.Credential, number int) ([]IssueComment, error)
 	// EditIssueBody replaces the issue body via PATCH /issues/{number}.
 	// Used by the tech-lead detail phase to write the LLM-authored body
 	// after the placeholder issue was created.

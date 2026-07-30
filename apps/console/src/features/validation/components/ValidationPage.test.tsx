@@ -56,7 +56,14 @@ vi.mock("../../tasks/api/queries", () => ({
 
 // Controllable status + file queries (no QueryClientProvider / MSW).
 let mockValidation = "none";
+let mockVerdict: string | undefined;
+let mockFailureKind: string | undefined;
 let mockIssue: number | undefined;
+const mockSetVerdict = {
+  mutate: vi.fn(),
+  isPending: false,
+  error: null as Error | null,
+};
 const mockCriteria = {
   isPending: false,
   isError: false,
@@ -82,6 +89,8 @@ vi.mock("../../projects/api/queries", () => ({
       deploy: {
         version: "v1",
         validation: mockValidation,
+        ...(mockVerdict ? { validationVerdict: mockVerdict } : {}),
+        ...(mockFailureKind ? { validationFailureKind: mockFailureKind } : {}),
         ...(mockIssue ? { validationIssue: mockIssue } : {}),
       },
     },
@@ -91,6 +100,7 @@ vi.mock("../../projects/api/queries", () => ({
 vi.mock("../api/queries", () => ({
   useValidationCriteria: () => mockCriteria,
   useValidationReport: () => mockReport,
+  useSetValidationVerdict: () => mockSetVerdict,
 }));
 
 import { ValidationPage } from "./ValidationPage";
@@ -134,8 +144,13 @@ function renderPage(view: "logs" | undefined, onViewChange = vi.fn()) {
 }
 
 afterEach(() => {
+  vi.clearAllMocks();
   mockValidation = "none";
+  mockVerdict = undefined;
+  mockFailureKind = undefined;
   mockIssue = undefined;
+  mockSetVerdict.isPending = false;
+  mockSetVerdict.error = null;
   mockCriteria.isPending = false;
   mockCriteria.isError = false;
   mockCriteria.data = undefined;
@@ -158,15 +173,71 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.getByTestId("log-view")).toBeInTheDocument();
   });
 
-  it("shows the inline log box for a mechanically failed run", () => {
-    mockValidation = "failed";
+  it("shows the log box AND the cause for an errored run", () => {
+    mockValidation = "errored";
+    mockFailureKind = "runner_crashed";
     mockIssue = 30;
     renderPage(undefined);
     expect(screen.getByTestId("log-view")).toBeInTheDocument();
+    // An errored chip that says only "failed" leaves the reader nowhere to go.
+    expect(screen.getByText(/Validation could not complete/)).toBeInTheDocument();
+    expect(screen.getByText(/runner died part-way/)).toBeInTheDocument();
   });
 
-  it("renders the joined report when a run completed", () => {
-    mockValidation = "completed";
+  // The pair the whole state model exists to separate.
+  it("distinguishes a failing SUITE from a broken RUN in the header chip", () => {
+    mockValidation = "finished";
+    mockVerdict = "fail";
+    mockIssue = 30;
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+    // Both the header chip and the verdict banner say it — deliberately.
+    expect(screen.getAllByText("Validation failed").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/At least one automated criterion did not pass/),
+    ).toBeInTheDocument();
+    // A failing suite is NOT a broken run: no error banner about the machinery.
+    expect(
+      screen.queryByText(/Validation could not complete/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers Pass/Fail only while awaiting review, and records the decision", () => {
+    mockValidation = "finished";
+    mockVerdict = "awaiting_review";
+    mockIssue = 30;
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    expect(screen.getAllByText("Awaiting review").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/could not decide this on their own/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pass" }));
+    expect(mockSetVerdict.mutate).toHaveBeenCalledWith({ verdict: "pass" });
+  });
+
+  it("shows no decision buttons once the verdict is automatic", () => {
+    mockValidation = "finished";
+    mockVerdict = "pass";
+    mockIssue = 30;
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    // An automatic pass is final — nobody can re-decide it from the UI.
+    expect(screen.queryByRole("button", { name: "Pass" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fail" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Every acceptance criterion is automated/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the joined report once a run reached a verdict", () => {
+    mockValidation = "finished";
+    mockVerdict = "fail";
     mockIssue = 30;
     mockCriteria.data = { content: CRITERIA };
     mockReport.data = { content: REPORT };
@@ -186,7 +257,8 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("toggles to the log view via the View logs button", () => {
-    mockValidation = "completed";
+    mockValidation = "finished";
+    mockVerdict = "fail";
     mockIssue = 30;
     mockCriteria.data = { content: CRITERIA };
     mockReport.data = { content: REPORT };
@@ -197,7 +269,8 @@ describe("ValidationPage lifecycle", () => {
   });
 
   it("shows the log box (and a View report button) when ?view=logs", () => {
-    mockValidation = "completed";
+    mockValidation = "finished";
+    mockVerdict = "fail";
     mockIssue = 30;
     mockCriteria.data = { content: CRITERIA };
     mockReport.data = { content: REPORT };
@@ -208,14 +281,17 @@ describe("ValidationPage lifecycle", () => {
     expect(onViewChange).toHaveBeenCalledWith(undefined);
   });
 
-  it("falls back to criteria-only with a note when the report is missing", () => {
-    mockValidation = "completed";
+  it("falls back to criteria-only, as an ERROR, when the report cannot be read", () => {
+    mockValidation = "finished";
+    mockVerdict = "fail";
     mockIssue = 30;
     mockCriteria.data = { content: CRITERIA };
     mockReport.isError = true;
     renderPage(undefined);
 
-    expect(screen.getByText(/report wasn't found/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/report for this run could not be read/),
+    ).toBeInTheDocument();
     expect(screen.getByText("Shoppers can search the catalog.")).toBeInTheDocument();
     // No state chips without a report.
     expect(screen.queryByText("Passed")).not.toBeInTheDocument();

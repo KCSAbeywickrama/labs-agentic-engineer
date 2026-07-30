@@ -40,6 +40,9 @@ type IssueService interface {
 	CloseIssue(ctx context.Context, orgID, projectID string, number int, comment string) error
 	// CommentIssue posts a comment on the issue.
 	CommentIssue(ctx context.Context, orgID, projectID string, number int, body string) error
+	// ListIssueComments returns an issue's comments oldest-first. The validation
+	// report ingest reads the runner's marked report comment through this.
+	ListIssueComments(ctx context.Context, orgID, projectID string, number int) ([]IssueComment, error)
 	// EditIssueBody replaces the issue's body. Used by the tech-lead detail
 	// phase to write the LLM-authored body after the placeholder issue was
 	// created.
@@ -270,6 +273,14 @@ func (s *issueService) CommentIssue(ctx context.Context, orgID, projectID string
 	}
 
 	return s.github.CommentIssue(ctx, owner, repoName, cred, number, body)
+}
+
+func (s *issueService) ListIssueComments(ctx context.Context, orgID, projectID string, number int) ([]IssueComment, error) {
+	owner, repoName, cred, err := s.resolveRepoAndCredential(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.github.ListIssueComments(ctx, owner, repoName, cred, number)
 }
 
 func (s *issueService) EditIssueBody(ctx context.Context, orgID, projectID string, number int, body string) error {

@@ -83,12 +83,12 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID, d
 		return nil
 	}
 
-	exists, err := s.hasOpenValidationIssue(ctx, orgID, projectID)
+	exists, err := s.hasOpenValidationIssue(ctx, orgID, projectID, designTag)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return nil // one validation issue per project until it terminates
+		return nil // one validation issue per project PER TAG
 	}
 
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
@@ -147,20 +147,36 @@ func (s *Service) ResolveValidationTask(ctx context.Context, orgID, projectID, d
 	if err := s.EnsureValidationIssue(ctx, orgID, projectID, designTag); err != nil {
 		return 0, err
 	}
-	return s.findOpenValidationIssue(ctx, orgID, projectID)
+	return s.findOpenValidationIssue(ctx, orgID, projectID, designTag)
 }
 
 // hasOpenValidationIssue reports whether an open aep:validation Task already
-// exists for the project (dedup — mirrors provisioning's openProvisionDeps).
-func (s *Service) hasOpenValidationIssue(ctx context.Context, orgID, projectID string) (bool, error) {
-	number, err := s.findOpenValidationIssue(ctx, orgID, projectID)
+// exists for the project at designTag (dedup — mirrors provisioning's
+// openProvisionDeps).
+func (s *Service) hasOpenValidationIssue(ctx context.Context, orgID, projectID, designTag string) (bool, error) {
+	number, err := s.findOpenValidationIssue(ctx, orgID, projectID, designTag)
 	return number > 0, err
 }
 
-// findOpenValidationIssue returns the open aep:validation Task's issue number,
-// or 0 when none exists.
-func (s *Service) findOpenValidationIssue(ctx context.Context, orgID, projectID string) (int, error) {
-	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{taskmeta.LabelMarker})
+// findOpenValidationIssue returns the open aep:validation Task's issue number for
+// designTag, or 0 when none exists. An empty designTag matches any tag.
+//
+// Keyed on the TAG, not just the class. Dedup used to be class-only, so a
+// validation issue that outlived its build was reused by the next design tag and
+// kept the earlier tag's aep:spec/<tag> label and block lineage — the issue's own
+// version stamp was then a lie. One issue per tag makes the stamp true, which
+// matters because the tag's issue is where that version's report lives: reports
+// are addressed as tag -> issue -> newest report comment.
+//
+// The tag label is pushed into the host query (GitHub AND-filters labels) rather
+// than filtered here, so a project with many historical issues does not page them
+// all back.
+func (s *Service) findOpenValidationIssue(ctx context.Context, orgID, projectID, designTag string) (int, error) {
+	labels := []string{taskmeta.LabelMarker}
+	if l := taskmeta.SpecTagLabel(designTag); l != "" {
+		labels = append(labels, l)
+	}
+	issues, err := s.issues.ListIssues(ctx, orgID, projectID, labels)
 	if err != nil {
 		return 0, fmt.Errorf("validation: list issues: %w", err)
 	}
@@ -241,11 +257,11 @@ func renderScope(doc *criteriaDoc) string {
 		"- UI criteria: browser specs (`@playwright/test`). API criteria: the built-in `request` fixture. Explore with `playwright-cli` first; never commit exploration sessions.",
 		"",
 		"## Report",
-		"- Commit `tests/validation/report.md` (summary, per-criterion results, manual checklist, scenario not-yet-validated list) and `tests/validation/report.json`.",
-		"- Post a summary comment on this issue when done.",
+		"- Do NOT commit the report. Generate it into the gitignored `tests/e2e/test-results/validation/`, then post it as a comment on THIS issue: the marker line `<!-- aep:validation-report/v1 execution=$AEP_TASK_ID -->`, the rendered `report.md`, then `report.json` inside a ```json fence.",
+		"- The platform reads that comment to decide this phase's verdict. No comment means the run is recorded as `report_missing` and the phase fails — this is required, not best-effort.",
 		"",
 		"---",
-		"Open one PR whose body includes `Closes #<this issue's number>` so the platform links it back. One PR; tests and report only.",
+		"Open one PR whose body includes `Closes #<this issue's number>` so the platform links it back. One PR; the test harness only — the report lives on this issue.",
 	)
 
 	return strings.TrimRight(b.String(), "\n")

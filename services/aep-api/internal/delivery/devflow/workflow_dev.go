@@ -57,6 +57,16 @@ func DevFlowWorkflow(ctx workflow.Context, in delivery.DevFlowInput) (delivery.D
 		markRunStatus(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusFailed, msg)
 		return status, nil
 	}
+	// failPhase is fail plus which phase is to blame. The overview needs it: a
+	// validating-phase failure is not a BUILD failure — every coding task landed —
+	// so the build stage must not render "failed" over a green tally. Recording
+	// the cause is what lets the status builder read that attribution instead of
+	// inferring it from the tally's shape and row timestamps.
+	failPhase := func(kind, msg string) (delivery.DevFlowStatus, error) {
+		status.Phase, status.Error = delivery.DevPhaseFailed, msg
+		markRunStatusKind(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusFailed, msg, kind)
+		return status, nil
+	}
 
 	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).RecordWorkflowRun, RecordWorkflowRunInput{
 		WorkflowID: info.WorkflowExecution.ID,
@@ -174,7 +184,7 @@ func DevFlowWorkflow(ctx workflow.Context, in delivery.DevFlowInput) (delivery.D
 		Gates:         in.Gates,
 	}).Get(ctx, &vres); err != nil {
 		status.Validation.Phase, status.Validation.Outcome = delivery.TaskPhaseFailed, delivery.OutcomeFailed
-		return fail("validation run failed: " + err.Error())
+		return failPhase(delivery.DevFailureValidationPhase, "validation run failed: "+err.Error())
 	}
 	for _, l := range vres.Lanes {
 		status.Validation.Lanes = append(status.Validation.Lanes, delivery.DevTaskRef{Issue: l.Issue, Phase: delivery.TaskPhaseDone, Outcome: l.Outcome})
@@ -186,7 +196,8 @@ func DevFlowWorkflow(ctx workflow.Context, in delivery.DevFlowInput) (delivery.D
 		status.Validation.Phase, status.Validation.Outcome = delivery.TaskPhaseDone, "skipped: "+vres.Reason
 	default:
 		status.Validation.Phase, status.Validation.Outcome = delivery.TaskPhaseFailed, vres.Outcome
-		return fail("validation run did not succeed: " + orEmpty(vres.Reason, vres.Outcome))
+		return failPhase(delivery.DevFailureValidationPhase,
+			"validation run did not succeed: "+orEmpty(vres.Reason, vres.Outcome))
 	}
 
 	if ok, d := gates.await(ctx, GateComplete); !ok {

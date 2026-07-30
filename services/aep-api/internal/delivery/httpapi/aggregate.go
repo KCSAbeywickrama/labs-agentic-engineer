@@ -20,6 +20,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery/build"
 	"github.com/wso2/aep/aep-api/internal/delivery/execution"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
+	"github.com/wso2/aep/aep-api/internal/delivery/validation"
 )
 
 // Deps carries every service the delivery slice handlers call. It lives in the
@@ -35,14 +36,19 @@ type Deps struct {
 	TaskReads     *task.Reads
 	TaskCommands  *task.Commands
 	TaskStream    *execution.TaskStreamService
+	// ValidationSvc + ValidationRuns serve the validation report read and the
+	// human-verdict write; nil leaves both endpoints 503.
+	ValidationSvc  *validation.Service
+	ValidationRuns validation.ValidationRunStore
 }
 
 // Every slice names its type Handler, so embedding them directly would be
 // "Handler redeclared". Local aliases give distinct field names (§6).
 type (
-	buildHandler     = build.Handler
-	taskHandler      = task.Handler
-	executionHandler = execution.Handler
+	buildHandler      = build.Handler
+	taskHandler       = task.Handler
+	executionHandler  = execution.Handler
+	validationHandler = validation.Handler
 )
 
 // Handlers is the delivery domain's slice handlers, embedded so Go promotes each
@@ -51,6 +57,7 @@ type Handlers struct {
 	*buildHandler
 	*taskHandler
 	*executionHandler
+	*validationHandler
 }
 
 // New assembles the domain: pure wiring, constructor injection only. The
@@ -58,8 +65,9 @@ type Handlers struct {
 // unwired one (each slice's nil guard), matching the pre-migration edge.
 func New(d Deps) (*Handlers, error) {
 	return &Handlers{
-		buildHandler:     build.NewHandler(d.BuildSvc, d.PreflightSvc, d.BuildActivity),
-		taskHandler:      task.NewHandler(d.TaskReads, d.TaskCommands),
-		executionHandler: execution.NewHandler(d.TaskStream),
+		buildHandler:      build.NewHandler(d.BuildSvc, d.PreflightSvc, d.BuildActivity),
+		taskHandler:       task.NewHandler(d.TaskReads, d.TaskCommands),
+		executionHandler:  execution.NewHandler(d.TaskStream),
+		validationHandler: validation.NewHandler(d.ValidationSvc, d.ValidationRuns),
 	}, nil
 }

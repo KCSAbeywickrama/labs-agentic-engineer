@@ -958,13 +958,23 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// edge holds no build/task/stream service. Assembled here, after the build +
 	// preflight services (whose ports depend on the external-resource provisioner
 	// constructed just above).
+	// The validation service is constructed here rather than with the other
+	// validation wiring below because the delivery aggregator needs it: its
+	// report-read endpoint is a delivery slice handler.
+	validationSvc := validation.NewService(validation.Deps{
+		Issues:   issueService,
+		Design:   designComponents{store: artifactStore},
+		Criteria: validationCriteria{files: filesSvc},
+	})
 	deliveryHandlers, err := deliveryhttpapi.New(deliveryhttpapi.Deps{
-		BuildSvc:      buildSvc,
-		PreflightSvc:  preflightSvc,
-		BuildActivity: buildActivityRecorder{svc: activitySvc},
-		TaskReads:     taskReads,
-		TaskCommands:  taskCommands,
-		TaskStream:    taskStreamSvc,
+		BuildSvc:       buildSvc,
+		PreflightSvc:   preflightSvc,
+		BuildActivity:  buildActivityRecorder{svc: activitySvc},
+		TaskReads:      taskReads,
+		TaskCommands:   taskCommands,
+		TaskStream:     taskStreamSvc,
+		ValidationSvc:  validationSvc,
+		ValidationRuns: workflowRunRepo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
@@ -974,12 +984,8 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 	// plan session mints it right after the plan tap creates the implementation
 	// issues, so it is born in the same phase as them (and never pollutes the
 	// plan turn's existing-task context). It dependsOn every component, so the
-	// funnel holds it until they all deploy (validation-phase).
-	validationSvc := validation.NewService(validation.Deps{
-		Issues:   issueService,
-		Design:   designComponents{store: artifactStore},
-		Criteria: validationCriteria{files: filesSvc},
-	})
+	// funnel holds it until they all deploy (validation-phase). The service itself
+	// is constructed above, where the delivery aggregator needs it.
 	taskPlan.SetValidationIssueMinter(validationSvc)
 	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
 	// external dependency's OpenAPI contract and atomically commits the spec file
@@ -1119,6 +1125,7 @@ func Assemble(cfg config.Config, in Infra) (*App, error) {
 			Planner:            devflowPlanner{plan: taskPlan, reads: taskReads},
 			Validator:          devflowValidator{store: artifactStore, comp: componentService},
 			ValidationResolver: devflowValidationResolver{svc: validationSvc, art: artifactSvcGit},
+			ReportIngestor:     devflowReportIngestor{svc: validationSvc},
 			Provisioner:        buildProvisioner{prov: provisioningSvc},
 			Recorder:           devflowActivityRecorder{svc: activitySvc},
 			Titles:             devflowTitles{reads: taskReads},

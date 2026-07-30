@@ -51,13 +51,22 @@ const (
 	deployDeployed  = "deployed"
 	deployFailed    = "failed"
 
-	// Coarse validation-run state (the deploy.validation contract enum): none
-	// (no validation child — not reached, or no acceptance criteria), running,
-	// completed (ran to completion), failed (mechanical failure).
-	validationNone      = "none"
-	validationRunning   = "running"
-	validationCompleted = "completed"
-	validationFailed    = "failed"
+	// Validation LIFECYCLE (the deploy.validation contract enum) — whether the
+	// run reached an answer, never what the answer was. That lives in
+	// deploy.validationVerdict, so a red suite is finished+fail rather than
+	// anything on this axis.
+	//
+	// These are the contract's words, renamed from the mechanical workflow_runs
+	// values the DB keeps for every run kind (completed→finished,
+	// failed→errored). The rename is deliberate: "completed" reads as "passed"
+	// once a verdict exists beside it, and "failed" would collide with verdict
+	// "fail" — two states sharing a word is what made the old single-enum
+	// surface unreadable.
+	validationNone     = "none"
+	validationRunning  = "running"
+	validationFinished = "finished"
+	validationErrored  = "errored"
+	validationCanceled = "canceled"
 )
 
 // devRunRows is the narrow port over the workflow_runs lookup index: the
@@ -195,10 +204,10 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 		status.Build.Version = row.Tag
 		status.Build.Status = buildStageStatus(row.Status)
 		// A validation-phase failure is not a BUILD failure: every coding task
-		// landed, and the failure already rides deploy.validation=failed below.
+		// landed, and the failure already rides deploy.validation=errored below.
 		// Without this the overview says "build failed · N/N" while the tally
 		// and the validation chip contradict it.
-		if validationAttributedFailure(row, validationRun) {
+		if validationAttributedFailure(row) {
 			status.Build.Status = buildSucceeded
 		}
 		status.Build.Tasks.Total = int64(row.TasksTotal)
@@ -236,22 +245,39 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// (get-task / stream-task-log serve the validation task by issue number).
 	if validationRun != nil {
 		status.Deploy.ValidationIssue = int64(validationRun.IssueNumber)
+		// Verdict and failure kind are mutually exclusive by construction — a run
+		// either reached an answer or broke — so each is surfaced only on the
+		// status it belongs to rather than leaking a stale value across a rebuild.
+		switch validationRun.Status {
+		case delivery.WorkflowStatusCompleted:
+			status.Deploy.ValidationVerdict = gen.DeployStageValidationVerdict(validationRun.Verdict)
+		case delivery.WorkflowStatusFailed:
+			status.Deploy.ValidationFailureKind = gen.DeployStageValidationFailureKind(validationRun.FailureKind)
+			status.Deploy.ValidationReason = validationRun.Reason
+		}
 	}
 	return nil
 }
 
 // validationStageStatus maps the validation child run's row status onto the
-// deploy.validation enum. No child row → none (not reached, or no acceptance
-// criteria). An unknown non-terminal status reads as running (in flight).
+// deploy.validation enum — the one place the DB's mechanical vocabulary becomes
+// the contract's. No child row → none (not reached, or no acceptance criteria).
+// An unknown non-terminal status reads as running (in flight).
+//
+// Canceled is its own value rather than folding into errored: a human stopping a
+// run is not the machinery breaking, and a retry policy reading this must not
+// confuse the two.
 func validationStageStatus(run *delivery.DevflowRun) string {
 	if run == nil {
 		return validationNone
 	}
 	switch run.Status {
 	case delivery.WorkflowStatusCompleted:
-		return validationCompleted
-	case delivery.WorkflowStatusFailed, delivery.WorkflowStatusCanceled:
-		return validationFailed
+		return validationFinished
+	case delivery.WorkflowStatusFailed:
+		return validationErrored
+	case delivery.WorkflowStatusCanceled:
+		return validationCanceled
 	default: // running
 		return validationRunning
 	}
@@ -316,26 +342,25 @@ func buildStageStatus(rowStatus string) string {
 	}
 }
 
-// validationAttributedFailure reports whether the newest dev run's failure
-// belongs to its VALIDATION phase: the run failed, its validation child
-// failed, and the coding tally is fully green — validation only runs after
-// every planned task succeeded, so a green tally + failed child means the
-// build itself did not fail. Canceled runs (either row) are never attributed.
+// validationAttributedFailure reports whether the dev run's failure belongs to
+// its VALIDATION phase, which the run itself records: the dev workflow stamps
+// DevFailureValidationPhase on the row when the validating phase is what failed
+// it. One field read, no inference.
 //
-// Two guards defeat the stale-row rebuild hazard (a same-tag rebuild reuses
-// the dev workflow ID, so an OLD failed validation row can match
-// ValidationRunByParent while the fresh execution failed elsewhere):
-//   - the tally: a provisioning failure carries 0/0/0 and a coding failure
-//     TasksFailed > 0 — neither shape passes;
-//   - recency: the child must have been recorded AFTER this dev row (a rebuild
-//     inserts a new dev row; its own validation child, if any, is younger) —
-//     this covers the green-tally shape too, a rebuild failing between the
-//     quality bar and respawning validation.
-func validationAttributedFailure(row delivery.DevflowRun, validationRun *delivery.DevflowRun) bool {
+// This replaced a two-guard heuristic — a green-tally shape plus "the validation
+// child was recorded after this dev row" — that existed only because the row
+// carried no cause. Both guards were really working around the stale-row rebuild
+// hazard: a same-tag rebuild reuses the dev workflow ID, so an OLD failed
+// validation row could match ValidationRunByParent while the fresh execution
+// failed elsewhere. Reading the dev row's own cause sidesteps that entirely,
+// because the cause is written by the execution that failed.
+//
+// Dev rows that failed before this column existed carry no kind and so are no
+// longer attributed. That is a display detail on historical runs only, and the
+// honest reading: the platform genuinely does not know why they failed.
+func validationAttributedFailure(row delivery.DevflowRun) bool {
 	return row.Status == delivery.WorkflowStatusFailed &&
-		validationRun != nil && validationRun.Status == delivery.WorkflowStatusFailed &&
-		validationRun.CreatedAt.After(row.CreatedAt) &&
-		row.TasksTotal > 0 && row.TasksFailed == 0 && row.TasksDone == row.TasksTotal
+		row.FailureKind == delivery.DevFailureValidationPhase
 }
 
 // bindingFailureReasons is the aggregate Ready condition's terminal-failure

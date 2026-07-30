@@ -121,12 +121,13 @@ describe("DeploymentsPage — validation chip", () => {
     expect(chip).not.toHaveAttribute("target");
   });
 
-  it("routes a FAILED validation to the Validation page", () => {
+  it("routes a FAILING VERDICT to the Validation page", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "failed",
+      validation: "finished",
+      validationVerdict: "fail",
       validationIssue: 30,
       validationUrl: "https://github.com/acme/demo/issues/30",
     };
@@ -138,7 +139,46 @@ describe("DeploymentsPage — validation chip", () => {
     expect(chip).not.toHaveAttribute("target");
   });
 
-  it("routes a COMPLETED validation to the Validation page", () => {
+  // The distinction the state model exists for: a broken RUN says "errored", not
+  // "failed", and carries its cause in the tooltip.
+  it("routes an ERRORED run to the Validation page with its cause", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "errored",
+      validationFailureKind: "report_missing",
+      validationIssue: 30,
+      validationUrl: "https://github.com/acme/demo/issues/30",
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const chip = screen.getByRole("link", { name: /Validation errored/ });
+    expect(chip).toHaveAttribute("href", "/projects/acme/validation");
+    expect(chip).toHaveAttribute(
+      "title",
+      "Open validation — the run never reported its results",
+    );
+  });
+
+  it("routes an AWAITING REVIEW verdict to the Validation page", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "finished",
+      validationVerdict: "awaiting_review",
+      validationIssue: 30,
+    };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const chip = screen.getByRole("link", { name: /Awaiting review/ });
+    expect(chip).toHaveAttribute("href", "/projects/acme/validation");
+  });
+
+  it("routes a PASSING verdict to the Validation page", () => {
     // The chip opens the Validation page in every state; that page owns the
     // report, the run log, and the issue/PR links — so no external URL and no
     // issue number are needed on the chip itself.
@@ -146,14 +186,15 @@ describe("DeploymentsPage — validation chip", () => {
       version: "v1",
       status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "completed",
+      validation: "finished",
+      validationVerdict: "pass",
       validationIssue: 30,
       validationUrl: "https://github.com/acme/demo/pull/42",
     };
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const chip = screen.getByRole("link", { name: /Validation report/ });
+    const chip = screen.getByRole("link", { name: /Validation passed/ });
     expect(chip).toHaveAttribute("href", "/projects/acme/validation");
     expect(chip).not.toHaveAttribute("target");
   });
@@ -163,13 +204,14 @@ describe("DeploymentsPage — validation chip", () => {
       version: "v1",
       status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "completed",
+      validation: "finished",
+      validationVerdict: "pass",
       validationUrl: "https://github.com/acme/demo/pull/42",
     };
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const chip = screen.getByRole("link", { name: /Validation report/ });
+    const chip = screen.getByRole("link", { name: /Validation passed/ });
     expect(chip).toHaveAttribute("href", "/projects/acme/validation");
     expect(chip).not.toHaveAttribute("target");
   });

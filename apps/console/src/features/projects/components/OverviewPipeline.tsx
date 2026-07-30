@@ -38,24 +38,13 @@ import { useNavigate } from "@tanstack/react-router";
 import type { components } from "../../../generated/aep-api";
 import {
   buildStageView,
+  CHIP_COLOR,
   deployStageView,
   specStageView,
   type StageView,
 } from "../lib/pipeline";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
-
-const CHIP_COLOR: Record<
-  StageView["tone"],
-  "default" | "info" | "warning" | "success" | "error"
-> = {
-  ghost: "default",
-  neutral: "default",
-  info: "info",
-  warning: "warning",
-  success: "success",
-  error: "error",
-};
 
 function StageCard({
   icon,

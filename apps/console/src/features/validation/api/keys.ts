@@ -21,7 +21,11 @@ import { projectKeys } from "../../projects/api/keys";
 export const validationKeys = {
   // A validation artifact's content, keyed by (path, version): the dev spec
   // version advances on each merged validation run, so it doubles as the
-  // cache-buster that invalidates a stale criteria/report read.
+  // cache-buster that invalidates a stale criteria read.
   file: (name: string, path: string, version: string) =>
     [...projectKeys.detail(name), "validation", "file", path, version] as const,
+  // The run report for a tag. Served from the tag's validation issue rather than
+  // the repo, so it is keyed by tag alone — not a repo path.
+  report: (name: string, tag: string) =>
+    [...projectKeys.detail(name), "validation", "report", tag] as const,
 };

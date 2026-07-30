@@ -19,6 +19,7 @@ package validation
 import (
 	"context"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -35,6 +36,10 @@ import (
 type IssueClient interface {
 	ListIssues(ctx context.Context, orgID, projectID string, labels []string) ([]sourcecontrol.IssueInfo, error)
 	CreateIssue(ctx context.Context, orgID, projectID string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error)
+	// ListIssueComments reads the validation issue's comments — where the runner
+	// posts its report, so the report is versioned per run instead of overwriting
+	// one path in the repo.
+	ListIssueComments(ctx context.Context, orgID, projectID string, number int) ([]sourcecontrol.IssueComment, error)
 }
 
 // DesignReader reads the project's authored design components at HEAD — the
@@ -52,6 +57,18 @@ type DesignReader interface {
 // once it exists. The composition root adapts the files feature's Read.
 type CriteriaReader interface {
 	ReadValidationCriteria(ctx context.Context, orgID, projectID string) (raw []byte, found bool, err error)
+}
+
+// ValidationRunStore is the narrow slice of the delivery domain's
+// workflow_runs repository the validation endpoints need: locate the run row for
+// a project's tag (it carries the issue the report was posted to and the workflow
+// id the verdict is written against), and record a human verdict.
+// delivery.WorkflowRunRepository satisfies it.
+type ValidationRunStore interface {
+	LatestValidationRunByTag(ctx context.Context, orgID, projectID, tag string) (*delivery.DevflowRun, error)
+	// ResolveValidationVerdict records a human verdict only while the row's
+	// verdict is awaiting_review; false means it was already decided.
+	ResolveValidationVerdict(ctx context.Context, workflowID, verdict, actor, note string) (bool, error)
 }
 
 // ContextProvider is the internal validation-context endpoint's view of the

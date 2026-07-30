@@ -34,8 +34,34 @@ type fakeIssues struct {
 	created  []sourcecontrol.CreateIssueRequest
 }
 
-func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, _ []string) ([]sourcecontrol.IssueInfo, error) {
-	return f.existing, nil
+// ListIssues AND-filters on labels, mirroring the host: the minter pushes the
+// aep:spec/<tag> label into the query to find only THIS tag's validation issue,
+// so a fake that ignored labels would hide whether that filter works.
+func (f *fakeIssues) ListIssues(_ context.Context, _, _ string, labels []string) ([]sourcecontrol.IssueInfo, error) {
+	var out []sourcecontrol.IssueInfo
+	for _, issue := range f.existing {
+		have := map[string]bool{}
+		for _, l := range issue.Labels {
+			have[l] = true
+		}
+		match := true
+		for _, want := range labels {
+			if !have[want] {
+				match = false
+				break
+			}
+		}
+		if match {
+			out = append(out, issue)
+		}
+	}
+	return out, nil
+}
+
+// ListIssueComments is unused by the minter tests; the report-comment path has
+// its own coverage in report_comment_test.go.
+func (f *fakeIssues) ListIssueComments(_ context.Context, _, _ string, _ int) ([]sourcecontrol.IssueComment, error) {
+	return nil, nil
 }
 
 func (f *fakeIssues) CreateIssue(_ context.Context, _, _ string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error) {
@@ -146,7 +172,9 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 
 func TestEnsureValidationIssue_DedupSkipsWhenOpenExists(t *testing.T) {
 	iss := &fakeIssues{existing: []sourcecontrol.IssueInfo{
-		{Number: 7, State: "open", Labels: []string{"aep:task", "aep:validation", "aep:origin/spec-plan"}},
+		{Number: 7, State: "open", Labels: []string{
+			"aep:task", "aep:validation", "aep:origin/spec-plan", "aep:spec/design-v3",
+		}},
 	}}
 	svc := newSvc(iss, []string{"hello-web"}, fakeCriteria{raw: []byte(sampleCriteria), found: true})
 
@@ -155,6 +183,60 @@ func TestEnsureValidationIssue_DedupSkipsWhenOpenExists(t *testing.T) {
 	}
 	if len(iss.created) != 0 {
 		t.Fatalf("dedup failed: created %d issues, want 0", len(iss.created))
+	}
+}
+
+// Dedup is keyed on the TAG, so a new design tag mints its OWN validation issue
+// even while the previous tag's issue is still open. That is what makes the
+// issue's aep:spec/<tag> stamp trustworthy — and the issue is where that version's
+// report lives, so a shared issue would mix two versions' reports in one thread.
+func TestEnsureValidationIssue_NewTagMintsItsOwnIssue(t *testing.T) {
+	iss := &fakeIssues{existing: []sourcecontrol.IssueInfo{
+		{Number: 7, State: "open", Labels: []string{
+			"aep:task", "aep:validation", "aep:origin/spec-plan", "aep:spec/design-v3",
+		}},
+	}}
+	svc := newSvc(iss, []string{"hello-web"}, fakeCriteria{raw: []byte(sampleCriteria), found: true})
+
+	if err := svc.EnsureValidationIssue(context.Background(), "org", "proj", "design-v4"); err != nil {
+		t.Fatalf("EnsureValidationIssue: %v", err)
+	}
+	if len(iss.created) != 1 {
+		t.Fatalf("want 1 created issue for the new tag, got %d", len(iss.created))
+	}
+	var gotTagLabel bool
+	for _, l := range iss.created[0].Labels {
+		if l == "aep:spec/design-v4" {
+			gotTagLabel = true
+		}
+	}
+	if !gotTagLabel {
+		t.Errorf("new issue labels = %v; want the aep:spec/design-v4 stamp", iss.created[0].Labels)
+	}
+}
+
+// ResolveValidationTask must return the issue for the tag being validated, not
+// merely any open validation issue.
+func TestResolveValidationTask_ReturnsTheTagsIssue(t *testing.T) {
+	iss := &fakeIssues{existing: []sourcecontrol.IssueInfo{
+		{Number: 7, State: "open", Labels: []string{
+			"aep:task", "aep:validation", "aep:origin/spec-plan", "aep:spec/design-v3",
+		}},
+		{Number: 9, State: "open", Labels: []string{
+			"aep:task", "aep:validation", "aep:origin/spec-plan", "aep:spec/design-v4",
+		}},
+	}}
+	svc := newSvc(iss, []string{"hello-web"}, fakeCriteria{raw: []byte(sampleCriteria), found: true})
+
+	number, err := svc.ResolveValidationTask(context.Background(), "org", "proj", "design-v4")
+	if err != nil {
+		t.Fatalf("ResolveValidationTask: %v", err)
+	}
+	if number != 9 {
+		t.Errorf("issue = %d; want 9 (design-v4's issue, not design-v3's)", number)
+	}
+	if len(iss.created) != 0 {
+		t.Errorf("want no new issue when the tag's issue already exists, got %d", len(iss.created))
 	}
 }
 

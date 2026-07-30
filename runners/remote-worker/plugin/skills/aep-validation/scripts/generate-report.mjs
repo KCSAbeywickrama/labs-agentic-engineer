@@ -36,7 +36,8 @@
 //   --criteria <p>    default specs/validation/validation-criteria.json (read-only)
 //   --results <p>     default tests/e2e/test-results/results.json
 //   --heal-log <p>    default tests/e2e/heal-log.json (optional file)
-//   --out <dir>       default tests/validation
+//   --out <dir>       default tests/e2e/test-results/validation (GITIGNORED —
+//                     the report is posted to the validation issue, not committed)
 //
 // Outputs:
 //   <out>/report.json          machine-readable report (schemaVersion 1)
@@ -64,7 +65,11 @@ function parseArgs(argv) {
     criteria: "specs/validation/validation-criteria.json",
     results: "tests/e2e/test-results/results.json",
     healLog: "tests/e2e/heal-log.json",
-    out: "tests/validation",
+    // Gitignored by tests/e2e/.gitignore (test-results/). The report is NOT a
+    // repo artifact: a committed report is one mutable path, so a given run's
+    // results become unaddressable as soon as the next run overwrites them. It
+    // is posted to the tag's validation issue instead, where runs accumulate.
+    out: "tests/e2e/test-results/validation",
     commit: "unknown",
     issue: null,
   };

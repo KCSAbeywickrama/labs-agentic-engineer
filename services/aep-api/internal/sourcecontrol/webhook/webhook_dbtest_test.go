@@ -223,6 +223,9 @@ func (f *fakeIssueSvc) CommentIssue(_ context.Context, _ string, _ string, _ int
 	f.comments = append(f.comments, body)
 	return nil
 }
+func (f *fakeIssueSvc) ListIssueComments(context.Context, string, string, int) ([]sourcecontrol.IssueComment, error) {
+	panic("fakeIssueSvc: ListIssueComments not expected")
+}
 func (f *fakeIssueSvc) CreateIssue(context.Context, string, string, sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error) {
 	panic("fakeIssueSvc: CreateIssue not expected")
 }

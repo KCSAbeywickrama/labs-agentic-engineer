@@ -157,11 +157,11 @@ function renderBody(doc, issueNumber) {
     "- UI criteria: browser specs (`@playwright/test`). API criteria: the built-in `request` fixture. Explore with `playwright-cli` first; never commit exploration sessions.",
     "",
     "## Report",
-    "- Commit `tests/validation/report.md` (summary, per-criterion results, manual checklist, scenario not-yet-validated list) and `tests/validation/report.json`.",
-    "- Post a summary comment on this issue when done.",
+    "- Do NOT commit the report. Generate it into the gitignored `tests/e2e/test-results/validation/`, then post it as a comment on THIS issue: the marker line `<!-- aep:validation-report/v1 execution=$AEP_TASK_ID -->`, the rendered `report.md`, then `report.json` inside a ```json fence.",
+    "- The platform reads that comment to decide this phase's verdict. No comment means the run is recorded as `report_missing` and the phase fails — this is required, not best-effort.",
     "",
     "---",
-    `When you open the PR, include \`Closes #${issueNumber}\` in its body so the platform links the PR back to this task. One PR; tests and report only.`
+    `When you open the PR, include \`Closes #${issueNumber}\` in its body so the platform links the PR back to this task. One PR; the test harness only — the report lives on this issue.`
   );
 
   return lines.join("\n");

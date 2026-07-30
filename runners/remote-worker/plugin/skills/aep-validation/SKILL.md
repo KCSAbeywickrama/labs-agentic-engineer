@@ -221,36 +221,65 @@ cp /app/plugin/skills/aep-validation/scripts/generate-report.mjs \
    tests/e2e/scripts/generate-report.mjs
 ```
 
-This writes `tests/validation/report.md` + `report.json`. It reads the
-oracle but never writes it — coverage is expressed by each criterion's
-pass/fail in the report, not by a flag in the criteria file. Exit code 2
-means a contract violation: spec titles that don't map to criterion ids
-(fix titles, re-run tests from step 7), a spec file missing its
-`// spec:` header (add the header, regenerate — no test re-run needed),
-or a pre-existing spec modified without a heal-log entry (record the
-heal per `references/healing.md`). Commit the report and tests together.
+This writes `report.md` + `report.json` into
+`tests/e2e/test-results/validation/`, which is **gitignored** — the
+report is **never committed**. It reads the oracle but never writes it —
+coverage is expressed by each criterion's pass/fail in the report, not by
+a flag in the criteria file. Exit code 2 means a contract violation: spec
+titles that don't map to criterion ids (fix titles, re-run tests from
+step 7), a spec file missing its `// spec:` header (add the header,
+regenerate — no test re-run needed), or a pre-existing spec modified
+without a heal-log entry (record the heal per `references/healing.md`).
 
-If `$AEP_PLATFORM_URL` is set, also push the report to the platform
-(best-effort — do not fail the task if this call fails):
+### 9b. POST THE REPORT TO THE VALIDATION ISSUE
+
+**The report's home is the issue, not the repo.** A committed report is
+one mutable path, so a run's results stop being addressable the moment
+the next run overwrites them. On the issue, each run appends its own
+comment and the issue's `aep:spec/<tag>` stamp says which version it
+belongs to.
+
+**The platform reads this comment to decide the phase's verdict — if it
+is missing the run is recorded as `report_missing` and fails.** This is
+not best-effort. Do it before opening the PR.
+
+The comment must start with the marker line exactly as shown, then the
+human report, then the machine payload in a `json` fence:
 
 ```bash
-curl -sf -X POST "$AEP_PLATFORM_URL/internal/v1/executions/$AEP_TASK_ID/validation-report" \
-  -H "Authorization: Bearer $(cat "$AEP_BEARER_FILE")" \
-  -H "Content-Type: application/json" \
-  --data-binary @tests/validation/report.json || true
+{
+  printf '<!-- aep:validation-report/v1 execution=%s -->\n' "$AEP_TASK_ID"
+  cat tests/e2e/test-results/validation/report.md
+  printf '\n```json\n'
+  cat tests/e2e/test-results/validation/report.json
+  printf '\n```\n'
+} > /tmp/validation-comment.md
+
+gh issue comment <N> --body-file /tmp/validation-comment.md
 ```
 
+The marker carries no tag: the issue you are commenting on is already the
+one for this version (it is stamped `aep:spec/<tag>`), so a tag here could
+only ever disagree with it.
+
+The `execution=$AEP_TASK_ID` attribute is how the platform tells YOUR
+report apart from an earlier run's on the same issue — never omit or
+alter it. Verify the comment posted (`gh issue view <N> --comments`)
+before continuing; a silent failure here fails the whole phase.
+
 ### 10. PR
+
+Commit the tests — the durable regression suite — but **not** the report:
 
 ```bash
 gh pr create \
   --title "Validation: <pass>/<total> e2e criteria passing (issue #<N>)" \
-  --body $'Closes #<N>\n\n<summary table: pass/fail/not_run + manual/scenario counts>\n\nReport: tests/validation/report.md'
+  --body $'Closes #<N>\n\n<summary table: pass/fail/not_run + manual/scenario counts>\n\nFull report: see the validation report comment on #<N>.'
 ```
 
-Open it **ready-for-review even when criteria fail** — the human reads
-the report and decides. Post a closing issue comment with the summary
-counts and the PR link.
+Open it **ready-for-review even when criteria fail** — a failing suite is
+a real verdict, not a broken run, and the tests still belong in the
+repo.
 
 ## Do not
 
@@ -258,6 +287,9 @@ counts and the PR link.
   `package.json` — tests and report only.
 - Write or modify anything under `specs/` — the acceptance oracle is
   read-only input; all validation artifacts live under `tests/`.
+- Commit `report.json` or `report.md`. They are generated into a
+  gitignored path and posted to the validation issue (step 9b). Only the
+  test harness and `tests/validation/test-plan.md` are committed.
 - Delete or skip a previously committed spec. If one is obsolete, say
   so in the PR description and report — a human removes it.
 - Leave `.only` / `.skip` / `.fixme` in committed specs.

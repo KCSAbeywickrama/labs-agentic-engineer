@@ -70,6 +70,11 @@ type ValidationLaneResult struct {
 	Issue   int    `json:"issue"`
 	Outcome string `json:"outcome"` // succeeded | failed
 	Error   string `json:"error,omitempty"`
+	// FailureKind is why the lane failed (delivery.ValidationFailure*), set by
+	// the lane child which is the only place that knows — a runner whose job died
+	// and a lane that never reported are different faults, and the parent would
+	// otherwise have to guess from Error's wording.
+	FailureKind string `json:"failureKind,omitempty"`
 }
 
 // ValidationFlowResult is what the orchestrator returns to the dev workflow.
@@ -77,7 +82,15 @@ type ValidationFlowResult struct {
 	Outcome string `json:"outcome"` // succeeded | failed | skipped
 	// Reason is "no acceptance criteria" on skip, the failure summary on
 	// failed, empty on success.
-	Reason   string                 `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// FailureKind is the machine-readable cause on a failed outcome
+	// (delivery.ValidationFailure*).
+	FailureKind string `json:"failureKind,omitempty"`
+	// Verdict is what the run answered (delivery.ValidationVerdict*) on a
+	// succeeded outcome. Orthogonal to Outcome: Outcome says the phase reached an
+	// answer, Verdict says whether the system under test passed — so a red suite
+	// is succeeded+fail, and the dev run still completes.
+	Verdict  string                 `json:"verdict,omitempty"`
 	PRNumber int                    `json:"prNumber,omitempty"`
 	Lanes    []ValidationLaneResult `json:"lanes,omitempty"`
 }
@@ -159,12 +172,20 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 
 	recorded := false
 	var laneResults []ValidationLaneResult
-	fail := func(msg string) (ValidationFlowResult, error) {
+	// fail records WHY the phase broke, not just that it did. Every call site
+	// names a delivery.ValidationFailure*: the row's single `failed` status used
+	// to cover activity errors, gate rejections, dispatch failures, dead runners,
+	// timeouts, an unopened PR and every merge outcome alike, leaving free-text
+	// reason as the only differentiator — and reason is not on the contract.
+	fail := func(kind, msg string) (ValidationFlowResult, error) {
 		status.Phase, status.Error = delivery.TaskPhaseFailed, msg
 		if recorded {
-			markRunStatus(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusFailed, msg)
+			markRunStatusKind(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusFailed, msg, kind)
 		}
-		return ValidationFlowResult{Outcome: delivery.OutcomeFailed, Reason: msg, PRNumber: status.PRNumber, Lanes: laneResults}, nil
+		return ValidationFlowResult{
+			Outcome: delivery.OutcomeFailed, Reason: msg, FailureKind: kind,
+			PRNumber: status.PRNumber, Lanes: laneResults,
+		}, nil
 	}
 
 	// 1. Resolve the validation issue (idempotent ensure + find). 0 ⇒ no
@@ -174,7 +195,7 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).ResolveValidationTask, ProjectRef{
 		OrgID: in.OrgID, ProjectID: in.ProjectID,
 	}).Get(ctx, &issue); err != nil {
-		return fail("resolve validation task: " + err.Error())
+		return fail(delivery.ValidationFailureInternalError, "resolve validation task: "+err.Error())
 	}
 	if issue == 0 {
 		status.Phase = delivery.TaskPhaseDone
@@ -196,7 +217,7 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 		IssueNumber:      issue,
 		ParentWorkflowID: in.DevWorkflowID,
 	}).Get(ctx, nil); err != nil {
-		return fail("record workflow run: " + err.Error())
+		return fail(delivery.ValidationFailureInternalError, "record workflow run: "+err.Error())
 	}
 	recorded = true
 
@@ -213,7 +234,7 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 
 	// 3. Gate: start coding (auto by default) — one gate for the whole phase.
 	if ok, d := gates.await(ctx, GateStartCoding); !ok {
-		return fail("start-coding gate rejected: " + d.Note)
+		return fail(delivery.ValidationFailureGateRejected, "start-coding gate rejected: "+d.Note)
 	}
 
 	// 4. Dispatch each lane's runner, then spawn its lane child. Every lane
@@ -226,7 +247,7 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 		if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).DispatchCoding, DispatchCodingInput{
 			OrgID: in.OrgID, ProjectID: in.ProjectID, Repo: in.Repo, Issue: lane.Issue,
 		}).Get(ctx, &executionID); err != nil {
-			return fail(fmt.Sprintf("dispatch %s lane: %s", lane.Kind, err.Error()))
+			return fail(delivery.ValidationFailureDispatch, fmt.Sprintf("dispatch %s lane: %s", lane.Kind, err.Error()))
 		}
 		wid := validationTaskWorkflowID(in.OrgID, in.ProjectID, in.Tag, lane.Kind, lane.Issue)
 		cctx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
@@ -239,7 +260,7 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 		// Block until the child is actually started so forwarded signals can
 		// never race its registration.
 		if err := cf.GetChildWorkflowExecution().Get(ctx, nil); err != nil {
-			return fail(fmt.Sprintf("start %s lane child: %s", lane.Kind, err.Error()))
+			return fail(delivery.ValidationFailureInternalError, fmt.Sprintf("start %s lane child: %s", lane.Kind, err.Error()))
 		}
 		runs = append(runs, &laneRun{lane: lane, execID: executionID, future: cf})
 		status.Lanes = append(status.Lanes, delivery.DevTaskRef{Issue: lane.Issue, WorkflowID: wid, Phase: delivery.TaskPhaseCoding})
@@ -315,31 +336,81 @@ func ValidationFlowWorkflow(ctx workflow.Context, in ValidationFlowInput) (Valid
 		sel.Select(ctx)
 	}
 	if remaining > 0 {
-		return fail("timed out waiting for validation lanes")
+		return fail(delivery.ValidationFailureTimedOut, "timed out waiting for validation lanes")
 	}
 	for _, r := range runs {
 		laneResults = append(laneResults, r.result)
 	}
 	for _, r := range runs {
 		if r.result.Outcome != delivery.OutcomeSucceeded {
-			return fail(fmt.Sprintf("lane %s (#%d): %s", r.lane.Kind, r.lane.Issue, orEmpty(r.result.Error, r.result.Outcome)))
+			return fail(orEmpty(r.result.FailureKind, delivery.ValidationFailureRunnerCrashed),
+				fmt.Sprintf("lane %s (#%d): %s", r.lane.Kind, r.lane.Issue, orEmpty(r.result.Error, r.result.Outcome)))
 		}
 	}
 
-	// 6. Merge the single validation PR (its merged content — committed e2e
-	// tests + report — is the phase's reviewable artifact; a validation issue
-	// spawns no post-merge build, so merge is the terminal step).
+	// 6. No PR means the lanes cannot have produced a reviewable artifact.
+	// Checked BEFORE the report ingest so this diagnosis wins over the
+	// report_missing the ingest would otherwise report for the same run.
 	if status.PRNumber == 0 {
-		return fail("validation lanes finished but no pull request was opened")
+		return fail(delivery.ValidationFailureNoPROpened, "validation lanes finished but no pull request was opened")
 	}
+
+	// 7. Ingest the report and compute the verdict — BEFORE merging.
+	//
+	// This is the step that gives the phase an answer at all: the e2e lane's
+	// success signal is pr-opened and the runner opens its PR whether criteria
+	// passed or failed, so lane success says only "the runner ran", never what it
+	// found. Without this a fully red suite and a fully green one are
+	// indistinguishable.
+	//
+	// Placed before the merge deliberately:
+	//   - a merge failure no longer erases the verdict — we already have it;
+	//   - a missing report is DETECTED here rather than passing silently, which
+	//     also closes the crash-after-PR-opened hole (pr-opened finishes the
+	//     execution row, so the watcher stops watching and a later pod death
+	//     produces no signal at all).
+	//
+	// Scoped to the e2e lane's execution, which is the only lane that reports
+	// today. A future scenario lane will post its own report, and this becomes one
+	// ingest per lane plus a rule for combining their verdicts — the strictest
+	// wins, on the same reasoning as rule 1 in ComputeVerdict.
+	e2e := byKind(LaneE2E)
+	if e2e == nil {
+		return fail(delivery.ValidationFailureInternalError, "no e2e lane to read a validation report from")
+	}
+	var ingested IngestValidationReportOutput
+	if err := workflow.ExecuteActivity(withDefaultActivityOpts(ctx), (*Activities).IngestValidationReport, IngestValidationReportInput{
+		OrgID: in.OrgID, ProjectID: in.ProjectID, Issue: issue, Execution: e2e.execID,
+	}).Get(ctx, &ingested); err != nil {
+		// The activity classifies its own failure (report_missing vs
+		// report_invalid); an infrastructure error arriving as a bare activity
+		// error is an internal fault, not a claim about the report.
+		return fail(delivery.ValidationFailureInternalError, "ingest validation report: "+err.Error())
+	}
+	if ingested.FailureKind != "" {
+		return fail(ingested.FailureKind, ingested.Error)
+	}
+	markValidationVerdict(ctx, info.WorkflowExecution.ID, ingested.Verdict)
+
+	// 8. Merge the single validation PR (its merged content — the committed e2e
+	// regression suite and test plan — is the phase's reviewable artifact; a
+	// validation issue spawns no post-merge build, so merge is the terminal step).
+	// The report itself is NOT in the PR: it lives on the validation issue, where
+	// successive runs stay individually addressable by the issue's tag.
 	status.Phase = delivery.TaskPhaseMerging
 	if err := runMergePhase(ctx, in.OrgID, in.ProjectID, status.PRNumber, in.Gates, &ms); err != nil {
-		return fail(err.Error())
+		return fail(delivery.ValidationFailureMergeFailed, err.Error())
 	}
 
 	status.Phase = delivery.TaskPhaseDone
 	markRunStatus(ctx, info.WorkflowExecution.ID, delivery.WorkflowStatusCompleted, "")
-	return ValidationFlowResult{Outcome: delivery.OutcomeSucceeded, PRNumber: status.PRNumber, Lanes: laneResults}, nil
+	// Succeeded means "the phase reached an answer", NOT "the criteria passed" —
+	// the verdict rides alongside, and a fail verdict still returns succeeded so
+	// the dev run completes rather than reporting a machinery failure it never had.
+	return ValidationFlowResult{
+		Outcome: delivery.OutcomeSucceeded, Verdict: ingested.Verdict,
+		PRNumber: status.PRNumber, Lanes: laneResults,
+	}, nil
 }
 
 // ValidationTaskWorkflow is one validation lane: it waits for the terminal
@@ -375,10 +446,14 @@ func ValidationTaskWorkflow(ctx workflow.Context, in ValidationTaskInput) (Valid
 	switch {
 	case !received:
 		res.Outcome, res.Error = delivery.OutcomeFailed, "timed out waiting for lane completion"
+		res.FailureKind = delivery.ValidationFailureTimedOut
 	case got.Phase == delivery.PhaseSucceeded:
 		res.Outcome = delivery.OutcomeSucceeded
 	default:
+		// The only failure signal forwarded here is a job-status one, so the
+		// runner's job died (watcher.go's job_failed:*).
 		res.Outcome, res.Error = delivery.OutcomeFailed, got.Message
+		res.FailureKind = delivery.ValidationFailureRunnerCrashed
 	}
 	if res.Outcome == delivery.OutcomeSucceeded {
 		status.Phase = delivery.TaskPhaseDone

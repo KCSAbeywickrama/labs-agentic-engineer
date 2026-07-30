@@ -17,11 +17,11 @@
  */
 
 /**
- * Parser for `tests/validation/report.json` — the deterministic run report the
- * e2e validation runner commits (generate-report.mjs, schemaVersion 1). Turns
- * the raw file text into a per-criterion status map the ValidationView overlays
- * onto the authored oracle (specs/validation/validation-criteria.json), joined
- * by criterion id.
+ * Parser for the validation run report — the deterministic report the e2e
+ * validation runner posts to its validation issue (generate-report.mjs,
+ * schemaVersion 1). Turns the raw report text into a per-criterion status map the
+ * ValidationView overlays onto the authored oracle
+ * (specs/validation/validation-criteria.json), joined by criterion id.
  *
  * Intentionally permissive: a report is generated FROM the oracle, so every
  * criterion should appear, but a criterion absent from the report simply renders
@@ -47,6 +47,8 @@ export interface CriterionReport {
   status: CriterionRunState | string;
   /** Failure message for a failed e2e criterion. */
   failure?: string;
+  /** `<spec file>:<line>` the failure was raised at, when the reporter had it. */
+  failureLocation?: string;
   /** Spec file path backing an e2e criterion. */
   spec?: string;
   /** The spec was repaired by the healer this run. */
@@ -75,6 +77,21 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/**
+ * A criterion's failure, which generate-report.mjs writes as an OBJECT —
+ * `{ message, location }` (specOutcome). Reading it as a bare string yielded ""
+ * for every real report, so the failure block never rendered in production while
+ * the tests passed on string-shaped fixtures.
+ *
+ * A plain string is still accepted: older reports already merged into project
+ * repos carry that shape, and a report is read long after it was written.
+ */
+function parseFailure(v: unknown): { message: string; location: string } {
+  if (typeof v === "string") return { message: v, location: "" };
+  if (isObject(v)) return { message: str(v.message), location: str(v.location) };
+  return { message: "", location: "" };
+}
+
 export function parseValidationReport(raw: string): ReportParseResult {
   let data: unknown;
   try {
@@ -99,8 +116,9 @@ export function parseValidationReport(raw: string): ReportParseResult {
     // A row is only meaningful with an id and a status to join/render.
     if (!id || !status) continue;
     const entry: CriterionReport = { status };
-    const failure = str(item.failure);
-    if (failure) entry.failure = failure;
+    const failure = parseFailure(item.failure);
+    if (failure.message) entry.failure = failure.message;
+    if (failure.location) entry.failureLocation = failure.location;
     const spec = str(item.spec);
     if (spec) entry.spec = spec;
     const healed = optBool(item.healed);

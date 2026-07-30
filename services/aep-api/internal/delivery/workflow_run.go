@@ -36,6 +36,51 @@ const (
 	WorkflowStatusCanceled  = "canceled"
 )
 
+// Validation verdict — WHAT the answer was, for kind=validation rows only.
+// Orthogonal to Status, which says only WHETHER an answer was reached: a red
+// test suite is Status=completed + Verdict=fail, never Status=failed. That split
+// is the point — Status alone can never mean "the criteria failed", so
+// WorkflowStatusFailed on a validation row means the machinery broke, full stop.
+//
+// AwaitingReview is the automatic path declining to decide: a manual or scenario
+// criterion is present, or an e2e criterion produced no result. A human resolves
+// it (see DevflowRun.VerdictSetBy). Rendered to humans as "Awaiting review" —
+// never "sign-off"/"approval", which would presuppose a pass when the human can
+// equally record a fail.
+const (
+	ValidationVerdictPass           = "pass"
+	ValidationVerdictFail           = "fail"
+	ValidationVerdictAwaitingReview = "awaiting_review"
+)
+
+// Validation failure kinds — the machine-readable cause behind a
+// WorkflowStatusFailed validation row, alongside Reason's human detail. The
+// taxonomy exists so a retry policy can be designed against an enum instead of
+// pattern-matching free text; nothing consumes it for retry today.
+const (
+	ValidationFailureInternalError = "internal_error"  // activity error resolving the issue / recording the run
+	ValidationFailureGateRejected  = "gate_rejected"   // a gate was declined
+	ValidationFailureDispatch      = "dispatch_failed" // the lane's runner never started
+	ValidationFailureRunnerCrashed = "runner_crashed"  // the lane's job died
+	ValidationFailureTimedOut      = "timed_out"       // lane wait or merge wait expired
+	ValidationFailureNoPROpened    = "no_pr_opened"    // lanes finished without opening a PR
+	ValidationFailureReportMissing = "report_missing"  // no report comment on the validation issue
+	ValidationFailureReportInvalid = "report_invalid"  // report unparseable, or carried no criteria
+	ValidationFailureMergeFailed   = "merge_failed"    // the validation PR did not merge
+)
+
+// Dev-run failure kinds — which PHASE failed a dev run. Only the validating
+// phase is modelled today, because that is the one the overview has to attribute:
+// a validation failure is not a BUILD failure (every coding task landed), so the
+// build stage must not render "failed" over a green tally.
+//
+// Recording the cause is what lets the status builder READ that attribution
+// instead of inferring it from the task tally's shape plus row recency — an
+// inference that could not distinguish a stale validation row from a fresh one.
+// Not exposed on the contract: deploy.validationFailureKind stays
+// validation-scoped, this is internal attribution.
+const DevFailureValidationPhase = "validation_phase"
+
 // WorkflowRun is the lookup index for Temporal devflow workflows — NOT the
 // source of truth (Temporal is). Webhook handlers and watchers use it to
 // resolve "which running workflow wants this event?" (a point lookup by
@@ -69,7 +114,30 @@ type DevflowRun struct {
 	// ParentWorkflowID links a task run to its dev run.
 	ParentWorkflowID string `gorm:"index" json:"parentWorkflowId,omitempty"`
 
+	// Status is the mechanical lifecycle: did the run reach an answer? The API
+	// renames it for validation rows (completed→"finished", failed→"errored") in
+	// projects.validationStageStatus, so no two user-facing words collide with
+	// Verdict's pass/fail. The DB keeps the original values for every kind.
 	Status string `gorm:"not null;index;default:running" json:"status"` // running | completed | failed | canceled
+
+	// Verdict is the validation phase's answer (ValidationVerdict*), set on
+	// kind=validation rows once the report is ingested. Empty while running, and
+	// empty on a run that never reached an answer — a failed row has a
+	// FailureKind, not a Verdict.
+	Verdict string `gorm:"type:text;index" json:"verdict,omitempty"`
+
+	// FailureKind is the machine-readable cause for a terminal `failed` run;
+	// Reason carries the human detail. Empty otherwise. Validation rows carry a
+	// ValidationFailure*; dev rows carry a DevFailure* naming the phase that
+	// failed them.
+	FailureKind string `gorm:"type:text" json:"failureKind,omitempty"`
+
+	// VerdictSetBy/At/Note record a human resolving an awaiting_review verdict.
+	// All empty when the verdict was computed automatically, which is also how a
+	// human decision stays distinguishable from a computed one after the fact.
+	VerdictSetBy string     `gorm:"type:text" json:"verdictSetBy,omitempty"`
+	VerdictSetAt *time.Time `json:"verdictSetAt,omitempty"`
+	VerdictNote  string     `gorm:"type:text" json:"verdictNote,omitempty"`
 
 	// TasksTotal/Done/Failed are the dev run's own task tally (the overview
 	// build stage), written by the dev workflow as absolute values — total

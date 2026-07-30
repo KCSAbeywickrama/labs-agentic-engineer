@@ -73,12 +73,15 @@ func validatePath(p string) error {
 }
 
 // readAllowList holds explicit non-specs/ paths the Files API may READ at HEAD.
-// It is a read-only escape hatch: the validation report is a runner-authored
-// artifact outside specs/, surfaced by the console's Validation page. The write
-// path (Apply) is never widened — validatePath stays specs/-only.
-var readAllowList = map[string]bool{
-	"tests/validation/report.json": true,
-}
+// It is a read-only escape hatch; the write path (Apply) is never widened —
+// validatePath stays specs/-only.
+//
+// Empty today. Its one entry was tests/validation/report.json, read by the
+// console's Validation page. The report is no longer committed: it is posted to
+// the tag's validation issue and served by get-validation-report, so the escape
+// hatch is not needed for it. The mechanism stays because the next
+// runner-authored artifact outside specs/ will want it.
+var readAllowList = map[string]bool{}
 
 // validateReadPath gates the read side: an exact readAllowList entry passes,
 // otherwise it defers to the specs/-only validatePath. Exact-match is

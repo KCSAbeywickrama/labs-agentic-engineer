@@ -19,6 +19,7 @@ package delivery
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -38,8 +39,22 @@ type WorkflowRunRepository interface {
 
 	// SetStatus marks the row for workflowID terminal (or running again). reason
 	// is the failure detail for a `failed` status (empty otherwise) — persisted so
-	// the build summary can show WHY a run failed.
-	SetStatus(ctx context.Context, workflowID, status, reason string) error
+	// the build summary can show WHY a run failed. failureKind is the
+	// machine-readable cause beside it (ValidationFailure* / DevFailure*), empty
+	// for non-failures and for causes not yet modelled.
+	SetStatus(ctx context.Context, workflowID, status, reason, failureKind string) error
+
+	// SetValidationVerdict records a validation row's computed verdict
+	// (ValidationVerdict*) — written by the report-ingest activity once the run
+	// reached an answer.
+	SetValidationVerdict(ctx context.Context, workflowID, verdict string) error
+
+	// ResolveValidationVerdict records a HUMAN verdict, but only while the row's
+	// verdict is still ValidationVerdictAwaitingReview. Reports false when the
+	// verdict was already decided — automatically, or by an earlier human — which
+	// is the endpoint's 409. The guard lives in the UPDATE's WHERE clause so two
+	// concurrent decisions cannot both win.
+	ResolveValidationVerdict(ctx context.Context, workflowID, verdict, actor, note string) (bool, error)
 
 	// SetTaskCounts writes the dev run's task tally as ABSOLUTE values —
 	// idempotent under activity retry, never an increment. Scoped to one
@@ -66,6 +81,13 @@ type WorkflowRunRepository interface {
 	// parent_workflow_id), or (nil, nil) when none — the status builder's
 	// cheap read of the project's validation phase state.
 	ValidationRunByParent(ctx context.Context, orgID, projectID, parentWorkflowID string) (*DevflowRun, error)
+
+	// LatestValidationRunByTag returns the newest validation-kind row for a
+	// project at a tag, or (nil, nil) when none. An empty tag means the newest
+	// regardless of tag. The validation endpoints' entry point: the row carries
+	// both the issue the report was posted to and the workflow id the verdict is
+	// written against.
+	LatestValidationRunByTag(ctx context.Context, orgID, projectID, tag string) (*DevflowRun, error)
 
 	// ListByProject returns a project's rows, newest first, optionally
 	// filtered to one kind ("" = all).
@@ -101,7 +123,7 @@ func (r *workflowRunRepository) Record(ctx context.Context, row *DevflowRun) err
 	}).Create(row).Error
 }
 
-func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status, reason string) error {
+func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, status, reason, failureKind string) error {
 	// Truncate defensively: the reason is a workflow error string, so a
 	// pathological one must not blow the row up. text has no hard cap, but a sane
 	// bound keeps the column and the UI honest.
@@ -110,7 +132,35 @@ func (r *workflowRunRepository) SetStatus(ctx context.Context, workflowID, statu
 	}
 	return r.db.WithContext(ctx).Model(&DevflowRun{}).
 		Where("workflow_id = ?", workflowID).
-		Updates(map[string]any{"status": status, "reason": reason}).Error
+		Updates(map[string]any{"status": status, "reason": reason, "failure_kind": failureKind}).Error
+}
+
+func (r *workflowRunRepository) SetValidationVerdict(ctx context.Context, workflowID, verdict string) error {
+	return r.db.WithContext(ctx).Model(&DevflowRun{}).
+		Where("workflow_id = ?", workflowID).
+		Update("verdict", verdict).Error
+}
+
+func (r *workflowRunRepository) ResolveValidationVerdict(ctx context.Context, workflowID, verdict, actor, note string) (bool, error) {
+	if len(note) > 2000 {
+		note = note[:2000]
+	}
+	now := time.Now().UTC()
+	// The awaiting_review guard is part of the WHERE clause, not a read-then-write:
+	// two humans deciding at once must not both succeed, and an automatic pass or
+	// fail must never be overwritable.
+	res := r.db.WithContext(ctx).Model(&DevflowRun{}).
+		Where("workflow_id = ? AND verdict = ?", workflowID, ValidationVerdictAwaitingReview).
+		Updates(map[string]any{
+			"verdict":        verdict,
+			"verdict_set_by": actor,
+			"verdict_set_at": now,
+			"verdict_note":   note,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *workflowRunRepository) SetTaskCounts(ctx context.Context, workflowID, runID string, total, done, failed int) error {
@@ -165,6 +215,23 @@ func (r *workflowRunRepository) ValidationRunByParent(ctx context.Context, orgID
 			WorkflowKindValidation, orgID, projectID, parentWorkflowID).
 		Order("created_at DESC").
 		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *workflowRunRepository) LatestValidationRunByTag(ctx context.Context, orgID, projectID, tag string) (*DevflowRun, error) {
+	q := r.db.WithContext(ctx).
+		Where("kind = ? AND org_id = ? AND project_id = ?", WorkflowKindValidation, orgID, projectID)
+	if tag != "" {
+		q = q.Where("tag = ?", tag)
+	}
+	var row DevflowRun
+	err := q.Order("created_at DESC").First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

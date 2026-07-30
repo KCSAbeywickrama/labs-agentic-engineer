@@ -151,9 +151,11 @@ function CriterionRow({
           method badge) so a long trace never crowds the assertion. */}
       {failed && (report?.spec || report?.failure) && (
         <Box sx={{ mt: 0.75, ml: "108px" }}>
-          {report?.spec && (
+          {/* Prefer the reporter's `<file>:<line>`, which points at the failing
+              assertion rather than just the spec that contains it. */}
+          {(report?.failureLocation || report?.spec) && (
             <Typography variant="caption" color="text.secondary" sx={mono}>
-              {report.spec}
+              {report.failureLocation || report.spec}
             </Typography>
           )}
           {report?.failure && (
@@ -339,7 +341,7 @@ export interface ValidationViewProps {
   /** Raw validation-criteria.json text (the acceptance oracle). */
   criteria: string;
   /**
-   * Raw tests/validation/report.json text. When present, per-criterion run
+   * Raw run-report JSON text. When present, per-criterion run
    * state is joined onto the oracle by criterion id and rendered as state chips
    * plus failure detail. Absent → the plain oracle (the Spec-view preview).
    */

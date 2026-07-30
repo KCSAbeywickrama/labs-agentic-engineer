@@ -45,6 +45,7 @@ type Activities struct {
 	planner            Planner
 	validator          Validator
 	validationResolver ValidationResolver
+	reportIngestor     ValidationReportIngestor
 	provisioner        BuildProvisioner
 	recorder           ActivityRecorder
 	titles             TaskTitleReader
@@ -61,6 +62,7 @@ type Deps struct {
 	Planner            Planner
 	Validator          Validator
 	ValidationResolver ValidationResolver
+	ReportIngestor     ValidationReportIngestor
 	Provisioner        BuildProvisioner
 	Recorder           ActivityRecorder
 	Titles             TaskTitleReader
@@ -76,6 +78,7 @@ func NewActivities(d Deps) *Activities {
 		planner:            d.Planner,
 		validator:          d.Validator,
 		validationResolver: d.ValidationResolver,
+		reportIngestor:     d.ReportIngestor,
 		provisioner:        d.Provisioner,
 		recorder:           d.Recorder,
 		titles:             d.Titles,
@@ -115,17 +118,35 @@ func (a *Activities) RecordWorkflowRun(ctx context.Context, in RecordWorkflowRun
 
 // SetWorkflowRunStatusInput marks a run terminal in the lookup index. Reason
 // carries the failure detail for a `failed` status (empty otherwise) so the
-// build summary can show WHY the run failed.
+// build summary can show WHY the run failed; FailureKind is the machine-readable
+// cause beside it.
 type SetWorkflowRunStatusInput struct {
 	WorkflowID string `json:"workflowId"`
 	Status     string `json:"status"` // completed | failed | canceled
 	Reason     string `json:"reason,omitempty"`
+	// FailureKind is a delivery.ValidationFailure* / delivery.DevFailure* value,
+	// set only alongside a `failed` status.
+	FailureKind string `json:"failureKind,omitempty"`
 }
 
-// SetWorkflowRunStatus records a run's terminal status (+ failure reason) in the
-// lookup index. Called as the final activity of the run-recording workflows.
+// SetWorkflowRunStatus records a run's terminal status (+ failure reason and
+// cause) in the lookup index. Called as the final activity of the run-recording
+// workflows.
 func (a *Activities) SetWorkflowRunStatus(ctx context.Context, in SetWorkflowRunStatusInput) error {
-	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status, in.Reason)
+	return a.runs.SetStatus(ctx, in.WorkflowID, in.Status, in.Reason, in.FailureKind)
+}
+
+// SetValidationVerdictInput carries the verdict computed from an ingested report.
+type SetValidationVerdictInput struct {
+	WorkflowID string `json:"workflowId"`
+	Verdict    string `json:"verdict"` // delivery.ValidationVerdict*
+}
+
+// SetValidationVerdict persists the validation phase's answer. Separate from the
+// status write because the two are orthogonal: the verdict says WHAT the answer
+// was, the status only whether one was reached.
+func (a *Activities) SetValidationVerdict(ctx context.Context, in SetValidationVerdictInput) error {
+	return a.runs.SetValidationVerdict(ctx, in.WorkflowID, in.Verdict)
 }
 
 // SetWorkflowRunTaskCountsInput carries a dev run's task tally — absolute
@@ -235,6 +256,50 @@ func (a *Activities) ResolveValidationTask(ctx context.Context, in ProjectRef) (
 		return 0, errNotConfigured
 	}
 	return a.validationResolver.ResolveValidationTask(ctx, in.OrgID, in.ProjectID)
+}
+
+// IngestValidationReportInput identifies the report to read: the validation issue
+// it was posted to, and the EXECUTION that posted it. Pinning the execution is
+// what makes report_missing trustworthy — a re-run against the same tag reuses the
+// same issue, so matching any report on it would return the previous run's.
+type IngestValidationReportInput struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	Issue     int    `json:"issue"`
+	Execution string `json:"execution"`
+}
+
+// IngestValidationReportOutput carries either the verdict or the reason none
+// could be reached — never both.
+type IngestValidationReportOutput struct {
+	Verdict     string `json:"verdict,omitempty"`
+	FailureKind string `json:"failureKind,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// IngestValidationReport reads the runner's report off the validation issue and
+// computes the verdict. This is the step that gives the validating phase an
+// answer: the e2e lane completes on pr-opened and the runner opens its PR whether
+// criteria passed or failed, so without this a red suite and a green suite are
+// indistinguishable.
+//
+// A missing or unreadable report comes back as DATA (FailureKind), not an error —
+// retrying cannot make an unreadable report readable, and a retry loop would only
+// delay reporting the real fault. Transport failures do return an error, so
+// Temporal retries those.
+func (a *Activities) IngestValidationReport(ctx context.Context, in IngestValidationReportInput) (IngestValidationReportOutput, error) {
+	if a.reportIngestor == nil {
+		return IngestValidationReportOutput{}, errNotConfigured
+	}
+	res, err := a.reportIngestor.IngestValidationReport(ctx, in.OrgID, in.ProjectID, in.Issue, in.Execution)
+	if err != nil {
+		return IngestValidationReportOutput{}, err
+	}
+	return IngestValidationReportOutput{
+		Verdict:     res.Verdict,
+		FailureKind: res.FailureKind,
+		Error:       res.Detail,
+	}, nil
 }
 
 // ProvisionDepsInput carries the project + tag + resolved provisioning payload

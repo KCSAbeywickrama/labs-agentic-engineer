@@ -478,6 +478,41 @@ func (c *Client) CommentIssue(ctx context.Context, owner, repo string, cred secr
 	return fmt.Errorf("github issue comment failed (status %d): %s", resp.StatusCode, string(respBody))
 }
 
+// ListIssueComments returns an issue's comments oldest-first (GET
+// /issues/{n}/comments, paginated 100/page — GitHub returns them in ascending
+// created_at order). The validation report ingest scans these for the runner's
+// marked report comment; a closed issue still serves its comments, so a report
+// stays readable after the validation PR auto-closes the issue.
+func (c *Client) ListIssueComments(ctx context.Context, owner, repo string, cred secrets.Credential, number int) ([]sourcecontrol.IssueComment, error) {
+	var out []sourcecontrol.IssueComment
+	for page := 1; ; page++ {
+		url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d/comments?per_page=100&page=%d", owner, repo, number, page)
+		var raw []struct {
+			ID        int64     `json:"id"`
+			Body      string    `json:"body"`
+			CreatedAt time.Time `json:"created_at"`
+			User      struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if err := c.getJSON(ctx, url, cred, &raw); err != nil {
+			return nil, err
+		}
+		for _, cm := range raw {
+			out = append(out, sourcecontrol.IssueComment{
+				ID:        cm.ID,
+				Body:      cm.Body,
+				Author:    cm.User.Login,
+				CreatedAt: cm.CreatedAt,
+			})
+		}
+		if len(raw) < 100 {
+			break // last (short) page
+		}
+	}
+	return out, nil
+}
+
 func (c *Client) ListIssues(ctx context.Context, owner, repo string, cred secrets.Credential, labels []string) ([]sourcecontrol.IssueInfo, error) {
 	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues?state=all&per_page=100", owner, repo)
 	if len(labels) > 0 {
