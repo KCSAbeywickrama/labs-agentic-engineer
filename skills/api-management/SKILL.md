@@ -1,183 +1,62 @@
 ---
 name: api-management
-description: How the platform's API gateway validates JWTs, injects identity headers (X-User-Id from sub, X-User-Groups for role), attaches CORS, and how to design + write services and consumers that match — including resolving the caller's role from X-User-Groups (403, not 401, for no role) and, when scoping needs them, the caller's directory attributes (e.g. their team/unit, their own id) via X-User-Name. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API.
+description: How the platform's API gateway fronts a service — it validates the caller's token, injects identity headers, and attaches CORS — plus how a consumer calls a protected API. Apply to any service with exposesAPI.auth set, and to any consumer with a dependency (a `component`-kind sibling OR an `external`-kind upstream API) that calls a protected API. What the injected identity MEANS, and how to authorize on it, is owned by `thunder-authentication`.
 ---
-
 
 # API Management
 
-## What this skill does
+A service whose design sets `exposesAPI.auth` sits behind the platform's API
+gateway. The gateway **terminates authentication**: it validates the caller's
+token against the org's IDP and passes the verified identity down as headers.
+Your code trusts those headers and never sees a token.
 
-The platform fronts every service with `exposesAPI.auth` set through an
-API gateway that validates JWTs, injects user-identity headers, and
-attaches CORS. This skill tells the agent how to design and write code
-that matches the gateway's contract, and how to call sibling protected
-APIs as well as external dependent APIs from a consumer component.
+## Constraints
 
-## Platform facts
+**Never validate a JWT.** The gateway did it already, against keys your service
+does not have — the signing keys, the `client_id` and the IDP's discovery URL are
+all platform-side. A service that parses or verifies tokens is duplicating the
+gateway and will disagree with it.
 
-The following statements describe cluster behaviour. Editing them in
-this skill does not change the cluster; it only desyncs your agent's
-output from reality.
+**Never issue one either.** No `/auth/login`, `/auth/register`, `/auth/logout`,
+or any token endpoint on any backend. The IDP owns token issuance — see
+`thunder-authentication`.
 
-- The gateway sits in front of every service whose `exposesAPI.auth` is
-  `end-user-required` or `service-required`.
-- The gateway validates JWTs against the org's IDP. Your service does
-  NOT validate JWTs.
-- The gateway injects identity headers (lowercase claim → mixed-case
-  header):
-  - `sub → X-User-Id` (the caller's canonical id — REQUIRED, always present on protected requests)
-  - `groups → X-User-Groups` (the caller's role groups — a JSON array; present when the user is in any group; drives RBAC)
-  - `username → X-User-Name` (the caller's username — the join key for
-    resolving the caller to an org-directory record; may be absent, so
-    handle that)
-  - `ouHandle → X-User-Ou` (multi-tenant, optional)
-- **Identity is not authorization.** `X-User-Id` is an OPAQUE IdP subject —
-  not a record key in any other service, so a directory lookup keyed on it
-  404s. Split the two questions a caller raises:
-  - **Role** (what may they do) comes from `X-User-Groups`, the SAME groups
-    claim the SPA reads (see `thunder-authentication`). An authenticated
-    caller with no recognized role is a **403**, never a 401 — a 401 tells
-    the SPA the token expired, so it restarts sign-in and loops forever.
-  - **Directory attributes** (which unit is theirs, their own id in the
-    directory) come from the caller's **directory record**: resolve it by
-    `X-User-Name` — the username, which the directory keys on — and read the
-    attributes from that record. A group name is a role, not an identity, so
-    never parse an attribute out of it, and never match `X-User-Id` against a
-    stored record id. `X-User-Name` is gateway-set from the validated token
-    (a client cannot spoof it), so it is safe to authorize on; but a username
-    can be renamed, so use it to LOOK UP the record, not as a stored row key —
-    key this service's own rows on the stable `X-User-Id`. The directory
-    service and its exact join field are org-specific; `internal-services`
-    owns them.
-- The gateway attaches an Envoy CORS filter to every `visibility: external`
-  HTTPRoute via the `api-configuration` ClusterTrait. Your service does
-  NOT add CORS middleware. Doubling produces two `Access-Control-Allow-Origin`
-  headers and browsers reject the response.
-- The agent does NOT see the gateway's `client_id`, JWT signing keys, or
-  the IDP's discovery URL. Those live in BFF code.
-- For consumers of a sibling protected API, the BFF injects the upstream
-  URL into the consuming workload's runtime config:
-  - Web-app consumer: read `window._env_.<NAME>_URL` (e.g.
-    `TODO_API_URL`) via `src/env.ts`.
-  - Backend consumer: read `os.Getenv("<NAME>_URL")` (Go) or
-    `process.env.<NAME>_URL` (Node).
-  Never hardcode the URL.
-- For consumers of **external** upstream APIs (declared as `external`-kind
-  entries in the component's `dependencies`), the BFF pins the URL on the
-  consuming workload's ReleaseBinding env as `<NAME>_URL`. Same read
-  pattern as sibling URLs.
-- API error responses should use `application/problem+json` with a
-  top-level `type`, `title`, `status` so the gateway can pass them
-  through unchanged.
+**Identity arrives in headers**, set by the gateway from the validated token, so
+a client cannot spoof them:
 
-## Recommended practice
+| Header | Claim | Presence |
+|---|---|---|
+| `X-User-Id` | `sub` | the caller's canonical, opaque IdP subject — always present on a protected request |
+| `X-User-Groups` | `groups` | the caller's role groups, a JSON array — present when the user is in any group |
+| `X-User-Name` | `username` | the caller's username — **may be absent** |
+| `X-User-Ou` | `ouHandle` | the caller's organization (multi-tenant, optional) |
 
-### Architect
+**`thunder-authentication` owns what these mean and how to authorize on them** —
+role resolution, the directory join, and why `X-User-Id` is not a lookup key.
+Two rules are this skill's, because they are the gateway's contract:
 
-- Set `exposesAPI.auth: end-user-required` on a `service` component when
-  the spec OR its description implies caller authentication is needed AND
-  no sign-in dependency is involved. Use the keyword rubric in the base
-  architect prompt to decide.
-- Set `exposesAPI.auth: service-required` for machine-to-machine APIs.
-- Omit `exposesAPI` entirely for public APIs (landing pages, health,
-  status hello-worlds).
-- When end-users sign in, do NOT set `exposesAPI.auth` on the backend by
-  hand. The SPA and the backend each declare the SAME `thunder-app`
-  `platform-resource` dependency, and the platform DERIVES
-  `exposesAPI.auth: end-user-required` on the backend from that dependency.
-  Setting an explicit `service-required` alongside the dependency is a
-  validation error; `service-required` stays manual only for pure
-  service-to-service APIs. The `thunder-authentication` skill owns this
-  dependency rule (and its rationale) — apply it.
-- For external upstreams that already exist outside the project, declare
-  them as `external`-kind entries in the consuming component's
-  `dependencies`. Use **name-only** declarations (`{ "kind": "external",
-  "name": "employee-api", "description": "..." }`) for catalog-known APIs —
-  the platform resolves the URL from its in-cluster catalog at design-load
-  time. Add `style: "rest-api"` (and optionally a `specPath` — a URL to a
-  published OpenAPI spec, or a repo-relative path to a committed one) when the
-  agent must call the API by specific endpoints; the coding agent otherwise
-  researches the provider's contract freely from the web at build time. The old
-  `needsSpec: true` flag is removed; the platform derives the state instead.
-- Every component with an `external` dependency MUST also carry an instruction
-  line in `componentAgentInstructions` of the form:
-  `Upstream external API <name>: env var <NAME_UPPER_SNAKE>_URL (auth: <authentication>). <description>. Read via os.Getenv / process.env / window._env_, call with standard HTTP client.`
-- Every component with a sibling backend `dependencies` entry (`kind:
-  component`) MUST also carry an instruction line of the form:
-  `Upstream <name>: read the URL from <NAME_UPPER_SNAKE>_URL via the runtime-config shim.`
-- Protected `service` `componentAgentInstructions` MUST say (verbatim or close):
-  `No /auth/* endpoints. The API Platform gateway validates the JWT and the api-configuration trait's jwt-auth policy injects identity headers on every request: X-User-Id (the caller's opaque IdP subject) and X-User-Groups (the caller's role groups, a JSON array). Stamp X-User-Id as the owner of this service's own rows (reject 401 when missing). Resolve the caller's ROLE from X-User-Groups — the same groups the SPA reads — and reject 403 (NOT 401) when the caller has no recognized role. NEVER look the caller up in an org-directory dependency by X-User-Id — an opaque subject is not a directory key. Do NOT validate JWTs yourself; do NOT add CORS middleware (the gateway handles CORS).`
-- When the spec's roles scope by the caller's own directory attributes (e.g.
-  a caller sees only rows for THEIR unit, or only rows assigned to THEIR
-  directory id) AND the component declares an org-directory dependency, add
-  one instruction line:
-  `Scope by the caller's directory record: resolve the caller by X-User-Name against <directory-dependency>, read the needed attribute (their unit / their id) from that record, and filter on it. Do NOT derive it from a group name and do NOT match X-User-Id against a stored record id — X-User-Id is an opaque subject, not a directory key.`
-- In the OpenAPI you author for a protected `service`, document the
-  injected `X-User-Id` header under `parameters` so consumers know it's
-  required-but-injected (the gateway adds it; clients don't set it). The
-  generic OpenAPI conventions are in your base design instructions.
+- **`X-User-Id` missing on a protected request → 401.** The gateway always sets
+  it when it lets a request through, so its absence means the request did not
+  come through the gateway.
+- **An authenticated caller who has no role → 403, never 401.** A 401 tells the
+  SPA its token expired, so it restarts sign-in and loops forever. The role
+  resolution itself is in `thunder-authentication`.
 
-### Tech-lead — issue body bullets
+**Own your rows by `X-User-Id`.** It is the only stable per-caller key the
+gateway gives you: stamp it on every row this service creates, and gate every
+per-user query on it.
 
-For every task targeting a `service` with `exposesAPI.auth: end-user-required`:
+**CORS.** The `api-configuration` ClusterTrait attaches an Envoy CORS filter per
+`visibility: external` HTTPRoute, so a managed API must not add its own.
 
-- Scope: "Do NOT implement `/auth/login`, `/auth/register`, or any
-  token-issuance endpoint. The platform gateway validates the JWT and
-  the `api-configuration` trait's `jwt-auth` policy injects `X-User-Id`
-  and `X-User-Groups` on every request. Stamp `X-User-Id` as the owner of
-  this service's own rows; reject 401 when it is missing."
-- Scope (only when the spec has roles): "Resolve the caller's role from
-  `X-User-Groups` (a JSON array of the caller's Thunder groups — the SAME
-  claim the SPA reads). Reject **403** — never 401 — for an authenticated
-  caller with no recognized role. NEVER resolve identity by looking
-  `X-User-Id` up in an org-directory dependency; an opaque subject is not a
-  directory key."
-- Scope (only when roles scope by the caller's own directory attributes):
-  "Resolve the caller's **directory record** by `X-User-Name` against the
-  org-directory dependency; read the caller's own attribute (unit / directory
-  id) from it and filter on that. Do NOT derive it from a group name; do NOT
-  match `X-User-Id` against a stored record id (an opaque subject is not a
-  directory key). When `X-User-Name` is absent or resolves to no record,
-  return **403** (not 401)."
-- Acceptance criteria (directory-scoped roles): "Two callers whose directory
-  records differ each see only their own scoped rows, resolved via the
-  caller's directory record — not via a group name or an `X-User-Id` match."
-- Scope: "Do NOT validate JWTs in code; do NOT add CORS middleware. The
-  gateway handles both."
-- Acceptance criteria: "Requests missing `X-User-Id` get 401; an
-  authenticated caller with no recognized role gets 403 (not 401), so the
-  SPA does not loop; a caller with a role sees only data their role
-  permits. `/health` is exempt and returns 200 without auth."
+**Document the injected header.** In the OpenAPI you author for a protected
+service, list `X-User-Id` under `parameters` so consumers know it is
+required-but-injected: the gateway adds it, clients never set it.
 
-For every task whose component has one or more `external`-kind
-`dependencies` entries, add **one Scope bullet per entry** of the form:
+## Implementation
 
-- "External upstream `<name>`: `<METHOD or 'GET'>` `<url>` —
-  <description>. Authentication: <authentication>. Read the URL from
-  env var `<NAME_UPPER_SNAKE>_URL` (already wired in the component's
-  design instructions) and call with a standard HTTP client."
-
-And one Acceptance criteria bullet per entry:
-
-- "Calls to external upstream `<name>` use the URL from env var
-  `<NAME_UPPER_SNAKE>_URL` (default `<url>`) and handle non-2xx
-  responses without crashing. <auth-specific expectation: `none` → no
-  Authorization header; `bearer` → caller's `Authorization` header
-  forwarded; `api-key` → static key from env.>"
-
-Use the literal URL, description, and authentication string from the
-`external` dependency entry — do not invent values.
-
-For service components (NOT web-apps), always add a Scope bullet: "Do
-NOT add CORS middleware. The platform's gateway attaches an Envoy CORS
-filter to every `visibility: external` HTTPRoute via the
-`api-configuration` ClusterTrait; doubled CORS headers break browsers."
-
-### Coding agent — implementation
-
-Read `X-User-Id` from every protected handler; reject 401 when missing.
-Per-user rows MUST be keyed on `X-User-Id`.
+Read `X-User-Id` in every protected handler; 401 when missing. Gate per-user
+queries on it — both filters, always:
 
 ```go
 func mustUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -187,13 +66,6 @@ func mustUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
         return "", false
     }
     return uid, true
-}
-
-func listTodos(w http.ResponseWriter, r *http.Request) {
-    uid, ok := mustUserID(w, r); if !ok { return }
-    rows, err := db.QueryContext(r.Context(),
-        `SELECT id, title, done FROM todos WHERE user_id = ? ORDER BY id DESC`, uid)
-    /* ... */
 }
 
 func updateTodo(w http.ResponseWriter, r *http.Request) {
@@ -210,105 +82,17 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-When the spec has roles, resolve the caller's role from `X-User-Groups`
-(the same groups the SPA reads) — NOT by looking `X-User-Id` up in an
-org-directory service. Return **403** (never 401) when no group maps to a
-role, so the SPA does not loop:
+Role-based and directory-scoped handlers build on this — see
+`thunder-authentication`.
 
-```go
-func callerRole(r *http.Request) string { // "" = no recognized role
-    for _, g := range parseGroups(r.Header.Get("X-User-Groups")) {
-        lg := strings.ToLower(g)
-        switch { // adapt the keywords to the spec's role names
-        case strings.Contains(lg, "admin"):   return "admin"
-        case strings.Contains(lg, "auditor"): return "auditor"
-        }
-    }
-    return ""
-}
+## Calling a protected upstream
 
-// X-User-Groups is a JSON array (e.g. ["Compliance Admin"]); accept a
-// comma-separated fallback too.
-func parseGroups(h string) []string {
-    h = strings.TrimSpace(h)
-    if h == "" { return nil }
-    var arr []string
-    if strings.HasPrefix(h, "[") && json.Unmarshal([]byte(h), &arr) == nil {
-        return arr
-    }
-    return strings.Split(h, ",")
-}
-```
+When forwarding the caller's auth to an upstream `bearer` API, propagate the
+inbound `Authorization` header verbatim — never re-issue or mint a token.
 
-When roles scope by the caller's own directory attributes — their unit, their
-own id in the directory — resolve the caller's **directory record** by
-`X-User-Name`, then filter on that record's fields. `X-User-Name` is the join
-key; never match `X-User-Id` (an opaque subject) against a stored record id,
-and never parse an attribute out of a group name. Absent/unresolved → 403:
-
-```go
-// resolveCaller looks the caller up in the org directory by username
-// (X-User-Name). ok == false → answer 403, never 401.
-func resolveCaller(r *http.Request) (DirectoryRecord, bool) {
-    username := r.Header.Get("X-User-Name")
-    if username == "" {
-        return DirectoryRecord{}, false
-    }
-    return directory.FindByUsername(r.Context(), username) // GET <dir>/...?username=...
-}
-
-func listScoped(w http.ResponseWriter, r *http.Request) {
-    switch callerRole(r) {
-    case "":      /* 403: no role */ return
-    case "admin": // no filter — sees everything
-    default:      // scoped to the caller's own directory attribute
-        rec, ok := resolveCaller(r); if !ok { /* 403 */ return }
-        // filter the query on rec.Unit or rec.ID — the attribute the spec
-        // scopes by — NOT r.Header.Get("X-User-Id") and NOT a group name.
-    }
-}
-```
-
-The directory's real endpoint, its username field, and the dependency wiring
-are org-specific — `internal-services` owns them; do not hardcode a roster.
-
-Gate per-user queries with `AND user_id = ?`. Do NOT validate JWTs in
-code. Do NOT add CORS middleware. Errors as `application/problem+json`
-with a top-level `type`, `title`, `status`.
-
-`/health` should remain exempt (no `mustUserID` call) so the platform's
-readiness probe can reach it without auth.
-
-For Go consumers of sibling APIs OR external dependent APIs, read the
-URL from env at startup (NOT per-request); fail fast if missing:
-
-```go
-upstreamURL := os.Getenv("EMPLOYEE_API_URL")
-if upstreamURL == "" {
-    log.Fatal("EMPLOYEE_API_URL not set")
-}
-```
-
-When forwarding caller auth to an upstream `bearer` API, propagate the
-inbound `Authorization` header verbatim — do NOT re-issue a token.
-
-For consumers of dependent APIs from a service component, the URL env
-is set on the workload's ReleaseBinding at dispatch time; there is no
-build-time URL injection. The agent's Dockerfile must not bake in any
-URL.
-
-The generic OpenAPI authoring conventions (3.0.3, `/health` on every
-service, cross-component contract agreement) live in the architect's
-design instructions — they are not restated here. The auth-specific
-addition is in the Architect sub-section above (document the injected
-`X-User-Id` header in the spec).
-
-### Common pitfalls
+## Pitfalls
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| CORS error in browser when calling upstream | Backend wrongly ships its own CORS middleware (doubled headers), OR upstream's `workload.yaml` lacks `visibility: external` | Remove the middleware; confirm `visibility: external` on upstream's `workload.yaml`. |
-| Every protected request 401s in test | Test calls don't carry `X-User-Id`; in production the gateway sets it, in test you set it manually | In integration tests, set `X-User-Id` directly on the request; don't try to mint a JWT. |
-| `/health` returns 401 | Handler accidentally went through `mustUserID` middleware | Carve out `/health` (and any other public path) before the auth gate. |
-| Signed-in user loops back to the login page forever | A protected handler answers no-role (or a failed org-directory lookup keyed on `X-User-Id`) with **401**; the SPA reads 401 as "token expired" and restarts sign-in | Resolve role from `X-User-Groups`; return **403** for an authenticated caller with no role; never key an org-directory lookup on `X-User-Id`. |
-| A role-scoped caller signs in but sees no rows | Scope derived the caller's attribute from a group NAME (empty for a generic role group), or matched the caller's `X-User-Id` (an opaque subject) against a stored directory id (never equal) | Scope by the caller's **directory record**: resolve it via `X-User-Name`, read the attribute (unit / id) from it, filter on that. Role still comes from `X-User-Groups`. |
+| CORS error in the browser when calling this API | The service ships its own CORS middleware (doubled headers), or its `workload.yaml` lacks `visibility: external` | Remove the middleware; confirm `visibility: external`. |
+| Every protected request 401s in tests | Test calls carry no `X-User-Id` — in production the gateway sets it | Set `X-User-Id` directly on the request in tests; don't try to mint a JWT. |

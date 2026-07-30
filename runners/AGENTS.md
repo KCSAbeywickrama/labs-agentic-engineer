@@ -55,6 +55,17 @@ edits (see `deployments/scripts/setup-k3d.sh`).
   and is what the test suite caps; reading an inert paragraph is cheaper than
   maintaining a second copy of it. ADR:
   `remote-worker/design/decisions/ADR-0001-one-mode-composed-skill.md`.
+- **`aep` is the umbrella skill; the stack skills sit under it.** It owns the run
+  (discover → order → branch → work → verify → finish) and the platform contract
+  every component obeys whatever it is written in — App Path, `workload.yaml`,
+  port, config + error shape, CORS ownership, dependency wiring, deny-list.
+  The repo-root `skills/` entries (`go`, `react-webapp`, `api-management`,
+  `thunder-authentication`) own only their stack: layout, `Dockerfile`, libraries,
+  the verify command, their own pitfalls. Restating a platform-contract rule in a
+  stack skill is a defect — it is preloaded context paid twice, and the two copies
+  drift (a live example: the deny-list once banned CORS middleware outright while
+  the `go` skill required it for an unmanaged service). Niche material that only
+  some runs need goes to `plugin/skills/aep/references/`, not into the body.
 - **Running the `aep` skill by hand.** Install the plugin into your own Claude
   Code (`claude plugin install <repo>/runners/remote-worker/plugin`) and use your
   own `gh auth login`; the workflow is the platform's. Note the installed plugin

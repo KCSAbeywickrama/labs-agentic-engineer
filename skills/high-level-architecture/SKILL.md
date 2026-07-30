@@ -83,12 +83,16 @@ the requirements state them.
 
 After emitting or changing a component's design, record the skills that
 component's build actually needs as a `skillsApplied` array **inside that
-component's `specs/design/components/<name>/design.json`** — e.g. a Go API
-service → `["openapi-conventions", "go"]`; a web-application →
-`["excalidraw", "react"]`. It is a JSON key on the component's design object,
-so include it when you write that `design.json` (addFile/editFile) — do NOT
-put `skillsApplied` in `design.md` frontmatter. Each component carries only the
-skills its own build needs.
+component's `specs/design/components/<name>/design.json`** — use the exact
+catalog names, e.g. a Go API service → `["openapi-conventions", "go"]`; a
+web-application → `["excalidraw-wireframes", "react-webapp"]`. Add
+`"api-management"` to any service that sits behind the gateway, and
+`"thunder-authentication"` to **both** sides of sign-in — the SPA *and* every
+protected backend it calls, since that skill owns how each resolves the caller's
+role. It is a JSON key on the component's design object, so include it when you
+write that `design.json` (addFile/editFile) — do NOT put `skillsApplied` in
+`design.md` frontmatter. Each component carries only the skills its own build
+needs.
 
 ## Deriving components — deployment units the requirements justify
 
@@ -115,9 +119,13 @@ Do NOT split by:
   receipts-service... is a domain model dressed as a topology; those are
   modules of ONE service;
 - layer — auth, notifications, file storage as own services when they are
-  modules of the API;
+  modules of the API; a single frontend split into `ui-shell` + `ui-pages` when
+  it is one bundle;
 - infrastructure — api-gateway, database, queue, auth server are NEVER
-  components; the platform provides them.
+  components; the platform provides them;
+- periodic work — a nightly digest or a cleanup sweep is a background task the
+  owning service starts, not a component of its own. Only a genuinely different
+  runtime or scaling profile (above) justifies splitting one off.
 
 When nothing above forces a split, a small system naturally lands at one
 service + one web-application — that is an outcome of the rule, not a target. Name
@@ -130,7 +138,10 @@ components in kebab-case after their responsibility (`expense-api`,
 (those are rejected, and a wrong value silently breaks the app's deployment and
 runtime config). The `-webapp` in a component NAME is fine; the `type` is still
 `"web-application"`. Other kinds the requirements imply (`"scheduled-task"`,
-`"worker"`, …) are captured verbatim.
+`"worker"`, …) are captured verbatim, but the platform installs component types
+for `service` and `web-application` ONLY — anything else records intent and does
+not deploy, so reach for one when the requirements truly force it, never as the
+default home for periodic work.
 
 ## Per-component design.json
 
@@ -146,7 +157,7 @@ violations:
   "language": "Go",                   // implementation language, e.g. "Go", "TypeScript"
   "buildpack": "docker",              // always "docker"
   "appPath": "expense-api",           // repo-relative source dir — the component name
-  "entrypoint": "deployment/service", // deploy entry
+  "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
   "dependencies": [ /* see below — every arrow in Interactions appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
@@ -218,7 +229,11 @@ kind by WHAT the target is:
   `{ "kind": "platform-resource", "name": "orders-db", "resourceType": "postgres", "parameters": { "size": "small" } }`.
   `thunder-app` is the platform's auth resource type: when the spec implies
   users sign in, declare it on BOTH the SPA and each protected service, using
-  the SAME dependency `name`. For `thunder-app` ONLY, proposing the `scopes`
+  the SAME dependency `name` — that shared name is what ties sign-in to
+  token-carrying API calls, and it also becomes the prefix of the SPA's runtime
+  OIDC keys (`user-auth` → `window._env_.USER_AUTH_*`), so pick a clear one.
+  Nothing else provisions auth: with no such dependency the SPA deploys unable
+  to sign in. For `thunder-app` ONLY, proposing the `scopes`
   parameter value is allowed (default `openid profile email`); every other
   resource type keeps the no-invented-parameters rule. Never propose
   `redirectUris` — they are platform-managed. See the `thunder-authentication`
