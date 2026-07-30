@@ -254,9 +254,9 @@ test("resolveTaskSkills: end-to-end with an injected clone", async () => {
     workspace: ws,
     scope: { kind: "component", componentName: "api" },
     skillsRepoURL: "https://github.com/acme/org-skills",
-    pat: "tok",
+    cloneAuth: { helperPath: "/stage/credhelper.sh", bearerFile: "/stage/bearer" },
     scratchDir,
-    clone: async (repoURL, _pat, dest) => {
+    clone: async (repoURL, _auth, dest) => {
       clonedRepoURL = repoURL;
       cloneCount += 1;
       // Fake the clone: copy the fixture tree into the scratch dir.
@@ -279,7 +279,7 @@ test("resolveTaskSkills: no applied skills → no clone, empty result", async ()
     workspace: ws,
     scope: { kind: "component", componentName: "api" },
     skillsRepoURL: "https://github.com/acme/org-skills",
-    pat: "tok",
+    cloneAuth: { helperPath: "/stage/credhelper.sh", bearerFile: "/stage/bearer" },
     scratchDir: path.join(os.tmpdir(), "aep-skills-noop", "task-2"),
     clone: async () => {
       cloned = true;
@@ -303,9 +303,9 @@ test("resolveTaskSkills: project scope materialises skills from every component"
     workspace: ws,
     scope: { kind: "project" },
     skillsRepoURL: "https://github.com/acme/org-skills",
-    pat: "tok",
+    cloneAuth: { helperPath: "/stage/credhelper.sh", bearerFile: "/stage/bearer" },
     scratchDir: path.join(os.tmpdir(), "aep-skills-project", "cycle-1"),
-    clone: async (_repoURL, _pat, dest) => {
+    clone: async (_repoURL, _auth, dest) => {
       await fs.promises.cp(cloneSrc, dest, { recursive: true });
     },
   });

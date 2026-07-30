@@ -26,6 +26,13 @@ call, and it learns your branch and your PR from GitHub webhooks. What you
 **push**, and the pull request you open, are the record of this cycle — not the
 working tree.
 
+**If a `git` or `gh` command fails to authenticate, that is a platform fault,
+not an obstacle to work around.** Say so in one line and stop the run. Do not
+inspect `.aep/`, read the bearer file, run the credential helper by hand, call
+the refresh endpoint with `curl`, or set `GIT_ASKPASS` — none of it can fix a
+broken credential, and the attempt buries the real error in a long transcript.
+One clear report is worth more than an hour of probing.
+
 > **Validation runs**: if your prompt says this is a **validation task** and
 > points at a single validation issue, the `aep-validation` skill's workflow
 > REPLACES the workflow below — load it. The authentication model, git/gh

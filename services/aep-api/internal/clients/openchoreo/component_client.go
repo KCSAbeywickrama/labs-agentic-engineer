@@ -25,6 +25,7 @@ import (
 
 	ocgen "github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 )
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/component_client_mock.go . ComponentClient
@@ -1208,6 +1209,19 @@ func codingAgentParameters(p CodingAgentParams) map[string]interface{} {
 // goes into the network-error wrap to keep slog logs distinguishable
 // (trigger build / trigger coding-agent).
 func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string, body ocgen.CreateWorkflowRunJSONRequestBody, opName string) (*gen.WorkflowRun, error) {
+	// Refuse a name OpenChoreo would accept and then never build. This is the
+	// one choke point every WorkflowRun create passes through, and the check is
+	// here rather than in the name generators because it has to hold for names
+	// they do not own — a caller-supplied runName included. The failure it
+	// replaces is the worst kind: a 201 Created, then no build pod, then a run
+	// stuck at WorkflowPending forever with nothing on its status explaining it.
+	if n := body.Metadata.Name; len(n) > k8sname.MaxLabelValueLen {
+		return nil, fmt.Errorf(
+			"%s: WorkflowRun name %q is %d chars, over the %d-char Kubernetes label-value limit "+
+				"(OpenChoreo and Argo both copy it into a label, so this run would be accepted and then never render)",
+			opName, n, len(n), k8sname.MaxLabelValueLen)
+	}
+
 	resp, err := c.oc.CreateWorkflowRunWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to %s: %w", opName, err)

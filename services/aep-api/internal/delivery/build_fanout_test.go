@@ -18,9 +18,11 @@ package delivery_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 )
 
 // TestDiffComponents pins the merged-PR path diff — the ONE rule the event
@@ -142,4 +144,87 @@ func TestBuildsAtMerge(t *testing.T) {
 			t.Fatalf("builds = %+v, want none", got)
 		}
 	})
+
+	// A long project and component must round-trip exactly like short ones. The
+	// names they produce are truncated, so this is the case where a naive
+	// shortening would quietly break the read side.
+	t.Run("long names still round-trip", func(t *testing.T) {
+		const longProject = "invoicing-freelancers-creates621"
+		const longComponent = "invoicing-webapp-admin-portal"
+		got := delivery.BuildsAtMerge([]delivery.MergeBuild{
+			{
+				Component: longComponent,
+				RunName:   delivery.BuildRunName(longProject, longComponent, sha, 2),
+				Status:    "Succeeded", Completed: true,
+			},
+		}, longProject, sha)
+
+		if len(got) != 1 || got[0].Attempt != 2 || got[0].Component != longComponent {
+			t.Fatalf("builds = %+v, want the truncated-name component at attempt 2", got)
+		}
+	})
+}
+
+// TestBuildRunNameFitsLabelBudget is the regression gate for the failure this
+// naming scheme exists to prevent: a run name one character over the 63-char
+// Kubernetes label-value limit is ACCEPTED by OpenChoreo and then never builds,
+// leaving the run pending forever with nothing on its status to explain it.
+//
+// The bound has to hold for every project and component name, not for the ones
+// that happen to exist today: a project carries a generated uniqueness suffix
+// and a component is named by the design agent, so neither length is bounded at
+// the point the name is composed.
+func TestBuildRunNameFitsLabelBudget(t *testing.T) {
+	const sha = "4b4fede2508f5354161ca86f0c6dc178f999c002"
+
+	cases := []struct{ name, project, component string }{
+		{"the pair that overflowed in production", "invoicing-freelancers-creates621", "invoicing-webapp"},
+		{"the pair that fit, one char under", "invoicing-freelancers-creates621", "invoicing-api"},
+		{"short names", "shop", "api"},
+		{"absurd project", strings.Repeat("p", 500), "api"},
+		{"absurd component", "shop", strings.Repeat("c", 500)},
+		{"absurd both", strings.Repeat("p", 500), strings.Repeat("c", 500)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Attempts beyond the re-trigger budget are included so the reserved
+			// room for the ordinal is exercised, not assumed.
+			for _, attempt := range []int{1, 2, 99} {
+				got := delivery.BuildRunName(tc.project, tc.component, sha, attempt)
+				if len(got) > k8sname.MaxLabelValueLen {
+					t.Errorf("BuildRunName attempt %d = %q (%d chars), over the %d-char label budget",
+						attempt, got, len(got), k8sname.MaxLabelValueLen)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildRunPrefixSeparatesSimilarComponents pins that two components whose
+// names survive truncation identically still get distinct prefixes.
+//
+// This is a correctness invariant, not a cosmetic one. The prefix IS the attempt
+// count: ensureBuildRun counts the runs carrying it to decide whether a red
+// build has already spent its one automatic re-trigger. Two components sharing a
+// prefix would pool their attempts, so one could consume the other's budget and
+// silently never be rebuilt.
+func TestBuildRunPrefixSeparatesSimilarComponents(t *testing.T) {
+	const project = "invoicing-freelancers-creates621"
+	const sha = "4b4fede2508f"
+
+	seen := map[string]string{}
+	for _, component := range []string{
+		"invoicing-webapp",
+		"invoicing-webapp-admin",
+		"invoicing-webapp-admin-portal",
+		"invoicing-webapp-reporting",
+	} {
+		prefix := delivery.BuildRunNamePrefix(project, component, sha)
+		if prior, dup := seen[prefix]; dup {
+			t.Errorf("components %q and %q share prefix %q — their attempt counts would pool",
+				prior, component, prefix)
+		}
+		seen[prefix] = component
+	}
 }

@@ -211,6 +211,19 @@ func (l *loop) awaitLanding(ctx workflow.Context, deadline workflow.Future) land
 // eventually sees every expected component settle — and inventing a timeout
 // here would create a failure class §7 does not name, which is exactly how
 // terminal reasons stop being honest.
+//
+// That premise has a dependency worth stating, because it has been broken once:
+// a WorkflowRun only inherits the platform's deadline once it RENDERS into an
+// Argo Workflow. A run that OpenChoreo accepts but cannot render never gets one,
+// and it is indistinguishable from a slow build from here — its status says
+// WorkflowPending with no condition and no event naming the cause. The known way
+// to produce that is a run name over the Kubernetes label-value budget, which is
+// now refused at creation (see k8sname.MaxLabelValueLen and the guard in the
+// OpenChoreo client's createWorkflowRun), so this loop's premise holds by
+// construction rather than by luck. If another render failure is ever found, the
+// fix belongs there too — at the point of creation, where the cause is still
+// known — and not in a timeout here, which could only report "something took too
+// long" about a run that was never going to start.
 func (l *loop) awaitBuilds(ctx workflow.Context) (cycleResult, error) {
 	for {
 		state, err := l.pollBuilds(ctx)

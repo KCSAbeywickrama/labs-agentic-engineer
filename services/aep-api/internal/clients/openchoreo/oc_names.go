@@ -20,6 +20,20 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+)
+
+// unixMilliDigits is the width of the timestamp NewBuildRunName appends. Thirteen
+// digits covers every instant from 2001 to 2286.
+const unixMilliDigits = 13
+
+// buildRunNameWidths cap the readable head. See delivery's equivalents: both
+// halves are recoverable in full from the run's own labels, so the cap costs
+// readability and nothing else.
+const (
+	runNameProjectWidth   = 18
+	runNameComponentWidth = 18
 )
 
 // NewBuildRunName produces the WorkflowRun metadata.name for a new build of
@@ -27,10 +41,21 @@ import (
 // name and stage the per-WorkflowRun build Secret (named
 // `<runName>-git-secret`) before POSTing the WorkflowRun — see
 // docs/design/build-credential-injection.md. The millisecond timestamp
-// keeps successive triggers unique while staying well inside DNS-1123
-// length once suffixed with `-git-secret`.
+// keeps successive triggers unique.
+//
+// Composed through k8sname.Bounded against MaxLabelValueLen, for the reason
+// given there: the binding budget on a run name is the 63-char label-value
+// limit, not the 253-char name limit, and a name over it is accepted by
+// OpenChoreo and then never builds. Formatting the parts directly used to leave
+// this path with ZERO headroom (a 32-char project and a 16-char component land
+// on exactly 63), so any slightly longer name would have broken the console's
+// Build button the same silent way.
 func NewBuildRunName(projectName, componentName string) string {
-	return fmt.Sprintf("%s-%d", ScopedComponentName(projectName, componentName), time.Now().UnixMilli())
+	head := k8sname.Bounded(k8sname.MaxLabelValueLen-1-unixMilliDigits,
+		k8sname.Capped(projectName, runNameProjectWidth),
+		k8sname.Capped(componentName, runNameComponentWidth),
+	)
+	return fmt.Sprintf("%s-%d", head, time.Now().UnixMilli())
 }
 
 // ScopedComponentName is the k8s metadata name OC uses for a component. OC

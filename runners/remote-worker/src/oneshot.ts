@@ -34,7 +34,7 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { provisionWorkspace, refreshGitToken } from "./lib/workspace.js";
+import { provisionWorkspace } from "./lib/workspace.js";
 import { runClaudeQuery } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
@@ -207,13 +207,13 @@ async function main(): Promise<number> {
     console.log("[oneshot] validation run — no design skills apply; using the aep-validation skill only");
   } else if (skillsRepoURL) {
     try {
-      const skillsBearer = ccProvider ? await ccProvider.getToken() : req.bearer;
-      const pat = await refreshGitToken(req, skillsBearer);
       const resolutions = await resolveTaskSkills({
         workspace: layout.workspace,
         scope: { kind: "project" },
         skillsRepoURL,
-        pat,
+        // Same credential helper the project clone used — one exchange
+        // implementation, and no GitHub token in this process.
+        cloneAuth: { helperPath: layout.helperBin, bearerFile: layout.bearerFile },
         // Clone OUTSIDE the work tree so its nested .git never enters the
         // agent's git status / commits.
         scratchDir: path.join(os.tmpdir(), "aep-skills", req.taskId),

@@ -21,6 +21,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 )
 
 // The merged-pull-request → builds contract, shared by the two halves of the
@@ -89,8 +91,13 @@ func fileUnder(file, appPath string) bool {
 }
 
 // ShortSHA is the 12-hex-character form of a commit used in run names, dedupe
-// keys and issue prose. Twelve is git's own long-enough-to-be-unique default
-// and keeps a WorkflowRun name inside the Kubernetes name budget.
+// keys and issue prose. Twelve is git's own long-enough-to-be-unique default.
+//
+// It is NOT what keeps a run name inside its Kubernetes budget — believing that
+// is what produced a 64-char name that silently never built. The budget is
+// enforced where the name is composed (BuildRunNamePrefix, via k8sname.Bounded),
+// so this width is free to serve readability and the GitHub dedupe keys that
+// also embed it.
 func ShortSHA(sha string) string {
 	s := strings.ToLower(strings.TrimSpace(sha))
 	if len(s) > 12 {
@@ -99,13 +106,46 @@ func ShortSHA(sha string) string {
 	return s
 }
 
+// Widths of the readable head of a build run name. The project and component
+// are capped because neither has a bounded length — a project carries a
+// generated uniqueness suffix, and a component is named by the design agent —
+// while the commit is never truncated, because matching a build to a commit is
+// the main reason anyone reads one of these names. Both are recoverable in full
+// from the run's own `openchoreo.dev/{project,component}` labels, so capping
+// them costs nothing but readability.
+const (
+	runNameProjectWidth   = 18
+	runNameComponentWidth = 18
+	// maxAttemptDigits is the room reserved for the trailing ordinal. The
+	// re-trigger budget allows two attempts per (component, commit); two digits
+	// leaves that room an order of magnitude of headroom.
+	maxAttemptDigits = 2
+)
+
+// buildRunNameBudget is what the prefix may spend: the whole label-value budget
+// less the "-<attempt>" that BuildRunName appends. Subtracting the suffix HERE
+// is what makes every attempt name bounded by construction.
+const buildRunNameBudget = k8sname.MaxLabelValueLen - 1 - maxAttemptDigits
+
 // BuildRunNamePrefix is the (component, commit) half of a build WorkflowRun's
 // name — the key both the automatic re-trigger budget and the supervisor's
 // cycle-build read count on. Attempts share it and differ only in the trailing
 // ordinal, so counting the runs whose name carries this prefix IS the attempt
 // count, derived from OpenChoreo rather than stored anywhere.
+//
+// The name is composed through k8sname.Bounded rather than formatted directly,
+// because it must fit MaxLabelValueLen for ANY project and component name: a
+// name one character over is accepted by OpenChoreo and then never builds
+// (k8sname.MaxLabelValueLen explains why). Bounded truncates the readable head
+// to fit and appends a digest of the untruncated identity, so two components
+// that share a truncated head still get distinct prefixes and cannot
+// contaminate each other's attempt count.
 func BuildRunNamePrefix(projectID, component, sha string) string {
-	return strings.ToLower(fmt.Sprintf("%s-%s-%s-", projectID, component, ShortSHA(sha)))
+	return k8sname.Bounded(buildRunNameBudget,
+		k8sname.Capped(projectID, runNameProjectWidth),
+		k8sname.Capped(component, runNameComponentWidth),
+		k8sname.Whole(ShortSHA(sha)),
+	) + "-"
 }
 
 // BuildRunName names attempt n (1-based) of a component's build at a commit.
