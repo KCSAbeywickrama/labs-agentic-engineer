@@ -26,7 +26,7 @@
 // user who triggered the turn (`ownerId`) can submit or skip — they hold the
 // SSE stream back to the agent; everyone else co-authors.
 
-import { Box, Button, Checkbox, Chip, Stack, TextField, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Checkbox, Chip, Radio, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 import { Sparkles, Users } from "@wso2/oxygen-ui-icons-react";
 import type { Doc } from "yjs";
 import type { AskQuestionInput, QuestionAnswer } from "@aep/agent-stream";
@@ -39,7 +39,76 @@ import {
   type RoomQuestion,
 } from "../../agent-chat/questionRoom";
 
-/** One question block: a heading, its options, and an "Other…" free-text row. */
+/**
+ * One selectable option card: radio/checkbox, label, "Recommended" badge, and
+ * the option's full description — always visible, so the user can weigh the
+ * choices without hunting through tooltips.
+ */
+function OptionCard({
+  opt,
+  multi,
+  isOn,
+  disabled,
+  onSelect,
+}: {
+  opt: AskQuestionInput["options"][number];
+  multi: boolean;
+  isOn: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  const Control = multi ? Checkbox : Radio;
+  return (
+    <Box
+      role={multi ? "checkbox" : "radio"}
+      aria-checked={isOn}
+      tabIndex={disabled ? -1 : 0}
+      onClick={disabled ? undefined : onSelect}
+      onKeyDown={
+        disabled
+          ? undefined
+          : (e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                onSelect();
+              }
+            }
+      }
+      sx={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 1,
+        p: 2,
+        border: 1,
+        borderColor: isOn ? "primary.main" : "divider",
+        borderRadius: 2,
+        bgcolor: isOn ? "action.selected" : "background.paper",
+        cursor: disabled ? "default" : "pointer",
+        transition: "border-color 120ms, background-color 120ms",
+        "&:hover": disabled ? undefined : { borderColor: "primary.main" },
+      }}
+    >
+      <Control size="small" checked={isOn} disabled={disabled} disableRipple sx={{ p: 0, mt: 0.25 }} />
+      <Box sx={{ minWidth: 0 }}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+          <Typography variant="body1" sx={{ fontWeight: 600 }}>
+            {opt.label}
+          </Typography>
+          {opt.recommended && (
+            <Chip label="Recommended" size="small" color="primary" variant="outlined" sx={{ height: 20 }} />
+          )}
+        </Stack>
+        {opt.description && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            {opt.description}
+          </Typography>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+/** One question block: heading, context detail, option cards, and an "Other…" free-text row. */
 function QuestionBlock({
   q,
   answer,
@@ -56,53 +125,39 @@ function QuestionBlock({
   const multi = q.multiSelect === true;
   const selected = answer?.selected ?? [];
   return (
-    <Box sx={{ mb: 4 }}>
+    <Box sx={{ mb: 5 }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
         {q.question}
       </Typography>
+      {q.detail && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          {q.detail}
+        </Typography>
+      )}
       {multi && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
           Pick as many as apply
         </Typography>
       )}
-      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", mt: 1 }}>
-        {q.options.map((opt) => {
-          const isOn = selected.includes(opt.label);
-          const chip = (
-            <Chip
-              key={opt.label}
-              label={
-                multi ? (
-                  <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-                    <Checkbox size="small" checked={isOn} sx={{ p: 0, mr: 0.5 }} disableRipple />
-                    <span>{opt.label}</span>
-                  </Stack>
-                ) : (
-                  opt.label
-                )
-              }
-              onClick={disabled ? undefined : () => onSelect(opt.label)}
-              variant={isOn ? "filled" : "outlined"}
-              color={isOn ? "primary" : opt.recommended ? "primary" : "default"}
-              disabled={disabled}
-              sx={{ borderRadius: 8, py: 2, px: 0.5, cursor: disabled ? "default" : "pointer" }}
-            />
-          );
-          return opt.description ? (
-            <Tooltip key={opt.label} title={opt.description}>
-              <span>{chip}</span>
-            </Tooltip>
-          ) : (
-            chip
-          );
-        })}
+      <Stack spacing={1.5} role={multi ? "group" : "radiogroup"} aria-label={q.question} sx={{ mt: 1.5 }}>
+        {q.options.map((opt) => (
+          <OptionCard
+            key={opt.label}
+            opt={opt}
+            multi={multi}
+            isOn={selected.includes(opt.label)}
+            disabled={disabled}
+            onSelect={() => onSelect(opt.label)}
+          />
+        ))}
         <TextField
           size="small"
-          placeholder="Other…"
+          placeholder="Other — describe your own answer, or add context to a choice…"
           value={answer?.freeText ?? ""}
           disabled={disabled}
+          multiline
           onChange={(e) => onNote(e.target.value)}
-          sx={{ minWidth: 200, "& .MuiOutlinedInput-root": { borderRadius: 8 } }}
+          sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
         />
       </Stack>
     </Box>
