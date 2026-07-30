@@ -27,7 +27,7 @@ import (
 
 // ErrEndUserAuthConflict and ErrResourceCatalogUnavailable are the build-local
 // pre-tag sentinels the handler maps to 409 / 503. build cannot import the
-// design feature (arch allowlist), so the AuthDeriver adapter wired at the
+// design feature (arch allowlist), so the DesignFactDeriver adapter wired at the
 // composition root translates design's equivalents into these before they cross
 // the port boundary.
 var (
@@ -42,12 +42,12 @@ type SpecCollector interface {
 	CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error)
 }
 
-// AuthDeriver runs the end-user-auth derivation against the design at HEAD and
+// DesignFactDeriver runs the end-user-auth derivation against the design at HEAD and
 // commits any stamped exposesAPI.auth BEFORE the tag-cut. The adapter maps
 // design's conflict/catalog sentinels onto ErrEndUserAuthConflict /
 // ErrResourceCatalogUnavailable.
-type AuthDeriver interface {
-	DeriveEndUserAuthAtHead(ctx context.Context, orgID, projectID string) error
+type DesignFactDeriver interface {
+	DerivePlatformResourceFactsAtHead(ctx context.Context, orgID, projectID string) error
 }
 
 // SecretStager writes an external dependency's secret values to SM-API and

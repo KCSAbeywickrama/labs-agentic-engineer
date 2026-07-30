@@ -97,15 +97,15 @@ var (
 // the single-tag POST /build flow now, so the design feature is a write helper,
 // not a gate. What remains: CollectSpec (dependency spec collection), the read
 // model ListDependencies, and the pre-tag step the thin POST /build path reuses
-// — DeriveEndUserAuthAtHead (issue #164). There is no exported interface —
+// — DerivePlatformResourceFactsAtHead (issue #164). There is no exported interface —
 // every caller holds the concrete type; the composition root adapts the
 // build-path method onto a narrow consumer interface
 // (internal/app/build_adapters.go) since build cannot import design.
 type designService struct {
 	store           *ArtifactStore
 	artifactSvc     ArtifactService
-	fileCommitter   designFileCommitter   // for CollectSpec's committed-truth spec write; may be nil
-	resourceCatalog resourceMarkerCatalog // for DeriveEndUserAuthAtHead end-user-auth derivation; may be nil (fails closed when platform-resource deps exist)
+	fileCommitter   designFileCommitter // for CollectSpec's committed-truth spec write; may be nil
+	resourceCatalog resourceTypeCatalog // for DerivePlatformResourceFactsAtHead end-user-auth derivation; may be nil (fails closed when platform-resource deps exist)
 }
 
 // DesignFileWrite is one file in a CollectSpec atomic commit. Path is the full
@@ -132,16 +132,18 @@ type designFileCommitter interface {
 	Commit(ctx context.Context, orgID, projectID string, writes []DesignFileWrite, message string) error
 }
 
-// resourceMarkerCatalog is design_service's narrow consumer port over the
-// dependencies/resources catalog: it returns the PE-authored CRT marker map
-// (CRTMarkers keyed by resourceType name) that design-save keys the
-// end-user-auth derivation on — replacing the deleted hardcoded thunder-app
-// resourceType name. *resources.ResourceTypeCatalog satisfies it structurally. Wired via
+// resourceTypeCatalog is design_service's narrow consumer port over the
+// dependencies/resources catalog: it returns the installed resource types
+// (CRTType keyed by resourceType name) that design-save's platform-resource
+// derivation reads — the PE-authored markers the end-user-auth derivation keys on
+// (replacing the deleted hardcoded thunder-app name), and the declared outputs
+// the wiring derivation turns into env-var names.
+// *resources.ResourceTypeCatalog satisfies it structurally. Wired via
 // SetResourceCatalog at the composition root; a nil catalog fails the save
 // closed (ErrResourceCatalogUnavailable) whenever the design declares a
-// platform-resource dependency, so the derivation is never silently skipped.
-type resourceMarkerCatalog interface {
-	MarkersByName(ctx context.Context) (map[string]CRTMarkers, error)
+// platform-resource dependency, so neither derivation is ever silently skipped.
+type resourceTypeCatalog interface {
+	ResourceTypesByName(ctx context.Context) (map[string]CRTType, error)
 }
 
 func NewDesignService(
@@ -161,11 +163,11 @@ func (s *designService) SetFileCommitter(c designFileCommitter) {
 	s.fileCommitter = c
 }
 
-// SetResourceCatalog wires the CRT marker lookup DeriveEndUserAuthAtHead uses to
+// SetResourceCatalog wires the CRT marker lookup DerivePlatformResourceFactsAtHead uses to
 // decide which platform-resource dependencies stamp end-user auth. A nil catalog
 // makes the derivation fail closed (ErrResourceCatalogUnavailable) whenever the
 // design declares a platform-resource dependency; auth-free designs are unaffected.
-func (s *designService) SetResourceCatalog(c resourceMarkerCatalog) {
+func (s *designService) SetResourceCatalog(c resourceTypeCatalog) {
 	s.resourceCatalog = c
 }
 

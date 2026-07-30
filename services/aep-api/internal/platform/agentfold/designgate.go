@@ -57,6 +57,11 @@ var (
 		"style": true, "package": true, "specPath": true,
 		"candidates": true,
 		"config":     true, "resourceType": true, "parameters": true,
+		// wiring is platform-stamped, not agent-authored — but it IS persisted in
+		// design.json, so it must fold. Design save re-derives and overwrites it,
+		// so an agent echoing back what it read is harmless (see the zod gate's
+		// dependencyWiringSchema for why this is accepted rather than rejected).
+		"wiring": true,
 	}
 	// externalOnlyDependencyKeys are meaningful only on kind="external" — a
 	// platform-resource is catalog-picked, an org-service is catalog-resolved,
@@ -217,6 +222,45 @@ func validateDependency(i int, d any) *designProblem {
 	}
 	if p := validateDependencyParameters(i, dep["parameters"]); p != nil {
 		return p
+	}
+	if p := validateDependencyWiring(i, dep["wiring"]); p != nil {
+		return p
+	}
+	return nil
+}
+
+// validateDependencyWiring mirrors the zod dependencyWiringSchema.strictObject:
+// when present, `wiring` carries a non-empty `ref` plus an `envBindings` object
+// of string values, and nothing else. Both halves are required together — a ref
+// with no bindings (or bindings with no ref) renders an unusable workload.yaml
+// resource entry, which is worse than an absent wiring the agent reports.
+func validateDependencyWiring(i int, raw any) *designProblem {
+	if raw == nil {
+		return nil // absent (optional) — not yet derivable
+	}
+	violation := func(format string, args ...any) *designProblem {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("dependencies[%d].wiring"+format, append([]any{i}, args...)...)}
+	}
+	wiring, ok := raw.(map[string]any)
+	if !ok {
+		return violation(": must be an object")
+	}
+	for k := range wiring {
+		if k != "ref" && k != "envBindings" {
+			return violation(": unknown property %s", k)
+		}
+	}
+	if ref, ok := wiring["ref"].(string); !ok || ref == "" {
+		return violation(".ref: must be a non-empty string")
+	}
+	bindings, ok := wiring["envBindings"].(map[string]any)
+	if !ok {
+		return violation(".envBindings: must be an object")
+	}
+	for k, v := range bindings {
+		if _, ok := v.(string); !ok {
+			return violation(".envBindings.%s: must be a string", k)
+		}
 	}
 	return nil
 }

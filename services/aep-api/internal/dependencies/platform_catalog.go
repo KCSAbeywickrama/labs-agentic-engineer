@@ -88,19 +88,35 @@ func (c *ResourceTypeCatalog) List(ctx context.Context) ([]PlatformResourceType,
 	return out, nil
 }
 
-// MarkersByName returns the extracted TypeMarkers for every installed
-// ClusterResourceType, keyed by name, in one OC call. Later per-dependency
-// consumers (design-save's auth derivation, runtimeconfig's consumer-URL
-// patch and skill attachment) look up a dependency's resourceType in this
-// map instead of branching on a hardcoded name.
-func (c *ResourceTypeCatalog) MarkersByName(ctx context.Context) (map[string]TypeMarkers, error) {
-	cts, err := c.rc.ListClusterResourceTypes(ctx)
+// TypesByName is List keyed by resourceType name — the lookup form every
+// per-dependency consumer wants, in one OC call. Design save reads it to key BOTH
+// of its derivations (auth off the markers, wiring off the outputs) without a
+// second round-trip; MarkersByName below is the narrower view over the same
+// projection, so there is one place a ClusterResourceType is interpreted.
+func (c *ResourceTypeCatalog) TypesByName(ctx context.Context) (map[string]PlatformResourceType, error) {
+	types, err := c.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]TypeMarkers, len(cts))
-	for _, ct := range cts {
-		out[ct.Metadata.Name] = MarkersFrom(ct.Metadata.Labels, ct.Metadata.Annotations)
+	out := make(map[string]PlatformResourceType, len(types))
+	for _, t := range types {
+		out[t.Name] = t
+	}
+	return out, nil
+}
+
+// MarkersByName returns the extracted TypeMarkers for every installed
+// ClusterResourceType, keyed by name, in one OC call. Consumers that need ONLY
+// the markers (runtimeconfig's consumer-URL patch and skill attachment) hold
+// this narrower port rather than the whole type record.
+func (c *ResourceTypeCatalog) MarkersByName(ctx context.Context) (map[string]TypeMarkers, error) {
+	types, err := c.TypesByName(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]TypeMarkers, len(types))
+	for name, t := range types {
+		out[name] = t.Markers
 	}
 	return out, nil
 }

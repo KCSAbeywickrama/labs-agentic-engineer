@@ -39,13 +39,13 @@ const defaultInputEnv = "development"
 // (that is the workflow's job, Task 3).
 type InputsCoordinator struct {
 	spec   SpecCollector
-	auth   AuthDeriver
+	auth   DesignFactDeriver
 	stager SecretStager
 	design PreflightDesignReader
 }
 
 // NewInputsCoordinator wires the coordinator.
-func NewInputsCoordinator(spec SpecCollector, auth AuthDeriver, stager SecretStager, design PreflightDesignReader) *InputsCoordinator {
+func NewInputsCoordinator(spec SpecCollector, auth DesignFactDeriver, stager SecretStager, design PreflightDesignReader) *InputsCoordinator {
 	return &InputsCoordinator{spec: spec, auth: auth, stager: stager, design: design}
 }
 
@@ -83,7 +83,7 @@ func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID st
 	if len(failures) > 0 {
 		return failures, nil
 	}
-	if err := c.auth.DeriveEndUserAuthAtHead(ctx, orgID, projectID); err != nil {
+	if err := c.auth.DerivePlatformResourceFactsAtHead(ctx, orgID, projectID); err != nil {
 		return failures, err
 	}
 	return failures, nil

@@ -160,6 +160,11 @@ type Dependency = contracts.Dependency
 // resolution set (see Dependency.Candidates). Wire shape in the contracts leaf.
 type DependencyCandidate = contracts.DependencyCandidate
 
+// DependencyWiring is the platform-stamped consumer-side wiring for a
+// platform-resource / external dependency (see derive_wiring.go). Wire shape in
+// the contracts leaf.
+type DependencyWiring = contracts.DependencyWiring
+
 // ConfigKey is one env-var key a component reads at runtime. Wire shape in the
 // contracts leaf (re-exported here).
 type ConfigKey = contracts.ConfigKey

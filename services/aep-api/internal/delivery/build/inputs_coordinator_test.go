@@ -89,7 +89,7 @@ type recordingAuth struct {
 	err   error
 }
 
-func (a *recordingAuth) DeriveEndUserAuthAtHead(context.Context, string, string) error {
+func (a *recordingAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error {
 	a.calls++
 	return a.err
 }

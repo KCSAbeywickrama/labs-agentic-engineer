@@ -25,7 +25,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -254,7 +254,7 @@ func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
 	plat := &fakePlatProv{}
 	// orders-db (platform-resource) is already Ready in OC but NOT in the drawer inputs.
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		dependencies.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding("host", "port"),
+		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding("host", "port"),
 	}}
 	svc := newTestService(issues, execs, reeval, fakeDesign{comps: designWithDeps()}, ext, plat, bindings)
 
@@ -321,7 +321,7 @@ func TestSettleReadyGate_NoOpenGate(t *testing.T) {
 	issues := newFakeIssues(nil) // no open gates
 	execs := &fakeExecStore{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		dependencies.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
+		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
 	}}
 	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 
@@ -346,7 +346,7 @@ func TestProvisionForBuild_EmptyInputsDoesNotMint(t *testing.T) {
 	execs := &fakeExecStore{}
 	// orders-db is Ready in OC, but there is no existing gate to settle.
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		dependencies.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
+		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
 	}}
 	svc := newTestService(issues, execs, &fakeReeval{}, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 

@@ -54,7 +54,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
-	"github.com/wso2/aep/aep-api/internal/dependencies"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -316,7 +316,7 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 				continue
 			}
 			deps.Resources = append(deps.Resources, workloadResourceDepYAML{
-				Ref:         dependencies.ExternalResourceName(projectID, name),
+				Ref:         ocname.ExternalResourceName(projectID, name),
 				EnvBindings: envBindings,
 			})
 		}
@@ -329,7 +329,7 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 				continue
 			}
 			deps.Resources = append(deps.Resources, workloadResourceDepYAML{
-				Ref:         dependencies.ExternalResourceName(projectID, depName),
+				Ref:         ocname.ExternalResourceName(projectID, depName),
 				EnvBindings: envBindings,
 			})
 			if dep, found := findDependency(comp, depName, spec.DependencyKindPlatformResource); found {
@@ -357,7 +357,7 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 // name; a platform resource's are generic (host, port, …) and must be prefixed
 // with the dependency name.
 func (s *Service) bindingEnvBindings(ctx context.Context, orgID, projectID, depName string, prefixed bool) (map[string]string, bool) {
-	b, err := s.bindings.GetBinding(ctx, orgID, dependencies.ExternalResourceBindingName(projectID, depName, defaultEnv))
+	b, err := s.bindings.GetBinding(ctx, orgID, ocname.ExternalResourceBindingName(projectID, depName, defaultEnv))
 	if err != nil || b == nil || b.Status == nil || len(b.Status.Outputs) == 0 {
 		return nil, false
 	}
@@ -487,10 +487,10 @@ func orgServiceURLEnv(name string) string {
 }
 
 // envVarName builds a valid C_IDENTIFIER env-var name from a dep name + output
-// name. Delegates to dependencies.EnvVarName — the single source of truth shared
+// name. Delegates to ocname.EnvVarName — the single source of truth shared
 // with runtimeconfig's window._env_ keys, so the pod env var and the SPA config
 // key for the same dep+output are byte-identical. "orders-db" + "host" →
 // "ORDERS_DB_HOST".
 func envVarName(depName, outName string) string {
-	return dependencies.EnvVarName(depName, outName)
+	return ocname.EnvVarName(depName, outName)
 }

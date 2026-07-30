@@ -565,7 +565,7 @@ func (r *resolvingSpec) CollectSpec(_ context.Context, _, _, _, dep string, _ []
 
 type noopAuth struct{}
 
-func (noopAuth) DeriveEndUserAuthAtHead(context.Context, string, string) error { return nil }
+func (noopAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error { return nil }
 
 type noopStager struct{}
 
