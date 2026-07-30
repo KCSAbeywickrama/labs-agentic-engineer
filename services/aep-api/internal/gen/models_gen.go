@@ -286,6 +286,27 @@ func (e RunValidationVerdict) Valid() bool {
 	}
 }
 
+// Defines values for SkillUpdateState.
+const (
+	SkillUpdateStateConflict   SkillUpdateState = "conflict"
+	SkillUpdateStateOverridden SkillUpdateState = "overridden"
+	SkillUpdateStateUpdate     SkillUpdateState = "update"
+)
+
+// Valid indicates whether the value is a known member of the SkillUpdateState enum.
+func (e SkillUpdateState) Valid() bool {
+	switch e {
+	case SkillUpdateStateConflict:
+		return true
+	case SkillUpdateStateOverridden:
+		return true
+	case SkillUpdateStateUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskDetailExecutorClass.
 const (
 	TaskDetailExecutorClassCoding     TaskDetailExecutorClass = "coding"
@@ -336,22 +357,22 @@ func (e TaskStreamEventType) Valid() bool {
 
 // Defines values for TaskViewExecutorClass.
 const (
-	Coding     TaskViewExecutorClass = "coding"
-	Ledger     TaskViewExecutorClass = "ledger"
-	Provision  TaskViewExecutorClass = "provision"
-	Validation TaskViewExecutorClass = "validation"
+	TaskViewExecutorClassCoding     TaskViewExecutorClass = "coding"
+	TaskViewExecutorClassLedger     TaskViewExecutorClass = "ledger"
+	TaskViewExecutorClassProvision  TaskViewExecutorClass = "provision"
+	TaskViewExecutorClassValidation TaskViewExecutorClass = "validation"
 )
 
 // Valid indicates whether the value is a known member of the TaskViewExecutorClass enum.
 func (e TaskViewExecutorClass) Valid() bool {
 	switch e {
-	case Coding:
+	case TaskViewExecutorClassCoding:
 		return true
-	case Ledger:
+	case TaskViewExecutorClassLedger:
 		return true
-	case Provision:
+	case TaskViewExecutorClassProvision:
 		return true
-	case Validation:
+	case TaskViewExecutorClassValidation:
 		return true
 	default:
 		return false
@@ -1322,6 +1343,7 @@ type SkillDetailBody struct {
 	BinaryReferences []string          `json:"binaryReferences"`
 	Compatibility    string            `json:"compatibility,omitempty"`
 	ContentSha       string            `json:"contentSha"`
+	Deletable        bool              `json:"deletable"`
 	Description      string            `json:"description"`
 	Editable         bool              `json:"editable"`
 	Kind             string            `json:"kind"`
@@ -1336,6 +1358,7 @@ type SkillDetailBody struct {
 // SkillSummary defines model for SkillSummary.
 type SkillSummary struct {
 	ContentSha  string `json:"contentSha"`
+	Deletable   bool   `json:"deletable"`
 	Description string `json:"description"`
 	Editable    bool   `json:"editable"`
 	Kind        string `json:"kind"`
@@ -1355,10 +1378,17 @@ type SkillSyncOutput struct {
 	Updated int64  `json:"updated"`
 }
 
-// SkillUpdate One built-in whose embedded (platform) content differs from the org's repo copy. Reconcile compares ContentSHA, not a hand-maintained version.
+// SkillUpdate One platform-shipped skill whose state differs from the org's baseline: state
+// "update" = org copy clean, platform shipped new content (sync will refresh);
+// "overridden" = org modified its copy (sync will never touch it);
+// "conflict" = both moved since the baseline (review required).
 type SkillUpdate struct {
-	Name string `json:"name"`
+	Name  string           `json:"name"`
+	State SkillUpdateState `json:"state"`
 }
+
+// SkillUpdateState defines model for SkillUpdate.State.
+type SkillUpdateState string
 
 // SkillUpdateList defines model for SkillUpdateList.
 type SkillUpdateList struct {

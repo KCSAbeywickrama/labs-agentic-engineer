@@ -65,6 +65,7 @@ type SkillSummary struct {
 	Description string `json:"description"`
 	ContentSHA  string `json:"contentSha"`
 	Editable    bool   `json:"editable"`
+	Deletable   bool   `json:"deletable"`
 }
 
 // ---- frontmatter parsing ----------------------------------------------------
@@ -89,20 +90,23 @@ type skillMetadata struct {
 }
 
 // skillAepMetadata is the platform namespace inside `metadata`. `kind` names
-// the skill kind: platform | org | custom | imported.
+// the skill kind: platform | org | imported.
 type skillAepMetadata struct {
 	Kind string `yaml:"kind,omitempty"`
 }
 
 // frontmatterKind derives a skill's kind from its frontmatter: the trimmed
 // `metadata.aep.kind` when it names a known kind, else "org" — an unmarked
-// SKILL.md is an org skill (platform-shipped, page-visible, read-only). The
-// service stamps custom/imported into the files it writes, so only the four
-// known values ever appear.
+// SKILL.md is an org skill (platform-shipped or user-authored, page-visible).
+// The retired "custom" kind (pre-fold) reads back as org for back-compat with
+// already-stored skills; the service stamps org/imported into the files it
+// writes going forward, so only the three current values are ever written.
 func frontmatterKind(fm skillFrontmatter) string {
 	switch k := strings.TrimSpace(fm.Metadata.Aep.Kind); k {
-	case SkillKindPlatform, SkillKindOrg, SkillKindCustom, SkillKindImported:
+	case SkillKindPlatform, SkillKindOrg, SkillKindImported:
 		return k
+	case "custom": // retired kind, folded into org (back-compat read)
+		return SkillKindOrg
 	default:
 		return SkillKindOrg
 	}
