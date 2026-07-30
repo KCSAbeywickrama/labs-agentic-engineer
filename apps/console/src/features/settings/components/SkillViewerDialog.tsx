@@ -27,22 +27,32 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  IconButton,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
+import { Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { MarkdownView } from "../../../components/MarkdownView";
 import { StatusChip } from "../../../components/StatusChip";
 import { useSkill } from "../api/queries";
 import { kindChipTone, kindLabel, normalizeKind } from "../skillKind";
 import { splitFrontmatter } from "../skillMd";
 
-// Read-only inspection of any skill, of any kind — the only way to see what an
-// org/platform skill actually instructs an agent to do.
+// Inspection of any skill, of any kind — the only way to see what an org/
+// platform skill actually instructs an agent to do. It also hosts the mutating
+// actions: Edit and Delete are offered here (gated on the skill's own
+// editable/deletable), so the list row stays a single uniform "View" button
+// across every kind and mutations happen while looking at the skill.
 export function SkillViewerDialog({
   name,
   onClose,
+  onEdit,
+  onDelete,
 }: {
   name: string | null;
   onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const { data: skill, isLoading, isError, error } = useSkill(name ?? "");
 
@@ -53,21 +63,57 @@ export function SkillViewerDialog({
   return (
     <Dialog open={name !== null} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
-        <Box
-          sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}
-        >
-          <Typography variant="h6" fontWeight={700}>
-            {name}
-          </Typography>
-          {kind && (
-            <StatusChip
-              label={kindLabel(kind)}
-              tone={kindChipTone(kind)}
-              variant="outlined"
-            />
-          )}
-          {skill && !skill.editable && (
-            <Chip size="small" variant="outlined" label="read-only" />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1.5,
+              flexWrap: "wrap",
+              flexGrow: 1,
+              minWidth: 0,
+            }}
+          >
+            <Typography variant="h6" fontWeight={700}>
+              {name}
+            </Typography>
+            {kind && (
+              <StatusChip
+                label={kindLabel(kind)}
+                tone={kindChipTone(kind)}
+                variant="outlined"
+              />
+            )}
+            {skill && !skill.editable && (
+              <Chip size="small" variant="outlined" label="read-only" />
+            )}
+          </Box>
+          {/* Mutating actions live in the top-right corner, each gated on the
+              skill's own flag: a platform-seeded org skill (editable, not
+              deletable) shows Edit only; a read-only platform skill shows
+              neither. The list row stays a single uniform "View" button. */}
+          {(skill?.editable || skill?.deletable) && (
+            <Box sx={{ display: "flex", gap: 0.5, flexShrink: 0 }}>
+              {skill?.editable && (
+                <Tooltip title="Edit">
+                  <IconButton size="small" aria-label="Edit" onClick={onEdit}>
+                    <Pencil size={18} />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {skill?.deletable && (
+                <Tooltip title="Delete">
+                  <IconButton
+                    size="small"
+                    color="error"
+                    aria-label="Delete"
+                    onClick={onDelete}
+                  >
+                    <Trash2 size={18} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
           )}
         </Box>
       </DialogTitle>

@@ -57,9 +57,9 @@ export function kindLabel(kind: SkillKind): string {
 }
 
 // Chip tone per kind (StatusChip). Two Oxygen Chip colours are deliberately
-// avoided: `warning` belongs to the "update available" chip (a kind must not
-// read as a state), and `secondary` resolves to a near-white (#e8e8e8) that
-// is unreadable on a light surface.
+// avoided: `warning` is the platform-update "review" status colour (SkillsSection
+// STATUS_META) — a kind must not read as a status — and `secondary` resolves to
+// a near-white (#e8e8e8) that is unreadable on a light surface.
 export function kindChipTone(kind: SkillKind): StatusTone {
   switch (kind) {
     case "org":
