@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/delivery/eventcore"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"gorm.io/gorm"
@@ -128,6 +129,32 @@ func (d designComponents) ComponentPaths(ctx context.Context, orgID, projectID s
 		paths[c.Name] = strings.Trim(c.AppPath, "/")
 	}
 	return paths, nil
+}
+
+// DeclaredResources maps each design component to its App Path plus the OC
+// resource refs its design says it consumes — read off each dependency's
+// platform-stamped `wiring` (spec/derive_wiring.go). A dependency with no wiring
+// is skipped: it is not derivable yet, so no agent could have wired it.
+// Satisfies eventcore.DesignReader's conformance half.
+func (d designComponents) DeclaredResources(ctx context.Context, orgID, projectID string) (map[string]eventcore.ComponentResources, error) {
+	design, err := d.store.ReadDesign(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if design == nil {
+		return nil, nil
+	}
+	out := make(map[string]eventcore.ComponentResources, len(design.Components))
+	for _, c := range design.Components {
+		entry := eventcore.ComponentResources{AppPath: strings.Trim(c.AppPath, "/")}
+		for _, dep := range c.Dependencies {
+			if dep.Wiring != nil && dep.Wiring.Ref != "" {
+				entry.Refs = append(entry.Refs, dep.Wiring.Ref)
+			}
+		}
+		out[c.Name] = entry
+	}
+	return out, nil
 }
 
 // ReadDesignComponents exposes the project's authored design components at HEAD.

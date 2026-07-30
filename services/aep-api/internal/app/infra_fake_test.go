@@ -32,8 +32,8 @@ import (
 // handler + watchers as production without touching the network, clock, or disk.
 func Fake() Infra {
 	key := make([]byte, 32)
-	minter, _ := secrets.NewAppTokenMinter(nil)        // no-app mode, no I/O
-	credStore, _ := secrets.NewDBStore(nil, key)       // AES cipher only, nil DB
+	minter, _ := secrets.NewAppTokenMinter(nil)  // no-app mode, no I/O
+	credStore, _ := secrets.NewDBStore(nil, key) // AES cipher only, nil DB
 	columnCipher, _ := secrets.NewColumnCipher(key)
 	return Infra{
 		DB:              &gorm.DB{},

@@ -61,6 +61,25 @@ type designFilesCommitter struct {
 	files spec.FilesService
 }
 
+// workloadReader is the eventcore wiring-conformance check's file read: the
+// shipped workload.yaml at HEAD. It is the same Files surface designFilesCommitter
+// uses, projected onto the narrower shape eventcore holds (no CAS token — the
+// check never writes).
+type workloadReader struct {
+	files spec.FilesService
+}
+
+func (a workloadReader) ReadFile(ctx context.Context, orgID, projectID, path string) (string, bool, error) {
+	fc, err := a.files.Read(ctx, orgID, projectID, path)
+	if err != nil {
+		if errors.Is(err, spec.ErrFileNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return fc.Content, true, nil
+}
+
 // ReadFile returns a file's current content + blob sha (the CAS token). A file
 // absent at HEAD is reported as ok=false with no error (a fresh spec create).
 func (a designFilesCommitter) ReadFile(ctx context.Context, orgID, projectID, path string) (content, sha string, ok bool, err error) {

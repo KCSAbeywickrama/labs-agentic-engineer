@@ -424,10 +424,34 @@ func (f fakeRepoLookup) ByFullName(_ context.Context, fullName string) (string, 
 	return testOrg, testProject, nil
 }
 
-type fakeDesign struct{ paths map[string]string }
+type fakeDesign struct {
+	paths map[string]string
+	// declared backs the wiring-conformance check; nil means the design declares
+	// no resources, which is the pre-conformance status quo.
+	declared map[string]ComponentResources
+	err      error
+}
 
 func (f fakeDesign) ComponentPaths(context.Context, string, string) (map[string]string, error) {
 	return f.paths, nil
+}
+
+func (f fakeDesign) DeclaredResources(context.Context, string, string) (map[string]ComponentResources, error) {
+	return f.declared, f.err
+}
+
+// fakeWorkloads serves shipped workload.yaml content by repo path.
+type fakeWorkloads struct {
+	byPath map[string]string
+	err    error
+}
+
+func (f fakeWorkloads) ReadFile(_ context.Context, _, _, path string) (string, bool, error) {
+	if f.err != nil {
+		return "", false, f.err
+	}
+	content, ok := f.byPath[path]
+	return content, ok, nil
 }
 
 type fakeRepoLister struct{ repos []RepoRef }

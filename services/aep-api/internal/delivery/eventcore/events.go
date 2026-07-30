@@ -51,6 +51,10 @@ type Ports struct {
 	// before its first build. Optional — an unwired ensurer means a first-ever
 	// component's build fails "Component not found".
 	Components ComponentEnsurer
+	// Workloads reads the shipped workload.yaml for the wiring-conformance check
+	// on the merged-PR fan-out. Optional — unwired means the check is skipped and
+	// a component can again ship without declaring the resources it consumes.
+	Workloads  WorkloadReader
 	Signaler   RunSignaler
 	Starter    RunStarter
 	// PlatformSender is the platform's own GitHub login (the App bot,

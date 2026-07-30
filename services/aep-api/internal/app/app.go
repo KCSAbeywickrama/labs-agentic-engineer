@@ -636,16 +636,19 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// resolves a milestone RUN ROW first and returns without a write when there
 	// is none, so a project with no live run costs nothing.
 	eventPlane := eventcore.New(eventcore.Ports{
-		Runs:     eventcoreRuns{runs: milestoneRunRepo},
-		Cycles:   eventcoreCycles{cycles: runCycleRepo},
-		Issues:   issueService,
-		PRs:      issueService,
-		Merger:   issueService,
-		Repos:    repoLocator{db: db},
-		Design:   designComponents{store: artifactStore},
-		Builds:   eventcoreBuilds{oc: componentClient, repos: repoRepo, stager: buildStager},
-		Signaler: runSupervisor,
-		Starter:  runSupervisor,
+		Runs:   eventcoreRuns{runs: milestoneRunRepo},
+		Cycles: eventcoreCycles{cycles: runCycleRepo},
+		Issues: issueService,
+		PRs:    issueService,
+		Merger: issueService,
+		Repos:  repoLocator{db: db},
+		Design: designComponents{store: artifactStore},
+		Builds: eventcoreBuilds{oc: componentClient, repos: repoRepo, stager: buildStager},
+		// The wiring-conformance check on the merged-PR fan-out: does what shipped
+		// consume the resources the design declares?
+		Workloads: workloadReader{files: filesSvc},
+		Signaler:  runSupervisor,
+		Starter:   runSupervisor,
 		// A first-ever component has no OpenChoreo Component CR, and a merged
 		// PR's build would fail "Component not found" — so the fan-out ensures
 		// the CR from the design facts immediately before it triggers.
@@ -968,7 +971,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		Coord: build.NewInputsCoordinator(
-			designService,                        // SpecCollector (CollectSpec)
+			designService,                          // SpecCollector (CollectSpec)
 			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
 			buildSecretStager{prov: externalProvisioner},
 			designComponents{store: artifactStore},
