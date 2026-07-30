@@ -28,7 +28,6 @@ import {
   runStateChip,
   spentBudgets,
   terminalReasonText,
-  validationVerdictChip,
   versionIsLive,
 } from "./runView";
 
@@ -319,19 +318,6 @@ describe("spentBudgets", () => {
   it("never reports build re-triggers — the real guard is per component per SHA", () => {
     const spent = spentBudgets(budgets({ buildRetriggers: 3 }));
     expect(spent.map((b) => b.label)).not.toContain("Build re-triggers");
-  });
-});
-
-describe("validationVerdictChip", () => {
-  it("is null until the validation cycle settles", () => {
-    expect(validationVerdictChip(undefined)).toBeNull();
-    expect(validationVerdictChip({})).toBeNull();
-  });
-
-  it("names the verdict", () => {
-    expect(validationVerdictChip({ verdict: "passed" })?.tone).toBe("success");
-    expect(validationVerdictChip({ verdict: "failed" })?.tone).toBe("error");
-    expect(validationVerdictChip({ verdict: "skipped" })?.tone).toBe("neutral");
   });
 });
 

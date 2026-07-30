@@ -27,14 +27,23 @@ import {
 } from "@wso2/oxygen-ui";
 import { FileText, GitPullRequest, ScrollText } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
-import { ValidationView } from "@aep/ui-validation-view";
+import { useMemo } from "react";
+import {
+  parseValidationCriteria,
+  parseValidationReport,
+  tallyCriterionStates,
+  ValidationView,
+  type CriterionTally,
+} from "@aep/ui-validation-view";
 import { PageHeader, type PageHeaderStatus } from "../../../components/PageHeader";
+import type { StatusTone } from "../../../components/StatusChip";
 import { EmptyState } from "../../../components/EmptyState";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns } from "../../builds/api/queries";
 import { RunFeed } from "../../builds/components/RunFeed";
-import { validationVerdictChip } from "../../builds/lib/runView";
+import { validationView, type StageTone } from "../../projects/lib/pipeline";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
+import { VerdictTile } from "./VerdictTile";
 
 // Validation lives on the DEPLOYMENT surface because the deployment is what is
 // being validated. Its verdict is a RUN property — read from the version's run
@@ -47,14 +56,53 @@ import { useValidationCriteria, useValidationReport } from "../api/queries";
 // loop is the Builds page's story.
 const VALIDATION_CYCLE = ["validation"] as const;
 
+// StageTone → StatusTone. The two unions differ only in `ghost`, which the shared
+// validation mapper never returns; it is mapped for exhaustiveness only.
+const TONE_TO_STATUS: Record<StageTone, StatusTone> = {
+  ghost: "neutral",
+  neutral: "neutral",
+  info: "info",
+  warning: "warning",
+  success: "success",
+  error: "error",
+};
+
 // Header chip for the run's verdict, falling back to the coarse lifecycle state
-// while no verdict exists yet.
+// while no verdict exists yet. DERIVED from the shared mapper rather than
+// restating its cases, so this page's chip cannot drift from the deployments
+// board's — the drift that left `partial`, `inconclusive` and `unreported`
+// chipless here while the board named them correctly.
 function headerChip(
-  verdict: ReturnType<typeof validationVerdictChip>,
+  verdict: ReturnType<typeof validationView>,
   running: boolean,
 ): PageHeaderStatus | undefined {
-  if (verdict) return { label: verdict.label, tone: verdict.tone };
+  if (verdict) {
+    return {
+      // The shared labels are lowercase for mid-sentence use; the chip leads.
+      label: verdict.label.charAt(0).toUpperCase() + verdict.label.slice(1),
+      tone: TONE_TO_STATUS[verdict.tone],
+    };
+  }
   return running ? { label: "Validating", tone: "info" } : undefined;
+}
+
+// The oracle joined with the run's report, as counts. Parsed here rather than
+// reaching into ValidationView's internals: the tile's copy names run concepts
+// (`validation-unreported`, the milestone staying open) that the shared view
+// package knows nothing about, and a second JSON.parse of a few-KB file inside a
+// useMemo is a cheaper price than teaching that package about runs.
+function useTally(
+  criteria: string | undefined,
+  report: string | undefined,
+): CriterionTally | undefined {
+  return useMemo(() => {
+    if (!criteria) return undefined;
+    const oracle = parseValidationCriteria(criteria);
+    if ("kind" in oracle) return undefined;
+    const parsed = report ? parseValidationReport(report) : undefined;
+    const statuses = parsed && !("kind" in parsed) ? parsed : undefined;
+    return tallyCriterionStates(oracle, statuses);
+  }, [criteria, report]);
 }
 
 /**
@@ -79,7 +127,11 @@ export function ValidationPage({
   // validation record is this page's subject.
   const runs = useBuildRuns(projectName, version || undefined);
   const run = runs.data?.runs?.[0];
-  const verdict = validationVerdictChip(run?.validation);
+  // The verdict VALUE drives every decision below. Deriving them from the chip's
+  // rendered label instead (as this page used to) breaks silently the moment the
+  // copy changes — and swapping in the shared mapper changes its casing.
+  const rawVerdict = run?.validation?.verdict ?? "";
+  const verdict = validationView(rawVerdict);
   const reportPath = run?.validation?.reportPath ?? "";
   const validationCycle = run?.cycles?.find((c) => c.kind === "validation");
   // The cycle carries the pull request's page as the webhook reported it. This
@@ -87,9 +139,15 @@ export function ValidationPage({
   // CLONE url — a `.git` suffix produced a link that 404s.
   const prUrl = validationCycle?.prUrl;
 
-  // A verdict means the run committed its report; before that there is nothing
-  // at HEAD to read. Hooks stay unconditional; `enabled` gates them.
-  const settled = verdict !== null && verdict.label !== "Validation skipped";
+  // The run reached an ANSWER — which is not the same as "everything passed", and
+  // not the same as "there is a report". Hooks stay unconditional; `enabled` gates
+  // them.
+  const settled = rawVerdict !== "" && rawVerdict !== "skipped";
+  // `unreported` MEANS no report was committed at that commit, and the server
+  // omits reportPath for it. Requesting the file anyway would 404 to rediscover
+  // what the verdict already told us, and land the reader on a vague "wasn't
+  // found" note instead of the tile that explains the breach.
+  const missingReport = rawVerdict === "unreported";
   const criteria = useValidationCriteria(projectName, version, settled);
   // Pinned to THIS run's validation-cycle merge commit. Reading the branch tip
   // would show whichever run last overwrote the path — so an older run in the story
@@ -98,14 +156,21 @@ export function ValidationPage({
   const report = useValidationReport(
     projectName,
     version,
-    settled,
+    settled && !missingReport,
     reportPath,
     validationCycle?.mergeSha,
   );
+  const tally = useTally(criteria.data?.content, report.data?.content);
 
   // Body rule: the log shows while there is no report to show (running, failed
   // mechanically, nothing settled yet) OR the user toggled ?view=logs.
   const showLogs = !settled || view === "logs";
+
+  // The verdict tile stays visible in BOTH bodies — a verdict does not stop being
+  // true because the reader switched to the log.
+  const tile = settled ? (
+    <VerdictTile verdict={rawVerdict} {...(tally ? { tally } : {})} />
+  ) : null;
 
   const chip = headerChip(verdict, running);
   const header = (
@@ -197,7 +262,7 @@ export function ValidationPage({
     );
   }
 
-  if (verdict?.label === "Validation skipped") {
+  if (rawVerdict === "skipped") {
     return (
       <>
         {header}
@@ -213,6 +278,7 @@ export function ValidationPage({
     return (
       <>
         {header}
+        {tile}
         <RunFeed
           projectName={projectName}
           runId={run.id}
@@ -225,6 +291,7 @@ export function ValidationPage({
   return (
     <>
       {header}
+      {tile}
       {criteria.isPending || (!criteria.isError && !criteria.data) ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
           <CircularProgress aria-label="Loading validation report" />
@@ -241,7 +308,10 @@ export function ValidationPage({
         </Alert>
       ) : (
         <>
-          {report.isError && (
+          {/* Only for a verdict that EXPECTED a report. `unreported` already
+              said so, in the tile, with its cause — repeating it as a vague note
+              would be weaker and say it twice. */}
+          {report.isError && !missingReport && (
             <Box sx={{ px: 3, pt: 2 }}>
               <Alert severity="info">
                 The run reached a verdict but its report wasn't found — showing

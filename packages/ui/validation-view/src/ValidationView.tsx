@@ -30,6 +30,7 @@ import {
   type CriterionReport,
   type ValidationReport,
 } from "./report.js";
+import { CRITERION_STATE_LABEL } from "./counts.js";
 
 // Solid background per verification method. Text color is computed for contrast
 // (getContrastText), so labels stay readable in both themes — the same approach
@@ -58,18 +59,18 @@ type ChipColor =
   | "success"
   | "warning";
 
-// report.json status → the state chip shown on a criterion when a run report is
-// joined in. Unknown statuses fall through to a neutral chip labelled verbatim.
-const STATE_CHIP: Record<string, { label: string; color: ChipColor }> = {
-  pass: { label: "Passed", color: "success" },
-  fail: { label: "Failed", color: "error" },
-  not_run: { label: "Not run", color: "default" },
-  not_validated: { label: "Not validated", color: "warning" },
-  manual: { label: "Manual", color: "default" },
+// report.json status → the chip colour shown on a criterion when a run report is
+// joined in. The LABEL comes from CRITERION_STATE_LABEL (counts.ts), which the
+// consumer's tally line reads too — so a criterion's chip and the summary above
+// it can never call the same status by two different names. Unknown statuses fall
+// through to a neutral chip labelled verbatim.
+const STATE_COLOR: Record<string, ChipColor> = {
+  pass: "success",
+  fail: "error",
+  not_run: "default",
+  not_validated: "warning",
+  manual: "default",
 };
-
-// Order the outcome tally so a failure reads first.
-const STATE_ORDER = ["fail", "pass", "not_run", "not_validated", "manual"];
 
 function SolidBadge({ label, color }: { label: string; color: string }) {
   return (
@@ -103,14 +104,13 @@ function MethodBadge({ method }: { method: string }) {
 
 // The per-criterion run-state chip (only rendered when a report is joined in).
 function StateChip({ status }: { status: string }) {
-  const chip = STATE_CHIP[status] ?? { label: status, color: "default" as const };
   return (
     <Chip
       size="small"
       variant="outlined"
-      color={chip.color}
+      color={STATE_COLOR[status] ?? "default"}
       {...(status === "pass" ? { icon: <Check size={14} /> } : {})}
-      label={chip.label}
+      label={CRITERION_STATE_LABEL[status] ?? status}
       sx={{ flexShrink: 0 }}
     />
   );
@@ -233,37 +233,26 @@ function ValidationBody({
   statuses: ValidationReport | undefined;
 }) {
   const { requirements } = criteria;
-  // Per-method tally for the summary header (kept in a stable order), plus a
-  // per-run-state tally when a report is joined in.
-  const { total, orderedMethods, methodCounts, orderedStates, stateCounts } =
-    useMemo(() => {
-      const methods = new Map<string, number>();
-      const states = new Map<string, number>();
-      let n = 0;
-      for (const r of requirements) {
-        for (const c of r.criteria) {
-          n += 1;
-          methods.set(c.method, (methods.get(c.method) ?? 0) + 1);
-          const st = statuses?.get(c.id)?.status;
-          if (st) states.set(st, (states.get(st) ?? 0) + 1);
-        }
+  // Per-method tally for the summary header, kept in a stable order. The
+  // per-run-state tally is deliberately NOT here: it belongs with the verdict it
+  // explains, which the consumer renders above this view (tallyCriterionStates in
+  // counts.ts), and duplicating it here would put the same numbers on the page
+  // twice.
+  const { total, orderedMethods, methodCounts } = useMemo(() => {
+    const methods = new Map<string, number>();
+    let n = 0;
+    for (const r of requirements) {
+      for (const c of r.criteria) {
+        n += 1;
+        methods.set(c.method, (methods.get(c.method) ?? 0) + 1);
       }
-      const orderedM = [
-        ...METHOD_ORDER.filter((m) => methods.has(m)),
-        ...[...methods.keys()].filter((m) => !METHOD_ORDER.includes(m)).sort(),
-      ];
-      const orderedS = [
-        ...STATE_ORDER.filter((s) => states.has(s)),
-        ...[...states.keys()].filter((s) => !STATE_ORDER.includes(s)).sort(),
-      ];
-      return {
-        total: n,
-        orderedMethods: orderedM,
-        methodCounts: methods,
-        orderedStates: orderedS,
-        stateCounts: states,
-      };
-    }, [requirements, statuses]);
+    }
+    const orderedM = [
+      ...METHOD_ORDER.filter((m) => methods.has(m)),
+      ...[...methods.keys()].filter((m) => !METHOD_ORDER.includes(m)).sort(),
+    ];
+    return { total: n, orderedMethods: orderedM, methodCounts: methods };
+  }, [requirements]);
 
   const reqCount = requirements.length;
   return (
@@ -277,7 +266,7 @@ function ValidationBody({
         <Box
           sx={{
             mt: 1,
-            mb: statuses ? 1.5 : 3,
+            mb: 3,
             display: "flex",
             alignItems: "center",
             gap: 1.5,
@@ -296,32 +285,6 @@ function ValidationBody({
             />
           ))}
         </Box>
-
-        {/* Run-outcome tally — only when a report is joined in */}
-        {statuses && orderedStates.length > 0 && (
-          <Box
-            sx={{
-              mb: 3,
-              display: "flex",
-              alignItems: "center",
-              gap: 1,
-              flexWrap: "wrap",
-            }}
-          >
-            {orderedStates.map((s) => {
-              const chip = STATE_CHIP[s] ?? { label: s, color: "default" as const };
-              return (
-                <Chip
-                  key={s}
-                  size="small"
-                  variant="outlined"
-                  color={chip.color}
-                  label={`${chip.label} ${stateCounts.get(s) ?? 0}`}
-                />
-              );
-            })}
-          </Box>
-        )}
 
         {reqCount === 0 ? (
           <Typography variant="body2" color="text.secondary">
